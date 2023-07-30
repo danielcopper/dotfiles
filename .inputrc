@@ -1,0 +1,49 @@
+#############################
+#       Editing mode        #
+#############################
+
+# Set vi as shortcut style for readline
+set editing-mode vi
+# show current mode
+set show-mode-in-prompt on
+# Set cursor stlye depending on mode
+$if term=linux
+        set vi-ins-mode-string \1\e[?0c\2
+        set vi-cmd-mode-string \1\e[?8c\2
+$else 
+        set vi-ins-mode-string \1\e[6 q\2
+        set vi-cmd-mode-string \1\e[2 q\2
+$endif
+
+############################
+#       Completion         #
+############################
+# Single Tab shows all possible completions
+#set show-all-if-unmodified on
+# Single Tab paritally completes or shows all possible completions
+set show-all-if-ambiguous on
+# Enable case INsensitive cd completion 
+set completion-ignore-case on
+
+############################
+#         Color            #
+############################
+# Color files by type
+set colored-stats on
+# Append char to indicate type
+set visible-stats on
+# Mark symlinked directories
+set mark-symlinked-directories on
+# Color the common prefix
+set colored-completion-prefix on
+# Color the common prefix in menu-complete
+set menu-complete-display-prefix on
+
+#############################
+#        Other Stuff        #
+#############################
+# Don't show ^C after pressing Ctrl+C
+set echo-control-characters off
+# Ensure that pasting iserts the clipboard as singe string isntead of inserting characters as if they were entered from the keyboard
+# This is a safety measure to prevent Readline from automatically modifying and running pasted commands
+set enable-bracketed-paste on
