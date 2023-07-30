@@ -35,6 +35,6 @@ source /usr/share/doc/pkgfile/command-not-found.bash
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
 # complete dotfiles alias git commands
-# source /usr/share/bash-completion/completions/git
-# __git_complete dotfiels __git_main
-complete -F _complete_alias dotfiles
+source /usr/share/bash-completion/completions/git
+__git_complete dotfiles __git_main
+# complete -F _complete_alias dotfiles
