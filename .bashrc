@@ -38,3 +38,6 @@ alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 source /usr/share/bash-completion/completions/git
 __git_complete dotfiles __git_main
 # complete -F _complete_alias dotfiles
+
+# Starship command prompt. Needs to be at the end of bashrc
+eval "$(starship init bash)"
