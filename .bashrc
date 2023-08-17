@@ -49,7 +49,7 @@ function git() {
 }
 
 # Use windows lazygit when in windows directory
-function git() {
+function lazygit() {
     if $(pwd -P | grep -q "\/mnt\/c\/*"); then
         lazygit.exe "$@"
     else
