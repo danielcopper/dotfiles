@@ -1,11 +1,10 @@
-# Get editor completion based on the config schema
-"$schema" = 'https://starship.rs/config-schema.json'
-
 # Sets user-defined palette
 palette = "catppuccin_mocha"
 
-[username]
-show_always = true
+# Change the default prompt format
+format = """\
+[╭╴](238)$os\
+$all[╰─](238)$character"""
 
 [character]
 # Note the use of Catppuccin color 'maroon'
@@ -17,6 +16,18 @@ vimcmd_symbol = "[❮](green)"
 truncation_length = 4
 # Catppuccin 'lavender'
 style = "bold lavender"
+
+[username]
+show_always = true
+
+[os]
+format ='[$symbol](bold white)'   
+disabled = false
+
+[os.symbols]
+Windows = " "
+Arch = "󰣇 "
+Ubuntu = " "
 
 # palette tables should be last in the config ⚓️
 [palettes.catppuccin_macchiato]
