@@ -11,6 +11,13 @@ alias grep='grep --color=auto'
 PS1='\u@\h \W > '
 #PS1='> '
 
+# Fix color compatibility
+#alias tmux="TERM=screen-256color-bce tmux"
+# Path Variables
+export TERM='xterm-256color'
+export EDITOR='nvim'
+export VISUAL='nvim'
+
 # Bash
 # complete commmands
 #complete -c man which
