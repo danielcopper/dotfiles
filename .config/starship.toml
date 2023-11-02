@@ -3,13 +3,15 @@ palette = "catppuccin_mocha"
 
 # Change the default prompt format
 format = """\
-[╭╴](238)$os\
+[╭╴](238)$os \
 $all[╰─](238)$character"""
 
 [character]
 # Note the use of Catppuccin color 'maroon'
-success_symbol = "[[♥](green) ❯](maroon)"
-error_symbol = "[❯](red)"
+success_symbol = "[[ ](green) ❯](maroon)"
+# success_symbol = "[[ ](green) ❯](maroon)"
+# success_symbol = "[[ ](green) ❯](maroon)"
+error_symbol = "[[ ](red) ❯](red)"
 vimcmd_symbol = "[❮](green)"
 
 [directory]
@@ -28,6 +30,18 @@ disabled = false
 Windows = " "
 Arch = "󰣇 "
 Ubuntu = " "
+
+[git_branch]
+symbol = ' '
+
+[git_commit]
+tag_symbol = '  '
+
+[lua]
+symbol = '  '
+
+[dotnet]
+format = 'via [$symbol($version )( 󰓾 $tfm )]($style)'
 
 # palette tables should be last in the config ⚓️
 [palettes.catppuccin_macchiato]

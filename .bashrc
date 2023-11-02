@@ -15,7 +15,7 @@ PS1='\u@\h \W > '
 #alias tmux="TERM=screen-256color-bce tmux"
 # Path Variables
 # These help to display the correct color when
-# using nvim inside of tmux with Alacritty
+# using nvim inside of tmux with Alacritty (possibly other term emulators as well)
 export TERM='xterm-256color'
 export EDITOR='nvim'
 export VISUAL='nvim'
