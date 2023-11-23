@@ -1,10 +1,38 @@
 local wezterm = require("wezterm")
 local act = wezterm.action
-local workspace_saver = require("workspace_saver")
+local session_manager = require("session-manager")
 
-wezterm.on("save_state", function() workspace_saver.save_state() end)
-wezterm.on("load_state", function() workspace_saver.load_state() end)
+wezterm.on("save_state", function(window, pane) session_manager.save_state(window, pane) end)
+wezterm.on("load_state", function() session_manager.load_state() end)
+wezterm.on("restore_state", function(window) session_manager.restore_state(window) end)
 
+wezterm.on("print_info", function(window)
+  local mux = wezterm.mux
+  local workspace = mux.get_active_workspace()
+  local workspace2 = window:active_workspace()
+  local windowid = window:window_id()
+  wezterm.log_info("Workspace: " .. workspace)
+  wezterm.log_info("Workspace option 2: " .. workspace2)
+  wezterm.log_info("All Windows: " .. windowid)
+
+  -- local info = string.format(
+  --   "Window ID: %d, Tab ID: %d, Pane ID: %d, Workspace: %s",
+  --   window:window_id(), tab:tab_id(), pane:pane_id(), workspace:name()
+  -- )
+  local tabs_info = window:tabs_with_info()
+  local tab_details = {}
+
+  for _, tab_info in ipairs(tabs_info) do
+    local details = string.format("Tab Index: %d, Is Active: %s, Tab ID: %d",
+      tab_info.index,
+      tostring(tab_info.is_active),
+      tab_info.tab:tab_id())
+    table.insert(tab_details, details)
+  end
+
+  local tab_details_str = table.concat(tab_details, "; ")
+  wezterm.log_info(string.format("Window ID: %d, Tabs Info: [%s]", window:window_id(), tab_details_str))
+end)
 -- Functions
 local get_last_folder_segment = function(cwd)
   if cwd == nil then
@@ -142,7 +170,7 @@ wezterm.on('format-tab-title', function(tab)
   end
 end
 )
-wezterm.on("update-right-status", function(window, pane)
+wezterm.on("update-status", function(window, pane)
   local workspace_or_leader = window:active_workspace()
   if window:active_key_table() then workspace_or_leader = window:active_key_table() end
   if window:leader_is_active() then workspace_or_leader = "LEADER" end
@@ -172,9 +200,9 @@ config.inactive_pane_hsb = {
 }
 
 -- Keys
-config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 1000 }
+config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 3000 }
 config.keys = {
-  { key = "c", mods = "LEADER", action = act.ActivateCopyMode },
+  { key = "C", mods = "LEADER", action = act.ActivateCopyMode },
 
   -- Pane Keybindings
   { key = "-", mods = "LEADER", action = act.SplitVertical { domain = "CurrentPaneDomain" } },
@@ -198,9 +226,34 @@ config.keys = {
 
   -- Workspace
   { key = "w", mods = "LEADER", action = act.ShowLauncherArgs { flags = "FUZZY|WORKSPACES" } },
+  {
+    key = 'W',
+    mods = 'LEADER',
+    action = act.PromptInputLine {
+      description = wezterm.format {
+        { Attribute = { Intensity = 'Bold' } },
+        { Foreground = { AnsiColor = 'Fuchsia' } },
+        { Text = 'Enter name for new workspace' },
+      },
+      action = wezterm.action_callback(function(window, pane, line)
+        -- line will be `nil` if they hit escape without entering anything
+        -- An empty string if they just hit enter
+        -- Or the actual line of text they wrote
+        if line then
+          window:perform_action(
+            act.SwitchToWorkspace {
+              name = line,
+            },
+            pane
+          )
+        end
+      end),
+    },
+  },
 
-  -- Experimental section for workspace saving
+  -- Session Manager
   { key = "S", mods = "LEADER", action = wezterm.action({ EmitEvent = "save_state" }) },
+  { key = "R", mods = "LEADER", action = wezterm.action({ EmitEvent = "restore_state" }) },
   { key = "L", mods = "LEADER", action = wezterm.action({ EmitEvent = "load_state" }) },
 }
 
