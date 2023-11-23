@@ -1,5 +1,11 @@
 local wezterm = require("wezterm")
 local act = wezterm.action
+local workspace_saver = require("wezterm_workspace_saver")
+local session_manager = require("session-manager")
+
+wezterm.on("save_state", function(window) workspace_saver.save_state(window) end)
+wezterm.on("load_state", function() workspace_saver.load_state() end)
+wezterm.on("restore_state", function(window) workspace_saver.restore_state(window) end)
 
 -- Functions
 local get_last_folder_segment = function(cwd)
@@ -48,7 +54,6 @@ local process_icons = {
   ['curl'] = wezterm.nerdfonts.mdi_flattr,
   ['gh'] = wezterm.nerdfonts.dev_github_badge,
   ['ruby'] = wezterm.nerdfonts.cod_ruby,
-  -- ['pwsh'] = wezterm.nerdfonts.cod_terminal_powershell,
   ['pwsh'] = wezterm.nerdfonts.seti_powershell,
   ['node'] = wezterm.nerdfonts.dev_nodejs_small,
   ['dotnet'] = wezterm.nerdfonts.md_language_csharp,
@@ -107,44 +112,34 @@ config.default_cwd = "C:/Repos"
 -- disables the 'modern' look of the tab bar
 config.use_fancy_tab_bar = false
 config.show_new_tab_button_in_tab_bar = false
-config.hide_tab_bar_if_only_one_tab = false
+config.hide_tab_bar_if_only_one_tab = true
 config.status_update_interval = 1000
 config.tab_max_width = 60
 config.tab_bar_at_bottom = false
-wezterm.on(
-  'format-tab-title',
-  function(tab, tabs, panes, config, hover, max_width)
-    local has_unseen_output = false
-    if not tab.is_active then
-      for _, pane in ipairs(tab.panes) do
-        if pane.has_unseen_output then
-          has_unseen_output = true
-          break
-        end
-      end
+wezterm.on('format-tab-title', function(tab, tabs, panes, config, hover, max_width)
+  local has_unseen_output = false
+  local is_zoomed = false
+
+  for _, pane in ipairs(tab.panes) do
+    if not tab.is_active and pane.has_unseen_output then
+      has_unseen_output = true
     end
-
-    local cwd = get_current_working_dir(tab)
-    local process = get_process(tab)
-    local title = string.format(' %s ~ %s  ', process, cwd)
-
-    local formatted_title = wezterm.format({
-      {Attribute = {Intensity = 'Bold'}},
-      {Text = title}
-    })
-
-    if has_unseen_output then
-      return {
-        {Foreground = {Color = '#28719c'}},
-        {Text = title}
-      }
-    else
-      return {
-        {Text = title}
-      }
+    if pane.is_zoomed then
+      is_zoomed = true
     end
   end
-)
+
+  local cwd = get_current_working_dir(tab)
+  local process = get_process(tab)
+  local zoom_icon = is_zoomed and wezterm.nerdfonts.cod_zoom_in or ""
+  local title = string.format(' %s ~ %s %s ', process, cwd, zoom_icon) -- Add placeholder for zoom_icon
+
+  return wezterm.format({
+    { Attribute = { Intensity = 'Bold' } },
+    { Text = title }
+  })
+end)
+
 wezterm.on("update-right-status", function(window, pane)
   local workspace_or_leader = window:active_workspace()
   -- Change the worspace name status if leader is active
@@ -173,15 +168,6 @@ wezterm.on("update-right-status", function(window, pane)
   }))
 end)
 
--- Periodic updates on the statusline
--- NOTE: Which is not working
-wezterm.on("idle", function()
-  local window = wezterm.active_window()
-  if window then
-    window:perform_action(wezterm.action({ EmitEvent = "update-right-status" }), nil)
-  end
-end)
-
 -- Panes
 config.inactive_pane_hsb = {
   saturation = 0.4,
@@ -189,7 +175,7 @@ config.inactive_pane_hsb = {
 }
 
 -- Keys
-config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 1000 }
+config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 3000 }
 config.keys = {
   { key = "c", mods = "LEADER", action = act.ActivateCopyMode },
 
@@ -217,10 +203,35 @@ config.keys = {
 
   -- Workspace
   { key = "w", mods = "LEADER", action = act.ShowLauncherArgs { flags = "FUZZY|WORKSPACES" } },
+  {
+    key = 'W',
+    mods = 'LEADER',
+    action = act.PromptInputLine {
+      description = wezterm.format {
+        { Attribute = { Intensity = 'Bold' } },
+        { Foreground = { AnsiColor = 'Fuchsia' } },
+        { Text = 'Enter name for new workspace' },
+      },
+      action = wezterm.action_callback(function(window, pane, line)
+        -- line will be `nil` if they hit escape without entering anything
+        -- An empty string if they just hit enter
+        -- Or the actual line of text they wrote
+        if line then
+          window:perform_action(
+            act.SwitchToWorkspace {
+              name = line,
+            },
+            pane
+          )
+        end
+      end),
+    },
+  },
 
-  -- Experimental section
-  { key = "S", mods = "LEADER", action = wezterm.action({ EmitEvent = "trigger-save-workspace" }) },
-
+  -- Experimental section for workspace saving
+  { key = "S", mods = "LEADER", action = wezterm.action({ EmitEvent = "save_state" }) },
+  { key = "R", mods = "LEADER", action = wezterm.action({ EmitEvent = "restore_state" }) },
+  { key = "L", mods = "LEADER", action = wezterm.action({ EmitEvent = "load_state" }) },
 }
 
 -- Quick tab movement
