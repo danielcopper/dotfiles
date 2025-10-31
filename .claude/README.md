@@ -29,6 +29,12 @@ This directory contains custom configurations for Claude Code including skills, 
 ~/.claude/
 ├── README.md                          # This file
 ├── settings.json                      # Hook and permission configuration
+├── agents/                            # Custom subagents (specialized AI assistants)
+│   ├── feature-planner.md             # Planning agent for implementation plans
+│   ├── feature-coder.md               # Coding agent for implementation
+│   └── feature-reviewer.md            # Review agent for code quality
+├── commands/                          # Custom slash commands (user-invoked)
+│   └── feature-implementation.md      # Multi-agent workflow orchestration
 ├── skills/                            # Custom skills (model-invoked)
 │   └── commit-message/
 │       ├── SKILL.md                   # Conventional Commits guidelines
@@ -50,7 +56,94 @@ This directory contains custom configurations for Claude Code including skills, 
 
 ## Features
 
-### 1. Commit Message Skill
+### 1. Multi-Agent Feature Implementation System
+
+**Location**: `~/.claude/agents/` and `~/.claude/commands/`
+
+**Purpose**: Orchestrates complex feature development using specialized AI agents for planning, coding, and reviewing.
+
+#### Usage
+
+Start the workflow with:
+```
+/feature-implementation <user-story> [additional context]
+```
+
+Or without arguments to provide context interactively.
+
+#### The Workflow
+
+**Phase 1: Planning**
+1. Provide user story and context
+2. Choose 1 or 2 planners (parallel planners compare approaches)
+3. Planning agent explores codebase and creates detailed implementation plan
+4. Review and approve the plan (or request modifications)
+
+**Phase 2: Implementation**
+1. Tasks are implemented sequentially (one at a time to avoid merge conflicts)
+2. Coding agent implements each task with tests
+3. Optional: Review agent checks for security, test coverage, quality, and performance
+4. If issues found: Coding agent fixes them, then re-review
+5. Progress tracked with visible checklist
+
+**Phase 3: Completion**
+- All changes summarized
+- Final test suite run
+- Suggested next steps
+
+#### The Agents
+
+**feature-planner** (`~/.claude/agents/feature-planner.md`)
+- **Role**: Analyzes requirements, explores codebase, creates implementation plans
+- **Tools**: Read, Glob, Grep, Task (read-only)
+- **Model**: Sonnet
+- **Approach**: Hybrid - takes provided context, explores to fill gaps
+- **Output**: Structured plan with sequential tasks, file changes, testing strategy
+
+**feature-coder** (`~/.claude/agents/feature-coder.md`)
+- **Role**: Implements features with tests and quality focus
+- **Tools**: All tools (Read, Write, Edit, Bash, etc.)
+- **Model**: Sonnet
+- **Focus**: Clean code, comprehensive tests, security best practices
+- **Output**: Implementation with tests and verification
+
+**feature-reviewer** (`~/.claude/agents/feature-reviewer.md`)
+- **Role**: Reviews implementations for quality and correctness
+- **Tools**: Read, Glob, Grep, Bash (read-only, no edits)
+- **Model**: Sonnet
+- **Review Focus**:
+  - ⚠️ Security vulnerabilities (OWASP Top 10)
+  - 🧪 Test coverage (unit, integration, edge cases)
+  - 📐 Code quality (patterns, maintainability)
+  - ⚡ Performance (bottlenecks, optimization)
+- **Output**: Detailed review with severity levels (CRITICAL/HIGH/MEDIUM/LOW)
+
+#### Benefits
+
+- **Structured approach**: Clear planning before implementation
+- **Quality focus**: Dedicated review phase catches issues early
+- **Separation of concerns**: Each agent is expert in their domain
+- **Visibility**: Progress tracking and decision points
+- **Flexibility**: Choose 1 or 2 planners, optional reviews
+- **Safety**: Sequential implementation avoids merge conflicts
+
+#### Example
+
+```bash
+# In Claude Code session:
+/feature-implementation Add user authentication with JWT tokens and refresh tokens. Should integrate with existing user model and protect sensitive routes.
+
+# Claude will:
+# 1. Ask if you want 1 or 2 planners
+# 2. Generate and present implementation plan
+# 3. Get your approval
+# 4. Implement each task sequentially
+# 5. Offer review after each task
+# 6. Track progress with checklist
+# 7. Summarize all changes when complete
+```
+
+### 2. Commit Message Skill
 
 **Location**: `~/.claude/skills/commit-message/`
 
@@ -274,6 +367,33 @@ echo '{"hookSpecificInput": {}, "transcript": []}' | \
 
 ## Usage
 
+### Slash Commands
+
+Custom slash commands provide specialized workflows:
+
+- **/feature-implementation**: Multi-agent workflow for implementing features
+  ```bash
+  # With context
+  /feature-implementation Add JWT authentication with refresh tokens
+
+  # Without context (will prompt)
+  /feature-implementation
+  ```
+
+### Subagents
+
+Specialized agents can be invoked explicitly or automatically:
+
+```bash
+# Explicit invocation
+"Use the feature-planner agent to create an implementation plan for adding OAuth2 support"
+
+"Use the feature-reviewer agent to review the authentication changes"
+
+# Automatic invocation
+# Agents are automatically used when running /feature-implementation
+```
+
 ### Skills
 
 Skills are automatically invoked by Claude when relevant:
@@ -445,20 +565,23 @@ cd ~/projects/my-project
 
 Potential additions to this configuration:
 
-- **Custom slash commands** (`.claude/commands/`)
+- **Additional slash commands** (`.claude/commands/`)
   - `/deploy` - Complex deployment workflows
   - `/test-full` - Run complete test suite with reporting
   - `/review-pr` - Automated PR review process
+  - `/refactor` - Guided refactoring with safety checks
 
-- **Sub-agents** (`.claude/agents/`)
-  - Specialized agents for specific tasks
-  - Custom system prompts
-  - Controlled tool access
+- **Additional sub-agents** (`.claude/agents/`)
+  - `test-writer` - Specialized test generation agent
+  - `refactor-agent` - Safe refactoring with analysis
+  - `documentation-agent` - Generate and maintain docs
+  - `security-auditor` - Deep security analysis
 
 - **Additional hooks**
   - `SessionStart` - Load development context on startup
   - `PreToolUse` - Validate/block dangerous commands
   - `PreCompact` - Backup transcripts before compaction
+  - `UserPromptSubmit` - Pre-process or validate user requests
 
 - **Output styles** (`.claude/output-styles/`)
   - Custom response formatting
