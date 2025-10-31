@@ -2,6 +2,27 @@
 
 This directory contains custom configurations for Claude Code including skills, hooks, commands, and agents.
 
+## Quick Start
+
+1. **Install dependencies** (Arch Linux):
+   ```bash
+   sudo pacman -S python-openai  # Optional, for premium TTS
+   ```
+
+2. **Configure API key** (optional, for OpenAI TTS):
+   ```bash
+   # Add to ~/.bash_profile
+   export OPENAI_API_KEY="sk-your-key-here"
+   ```
+
+3. **⚠️ Important**: Hooks do NOT work in your home directory
+   - Navigate to any project: `cd ~/projects/my-project`
+   - Then start Claude Code
+
+4. **Verify** with `/hooks` command in Claude Code
+
+**Windows TTS works by default** - no setup needed!
+
 ## Directory Structure
 
 ```
@@ -19,10 +40,12 @@ This directory contains custom configurations for Claude Code including skills, 
     ├── post_tool_use.py              # Error/warning detection
     ├── logs/                          # JSON logs for all events
     └── utils/
-        └── tts/                       # Text-to-speech utilities
-            ├── speak.py               # TTS manager with fallback
-            ├── openai_tts.py         # Premium OpenAI voices
-            └── windows_tts.py        # Windows TTS (WSL)
+        ├── tts/                       # Text-to-speech utilities
+        │   ├── speak.py               # TTS manager with fallback
+        │   ├── openai_tts.py         # Premium OpenAI voices
+        │   └── windows_tts.py        # Windows TTS (WSL)
+        └── llm/                       # LLM utilities
+            └── openai_completion.py  # LLM-generated messages
 ```
 
 ## Features
@@ -67,11 +90,27 @@ This directory contains custom configurations for Claude Code including skills, 
    - Natural-sounding voices
    - Uses "nova" voice with 1.1x speed
    - Requires OpenAI API key in environment
+   - **Also powers LLM-generated completion messages** (see below)
 
 2. **Windows TTS** (fallback, no API needed)
    - Uses Windows Speech Synthesis via PowerShell
    - Works from WSL without additional setup
    - Rate: 2, Volume: 80
+
+#### LLM-Generated Messages
+
+**Stop** and **SubagentStop** hooks use OpenAI's API to generate **varied, friendly completion messages** instead of repetitive hardcoded text.
+
+**How it works**:
+- Uses `gpt-4o-mini` (fast and cost-effective)
+- Generates short messages (under 10 words)
+- Positive, future-focused tone
+- Examples: "Ready for the next challenge!", "All set! What's next?", "Done and dusted! Let's keep going."
+- Falls back to simple "Task complete!" if API unavailable
+
+**Optional personalization**:
+- Set `ENGINEER_NAME` environment variable in `~/.bash_profile`
+- Messages will be personalized for you
 
 #### Hook Events
 
@@ -88,23 +127,18 @@ This directory contains custom configurations for Claude Code including skills, 
 ##### Stop Hook (`stop.py`)
 **Trigger**: When Claude finishes responding
 
-**Announcements** (contextual based on tools used):
-- "Code changes completed. Files have been modified." (Write/Edit)
-- "Command execution completed." (Bash)
-- "File analysis complete." (Read)
-- "Search completed." (Grep/Glob)
-- "Agent task completed." (Task)
+**Announcements**: Uses LLM-generated messages (see above) for varied, friendly completions
+- Examples: "All done!", "Ready for next task!", "Nailed it!"
+- Falls back to "Task complete!" if LLM unavailable
 
 **Logging**: `~/.claude/hooks/logs/stop.json`
 
 ##### SubagentStop Hook (`subagent_stop.py`)
 **Trigger**: When a subagent completes its task
 
-**Announcements**:
-- "Code exploration complete"
-- "Planning agent finished"
-- "Code review complete"
-- "Work planning complete"
+**Announcements**: Uses LLM-generated messages (see above) for varied completions
+- **Smart filtering**: Only announces for meaningful tasks (filters out startup/background agents)
+- Skips announcements for `general-purpose` agents and tasks without descriptions
 
 **Logging**: `~/.claude/hooks/logs/subagent_stop.json`
 
@@ -153,21 +187,66 @@ Each hook:
 
 ### Prerequisites
 
-- **Claude Code** installed
+- **Claude Code** installed (version 2.0.30 or higher)
 - **Python 3** (already on most systems)
 - **WSL** (if on Windows) - for Windows TTS access
 
-### Optional: Premium TTS
+### ⚠️ Known Limitations
 
-To enable OpenAI TTS (premium voices):
+**IMPORTANT**: Hooks do **NOT work** when Claude Code is running in your home directory (`~`). This is a Claude Code limitation.
 
+**Workaround**: Use Claude Code in project directories other than your home directory. The hooks will work correctly in any subdirectory or separate project folder.
+
+### Dependencies
+
+#### For Windows TTS (Free, Default)
+No additional dependencies needed - uses built-in Windows Speech Synthesis via PowerShell from WSL.
+
+#### For OpenAI TTS (Premium, Optional)
+
+**On Arch Linux** (recommended method):
 ```bash
-# Install OpenAI Python library
-pip install openai
-
-# Set API key in your shell profile (~/.bashrc, ~/.zshrc, etc.)
-export OPENAI_API_KEY="your-api-key-here"
+# Install python-openai via pacman
+sudo pacman -S python-openai
 ```
+
+**On other systems**:
+```bash
+# Install via pip
+pip install openai
+# or
+pip install --user openai
+```
+
+### Configuring OpenAI API Key
+
+**IMPORTANT**: For Claude Code hooks to access the API key, it must be in `~/.bash_profile` (not `.bashrc` or `.bashrc.local`).
+
+Hooks run in non-interactive shells which don't source `.bashrc`, so the key must be in a profile file that's loaded for all shells.
+
+1. **Add your API key** to `~/.bash_profile`:
+   ```bash
+   # Edit ~/.bash_profile and add:
+   export OPENAI_API_KEY="sk-your-api-key-here"
+   ```
+
+   **Get your key from**: https://platform.openai.com/api-keys
+
+2. **Reload your shell**:
+   ```bash
+   # Logout and login, or source the file:
+   source ~/.bash_profile
+   ```
+
+3. **Verify**:
+   ```bash
+   echo $OPENAI_API_KEY
+   # Should output: sk-your-key...
+   ```
+
+**Note**: If your `.bash_profile` is in version control, you may want to:
+- Keep it out of version control, OR
+- Source a separate secrets file from `.bash_profile` that's gitignored
 
 ### Verification
 
@@ -274,32 +353,58 @@ Claude Code supports these hook events:
 
 ## Troubleshooting
 
+### Hooks Not Running At All
+
+**FIRST CHECK**: Are you running Claude Code in your home directory?
+
+```bash
+pwd
+# If output is /home/yourusername, hooks will NOT work!
+```
+
+**Solution**: Navigate to any project directory:
+```bash
+cd ~/projects/my-project
+# Now start Claude Code - hooks will work
+```
+
+**Verify hooks are registered**:
+1. In Claude Code, type `/hooks`
+2. Check if your hooks appear in the list
+3. If they appear but don't execute, you're likely in your home directory
+
 ### No TTS Output
 
-1. **Test Windows TTS directly**:
+1. **Check if hooks are executing at all**:
    ```bash
-   powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Test')"
+   # Check if log files are being created/updated
+   ls -lt ~/.claude/hooks/logs/
+   # Files should have recent timestamps when hooks run
    ```
 
-2. **Check hook execution**:
+2. **Test Windows TTS directly**:
    ```bash
-   # Verify hooks are executable
-   ls -l ~/.claude/hooks/*.py
-
-   # Check logs for errors
-   cat ~/.claude/hooks/logs/*.json | jq '.[] | select(.error)'
+   powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Test')"
    ```
 
 3. **Test hook directly**:
    ```bash
    echo '{}' | python3 ~/.claude/hooks/stop.py --notify
+   # You should hear TTS audio
    ```
 
-### Hooks Not Running
+4. **Check for errors**:
+   ```bash
+   # Check error log
+   cat ~/.claude/hooks/logs/hook_errors.log
+   ```
 
-1. **Verify settings.json is valid**:
+### Settings Issues
+
+1. **Verify settings.json is valid JSON**:
    ```bash
    cat ~/.claude/settings.json | jq '.'
+   # Should pretty-print the JSON without errors
    ```
 
 2. **Check hook permissions**:
@@ -312,7 +417,12 @@ Claude Code supports these hook events:
    ```bash
    which python3
    python3 --version
+   # Should show Python 3.x
    ```
+
+4. **Restart Claude Code** after any settings changes:
+   - Settings are loaded at startup only
+   - Changes won't take effect until restart
 
 ### OpenAI TTS Not Working
 

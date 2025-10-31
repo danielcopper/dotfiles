@@ -1,5 +1,4 @@
 {
-  "alwaysThinkingEnabled": true,
   "hooks": {
     "Notification": [
       {
@@ -7,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/notification.py --notify",
+            "command": "python3 $HOME/.claude/hooks/notification.py --notify",
             "timeout": 25
           }
         ]
@@ -19,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/stop.py --notify",
+            "command": "python3 $HOME/.claude/hooks/stop.py --notify",
             "timeout": 25
           }
         ]
@@ -31,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/subagent_stop.py --notify",
+            "command": "python3 $HOME/.claude/hooks/subagent_stop.py --notify",
             "timeout": 25
           }
         ]
@@ -43,11 +42,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/post_tool_use.py --notify",
+            "command": "python3 $HOME/.claude/hooks/post_tool_use.py --notify",
             "timeout": 25
           }
         ]
       }
     ]
-  }
+  },
+  "alwaysThinkingEnabled": true
 }

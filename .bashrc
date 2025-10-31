@@ -11,6 +11,10 @@ alias grep='grep --color=auto'
 PS1='\u@\h \W > '
 #PS1='> '
 
+# Vars
+export XDG_CONFIG_HOME="$HOME/.config"
+export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+
 # Bash
 # complete commmands
 #complete -c man which
@@ -39,23 +43,10 @@ source /usr/share/bash-completion/completions/git
 __git_complete dotfiles __git_main
 # complete -F _complete_alias dotfiles
 
-# Use windows git when in windows directory
-function git() {
-    if $(pwd -P | grep -q "\/mnt\/c\/*"); then
-        git.exe "$@"
-    else
-        command git "$@"
-    fi
-}
-
-# Use windows lazygit when in windows directory
-function lazygit() {
-    if $(pwd -P | grep -q "\/mnt\/c\/*"); then
-        lazygit.exe "$@"
-    else
-        command lazygit "$@"
-    fi
-}
+# Source local environment variables and secrets (not in dotfiles repo)
+if [ -f ~/.bashrc.local ]; then
+    source ~/.bashrc.local
+fi
 
 # Starship command prompt. Needs to be at the end of bashrc
 eval "$(starship init bash)"

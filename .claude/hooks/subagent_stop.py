@@ -33,52 +33,98 @@ def log_subagent_completion(data):
     except Exception as e:
         print(f"Logging error: {e}", file=sys.stderr)
 
-def get_subagent_message(data):
-    """Generate contextual message about subagent completion."""
+def get_llm_completion_message():
+    """Try to generate completion message using LLM."""
     try:
-        hook_data = data.get("hookSpecificInput", {})
-        agent_type = hook_data.get("subagentType", "unknown")
-        description = hook_data.get("description", "")
+        llm_script = Path.home() / ".claude" / "hooks" / "utils" / "llm" / "openai_completion.py"
+        if not llm_script.exists():
+            return None
 
-        # Map agent types to friendly names
-        agent_names = {
-            "Explore": "Code exploration",
-            "Plan": "Planning",
-            "focused-coder": "Code implementation",
-            "code-quality-reviewer": "Code review",
-            "work-planner": "Work planning",
-            "workflow-orchestrator": "Workflow orchestration",
-            "general-purpose": "General task"
-        }
+        result = subprocess.run(
+            [sys.executable, str(llm_script)],
+            timeout=10,
+            check=False,
+            capture_output=True,
+            text=True
+        )
 
-        friendly_name = agent_names.get(agent_type, agent_type)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
 
-        if description:
-            # Use the description if available
-            short_desc = description[:50]
-            return f"{friendly_name} complete: {short_desc}"
-        else:
-            return f"{friendly_name} agent finished."
-
+    except subprocess.TimeoutExpired:
+        print("LLM completion timeout", file=sys.stderr)
     except Exception as e:
-        print(f"Message generation error: {e}", file=sys.stderr)
-        return "Subagent task completed."
+        print(f"LLM completion error: {e}", file=sys.stderr)
+
+    return None
+
+def get_subagent_message(data):
+    """Generate subagent completion message - tries LLM first, falls back to simple default."""
+    # Try LLM-generated message
+    llm_message = get_llm_completion_message()
+    if llm_message:
+        return llm_message
+
+    # Fallback to simple message
+    return "Subagent complete!"
 
 def announce(message):
     """Announce message via TTS."""
     try:
         tts_script = Path.home() / ".claude" / "hooks" / "utils" / "tts" / "speak.py"
         if not tts_script.exists():
+            log_error("TTS script not found")
             return
 
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(tts_script), message],
             timeout=20,
             check=False,
-            capture_output=True
+            capture_output=False  # Don't suppress output - let errors show
         )
+
+        if result.returncode != 0:
+            log_error(f"TTS failed with exit code {result.returncode}")
+    except subprocess.TimeoutExpired:
+        log_error("TTS timeout after 20 seconds")
     except Exception as e:
-        print(f"TTS error: {e}", file=sys.stderr)
+        log_error(f"TTS error: {e}")
+
+def log_error(message):
+    """Log error messages to file."""
+    try:
+        log_dir = Path.home() / ".claude" / "hooks" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "hook_errors.log"
+
+        timestamp = datetime.now().isoformat()
+        with open(log_file, 'a') as f:
+            f.write(f"[{timestamp}] subagent_stop: {message}\n")
+    except Exception:
+        pass  # Fail silently if we can't log
+
+def should_announce(data):
+    """Determine if we should announce this subagent completion."""
+    try:
+        hook_data = data.get("hookSpecificInput", {})
+        agent_type = hook_data.get("subagentType", "")
+        description = hook_data.get("description", "")
+
+        # Skip agents that are likely background/startup agents
+        skip_types = {"general-purpose"}  # Add more types to skip if needed
+
+        if agent_type in skip_types:
+            return False
+
+        # Only announce if there's a meaningful description
+        # This filters out startup/background agents
+        if description and len(description.strip()) > 5:
+            return True
+
+        return False
+
+    except Exception:
+        return False
 
 def main():
     """Process subagent stop hook."""
@@ -86,7 +132,7 @@ def main():
         data = json.load(sys.stdin)
         log_subagent_completion(data)
 
-        if "--notify" in sys.argv:
+        if "--notify" in sys.argv and should_announce(data):
             message = get_subagent_message(data)
             announce(message)
 

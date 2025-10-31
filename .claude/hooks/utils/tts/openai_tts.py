@@ -39,23 +39,45 @@ def speak(text):
             tmp_file.write(response.content)
             tmp_path = tmp_file.name
 
+        # Convert WSL path to Windows path
+        try:
+            result = subprocess.run(
+                ["wslpath", "-w", tmp_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            windows_path = result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Fallback: if wslpath fails, try basic conversion
+            # This won't work for all cases but better than nothing
+            windows_path = tmp_path.replace("/", "\\")
+
+        # Escape PowerShell special characters in path
+        escaped_path = windows_path.replace("'", "''")
+
         # Play audio using Windows Media Player via PowerShell
+        # Using SoundPlayer for MP3 requires proper MediaPlayer setup
         ps_command = f"""
-$player = New-Object System.Media.SoundPlayer
 Add-Type -AssemblyName presentationCore
 $mediaPlayer = New-Object System.Windows.Media.MediaPlayer
-$mediaPlayer.Open('{tmp_path.replace("/", "\\")}')
+$mediaPlayer.Open('{escaped_path}')
 $mediaPlayer.Play()
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 10
+$mediaPlayer.Stop()
 $mediaPlayer.Close()
 """
 
-        subprocess.run(
+        result = subprocess.run(
             ["powershell.exe", "-Command", ps_command],
             timeout=20,
             check=False,
-            capture_output=True
+            capture_output=True,
+            text=True
         )
+
+        if result.returncode != 0 and result.stderr:
+            print(f"PowerShell playback error: {result.stderr}", file=sys.stderr)
 
         # Clean up
         try:

@@ -43,16 +43,35 @@ def announce(message):
     try:
         tts_script = Path.home() / ".claude" / "hooks" / "utils" / "tts" / "speak.py"
         if not tts_script.exists():
+            log_error("TTS script not found")
             return
 
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(tts_script), message],
             timeout=20,
             check=False,
-            capture_output=True
+            capture_output=False  # Don't suppress output - let errors show
         )
+
+        if result.returncode != 0:
+            log_error(f"TTS failed with exit code {result.returncode}")
+    except subprocess.TimeoutExpired:
+        log_error("TTS timeout after 20 seconds")
     except Exception as e:
-        print(f"TTS error: {e}", file=sys.stderr)
+        log_error(f"TTS error: {e}")
+
+def log_error(message):
+    """Log error messages to file."""
+    try:
+        log_dir = Path.home() / ".claude" / "hooks" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "hook_errors.log"
+
+        timestamp = datetime.now().isoformat()
+        with open(log_file, 'a') as f:
+            f.write(f"[{timestamp}] notification: {message}\n")
+    except Exception:
+        pass  # Fail silently if we can't log
 
 def main():
     """Process notification hook."""

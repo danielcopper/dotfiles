@@ -33,57 +33,75 @@ def log_completion(data):
     except Exception as e:
         print(f"Logging error: {e}", file=sys.stderr)
 
-def get_completion_message(data):
-    """Generate contextual completion message based on what Claude did."""
+def get_llm_completion_message():
+    """Try to generate completion message using LLM."""
     try:
-        hook_data = data.get("hookSpecificInput", {})
+        llm_script = Path.home() / ".claude" / "hooks" / "utils" / "llm" / "openai_completion.py"
+        if not llm_script.exists():
+            return None
 
-        # Try to get information about what tools were used
-        transcript = data.get("transcript", [])
+        result = subprocess.run(
+            [sys.executable, str(llm_script)],
+            timeout=10,
+            check=False,
+            capture_output=True,
+            text=True
+        )
 
-        # Count tool uses
-        tools_used = []
-        for event in transcript:
-            if isinstance(event, dict) and event.get("type") == "tool_use":
-                tool_name = event.get("name", "")
-                if tool_name and tool_name not in tools_used:
-                    tools_used.append(tool_name)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
 
-        # Generate message based on tools used
-        if "Write" in tools_used or "Edit" in tools_used:
-            return "Code changes completed. Files have been modified."
-        elif "Bash" in tools_used:
-            return "Command execution completed."
-        elif "Read" in tools_used and len(tools_used) == 1:
-            return "File analysis complete."
-        elif "Grep" in tools_used or "Glob" in tools_used:
-            return "Search completed."
-        elif "Task" in tools_used:
-            return "Agent task completed."
-        elif tools_used:
-            return f"Task complete. Used: {', '.join(tools_used[:3])}."
-        else:
-            return "Response complete."
-
+    except subprocess.TimeoutExpired:
+        print("LLM completion timeout", file=sys.stderr)
     except Exception as e:
-        print(f"Message generation error: {e}", file=sys.stderr)
-        return "Task complete."
+        print(f"LLM completion error: {e}", file=sys.stderr)
+
+    return None
+
+def get_completion_message(data):
+    """Generate completion message - tries LLM first, falls back to simple default."""
+    # Try LLM-generated message
+    llm_message = get_llm_completion_message()
+    if llm_message:
+        return llm_message
+
+    # Fallback to simple generic message
+    return "Task complete!"
 
 def announce(message):
     """Announce message via TTS."""
     try:
         tts_script = Path.home() / ".claude" / "hooks" / "utils" / "tts" / "speak.py"
         if not tts_script.exists():
+            log_error("TTS script not found")
             return
 
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(tts_script), message],
             timeout=20,
             check=False,
-            capture_output=True
+            capture_output=False  # Don't suppress output - let errors show
         )
+
+        if result.returncode != 0:
+            log_error(f"TTS failed with exit code {result.returncode}")
+    except subprocess.TimeoutExpired:
+        log_error("TTS timeout after 20 seconds")
     except Exception as e:
-        print(f"TTS error: {e}", file=sys.stderr)
+        log_error(f"TTS error: {e}")
+
+def log_error(message):
+    """Log error messages to file."""
+    try:
+        log_dir = Path.home() / ".claude" / "hooks" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "hook_errors.log"
+
+        timestamp = datetime.now().isoformat()
+        with open(log_file, 'a') as f:
+            f.write(f"[{timestamp}] stop: {message}\n")
+    except Exception:
+        pass  # Fail silently if we can't log
 
 def main():
     """Process stop hook."""
