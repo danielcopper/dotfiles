@@ -13,7 +13,16 @@ PS1='\u@\h \W > '
 
 # Vars
 export XDG_CONFIG_HOME="$HOME/.config"
-export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+export DBT_PROFILES_DIR="$HOME/.config/dbt"
+export PATH="$HOME/.local/bin:$HOME/.dotnet/tools:$PATH"
+
+# Auto-start gnome-keyring for MSAL token storage
+if [ -z "$GNOME_KEYRING_CONTROL" ]; then
+    # Create keyring directory if it doesn't exist (WSL fix)
+    mkdir -p /run/user/$UID/keyring 2>/dev/null
+    eval $(gnome-keyring-daemon --start --components=secrets 2>/dev/null)
+    export GNOME_KEYRING_CONTROL
+fi
 
 # Bash
 # complete commmands
@@ -50,3 +59,5 @@ fi
 
 # Starship command prompt. Needs to be at the end of bashrc
 eval "$(starship init bash)"
+
+eval "$(zoxide init bash --cmd cd)"

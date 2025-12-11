@@ -56,14 +56,19 @@ def speak(text):
         # Escape PowerShell special characters in path
         escaped_path = windows_path.replace("'", "''")
 
+        # Estimate audio duration based on text length (roughly 150 words/min = 2.5 words/sec)
+        word_count = len(text.split())
+        estimated_seconds = max(2, min(word_count / 2.5 + 1, 15))  # 2-15 seconds
+
         # Play audio using Windows Media Player via PowerShell
-        # Using SoundPlayer for MP3 requires proper MediaPlayer setup
+        # Small delay after Open() to let MediaPlayer buffer (fixes audio cut-off)
         ps_command = f"""
 Add-Type -AssemblyName presentationCore
 $mediaPlayer = New-Object System.Windows.Media.MediaPlayer
 $mediaPlayer.Open('{escaped_path}')
+Start-Sleep -Milliseconds 300
 $mediaPlayer.Play()
-Start-Sleep -Seconds 10
+Start-Sleep -Seconds {int(estimated_seconds)}
 $mediaPlayer.Stop()
 $mediaPlayer.Close()
 """

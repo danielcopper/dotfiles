@@ -1,6 +1,6 @@
 ---
 name: commit-message
-description: Use this skill when helping users create git commit messages. Enforces Conventional Commits format with type(scope): subject structure, includes breaking change notices and issue references. Adapts detail level based on change complexity.
+description: Use this skill PROACTIVELY when helping users create git commit messages. Enforces Conventional Commits format with type(scope): subject structure, includes breaking change notices and issue references. Adapts detail level based on change complexity.
 ---
 
 # Commit Message Guidelines
@@ -162,7 +162,10 @@ Related to #125
 **Always include:**
 - Breaking change notices
 - Issue references when applicable
-- Co-authored-by when relevant
+
+**Never include:**
+- Co-authored-by footers
+- Tool attribution (e.g., "Generated with Claude Code")
 
 ## Verification Checklist
 

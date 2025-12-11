@@ -7,34 +7,14 @@ Detects and announces errors/warnings.
 
 import json
 import sys
-import subprocess
 from pathlib import Path
-from datetime import datetime
 
-def log_tool_use(data):
-    """Log tool use data to file."""
-    log_dir = Path.home() / ".claude" / "hooks" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "post_tool_use.json"
+# Add utils to path
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-    try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
+from config import is_hook_enabled, is_tts_enabled
+from common import announce, log_json, log_error
 
-        data['timestamp'] = datetime.now().isoformat()
-        logs.append(data)
-
-        # Keep only last 100 entries to prevent log bloat
-        logs = logs[-100:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
-    except Exception as e:
-        print(f"Logging error: {e}", file=sys.stderr)
 
 def check_for_errors(data):
     """Check if tool execution had errors or warnings."""
@@ -43,24 +23,19 @@ def check_for_errors(data):
         tool_name = hook_data.get("tool_name", "unknown")
         tool_result = hook_data.get("tool_result", {})
 
-        # Check for error indicators
         if isinstance(tool_result, dict):
-            # Check for error field
             if tool_result.get("error"):
                 error_msg = tool_result.get("error", "Unknown error")
                 return True, f"{tool_name} error: {error_msg[:50]}"
 
-            # Check for stderr in bash results
             if "stderr" in tool_result and tool_result["stderr"]:
                 stderr = tool_result["stderr"]
                 if any(word in stderr.lower() for word in ["error", "fatal", "failed", "exception"]):
                     return True, f"{tool_name} command failed with errors"
 
-            # Check for non-zero exit codes
             if "exit_code" in tool_result and tool_result["exit_code"] != 0:
                 return True, f"{tool_name} exited with code {tool_result['exit_code']}"
 
-        # Check string results for error keywords
         if isinstance(tool_result, str):
             lower_result = tool_result.lower()
             if any(word in lower_result for word in ["error:", "fatal:", "exception:", "traceback"]):
@@ -69,53 +44,23 @@ def check_for_errors(data):
         return False, None
 
     except Exception as e:
-        print(f"Error checking error: {e}", file=sys.stderr)
+        log_error("post_tool_use", f"Error checking error: {e}")
         return False, None
 
-def announce(message):
-    """Announce message via TTS."""
-    try:
-        tts_script = Path.home() / ".claude" / "hooks" / "utils" / "tts" / "speak.py"
-        if not tts_script.exists():
-            log_error("TTS script not found")
-            return
-
-        result = subprocess.run(
-            [sys.executable, str(tts_script), message],
-            timeout=20,
-            check=False,
-            capture_output=False  # Don't suppress output - let errors show
-        )
-
-        if result.returncode != 0:
-            log_error(f"TTS failed with exit code {result.returncode}")
-    except subprocess.TimeoutExpired:
-        log_error("TTS timeout after 20 seconds")
-    except Exception as e:
-        log_error(f"TTS error: {e}")
-
-def log_error(message):
-    """Log error messages to file."""
-    try:
-        log_dir = Path.home() / ".claude" / "hooks" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "hook_errors.log"
-
-        timestamp = datetime.now().isoformat()
-        with open(log_file, 'a') as f:
-            f.write(f"[{timestamp}] post_tool_use: {message}\n")
-    except Exception:
-        pass  # Fail silently if we can't log
 
 def main():
     """Process post tool use hook."""
     try:
         data = json.load(sys.stdin)
-        log_tool_use(data)
 
-        if "--notify" in sys.argv:
+        hook_enabled, tts_enabled = is_hook_enabled("post_tool_use"), is_tts_enabled()
+        if not hook_enabled:
+            sys.exit(0)
+
+        log_json("post_tool_use.json", data)
+
+        if "--notify" in sys.argv and tts_enabled:
             has_error, error_msg = check_for_errors(data)
-
             if has_error and error_msg:
                 announce(f"Warning: {error_msg}")
 
@@ -123,8 +68,9 @@ def main():
         print("Invalid JSON input", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Hook error: {e}", file=sys.stderr)
+        log_error("post_tool_use", f"Hook error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
