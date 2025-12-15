@@ -1,0 +1,30 @@
+# Claude Code - Sensitive and temporary files
+# Include this in your dotfiles to avoid committing sensitive data
+
+# Credentials and API keys
+.credentials.json
+*.key
+*.pem
+
+# Session data
+history.jsonl
+session-env/
+projects/
+
+# Temporary files
+debug/
+shell-snapshots/
+file-history/
+todos/
+
+# Stats and analytics
+statsig/
+
+# Hook logs (these contain session data)
+hooks/logs/
+
+# Keep these (configuration and custom code)
+# settings.json
+# README.md
+# hooks/*.py (but not logs/)
+# skills/

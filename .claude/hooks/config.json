@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "notification": true,
+    "stop": true,
+    "subagent_stop": true,
+    "post_tool_use": true,
+    "pre_tool_use": true,
+    "user_prompt_submit": true,
+    "session_start": true,
+    "pre_compact": true
+  },
+  "tts": {
+    "enabled": true,
+    "provider": "auto"
+  },
+  "security": {
+    "block_dangerous_commands": true,
+    "protect_env_files": true,
+    "blocked_paths": ["/", "/etc", "/usr"],
+    "dangerous_patterns": ["rm -rf", "rm -fr", "rm -r /", "mkfs", "dd if=", "> /dev/sd"]
+  },
+  "logging": {
+    "enabled": true,
+    "max_entries": 100
+  }
+}
