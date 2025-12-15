@@ -5,6 +5,9 @@
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
+# Greeter
+fastfetch
+
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 #PS1='[\u@\h \W]\$ '
@@ -27,6 +30,7 @@ export PROTON_NO_ESYNC=0
 export PROTON_NO_FSYNC=0
 
 export TERMINAL="wezterm"
+export PATH="$HOME/.local/bin:$PATH"
 
 # Bash
 # complete commmands
@@ -37,7 +41,7 @@ source /usr/share/bash-completion/bash_completion
 source /usr/share/nvm/init-nvm.sh
 
 # Load Angular CLI autocompletion.
-source <(ng completion script)
+# source <(ng completion script)
 
 # Git completion
 source /usr/share/git/completion/git-completion.bash
@@ -57,6 +61,8 @@ alias grep='grep --color=auto'
 alias ip='ip -color=auto'
 alias diff='diff --color=auto'
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
+alias update='sudo -v && paru -Syu --noconfirm --skipreview'
+alias cc='alacritty -e claude'
 
 # complete dotfiles alias git commands
 source /usr/share/bash-completion/completions/git
@@ -96,6 +102,8 @@ export PATH="$PATH:/home/daniel/.dotnet/tools"
 # }
 #
 # complete -f -F _dotnet_bash_complete dotnet
+
+eval "$(zoxide init bash)"
 
 # Starship command prompt. Needs to be at the end of bashrc
 eval "$(starship init bash)"
