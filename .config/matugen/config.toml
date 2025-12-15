@@ -1,0 +1,33 @@
+[config]
+reload_apps = true
+
+[config.wallpaper]
+command = "swww"
+arguments = ["img", "--transition-type", "grow", "--transition-pos", "center"]
+set = false
+
+[templates.alacritty]
+input_path = "~/.config/matugen/templates/alacritty-colors.toml"
+output_path = "~/.config/alacritty/colors.toml"
+
+[templates.hyprland]
+input_path = "~/.config/matugen/templates/hyprland-colors.conf"
+output_path = "~/.config/hypr/colors.conf"
+post_hook = "hyprctl reload"
+
+[templates.rofi]
+input_path = "~/.config/matugen/templates/rofi-colors.rasi"
+output_path = "~/.config/rofi/colors.rasi"
+
+[templates.waybar]
+input_path = "~/.config/matugen/templates/waybar-colors.css"
+output_path = "~/.config/waybar/colors.css"
+post_hook = "pkill -SIGUSR2 waybar"
+
+[templates.wlogout]
+input_path = "~/.config/matugen/templates/wlogout-colors.css"
+output_path = "~/.config/wlogout/colors.css"
+
+[templates.starship]
+input_path = "~/.config/matugen/templates/starship.toml"
+output_path = "~/.config/starship.toml"

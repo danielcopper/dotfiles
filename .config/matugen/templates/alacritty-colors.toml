@@ -1,0 +1,31 @@
+[colors.primary]
+background = "#{{colors.surface.default.hex_stripped}}"
+foreground = "#{{colors.on_surface.default.hex_stripped}}"
+
+[colors.cursor]
+text = "#{{colors.surface.default.hex_stripped}}"
+cursor = "#{{colors.primary.default.hex_stripped}}"
+
+[colors.selection]
+text = "#{{colors.on_primary.default.hex_stripped}}"
+background = "#{{colors.primary.default.hex_stripped}}"
+
+[colors.normal]
+black = "#{{colors.surface_container.default.hex_stripped}}"
+red = "#{{colors.error.default.hex_stripped}}"
+green = "#{{colors.primary.default.hex_stripped}}"
+yellow = "#{{colors.tertiary.default.hex_stripped}}"
+blue = "#{{colors.secondary.default.hex_stripped}}"
+magenta = "#{{colors.tertiary.default.hex_stripped}}"
+cyan = "#{{colors.secondary.default.hex_stripped}}"
+white = "#{{colors.on_surface.default.hex_stripped}}"
+
+[colors.bright]
+black = "#{{colors.outline.default.hex_stripped}}"
+red = "#{{colors.on_error_container.default.hex_stripped}}"
+green = "#{{colors.primary_fixed.default.hex_stripped}}"
+yellow = "#{{colors.tertiary_fixed.default.hex_stripped}}"
+blue = "#{{colors.secondary_fixed.default.hex_stripped}}"
+magenta = "#{{colors.tertiary_fixed.default.hex_stripped}}"
+cyan = "#{{colors.secondary_fixed.default.hex_stripped}}"
+white = "#{{colors.inverse_surface.default.hex_stripped}}"
