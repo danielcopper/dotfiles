@@ -1,0 +1,14 @@
+:root {
+  --cc-bg: {{colors.surface_container.default.hex}};
+  --noti-border-color: {{colors.outline_variant.default.hex}};
+  --noti-bg: {{colors.surface.default.red}}, {{colors.surface.default.green}}, {{colors.surface.default.blue}};
+  --noti-bg-alpha: 0.95;
+  --noti-bg-darker: {{colors.surface_container_lowest.default.hex}};
+  --noti-bg-hover: {{colors.surface_container_high.default.hex}};
+  --noti-bg-focus: {{colors.surface_container_highest.default.hex}};
+  --noti-close-bg: {{colors.surface_container_high.default.hex}};
+  --noti-close-bg-hover: {{colors.surface_container_highest.default.hex}};
+  --text-color: {{colors.on_surface.default.hex}};
+  --text-color-disabled: {{colors.outline.default.hex}};
+  --bg-selected: {{colors.primary.default.hex}};
+}

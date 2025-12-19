@@ -1,0 +1,12 @@
+#!/bin/bash
+# Hyprland Keybinds für Walker (dmenu-Modus)
+
+hyprctl binds -j | jq -r '.[] | 
+  (if .modmask == 64 then "Super + "
+   elif .modmask == 65 then "Super+Shift + "
+   elif .modmask == 68 then "Super+Ctrl + "
+   elif .modmask == 72 then "Super+Alt + "
+   elif .modmask == 1 then "Shift + "
+   elif .modmask == 0 then ""
+   else "Mod\(.modmask) + " end) + .key + " → " + .dispatcher + " " + .arg
+' | sort | walker -d -p "Keybinds"

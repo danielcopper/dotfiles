@@ -1,0 +1,48 @@
+/* ML4W-inspired wlogout style */
+
+* {
+    background-image: none;
+    font-family: "CommitMono Nerd Font", monospace;
+}
+
+window {
+    background-color: rgba(16, 20, 24, 0.6);
+}
+
+button {
+    color: #e0e2e8;
+    background-color: rgba(29, 32, 36, 0.0);
+    border: none;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 24px;
+    border-radius: 16px;
+    margin: 0 10px;
+    transition: all 0.3s cubic-bezier(.55, 0.0, .28, 1.1);
+}
+
+button:hover, button:focus {
+    background-color: rgba(157, 203, 251, 0.15);
+    background-size: 36px;
+    margin: 20px;
+}
+
+#lock {
+    background-image: image(url("/usr/share/wlogout/icons/lock.png"));
+}
+
+#logout {
+    background-image: image(url("/usr/share/wlogout/icons/logout.png"));
+}
+
+#suspend {
+    background-image: image(url("/usr/share/wlogout/icons/suspend.png"));
+}
+
+#reboot {
+    background-image: image(url("/usr/share/wlogout/icons/reboot.png"));
+}
+
+#shutdown {
+    background-image: image(url("/usr/share/wlogout/icons/shutdown.png"));
+}
