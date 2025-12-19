@@ -1,42 +1,161 @@
 {
+  "layer": "top",
   "position": "top",
-  "modules-left": ["hyprland/workspaces"],
-  "modules-center": ["hyprland/window"],
-  "modules-right": ["network", "pulseaudio", "battery", "clock"],
-  "clock": {
-    "format": "<span foreground='#f5c2e7'>   </span>{:%a %d %H:%M}",
-    "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>"
+  "height": 39,
+  "spacing": 4,
+  "margin-top": 0,
+  "margin-left": 6,
+  "margin-right": 6,
+
+  "modules-left": [
+    "hyprland/workspaces",
+    "hyprland/window"
+  ],
+
+  "modules-center": [
+    "custom/weather",
+    "clock"
+  ],
+
+  "modules-right": [
+    "tray",
+    "cpu",
+    "temperature",
+    "memory",
+    "custom/gpu",
+    "bluetooth",
+    "network",
+    "pulseaudio",
+    "custom/power"
+  ],
+
+  "hyprland/workspaces": {
+    "format": "{icon}",
+    "format-icons": {
+      "1": "1",
+      "2": "2",
+      "3": "3",
+      "4": "4",
+      "5": "5",
+      "6": "6",
+      "7": "7",
+      "8": "8",
+      "9": "9",
+      "10": "10",
+      "default": ""
+    },
+    "on-click": "activate",
+    "sort-by-number": true
   },
+
+  "hyprland/window": {
+    "format": "{}",
+    "max-length": 40,
+    "separate-outputs": true
+  },
+
+  "clock": {
+    "format": "·  {:%a %d. %b  ·  %H:%M}",
+    "format-alt": "{:%H:%M}",
+    "tooltip-format": "<tt><small>{calendar}</small></tt>",
+    "calendar": {
+      "mode": "month",
+      "weeks-pos": "right",
+      "format": {
+        "months": "<span color='#cebdfe'><b>{}</b>",
+        "days": "<span color='#e6e1e9'><b>{}</b>",
+        "weeks": "<span color='#938f99'><b>W{}</b>",
+        "weekdays": "<span color='#efb8c9'><b>{}</b>",
+        "today": "<span color='#cebdfe'><b><u>{}</u></b>"
+      }
+    }
+  },
+
+  "bluetooth": {
+    "format": "󰂯",
+    "format-disabled": "󰂲",
+    "format-connected": "󰂱 {num_connections}",
+    "tooltip-format": "{controller_alias}\n{status}",
+    "tooltip-format-connected": "{controller_alias}\n{num_connections} verbunden\n\n{device_enumerate}",
+    "tooltip-format-enumerate-connected": "󰂱 {device_alias}",
+    "on-click": "bzmenu -l walker"
+  },
+
+  "network": {
+    "format-wifi": "<span font_size='11pt'>󰖩</span> {signalStrength}%",
+    "format-ethernet": "<span font_size='11pt'></span>",
+    "format-disconnected": "<span font_size='11pt'>󰖪</span>",
+    "tooltip-format-wifi": "{essid} ({signalStrength}%)",
+    "tooltip-format-ethernet": "{ifname}: {ipaddr}/{cidr}",
+    "tooltip-format-disconnected": "Disconnected",
+    "on-click": "networkmanager_dmenu"
+  },
+
+  "pulseaudio": {
+    "format": "<span font_size='15pt'>{icon}</span> {volume}%",
+    "format-muted": "<span font_size='15pt'>󰝟</span>",
+    "format-icons": {
+      "default": ["󰕿", "󰖀", "󰕾"]
+    },
+    "on-click": "pavucontrol",
+    "on-scroll-up": "swayosd-client --output-volume raise",
+    "on-scroll-down": "swayosd-client --output-volume lower"
+  },
+
   "battery": {
     "states": {
       "warning": 30,
       "critical": 15
     },
-    "format": "<span size='13000' foreground='#a6e3a1'>{icon} </span> {capacity}%",
-    "format-warning": "<span size='13000' foreground='#B1E3AD'>{icon} </span> {capacity}%",
-    "format-critical": "<span size='13000' foreground='#E38C8F'>{icon} </span> {capacity}%",
-    "format-charging": "<span size='13000' foreground='#B1E3AD'> </span>{capacity}%",
-    "format-plugged": "<span size='13000' foreground='#B1E3AD'> </span>{capacity}%",
-    "format-alt": "<span size='13000' foreground='#B1E3AD'>{icon} </span> {time}",
-    "format-full": "<span size='13000' foreground='#B1E3AD'> </span>{capacity}%",
-    "format-icons": [" ", " ", " ", " ", " "],
-    "tooltip-format": "{time}"
+    "format": "{icon} {capacity}%",
+    "format-charging": "󰂄 {capacity}%",
+    "format-plugged": "󰚥 {capacity}%",
+    "format-icons": ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+    "tooltip-format": "{timeTo}"
   },
-  "network": {
-    "format-wifi": "<span size='13000' foreground='#f5e0dc'>  </span>{essid}",
-    "format-ethernet": "<span size='13000' foreground='#f5e0dc'>  </span> Wired",
-    "format-linked": "{ifname} (No IP)  ",
-    "format-disconnected": "<span size='13000' foreground='#f5e0dc'>  </span>Disconnected",
-    "tooltip-format-wifi": "Signal Strenght: {signalStrength}%",
-    "tooltip-format-ethernet": "Connected to Ethernet ({ifname})",
-    "tooltip-format-disconnected": "No Connection"
+
+  "tray": {
+    "icon-size": 16,
+    "spacing": 8
   },
-  "pulseaudio": {
-      "format": "{icon}  {volume}%",
-      "format-muted": " ",
-      "format-icons": {
-          "default": ["", "", " "]
-      },
-      "on-click": "pavucontrol"
+
+  "custom/power": {
+    "format": "<span font_size='16pt'>󰐥</span>",
+    "tooltip": false,
+    "on-click": "wlogout -l ~/.config/wlogout/layout -C ~/.config/wlogout/style.css -b 5 -L 600 -R 600 -T 450 -B 450"
+  },
+
+  "custom/weather": {
+    "format": "{}",
+    "tooltip": true,
+    "interval": 1800,
+    "exec": "wttrbar --custom-indicator '{ICON} {temp_C}°' --lang de",
+    "return-type": "json"
+  },
+
+  "cpu": {
+    "format": "󰍛 {usage}%",
+    "interval": 2,
+    "tooltip": true
+  },
+
+  "memory": {
+    "format": "󰘚 {percentage}%",
+    "interval": 2,
+    "tooltip-format": "{used:0.1f}G / {total:0.1f}G"
+  },
+
+  "temperature": {
+    "hwmon-path": "/sys/class/hwmon/hwmon1/temp1_input",
+    "format": "󰔏 {temperatureC}°C",
+    "critical-threshold": 80,
+    "tooltip": true
+  },
+
+  "custom/gpu": {
+    "exec": "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo 'N/A'",
+    "format": "<span font_size='14pt'>󰢮</span> {}%",
+    "interval": 2,
+    "tooltip": true
   }
 }

@@ -1,127 +1,258 @@
-@import "mocha.css"; 
+@import "colors.css";
 
 * {
-    font-family: "MesloLGS Nerd Font Mono Bold";
-    font-size: 16px;
-    min-height: 0;
-    font-weight: bold;
+  font-family: "CommitMono Nerd Font", "CommitMono NF";
+  font-size: 16px;
+  font-weight: 600;
+  min-height: 0;
 }
 
 window#waybar {
-    background: transparent;
-    background-color: @crust;
-    color: @overlay0;
-    transition-property: background-color;
-    transition-duration: 0.1s;
-    border-bottom: 1px solid @overlay1;
+  background: transparent;
+  border: none;
 }
 
-#window {
-    margin: 8px;
-    padding-left: 8;
-    padding-right: 8;
+window#waybar.hidden {
+  opacity: 0.2;
 }
 
-button {
-    box-shadow: inset 0 -3px transparent;
-    border: none;
-    border-radius: 0;
+/* Segment containers */
+.modules-left,
+.modules-center,
+.modules-right {
+  background: alpha(@crust, 0.7);
+  border-radius: 12px;
+  border: 1px solid alpha(@mauve, 0.2);
+  margin: 2px 0;
+  padding: 0 4px;
 }
 
-button:hover {
-    background: inherit;
-    color: @mauve;
-    border-top: 2px solid @mauve;
+.modules-left {
+  margin-left: 0;
+}
+
+.modules-right {
+  margin-right: 0;
+}
+
+/* General module styling */
+#workspaces,
+#window,
+#clock,
+#custom-weather,
+#cpu,
+#memory,
+#temperature,
+#custom-gpu,
+#bluetooth,
+#network,
+#pulseaudio,
+#battery,
+#tray,
+#custom-power {
+  padding: 0 4px;
+  margin: 2px 1px;
+  color: @text;
+  border-radius: 8px;
+  background: transparent;
+  transition: all 0.2s ease;
+}
+
+/* Workspaces */
+#workspaces {
+  background: transparent;
+  padding: 0 4px;
 }
 
 #workspaces button {
-    padding: 0 4px;
+  padding: 0 8px;
+  margin: 4px 2px;
+  color: @overlay0;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  transition: all 0.2s ease;
 }
 
-#workspaces button.focused {
-    background-color: rgba(0, 0, 0, 0.3);
-    color: @rosewater;
-    border-top: 2px solid @rosewater;
+#workspaces button:hover {
+  color: @text;
+  background: alpha(@surface1, 0.8);
 }
 
 #workspaces button.active {
-    background-color: rgba(0, 0, 0, 0.3);
-    color: @mauve;
-    border-top: 2px solid @mauve;
+  color: @crust;
+  background: @mauve;
 }
 
 #workspaces button.urgent {
-    background-color: #eb4d4b;
+  color: @crust;
+  background: @red;
 }
 
-#pulseaudio,
-#clock,
-#battery,
-#cpu,
-#memory,
-#disk,
-#temperature,
-#backlight,
-#wireplumber,
-#tray,
-#network,
-#mode,
-#scratchpad {
-  margin-top: 2px;
-  margin-bottom: 2px;
-  margin-left: 4px;
-  margin-right: 4px;
-  padding-left: 4px;
-  padding-right: 4px;
+/* Window title */
+#window {
+  color: @subtext1;
+  font-weight: 500;
 }
 
+/* Weather */
+#custom-weather {
+  color: @mauve;
+}
+
+#custom-weather:hover {
+  background: alpha(@mauve, 0.15);
+}
+
+/* Dynamic weather colors based on wttrbar CSS classes */
+#custom-weather.sunny { color: @yellow; }
+#custom-weather.cloudy { color: @overlay1; }
+#custom-weather.rainy { color: @blue; }
+#custom-weather.snow { color: @text; }
+
+/* CPU */
+#cpu {
+  color: @green;
+}
+
+#cpu:hover {
+  background: alpha(@green, 0.15);
+}
+
+/* Memory */
+#memory {
+  color: @green;
+}
+
+#memory:hover {
+  background: alpha(@green, 0.15);
+}
+
+/* Temperature */
+#temperature {
+  color: @green;
+}
+
+#temperature:hover {
+  background: alpha(@green, 0.15);
+}
+
+#temperature.critical {
+  color: @red;
+}
+
+/* GPU */
+#custom-gpu {
+  color: @sapphire;
+}
+
+#custom-gpu:hover {
+  background: alpha(@sapphire, 0.15);
+}
+
+/* Clock */
 #clock {
-    color: @maroon;
-    border-bottom: 2px solid @maroon;
+  color: @mauve;
+  font-weight: 700;
 }
 
-#clock.date {
-    color: @mauve;
-    border-bottom: 2px solid @mauve;
+#clock:hover {
+  background: alpha(@mauve, 0.15);
 }
 
-#pulseaudio {
-    color: @blue;
-    border-bottom: 2px solid @blue;
+/* Bluetooth */
+#bluetooth {
+  color: @blue;
 }
 
+#bluetooth:hover {
+  background: alpha(@blue, 0.15);
+}
+
+#bluetooth.disabled {
+  color: @overlay0;
+}
+
+/* Network */
 #network {
-    color: @yellow;
-    border-bottom: 2px solid @yellow;
+  color: @blue;
 }
 
-#idle_inhibitor {
-    margin-right: 12px;
-    color: #7cb342;
+#network:hover {
+  background: alpha(@blue, 0.15);
 }
 
-#idle_inhibitor.activated {
-    color: @red;
+#network.disconnected {
+  color: @overlay0;
 }
 
+/* Audio */
+#pulseaudio {
+  color: @blue;
+}
+
+#pulseaudio:hover {
+  background: alpha(@blue, 0.15);
+}
+
+#pulseaudio.muted {
+  color: @overlay0;
+}
+
+/* Battery */
 #battery {
-    color: @green;
-    border-bottom: 2px solid @green;
+  color: @green;
 }
 
-/* If workspaces is the leftmost module, omit left margin */
-.modules-left>widget:first-child>#workspaces {
-    margin-left: 0;
+#battery:hover {
+  background: alpha(@green, 0.15);
 }
 
-/* If workspaces is the rightmost module, omit right margin */
-.modules-right>widget:last-child>#workspaces {
-    margin-right: 0;
+#battery.warning {
+  color: @yellow;
 }
 
-#custom-vpn {
-    color: @lavender;
-    border-radius: 15px;
-    padding-left: 6px;
-    padding-right: 6px;
+#battery.critical {
+  color: @red;
+}
+
+#battery.charging, #battery.plugged {
+  color: @green;
+}
+
+/* Tray */
+#tray {
+  padding: 0 8px;
+  margin-right: 12px;
+}
+
+#tray > .passive {
+  -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+  -gtk-icon-effect: highlight;
+}
+
+/* Power button */
+#custom-power {
+  color: @red;
+  padding: 0 10px;
+  margin-left: 8px;
+}
+
+#custom-power:hover {
+  background: alpha(@red, 0.15);
+}
+
+/* Tooltip */
+tooltip {
+  background: @crust;
+  border: 1px solid @surface1;
+  border-radius: 8px;
+}
+
+tooltip label {
+  color: @text;
+  padding: 4px 8px;
 }
