@@ -19,30 +19,22 @@
 
   "modules-right": [
     "tray",
-    "cpu",
-    "temperature",
-    "memory",
-    "custom/gpu",
-    "bluetooth",
-    "network",
-    "pulseaudio",
-    "custom/power"
+    "group/audio",
+    "group/connectivity",
+    "group/stats",
+    "group/power-menu"
   ],
 
   "hyprland/workspaces": {
-    "format": "{icon}",
+    "format": "{name}: {icon}",
     "format-icons": {
-      "1": "1",
-      "2": "2",
-      "3": "3",
-      "4": "4",
-      "5": "5",
-      "6": "6",
-      "7": "7",
-      "8": "8",
-      "9": "9",
-      "10": "10",
-      "default": ""
+      "active": "",
+      "default": ""
+    },
+    "persistent-workspaces": {
+      "DP-1": [1, 4, 7],
+      "DP-2": [2, 5, 8],
+      "DP-3": [3, 6, 9]
     },
     "on-click": "activate",
     "sort-by-number": true
@@ -54,21 +46,56 @@
     "separate-outputs": true
   },
 
+  "custom/weather": {
+    "format": "{}",
+    "tooltip": true,
+    "interval": 1800,
+    "exec": "wttrbar --custom-indicator '{ICON} {temp_C}°' --lang de",
+    "return-type": "json"
+  },
+
   "clock": {
-    "format": "·  {:%a %d. %b  ·  %H:%M}",
+    "format": "· {:%d · %H:%M}",
     "format-alt": "{:%H:%M}",
     "tooltip-format": "<tt><small>{calendar}</small></tt>",
     "calendar": {
       "mode": "month",
       "weeks-pos": "right",
       "format": {
-        "months": "<span color='#cebdfe'><b>{}</b>",
-        "days": "<span color='#e6e1e9'><b>{}</b>",
-        "weeks": "<span color='#938f99'><b>W{}</b>",
-        "weekdays": "<span color='#efb8c9'><b>{}</b>",
-        "today": "<span color='#cebdfe'><b><u>{}</u></b>"
+        "months": "<span color='#cebdfe'><b>{}</b></span>",
+        "days": "<span color='#e6e1e9'><b>{}</b></span>",
+        "weeks": "<span color='#938f99'><b>W{}</b></span>",
+        "weekdays": "<span color='#efb8c9'><b>{}</b></span>",
+        "today": "<span color='#cebdfe'><b><u>{}</u></b></span>"
       }
     }
+  },
+
+  "tray": {
+    "icon-size": 16,
+    "spacing": 8
+  },
+
+  "group/audio": {
+    "orientation": "horizontal",
+    "modules": ["pulseaudio"]
+  },
+
+  "pulseaudio": {
+    "format": "{icon} {volume}%",
+    "format-muted": "{icon} {volume}%",
+    "format-icons": {
+      "default": ["", "", ""],
+      "muted": ""
+    },
+    "on-click": "pavucontrol",
+    "on-scroll-up": "swayosd-client --output-volume raise",
+    "on-scroll-down": "swayosd-client --output-volume lower"
+  },
+
+  "group/connectivity": {
+    "orientation": "horizontal",
+    "modules": ["bluetooth", "network"]
   },
 
   "bluetooth": {
@@ -82,24 +109,46 @@
   },
 
   "network": {
-    "format-wifi": "<span font_size='11pt'>󰖩</span> {signalStrength}%",
-    "format-ethernet": "<span font_size='11pt'></span>",
-    "format-disconnected": "<span font_size='11pt'>󰖪</span>",
+    "interval": 2,
+    "format-wifi": "󰖩 {signalStrength}% ↓{bandwidthDownBytes} ↑{bandwidthUpBytes}",
+    "format-ethernet": "󰈀 ↓{bandwidthDownBytes} ↑{bandwidthUpBytes}",
+    "format-disconnected": "󰖪",
     "tooltip-format-wifi": "{essid} ({signalStrength}%)",
     "tooltip-format-ethernet": "{ifname}: {ipaddr}/{cidr}",
     "tooltip-format-disconnected": "Disconnected",
     "on-click": "networkmanager_dmenu"
   },
 
-  "pulseaudio": {
-    "format": "<span font_size='15pt'>{icon}</span> {volume}%",
-    "format-muted": "<span font_size='15pt'>󰝟</span>",
-    "format-icons": {
-      "default": ["󰕿", "󰖀", "󰕾"]
-    },
-    "on-click": "pavucontrol",
-    "on-scroll-up": "swayosd-client --output-volume raise",
-    "on-scroll-down": "swayosd-client --output-volume lower"
+  "group/stats": {
+    "orientation": "horizontal",
+    "modules": ["custom/cpu", "temperature", "memory", "custom/gpu", "battery"]
+  },
+
+  "custom/cpu": {
+    "exec": "~/.config/waybar/scripts/cpu-sparkline.sh",
+    "interval": 2,
+    "tooltip": false,
+    "format": "{}"
+  },
+
+  "temperature": {
+    "hwmon-path": "/sys/class/hwmon/hwmon1/temp1_input",
+    "format": "󰔏 {temperatureC}°C",
+    "critical-threshold": 80,
+    "tooltip": true
+  },
+
+  "memory": {
+    "format": " {used:0.1f}G/{total:0.1f}G",
+    "interval": 2,
+    "tooltip-format": "{percentage}% used"
+  },
+
+  "custom/gpu": {
+    "exec": "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo 'N/A'",
+    "format": "<span font_size='14pt'>󰢮</span> {}%",
+    "interval": 2,
+    "tooltip": true
   },
 
   "battery": {
@@ -114,48 +163,14 @@
     "tooltip-format": "{timeTo}"
   },
 
-  "tray": {
-    "icon-size": 16,
-    "spacing": 8
+  "group/power-menu": {
+    "orientation": "horizontal",
+    "modules": ["custom/power"]
   },
 
   "custom/power": {
-    "format": "<span font_size='16pt'>󰐥</span>",
+    "format": "",
     "tooltip": false,
     "on-click": "wlogout -l ~/.config/wlogout/layout -C ~/.config/wlogout/style.css -b 5 -L 600 -R 600 -T 450 -B 450"
-  },
-
-  "custom/weather": {
-    "format": "{}",
-    "tooltip": true,
-    "interval": 1800,
-    "exec": "wttrbar --custom-indicator '{ICON} {temp_C}°' --lang de",
-    "return-type": "json"
-  },
-
-  "cpu": {
-    "format": "󰍛 {usage}%",
-    "interval": 2,
-    "tooltip": true
-  },
-
-  "memory": {
-    "format": "󰘚 {percentage}%",
-    "interval": 2,
-    "tooltip-format": "{used:0.1f}G / {total:0.1f}G"
-  },
-
-  "temperature": {
-    "hwmon-path": "/sys/class/hwmon/hwmon1/temp1_input",
-    "format": "󰔏 {temperatureC}°C",
-    "critical-threshold": 80,
-    "tooltip": true
-  },
-
-  "custom/gpu": {
-    "exec": "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo 'N/A'",
-    "format": "<span font_size='14pt'>󰢮</span> {}%",
-    "interval": 2,
-    "tooltip": true
   }
 }
