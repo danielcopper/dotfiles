@@ -171,6 +171,6 @@
   "custom/power": {
     "format": "",
     "tooltip": false,
-    "on-click": "wlogout -l ~/.config/wlogout/layout -C ~/.config/wlogout/style.css -b 5 -L 600 -R 600 -T 450 -B 450"
+    "on-click": "~/.config/hypr/scripts/wlogout-wrapper.sh"
   }
 }
