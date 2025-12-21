@@ -13,11 +13,12 @@ if [ ! -f "$WALLPAPER" ]; then
     exit 1
 fi
 
-# Set desktop wallpaper with swww
+# Generate colors with matugen and set wallpaper with swww
+matugen image "$WALLPAPER"
 swww img "$WALLPAPER" --transition-type grow --transition-pos center
 
 # Copy to SDDM theme (requires sudo)
-SDDM_BG_DIR="/usr/share/sddm/themes/sugar-candy/Backgrounds"
+SDDM_BG_DIR="/usr/share/sddm/themes/Sugar-Candy/Backgrounds"
 if [ -d "$SDDM_BG_DIR" ]; then
     sudo cp "$WALLPAPER" "$SDDM_BG_DIR/current.jpg"
     echo "SDDM wallpaper updated"
