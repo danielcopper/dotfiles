@@ -18,7 +18,7 @@
   ],
 
   "modules-right": [
-    "tray",
+    "group/systray",
     "group/audio",
     "group/connectivity",
     "group/stats",
@@ -69,6 +69,11 @@
         "today": "<span color='#cebdfe'><b><u>{}</u></b></span>"
       }
     }
+  },
+
+  "group/systray": {
+    "orientation": "horizontal",
+    "modules": ["tray"]
   },
 
   "tray": {

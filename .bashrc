@@ -37,8 +37,11 @@ export PATH="$HOME/.local/bin:$PATH"
 #complete -c man which
 source /usr/share/bash-completion/bash_completion
 
-# Set up Node Version Manager
-source /usr/share/nvm/init-nvm.sh
+# Set up Node Version Manager (deaktiviert - nutze mise stattdessen)
+# source /usr/share/nvm/init-nvm.sh
+
+# mise aktivieren
+eval "$(mise activate bash)"
 
 # Load Angular CLI autocompletion.
 # source <(ng completion script)

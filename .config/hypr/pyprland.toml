@@ -2,7 +2,7 @@
 plugins = ["scratchpads"]
 
 [scratchpads.term]
-command = "kitty --class kitty-scratch"
+command = "kitty -o hide_window_decorations=yes --class kitty-scratch"
 class = "kitty-scratch"
 animation = "fromTop"
 size = "75% 60%"

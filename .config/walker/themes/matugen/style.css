@@ -1,8 +1,8 @@
-@define-color window_bg_color #141218;
-@define-color accent_bg_color #d2bcfd;
-@define-color theme_fg_color #e7e0e8;
-@define-color theme_fg_dim #cbc4cf;
-@define-color selected_bg_color #4f3d74;
+@define-color window_bg_color #141318;
+@define-color accent_bg_color #ccbeff;
+@define-color theme_fg_color #e6e1e9;
+@define-color theme_fg_dim #cac4cf;
+@define-color selected_bg_color #4a3e76;
 @define-color error_bg_color #ffb4ab;
 @define-color error_fg_color #690005;
 

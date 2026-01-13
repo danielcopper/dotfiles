@@ -36,6 +36,7 @@ window#waybar.hidden {
 }
 
 /* Right side groups */
+#systray,
 #audio,
 #connectivity,
 #stats,
@@ -113,7 +114,7 @@ window#waybar.hidden {
 #workspaces button {
   padding: 0 8px;
   margin: 4px 2px;
-  color: @primary;
+  color: @secondary;
   border-radius: 6px;
   background: transparent;
   border: none;
@@ -127,7 +128,7 @@ window#waybar.hidden {
 
 #workspaces button.active {
   color: @surface-container-lowest;
-  background: @primary;
+  background: @secondary;
 }
 
 #workspaces button.urgent {
@@ -137,27 +138,27 @@ window#waybar.hidden {
 
 /* Window title */
 #window {
-  color: @primary;
+  color: @secondary;
   font-weight: 500;
 }
 
 /* Weather */
 #custom-weather {
-  color: @primary;
+  color: @secondary;
 }
 
 #custom-weather:hover {
-  background: alpha(@primary, 0.15);
+  background: alpha(@secondary, 0.15);
 }
 
 /* Clock */
 #clock {
-  color: @primary;
+  color: @secondary;
   font-weight: 700;
 }
 
 #clock:hover {
-  background: alpha(@primary, 0.15);
+  background: alpha(@secondary, 0.15);
 }
 
 /* CPU */
@@ -263,9 +264,8 @@ window#waybar.hidden {
 }
 
 /* Tray */
-#tray {
-  padding: 0 8px;
-  margin-right: 12px;
+#tray > widget {
+  padding: 0 4px;
 }
 
 #tray > .passive {

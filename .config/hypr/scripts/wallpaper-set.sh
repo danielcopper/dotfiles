@@ -17,14 +17,7 @@ fi
 matugen image "$WALLPAPER"
 swww img "$WALLPAPER" --transition-type grow --transition-pos center
 
-# Copy to SDDM theme (requires sudo)
-SDDM_BG_DIR="/usr/share/sddm/themes/Sugar-Candy/Backgrounds"
-if [ -d "$SDDM_BG_DIR" ]; then
-    sudo cp "$WALLPAPER" "$SDDM_BG_DIR/current.jpg"
-    echo "SDDM wallpaper updated"
-fi
-
-# Also copy to ~/.config/backgrounds for consistency
-cp "$WALLPAPER" ~/.config/backgrounds/current.jpg 2>/dev/null
+# Copy to SDDM (symlink points here, ACLs allow sddm to read)
+cp "$WALLPAPER" ~/.config/sddm/current.jpg
 
 echo "Wallpaper set: $WALLPAPER"

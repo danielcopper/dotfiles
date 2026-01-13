@@ -1,7 +1,7 @@
 window#osd {
   border-radius: 10px;
-  border: 0.5px solid #d2bcfd;
-  background: alpha(#141218, 0.9);
+  border: 0.5px solid #ccbeff;
+  background: alpha(#141318, 0.9);
 }
 
 window#osd #container {
@@ -9,12 +9,12 @@ window#osd #container {
 }
 
 window#osd image {
-  color: #d2bcfd;
+  color: #ccbeff;
   -gtk-icon-transform: scale(0.6);
 }
 
 window#osd label {
-  color: #e7e0e8;
+  color: #e6e1e9;
   font-size: 12px;
 }
 
@@ -37,7 +37,7 @@ window#osd segment {
   min-height: inherit;
   border-radius: inherit;
   border: none;
-  background: alpha(#948f99, 0.5);
+  background: alpha(#938f99, 0.5);
 }
 
 window#osd progress,
@@ -45,7 +45,7 @@ window#osd segment.active {
   min-height: inherit;
   border-radius: inherit;
   border: none;
-  background: #d2bcfd;
+  background: #ccbeff;
 }
 
 window#osd segment {

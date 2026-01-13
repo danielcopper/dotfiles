@@ -63,3 +63,25 @@ Config: `~/.config/waybar/config`
 Style: `~/.config/waybar/style.css` (importiert `colors.css` von matugen)
 
 Klick auf Bluetooth/Network öffnet bzmenu bzw. networkmanager_dmenu.
+
+## SDDM Wallpaper Sync
+
+SDDM zeigt das gleiche Wallpaper wie der Desktop. Setup:
+
+1. **Symlink im Theme:**
+   `/usr/share/sddm/themes/Sugar-Candy/Backgrounds/current.jpg` → `~/.config/sddm/current.jpg`
+
+2. **ACLs für SDDM-Zugriff:**
+   ```bash
+   setfacl -m u:sddm:x /home/daniel
+   setfacl -m u:sddm:x /home/daniel/.config
+   setfacl -m u:sddm:x /home/daniel/.config/sddm
+   setfacl -m u:sddm:r /home/daniel/.config/sddm/current.jpg
+   ```
+
+3. **Waypaper post_command** (in `~/.config/waypaper/config.ini`):
+   ```
+   post_command = matugen image $wallpaper && cp "$wallpaper" ~/.config/sddm/current.jpg
+   ```
+
+Bei neuem Wallpaper via Waypaper wird automatisch SDDM aktualisiert.
