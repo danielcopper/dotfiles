@@ -393,7 +393,17 @@ If `--quick` flag is present, use this streamlined workflow:
 
 ## User Interaction Guidelines
 
-**Use AskUserQuestion tool** for decision points with simple choices:
+**CRITICAL: You MUST use the AskUserQuestion tool** for decision points - NEVER just output options as text!
+
+When you write something like:
+```
+Would you like to continue?
+- yes → Do something
+- no → Do something else
+```
+...without invoking `AskUserQuestion`, the user sees static text with NO way to click or select. This breaks the workflow.
+
+**ALWAYS invoke AskUserQuestion for:**
 - Supervision level selection
 - Plan approval (approve/modify/replan)
 - Commit approval (approve/edit/skip)
@@ -401,12 +411,12 @@ If `--quick` flag is present, use this streamlined workflow:
 - Review results (fix/accept/manual)
 - Task continuation (continue/pause/skip)
 
-**Use plain text prompts** when:
+**Use plain text prompts ONLY when:**
 - User needs to provide detailed input (e.g., "describe what changes you want")
 - Explaining something before asking a follow-up
 - The response requires free-form text
 
-This gives users clickable options for common decisions while allowing flexibility for complex input.
+**Enforcement:** If you catch yourself writing option lists as markdown text, STOP and use the AskUserQuestion tool instead. The user expects clickable options, not copy-paste text.
 
 ---
 
