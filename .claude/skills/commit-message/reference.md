@@ -208,20 +208,6 @@ in production. Reverting while we investigate the issue.
 Related to #823
 ```
 
-### Multiple Co-Authors
-```
-feat(payment): integrate Stripe payment processing
-
-Implement Stripe payment gateway with support for credit
-cards, Apple Pay, and Google Pay. Includes webhook handling
-for payment events and automatic invoice generation.
-
-Closes #445
-
-Co-authored-by: Jane Developer <jane@example.com>
-Co-authored-by: Bob Engineer <bob@example.com>
-```
-
 ### Hotfix
 ```
 fix(security)!: expire all active sessions after password change
