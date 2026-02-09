@@ -5,9 +5,6 @@
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
-# Greeter
-fastfetch
-
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 #PS1='[\u@\h \W]\$ '
@@ -52,11 +49,7 @@ source /usr/share/git/completion/git-completion.bash
 # QMK completion
 #source ~/Repos/qmk_firmware/util/qmk_tab_complete.sh
 
-# Command not found
-# Automatically search the official repositories when entering an unrecognized command
-# Need pkgfile to be installed
-# Update the pkgfile database with 'pkgfile -u'
-source /usr/share/doc/pkgfile/command-not-found.bash
+
 
 # Aliases
 alias ls='ls --color=auto'

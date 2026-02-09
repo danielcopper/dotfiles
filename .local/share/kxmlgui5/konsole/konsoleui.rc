@@ -1,0 +1,6 @@
+<!DOCTYPE gui SYSTEM "kpartgui.dtd">
+<gui name="konsole" version="20">
+<!--<ToolBar name="mainToolBar">
+ <text>Main Toolbar</text>
+</ToolBar>-->
+</gui>
