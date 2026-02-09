@@ -2,107 +2,138 @@
 """
 PreToolUse Hook - Security Guard
 Intercepts tool calls before execution to block dangerous operations.
-Protects against: rm -rf, .env file access, and other destructive commands.
+
+Output format: JSON with hookSpecificOutput containing permissionDecision.
+Always exits 0 — decision communicated via stdout JSON.
 """
 
 import json
-import sys
+import os
 import re
+import sys
 from pathlib import Path
-from datetime import datetime
 
 # Add utils to path
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-def load_config():
-    """Load hook configuration."""
-    try:
-        from config import is_hook_enabled, get_security_config
-        return is_hook_enabled("pre_tool_use"), get_security_config()
-    except ImportError:
-        return True, {
-            "block_dangerous_commands": True,
-            "protect_env_files": True,
-            "blocked_paths": ["/", "/etc", "/usr"],
-            "dangerous_patterns": ["rm -rf", "rm -fr", "rm -r /", "mkfs", "dd if=", "> /dev/sd"]
+from config import get_security_config, get_auto_approve_config
+from common import run_hook, log_jsonl, log_error
+
+
+def _make_decision(decision, reason):
+    """Build the hook-specific output dict."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": reason,
         }
+    }
 
-def log_event(event_type, details):
-    """Log security events to file."""
-    log_dir = Path.home() / ".claude" / "hooks" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "pre_tool_use.json"
 
-    try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
+def _normalize_command(command):
+    """Normalize a command string for pattern matching."""
+    home = os.path.expanduser("~")
+    normalized = command.replace("$HOME", home)
+    normalized = normalized.replace("${HOME}", home)
+    normalized = normalized.replace("~", home)
 
-        logs.append({
-            "timestamp": datetime.now().isoformat(),
-            "event": event_type,
-            "details": details
-        })
+    # Strip common path prefixes
+    for prefix in ("/usr/bin/", "/bin/", "/usr/local/bin/", "/usr/sbin/", "/sbin/"):
+        normalized = normalized.replace(prefix, "")
 
-        # Keep last 100 entries
-        logs = logs[-100:]
+    return normalized
 
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
 
-    except Exception:
-        pass
+def _check_subshell_in_rm(command):
+    """Detect $(…) or backticks in rm context."""
+    if not re.search(r'\brm\b', command, re.IGNORECASE):
+        return False
+    if re.search(r'\$\(', command) or re.search(r'`[^`]+`', command):
+        return True
+    return False
 
-def is_dangerous_rm_command(command, config):
-    """Check if command is a dangerous rm operation."""
+
+def _is_dangerous_command(command, config):
+    """Check if command matches any dangerous pattern."""
     if not config.get("block_dangerous_commands", True):
         return False, None
 
-    patterns = config.get("dangerous_patterns", [])
-    command_lower = command.lower()
+    normalized = _normalize_command(command)
+    normalized_lower = normalized.lower()
 
+    # Check configured dangerous patterns (case-insensitive)
+    patterns = config.get("dangerous_patterns", [])
     for pattern in patterns:
-        if pattern.lower() in command_lower:
+        pat_lower = pattern.lower()
+        # Direct substring match
+        if pat_lower in normalized_lower:
             return True, f"Blocked dangerous pattern: {pattern}"
+        # For pipe patterns like "curl | sh", check with regex
+        # allowing arbitrary args between the command and the pipe
+        if "|" in pat_lower:
+            parts = [p.strip() for p in pat_lower.split("|", 1)]
+            if len(parts) == 2:
+                regex = re.escape(parts[0]) + r'.*\|\s*' + re.escape(parts[1])
+                if re.search(regex, normalized_lower):
+                    return True, f"Blocked dangerous pattern: {pattern}"
 
     # Check for rm with recursive flags targeting dangerous paths
-    rm_pattern = r'rm\s+(-[rfRF]+\s+)*(/|~|\*|/home|/root|/etc|/usr|/var|/boot)'
-    if re.search(rm_pattern, command):
-        return True, "Blocked recursive delete on sensitive path"
+    blocked_paths = config.get("blocked_paths", [])
+    rm_match = re.search(
+        r'\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+(.+)',
+        normalized,
+    )
+    if rm_match:
+        target = rm_match.group(2).strip()
+        for bp in blocked_paths:
+            if target == bp or target.startswith(bp + "/"):
+                # Allow /home/user paths
+                if "/home/" in target:
+                    continue
+                return True, f"Blocked recursive delete on: {bp}"
 
-    # Check for rm -rf with wildcards
-    if re.search(r'rm\s+-[rfRF]*\s+\*', command):
+    # rm -rf with wildcards
+    if re.search(r'\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+\*', normalized):
         return True, "Blocked recursive delete with wildcard"
+
+    # Subshell expansion in rm
+    if _check_subshell_in_rm(normalized):
+        return True, "Blocked rm with subshell expansion"
 
     return False, None
 
-def is_env_file_access(tool_name, input_data, config):
-    """Check if operation accesses .env files."""
-    if not config.get("protect_env_files", True):
+
+def _check_sensitive_files(tool_name, input_data, config):
+    """Check if operation accesses sensitive files using regex patterns."""
+    if not config.get("protect_sensitive_files", True):
         return False, None
 
-    # Tools that access files
-    file_tools = ["Read", "Edit", "Write", "Bash"]
+    file_tools = {"Read", "Edit", "Write", "Bash"}
     if tool_name not in file_tools:
         return False, None
 
-    # Get the file path from various input formats
-    file_path = ""
+    # Gather all paths to check
+    paths_to_check = []
     if isinstance(input_data, dict):
-        file_path = input_data.get("file_path", "") or input_data.get("path", "") or input_data.get("command", "")
+        for key in ("file_path", "path", "command"):
+            val = input_data.get(key, "")
+            if val:
+                paths_to_check.append(val)
     elif isinstance(input_data, str):
-        file_path = input_data
+        paths_to_check.append(input_data)
 
-    # Check for .env file access (but allow .env.example, .env.sample)
-    if re.search(r'\.env(?!\.example|\.sample|\.template)', file_path):
-        return True, "Blocked access to .env file"
+    patterns = config.get("sensitive_file_patterns", [])
+    for path_str in paths_to_check:
+        for pattern in patterns:
+            if re.search(pattern, path_str, re.IGNORECASE):
+                return True, f"Blocked access to sensitive file matching: {pattern}"
 
     return False, None
 
-def check_blocked_paths(tool_name, input_data, config):
-    """Check if operation targets blocked paths."""
+
+def _check_blocked_paths(tool_name, input_data, config):
+    """Check if operation targets blocked paths for write operations."""
     blocked = config.get("blocked_paths", [])
     if not blocked:
         return False, None
@@ -113,69 +144,105 @@ def check_blocked_paths(tool_name, input_data, config):
     elif isinstance(input_data, str):
         file_path = input_data
 
-    # Only block exact matches to root paths for write operations
-    if tool_name in ["Write", "Edit"]:
+    if not file_path:
+        return False, None
+
+    if tool_name in ("Write", "Edit"):
+        normalized = _normalize_command(file_path)
         for blocked_path in blocked:
-            if file_path == blocked_path or file_path.startswith(blocked_path + "/"):
-                # But allow /home/user paths
-                if "/home/" in file_path or file_path.startswith("~"):
+            if normalized == blocked_path or normalized.startswith(blocked_path + "/"):
+                if "/home/" in normalized or normalized.startswith(os.path.expanduser("~")):
                     continue
                 return True, f"Blocked write to protected path: {blocked_path}"
 
     return False, None
 
-def main():
-    """Process pre-tool-use hook."""
-    try:
-        data = json.load(sys.stdin)
-        enabled, security_config = load_config()
 
-        if not enabled:
-            sys.exit(0)
+def _check_auto_approve(tool_name, input_data, cwd):
+    """Check if operation can be auto-approved as a safe read."""
+    auto_cfg = get_auto_approve_config()
+    if not auto_cfg.get("safe_reads", True):
+        return False
 
-        hook_data = data.get("hookSpecificInput", {})
-        tool_name = hook_data.get("tool_name", "")
-        tool_input = hook_data.get("tool_input", {})
+    safe_read_tools = {"Read", "Glob", "Grep"}
+    if tool_name not in safe_read_tools:
+        return False
 
-        # Check for dangerous operations
-        blocked = False
-        reason = None
+    # Get the path being accessed
+    file_path = ""
+    if isinstance(input_data, dict):
+        file_path = input_data.get("file_path", "") or input_data.get("path", "") or input_data.get("pattern", "")
 
-        # Check Bash commands
-        if tool_name == "Bash":
-            command = tool_input.get("command", "") if isinstance(tool_input, dict) else str(tool_input)
-            blocked, reason = is_dangerous_rm_command(command, security_config)
+    if not file_path:
+        return True  # No path to check, allow
 
-        # Check .env file access
-        if not blocked:
-            blocked, reason = is_env_file_access(tool_name, tool_input, security_config)
+    # Project paths only check
+    if auto_cfg.get("project_paths_only", True) and cwd:
+        resolved = str(Path(file_path).resolve()) if file_path.startswith("/") else file_path
+        cwd_resolved = str(Path(cwd).resolve())
+        if resolved.startswith(cwd_resolved):
+            return True
 
-        # Check blocked paths
-        if not blocked:
-            blocked, reason = check_blocked_paths(tool_name, tool_input, security_config)
+    return False
 
-        # Log the event
-        log_event("blocked" if blocked else "allowed", {
+
+def handle_pre_tool_use(data):
+    """Main handler for pre-tool-use events."""
+    hook_data = data.get("hookSpecificInput", {})
+    tool_name = hook_data.get("tool_name", "")
+    tool_input = hook_data.get("tool_input", {})
+    cwd = data.get("cwd", "")
+
+    security_config = get_security_config()
+
+    # Check for auto-approve (safe reads)
+    if _check_auto_approve(tool_name, tool_input, cwd):
+        log_jsonl("pre_tool_use.json", {
+            "event": "auto_approved",
             "tool": tool_name,
-            "blocked": blocked,
-            "reason": reason
         })
+        return _make_decision("allow", "Safe read operation in project directory")
 
+    # Check Bash commands for dangerous patterns
+    if tool_name == "Bash":
+        command = tool_input.get("command", "") if isinstance(tool_input, dict) else str(tool_input)
+        blocked, reason = _is_dangerous_command(command, security_config)
         if blocked:
-            # Exit code 2 blocks the tool with an error message
-            print(json.dumps({
-                "error": f"Security block: {reason}"
-            }))
-            sys.exit(2)
+            log_jsonl("pre_tool_use.json", {
+                "event": "blocked",
+                "tool": tool_name,
+                "reason": reason,
+            })
+            return _make_decision("deny", reason)
 
-        # Exit 0 allows the tool to proceed
-        sys.exit(0)
+    # Check sensitive file access
+    blocked, reason = _check_sensitive_files(tool_name, tool_input, security_config)
+    if blocked:
+        log_jsonl("pre_tool_use.json", {
+            "event": "blocked",
+            "tool": tool_name,
+            "reason": reason,
+        })
+        return _make_decision("deny", reason)
 
-    except json.JSONDecodeError:
-        sys.exit(0)  # Allow on parse error
-    except Exception as e:
-        print(f"Hook error: {e}", file=sys.stderr)
-        sys.exit(0)  # Allow on error (fail open)
+    # Check blocked paths for write operations
+    blocked, reason = _check_blocked_paths(tool_name, tool_input, security_config)
+    if blocked:
+        log_jsonl("pre_tool_use.json", {
+            "event": "blocked",
+            "tool": tool_name,
+            "reason": reason,
+        })
+        return _make_decision("deny", reason)
+
+    # Log allowed operations
+    log_jsonl("pre_tool_use.json", {
+        "event": "allowed",
+        "tool": tool_name,
+    })
+
+    return None
+
 
 if __name__ == "__main__":
-    main()
+    run_hook("pre_tool_use", handle_pre_tool_use)

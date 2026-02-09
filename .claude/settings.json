@@ -95,6 +95,18 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/subagent_start.py",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

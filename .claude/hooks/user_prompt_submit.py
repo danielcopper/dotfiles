@@ -6,66 +6,32 @@ Validates prompts and logs them for audit/analysis.
 """
 
 import json
-import sys
 import re
+import sys
 from pathlib import Path
-from datetime import datetime
 
-# Add utils to path
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-def load_config():
-    """Load hook configuration."""
-    try:
-        from config import is_hook_enabled, get_logging_config
-        return is_hook_enabled("user_prompt_submit"), get_logging_config()
-    except ImportError:
-        return True, {"enabled": True, "max_entries": 100}
+from common import run_hook, log_jsonl
 
-def log_prompt(data, logging_config):
-    """Log prompt to file."""
-    if not logging_config.get("enabled", True):
-        return
 
-    log_dir = Path.home() / ".claude" / "hooks" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "user_prompt_submit.json"
+def _log_prompt(data):
+    """Log prompt preview to file."""
+    hook_data = data.get("hookSpecificInput", {})
+    prompt = hook_data.get("prompt", "")
 
-    try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
+    log_jsonl("user_prompt_submit.json", {
+        "session_id": data.get("session_id", ""),
+        "prompt_length": len(prompt),
+        "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+    })
 
-        hook_data = data.get("hookSpecificInput", {})
-        prompt = hook_data.get("prompt", "")
 
-        logs.append({
-            "timestamp": datetime.now().isoformat(),
-            "session_id": data.get("session_id", ""),
-            "prompt_length": len(prompt),
-            "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt
-        })
-
-        # Keep last N entries
-        max_entries = logging_config.get("max_entries", 100)
-        logs = logs[-max_entries:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
-    except Exception:
-        pass
-
-def validate_prompt(prompt):
+def _validate_prompt(prompt):
     """
     Validate prompt for security concerns.
     Returns (is_valid, reason) tuple.
-
-    Customize blocked_patterns to add your own rules.
     """
-    # Add patterns you want to block (currently empty - customize as needed)
     blocked_patterns = [
         # Example patterns (uncomment to enable):
         # r"ignore\s+previous\s+instructions",
@@ -74,15 +40,14 @@ def validate_prompt(prompt):
     ]
 
     prompt_lower = prompt.lower()
-
     for pattern in blocked_patterns:
         if re.search(pattern, prompt_lower):
-            return False, f"Blocked pattern detected"
+            return False, "Blocked pattern detected"
 
     return True, None
 
 
-def check_auto_resume():
+def _check_auto_resume():
     """
     Check if /implement workflow needs auto-resume after compact/clear.
     Returns systemMessage if auto-resume is needed, None otherwise.
@@ -94,11 +59,8 @@ def check_auto_resume():
 
     try:
         state_file_path = marker_file.read_text().strip()
-
-        # Delete the marker file immediately to prevent re-triggering
         marker_file.unlink()
 
-        # Verify the state file exists
         if state_file_path and Path(state_file_path).exists():
             return (
                 f"IMPORTANT: The /implement workflow was interrupted for context compaction. "
@@ -111,55 +73,33 @@ def check_auto_resume():
                 "IMPORTANT: The /implement workflow was interrupted for context compaction. "
                 "Run `/implement --resume` to continue (if there's a recent state file in ~/.claude/feature-progress/)."
             )
-
     except Exception:
-        # If anything goes wrong, try to clean up the marker
         try:
             marker_file.unlink()
         except Exception:
             pass
         return None
 
-def main():
-    """Process user prompt submit hook."""
-    try:
-        data = json.load(sys.stdin)
-        enabled, logging_config = load_config()
 
-        if not enabled:
-            sys.exit(0)
+def handle_user_prompt_submit(data):
+    _log_prompt(data)
 
-        # Log the prompt
-        log_prompt(data, logging_config)
+    # Check for /implement auto-resume
+    auto_resume_msg = _check_auto_resume()
+    if auto_resume_msg:
+        return {"systemMessage": auto_resume_msg}
 
-        # Check for /implement auto-resume after compact/clear
-        auto_resume_msg = check_auto_resume()
-        if auto_resume_msg:
-            print(json.dumps({
-                "systemMessage": auto_resume_msg
-            }))
-            sys.exit(0)
+    # Validate if --validate flag is passed
+    if "--validate" in sys.argv:
+        hook_data = data.get("hookSpecificInput", {})
+        prompt = hook_data.get("prompt", "")
 
-        # Validate if --validate flag is passed
-        if "--validate" in sys.argv:
-            hook_data = data.get("hookSpecificInput", {})
-            prompt = hook_data.get("prompt", "")
+        is_valid, reason = _validate_prompt(prompt)
+        if not is_valid:
+            return {"error": f"Prompt validation failed: {reason}"}
 
-            is_valid, reason = validate_prompt(prompt)
+    return None
 
-            if not is_valid:
-                print(json.dumps({
-                    "error": f"Prompt validation failed: {reason}"
-                }))
-                sys.exit(2)
-
-        sys.exit(0)
-
-    except json.JSONDecodeError:
-        sys.exit(0)
-    except Exception as e:
-        print(f"Hook error: {e}", file=sys.stderr)
-        sys.exit(0)
 
 if __name__ == "__main__":
-    main()
+    run_hook("user_prompt_submit", handle_user_prompt_submit)

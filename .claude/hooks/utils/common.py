@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Common utilities for Claude Code hooks.
-Shared functions for TTS, logging, and LLM message generation.
+Shared functions for TTS, notifications, logging, and LLM message generation.
 """
 
 import json
@@ -10,6 +10,59 @@ import sys
 import subprocess
 from pathlib import Path
 from datetime import datetime
+
+
+# =============================================================================
+# Notifications (unified: toast + sounds + TTS + debounce)
+# =============================================================================
+
+def notify_all(title, message, event_type, tts_message=None):
+    """
+    Send all enabled notification types, respecting debounce.
+
+    title: Toast notification title
+    message: Toast notification body / fallback text
+    event_type: Sound event type ("complete", "error", "attention", "subagent")
+    tts_message: Optional override for TTS text (defaults to message)
+    """
+    try:
+        from config import is_toast_enabled, is_sounds_enabled, is_tts_enabled, is_debounce_enabled, get_debounce_config
+
+        # Check debounce first
+        if is_debounce_enabled():
+            from notify.debounce import should_notify, mark_notified
+            debounce_cfg = get_debounce_config()
+            interval = debounce_cfg.get("min_interval_seconds", 5)
+            if not should_notify(interval):
+                return
+
+        # Toast notification
+        if is_toast_enabled():
+            try:
+                from notify.toast import show_toast
+                show_toast(title, message)
+            except Exception as e:
+                log_error("notify", f"Toast error: {e}")
+
+        # Sound effect
+        if is_sounds_enabled():
+            try:
+                from notify.sound import play_sound
+                play_sound(event_type)
+            except Exception as e:
+                log_error("notify", f"Sound error: {e}")
+
+        # TTS
+        if is_tts_enabled():
+            announce(tts_message or message)
+
+        # Mark notified for debounce
+        if is_debounce_enabled():
+            from notify.debounce import mark_notified
+            mark_notified()
+
+    except Exception as e:
+        log_error("notify_all", f"Error: {e}")
 
 
 # =============================================================================
@@ -42,15 +95,67 @@ def announce(message, timeout=20):
 
 
 # =============================================================================
+# Hook Runner
+# =============================================================================
+
+def run_hook(hook_name, handler_fn):
+    """
+    Standard wrapper for hook scripts. Eliminates boilerplate.
+
+    Reads JSON from stdin, checks if hook is enabled, calls handler_fn(data),
+    and handles output/errors consistently.
+
+    handler_fn(data) should:
+      - Return a dict to output as JSON to stdout
+      - Return None for no output
+      - Raise exceptions on error (they'll be caught and logged)
+    """
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        sys.exit(0)
+
+    try:
+        from config import is_hook_enabled
+        if not is_hook_enabled(hook_name):
+            sys.exit(0)
+    except ImportError:
+        pass
+
+    try:
+        result = handler_fn(data)
+        if isinstance(result, dict):
+            print(json.dumps(result))
+    except Exception as e:
+        log_error(hook_name, f"Hook error: {e}")
+
+    sys.exit(0)
+
+
+# =============================================================================
 # Logging
 # =============================================================================
 
 def log_error(hook_name, message):
-    """Log error messages to file."""
+    """Log error messages to file with rotation."""
     try:
         log_dir = Path.home() / ".claude" / "hooks" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "hook_errors.log"
+
+        # Rotate if too large
+        try:
+            from config import get_logging_config
+            max_bytes = get_logging_config().get("error_log_max_bytes", 524288)
+        except ImportError:
+            max_bytes = 524288
+
+        if log_file.exists() and log_file.stat().st_size > max_bytes:
+            rotated = log_dir / "hook_errors.log.1"
+            try:
+                log_file.rename(rotated)
+            except OSError:
+                pass
 
         timestamp = datetime.now().isoformat()
         with open(log_file, 'a') as f:
@@ -59,11 +164,21 @@ def log_error(hook_name, message):
         pass
 
 
-def log_json(filename, data, max_entries=100):
-    """Log data to a JSON file with rotation."""
+def log_jsonl(filename, data, max_entries=None):
+    """
+    Log data to a JSON file with rotation.
+    Append entry, keep last max_entries.
+    """
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / filename
+
+    if max_entries is None:
+        try:
+            from config import get_logging_config
+            max_entries = get_logging_config().get("max_entries", 100)
+        except ImportError:
+            max_entries = 100
 
     try:
         if log_file.exists():
@@ -83,6 +198,10 @@ def log_json(filename, data, max_entries=100):
     except Exception as e:
         log_error("common", f"JSON logging error: {e}")
         return False
+
+
+# Backward compat alias
+log_json = log_jsonl
 
 
 # =============================================================================
