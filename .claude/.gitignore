@@ -19,12 +19,31 @@ todos/
 
 # Stats and analytics
 statsig/
+stats-cache.json
 
 # Hook logs (these contain session data)
 hooks/logs/
+
+# Local/sensitive settings
+settings.local.json
+settings-for-api-key.json
+
+# Runtime state
+feature-progress/
+plans/
+cache/
+downloads/
+ide/
+paste-cache/
+plugins/
+shared/
+tasks/
+telemetry/
 
 # Keep these (configuration and custom code)
 # settings.json
 # README.md
 # hooks/*.py (but not logs/)
 # skills/
+# agents/
+# commands/
