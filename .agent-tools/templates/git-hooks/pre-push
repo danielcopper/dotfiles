@@ -1,0 +1,23 @@
+#!/bin/sh
+# pre-push hook: warns on force push in agent context
+# Only active when $AGENT_SESSION is set
+
+if [ -n "$AGENT_SESSION" ]; then
+    # Check the parent process command for force push flags
+    if [ -f "/proc/$PPID/cmdline" ]; then
+        push_cmd=$(tr '\0' ' ' < "/proc/$PPID/cmdline")
+        case "$push_cmd" in
+            *--force*|*" -f "*|*--force-with-lease*)
+                echo ""
+                echo "WARNING: Force push detected in agent context."
+                echo "Agent session: $AGENT_SESSION"
+                echo ""
+                # Warn but allow (policy: warn)
+                # To hard-block, change exit 0 to exit 1 below
+                exit 0
+                ;;
+        esac
+    fi
+fi
+
+exit 0

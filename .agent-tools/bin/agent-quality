@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Run quality gates for the current project.
+
+Usage: agent-quality [--staged-only] [--install-hook] [directory]
+Exit 0 = all gates pass, Exit 1 = failures, Exit 2 = usage error
+"""
+
+import argparse
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+from quality_gates import run_quality_gates
+
+
+def install_hook(project_dir):
+    """Copy pre-commit template to .git/hooks/."""
+    git_hooks_dir = Path(project_dir) / ".git" / "hooks"
+    if not git_hooks_dir.exists():
+        print(f"Error: {git_hooks_dir} does not exist. Is this a git repo?", file=sys.stderr)
+        sys.exit(2)
+
+    template = Path(__file__).resolve().parent.parent / "templates" / "git-hooks" / "pre-commit"
+    if not template.exists():
+        print(f"Error: Template not found at {template}", file=sys.stderr)
+        sys.exit(2)
+
+    dest = git_hooks_dir / "pre-commit"
+    shutil.copy2(template, dest)
+    os.chmod(dest, 0o755)
+    print(f"Installed pre-commit hook to {dest}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run quality gates")
+    parser.add_argument("--staged-only", action="store_true",
+                        help="Only check stacks with staged files")
+    parser.add_argument("--install-hook", action="store_true",
+                        help="Install pre-commit hook to .git/hooks/")
+    parser.add_argument("directory", nargs="?", default=os.getcwd(),
+                        help="Project directory (default: cwd)")
+    args = parser.parse_args()
+
+    if args.install_hook:
+        install_hook(args.directory)
+        return
+
+    results = run_quality_gates(args.directory, staged_only=args.staged_only)
+    print(json.dumps(results, indent=2))
+
+    if not results["passed"]:
+        print("\nFailed gates:", file=sys.stderr)
+        for r in results["results"]:
+            if not r["passed"] and not r.get("skipped"):
+                print(f"  FAIL: {r['gate']} ({r['duration_s']}s)", file=sys.stderr)
+                if r.get("output"):
+                    for line in r["output"].strip().splitlines()[-5:]:
+                        print(f"    {line}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

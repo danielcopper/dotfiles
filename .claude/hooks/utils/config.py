@@ -2,12 +2,21 @@
 """
 Hook configuration utility.
 Reads config.json to determine which hooks and features are enabled.
+
+Supports two config locations (checked in order):
+1. ~/.agent-tools/config.json (new centralized config)
+2. ~/.claude/hooks/config.json (legacy)
+
+And two structures:
+- New: Claude-specific settings under "claude" key
+- Old: flat structure with all keys at top level
 """
 
 import json
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".claude" / "hooks" / "config.json"
+_NEW_CONFIG_PATH = Path.home() / ".agent-tools" / "config.json"
+_OLD_CONFIG_PATH = Path.home() / ".claude" / "hooks" / "config.json"
 
 _config_cache = None
 
@@ -36,6 +45,16 @@ _DEFAULT_LOGGING = {
 }
 
 
+def _resolve_config_path():
+    """Find the config file. New location takes priority."""
+    if _NEW_CONFIG_PATH.exists():
+        return _NEW_CONFIG_PATH
+    return _OLD_CONFIG_PATH
+
+
+CONFIG_PATH = _resolve_config_path()
+
+
 def get_config():
     """Load and cache configuration."""
     global _config_cache
@@ -43,8 +62,10 @@ def get_config():
         return _config_cache
 
     try:
-        if CONFIG_PATH.exists():
-            with open(CONFIG_PATH, 'r') as f:
+        # Re-resolve in case files were created after module load
+        path = _resolve_config_path()
+        if path.exists():
+            with open(path, "r") as f:
                 _config_cache = json.load(f)
         else:
             _config_cache = {}
@@ -54,38 +75,62 @@ def get_config():
     return _config_cache
 
 
+def _is_new_structure(config):
+    """Detect if config uses the new nested structure."""
+    return "claude" in config
+
+
+def _get_claude_section(config, key, default=None):
+    """Get a Claude-specific config value from either structure.
+
+    New structure: config["claude"][key] or config["claude"]["notifications"][key]
+    Old structure: config[key]
+    """
+    if default is None:
+        default = {}
+
+    if _is_new_structure(config):
+        claude = config.get("claude", {})
+        # Notification sub-keys live under "notifications"
+        if key in ("tts", "toast", "sounds", "debounce"):
+            return claude.get("notifications", {}).get(key, default)
+        return claude.get(key, default)
+
+    return config.get(key, default)
+
+
 def is_hook_enabled(hook_name):
     """Check if a specific hook is enabled."""
     config = get_config()
-    hooks = config.get("hooks", {})
+    hooks = _get_claude_section(config, "hooks", {})
     return hooks.get(hook_name, True)
 
 
 def is_tts_enabled():
     """Check if TTS is enabled."""
     config = get_config()
-    tts = config.get("tts", {})
+    tts = _get_claude_section(config, "tts", {})
     return tts.get("enabled", False)
 
 
 def is_toast_enabled():
     """Check if toast notifications are enabled."""
     config = get_config()
-    toast = config.get("toast", {})
+    toast = _get_claude_section(config, "toast", {})
     return toast.get("enabled", True)
 
 
 def is_sounds_enabled():
     """Check if sound effects are enabled."""
     config = get_config()
-    sounds = config.get("sounds", {})
+    sounds = _get_claude_section(config, "sounds", {})
     return sounds.get("enabled", True)
 
 
 def is_debounce_enabled():
     """Check if notification debounce is enabled."""
     config = get_config()
-    debounce = config.get("debounce", {})
+    debounce = _get_claude_section(config, "debounce", {})
     return debounce.get("enabled", True)
 
 
@@ -108,7 +153,7 @@ def get_security_config():
 def get_logging_config():
     """Get logging configuration with defaults."""
     config = get_config()
-    logging_cfg = config.get("logging", {})
+    logging_cfg = _get_claude_section(config, "logging", {})
 
     result = dict(_DEFAULT_LOGGING)
     result.update(logging_cfg)
@@ -118,13 +163,13 @@ def get_logging_config():
 def get_toast_config():
     """Get toast notification configuration."""
     config = get_config()
-    return config.get("toast", {"enabled": True, "provider": "auto"})
+    return _get_claude_section(config, "toast", {"enabled": True, "provider": "auto"})
 
 
 def get_sounds_config():
     """Get sounds configuration."""
     config = get_config()
-    return config.get("sounds", {
+    return _get_claude_section(config, "sounds", {
         "enabled": True,
         "provider": "auto",
         "events": {
@@ -139,13 +184,13 @@ def get_sounds_config():
 def get_debounce_config():
     """Get debounce configuration."""
     config = get_config()
-    return config.get("debounce", {"enabled": True, "min_interval_seconds": 5})
+    return _get_claude_section(config, "debounce", {"enabled": True, "min_interval_seconds": 5})
 
 
 def get_auto_approve_config():
     """Get auto-approve configuration."""
     config = get_config()
-    return config.get("auto_approve", {
+    return _get_claude_section(config, "auto_approve", {
         "safe_reads": True,
         "project_paths_only": True,
     })

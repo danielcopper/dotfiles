@@ -11,6 +11,9 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+# Session context — set by run_hook(), read by log_jsonl()
+_session_context = {}
+
 
 # =============================================================================
 # Notifications (unified: toast + sounds + TTS + debounce)
@@ -115,6 +118,14 @@ def run_hook(hook_name, handler_fn):
     except (json.JSONDecodeError, ValueError):
         sys.exit(0)
 
+    # Capture session context for log correlation
+    global _session_context
+    _session_context = {
+        "session_id": data.get("session_id", ""),
+        "cwd": data.get("cwd", ""),
+        "hook": hook_name,
+    }
+
     try:
         from config import is_hook_enabled
         if not is_hook_enabled(hook_name):
@@ -188,6 +199,13 @@ def log_jsonl(filename, data, max_entries=None):
             logs = []
 
         data['timestamp'] = datetime.now().isoformat()
+
+        # Inject session context for log correlation
+        if _session_context:
+            for key in ("session_id", "cwd", "hook"):
+                if key not in data and _session_context.get(key):
+                    data[key] = _session_context[key]
+
         logs.append(data)
         logs = logs[-max_entries:]
 

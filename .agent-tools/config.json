@@ -1,0 +1,79 @@
+{
+  "security": {
+    "block_dangerous_commands": true,
+    "protect_sensitive_files": true,
+    "blocked_paths": ["/", "/etc", "/usr", "/boot", "/sys", "/proc", "/dev", "/var", "/root"],
+    "dangerous_patterns": [
+      "rm -rf", "rm -fr", "rm -r /", "mkfs", "dd if=", "> /dev/sd",
+      "curl | sh", "curl | bash", "wget | sh", "wget | bash",
+      "curl|sh", "curl|bash", "wget|sh", "wget|bash",
+      "chmod -R 777", "chown -R", "kill -9 -1", "pkill -9",
+      "shred", "truncate -s 0", ":(){ :|:& };:"
+    ],
+    "sensitive_file_patterns": [
+      "\\.env(?!\\.example|\\.sample|\\.template)",
+      "credentials\\.json", "id_rsa", "\\.aws/credentials",
+      "secrets\\.ya?ml", "\\.pem$", "\\.key$"
+    ],
+    "hard_blocks": {
+      "force_push": "warn",
+      "deploy": "deny",
+      "non_local_db": "deny",
+      "allowed_db_hosts": ["localhost", "127.0.0.1", "::1", "host.docker.internal", "."],
+      "allowed_db_ports": [1433]
+    }
+  },
+  "quality_gates": {
+    "timeout_seconds": 60,
+    "csharp": { "build": true, "format_check": true },
+    "typescript": { "typecheck": true, "lint": true },
+    "python": { "lint": true, "typecheck": false }
+  },
+  "claude": {
+    "hooks": {
+      "notification": true,
+      "stop": true,
+      "subagent_stop": true,
+      "subagent_start": true,
+      "post_tool_use": true,
+      "pre_tool_use": true,
+      "user_prompt_submit": true,
+      "session_start": true,
+      "session_end": true,
+      "pre_compact": true
+    },
+    "notifications": {
+      "tts": {
+        "enabled": false,
+        "provider": "auto"
+      },
+      "toast": {
+        "enabled": true,
+        "provider": "auto"
+      },
+      "sounds": {
+        "enabled": true,
+        "provider": "auto",
+        "events": {
+          "complete": "complete",
+          "error": "dialog-error",
+          "attention": "bell",
+          "subagent": "message-new-instant"
+        }
+      },
+      "debounce": {
+        "enabled": true,
+        "min_interval_seconds": 5
+      }
+    },
+    "auto_approve": {
+      "safe_reads": true,
+      "project_paths_only": true
+    },
+    "logging": {
+      "enabled": true,
+      "max_entries": 100,
+      "error_log_max_bytes": 524288
+    }
+  }
+}

@@ -3,6 +3,10 @@
 Hook Toggle Utility
 Easily enable/disable hooks and notification features from the command line.
 
+Supports both config locations:
+1. ~/.agent-tools/config.json (new centralized config)
+2. ~/.claude/hooks/config.json (legacy)
+
 Usage:
     python toggle.py                    # Show status of all hooks
     python toggle.py <hook> on|off      # Enable/disable specific hook
@@ -18,7 +22,8 @@ import json
 import sys
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".claude" / "hooks" / "config.json"
+_NEW_CONFIG_PATH = Path.home() / ".agent-tools" / "config.json"
+_OLD_CONFIG_PATH = Path.home() / ".claude" / "hooks" / "config.json"
 
 ALL_HOOKS = [
     "notification", "stop", "subagent_stop", "subagent_start",
@@ -31,25 +36,64 @@ FEATURE_TOGGLES = ["tts", "toast", "sounds", "debounce", "notify"]
 VALID_TARGETS = ALL_HOOKS + FEATURE_TOGGLES + ["all"]
 
 
+def _resolve_config_path():
+    """Find the config file. New location takes priority."""
+    if _NEW_CONFIG_PATH.exists():
+        return _NEW_CONFIG_PATH
+    return _OLD_CONFIG_PATH
+
+
+def _is_new_structure(config):
+    """Detect if config uses the new nested structure."""
+    return "claude" in config
+
+
 def load_config():
     """Load configuration."""
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, 'r') as f:
+    path = _resolve_config_path()
+    if path.exists():
+        with open(path, "r") as f:
             return json.load(f)
     return {"hooks": {}, "tts": {"enabled": False}, "toast": {"enabled": True}, "sounds": {"enabled": True}}
 
 
 def save_config(config):
-    """Save configuration."""
-    with open(CONFIG_PATH, 'w') as f:
+    """Save configuration to the resolved path."""
+    path = _resolve_config_path()
+    with open(path, "w") as f:
         json.dump(config, f, indent=2)
-    f.close()
+        f.write("\n")
+
+
+def _get_claude_section(config, key, default=None):
+    """Get a Claude-specific config value from either structure."""
+    if default is None:
+        default = {}
+    if _is_new_structure(config):
+        claude = config.get("claude", {})
+        if key in ("tts", "toast", "sounds", "debounce"):
+            return claude.get("notifications", {}).get(key, default)
+        return claude.get(key, default)
+    return config.get(key, default)
+
+
+def _set_claude_value(config, section, key, value):
+    """Set a Claude-specific config value in either structure."""
+    if _is_new_structure(config):
+        claude = config.setdefault("claude", {})
+        if section in ("tts", "toast", "sounds", "debounce"):
+            notifications = claude.setdefault("notifications", {})
+            notifications.setdefault(section, {})[key] = value
+        else:
+            claude.setdefault(section, {})[key] = value
+    else:
+        config.setdefault(section, {})[key] = value
 
 
 def show_status():
     """Display current status of all hooks and features."""
     config = load_config()
-    hooks = config.get("hooks", {})
+    hooks = _get_claude_section(config, "hooks", {})
 
     print("\n=== Hook Status ===\n")
     for hook in ALL_HOOKS:
@@ -59,18 +103,28 @@ def show_status():
 
     print("\n=== Notification Methods ===\n")
     features = [
-        ("TTS (Text-to-Speech)", config.get("tts", {}).get("enabled", False)),
-        ("Toast Notifications", config.get("toast", {}).get("enabled", True)),
-        ("Sound Effects", config.get("sounds", {}).get("enabled", True)),
+        ("TTS (Text-to-Speech)", _get_claude_section(config, "tts", {}).get("enabled", False)),
+        ("Toast Notifications", _get_claude_section(config, "toast", {}).get("enabled", True)),
+        ("Sound Effects", _get_claude_section(config, "sounds", {}).get("enabled", True)),
     ]
     for name, enabled in features:
         icon = "[ON] " if enabled else "[OFF]"
         print(f"  {icon} {name}")
 
     print("\n=== Other ===\n")
-    debounce = config.get("debounce", {}).get("enabled", True)
-    interval = config.get("debounce", {}).get("min_interval_seconds", 5)
+    debounce_cfg = _get_claude_section(config, "debounce", {})
+    debounce = debounce_cfg.get("enabled", True)
+    interval = debounce_cfg.get("min_interval_seconds", 5)
     print(f"  {'[ON] ' if debounce else '[OFF]'} Debounce ({interval}s interval)")
+
+    # Show hard blocks status if available
+    security = config.get("security", {})
+    hard_blocks = security.get("hard_blocks", {})
+    if hard_blocks:
+        print("\n=== Hard Blocks ===\n")
+        for key in ("force_push", "deploy", "non_local_db"):
+            policy = hard_blocks.get(key, "deny")
+            print(f"  [{policy.upper():4s}] {key}")
 
     print(f"\n=== Usage ===\n")
     print(f"  python {Path(__file__).name} <hook_name> on|off")
@@ -80,52 +134,41 @@ def show_status():
     print()
 
 
-def _ensure_key(config, section, default=None):
-    """Ensure a config section exists."""
-    if section not in config:
-        config[section] = default if default is not None else {}
-
-
 def toggle(target, enable):
     """Toggle a hook or feature."""
     config = load_config()
 
     if target == "all":
-        _ensure_key(config, "hooks", {})
+        if _is_new_structure(config):
+            hooks = config.setdefault("claude", {}).setdefault("hooks", {})
+        else:
+            hooks = config.setdefault("hooks", {})
         for hook in ALL_HOOKS:
-            config["hooks"][hook] = enable
+            hooks[hook] = enable
         print(f"All hooks {'enabled' if enable else 'disabled'}")
 
     elif target == "notify":
         for section in ("tts", "toast", "sounds"):
-            _ensure_key(config, section, {})
-            config[section]["enabled"] = enable
+            _set_claude_value(config, section, "enabled", enable)
         print(f"All notification methods {'enabled' if enable else 'disabled'}")
 
-    elif target == "tts":
-        _ensure_key(config, "tts", {})
-        config["tts"]["enabled"] = enable
-        print(f"TTS {'enabled' if enable else 'disabled'}")
-
-    elif target == "toast":
-        _ensure_key(config, "toast", {})
-        config["toast"]["enabled"] = enable
-        print(f"Toast notifications {'enabled' if enable else 'disabled'}")
-
-    elif target == "sounds":
-        _ensure_key(config, "sounds", {})
-        config["sounds"]["enabled"] = enable
-        print(f"Sound effects {'enabled' if enable else 'disabled'}")
-
-    elif target == "debounce":
-        _ensure_key(config, "debounce", {})
-        config["debounce"]["enabled"] = enable
-        print(f"Debounce {'enabled' if enable else 'disabled'}")
+    elif target in ("tts", "toast", "sounds", "debounce"):
+        _set_claude_value(config, target, "enabled", enable)
+        label = {
+            "tts": "TTS",
+            "toast": "Toast notifications",
+            "sounds": "Sound effects",
+            "debounce": "Debounce",
+        }[target]
+        print(f"{label} {'enabled' if enable else 'disabled'}")
 
     else:
         # It's a hook name
-        _ensure_key(config, "hooks", {})
-        config["hooks"][target] = enable
+        if _is_new_structure(config):
+            hooks = config.setdefault("claude", {}).setdefault("hooks", {})
+        else:
+            hooks = config.setdefault("hooks", {})
+        hooks[target] = enable
         print(f"Hook '{target}' {'enabled' if enable else 'disabled'}")
 
     save_config(config)

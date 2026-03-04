@@ -215,6 +215,26 @@ def handle_pre_tool_use(data):
             })
             return _make_decision("deny", reason)
 
+        # Hard blocks from agent-tools
+        try:
+            _at = str(Path.home() / ".agent-tools" / "lib")
+            if _at not in sys.path:
+                sys.path.insert(0, _at)
+            from command_checker import check_command
+            result = check_command(command)
+            if result["blocked"]:
+                log_jsonl("pre_tool_use.json", {
+                    "event": "blocked_by_agent_tools",
+                    "tool": tool_name,
+                    "reason": result["reason"],
+                    "policy": result["policy"],
+                })
+                if result["policy"] == "deny":
+                    return _make_decision("deny", result["reason"])
+                # policy == "warn": return None → Claude shows its own "ask" prompt
+        except ImportError:
+            pass  # agent-tools not installed
+
     # Check sensitive file access
     blocked, reason = _check_sensitive_files(tool_name, tool_input, security_config)
     if blocked:

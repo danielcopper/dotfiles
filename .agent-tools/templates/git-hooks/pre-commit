@@ -1,0 +1,16 @@
+#!/bin/sh
+# pre-commit hook: runs agent-quality on staged changes
+# Install: agent-quality --install-hook
+
+if command -v agent-quality >/dev/null 2>&1; then
+    agent-quality --staged-only "$(git rev-parse --show-toplevel)"
+    exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo ""
+        echo "Quality gate failed. Commit blocked."
+        echo "Run 'agent-quality' to see full details."
+        exit 1
+    fi
+fi
+
+exit 0

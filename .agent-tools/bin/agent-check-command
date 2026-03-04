@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Check a command for hard blocks.
+
+Usage: agent-check-command "git push --force origin main"
+Exit 0 = allowed, Exit 1 = blocked, Exit 2 = usage error
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+from command_checker import check_command
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: agent-check-command <command>", file=sys.stderr)
+        sys.exit(2)
+
+    command = " ".join(sys.argv[1:])
+    result = check_command(command)
+    print(json.dumps(result, indent=2))
+    sys.exit(1 if result["blocked"] else 0)
+
+
+if __name__ == "__main__":
+    main()
