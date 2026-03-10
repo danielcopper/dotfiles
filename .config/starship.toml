@@ -3,8 +3,8 @@ palette = "catppuccin_mocha"
 
 # Change the default prompt format
 format = """\
-[╭╴](238)$os\
-$all[╰╴](238)$character"""
+[╭╴](238)$os$all\
+[╰╴](238)$character"""
 
 [character]
 # Note the use of Catppuccin color 'maroon'
