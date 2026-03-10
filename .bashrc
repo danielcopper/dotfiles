@@ -2,10 +2,16 @@
 # ~/.bashrc
 #
 
+# Disable history expansion (! triggers). Prevents bash from interpreting ! as
+# a history command (e.g. "Admin123!" in passwords, SQL strings with 'value').
+# Use Ctrl+R or arrow keys instead of !! for command recall.
+# Placed before the interactive guard so it applies to all shell contexts.
+set +H
+
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
-alias ls='ls --color=auto'
+alias ls='lsd'
 alias grep='grep --color=auto'
 #PS1='[\u@\h \W]\$ '
 PS1='\u@\h \W > '
@@ -15,6 +21,7 @@ PS1='\u@\h \W > '
 export XDG_CONFIG_HOME="$HOME/.config"
 export DBT_PROFILES_DIR="$HOME/.config/dbt"
 export PATH="$HOME/.local/bin:$HOME/.dotnet/tools:$PATH"
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 
 # Auto-start gnome-keyring for MSAL token storage
 if [ -z "$GNOME_KEYRING_CONTROL" ]; then
@@ -29,8 +36,8 @@ fi
 #complete -c man which
 source /usr/share/bash-completion/bash_completion
 
-# Set up Node Version Manager
-source /usr/share/nvm/init-nvm.sh
+# mise - runtime version manager (Java, Node, Python, etc.)
+eval "$(mise activate bash)"
 
 # Load Angular CLI autocompletion.
 source <(ng completion script)
@@ -57,7 +64,15 @@ if [ -f ~/.bashrc.local ]; then
     source ~/.bashrc.local
 fi
 
+# Auto-start wsl-screenshot-cli (clipboard screenshot → WSL path)
+if command -v wsl-screenshot-cli &>/dev/null && wsl-screenshot-cli status 2>/dev/null | grep -q "not running"; then
+    wsl-screenshot-cli start --daemon &>/dev/null
+fi
+
 # Starship command prompt. Needs to be at the end of bashrc
 eval "$(starship init bash)"
 
 eval "$(zoxide init bash --cmd cd)"
+
+# opencode
+export PATH=/home/daniel/.opencode/bin:$PATH

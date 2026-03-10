@@ -73,7 +73,7 @@ if [ -n "$BRANCH" ]; then
     else
         SYNC_INFO="${LIGHT_GREY}↑- ↓-${RESET}"
     fi
-    LINE1="${LINE1} | 🌿 ${GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
+    LINE1="${LINE1} |  ${GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
 
     # Lines changed (session total) — next to branch info
     if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_REM" -gt 0 ]; then
