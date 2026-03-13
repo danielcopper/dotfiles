@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from common import run_hook, log_jsonl, notify_all, log_error
+from common import run_hook, log_jsonl, notify_all, run_in_background, log_error
 
 
 def _check_for_errors(data):
@@ -51,7 +51,9 @@ def handle_post_tool_use(data):
     if "--notify" in sys.argv:
         has_error, error_msg = _check_for_errors(data)
         if has_error and error_msg:
-            notify_all("Claude Code", f"Warning: {error_msg}", "error", tts_message=f"Warning: {error_msg}")
+            run_in_background(lambda msg=error_msg: notify_all(
+                "Claude Code", f"Warning: {msg}", "error", tts_message=f"Warning: {msg}"
+            ))
 
     return None
 

@@ -10,17 +10,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from common import run_hook, log_jsonl, notify_all, get_completion_message
+from common import run_hook, log_jsonl, notify_all, run_in_background, get_completion_message
 
 
 def handle_stop(data):
     log_jsonl("stop.json", data)
 
     if "--notify" in sys.argv:
-        message = get_completion_message()
-        notify_all("Claude Code", message, "complete", tts_message=message)
+        run_in_background(lambda: _do_notify())
 
     return None
+
+
+def _do_notify():
+    message = get_completion_message()
+    notify_all("Claude Code", message, "complete", tts_message=message)
 
 
 if __name__ == "__main__":

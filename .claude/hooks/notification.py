@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from common import run_hook, log_jsonl, notify_all, get_notification_message
+from common import run_hook, log_jsonl, notify_all, run_in_background, get_notification_message
 
 
 def handle_notification(data):
@@ -29,10 +29,14 @@ def handle_notification(data):
         if "question" in message_text.lower():
             notification_type = "question"
 
-        tts_message = get_notification_message(notification_type)
-        notify_all("Claude Code", tts_message, "attention", tts_message=tts_message)
+        run_in_background(lambda nt=notification_type: _do_notify(nt))
 
     return None
+
+
+def _do_notify(notification_type):
+    tts_message = get_notification_message(notification_type)
+    notify_all("Claude Code", tts_message, "attention", tts_message=tts_message)
 
 
 if __name__ == "__main__":

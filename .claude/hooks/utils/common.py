@@ -6,6 +6,7 @@ Shared functions for TTS, notifications, logging, and LLM message generation.
 
 import json
 import os
+import signal
 import sys
 import subprocess
 from pathlib import Path
@@ -66,6 +67,38 @@ def notify_all(title, message, event_type, tts_message=None):
 
     except Exception as e:
         log_error("notify_all", f"Error: {e}")
+
+
+def run_in_background(fn):
+    """
+    Run fn in a forked background process. Returns immediately in parent.
+    Use for fire-and-forget work (notifications, TTS) that shouldn't block the hook.
+    """
+    try:
+        pid = os.fork()
+    except OSError:
+        fn()  # Fallback: run synchronously
+        return
+
+    if pid != 0:
+        # Parent: don't wait for child, just return
+        # Ignore SIGCHLD to auto-reap (avoid zombies)
+        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+        return
+
+    # Child: detach stdio so we don't interfere with hook JSON output
+    try:
+        devnull_fd = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull_fd, 0)
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        if devnull_fd > 2:
+            os.close(devnull_fd)
+        fn()
+    except Exception:
+        pass
+    finally:
+        os._exit(0)
 
 
 # =============================================================================
@@ -175,42 +208,33 @@ def log_error(hook_name, message):
         pass
 
 
-def log_jsonl(filename, data, max_entries=None):
+def log_jsonl(filename, data, max_bytes=524288):
     """
-    Log data to a JSON file with rotation.
-    Append entry, keep last max_entries.
+    Log data as one JSON-per-line (JSONL). Append-only, rotates by file size.
     """
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / filename
 
-    if max_entries is None:
-        try:
-            from config import get_logging_config
-            max_entries = get_logging_config().get("max_entries", 100)
-        except ImportError:
-            max_entries = 100
+    data['timestamp'] = datetime.now().isoformat()
+
+    # Inject session context for log correlation
+    if _session_context:
+        for key in ("session_id", "cwd", "hook"):
+            if key not in data and _session_context.get(key):
+                data[key] = _session_context[key]
 
     try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
+        # Rotate if file too large
+        try:
+            if log_file.stat().st_size > max_bytes:
+                rotated = log_dir / (filename + ".1")
+                log_file.rename(rotated)
+        except OSError:
+            pass
 
-        data['timestamp'] = datetime.now().isoformat()
-
-        # Inject session context for log correlation
-        if _session_context:
-            for key in ("session_id", "cwd", "hook"):
-                if key not in data and _session_context.get(key):
-                    data[key] = _session_context[key]
-
-        logs.append(data)
-        logs = logs[-max_entries:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(data, separators=(',', ':')) + '\n')
 
         return True
     except Exception as e:

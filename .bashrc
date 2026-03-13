@@ -22,6 +22,10 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export DBT_PROFILES_DIR="$HOME/.config/dbt"
 export PATH="$HOME/.local/bin:$HOME/.dotnet/tools:$PATH"
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+# Prevent Claude Code from spawning powershell.exe ~38x on startup to resolve
+# this variable. Each call takes ~700ms on WSL2, causing 30-60s input freeze.
+# See: https://github.com/anthropics/claude-code/issues/29672
+export USERPROFILE="/mnt/c/Users/KueppermannD"
 
 # Auto-start gnome-keyring for MSAL token storage
 if [ -z "$GNOME_KEYRING_CONTROL" ]; then

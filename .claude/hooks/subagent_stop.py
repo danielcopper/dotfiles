@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from common import run_hook, log_jsonl, notify_all, get_subagent_message
+from common import run_hook, log_jsonl, notify_all, run_in_background, get_subagent_message
 
 
 def handle_subagent_stop(data):
@@ -27,10 +27,14 @@ def handle_subagent_stop(data):
 
         # Only announce if there's a meaningful description
         if description and len(description.strip()) > 5:
-            message = get_subagent_message()
-            notify_all("Claude Code", message, "subagent", tts_message=message)
+            run_in_background(lambda: _do_notify())
 
     return None
+
+
+def _do_notify():
+    message = get_subagent_message()
+    notify_all("Claude Code", message, "subagent", tts_message=message)
 
 
 if __name__ == "__main__":
