@@ -30,6 +30,15 @@ Rules:
 - Never modify files outside the assigned worktree
 - Push from inside the worktree — `git push` works normally (same remote/origin)
 
+## Dotfiles
+
+Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'`
+
+- All dotfiles commands use: `/usr/bin/git --git-dir=/home/deck/.dotfiles/ --work-tree=/home/deck <command>`
+- Files must be added with **absolute paths**: `/home/deck/.config/tmux/tmux.conf` (not relative)
+- Current branch on this machine: `steamdeck`
+- Remote: `origin` → `git@github.com:danielcopper/dotfiles.git`
+
 ## Infrastructure
 
 ### SQL Server
