@@ -81,6 +81,45 @@ def validate_prompt(prompt):
 
     return True, None
 
+
+def check_auto_resume():
+    """
+    Check if /implement workflow needs auto-resume after compact/clear.
+    Returns systemMessage if auto-resume is needed, None otherwise.
+    """
+    marker_file = Path.home() / ".claude" / "feature-progress" / ".auto-resume"
+
+    if not marker_file.exists():
+        return None
+
+    try:
+        state_file_path = marker_file.read_text().strip()
+
+        # Delete the marker file immediately to prevent re-triggering
+        marker_file.unlink()
+
+        # Verify the state file exists
+        if state_file_path and Path(state_file_path).exists():
+            return (
+                f"IMPORTANT: The /implement workflow was interrupted for context compaction. "
+                f"You MUST immediately run `/implement --resume` to continue the workflow. "
+                f"State file: {state_file_path}. "
+                f"Do this BEFORE responding to anything else the user said."
+            )
+        else:
+            return (
+                "IMPORTANT: The /implement workflow was interrupted for context compaction. "
+                "Run `/implement --resume` to continue (if there's a recent state file in ~/.claude/feature-progress/)."
+            )
+
+    except Exception:
+        # If anything goes wrong, try to clean up the marker
+        try:
+            marker_file.unlink()
+        except Exception:
+            pass
+        return None
+
 def main():
     """Process user prompt submit hook."""
     try:
@@ -92,6 +131,14 @@ def main():
 
         # Log the prompt
         log_prompt(data, logging_config)
+
+        # Check for /implement auto-resume after compact/clear
+        auto_resume_msg = check_auto_resume()
+        if auto_resume_msg:
+            print(json.dumps({
+                "systemMessage": auto_resume_msg
+            }))
+            sys.exit(0)
 
         # Validate if --validate flag is passed
         if "--validate" in sys.argv:
