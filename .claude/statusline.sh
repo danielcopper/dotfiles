@@ -74,7 +74,7 @@ if [ -n "$BRANCH" ]; then
     LIGHT_GREY='\033[37m'; ORANGE='\033[38;5;208m'
     # Branch or worktree icon
     if [ "$IS_WORKTREE" = "1" ]; then
-        GIT_ICON="${MAGENTA}${RESET}"
+        GIT_ICON="${MAGENTA}${RESET}"
     else
         GIT_ICON=""
     fi
