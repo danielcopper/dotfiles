@@ -5,7 +5,7 @@ input=$(cat)
 if [ -n "$ANTHROPIC_API_KEY" ]; then PLAN="api"; else PLAN="sub"; fi
 
 # ── JSON fields ──────────────────────────────────────────────────────
-MODEL=$(echo "$input" | jq -r '.model.display_name // "?"')
+MODEL=$(echo "$input" | jq -r '.model.display_name // "?"' | sed 's/ ([^)]*context)//g')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir // "."')
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
@@ -37,11 +37,15 @@ cache_is_stale() {
     [ $(($(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0))) -gt $CACHE_MAX_AGE ]
 }
 
-BRANCH="" ; HAS_UPSTREAM=0 ; AHEAD=0 ; BEHIND=0 ; STAGED=0 ; MODIFIED=0 ; UNTRACKED=0 ; REMOTE_URL=""
+BRANCH="" ; HAS_UPSTREAM=0 ; AHEAD=0 ; BEHIND=0 ; STAGED=0 ; MODIFIED=0 ; UNTRACKED=0 ; REMOTE_URL="" ; IS_WORKTREE=0
 
 if git -C "$DIR" rev-parse --git-dir > /dev/null 2>&1; then
     if cache_is_stale; then
         BRANCH=$(git -C "$DIR" branch --show-current 2>/dev/null)
+        # Detect worktree: git-dir differs from git-common-dir
+        GIT_DIR=$(git -C "$DIR" rev-parse --git-dir 2>/dev/null)
+        GIT_COMMON=$(git -C "$DIR" rev-parse --git-common-dir 2>/dev/null)
+        [ "$GIT_DIR" != "$GIT_COMMON" ] && IS_WORKTREE=1
         # Only use the actual tracked upstream — no fallbacks
         UPSTREAM=$(git -C "$DIR" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
         if [ -n "$UPSTREAM" ]; then
@@ -56,9 +60,9 @@ if git -C "$DIR" rev-parse --git-dir > /dev/null 2>&1; then
             | sed 's|git@github\.com:|https://github.com/|' \
             | sed 's|git@\([^:]*\):|https://\1/|' \
             | sed 's|\.git$||')
-        echo "$BRANCH|$HAS_UPSTREAM|$AHEAD|$BEHIND|$STAGED|$MODIFIED|$UNTRACKED|$REMOTE_URL" > "$CACHE_FILE"
+        echo "$BRANCH|$HAS_UPSTREAM|$AHEAD|$BEHIND|$STAGED|$MODIFIED|$UNTRACKED|$REMOTE_URL|$IS_WORKTREE" > "$CACHE_FILE"
     else
-        IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED REMOTE_URL < "$CACHE_FILE"
+        IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED REMOTE_URL IS_WORKTREE < "$CACHE_FILE"
     fi
 fi
 
@@ -67,13 +71,26 @@ LINE1="📁 ${DIR##*/}"
 
 # Git info
 if [ -n "$BRANCH" ]; then
-    LIGHT_GREY='\033[37m'
+    LIGHT_GREY='\033[37m'; ORANGE='\033[38;5;208m'
+    # Branch or worktree icon
+    if [ "$IS_WORKTREE" = "1" ]; then
+        GIT_ICON="${MAGENTA}${RESET}"
+    else
+        GIT_ICON=""
+    fi
     if [ "$HAS_UPSTREAM" = "1" ]; then
         SYNC_INFO="${GREEN}↑${AHEAD}${RESET} ${RED}↓${BEHIND}${RESET}"
     else
         SYNC_INFO="${LIGHT_GREY}↑- ↓-${RESET}"
     fi
-    LINE1="${LINE1} | 🌿 ${GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
+    LINE1="${LINE1} | ${GIT_ICON} ${GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
+
+    # Working tree status
+    WT_PARTS=""
+    [ "$STAGED" -gt 0 ]    && WT_PARTS="${WT_PARTS}${GREEN}+${STAGED}${RESET} "
+    [ "$MODIFIED" -gt 0 ]  && WT_PARTS="${WT_PARTS}${ORANGE}~${MODIFIED}${RESET} "
+    [ "$UNTRACKED" -gt 0 ] && WT_PARTS="${WT_PARTS}${LIGHT_GREY}?${UNTRACKED}${RESET} "
+    [ -n "$WT_PARTS" ] && LINE1="${LINE1} | ${WT_PARTS% }"
 
     # Lines changed (session total) — next to branch info
     if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_REM" -gt 0 ]; then
