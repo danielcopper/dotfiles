@@ -30,15 +30,25 @@ Rules:
 - Never modify files outside the assigned worktree
 - Push from inside the worktree — `git push` works normally (same remote/origin)
 
+## Dotfiles
+
+Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'`
+
+- All dotfiles commands use: `/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME <command>`
+- Files must be added with **absolute paths** (not relative)
+- Remote: `origin` → `git@github.com:danielcopper/dotfiles.git`
+- Each machine has its own branch (e.g. `wsl`, `steamdeck`, `arch`, `windows`)
+
 ## Infrastructure
 
 ### SQL Server
 
 Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa` · Password: `Admin123!`
 
+- Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -P "Admin123!" -C`
 - History expansion is disabled (`set +H` in `.bashrc`) — `!` in password is safe
 - Always quote the password with double quotes: `-P "Admin123!"`
-- **CRITICAL — `docker exec` shell quoting:** Never use single quotes `'` inside SQL passed to `docker exec`. They get consumed across shell layers (bash → docker exec → sqlcmd). Use escaped double quotes `\"` for all SQL string literals:
+- **CRITICAL — shell quoting:** Never use single quotes `'` inside SQL passed via `-Q`. Bash consumes them. Use escaped double quotes `\"` for all SQL string literals:
   - ✅ `-Q "SELECT * FROM t WHERE name = \"alice\""`
   - ❌ `-Q "SELECT * FROM t WHERE name = 'alice'"`
   - Applies to **all** string literals, `LIKE` patterns, and any SQL that would normally use single quotes

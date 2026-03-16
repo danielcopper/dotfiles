@@ -2,7 +2,7 @@
 command_alias_start_index: 200
 keybindings:
   # root_table: C-Space
-  prefix_table: Space
+  prefix_table: ?
 title:
   style: align=centre,bold
   prefix: tmux
