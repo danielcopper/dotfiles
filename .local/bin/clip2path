@@ -3,7 +3,6 @@ set -euo pipefail
 
 # Detect flatpak and use flatpak-spawn to run commands on the host
 if [ -f "/.flatpak-info" ]; then
-    HOST_CMD=(flatpak-spawn --host bash -c)
     SETUP='export PATH="/home/linuxbrew/.linuxbrew/bin:/home/deck/.nix-profile/bin:$PATH"; export DISPLAY="${DISPLAY:-:0}"; export XAUTHORITY=$(ls /run/user/1000/xauth_* 2>/dev/null | head -1);'
 
     types=$(flatpak-spawn --host bash -c "${SETUP} xclip -selection clipboard -t TARGETS -o 2>/dev/null" || true)
@@ -11,7 +10,8 @@ if [ -f "/.flatpak-info" ]; then
     if echo "$types" | grep -q '^image/'; then
         ext=$(echo "$types" | grep -m1 '^image/' | cut -d/ -f2 | cut -d';' -f1)
         file="/tmp/clip_$(date +%s).${ext}"
-        flatpak-spawn --host bash -c "${SETUP} xclip -selection clipboard -t \"image/${ext}\" -o" > "$file"
+        # Write image on the host /tmp so it's visible outside flatpak
+        flatpak-spawn --host bash -c "${SETUP} xclip -selection clipboard -t \"image/${ext}\" -o > ${file}"
         echo -n "$file"
     else
         flatpak-spawn --host bash -c "${SETUP} xclip -selection clipboard -o"
