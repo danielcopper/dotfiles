@@ -236,6 +236,7 @@ config.inactive_pane_hsb = {
   brightness = 0.5
 }
 
+
 ---------------------------------------------------------
 --                     Keymaps                         --
 ---------------------------------------------------------
@@ -245,6 +246,27 @@ config.keys = {
   -- Clipboard
   { key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
   { key = "c", mods = "CTRL|SHIFT", action = act.CopyTo("Clipboard") },
+  -- Image paste: saves clipboard image to /tmp and pastes the path
+  {
+    key = "v",
+    mods = "CTRL|SHIFT",
+    action = wezterm.action_callback(function(window, pane)
+      local ok, stdout, stderr = wezterm.run_child_process({
+        "/bin/bash",
+        os.getenv("HOME") .. "/.local/bin/clip2path"
+      })
+      if ok and stdout then
+        local result = stdout:gsub("%s+$", "")
+        if result ~= "" and result:match("^/tmp/clip_") then
+          pane:send_text(result)
+        else
+          window:perform_action(act.PasteFrom("Clipboard"), pane)
+        end
+      else
+        window:perform_action(act.PasteFrom("Clipboard"), pane)
+      end
+    end),
+  },
 
   -- Pane Keybindings
   { key = "-", mods = "LEADER", action = act.SplitVertical { domain = "CurrentPaneDomain" } },
