@@ -1,6 +1,6 @@
 ---
 description: Multi-agent workflow for any task - features, fixes, projects, prototypes. Plans, implements, and reviews with full user control.
-argument-hint: "<task description> [flags: --quick, --resume, --team, --no-explore, --list-progress]"
+argument-hint: "<task description> [flags: --quick, --resume, --team, --no-explore]"
 ---
 
 # /implement - Multi-Agent Workflow
@@ -23,31 +23,23 @@ You are running the **/implement** workflow - a supervised multi-agent system th
 | `--quick` | Skip exploration and planning. Single coder with self-review. Escalates to full workflow if task is complex. |
 | `--no-explore` | Skip codebase exploration, go directly to planning. Use when codebase is well understood. |
 | `--team` | Use experimental team agents instead of subagents. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. |
-| `--resume [id]` | Resume in-progress work. Without ID: list all for current project and ask which to resume. With ID: resume that specific feature. |
-| `--list-progress` | List all in-progress work. Add `--all` to show all projects (default: current project only). |
+| `--resume [id]` | Resume in-progress work. Without ID: show all open workflows for this project and ask which to resume. With ID: resume that specific feature directly. |
 
 ## Argument Handling
 
 Parse $ARGUMENTS for a task description and any flags listed above. Multiple flags can be combined.
 
-**`--list-progress`** behavior:
-1. Read all files in `~/.claude/feature-progress/`
-2. Group by project path
-3. Display table: Project | ID | Feature | Phase | Tasks (completed/total) | Last Updated
-4. `--list-progress --all`: Show all projects (default: current project only)
-5. Exit after displaying
-
-**`--resume`** (no ID): Resume most recent feature for current project.
-1. Find state files matching current project path
-2. If none: "No in-progress work found. Use --list-progress --all to see other projects."
-3. If multiple: Show list, ask which to resume
-4. Load state JSON and plan markdown
-5. Validate files exist — if missing, report error
+**`--resume`** (no ID):
+1. Read all state files from `~/.claude/feature-progress/` matching current project path
+2. If none found: "No in-progress work found for this project."
+3. If one found: Show summary (feature, phase, tasks completed/total) and resume automatically
+4. If multiple found: Show table of all open workflows, ask which to resume
+5. Load state JSON and plan markdown, validate both exist
 6. Display resumption summary and continue from last incomplete task
 
 **`--resume <id>`**: Resume specific feature by ID.
-1. Load `<id>.json`, if not found suggest --list-progress
-2. Load `<id>-plan.md` — if missing, warn and suggest re-planning
+1. Load `<id>.json` — if not found, list available state files
+2. Load `<id>-plan.md` — if missing, warn and offer re-planning
 3. Continue from last incomplete task
 
 **State validation on resume:**
