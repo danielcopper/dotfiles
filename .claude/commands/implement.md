@@ -1,6 +1,6 @@
 ---
 description: Multi-agent workflow for any task - features, fixes, projects, prototypes. Plans, implements, and reviews with full user control.
-argument-hint: "<task> [--quick] [--no-explore] [--team] [--resume [id]] [--list-progress] [additional context]"
+argument-hint: "<task description> [flags: --quick, --resume, --team, --no-explore, --list-progress]"
 ---
 
 # /implement - Multi-Agent Workflow
@@ -16,17 +16,21 @@ You are running the **/implement** workflow - a supervised multi-agent system th
 | **No-explore** (`--no-explore`) | Well-understood codebase | Plan → Code → Review |
 | **Team** (`--team`) | Uses experimental team agents instead of subagents | Same phases, different execution |
 
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--quick` | Skip exploration and planning. Single coder with self-review. Escalates to full workflow if task is complex. |
+| `--no-explore` | Skip codebase exploration, go directly to planning. Use when codebase is well understood. |
+| `--team` | Use experimental team agents instead of subagents. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. |
+| `--resume [id]` | Resume in-progress work. Without ID: list all for current project and ask which to resume. With ID: resume that specific feature. |
+| `--list-progress` | List all in-progress work. Add `--all` to show all projects (default: current project only). |
+
 ## Argument Handling
 
-Parse $ARGUMENTS for special flags:
+Parse $ARGUMENTS for a task description and any flags listed above. Multiple flags can be combined.
 
-**`--quick`**: Quick fix mode — skips exploration and planning. Single coder with self-review. If coder determines task is complex, escalate to full workflow.
-
-**`--no-explore`**: Skip codebase exploration — goes directly to planning.
-
-**`--team`**: Use experimental team agents instead of subagents for implementation. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
-
-**`--list-progress`**: List all in-progress work.
+**`--list-progress`** behavior:
 1. Read all files in `~/.claude/feature-progress/`
 2. Group by project path
 3. Display table: Project | ID | Feature | Phase | Tasks (completed/total) | Last Updated
