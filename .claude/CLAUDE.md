@@ -19,9 +19,11 @@
 When asked to create a new branch or work on a new feature/task:
 
 1. **Never use `git checkout -b` in place** — always create a worktree
-2. **Create:** `git worktree add .worktrees/<name> -b <name> <base-branch>`
+2. **Create:** `git worktree add .worktrees/<type>/<slug> -b <type>/<slug> <base-branch>`
+   - Types: `feature/`, `fix/`, `refactor/`, `chore/`, `docs/`
+   - Example: `git worktree add .worktrees/feature/oauth-login -b feature/oauth-login main`
 3. **Work** inside the new worktree for all changes on that branch
-4. **Cleanup:** `git worktree remove .worktrees/<name> && git branch -d <name>`
+4. **Cleanup:** `git worktree remove .worktrees/<type>/<slug> && git branch -d <type>/<slug>`
 
 Rules:
 
@@ -34,10 +36,10 @@ Rules:
 
 Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'`
 
-- All dotfiles commands use: `/usr/bin/git --git-dir=/home/deck/.dotfiles/ --work-tree=/home/deck <command>`
-- Files must be added with **absolute paths**: `/home/deck/.config/tmux/tmux.conf` (not relative)
-- Current branch on this machine: `steamdeck`
+- All dotfiles commands use: `/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME <command>`
+- Files must be added with **absolute paths** (not relative)
 - Remote: `origin` → `git@github.com:danielcopper/dotfiles.git`
+- Each machine has its own branch (e.g. `wsl`, `steamdeck`, `arch`, `windows`)
 
 ## Infrastructure
 
