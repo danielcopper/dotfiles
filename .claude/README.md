@@ -45,8 +45,15 @@ Custom configuration for Claude Code: agents, hooks, commands, and settings.
 Start with `/implement`:
 
 ```
-/implement <task> [--quick] [--no-explore] [--team] [--resume [id]]
+/implement <task description> [flags: --quick, --resume, --team, --no-explore]
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--quick` | Skip exploration and planning. Single coder with self-review. |
+| `--no-explore` | Skip codebase exploration, go directly to planning. |
+| `--team` | Use experimental team agents instead of subagents. |
+| `--resume [id]` | Resume in-progress work. Without ID: show open workflows and ask which to resume. |
 
 Phases: **Plan** (planner agent) → **Implement** (coder agent, TDD) → **Review** (reviewer agent) → **Done**
 
