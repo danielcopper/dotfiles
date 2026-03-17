@@ -55,9 +55,46 @@ Start with `/implement`:
 | `--team` | Use experimental team agents instead of subagents. |
 | `--resume [id]` | Resume in-progress work. Without ID: show open workflows and ask which to resume. |
 
-Phases: **Plan** (planner agent) → **Implement** (coder agent, TDD) → **Review** (reviewer agent) → **Done**
+### Workflow
 
-Each phase has user approval gates. Tasks are implemented sequentially to avoid conflicts.
+```
+ ┌─────────────┐     ┌──────────┐     ┌─────────────────────────────┐     ┌──────┐
+ │  1. Explore  │────▶│ 2. Plan  │────▶│      3. Implement           │────▶│ Done │
+ │  (optional)  │     │          │     │                             │     │      │
+ └─────────────┘     └──────────┘     │  ┌───────┐    ┌──────────┐  │     └──────┘
+                                      │  │ Coder │───▶│ Reviewer │  │
+                                      │  └───┬───┘    └────┬─────┘  │
+                                      │      │  ◀─────────┘        │
+                                      │      │   fix loop          │
+                                      │      │   (until clean)     │
+                                      └─────────────────────────────┘
+```
+
+**Phase 1 — Explore** (skipped with `--quick` or `--no-explore`):
+Explore agent scans the codebase to understand relevant patterns, files, and conventions.
+
+**Phase 2 — Plan**:
+Planner agent creates a detailed implementation plan with sequential tasks. User can choose 1 or 2 planners (parallel comparison). Plan must be approved before implementation starts.
+
+**Phase 3 — Implement** (per task):
+1. **Coder** implements the task (with tests, TDD or test-after)
+2. User approves the commit
+3. **Reviewer** checks for security, quality, performance issues
+4. If issues found → findings go back to **Coder** for fixes → **Reviewer** re-checks
+5. Loop repeats until clean or user accepts remaining issues (max 3 cycles)
+6. Task marked complete, next task starts
+
+Each phase has user approval gates. Tasks are implemented sequentially to avoid conflicts. Supervision level (strict/normal/guided/relaxed) controls how much the workflow pauses for approval.
+
+### Agents
+
+| Agent | Role | Model |
+|-------|------|-------|
+| **planner** | Analyzes requirements, creates implementation plans | Opus |
+| **coder** | Implements tasks with tests (TDD), self-reviews | Sonnet |
+| **reviewer** | Reviews for security, quality, performance | Sonnet |
+| **architect** | Designs system architecture for large features | Opus |
+| **documenter** | Updates documentation for code changes | Sonnet |
 
 ## Hooks
 
