@@ -1,6 +1,6 @@
 ---
 description: Multi-agent workflow for any task - features, fixes, projects, prototypes. Plans, implements, and reviews with full user control.
-argument-hint: "<task description> [flags: --quick, --resume, --team, --no-explore]"
+argument-hint: "<task description> [flags: --quick, --resume, --team]"
 ---
 
 # /implement - Multi-Agent Workflow
@@ -11,17 +11,15 @@ You are running the **/implement** workflow - a supervised multi-agent system th
 
 | Mode | Use Case | Flow |
 |------|----------|------|
-| **Full** (default) | Features, complex tasks | Explore → Plan → Code → Review |
+| **Full** (default) | Features, complex tasks | Plan → Code → Review |
 | **Quick** (`--quick`) | Trivial fixes, one-liners | Code only (self-review) |
-| **No-explore** (`--no-explore`) | Well-understood codebase | Plan → Code → Review |
 | **Team** (`--team`) | Uses experimental team agents instead of subagents | Same phases, different execution |
 
 ## Flags
 
 | Flag | Description |
 |------|-------------|
-| `--quick` | Skip exploration and planning. Single coder with self-review. Escalates to full workflow if task is complex. |
-| `--no-explore` | Skip codebase exploration, go directly to planning. Use when codebase is well understood. |
+| `--quick` | Skip planning. Single coder with self-review. Escalates to full workflow if task is complex. |
 | `--team` | Use experimental team agents instead of subagents. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. |
 | `--resume [id]` | Resume in-progress work. Without ID: show all open workflows for this project and ask which to resume. With ID: resume that specific feature directly. |
 
@@ -71,7 +69,7 @@ If no flags, proceed with new feature workflow.
   "plan_file": "<id>-plan.md",
   "created": "ISO timestamp",
   "updated": "ISO timestamp",
-  "phase": "exploration|planning|implementation|completion",
+  "phase": "planning|implementation|completion",
   "branch": "feature/branch-name",
   "worktree_path": ".worktrees/feature/branch-name",
   "base_branch": "main",
@@ -117,19 +115,16 @@ All agents are defined in `~/.claude/agents/`. They have their own system prompt
 
 | Agent | Role | Model | Access |
 |-------|------|-------|--------|
-| **planner** | Creates implementation plans | opus | Read-only + Explore |
+| **planner** | Creates implementation plans, explores codebase | opus | Read-only + Explore |
 | **coder** | Implements tasks, writes tests | sonnet (opus for migrate) | Read-write |
 | **reviewer** | Reviews for security, quality, performance | sonnet (opus for security) | Read-only + Bash |
 | **architect** | Designs architecture for large features | opus | Read-only + Explore |
 | **documenter** | Updates documentation | sonnet | Read-write |
 
-**Built-in agents (no file needed):**
-- **Explore**: Deep codebase analysis (`subagent_type="Explore"`, model sonnet)
-
 ### Agent Modes & Focuses
 
 **Coder modes** (passed via `Mode:` in task prompt):
-- `implement` (default), `fix` (TDD bug fix), `refactor` (no behavior changes), `migrate` (breaking changes)
+- `implement` (default), `fix` (bug fix), `refactor` (no behavior changes), `migrate` (breaking changes)
 
 **Reviewer focuses** (passed via `Focus:` in task prompt):
 - `full` (default), `security` (OWASP deep audit), `performance` (Big O, N+1, caching), `test-coverage` (edge cases, quality)
@@ -186,25 +181,7 @@ Behavior reference:
 If $ARGUMENTS is empty: ask user to describe the task.
 Once you have requirements: summarize and confirm understanding.
 
-### Step 1.5: Exploration (unless `--no-explore` or `--quick`)
-
-Determine exploration depth from signals:
-
-| Signal | Level |
-|--------|-------|
-| Unfamiliar files/patterns, multiple modules, new codebase | Thorough |
-| Medium complexity | Moderate |
-| Simple/localized, user provided context | Quick or skip |
-
-Invoke Explore agent:
-```
-Agent tool: subagent_type="Explore", model="sonnet"
-Prompt: "Explore the codebase to understand [specific areas]. Task context: [description]"
-```
-
-Present summary of findings, then proceed.
-
-### Step 1.7: Recommend Agents & Modes
+### Step 2: Recommend Agents & Modes
 
 Based on detection signals, recommend configuration. Present and ask:
 
@@ -216,11 +193,11 @@ Options:
 - "customize" → Let me adjust
 ```
 
-### Step 1.8: Invoke Architect (if recommended and approved)
+### Step 3: Invoke Architect (if recommended and approved)
 
 Invoke architect agent, present design, get approval. Architecture decisions guide the planner.
 
-### Step 2: Planning
+### Step 4: Planning
 
 **Use AskUserQuestion:**
 ```
@@ -231,6 +208,8 @@ Options:
 ```
 
 **1 planner**: Invoke `subagent_type="planner"`, pass user story + context, wait for plan. **Store the planner's agent_id.**
+
+The planner has access to the Explore agent and will explore the codebase as needed — no separate exploration phase required.
 
 **2 planners**: Invoke TWO planner agents in parallel (both calls in single message):
 - Planner A: "Focus on simplicity and minimal changes"
@@ -247,7 +226,7 @@ Options:
 - **Store the chosen planner's agent_id.** The other planner is no longer needed.
 - Proceed to Plan Approval Loop with the chosen plan.
 
-### Step 3: Plan Approval Loop
+### Step 5: Plan Approval Loop
 
 Present plan with task breakdown, affected files, testing strategy.
 
@@ -274,17 +253,14 @@ Options:
 5. **Loop back to Plan Approval** — ask approve/modify/replan again
 6. Repeat until approved or user chooses replan
 
-**On replan:** Dismiss current planner, go back to Step 2 with a fresh planner.
+**On replan:** Dismiss current planner, go back to Step 4 with a fresh planner.
 
 **On approve:**
 1. Save full planner output to `<id>-plan.md`
 2. Create state file `<id>.json`
 3. **Planner can now shut down** — no longer needed
-4. Select execution mode
-5. Create worktree and branch
-6. Proceed to testing approach selection
 
-### Step 3.1: Execution Mode (skip if `--team` flag set)
+### Step 6: Execution Mode (skip if `--team` flag set)
 
 Now that the plan is approved, analyze it to recommend an execution mode. Consider:
 - Number of tasks and their complexity
@@ -306,7 +282,7 @@ If team mode selected, verify `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set. I
 
 Store choice in state as `execution_mode`.
 
-### Step 3.3: Worktree Setup
+### Step 7: Worktree Setup
 
 Create a worktree for the implementation (per project convention — never work on the current branch directly):
 
@@ -327,20 +303,6 @@ git worktree add .worktrees/$BRANCH -b $BRANCH $BASE
 - Without ticket: `feature/oauth-login`, `fix/null-check`
 - Detect ticket numbers from task description, $ARGUMENTS, or ask user if unclear
 
-**Worktree directory convention:** Always use the branch type prefix as a subdirectory:
-```
-.worktrees/
-├── feature/
-│   ├── 123-whitelist-defaults/
-│   └── oauth-login/
-├── fix/
-│   └── 456-auth-crash/
-├── refactor/
-│   └── cleanup-services/
-└── chore/
-    └── migrate-db-schema/
-```
-
 **Type mapping from coder mode:**
 | Coder Mode | Branch Prefix |
 |------------|---------------|
@@ -355,7 +317,7 @@ On `--resume`: Verify the worktree still exists. If removed, recreate it from th
 
 **Worktree cleanup is the user's responsibility.** Never auto-remove. Mention the path in the completion summary so the user can clean up when ready.
 
-### Step 3.5: Testing Approach
+### Step 8: Testing Approach
 
 Read the planner's `Testing Strategy` section for the recommended approach and rationale.
 
@@ -372,7 +334,7 @@ Pre-select the planner's recommendation as the default. Store choice in state as
 
 ---
 
-## Implementation (Subagent Mode)
+## Step 9: Implementation (Subagent Mode)
 
 ### The Coder-Reviewer Loop
 
@@ -544,7 +506,7 @@ Options:
 
 ---
 
-## Implementation (Team Mode)
+## Step 9: Implementation (Team Mode)
 
 > **Experimental.** Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 
@@ -624,7 +586,7 @@ After all tasks complete:
 
 ---
 
-## Completion (Phase 3)
+## Step 10: Completion
 
 1. Update progress tracker — all tasks complete
 2. Run final test suite (inside worktree)
@@ -637,12 +599,11 @@ After all tasks complete:
    **Tests:** [counts]
    **All tasks:** [checklist]
    **Branch:** [branch name]
+   **Worktree:** `.worktrees/$BRANCH` (remove when done: `git worktree remove .worktrees/$BRANCH`)
    **Next steps:** integration testing, manual testing, PR creation
    ```
 5. Update state to `phase: "completion"`
-6. **Do NOT automatically remove the worktree.** The user may need it for manual testing, PR review, or further work. Just mention it in the summary:
-   > "Worktree at `.worktrees/$BRANCH` is still active. Remove it when you're done: `git worktree remove .worktrees/$BRANCH`"
-7. Ask: "Create a pull request now?"
+6. Ask: "Create a pull request now?"
 
 ---
 
