@@ -273,23 +273,30 @@ On approve:
 Create a worktree for the implementation (per project convention — never work on the current branch directly):
 
 ```bash
-# Derive branch name: <type>/<feature-slug>
+# Derive branch name: <type>/[ticket-]<feature-slug>
 # Type is based on coder mode: implement→feature, fix→fix, refactor→refactor, migrate→chore
-BRANCH="<type>/<feature-slug>"
+# If task references a ticket number (Azure DevOps, GitHub issue), prefix the slug with it
+BRANCH="<type>/<feature-slug>"        # e.g. feature/oauth-login
+BRANCH="<type>/<ticket>-<slug>"       # e.g. feature/123-oauth-login, fix/456-auth-crash
 BASE=$(git branch --show-current)
 
 # Worktree path mirrors branch structure: .worktrees/<type>/<slug>
 git worktree add .worktrees/$BRANCH -b $BRANCH $BASE
 ```
 
+**Branch naming:**
+- With ticket: `feature/123-oauth-login`, `fix/456-null-check`
+- Without ticket: `feature/oauth-login`, `fix/null-check`
+- Detect ticket numbers from task description, $ARGUMENTS, or ask user if unclear
+
 **Worktree directory convention:** Always use the branch type prefix as a subdirectory:
 ```
 .worktrees/
 ├── feature/
-│   ├── whitelist-defaults/
+│   ├── 123-whitelist-defaults/
 │   └── oauth-login/
 ├── fix/
-│   └── auth-crash/
+│   └── 456-auth-crash/
 ├── refactor/
 │   └── cleanup-services/
 └── chore/
