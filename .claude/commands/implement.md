@@ -116,8 +116,8 @@ All agents are defined in `~/.claude/agents/`. They have their own system prompt
 | Agent | Role | Model | Access |
 |-------|------|-------|--------|
 | **planner** | Creates implementation plans, explores codebase | opus | Read-only + Explore |
-| **coder** | Implements tasks, writes tests | sonnet (opus for migrate) | Read-write |
-| **reviewer** | Reviews for security, quality, performance | sonnet (opus for security) | Read-only + Bash |
+| **coder** | Implements tasks, writes tests | sonnet (opus when recommended) | Read-write |
+| **reviewer** | Reviews for security, quality, performance | sonnet (opus when recommended) | Read-only + Bash |
 | **architect** | Designs architecture for large features | opus | Read-only + Explore |
 | **documenter** | Updates documentation | sonnet | Read-write |
 
@@ -183,11 +183,23 @@ Once you have requirements: summarize and confirm understanding.
 
 ### Step 2: Recommend Agents & Modes
 
-Based on detection signals, recommend configuration. Present and ask:
+Based on detection signals, recommend configuration including **model overrides** for coder and reviewer.
+
+**Model selection (applies to both coder and reviewer):**
+Default is sonnet. Recommend opus when the task genuinely benefits from deeper reasoning:
+- Complex architecture work (new abstractions, design patterns, cross-module refactoring)
+- Migrations with many interdependent changes
+- Security-sensitive code (auth, crypto, access control)
+- Tricky algorithmic problems or concurrency
+- When coder is opus, reviewer should typically also be opus (it needs the same depth to review)
+
+Do NOT recommend opus for straightforward CRUD, config changes, adding tests to existing patterns, or simple bug fixes — sonnet handles these well.
+
+Present your recommendation with reasoning:
 
 **Use AskUserQuestion:**
 ```
-Question: "Recommended settings: Coder [mode], Reviewer [focus], Optional agents: [list]. Proceed?"
+Question: "Recommended: Coder [mode] ([sonnet/opus]), Reviewer [focus] ([sonnet/opus]), Optional: [list]. Reasoning: [why]. Proceed?"
 Options:
 - "yes" → Use recommended settings
 - "customize" → Let me adjust
