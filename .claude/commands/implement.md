@@ -273,12 +273,36 @@ On approve:
 Create a worktree for the implementation (per project convention — never work on the current branch directly):
 
 ```bash
-# Derive branch name from feature slug
-BRANCH="feature/<feature-slug>"
+# Derive branch name: <type>/<feature-slug>
+# Type is based on coder mode: implement→feature, fix→fix, refactor→refactor, migrate→chore
+BRANCH="<type>/<feature-slug>"
 BASE=$(git branch --show-current)
 
+# Worktree path mirrors branch structure: .worktrees/<type>/<slug>
 git worktree add .worktrees/$BRANCH -b $BRANCH $BASE
 ```
+
+**Worktree directory convention:** Always use the branch type prefix as a subdirectory:
+```
+.worktrees/
+├── feature/
+│   ├── whitelist-defaults/
+│   └── oauth-login/
+├── fix/
+│   └── auth-crash/
+├── refactor/
+│   └── cleanup-services/
+└── chore/
+    └── migrate-db-schema/
+```
+
+**Type mapping from coder mode:**
+| Coder Mode | Branch Prefix |
+|------------|---------------|
+| `implement` | `feature/` |
+| `fix` | `fix/` |
+| `refactor` | `refactor/` |
+| `migrate` | `chore/` |
 
 Store `branch` and `worktree_path` in state. **All coder agents must work inside the worktree directory** — pass the worktree path as the working directory.
 
