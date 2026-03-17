@@ -242,16 +242,28 @@ Options:
 - "2 planners" → Compare strategies in parallel
 ```
 
-**1 planner**: Invoke `subagent_type="planner"`, pass user story + context, wait for plan.
+**1 planner**: Invoke `subagent_type="planner"`, pass user story + context, wait for plan. **Store the planner's agent_id.**
 
 **2 planners**: Invoke TWO planner agents in parallel (both calls in single message):
 - Planner A: "Focus on simplicity and minimal changes"
 - Planner B: "Focus on extensibility and future-proofing"
 - Compare approaches, recommend best, present both to user.
+- **Use AskUserQuestion:**
+  ```
+  Question: "Which plan do you prefer?"
+  Options:
+  - "Plan A" → Use the minimal approach
+  - "Plan B" → Use the extensible approach
+  - "replan" → Start over with different direction
+  ```
+- **Store the chosen planner's agent_id.** The other planner is no longer needed.
+- Proceed to Plan Approval Loop with the chosen plan.
 
-### Step 3: Plan Approval
+### Step 3: Plan Approval Loop
 
 Present plan with task breakdown, affected files, testing strategy.
+
+**CRITICAL: The planner agent stays alive until plan is approved.** Do NOT let it shut down.
 
 **Use AskUserQuestion:**
 ```
@@ -259,14 +271,29 @@ Question: "Does this plan look good?"
 Options:
 - "approve" → Start implementation
 - "modify" → Request specific changes
-- "replan" → Start over
+- "replan" → Start over with fresh planner
 ```
 
-On approve:
+**On modify:**
+1. Ask user what they want changed (plain text prompt)
+2. Send feedback to the **still-running planner** via SendMessage:
+   ```
+   SendMessage to: [planner agent_id]
+   "The user wants these changes to the plan: [user feedback]. Update the plan accordingly."
+   ```
+3. Planner returns updated plan
+4. Present updated plan to user
+5. **Loop back to Plan Approval** — ask approve/modify/replan again
+6. Repeat until approved or user chooses replan
+
+**On replan:** Dismiss current planner, go back to Step 2 with a fresh planner.
+
+**On approve:**
 1. Save full planner output to `<id>-plan.md`
 2. Create state file `<id>.json`
-3. Create worktree and branch
-4. Proceed to testing approach selection
+3. **Planner can now shut down** — no longer needed
+4. Create worktree and branch
+5. Proceed to testing approach selection
 
 ### Step 3.3: Worktree Setup
 
