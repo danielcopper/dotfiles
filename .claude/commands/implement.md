@@ -150,21 +150,9 @@ All agents are defined in `~/.claude/agents/`. They have their own system prompt
 
 ## Workflow
 
-### Step 0: Execution Mode & Supervision
+### Step 0: Supervision Level
 
-**0.1 — Execution mode** (skip if `--team` flag set):
-
-**Use AskUserQuestion:**
-```
-Question: "How should this be executed?"
-Options:
-- "subagents (default)" → Standard agent spawning, orchestrator manages all communication
-- "team agents (experimental)" → Persistent teammates with direct messaging, tmux view
-```
-
-If team mode selected, verify `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set. If not, inform user how to enable it and fall back to subagent mode.
-
-**0.2 — Supervision level** (skip if resuming with saved settings):
+Skip if resuming with saved settings.
 
 **Use AskUserQuestion:**
 ```
@@ -292,8 +280,31 @@ Options:
 1. Save full planner output to `<id>-plan.md`
 2. Create state file `<id>.json`
 3. **Planner can now shut down** — no longer needed
-4. Create worktree and branch
-5. Proceed to testing approach selection
+4. Select execution mode
+5. Create worktree and branch
+6. Proceed to testing approach selection
+
+### Step 3.1: Execution Mode (skip if `--team` flag set)
+
+Now that the plan is approved, analyze it to recommend an execution mode. Consider:
+- Number of tasks and their complexity
+- Whether multiple review rounds are likely (security-sensitive, complex logic)
+- Whether the reviewer would benefit from persistent context across tasks
+- Whether the overhead of team setup is justified
+
+Make a genuine recommendation with reasoning, then ask:
+
+**Use AskUserQuestion:**
+```
+Question: "[Your recommendation and reasoning]. Which execution mode?"
+Options:
+- "subagents" → Standard agent spawning
+- "team agents (experimental)" → Persistent reviewer, coder per task, tmux view
+```
+
+If team mode selected, verify `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set. If not, inform user how to enable it and fall back to subagent mode.
+
+Store choice in state as `execution_mode`.
 
 ### Step 3.3: Worktree Setup
 
