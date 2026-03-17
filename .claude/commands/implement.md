@@ -75,6 +75,9 @@ If no flags, proceed with new feature workflow.
   "base_branch": "main",
   "execution_mode": "subagent|team",
   "supervision": "strict|normal|guided|relaxed",
+  "testing_approach": "tdd|test-after|no tests",
+  "coder_model": "sonnet|opus",
+  "reviewer_model": "sonnet|opus",
   "repos": {"Backend": "backend", "Frontend": "frontend"},
   "tasks": [
     {"id": 1, "name": "Task name"},
@@ -348,7 +351,7 @@ Pre-select the planner's recommendation as the default. Store choice in state as
 
 ---
 
-## Step 9: Implementation (Subagent Mode)
+## Implementation (Subagent Mode)
 
 ### The Coder-Reviewer Loop
 
@@ -358,7 +361,7 @@ For each task in the plan:
 
 ```
 Agent tool: subagent_type="coder"
-Model: "opus" for --mode=migrate, otherwise "sonnet"
+Model: Use the model chosen in Step 2 (default sonnet, opus if recommended and approved)
 
 Prompt:
 "## Task [N]: [Name]
@@ -428,7 +431,7 @@ Options:
 
 ```
 Agent tool: subagent_type="reviewer"
-Model: "opus" for --focus=security, otherwise "sonnet"
+Model: Use the model chosen in Step 2 (default sonnet, opus if recommended and approved)
 ```
 
 **CRITICAL: Reviewer reports findings to YOU (orchestrator), NOT to coder.**
@@ -520,7 +523,7 @@ Options:
 
 ---
 
-## Step 9: Implementation (Team Mode)
+## Implementation (Team Mode)
 
 > **Experimental.** Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 
@@ -589,21 +592,32 @@ After all tasks complete:
 ## Quick Fix Mode (`--quick`)
 
 1. **Assess complexity** — if complex, offer to escalate to full workflow
-2. **Direct implementation**: Invoke coder with `model="sonnet"`:
+2. **Create worktree** (same convention as full workflow — `fix/<slug>` or `fix/<ticket>-<slug>`)
+3. **Ask testing approach:**
+   **Use AskUserQuestion:**
+   ```
+   Question: "Testing approach for this fix?"
+   Options:
+   - "tdd" → Write failing test first, then fix
+   - "test-after" → Fix first, then add test
+   - "no tests" → No tests needed
+   ```
+4. **Direct implementation**: Invoke coder with `model="sonnet"` inside the worktree:
    ```
    Task: [description]
-   Mode: Quick fix — self-review, no separate planning
-   Requirements: Keep changes minimal, write test for fix, run tests, self-review.
+   Mode: fix
+   Testing: [chosen approach]
+   Requirements: Keep changes minimal, run tests, self-review.
    ```
-3. **Show changes, get commit approval** (even in relaxed mode)
-4. **Done** — no separate review unless user requests
+5. **Show changes, get commit approval** (even in relaxed mode — show commit message first)
+6. **Done** — no separate review unless user requests
 
 ---
 
 ## Step 10: Completion
 
 1. Update progress tracker — all tasks complete
-2. Run final test suite (inside worktree)
+2. Run final test suite yourself (inside worktree) — this is the one exception where you execute commands directly
 3. Offer documenter if applicable (public API changed, new features, breaking changes)
 4. Summarize:
    ```markdown

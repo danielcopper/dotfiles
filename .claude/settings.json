@@ -131,7 +131,8 @@
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:deepwiki.com)",
       "Read(//home/deck/Repos/**)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Read(~/.claude/feature-progress/**)"
     ]
   },
   "statusLine": {
