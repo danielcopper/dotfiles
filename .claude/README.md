@@ -7,45 +7,42 @@ Custom configuration for Claude Code: agents, hooks, commands, and settings.
 Start with `/implement`:
 
 ```
-/implement <task description> [flags: --quick, --resume, --team, --no-explore]
+/implement <task description> [flags: --quick, --resume, --team]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--quick` | Skip exploration and planning. Single coder with self-review. |
-| `--no-explore` | Skip codebase exploration, go directly to planning. |
+| `--quick` | Skip planning. Single coder with self-review. |
 | `--team` | Use experimental team agents instead of subagents. |
 | `--resume [id]` | Resume in-progress work. Without ID: show open workflows and ask which to resume. |
 
 ### Workflow
 
 ```
-Explore ──▶ Plan ──▶ Implement ──▶ Done
-                         │
-                    ┌────┴────┐
-                    ▼         │
-                  Coder ──▶ Reviewer
-                    ▲         │
-                    └─────────┘
-                     fix loop
-                   (until clean)
+Plan ──▶ Implement ──▶ Done
+              │
+         ┌────┴────┐
+         ▼         │
+       Coder ──▶ Reviewer
+         ▲         │
+         └─────────┘
+          fix loop
+        (until clean)
 ```
 
-**Phase 1 — Explore** (skipped with `--quick` or `--no-explore`):
-Explore agent scans the codebase to understand relevant patterns, files, and conventions.
+**Phase 1 — Plan**:
+Planner agent explores the codebase and creates a detailed implementation plan with sequential tasks. User can choose 1 or 2 planners (parallel comparison). Planner stays alive for plan revisions until approved.
 
-**Phase 2 — Plan**:
-Planner agent creates a detailed implementation plan with sequential tasks. User can choose 1 or 2 planners (parallel comparison). Plan must be approved before implementation starts.
-
-**Phase 3 — Implement** (per task):
-1. **Coder** implements the task (with tests, TDD or test-after)
-2. User approves the commit
+**Phase 2 — Implement** (per task):
+1. **Coder** implements the task (testing approach chosen by user: TDD, test-after, or none)
+2. User approves the commit (shown with suggested message)
 3. **Reviewer** checks for security, quality, performance issues
-4. If issues found → findings go back to **Coder** for fixes → **Reviewer** re-checks
-5. Loop repeats until clean or user accepts remaining issues (max 3 cycles)
-6. Task marked complete, next task starts
+4. Reviewer reports findings to **orchestrator** (not directly to coder) — user decides
+5. If fix needed → findings go to **Coder** → **Reviewer** re-checks
+6. Loop repeats until clean or user accepts remaining issues (max 3 cycles)
+7. Task marked complete, next task starts
 
-Each phase has user approval gates. Tasks are implemented sequentially to avoid conflicts. Supervision level (strict/normal/guided/relaxed) controls how much the workflow pauses for approval.
+Each phase has user approval gates. Supervision level (strict/normal/guided/relaxed) controls how much the workflow pauses for approval. Execution mode (subagents or team agents) is chosen after plan approval.
 
 ### Agents
 
