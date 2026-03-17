@@ -2,30 +2,42 @@
 """
 Stop Hook
 Triggered when Claude finishes responding.
-Announces task completion with toast, sound, and optional TTS.
+Announces task completion with varied LLM-generated messages.
 """
 
+import json
 import sys
 from pathlib import Path
 
+# Add utils to path
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from common import run_hook, log_jsonl, notify_all, run_in_background, get_completion_message
+from config import is_hook_enabled, is_tts_enabled
+from common import announce, log_json, log_error, get_completion_message
 
 
-def handle_stop(data):
-    log_jsonl("stop.json", data)
+def main():
+    """Process stop hook."""
+    try:
+        data = json.load(sys.stdin)
 
-    if "--notify" in sys.argv:
-        run_in_background(lambda: _do_notify())
+        hook_enabled, tts_enabled = is_hook_enabled("stop"), is_tts_enabled()
+        if not hook_enabled:
+            sys.exit(0)
 
-    return None
+        log_json("stop.json", data)
 
+        if "--notify" in sys.argv and tts_enabled:
+            message = get_completion_message()
+            announce(message)
 
-def _do_notify():
-    message = get_completion_message()
-    notify_all("Claude Code", message, "complete", tts_message=message)
+    except json.JSONDecodeError:
+        print("Invalid JSON input", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        log_error("stop", f"Hook error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    run_hook("stop", handle_stop)
+    main()

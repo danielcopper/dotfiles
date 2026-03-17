@@ -45,9 +45,9 @@ Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ -
 
 Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa` · Password: `Admin123!`
 
-- Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -P "Admin123!" -C`
 - History expansion is disabled (`set +H` in `.bashrc`) — `!` in password is safe
 - Always quote the password with double quotes: `-P "Admin123!"`
+- Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -P "Admin123!" -C`
 - **CRITICAL — shell quoting:** Never use single quotes `'` inside SQL passed via `-Q`. Bash consumes them. Use escaped double quotes `\"` for all SQL string literals:
   - ✅ `-Q "SELECT * FROM t WHERE name = \"alice\""`
   - ❌ `-Q "SELECT * FROM t WHERE name = 'alice'"`

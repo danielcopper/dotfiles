@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-TTS Manager with Priority Fallback and Platform Routing.
-
-Priority:
-  1. OpenAI TTS (if OPENAI_API_KEY set)
-  2. Platform-native TTS:
-     - WSL2/Windows: Windows Speech Synthesis via PowerShell
-     - Linux: espeak-ng / spd-say / festival
+TTS Manager with Priority Fallback
+Tries OpenAI TTS first, falls back to Windows TTS.
 """
 
 import os
@@ -14,62 +9,56 @@ import sys
 import subprocess
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from platform_info import detect_platform
+def get_tts_script():
+    """Determine which TTS script to use based on availability."""
+    hooks_dir = Path.home() / ".claude" / "hooks" / "utils" / "tts"
 
+    # Priority 1: OpenAI TTS (if API key is set)
+    if os.getenv("OPENAI_API_KEY"):
+        openai_script = hooks_dir / "openai_tts.py"
+        if openai_script.exists():
+            return str(openai_script), "OpenAI"
+
+    # Priority 2: Windows TTS (always available on WSL)
+    windows_script = hooks_dir / "windows_tts.py"
+    if windows_script.exists():
+        return str(windows_script), "Windows"
+
+    return None, None
 
 def speak(text, quiet=False):
     """Speak text using the best available TTS provider."""
     if not text:
         return False
 
-    hooks_dir = Path(__file__).parent
+    script, provider = get_tts_script()
 
-    # Priority 1: OpenAI TTS (if API key is set)
-    if os.getenv("OPENAI_API_KEY"):
-        openai_script = hooks_dir / "openai_tts.py"
-        if openai_script.exists():
-            try:
-                result = subprocess.run(
-                    [sys.executable, str(openai_script), text],
-                    timeout=20, check=False, capture_output=True,
-                )
-                if result.returncode == 0:
-                    return True
-            except Exception:
-                pass
+    if not script:
+        if not quiet:
+            print("No TTS provider available", file=sys.stderr)
+        return False
 
-    # Priority 2: Platform-native TTS
-    plat = detect_platform()
+    try:
+        if not quiet:
+            print(f"🔊 Using {provider} TTS: {text[:50]}...", file=sys.stderr)
 
-    if plat in ("wsl2", "windows"):
-        windows_script = hooks_dir / "windows_tts.py"
-        if windows_script.exists():
-            try:
-                result = subprocess.run(
-                    [sys.executable, str(windows_script), text],
-                    timeout=20, check=False, capture_output=True,
-                )
-                return result.returncode == 0
-            except Exception:
-                pass
-    else:
-        # Linux native TTS
-        linux_script = hooks_dir / "linux_tts.py"
-        if linux_script.exists():
-            try:
-                result = subprocess.run(
-                    [sys.executable, str(linux_script), text],
-                    timeout=20, check=False, capture_output=True,
-                )
-                return result.returncode == 0
-            except Exception:
-                pass
+        result = subprocess.run(
+            [sys.executable, script, text],
+            timeout=20,
+            check=False,
+            capture_output=True
+        )
 
-    if not quiet:
-        print("No TTS provider available", file=sys.stderr)
-    return False
+        return result.returncode == 0
 
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            print("TTS timeout", file=sys.stderr)
+        return False
+    except Exception as e:
+        if not quiet:
+            print(f"TTS error: {e}", file=sys.stderr)
+        return False
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

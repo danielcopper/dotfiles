@@ -2,40 +2,63 @@
 """
 SubagentStop Hook
 Triggered when a subagent completes its task.
-Announces completion with toast, sound, and optional TTS.
+Announces completion with varied LLM-generated messages.
 """
 
+import json
 import sys
 from pathlib import Path
 
+# Add utils to path
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-from common import run_hook, log_jsonl, notify_all, run_in_background, get_subagent_message
+from config import is_hook_enabled, is_tts_enabled
+from common import announce, log_json, log_error, get_subagent_message
 
 
-def handle_subagent_stop(data):
-    log_jsonl("subagent_stop.json", data)
-
-    if "--notify" in sys.argv:
+def should_announce(data):
+    """Determine if we should announce this subagent completion."""
+    try:
         hook_data = data.get("hookSpecificInput", {})
         agent_type = hook_data.get("subagentType", "")
         description = hook_data.get("description", "")
 
         # Skip background/startup agents
-        if agent_type in ("general-purpose",):
-            return None
+        skip_types = {"general-purpose"}
+        if agent_type in skip_types:
+            return False
 
         # Only announce if there's a meaningful description
         if description and len(description.strip()) > 5:
-            run_in_background(lambda: _do_notify())
+            return True
 
-    return None
+        return False
+    except Exception:
+        return False
 
 
-def _do_notify():
-    message = get_subagent_message()
-    notify_all("Claude Code", message, "subagent", tts_message=message)
+def main():
+    """Process subagent stop hook."""
+    try:
+        data = json.load(sys.stdin)
+
+        hook_enabled, tts_enabled = is_hook_enabled("subagent_stop"), is_tts_enabled()
+        if not hook_enabled:
+            sys.exit(0)
+
+        log_json("subagent_stop.json", data)
+
+        if "--notify" in sys.argv and tts_enabled and should_announce(data):
+            message = get_subagent_message()
+            announce(message)
+
+    except json.JSONDecodeError:
+        print("Invalid JSON input", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        log_error("subagent_stop", f"Hook error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    run_hook("subagent_stop", handle_subagent_stop)
+    main()
