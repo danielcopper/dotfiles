@@ -267,7 +267,22 @@ Options:
 On approve:
 1. Save full planner output to `<id>-plan.md`
 2. Create state file `<id>.json`
-3. Proceed to implementation
+3. Proceed to testing approach selection
+
+### Step 3.5: Testing Approach
+
+Read the planner's `Testing Strategy` section for the recommended approach and rationale.
+
+**Use AskUserQuestion:**
+```
+Question: "Planner recommends [recommended approach]: [rationale]. What testing approach should the coder follow?"
+Options:
+- "tdd" → Write failing tests first, then implement to pass
+- "test-after" → Implement first, then write tests
+- "no tests" → No tests needed
+```
+
+Pre-select the planner's recommendation as the default. Store choice in state as `testing_approach`. Pass it to every coder invocation in the `Testing:` field.
 
 ---
 
@@ -286,6 +301,7 @@ Model: "opus" for --mode=migrate, otherwise "sonnet"
 Prompt:
 "## Task [N]: [Name]
 **Mode:** [implement/fix/refactor/migrate]
+**Testing:** [tdd/test-after/no tests]
 **Plan file:** [path to <id>-plan.md]
 **State file:** [path to <id>.json]
 

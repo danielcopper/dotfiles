@@ -48,7 +48,9 @@ Structure your plan as follows:
 ...
 
 ## Testing Strategy
-[Overall approach to testing]
+**Recommended approach:** [tdd | test-after | no tests]
+**Rationale:** [Why this approach fits — e.g. "TDD: bug fix with clear reproduction steps" or "test-after: exploratory UI work where design will evolve" or "no tests: config-only changes, no test framework"]
+[Additional testing notes]
 
 ## Risks & Mitigations
 [Known risks and how to handle them]

@@ -42,8 +42,8 @@ Schema/dependency migrations, breaking changes:
 
 1. **Read the plan file** referenced in your task prompt for full context
 2. **Check the state file** for decisions from previous tasks
-3. **Write failing tests first** (TDD) based on test specs in the plan
-4. **Implement** to make tests pass
+3. **Follow the testing approach** specified in your task prompt (`Testing:` field) — TDD, test-after, or no tests
+4. **Implement** the changes
 5. **Run all relevant tests** to verify nothing is broken
 6. **Self-review** your changes for obvious issues
 7. **Report results** in the format below
