@@ -353,12 +353,7 @@ Store `branch` and `worktree_path` in state. **All coder agents must work inside
 
 On `--resume`: Verify the worktree still exists. If removed, recreate it from the branch (which should still exist).
 
-**Cleanup at completion (Phase 3):**
-After all tasks are done and user is satisfied:
-```bash
-git worktree remove .worktrees/$BRANCH
-```
-The branch stays (for PR creation). Only remove the worktree.
+**Worktree cleanup is the user's responsibility.** Never auto-remove. Mention the path in the completion summary so the user can clean up when ready.
 
 ### Step 3.5: Testing Approach
 
@@ -645,10 +640,8 @@ After all tasks complete:
    **Next steps:** integration testing, manual testing, PR creation
    ```
 5. Update state to `phase: "completion"`
-6. **Clean up worktree** (branch stays for PR):
-   ```bash
-   git worktree remove .worktrees/$BRANCH
-   ```
+6. **Do NOT automatically remove the worktree.** The user may need it for manual testing, PR review, or further work. Just mention it in the summary:
+   > "Worktree at `.worktrees/$BRANCH` is still active. Remove it when you're done: `git worktree remove .worktrees/$BRANCH`"
 7. Ask: "Create a pull request now?"
 
 ---
