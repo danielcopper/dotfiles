@@ -132,7 +132,9 @@
       "WebFetch(domain:deepwiki.com)",
       "Read(//home/deck/Repos/**)",
       "Read(//tmp/**)",
-      "Read(~/.claude/feature-progress/**)"
+      "Read(~/.claude/feature-progress/**)",
+      "Edit(.worktrees/**)",
+      "Write(.worktrees/**)"
     ]
   },
   "statusLine": {
