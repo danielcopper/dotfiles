@@ -195,7 +195,7 @@ Options:
 
 ### Step 3: Invoke Architect (if recommended and approved)
 
-Invoke architect agent, present design, get approval. Architecture decisions guide the planner.
+Invoke architect agent, present design, get approval. **Capture the architect's agentId** — if the user wants modifications, resume via `SendMessage to: [architect agentId]` (same pattern as planner in Step 5). Architecture decisions guide the planner.
 
 ### Step 4: Planning
 
@@ -230,7 +230,7 @@ The planner has access to the Explore agent and will explore the codebase as nee
 
 Present plan with task breakdown, affected files, testing strategy.
 
-**CRITICAL: The planner agent stays alive until plan is approved.** Do NOT let it shut down.
+**CRITICAL:** When the planner agent completes, its result includes an `agentId`. **You MUST capture and store this agentId** — it's the only way to resume the planner for modifications. The planner is not "alive" but can be resumed via SendMessage using this ID.
 
 **Use AskUserQuestion:**
 ```
@@ -243,17 +243,19 @@ Options:
 
 **On modify:**
 1. Ask user what they want changed (plain text prompt)
-2. Send feedback to the **still-running planner** via SendMessage:
+2. **Resume the planner** by sending feedback via SendMessage (NOT TaskOutput, NOT a new Agent call):
    ```
-   SendMessage to: [planner agent_id]
-   "The user wants these changes to the plan: [user feedback]. Update the plan accordingly."
+   SendMessage to: [planner agentId from Step 4]
+   "The user wants these changes to the plan: [user feedback]. Update the plan accordingly and return the full updated plan."
    ```
-3. Planner returns updated plan
+3. Planner resumes with full context of its previous exploration and plan
 4. Present updated plan to user
 5. **Loop back to Plan Approval** — ask approve/modify/replan again
 6. Repeat until approved or user chooses replan
 
-**On replan:** Dismiss current planner, go back to Step 4 with a fresh planner.
+**On replan:** Start fresh — go back to Step 4 with a new planner agent.
+
+> **Why SendMessage?** A new Agent call would create a fresh planner with no memory of the codebase exploration or previous plan. SendMessage resumes the existing planner with its full context intact.
 
 **On approve:**
 1. Save full planner output to `<id>-plan.md`
