@@ -377,6 +377,8 @@ Check the state file for decisions from previous tasks.
 Report your key decisions under '### Key Decisions'."
 ```
 
+**CRITICAL: Capture the coder's `agentId` from the Agent tool result.** Store it in state AND keep it in your working memory. You WILL need it to send review findings back to this exact coder via SendMessage. Do NOT discard it after the coder returns.
+
 Update state: `in_progress`, `started`, `agent_id`.
 
 **Do NOT read code files yourself to gather context. The plan and agents handle that.**
