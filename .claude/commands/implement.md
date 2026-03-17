@@ -77,6 +77,8 @@ If no flags, proceed with new feature workflow.
   "updated": "ISO timestamp",
   "phase": "exploration|planning|implementation|completion",
   "branch": "feature/branch-name",
+  "worktree_path": ".worktrees/feature/branch-name",
+  "base_branch": "main",
   "execution_mode": "subagent|team",
   "supervision": "strict|normal|guided|relaxed",
   "repos": {"Backend": "backend", "Frontend": "frontend"},
@@ -267,7 +269,31 @@ Options:
 On approve:
 1. Save full planner output to `<id>-plan.md`
 2. Create state file `<id>.json`
-3. Proceed to testing approach selection
+3. Create worktree and branch
+4. Proceed to testing approach selection
+
+### Step 3.3: Worktree Setup
+
+Create a worktree for the implementation (per project convention — never work on the current branch directly):
+
+```bash
+# Derive branch name from feature slug
+BRANCH="feature/<feature-slug>"
+BASE=$(git branch --show-current)
+
+git worktree add .worktrees/$BRANCH -b $BRANCH $BASE
+```
+
+Store `branch` and `worktree_path` in state. **All coder agents must work inside the worktree directory** — pass the worktree path as the working directory.
+
+On `--resume`: Verify the worktree still exists. If removed, recreate it from the branch (which should still exist).
+
+**Cleanup at completion (Phase 3):**
+After all tasks are done and user is satisfied:
+```bash
+git worktree remove .worktrees/$BRANCH
+```
+The branch stays (for PR creation). Only remove the worktree.
 
 ### Step 3.5: Testing Approach
 
@@ -529,7 +555,7 @@ After all tasks complete:
 ## Completion (Phase 3)
 
 1. Update progress tracker — all tasks complete
-2. Run final test suite
+2. Run final test suite (inside worktree)
 3. Offer documenter if applicable (public API changed, new features, breaking changes)
 4. Summarize:
    ```markdown
@@ -538,10 +564,15 @@ After all tasks complete:
    **Changes:** [file summaries]
    **Tests:** [counts]
    **All tasks:** [checklist]
+   **Branch:** [branch name]
    **Next steps:** integration testing, manual testing, PR creation
    ```
 5. Update state to `phase: "completion"`
-6. Ask: "Create a pull request now?"
+6. **Clean up worktree** (branch stays for PR):
+   ```bash
+   git worktree remove .worktrees/$BRANCH
+   ```
+7. Ask: "Create a pull request now?"
 
 ---
 
