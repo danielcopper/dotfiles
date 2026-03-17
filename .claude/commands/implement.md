@@ -409,13 +409,25 @@ Update state: `in_progress`, `started`, `agent_id`.
 
 **2. Coder reports completion → show results to user:**
 
-Display changes, diff summary, test results, suggested commit.
+Display changes, diff summary, test results.
 
 **3. Commit approval** (based on supervision level):
 
+**CRITICAL: Always show the suggested commit message BEFORE asking.** The user needs to see it to decide whether to approve or edit. Display it like:
+
+```markdown
+**Suggested commit message:**
+> feat(module): short description
+>
+> - Detail 1
+> - Detail 2
+```
+
+Then ask:
+
 **Use AskUserQuestion:**
 ```
-Question: "Ready to commit?"
+Question: "Ready to commit with this message?"
 Options:
 - "approve" → Commit with suggested message
 - "edit" → Modify commit message
