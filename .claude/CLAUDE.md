@@ -38,8 +38,8 @@ Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ -
 
 - All dotfiles commands use: `/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME <command>`
 - Files must be added with **absolute paths** (not relative)
-- Remote: `origin` → `git@github.com:danielcopper/dotfiles.git`
-- Each machine has its own branch (e.g. `wsl`, `steamdeck`, `arch`, `windows`)
+- Remote: `origin` (use `git remote get-url origin` to check)
+- Each machine has its own branch (use `git branch --show-current` to check)
 
 ## Infrastructure
 
