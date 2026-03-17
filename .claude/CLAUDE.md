@@ -19,9 +19,14 @@
 When asked to create a new branch or work on a new feature/task:
 
 1. **Never use `git checkout -b` in place** — always create a worktree
-2. **Create:** `git worktree add .worktrees/<name> -b <name> <base-branch>`
+2. **Create:** `git worktree add .worktrees/<type>/<slug> -b <type>/<slug> <base-branch>`
+   - Types: `feature/`, `fix/`, `refactor/`, `chore/`, `docs/`
+   - If a ticket number exists (Azure DevOps, GitHub issue), prefix the slug: `<type>/<ticket>-<slug>`
+   - Examples:
+     - `git worktree add .worktrees/feature/oauth-login -b feature/oauth-login main`
+     - `git worktree add .worktrees/feature/123-oauth-login -b feature/123-oauth-login main`
 3. **Work** inside the new worktree for all changes on that branch
-4. **Cleanup:** `git worktree remove .worktrees/<name> && git branch -d <name>`
+4. **Cleanup:** `git worktree remove .worktrees/<type>/<slug> && git branch -d <type>/<slug>`
 
 Rules:
 

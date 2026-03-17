@@ -150,21 +150,9 @@ All agents are defined in `~/.claude/agents/`. They have their own system prompt
 
 ## Workflow
 
-### Step 0: Execution Mode & Supervision
+### Step 0: Supervision Level
 
-**0.1 — Execution mode** (skip if `--team` flag set):
-
-**Use AskUserQuestion:**
-```
-Question: "How should this be executed?"
-Options:
-- "subagents (default)" → Standard agent spawning, orchestrator manages all communication
-- "team agents (experimental)" → Persistent teammates with direct messaging, tmux view
-```
-
-If team mode selected, verify `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set. If not, inform user how to enable it and fall back to subagent mode.
-
-**0.2 — Supervision level** (skip if resuming with saved settings):
+Skip if resuming with saved settings.
 
 **Use AskUserQuestion:**
 ```
@@ -242,16 +230,28 @@ Options:
 - "2 planners" → Compare strategies in parallel
 ```
 
-**1 planner**: Invoke `subagent_type="planner"`, pass user story + context, wait for plan.
+**1 planner**: Invoke `subagent_type="planner"`, pass user story + context, wait for plan. **Store the planner's agent_id.**
 
 **2 planners**: Invoke TWO planner agents in parallel (both calls in single message):
 - Planner A: "Focus on simplicity and minimal changes"
 - Planner B: "Focus on extensibility and future-proofing"
 - Compare approaches, recommend best, present both to user.
+- **Use AskUserQuestion:**
+  ```
+  Question: "Which plan do you prefer?"
+  Options:
+  - "Plan A" → Use the minimal approach
+  - "Plan B" → Use the extensible approach
+  - "replan" → Start over with different direction
+  ```
+- **Store the chosen planner's agent_id.** The other planner is no longer needed.
+- Proceed to Plan Approval Loop with the chosen plan.
 
-### Step 3: Plan Approval
+### Step 3: Plan Approval Loop
 
 Present plan with task breakdown, affected files, testing strategy.
+
+**CRITICAL: The planner agent stays alive until plan is approved.** Do NOT let it shut down.
 
 **Use AskUserQuestion:**
 ```
@@ -259,37 +259,82 @@ Question: "Does this plan look good?"
 Options:
 - "approve" → Start implementation
 - "modify" → Request specific changes
-- "replan" → Start over
+- "replan" → Start over with fresh planner
 ```
 
-On approve:
+**On modify:**
+1. Ask user what they want changed (plain text prompt)
+2. Send feedback to the **still-running planner** via SendMessage:
+   ```
+   SendMessage to: [planner agent_id]
+   "The user wants these changes to the plan: [user feedback]. Update the plan accordingly."
+   ```
+3. Planner returns updated plan
+4. Present updated plan to user
+5. **Loop back to Plan Approval** — ask approve/modify/replan again
+6. Repeat until approved or user chooses replan
+
+**On replan:** Dismiss current planner, go back to Step 2 with a fresh planner.
+
+**On approve:**
 1. Save full planner output to `<id>-plan.md`
 2. Create state file `<id>.json`
-3. Create worktree and branch
-4. Proceed to testing approach selection
+3. **Planner can now shut down** — no longer needed
+4. Select execution mode
+5. Create worktree and branch
+6. Proceed to testing approach selection
+
+### Step 3.1: Execution Mode (skip if `--team` flag set)
+
+Now that the plan is approved, analyze it to recommend an execution mode. Consider:
+- Number of tasks and their complexity
+- Whether multiple review rounds are likely (security-sensitive, complex logic)
+- Whether the reviewer would benefit from persistent context across tasks
+- Whether the overhead of team setup is justified
+
+Make a genuine recommendation with reasoning, then ask:
+
+**Use AskUserQuestion:**
+```
+Question: "[Your recommendation and reasoning]. Which execution mode?"
+Options:
+- "subagents" → Standard agent spawning
+- "team agents (experimental)" → Persistent reviewer, coder per task, tmux view
+```
+
+If team mode selected, verify `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set. If not, inform user how to enable it and fall back to subagent mode.
+
+Store choice in state as `execution_mode`.
 
 ### Step 3.3: Worktree Setup
 
 Create a worktree for the implementation (per project convention — never work on the current branch directly):
 
 ```bash
-# Derive branch name: <type>/<feature-slug>
+# Derive branch name: <type>/[ticket-]<feature-slug>
 # Type is based on coder mode: implement→feature, fix→fix, refactor→refactor, migrate→chore
-BRANCH="<type>/<feature-slug>"
+# If task references a ticket number (Azure DevOps, GitHub issue), prefix the slug with it
+BRANCH="<type>/<feature-slug>"        # e.g. feature/oauth-login
+BRANCH="<type>/<ticket>-<slug>"       # e.g. feature/123-oauth-login, fix/456-auth-crash
 BASE=$(git branch --show-current)
 
 # Worktree path mirrors branch structure: .worktrees/<type>/<slug>
 git worktree add .worktrees/$BRANCH -b $BRANCH $BASE
 ```
 
+**Branch naming:**
+- With ticket: `feature/123-oauth-login`, `fix/456-null-check`
+- Without ticket: `feature/oauth-login`, `fix/null-check`
+- Detect ticket numbers from task description, $ARGUMENTS, or ask user if unclear
+
 **Worktree directory convention:** Always use the branch type prefix as a subdirectory:
 ```
 .worktrees/
 ├── feature/
-│   ├── whitelist-defaults/
+│   ├── 123-whitelist-defaults/
 │   └── oauth-login/
 ├── fix/
-│   └── auth-crash/
+│   └── 456-auth-crash/
 ├── refactor/
 │   └── cleanup-services/
 └── chore/
@@ -308,12 +353,7 @@ Store `branch` and `worktree_path` in state. **All coder agents must work inside
 
 On `--resume`: Verify the worktree still exists. If removed, recreate it from the branch (which should still exist).
 
-**Cleanup at completion (Phase 3):**
-After all tasks are done and user is satisfied:
-```bash
-git worktree remove .worktrees/$BRANCH
-```
-The branch stays (for PR creation). Only remove the worktree.
+**Worktree cleanup is the user's responsibility.** Never auto-remove. Mention the path in the completion summary so the user can clean up when ready.
 
 ### Step 3.5: Testing Approach
 
@@ -364,13 +404,25 @@ Update state: `in_progress`, `started`, `agent_id`.
 
 **2. Coder reports completion → show results to user:**
 
-Display changes, diff summary, test results, suggested commit.
+Display changes, diff summary, test results.
 
 **3. Commit approval** (based on supervision level):
 
+**CRITICAL: Always show the suggested commit message BEFORE asking.** The user needs to see it to decide whether to approve or edit. Display it like:
+
+```markdown
+**Suggested commit message:**
+> feat(module): short description
+>
+> - Detail 1
+> - Detail 2
+```
+
+Then ask:
+
 **Use AskUserQuestion:**
 ```
-Question: "Ready to commit?"
+Question: "Ready to commit with this message?"
 Options:
 - "approve" → Commit with suggested message
 - "edit" → Modify commit message
@@ -588,10 +640,8 @@ After all tasks complete:
    **Next steps:** integration testing, manual testing, PR creation
    ```
 5. Update state to `phase: "completion"`
-6. **Clean up worktree** (branch stays for PR):
-   ```bash
-   git worktree remove .worktrees/$BRANCH
-   ```
+6. **Do NOT automatically remove the worktree.** The user may need it for manual testing, PR review, or further work. Just mention it in the summary:
+   > "Worktree at `.worktrees/$BRANCH` is still active. Remove it when you're done: `git worktree remove .worktrees/$BRANCH`"
 7. Ask: "Create a pull request now?"
 
 ---
