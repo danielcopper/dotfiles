@@ -4,7 +4,7 @@ palette = "catppuccin_mocha"
 # Change the default prompt format
 format = """\
 [╭╴](238)$os$all\
-[╰╴](238)$character"""
+[╰╴](238)$battery$character"""
 
 [character]
 # Note the use of Catppuccin color 'maroon'
@@ -21,7 +21,7 @@ style = "bold lavender"
 show_always = true
 
 [os]
-format ='[$symbol](bold white)'   
+format ='[$symbol](bold white)'
 disabled = false
 
 [os.symbols]
