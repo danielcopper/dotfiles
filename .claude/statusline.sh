@@ -13,6 +13,8 @@ DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 LINES_ADD=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 LINES_REM=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 MAX_TOKENS=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
+PCT_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | cut -d. -f1)
+PCT_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | cut -d. -f1)
 
 # Format token capacity: 200000→"200k", 1000000→"1m"
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
@@ -21,9 +23,48 @@ else
     TOKEN_LABEL="$((MAX_TOKENS / 1000))k"
 fi
 
-# ── Colors ───────────────────────────────────────────────────────────
-CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
-MAGENTA='\033[35m'; DIM='\033[2m'; RESET='\033[0m'
+# ── Catppuccin Mocha ─────────────────────────────────────────────────
+# Foreground
+FG_GREEN='\033[38;2;166;227;161m'
+FG_RED='\033[38;2;243;139;168m'
+FG_YELLOW='\033[38;2;249;226;175m'
+FG_PEACH='\033[38;2;250;179;135m'
+FG_MAUVE='\033[38;2;203;166;247m'
+FG_SAPPHIRE='\033[38;2;116;199;236m'
+FG_SUBTEXT0='\033[38;2;166;173;200m'
+FG_OVERLAY0='\033[38;2;108;112;134m'
+FG_CRUST='\033[38;2;17;17;27m'
+FG_SUBTEXT1='\033[38;2;186;194;222m'
+# Background
+BG_GREEN='\033[48;2;166;227;161m'
+BG_YELLOW='\033[48;2;249;226;175m'
+BG_RED='\033[48;2;243;139;168m'
+BG_BLUE='\033[48;2;137;180;250m'
+BG_LAVENDER='\033[48;2;180;190;254m'
+BG_PEACH='\033[48;2;250;179;135m'
+BG_SURFACE0='\033[48;2;49;50;68m'
+
+BOLD='\033[1m'; STRIKE='\033[9m'; RESET='\033[0m'
+
+# ── Progress bar builder ─────────────────────────────────────────────
+# Usage: build_bar WIDTH PERCENTAGE BG_LOW BG_MID BG_HIGH LABEL
+build_bar() {
+    local width=$1 pct=$2 bg_low=$3 bg_mid=$4 bg_high=$5 label=$6
+    local bg_fill
+    if [ "$pct" -ge 85 ]; then bg_fill="$bg_high"
+    elif [ "$pct" -ge 65 ]; then bg_fill="$bg_mid"
+    else bg_fill="$bg_low"; fi
+    local label_len=${#label}
+    local pad_total=$((width - label_len))
+    [ "$pad_total" -lt 0 ] && pad_total=0
+    local pad_left=$((pad_total / 2))
+    local pad_right=$((pad_total - pad_left))
+    local full_text=$(printf '%*s%s%*s' "$pad_left" "" "$label" "$pad_right" "")
+    local fill_pos=$((pct * width / 100))
+    local filled="${full_text:0:$fill_pos}"
+    local empty="${full_text:$fill_pos}"
+    echo "${bg_fill}\033[30m${filled}${RESET}${BG_SURFACE0}${FG_SUBTEXT1}${empty}${RESET}"
+}
 
 # ── Git cache ────────────────────────────────────────────────────────
 CACHE_DIR="/tmp/statusline-cache"
@@ -71,79 +112,61 @@ LINE1="📁 ${DIR##*/}"
 
 # Git info
 if [ -n "$BRANCH" ]; then
-    LIGHT_GREY='\033[37m'; ORANGE='\033[38;5;208m'
     # Branch or worktree icon
     if [ "$IS_WORKTREE" = "1" ]; then
-        GIT_ICON="${MAGENTA}${RESET}"
+        GIT_ICON="${FG_MAUVE}${RESET}"
     else
-        GIT_ICON=""
+        GIT_ICON=""
     fi
     if [ "$HAS_UPSTREAM" = "1" ]; then
-        SYNC_INFO="${GREEN}↑${AHEAD}${RESET} ${RED}↓${BEHIND}${RESET}"
+        SYNC_INFO="${FG_GREEN}↑${AHEAD}${RESET} ${FG_RED}↓${BEHIND}${RESET}"
     else
-        SYNC_INFO="${LIGHT_GREY}↑- ↓-${RESET}"
+        SYNC_INFO="${FG_SUBTEXT0}↑- ↓-${RESET}"
     fi
-    LINE1="${LINE1} | ${GIT_ICON} ${GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
+    LINE1="${LINE1} | ${GIT_ICON} ${FG_GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
 
     # Working tree status
     WT_PARTS=""
-    [ "$STAGED" -gt 0 ]    && WT_PARTS="${WT_PARTS}${GREEN}+${STAGED}${RESET} "
-    [ "$MODIFIED" -gt 0 ]  && WT_PARTS="${WT_PARTS}${ORANGE}~${MODIFIED}${RESET} "
-    [ "$UNTRACKED" -gt 0 ] && WT_PARTS="${WT_PARTS}${LIGHT_GREY}?${UNTRACKED}${RESET} "
+    [ "$STAGED" -gt 0 ]    && WT_PARTS="${WT_PARTS}${FG_GREEN}+${STAGED}${RESET} "
+    [ "$MODIFIED" -gt 0 ]  && WT_PARTS="${WT_PARTS}${FG_PEACH}~${MODIFIED}${RESET} "
+    [ "$UNTRACKED" -gt 0 ] && WT_PARTS="${WT_PARTS}${FG_SUBTEXT0}?${UNTRACKED}${RESET} "
     [ -n "$WT_PARTS" ] && LINE1="${LINE1} | ${WT_PARTS% }"
 
-    # Lines changed (session total) — next to branch info
+    # Lines changed (session total)
     if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_REM" -gt 0 ]; then
-        LINE1="${LINE1} | ${GREEN}+${LINES_ADD}${RESET} ${RED}-${LINES_REM}${RESET}"
+        LINE1="${LINE1} | ${FG_GREEN}+${LINES_ADD}${RESET} ${FG_RED}-${LINES_REM}${RESET}"
     fi
 
-    # Clickable repo link at the end
+    # Repo link (OSC 8 hyperlinks don't work in tmux through Claude Code's renderer)
     if [ -n "$REMOTE_URL" ]; then
         REPO_NAME=$(basename "$REMOTE_URL")
-        LINE1="${LINE1} | 🔗 \033]8;;${REMOTE_URL}\a${CYAN}${REPO_NAME}${RESET}\033]8;;\a"
+        if [ -n "$TMUX" ]; then
+            LINE1="${LINE1} | 🔗 ${FG_SAPPHIRE}${REPO_NAME}${RESET} ${FG_OVERLAY0}${REMOTE_URL}${RESET}"
+        else
+            LINE1="${LINE1} | 🔗 \033]8;;${REMOTE_URL}\a${FG_SAPPHIRE}${REPO_NAME}${RESET}\033]8;;\a"
+        fi
     fi
 fi
 
 # ── LINE 2: Session ─────────────────────────────────────────────────
-# Background colors for progress bar
-BG_GREEN='\033[42m'; BG_YELLOW='\033[43m'; BG_RED='\033[41m'
-BG_DARK='\033[48;5;236m'
-FG_WHITE='\033[97m'; BOLD='\033[1m'
-
-# Fill color based on context usage
-if [ "$PCT" -ge 80 ]; then BG_FILL="$BG_RED"
-elif [ "$PCT" -ge 50 ]; then BG_FILL="$BG_YELLOW"
-else BG_FILL="$BG_GREEN"; fi
-
-# Build label centered in bar: "Model TOKENs"
-LABEL="${MODEL} ${TOKEN_LABEL}"
-BAR_WIDTH=20
-LABEL_LEN=${#LABEL}
-PAD_TOTAL=$((BAR_WIDTH - LABEL_LEN))
-PAD_LEFT=$((PAD_TOTAL / 2))
-PAD_RIGHT=$((PAD_TOTAL - PAD_LEFT))
-FULL_TEXT=$(printf '%*s%s%*s' "$PAD_LEFT" "" "$LABEL" "$PAD_RIGHT" "")
-
-# Split at fill position — left portion gets fill bg, right gets dark bg
-FILL_POS=$((PCT * BAR_WIDTH / 100))
-FILLED_PART="${FULL_TEXT:0:$FILL_POS}"
-EMPTY_PART="${FULL_TEXT:$FILL_POS}"
-PROGRESS_BAR="${BG_FILL}${FG_WHITE}${BOLD}${FILLED_PART}${RESET}${BG_DARK}${FG_WHITE}${EMPTY_PART}${RESET}"
+# Build progress bars
+CTX_BAR=$(build_bar 20 "$PCT" "$BG_GREEN" "$BG_PEACH" "$BG_RED" "${MODEL} ${TOKEN_LABEL}")
+HOUR_BAR=$(build_bar 10 "$PCT_5H" "$BG_BLUE" "$BG_PEACH" "$BG_RED" "5h ${PCT_5H}%")
+WEEK_BAR=$(build_bar 10 "$PCT_7D" "$BG_LAVENDER" "$BG_PEACH" "$BG_RED" "7d ${PCT_7D}%")
 
 # Cost — strikethrough+dim for subscription, yellow for API
-STRIKE='\033[9m'
 COST_FMT=$(printf '$%.2f' "$COST")
 if [ "$PLAN" = "sub" ]; then
-    COST_PART="💰 ${DIM}${STRIKE}${COST_FMT}${RESET}"
+    COST_PART="💰 ${FG_OVERLAY0}${STRIKE}${COST_FMT}${RESET}"
 else
-    COST_PART="💰 ${YELLOW}${COST_FMT}${RESET}"
+    COST_PART="💰 ${FG_YELLOW}${COST_FMT}${RESET}"
 fi
 
 # Duration
 DURATION_SEC=$((DURATION_MS / 1000))
 MINS=$((DURATION_SEC / 60)); SECS=$((DURATION_SEC % 60))
 
-LINE2="${PROGRESS_BAR} | ${COST_PART} | ⏱️ ${MINS}m ${SECS}s"
+LINE2="${CTX_BAR} ${HOUR_BAR} ${WEEK_BAR} | ${COST_PART} | ⏱️ ${MINS}m ${SECS}s"
 
 # ── Output ───────────────────────────────────────────────────────────
 printf '%b\n' "$LINE1"
