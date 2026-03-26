@@ -15,6 +15,8 @@ LINES_REM=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 MAX_TOKENS=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
 PCT_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | cut -d. -f1)
 PCT_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | cut -d. -f1)
+RESET_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // 0')
+RESET_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
 
 # Format token capacity: 200000→"200k", 1000000→"1m"
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
@@ -149,10 +151,33 @@ if [ -n "$BRANCH" ]; then
 fi
 
 # ── LINE 2: Session ─────────────────────────────────────────────────
+# Format reset countdowns
+NOW=$(date +%s)
+REMAIN_5H=$(( RESET_5H - NOW ))
+REMAIN_7D=$(( RESET_7D - NOW ))
+[ "$REMAIN_5H" -lt 0 ] && REMAIN_5H=0
+[ "$REMAIN_7D" -lt 0 ] && REMAIN_7D=0
+
+# 5h: always h+m
+R5H_H=$((REMAIN_5H / 3600))
+R5H_M=$(((REMAIN_5H % 3600) / 60))
+RESET_5H_FMT="${R5H_H}h ${R5H_M}m"
+
+# 7d: days if >=1d, otherwise h+m
+R7D_D=$((REMAIN_7D / 86400))
+if [ "$R7D_D" -ge 1 ]; then
+    R7D_H=$(((REMAIN_7D % 86400) / 3600))
+    RESET_7D_FMT="${R7D_D}d ${R7D_H}h"
+else
+    R7D_H=$((REMAIN_7D / 3600))
+    R7D_M=$(((REMAIN_7D % 3600) / 60))
+    RESET_7D_FMT="${R7D_H}h ${R7D_M}m"
+fi
+
 # Build progress bars
 CTX_BAR=$(build_bar 20 "$PCT" "$BG_GREEN" "$BG_PEACH" "$BG_RED" "${MODEL} ${TOKEN_LABEL}")
-HOUR_BAR=$(build_bar 10 "$PCT_5H" "$BG_BLUE" "$BG_PEACH" "$BG_RED" "5h ${PCT_5H}%")
-WEEK_BAR=$(build_bar 10 "$PCT_7D" "$BG_LAVENDER" "$BG_PEACH" "$BG_RED" "7d ${PCT_7D}%")
+HOUR_BAR=$(build_bar 18 "$PCT_5H" "$BG_BLUE" "$BG_PEACH" "$BG_RED" "5h ${PCT_5H}% | ${RESET_5H_FMT}")
+WEEK_BAR=$(build_bar 18 "$PCT_7D" "$BG_LAVENDER" "$BG_PEACH" "$BG_RED" "7d ${PCT_7D}% | ${RESET_7D_FMT}")
 
 # Cost — strikethrough+dim for subscription, yellow for API
 COST_FMT=$(printf '$%.2f' "$COST")
