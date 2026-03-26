@@ -5,7 +5,8 @@ input=$(cat)
 if [ -n "$ANTHROPIC_API_KEY" ]; then PLAN="api"; else PLAN="sub"; fi
 
 # ── JSON fields ──────────────────────────────────────────────────────
-MODEL=$(echo "$input" | jq -r '.model.display_name // "?"' | sed 's/ ([^)]*context)//g')
+MODEL=$(echo "$input" | jq -r '.model.display_name // "?"' 2>/dev/null | sed 's/ ([^)]*context)//g')
+MODEL=${MODEL:-"?"}
 DIR=$(echo "$input" | jq -r '.workspace.current_dir // "."')
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
@@ -17,6 +18,19 @@ PCT_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | c
 PCT_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | cut -d. -f1)
 RESET_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // 0')
 RESET_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
+
+# Sanitize: ensure all numeric fields are valid integers/floats
+safe_int() { local v="${1:-0}"; [ "$v" -eq "$v" ] 2>/dev/null && echo "$v" || echo "0"; }
+PCT=$(safe_int "$PCT")
+COST=${COST:-0}
+DURATION_MS=$(safe_int "$DURATION_MS")
+LINES_ADD=$(safe_int "$LINES_ADD")
+LINES_REM=$(safe_int "$LINES_REM")
+MAX_TOKENS=$(safe_int "$MAX_TOKENS"); [ "$MAX_TOKENS" -eq 0 ] && MAX_TOKENS=200000
+PCT_5H=$(safe_int "$PCT_5H")
+PCT_7D=$(safe_int "$PCT_7D")
+RESET_5H=$(safe_int "$RESET_5H")
+RESET_7D=$(safe_int "$RESET_7D")
 
 # Format token capacity: 200000→"200k", 1000000→"1m"
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
@@ -51,7 +65,9 @@ BOLD='\033[1m'; STRIKE='\033[9m'; RESET='\033[0m'
 # ── Progress bar builder ─────────────────────────────────────────────
 # Usage: build_bar WIDTH PERCENTAGE BG_LOW BG_MID BG_HIGH LABEL
 build_bar() {
-    local width=$1 pct=$2 bg_low=$3 bg_mid=$4 bg_high=$5 label=$6
+    local width=$1 pct=${2:-0} bg_low=$3 bg_mid=$4 bg_high=$5 label=$6
+    [ "$pct" -eq "$pct" ] 2>/dev/null || pct=0
+    [ "$pct" -lt 0 ] && pct=0; [ "$pct" -gt 100 ] && pct=100
     local bg_fill
     if [ "$pct" -ge 85 ]; then bg_fill="$bg_high"
     elif [ "$pct" -ge 65 ]; then bg_fill="$bg_mid"
@@ -180,7 +196,7 @@ HOUR_BAR=$(build_bar 18 "$PCT_5H" "$BG_BLUE" "$BG_PEACH" "$BG_RED" "5h ${PCT_5H}
 WEEK_BAR=$(build_bar 18 "$PCT_7D" "$BG_LAVENDER" "$BG_PEACH" "$BG_RED" "7d ${PCT_7D}% | ${RESET_7D_FMT}")
 
 # Cost — strikethrough+dim for subscription, yellow for API
-COST_FMT=$(printf '$%.2f' "$COST")
+COST_FMT=$(LC_NUMERIC=C printf '$%.2f' "$COST")
 if [ "$PLAN" = "sub" ]; then
     COST_PART="💰 ${FG_OVERLAY0}${STRIKE}${COST_FMT}${RESET}"
 else
@@ -195,4 +211,8 @@ LINE2="${CTX_BAR} ${HOUR_BAR} ${WEEK_BAR} | ${COST_PART} | ⏱️ ${MINS}m ${SEC
 
 # ── Output ───────────────────────────────────────────────────────────
 printf '%b\n' "$LINE1"
-printf '%b\n' "$LINE2"
+if [ -n "$LINE2" ]; then
+    printf '%b\n' "$LINE2"
+else
+    printf '%b\n' "${BG_SURFACE0}${FG_SUBTEXT1} ${MODEL} ${TOKEN_LABEL} | ctx ${PCT}% | 5h ${PCT_5H}% | 7d ${PCT_7D}% ${RESET}"
+fi
