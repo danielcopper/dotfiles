@@ -106,7 +106,5 @@ export PATH="$PATH:/home/daniel/.dotnet/tools"
 #
 # complete -f -F _dotnet_bash_complete dotnet
 
-eval "$(zoxide init bash)"
-
-# Starship command prompt. Needs to be at the end of bashrc
 eval "$(starship init bash)"
+eval "$(zoxide init bash --cmd cd)"
