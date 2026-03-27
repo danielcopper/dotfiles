@@ -6,7 +6,6 @@
 
 ## Environment
 
-- OS: Linux
 - **Line endings:** New files use LF. Existing files keep their current line endings (CRLF or LF) — never bulk-convert.
 
 ## Git
@@ -48,12 +47,8 @@ Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ -
 
 ### SQL Server
 
-Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa` · Password: `Admin123!`
+Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa`
 
-- History expansion is disabled (`set +H` in `.bashrc`) — `!` in password is safe
-- Always quote the password with double quotes: `-P "Admin123!"`
-- Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -P "Admin123!" -C`
-- **CRITICAL — shell quoting:** Never use single quotes `'` inside SQL passed via `-Q`. Bash consumes them. Use escaped double quotes `\"` for all SQL string literals:
-  - ✅ `-Q "SELECT * FROM t WHERE name = \"alice\""`
-  - ❌ `-Q "SELECT * FROM t WHERE name = 'alice'"`
-  - Applies to **all** string literals, `LIKE` patterns, and any SQL that would normally use single quotes
+- Password is set via `SQLCMDPASSWORD` env var (in settings.json) — no `-P` flag needed
+- Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -C`
+- Single quotes in `-Q` work normally: `-Q "SELECT * FROM t WHERE name = 'alice'"`

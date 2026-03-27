@@ -1,0 +1,77 @@
+# ============================================================================
+# Claude Code Hooks Configuration
+# ============================================================================
+
+[hooks]
+notification      = true
+stop              = true
+subagent_stop     = true
+post_tool_use     = true
+pre_tool_use      = true
+user_prompt_submit = true
+session_start     = true
+pre_compact       = true
+
+# ============================================================================
+# TTS (Text-to-Speech)
+# ============================================================================
+[tts]
+enabled  = true
+
+# Provider: "kokoro", "piper", "windows"
+# Fallback order if chosen provider fails: kokoro -> piper -> windows
+provider = "kokoro"
+
+# --- Kokoro settings ---
+# Model: "kokoro-v1.0.int8" (88 MB, fast) or "kokoro-v1.0.fp16" (170 MB, best quality)
+kokoro_model = "kokoro-v1.0.int8"
+
+# Voice for Kokoro. Available voices:
+#
+#   American English (female):
+#     af_alloy, af_aoede, af_bella, af_heart, af_jessica,
+#     af_kore, af_nicole, af_nova, af_river, af_sarah, af_sky
+#   American English (male):
+#     am_adam, am_echo, am_eric, am_fenrir, am_liam,
+#     am_michael, am_onyx, am_puck, am_santa
+#   British English (female):
+#     bf_alice, bf_emma, bf_isabella, bf_lily
+#   British English (male):
+#     bm_daniel, bm_fable, bm_george, bm_lewis
+#   Other languages:
+#     ef_dora, em_alex (Spanish)
+#     ff_siwis (French)
+#     hf_alpha, hf_beta, hm_omega, hm_psi (Hindi)
+#     if_sara, im_nicola (Italian)
+#     jf_alpha, jf_gongitsune, jf_nezumi, jf_tebukuro, jm_kumo (Japanese)
+#     pf_dora, pm_alex, pm_santa (Portuguese)
+#     zf_xiaobei, zf_xiaoni, zf_xiaoxiao, zf_xiaoyi (Chinese)
+#     zm_yunjian, zm_yunxi, zm_yunxia, zm_yunyang (Chinese)
+voice = "am_michael"
+
+# --- Piper settings ---
+# Model name (without .onnx extension). Must exist in hooks/utils/tts/models/.
+# Download more voices from: https://rhasspy.github.io/piper-samples/
+# Example voices:
+#   en_US-lessac-high    (US English, single speaker, high quality)
+#   en_US-lessac-medium  (US English, single speaker, medium quality)
+#   en_US-amy-medium     (US English, female)
+#   en_GB-alan-medium    (British English, male)
+#   de_DE-thorsten-high  (German, male)
+piper_model = "en_US-lessac-high"
+
+# ============================================================================
+# Security (PreToolUse hook)
+# ============================================================================
+[security]
+block_dangerous_commands = true
+protect_env_files        = true
+blocked_paths            = ["/", "/etc", "/usr"]
+dangerous_patterns       = ["rm -rf", "rm -fr", "rm -r /", "mkfs", "dd if=", "> /dev/sd"]
+
+# ============================================================================
+# Logging
+# ============================================================================
+[logging]
+enabled     = true
+max_entries = 100

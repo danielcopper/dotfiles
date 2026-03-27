@@ -1,0 +1,5 @@
+kokoro-onnx
+soundfile
+numpy
+piper-tts
+pathvalidate

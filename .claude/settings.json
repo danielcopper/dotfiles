@@ -1,4 +1,58 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "SQLCMDPASSWORD": "Admin123!"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git mv:*)",
+      "Bash(git worktree:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git remote:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git merge:*)",
+      "Bash(git stash push:*)",
+      "Bash(git stash pop:*)",
+      "Bash(git stash apply:*)",
+      "Bash(git stash list:*)",
+      "Bash(git stash show:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh search:*)",
+      "Bash(gh api:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh release view:*)",
+      "Bash(gh release list:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(mise trust:*)",
+      "Bash(mise install:*)",
+      "Bash(mise run test:*)",
+      "Bash(sqlcmd -S localhost -U sa -C:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "Read(~/Repos/**)",
+      "Read(~/repos/**)",
+      "Read(/tmp/**)",
+      "Read(~/.claude/feature-progress/**)",
+      "Edit(.worktrees/**)",
+      "Write(.worktrees/**)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -97,52 +151,34 @@
       }
     ]
   },
-  "permissions": {
-    "allow": [
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)",
-      "Bash(git mv:*)",
-      "Bash(git worktree:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git status:*)",
-      "Bash(git branch:*)",
-      "Bash(git fetch:*)",
-      "Bash(git remote:*)",
-      "Bash(gh issue:*)",
-      "Bash(gh search:*)",
-      "Bash(gh api:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr view:*)",
-      "Bash(gh pr list:*)",
-      "Bash(gh pr diff:*)",
-      "Bash(gh pr checks:*)",
-      "Bash(gh release view:*)",
-      "Bash(gh release list:*)",
-      "Bash(python -m pytest:*)",
-      "Bash(.venv/bin/python -m pytest:*)",
-      "Bash(mise trust:*)",
-      "Bash(mise install:*)",
-      "Bash(mise run test:*)",
-      "Bash(sqlcmd -S localhost -U sa -P \"Admin123!\":*)",
-      "WebSearch",
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:api.github.com)",
-      "WebFetch(domain:deepwiki.com)",
-      "Read(//home/daniel/Repos/**)",
-      "Read(//home/daniel/repos/**)",
-      "Read(//tmp/**)"
-    ]
-  },
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh",
     "padding": 1
   },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": false,
+    "context7@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": false
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    }
+  },
   "alwaysThinkingEnabled": true,
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  }
+  "effortLevel": "high",
+  "voiceEnabled": true
 }

@@ -23,32 +23,21 @@ def load_config():
         return True, True
 
 def log_session(data):
-    """Log session start to file."""
+    """Log session start to JSONL file."""
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "session_start.json"
+    log_file = log_dir / "session_start.jsonl"
 
     try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
-
         hook_data = data.get("hookSpecificInput", {})
-
-        logs.append({
+        entry = {
             "timestamp": datetime.now().isoformat(),
             "session_id": data.get("session_id", ""),
             "source": hook_data.get("source", "unknown"),
             "cwd": data.get("cwd", "")
-        })
-
-        logs = logs[-50:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
+        }
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(entry) + "\n")
     except Exception:
         pass
 
