@@ -23,38 +23,25 @@ def load_config():
         return True, {"enabled": True, "max_entries": 100}
 
 def log_prompt(data, logging_config):
-    """Log prompt to file."""
+    """Log prompt to JSONL file."""
     if not logging_config.get("enabled", True):
         return
 
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "user_prompt_submit.json"
+    log_file = log_dir / "user_prompt_submit.jsonl"
 
     try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
-
         hook_data = data.get("hookSpecificInput", {})
         prompt = hook_data.get("prompt", "")
-
-        logs.append({
+        entry = {
             "timestamp": datetime.now().isoformat(),
             "session_id": data.get("session_id", ""),
             "prompt_length": len(prompt),
             "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt
-        })
-
-        # Keep last N entries
-        max_entries = logging_config.get("max_entries", 100)
-        logs = logs[-max_entries:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
+        }
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(entry) + "\n")
     except Exception:
         pass
 

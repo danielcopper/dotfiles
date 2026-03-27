@@ -56,29 +56,19 @@ def backup_transcript(data):
         return False
 
 def log_compaction(data):
-    """Log compaction event."""
+    """Log compaction event to JSONL file."""
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "pre_compact.json"
+    log_file = log_dir / "pre_compact.jsonl"
 
     try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
-
-        logs.append({
+        entry = {
             "timestamp": datetime.now().isoformat(),
             "session_id": data.get("session_id", ""),
             "cwd": data.get("cwd", "")
-        })
-
-        logs = logs[-50:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
+        }
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(entry) + "\n")
     except Exception:
         pass
 

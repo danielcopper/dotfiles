@@ -75,9 +75,6 @@ If no flags, proceed with new feature workflow.
   "base_branch": "main",
   "execution_mode": "subagent|team",
   "supervision": "strict|normal|guided|relaxed",
-  "testing_approach": "tdd|test-after|no tests",
-  "coder_model": "sonnet|opus",
-  "reviewer_model": "sonnet|opus",
   "repos": {"Backend": "backend", "Frontend": "frontend"},
   "tasks": [
     {"id": 1, "name": "Task name"},
@@ -119,8 +116,8 @@ All agents are defined in `~/.claude/agents/`. They have their own system prompt
 | Agent | Role | Model | Access |
 |-------|------|-------|--------|
 | **planner** | Creates implementation plans, explores codebase | opus | Read-only + Explore |
-| **coder** | Implements tasks, writes tests | sonnet (opus when recommended) | Read-write |
-| **reviewer** | Reviews for security, quality, performance | sonnet (opus when recommended) | Read-only + Bash |
+| **coder** | Implements tasks, writes tests | sonnet (opus for migrate) | Read-write |
+| **reviewer** | Reviews for security, quality, performance | sonnet (opus for security) | Read-only + Bash |
 | **architect** | Designs architecture for large features | opus | Read-only + Explore |
 | **documenter** | Updates documentation | sonnet | Read-write |
 
@@ -186,23 +183,11 @@ Once you have requirements: summarize and confirm understanding.
 
 ### Step 2: Recommend Agents & Modes
 
-Based on detection signals, recommend configuration including **model overrides** for coder and reviewer.
-
-**Model selection (applies to both coder and reviewer):**
-Default is sonnet. Recommend opus when the task genuinely benefits from deeper reasoning:
-- Complex architecture work (new abstractions, design patterns, cross-module refactoring)
-- Migrations with many interdependent changes
-- Security-sensitive code (auth, crypto, access control)
-- Tricky algorithmic problems or concurrency
-- When coder is opus, reviewer should typically also be opus (it needs the same depth to review)
-
-Do NOT recommend opus for straightforward CRUD, config changes, adding tests to existing patterns, or simple bug fixes — sonnet handles these well.
-
-Present your recommendation with reasoning:
+Based on detection signals, recommend configuration. Present and ask:
 
 **Use AskUserQuestion:**
 ```
-Question: "Recommended: Coder [mode] ([sonnet/opus]), Reviewer [focus] ([sonnet/opus]), Optional: [list]. Reasoning: [why]. Proceed?"
+Question: "Recommended settings: Coder [mode], Reviewer [focus], Optional agents: [list]. Proceed?"
 Options:
 - "yes" → Use recommended settings
 - "customize" → Let me adjust
@@ -210,7 +195,7 @@ Options:
 
 ### Step 3: Invoke Architect (if recommended and approved)
 
-Invoke architect agent, present design, get approval. **Capture the architect's agentId** — if the user wants modifications, resume via `SendMessage to: [architect agentId]` (same pattern as planner in Step 5). Architecture decisions guide the planner.
+Invoke architect agent, present design, get approval. Architecture decisions guide the planner.
 
 ### Step 4: Planning
 
@@ -245,7 +230,7 @@ The planner has access to the Explore agent and will explore the codebase as nee
 
 Present plan with task breakdown, affected files, testing strategy.
 
-**CRITICAL:** When the planner agent completes, its result includes an `agentId`. **You MUST capture and store this agentId** — it's the only way to resume the planner for modifications. The planner is not "alive" but can be resumed via SendMessage using this ID.
+**CRITICAL: The planner agent stays alive until plan is approved.** Do NOT let it shut down.
 
 **Use AskUserQuestion:**
 ```
@@ -258,19 +243,17 @@ Options:
 
 **On modify:**
 1. Ask user what they want changed (plain text prompt)
-2. **Resume the planner** by sending feedback via SendMessage (NOT TaskOutput, NOT a new Agent call):
+2. Send feedback to the **still-running planner** via SendMessage:
    ```
-   SendMessage to: [planner agentId from Step 4]
-   "The user wants these changes to the plan: [user feedback]. Update the plan accordingly and return the full updated plan."
+   SendMessage to: [planner agent_id]
+   "The user wants these changes to the plan: [user feedback]. Update the plan accordingly."
    ```
-3. Planner resumes with full context of its previous exploration and plan
+3. Planner returns updated plan
 4. Present updated plan to user
 5. **Loop back to Plan Approval** — ask approve/modify/replan again
 6. Repeat until approved or user chooses replan
 
-**On replan:** Start fresh — go back to Step 4 with a new planner agent.
-
-> **Why SendMessage?** A new Agent call would create a fresh planner with no memory of the codebase exploration or previous plan. SendMessage resumes the existing planner with its full context intact.
+**On replan:** Dismiss current planner, go back to Step 4 with a fresh planner.
 
 **On approve:**
 1. Save full planner output to `<id>-plan.md`
@@ -351,7 +334,7 @@ Pre-select the planner's recommendation as the default. Store choice in state as
 
 ---
 
-## Implementation (Subagent Mode)
+## Step 9: Implementation (Subagent Mode)
 
 ### The Coder-Reviewer Loop
 
@@ -361,7 +344,7 @@ For each task in the plan:
 
 ```
 Agent tool: subagent_type="coder"
-Model: Use the model chosen in Step 2 (default sonnet, opus if recommended and approved)
+Model: "opus" for --mode=migrate, otherwise "sonnet"
 
 Prompt:
 "## Task [N]: [Name]
@@ -376,8 +359,6 @@ Check the state file for decisions from previous tasks.
 
 Report your key decisions under '### Key Decisions'."
 ```
-
-**CRITICAL: Capture the coder's `agentId` from the Agent tool result.** Store it in state AND keep it in your working memory. You WILL need it to send review findings back to this exact coder via SendMessage. Do NOT discard it after the coder returns.
 
 Update state: `in_progress`, `started`, `agent_id`.
 
@@ -433,7 +414,7 @@ Options:
 
 ```
 Agent tool: subagent_type="reviewer"
-Model: Use the model chosen in Step 2 (default sonnet, opus if recommended and approved)
+Model: "opus" for --focus=security, otherwise "sonnet"
 ```
 
 **CRITICAL: Reviewer reports findings to YOU (orchestrator), NOT to coder.**
@@ -525,7 +506,7 @@ Options:
 
 ---
 
-## Implementation (Team Mode)
+## Step 9: Implementation (Team Mode)
 
 > **Experimental.** Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 
@@ -594,32 +575,21 @@ After all tasks complete:
 ## Quick Fix Mode (`--quick`)
 
 1. **Assess complexity** — if complex, offer to escalate to full workflow
-2. **Create worktree** (same convention as full workflow — `fix/<slug>` or `fix/<ticket>-<slug>`)
-3. **Ask testing approach:**
-   **Use AskUserQuestion:**
-   ```
-   Question: "Testing approach for this fix?"
-   Options:
-   - "tdd" → Write failing test first, then fix
-   - "test-after" → Fix first, then add test
-   - "no tests" → No tests needed
-   ```
-4. **Direct implementation**: Invoke coder with `model="sonnet"` inside the worktree:
+2. **Direct implementation**: Invoke coder with `model="sonnet"`:
    ```
    Task: [description]
-   Mode: fix
-   Testing: [chosen approach]
-   Requirements: Keep changes minimal, run tests, self-review.
+   Mode: Quick fix — self-review, no separate planning
+   Requirements: Keep changes minimal, write test for fix, run tests, self-review.
    ```
-5. **Show changes, get commit approval** (even in relaxed mode — show commit message first)
-6. **Done** — no separate review unless user requests
+3. **Show changes, get commit approval** (even in relaxed mode)
+4. **Done** — no separate review unless user requests
 
 ---
 
 ## Step 10: Completion
 
 1. Update progress tracker — all tasks complete
-2. Run final test suite yourself (inside worktree) — this is the one exception where you execute commands directly
+2. Run final test suite (inside worktree)
 3. Offer documenter if applicable (public API changed, new features, breaking changes)
 4. Summarize:
    ```markdown

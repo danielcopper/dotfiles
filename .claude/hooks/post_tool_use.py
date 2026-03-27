@@ -66,10 +66,10 @@ def main():
 
     except json.JSONDecodeError:
         print("Invalid JSON input", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(0)
     except Exception as e:
         log_error("post_tool_use", f"Hook error: {e}")
-        sys.exit(1)
+        sys.exit(0)
 
 
 if __name__ == "__main__":
