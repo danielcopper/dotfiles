@@ -135,7 +135,17 @@
             "timeout": 10
           }
         ]
-      }
+      }<% if [ "$YADM_CLASS" = "arch" ]; then %>,
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/daniel/projects/claude-matrix-bridge/scripts/session-hook.sh start",
+            "timeout": 5000
+          }
+        ]
+      }<% fi %>
     ],
     "PreCompact": [
       {
@@ -148,7 +158,19 @@
           }
         ]
       }
-    ]
+    ]<% if [ "$YADM_CLASS" = "arch" ]; then %>,
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/daniel/projects/claude-matrix-bridge/scripts/session-hook.sh end",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]<% fi %>
   },
   "statusLine": {
     "type": "command",

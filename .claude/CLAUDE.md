@@ -37,12 +37,17 @@ Rules:
 
 ## Dotfiles
 
-Bare git repo setup. Alias: `dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'`
+Managed with [yadm](https://yadm.io) (Yet Another Dotfiles Manager).
 
-- All dotfiles commands use: `/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME <command>`
-- Files must be added with **absolute paths** (not relative)
-- Remote: `origin` (use `git remote get-url origin` to check)
-- Each machine has its own branch (use `git branch --show-current` to check)
+- All dotfiles commands: `yadm <command>` — behaves like git (`yadm status`, `yadm add`, `yadm commit`, `yadm push`, `yadm diff`)
+- Files can be added with relative or absolute paths
+- Bare repo at `~/.local/share/yadm/repo.git`
+- Remote: `origin` (use `yadm remote get-url origin` to check)
+- **Single `main` branch** — no more branch-per-machine drift
+- Platform-specific files use **yadm alternates** (`##class.<name>` suffix, e.g. `~/.ssh/config##class.steamdeck`) or **esh/j2 templates** (`##template.esh` suffix with class-conditional blocks via `$YADM_CLASS`)
+- Machine class is set once via `yadm config local.class <name>` (e.g. `arch`, `wsl`, `steamdeck`)
+- Run `yadm alt` after class change or template edit to re-resolve alternates/templates
+- Old branch-per-machine history preserved under `archive/pre-yadm/<name>` tags
 
 ## Infrastructure
 

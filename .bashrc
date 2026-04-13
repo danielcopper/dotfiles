@@ -63,13 +63,7 @@ alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 alias ip='ip -color=auto'
 alias diff='diff --color=auto'
-alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 alias update='sudo -v && paru -Syu --noconfirm --skipreview'
-
-# complete dotfiles alias git commands
-source /usr/share/bash-completion/completions/git
-__git_complete dotfiles __git_main
-# complete -F _complete_alias dotfiles
 
 # dotnet completion and Path updates
 export PATH="$PATH:/home/daniel/.dotnet/tools"
