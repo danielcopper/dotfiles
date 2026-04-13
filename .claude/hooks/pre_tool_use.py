@@ -28,30 +28,19 @@ def load_config():
         }
 
 def log_event(event_type, details):
-    """Log security events to file."""
+    """Log security events to JSONL file."""
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "pre_tool_use.json"
+    log_file = log_dir / "pre_tool_use.jsonl"
 
     try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
-
-        logs.append({
+        entry = {
             "timestamp": datetime.now().isoformat(),
             "event": event_type,
             "details": details
-        })
-
-        # Keep last 100 entries
-        logs = logs[-100:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
+        }
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(entry) + "\n")
     except Exception:
         pass
 
@@ -172,10 +161,10 @@ def main():
         sys.exit(0)
 
     except json.JSONDecodeError:
-        sys.exit(0)  # Allow on parse error
+        sys.exit(0)  # Allow on parse error (no input to validate)
     except Exception as e:
-        print(f"Hook error: {e}", file=sys.stderr)
-        sys.exit(0)  # Allow on error (fail open)
+        print(json.dumps({"error": f"Security hook crashed: {e}"}))
+        sys.exit(2)  # Block on unexpected error (fail closed)
 
 if __name__ == "__main__":
     main()

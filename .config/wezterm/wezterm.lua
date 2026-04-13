@@ -1,39 +1,17 @@
 local wezterm = require("wezterm")
 local act = wezterm.action
--- local session_manager = require("wezterm-session-manager/session-manager")
 
-wezterm.on("save_state", function(window, pane) session_manager.save_state(window, pane) end)
-wezterm.on("load_state", function() session_manager.load_state() end)
-wezterm.on("restore_state", function(window) session_manager.restore_state(window) end)
+---------------------------------------------------------
+--                      Plugins                        --
+---------------------------------------------------------
+-- For Keybindings check the Keymaps section
 
-wezterm.on("print_info", function(window)
-  local mux = wezterm.mux
-  local workspace = mux.get_active_workspace()
-  local workspace2 = window:active_workspace()
-  local windowid = window:window_id()
-  wezterm.log_info("Workspace: " .. workspace)
-  wezterm.log_info("Workspace option 2: " .. workspace2)
-  wezterm.log_info("All Windows: " .. windowid)
+-- auto update plugins
+wezterm.plugin.update_all()
 
-  -- local info = string.format(
-  --   "Window ID: %d, Tab ID: %d, Pane ID: %d, Workspace: %s",
-  --   window:window_id(), tab:tab_id(), pane:pane_id(), workspace:name()
-  -- )
-  local tabs_info = window:tabs_with_info()
-  local tab_details = {}
-
-  for _, tab_info in ipairs(tabs_info) do
-    local details = string.format("Tab Index: %d, Is Active: %s, Tab ID: %d",
-      tab_info.index,
-      tostring(tab_info.is_active),
-      tab_info.tab:tab_id())
-    table.insert(tab_details, details)
-  end
-
-  local tab_details_str = table.concat(tab_details, "; ")
-  wezterm.log_info(string.format("Window ID: %d, Tabs Info: [%s]", window:window_id(), tab_details_str))
-end)
--- Functions
+---------------------------------------------------------
+--                     Functions                       --
+---------------------------------------------------------
 local get_last_folder_segment = function(cwd)
   if cwd == nil then
     return "N/A" -- or some default value you prefer
@@ -88,11 +66,19 @@ local function get_process(tab)
   local process_name = tab.active_pane.foreground_process_name:match("([^/\\]+)%.exe$") or
       tab.active_pane.foreground_process_name:match("([^/\\]+)$")
 
+  -- local icon = process_icons[process_name] or string.format('[%s]', process_name)
   local icon = process_icons[process_name] or wezterm.nerdfonts.seti_checkbox_unchecked
 
   return icon
 end
 
+local function basename(s)
+  return string.gsub(s, '(.*[/\\])(.*)', '%2')
+end
+
+---------------------------------------------------------
+--                   Config Setup                      --
+---------------------------------------------------------
 -- This table will hold the configuration.
 local config = {}
 
@@ -102,80 +88,74 @@ if wezterm.config_builder then
   config = wezterm.config_builder()
 end
 
+---------------------------------------------------------
+--                         UI                          --
+---------------------------------------------------------
+-- NOTE: Tempory only. this switches to software rendering to eliminate the nu shell bug where output
+-- moves upwards on each keystroke.
+-- config.front_end = "Software"
+
 -- Colorscheme
 config.color_scheme = "Catppuccin Mocha" -- or Macchiato, Frappe, Latte
 --config.color_scheme = "Tokyo Night"
 
 -- Font
+-- Option 1: Monaspace Neon + Radon cursive italics
+-- config.font = wezterm.font_with_fallback {
+--   "Monaspace Neon NF",
+--   "JetBrainsMono Nerd Font",
+-- }
+-- config.font_rules = {
+--   { italic = true, font = wezterm.font("Monaspace Radon NF", { italic = true }) },
+--   { italic = true, intensity = "Bold", font = wezterm.font("Monaspace Radon NF", { italic = true, bold = true }) },
+-- }
+
+-- Option 2: Victor Mono (has built-in cursive italics)
+-- config.font = wezterm.font_with_fallback {
+--   "VictorMono NF",
+--   "JetBrainsMono Nerd Font",
+-- }
+-- config.font_rules = {}
+
+-- Option 3: Maple Mono (has built-in cursive italics)
+-- config.font = wezterm.font_with_fallback {
+--   "Maple Mono NF",
+--   "JetBrainsMono Nerd Font",
+-- }
+-- config.font_rules = {}
+
+-- Option 4: JetBrains Mono (no cursive, clean default)
+-- config.font = wezterm.font_with_fallback {
+--   "JetBrainsMono Nerd Font",
+-- }
+-- config.font_rules = {}
+
+-- Option 5: Hack
+-- config.font = wezterm.font_with_fallback {
+--   "Hack Nerd Font",
+--   "JetBrainsMono Nerd Font",
+-- }
+-- config.font_rules = {}
+
+-- Option 6: IBM Plex Mono
+-- config.font = wezterm.font_with_fallback {
+--   "BlexMono Nerd Font",
+--   "JetBrainsMono Nerd Font",
+-- }
+-- config.font_rules = {}
+
+-- Option 7: Geist Mono
 config.font = wezterm.font_with_fallback {
+  "GeistMono Nerd Font",
   "JetBrainsMono Nerd Font",
-  "IbmPlex",
-  -- "OperatorMono",
-  -- "MapleMono",
-  -- "VictorMono NF"
 }
-config.font_size = 11.0
+config.font_rules = {}
 
--- Monaspace:  https://monaspace.githubnext.com/
--- Based upon, contributed to:  https://gist.github.com/ErebusBat/9744f25f3735c1e0491f6ef7f3a9ddc3
-config.font = wezterm.font(
-  { -- Normal text
-    family = 'Monaspace Neon',
-    harfbuzz_features = { 'calt', 'liga', 'dlig', 'ss01', 'ss02', 'ss03', 'ss04', 'ss05', 'ss06', 'ss07', 'ss08' },
-    stretch = 'UltraCondensed', -- This doesn't seem to do anything
-  })
-
-config.font_rules = {
-  { -- Italic
-    intensity = 'Normal',
-    italic = true,
-    font = wezterm.font({
-      -- family = "Monaspace Radon", -- script style
-      family = 'Monaspace Xenon', -- courier-like
-      style = 'Italic',
-    })
-  },
-
-  { -- Bold
-    intensity = 'Bold',
-    italic = false,
-    font = wezterm.font({
-      family = 'Monaspace Krypton',
-      -- weight='ExtraBold',
-      weight = 'Bold',
-    })
-  },
-
-  { -- Bold Italic
-    intensity = 'Bold',
-    italic = true,
-    font = wezterm.font({
-      family = 'Monaspace Xenon',
-      -- family = "Monaspace Radon",
-      style = 'Italic',
-      weight = 'Bold',
-    }
-    )
-  },
-}
-
--- From: https://stackoverflow.com/a/7470789/5353461
-function merge_tables(t1, t2)
-  for k, v in pairs(t2) do
-    if (type(v) == "table") and (type(t1[k] or false) == "table") then
-      merge_tables(t1[k], t2[k])
-    else
-      t1[k] = v
-    end
-  end
-  return t1
-end
-
--- config = merge_tables(config, font_config)
+config.font_size = 13
 
 -- Window
-config.window_background_opacity = 0.9
--- config.window_decorations = "RESIZE" -- removes close, minimize and so on
+config.window_background_opacity = 0.95
+config.window_decorations = "RESIZE" -- removes close, minimize and so on
 config.window_close_confirmation = "AlwaysPrompt"
 config.window_padding = {
   top = 5,
@@ -185,55 +165,30 @@ config.window_padding = {
 }
 
 -- General
-config.scrollback_lines = 3000
-config.default_prog = { "/bin/bash" }
+config.scrollback_lines = 10000
+config.max_fps = 90
+config.enable_kitty_keyboard = true
 
---
--- Hyperlinks
---
-
--- https://wezfurlong.org/wezterm/hyperlinks.html
-
--- Terminal hyperlinks
--- https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
--- printf '\e]8;;http://example.com\e\\This is a link\e]8;;\e\\\n'
-
--- Use the defaults as a base.  https://wezfurlong.org/wezterm/config/lua/config/hyperlink_rules.html
-config.hyperlink_rules = wezterm.default_hyperlink_rules()
-
--- make username/project paths clickable. this implies paths like the following are for github.
--- ( "nvim-treesitter/nvim-treesitter" | wbthomason/packer.nvim | wez/wezterm | "wez/wezterm.git" )
--- as long as a full url hyperlink regex exists above this it should not match a full url to
--- github or gitlab / bitbucket (i.e. https://gitlab.com/user/project.git is still a whole clickable url)
-
--- Regex syntax:  https://docs.rs/regex/latest/regex/#syntax and https://docs.rs/fancy-regex/latest/fancy_regex/#syntax
--- Lua's [[ ]] literal strings prevent character [[:classes:]] :(
--- To avoid "]]] at end, use "[a-z].{0}]]"
--- https://www.lua.org/pil/2.4.html#:~:text=bracketed%20form%20may%20run%20for%20several%20lines%2C%20may%20nest
-
-table.insert(config.hyperlink_rules, {
-  -- https://github.com/shinnn/github-username-regex  https://stackoverflow.com/a/64147124/5353461
-  regex = [[(^|(?<=[\[(\s'"]))([0-9A-Za-z][-0-9A-Za-z]{0,38})/([A-Za-z0-9_.-]{1,100})((?=[])\s'".!?])|$)]],
-  --  is/good  0valid0/-_.reponname  /bad/start  -bad/username  bad/end!  too/many/parts -bad/username
-  --  [wraped/name] (aa/bb) 'aa/bb' "aa/bb"  end/punct!  end/punct.
-  format = 'https://www.github.com/$2/$3/',
-  -- highlight = 0,  -- highlight this regex match group, use 0 for all
-})
-
+-- Start maximized
+wezterm.on("gui-startup", function(cmd)
+  local _, _, window = wezterm.mux.spawn_window(cmd or {})
+  window:gui_window():maximize()
+end)
 
 -- Tab/Status Bar
 -- disables the 'modern' look of the tab bar
-config.use_fancy_tab_bar = false
-config.show_new_tab_button_in_tab_bar = false
+-- config.use_fancy_tab_bar = false
+-- config.show_new_tab_button_in_tab_bar = false
 config.hide_tab_bar_if_only_one_tab = true
 config.status_update_interval = 1000
 config.tab_max_width = 60
 config.tab_bar_at_bottom = false
-wezterm.on('format-tab-title', function(tab)
+wezterm.on('format-tab-title', function(tab, tabs, panes, config, hover, max_width)
   local has_unseen_output = false
   local is_zoomed = false
+
   for _, pane in ipairs(tab.panes) do
-    if pane.has_unseen_output then
+    if not tab.is_active and pane.has_unseen_output then
       has_unseen_output = true
     end
     if pane.is_zoomed then
@@ -244,45 +199,34 @@ wezterm.on('format-tab-title', function(tab)
   local cwd = get_current_working_dir(tab)
   local process = get_process(tab)
   local zoom_icon = is_zoomed and wezterm.nerdfonts.cod_zoom_in or ""
-  local title = string.format(' %s  %s %s ', process, cwd, zoom_icon)
+  local title = string.format(' %s ~ %s %s ', process, cwd, zoom_icon) -- Add placeholder for zoom_icon
 
-  local formatted_title = wezterm.format({
+  return wezterm.format({
     { Attribute = { Intensity = 'Bold' } },
     { Text = title }
   })
+end)
 
-  if has_unseen_output then
-    return {
-      { Foreground = { Color = '#28719c' } },
-      { Text = formatted_title }
-    }
-  else
-    return {
-      { Text = formatted_title }
-    }
-  end
-end
-)
-wezterm.on("update-status", function(window, pane)
+wezterm.on("update-right-status", function(window, pane)
+  local palette = window:effective_config().resolved_palette
+  local fg = palette.foreground
+  local accent = palette.ansi[4]
+
   local workspace_or_leader = window:active_workspace()
   if window:active_key_table() then workspace_or_leader = window:active_key_table() end
   if window:leader_is_active() then workspace_or_leader = "LEADER" end
 
-  local cmd = get_last_folder_segment(pane:get_foreground_process_name())
   local time = wezterm.strftime("%H:%M")
-  local hostname = " " .. wezterm.hostname() .. " ";
 
   window:set_right_status(wezterm.format({
-    { Text = wezterm.nerdfonts.oct_table .. " " .. workspace_or_leader },
-    { Text = " | " },
-    { Foreground = { Color = "FFB86C" } },
-    { Text = wezterm.nerdfonts.fa_code .. " " .. cmd },
-    "ResetAttributes",
-    { Text = " | " },
-    { Text = wezterm.nerdfonts.oct_person .. " " .. hostname },
-    { Text = " | " },
-    { Text = wezterm.nerdfonts.md_clock .. " " .. time },
-    { Text = " | " },
+    { Foreground = { Color = accent } },
+    { Text = wezterm.nerdfonts.oct_table .. " " },
+    { Foreground = { Color = fg } },
+    { Text = workspace_or_leader .. "  " },
+    { Foreground = { Color = accent } },
+    { Text = wezterm.nerdfonts.md_clock .. " " },
+    { Foreground = { Color = fg } },
+    { Text = time .. " " },
   }))
 end)
 
@@ -292,10 +236,37 @@ config.inactive_pane_hsb = {
   brightness = 0.5
 }
 
+
+---------------------------------------------------------
+--                     Keymaps                         --
+---------------------------------------------------------
 -- Keys
 config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 3000 }
 config.keys = {
-  { key = "C", mods = "LEADER", action = act.ActivateCopyMode },
+  -- Clipboard
+  { key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
+  { key = "c", mods = "CTRL|SHIFT", action = act.CopyTo("Clipboard") },
+  -- Image paste: saves clipboard image to /tmp and pastes the path
+  {
+    key = "v",
+    mods = "CTRL|SHIFT",
+    action = wezterm.action_callback(function(window, pane)
+      local ok, stdout, stderr = wezterm.run_child_process({
+        "/bin/bash",
+        os.getenv("HOME") .. "/.local/bin/clip2path"
+      })
+      if ok and stdout then
+        local result = stdout:gsub("%s+$", "")
+        if result ~= "" and result:match("^/tmp/clip_") then
+          pane:send_text(result)
+        else
+          window:perform_action(act.PasteFrom("Clipboard"), pane)
+        end
+      else
+        window:perform_action(act.PasteFrom("Clipboard"), pane)
+      end
+    end),
+  },
 
   -- Pane Keybindings
   { key = "-", mods = "LEADER", action = act.SplitVertical { domain = "CurrentPaneDomain" } },
@@ -307,7 +278,9 @@ config.keys = {
   { key = "x", mods = "LEADER", action = act.CloseCurrentPane { confirm = true } },
   { key = "z", mods = "LEADER", action = act.TogglePaneZoomState },
   { key = "s", mods = "LEADER", action = act.RotatePanes "Clockwise" },
-  { key = "r", mods = "LEADER", action = act.ActivateKeyTable { name = "resize_pane", one_shot = false } },
+  -- We could make separate keybindings for resizing panes
+  -- But Wezterm offers a custom mode we will use here
+  { key = "r", mods = "ALT", action = act.ActivateKeyTable { name = "resize_pane", one_shot = false } },
 
   -- Tab Keybindings
   { key = "c", mods = "LEADER", action = act.SpawnTab("CurrentPaneDomain") },
@@ -343,11 +316,6 @@ config.keys = {
       end),
     },
   },
-
-  -- Session Manager
-  { key = "S", mods = "LEADER", action = wezterm.action({ EmitEvent = "save_state" }) },
-  { key = "R", mods = "LEADER", action = wezterm.action({ EmitEvent = "restore_state" }) },
-  { key = "L", mods = "LEADER", action = wezterm.action({ EmitEvent = "load_state" }) },
 }
 
 -- Quick tab movement

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
 Hook configuration utility.
-Reads config.json to determine which hooks are enabled.
+Reads config.toml to determine which hooks are enabled.
+Falls back to config.json for backwards compatibility.
 """
 
 import json
+import tomllib
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".claude" / "hooks" / "config.json"
+CONFIG_TOML = Path.home() / ".claude" / "hooks" / "config.toml"
+CONFIG_JSON = Path.home() / ".claude" / "hooks" / "config.json"
 
 _config_cache = None
 
@@ -18,8 +21,11 @@ def get_config():
         return _config_cache
 
     try:
-        if CONFIG_PATH.exists():
-            with open(CONFIG_PATH, 'r') as f:
+        if CONFIG_TOML.exists():
+            with open(CONFIG_TOML, 'rb') as f:
+                _config_cache = tomllib.load(f)
+        elif CONFIG_JSON.exists():
+            with open(CONFIG_JSON, 'r') as f:
                 _config_cache = json.load(f)
         else:
             _config_cache = {}
@@ -32,7 +38,6 @@ def is_hook_enabled(hook_name):
     """Check if a specific hook is enabled."""
     config = get_config()
     hooks = config.get("hooks", {})
-    # Default to True if not specified
     return hooks.get(hook_name, True)
 
 def is_tts_enabled():
@@ -40,6 +45,11 @@ def is_tts_enabled():
     config = get_config()
     tts = config.get("tts", {})
     return tts.get("enabled", True)
+
+def get_tts_config():
+    """Get full TTS configuration."""
+    config = get_config()
+    return config.get("tts", {})
 
 def get_security_config():
     """Get security configuration."""

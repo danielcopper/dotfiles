@@ -65,7 +65,6 @@ alias ip='ip -color=auto'
 alias diff='diff --color=auto'
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 alias update='sudo -v && paru -Syu --noconfirm --skipreview'
-alias cc='alacritty -e claude'
 
 # complete dotfiles alias git commands
 source /usr/share/bash-completion/completions/git

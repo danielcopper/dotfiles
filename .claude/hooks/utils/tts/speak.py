@@ -1,70 +1,69 @@
 #!/usr/bin/env python3
 """
-TTS Manager with Priority Fallback
-Tries OpenAI TTS first, falls back to Windows TTS.
+TTS Manager - dispatches to configured provider.
+
+Provider is read from ~/.claude/hooks/config.toml under [tts].provider.
+Supported: "kokoro", "piper", "windows"
 """
 
-import os
 import sys
-import subprocess
 from pathlib import Path
 
-def get_tts_script():
-    """Determine which TTS script to use based on availability."""
-    hooks_dir = Path.home() / ".claude" / "hooks" / "utils" / "tts"
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import get_tts_config
 
-    # Priority 1: OpenAI TTS (if API key is set)
-    if os.getenv("OPENAI_API_KEY"):
-        openai_script = hooks_dir / "openai_tts.py"
-        if openai_script.exists():
-            return str(openai_script), "OpenAI"
+TTS_DIR = Path(__file__).parent
 
-    # Priority 2: Windows TTS (always available on WSL)
-    windows_script = hooks_dir / "windows_tts.py"
-    if windows_script.exists():
-        return str(windows_script), "Windows"
+PROVIDERS = {
+    "kokoro": TTS_DIR / "kokoro_tts.py",
+    "piper": TTS_DIR / "piper_tts.py",
+    "windows": TTS_DIR / "windows_tts.py",
+}
 
-    return None, None
+FALLBACK_ORDER = ["kokoro", "piper", "windows"]
 
-def speak(text, quiet=False):
-    """Speak text using the best available TTS provider."""
+
+def get_provider():
+    """Read configured TTS provider from config."""
+    return get_tts_config().get("provider", "kokoro")
+
+
+def speak(text):
+    """Speak text using the configured provider, with fallback."""
     if not text:
         return False
 
-    script, provider = get_tts_script()
+    provider = get_provider()
 
-    if not script:
-        if not quiet:
-            print("No TTS provider available", file=sys.stderr)
-        return False
+    # Build try-order: configured provider first, then fallbacks
+    order = [provider] + [p for p in FALLBACK_ORDER if p != provider]
 
-    try:
-        if not quiet:
-            print(f"🔊 Using {provider} TTS: {text[:50]}...", file=sys.stderr)
+    for name in order:
+        script = PROVIDERS.get(name)
+        if not script or not script.exists():
+            continue
 
-        result = subprocess.run(
-            [sys.executable, script, text],
-            timeout=20,
-            check=False,
-            capture_output=True
-        )
+        try:
+            # Import and call directly (avoids subprocess overhead)
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(name, str(script))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
 
-        return result.returncode == 0
+            if mod.speak(text):
+                return True
+        except Exception as e:
+            print(f"{name} TTS failed: {e}", file=sys.stderr)
+            continue
 
-    except subprocess.TimeoutExpired:
-        if not quiet:
-            print("TTS timeout", file=sys.stderr)
-        return False
-    except Exception as e:
-        if not quiet:
-            print(f"TTS error: {e}", file=sys.stderr)
-        return False
+    print("All TTS providers failed", file=sys.stderr)
+    return False
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         message = " ".join(sys.argv[1:])
-        success = speak(message)
-        sys.exit(0 if success else 1)
+        sys.exit(0 if speak(message) else 1)
     else:
         print("Usage: speak.py <message>", file=sys.stderr)
         sys.exit(1)

@@ -23,38 +23,25 @@ def load_config():
         return True, {"enabled": True, "max_entries": 100}
 
 def log_prompt(data, logging_config):
-    """Log prompt to file."""
+    """Log prompt to JSONL file."""
     if not logging_config.get("enabled", True):
         return
 
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "user_prompt_submit.json"
+    log_file = log_dir / "user_prompt_submit.jsonl"
 
     try:
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-        else:
-            logs = []
-
         hook_data = data.get("hookSpecificInput", {})
         prompt = hook_data.get("prompt", "")
-
-        logs.append({
+        entry = {
             "timestamp": datetime.now().isoformat(),
             "session_id": data.get("session_id", ""),
             "prompt_length": len(prompt),
             "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt
-        })
-
-        # Keep last N entries
-        max_entries = logging_config.get("max_entries", 100)
-        logs = logs[-max_entries:]
-
-        with open(log_file, 'w') as f:
-            json.dump(logs, f, indent=2)
-
+        }
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(entry) + "\n")
     except Exception:
         pass
 
@@ -81,6 +68,45 @@ def validate_prompt(prompt):
 
     return True, None
 
+
+def check_auto_resume():
+    """
+    Check if /implement workflow needs auto-resume after compact/clear.
+    Returns systemMessage if auto-resume is needed, None otherwise.
+    """
+    marker_file = Path.home() / ".claude" / "feature-progress" / ".auto-resume"
+
+    if not marker_file.exists():
+        return None
+
+    try:
+        state_file_path = marker_file.read_text().strip()
+
+        # Delete the marker file immediately to prevent re-triggering
+        marker_file.unlink()
+
+        # Verify the state file exists
+        if state_file_path and Path(state_file_path).exists():
+            return (
+                f"IMPORTANT: The /implement workflow was interrupted for context compaction. "
+                f"You MUST immediately run `/implement --resume` to continue the workflow. "
+                f"State file: {state_file_path}. "
+                f"Do this BEFORE responding to anything else the user said."
+            )
+        else:
+            return (
+                "IMPORTANT: The /implement workflow was interrupted for context compaction. "
+                "Run `/implement --resume` to continue (if there's a recent state file in ~/.claude/feature-progress/)."
+            )
+
+    except Exception:
+        # If anything goes wrong, try to clean up the marker
+        try:
+            marker_file.unlink()
+        except Exception:
+            pass
+        return None
+
 def main():
     """Process user prompt submit hook."""
     try:
@@ -92,6 +118,14 @@ def main():
 
         # Log the prompt
         log_prompt(data, logging_config)
+
+        # Check for /implement auto-resume after compact/clear
+        auto_resume_msg = check_auto_resume()
+        if auto_resume_msg:
+            print(json.dumps({
+                "systemMessage": auto_resume_msg
+            }))
+            sys.exit(0)
 
         # Validate if --validate flag is passed
         if "--validate" in sys.argv:

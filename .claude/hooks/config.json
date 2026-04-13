@@ -11,7 +11,8 @@
   },
   "tts": {
     "enabled": true,
-    "provider": "auto"
+    "provider": "kokoro",
+    "voice": "bm_daniel"
   },
   "security": {
     "block_dangerous_commands": true,
