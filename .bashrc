@@ -32,6 +32,9 @@ export PROTON_NO_FSYNC=0
 export TERMINAL="wezterm"
 export PATH="$HOME/.local/bin:$PATH"
 
+# Fallback for shells not covered by environment.d (nested, non-login)
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+
 # Bash
 # complete commmands
 #complete -c man which
