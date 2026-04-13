@@ -151,7 +151,7 @@ config.font = wezterm.font_with_fallback {
 }
 config.font_rules = {}
 
-config.font_size = 13
+config.font_size = 11
 
 -- Window
 config.window_background_opacity = 0.95
