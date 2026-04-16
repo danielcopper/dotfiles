@@ -16,7 +16,7 @@ pre_compact       = true
 # TTS (Text-to-Speech)
 # ============================================================================
 [tts]
-enabled  = true
+enabled  = false
 
 # Provider: "kokoro", "piper", "windows"
 # Fallback order if chosen provider fails: kokoro -> piper -> windows

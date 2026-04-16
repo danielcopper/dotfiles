@@ -116,9 +116,9 @@ LINE1="📁 ${DIR##*/}"
 if [ -n "$BRANCH" ]; then
     # Branch or worktree icon
     if [ "$IS_WORKTREE" = "1" ]; then
-        GIT_ICON="${FG_MAUVE}${RESET}"
+        GIT_ICON="${FG_MAUVE}${RESET}"
     else
-        GIT_ICON=""
+        GIT_ICON="${FG_BLUE}${RESET}"
     fi
     if [ "$HAS_UPSTREAM" = "1" ]; then
         SYNC_INFO="${FG_GREEN}↑${AHEAD}${RESET} ${FG_RED}↓${BEHIND}${RESET}"
