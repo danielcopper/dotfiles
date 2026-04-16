@@ -3,7 +3,7 @@
 ## Behavior
 
 - When a tool call is rejected/cancelled, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed.
-- **Asking is better than guessing.** Don't produce content for the sake of producing content. If uncertain, ask — Daniel can usually answer. Never invent fixes or implementations to fill silence.
+- **Don't be hyper-proactive.** Do exactly what was asked — no more. Don't invent couplings between independent tools ("tool A could read tool B's config"), don't add auto-detection layers, don't build smart fallbacks on top of smart fallbacks. Prefer a dumb default + simple override file over clever runtime logic. If you catch yourself writing a "detects X and automatically does Y" hook, stop and ask whether the user actually wanted that.
 
 ## Environment
 
@@ -11,6 +11,10 @@
 
 ## Git
 
+- **Conventional Commits** — always use the format: `<type>(<scope>): <description>`
+  - Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `ci`, `build`, `perf`, `style`
+  - Scope is optional but preferred (e.g., `feat(relay): add SSE endpoint`)
+  - Description is lowercase, imperative, no period
 - Never include "Co-authored by", "Generated with", or any similar AI/Claude mentions in commit messages
 - `git add .` is forbidden — always add files individually
 
@@ -44,10 +48,9 @@ Managed with [yadm](https://yadm.io) (Yet Another Dotfiles Manager).
 - Bare repo at `~/.local/share/yadm/repo.git`
 - Remote: `origin` (use `yadm remote get-url origin` to check)
 - **Single `main` branch** — no more branch-per-machine drift
-- Platform-specific files use **yadm alternates** (`##class.<name>` suffix, e.g. `~/.ssh/config##class.steamdeck`) or **esh/j2 templates** (`##template.esh` suffix with class-conditional blocks via `$YADM_CLASS`)
+- Platform-specific files use **yadm alternates** (`##class.<name>` suffix, e.g. `~/.bashrc##class.steamdeck`) or **esh templates** (`##template.esh` suffix with class-conditional blocks via `$YADM_CLASS`)
 - Machine class is set once via `yadm config local.class <name>` (e.g. `arch`, `wsl`, `steamdeck`)
 - Run `yadm alt` after class change or template edit to re-resolve alternates/templates
-- Old branch-per-machine history preserved under `archive/pre-yadm/<name>` tags
 
 ## Infrastructure
 
