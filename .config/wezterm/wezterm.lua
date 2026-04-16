@@ -151,7 +151,7 @@ config.font = wezterm.font_with_fallback {
 }
 config.font_rules = {}
 
-config.font_size = 11
+config.font_size = 13
 
 -- Window
 config.window_background_opacity = 0.95
@@ -244,29 +244,8 @@ config.inactive_pane_hsb = {
 config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 3000 }
 config.keys = {
   -- Clipboard
-  { key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
   { key = "c", mods = "CTRL|SHIFT", action = act.CopyTo("Clipboard") },
-  -- Image paste: saves clipboard image to /tmp and pastes the path
-  {
-    key = "v",
-    mods = "CTRL|SHIFT",
-    action = wezterm.action_callback(function(window, pane)
-      local ok, stdout, stderr = wezterm.run_child_process({
-        "/bin/bash",
-        os.getenv("HOME") .. "/.local/bin/clip2path"
-      })
-      if ok and stdout then
-        local result = stdout:gsub("%s+$", "")
-        if result ~= "" and result:match("^/tmp/clip_") then
-          pane:send_text(result)
-        else
-          window:perform_action(act.PasteFrom("Clipboard"), pane)
-        end
-      else
-        window:perform_action(act.PasteFrom("Clipboard"), pane)
-      end
-    end),
-  },
+  { key = "v", mods = "CTRL|SHIFT", action = act.PasteFrom("Clipboard") },
 
   -- Pane Keybindings
   { key = "-", mods = "LEADER", action = act.SplitVertical { domain = "CurrentPaneDomain" } },
