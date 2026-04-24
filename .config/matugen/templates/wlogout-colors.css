@@ -1,5 +1,0 @@
-@define-color crust {{colors.surface_container_lowest.default.hex}};
-@define-color surface0 {{colors.surface_container.default.hex}};
-@define-color surface1 {{colors.surface_container_high.default.hex}};
-@define-color text {{colors.on_surface.default.hex}};
-@define-color mauve {{colors.primary.default.hex}};
