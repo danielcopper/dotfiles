@@ -12,7 +12,7 @@ cd ~/dotfiles
 ./bootstrap.sh <class>
 ```
 
-Where `<class>` is one of `arch`, `steamdeck`, `wsl`.
+Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 
 ## Layout
 

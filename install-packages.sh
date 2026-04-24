@@ -2,7 +2,7 @@
 # Install OS packages for the given class.
 set -euo pipefail
 
-CLASS=${1:?usage: $0 <arch|steamdeck|wsl>}
+CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 
 if ! command -v pacman >/dev/null 2>&1; then

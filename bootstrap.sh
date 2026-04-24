@@ -2,7 +2,7 @@
 # Wrapper: install OS packages, then symlink dotfiles for the given class.
 set -euo pipefail
 
-CLASS=${1:?usage: $0 <arch|steamdeck|wsl>}
+CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 
 "$DIR/install-packages.sh" "$CLASS"

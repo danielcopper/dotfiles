@@ -2,7 +2,7 @@
 # Symlink dotfiles for the given class via GNU Stow.
 set -euo pipefail
 
-CLASS=${1:?usage: $0 <arch|steamdeck|wsl>}
+CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 cd "$DIR"
 
@@ -24,12 +24,12 @@ case "$CLASS" in
   steamdeck)
     class_pkgs=(host-steamdeck)
     ;;
-  wsl)
-    class_pkgs=(host-wsl)
+  wsl-arch)
+    class_pkgs=(host-wsl-arch)
     ;;
   *)
     echo "unknown class: $CLASS" >&2
-    echo "supported: arch, steamdeck, wsl" >&2
+    echo "supported: arch, steamdeck, wsl-arch" >&2
     exit 1
     ;;
 esac
