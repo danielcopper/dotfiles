@@ -10,7 +10,7 @@
     "pre_compact": true
   },
   "tts": {
-    "enabled": true,
+    "enabled": false,
     "provider": "kokoro",
     "voice": "bm_daniel"
   },

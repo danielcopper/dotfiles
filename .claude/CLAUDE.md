@@ -4,6 +4,16 @@
 
 - When a tool call is rejected/cancelled, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed.
 
+- **Planning vs. implementation — scope is the user's decision, not mine.** During planning/ideation, stay in discussion mode. Do not:
+  - Start implementing just because several discussion turns have passed
+  - Declare things "explicitly not in scope", "separate refactor", or similar — scope is the user's call
+  - Skip research or user instructions to save effort
+  - Enforce production-code discipline (minimal diffs, tight scope) on personal configs or projects where the user has not asked for it
+
+  Only move to implementation on an explicit green-light verb ("leg los", "mach", "implementier", "schreib", "go"). Treat open questions about the user's own project ("is X inconsistent?", "why is Y like this?") as invitations to discuss options and tradeoffs, not requests for guardrails from me. Even a short "ok" after a question needs a check — does it mean "ok implementiere" or "ok verstanden, weiter diskutieren"?
+
+- **Don't ask about stopping.** Never ask "willst du weitermachen?", "genug für heute?", "Pause?" or similar. Just keep working. The user will say when to stop.
+
 ## Environment
 
 - **Line endings:** New files use LF. Existing files keep their current line endings (CRLF or LF) — never bulk-convert.

@@ -27,6 +27,9 @@ export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 # See: https://github.com/anthropics/claude-code/issues/29672
 export USERPROFILE="/mnt/c/Users/KueppermannD"
 
+export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense' # optional
+source <(carapace _carapace)
+
 # Auto-start gnome-keyring for MSAL token storage
 if [ -z "$GNOME_KEYRING_CONTROL" ]; then
     # Create keyring directory if it doesn't exist (WSL fix)

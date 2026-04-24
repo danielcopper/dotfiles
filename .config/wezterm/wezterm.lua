@@ -246,9 +246,13 @@ config.inactive_pane_hsb = {
 -- Keys
 config.leader = { key = "Space", mods = "SHIFT", timeout_milliseconds = 3000 }
 config.keys = {
-  -- Clipboard
+  -- Clipboard: Ctrl+V = text paste, Ctrl+Shift+V = image paste (passthrough to app)
   { key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
+  { key = "v", mods = "CTRL|SHIFT", action = act.SendKey { key = "v", mods = "CTRL" } },
   { key = "c", mods = "CTRL|SHIFT", action = act.CopyTo("Clipboard") },
+
+  -- Copy mode (vim-style navigation outside tmux)
+  { key = "Escape", mods = "LEADER", action = act.ActivateCopyMode },
 
   -- Pane Keybindings
   { key = "-", mods = "LEADER", action = act.SplitVertical { domain = "CurrentPaneDomain" } },
