@@ -3,7 +3,18 @@
 ## Behavior
 
 - When a tool call is rejected/cancelled, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed.
+
 - **Don't be hyper-proactive.** Do exactly what was asked — no more. Don't invent couplings between independent tools ("tool A could read tool B's config"), don't add auto-detection layers, don't build smart fallbacks on top of smart fallbacks. Prefer a dumb default + simple override file over clever runtime logic. If you catch yourself writing a "detects X and automatically does Y" hook, stop and ask whether the user actually wanted that.
+
+- **Planning vs. implementation — scope is the user's decision, not mine.** During planning/ideation, stay in discussion mode. Do not:
+  - Start implementing just because several discussion turns have passed
+  - Declare things "explicitly not in scope", "separate refactor", or similar — scope is the user's call
+  - Skip research or user instructions to save effort
+  - Enforce production-code discipline (minimal diffs, tight scope) on personal configs or projects where the user has not asked for it
+
+  Only move to implementation on an explicit green-light verb ("leg los", "mach", "implementier", "schreib", "go"). Treat open questions about the user's own project ("is X inconsistent?", "why is Y like this?") as invitations to discuss options and tradeoffs, not requests for guardrails from me. Even a short "ok" after a question needs a check — does it mean "ok implementiere" or "ok verstanden, weiter diskutieren"?
+
+- **Don't ask about stopping.** Never ask "willst du weitermachen?", "genug für heute?", "Pause?" or similar. Just keep working. The user will say when to stop.
 
 ## Environment
 
