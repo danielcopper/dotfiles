@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Symlink dotfiles for the given class via GNU Stow.
+set -euo pipefail
+
+CLASS=${1:?usage: $0 <arch|steamdeck|wsl>}
+DIR="$(dirname "$(readlink -f "$0")")"
+cd "$DIR"
+
+common_pkgs=(
+  bash
+  git
+  inputrc
+  claude
+  starship
+  tmux
+  wezterm
+  lazygit
+)
+
+case "$CLASS" in
+  arch)
+    class_pkgs=(alacritty hypr waybar rofi swaync walker wlogout host-arch)
+    ;;
+  steamdeck)
+    class_pkgs=(host-steamdeck)
+    ;;
+  wsl)
+    class_pkgs=(host-wsl)
+    ;;
+  *)
+    echo "unknown class: $CLASS" >&2
+    echo "supported: arch, steamdeck, wsl" >&2
+    exit 1
+    ;;
+esac
+
+all_pkgs=("${common_pkgs[@]}" "${class_pkgs[@]}")
+
+echo "stowing for class=$CLASS:"
+printf '  %s\n' "${all_pkgs[@]}"
+echo
+
+stow -R "${all_pkgs[@]}"

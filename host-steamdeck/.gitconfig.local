@@ -1,0 +1,1 @@
+# Steamdeck-specific git config. Included by shared .gitconfig via [include] path.

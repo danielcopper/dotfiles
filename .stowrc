@@ -1,0 +1,6 @@
+--target=~
+--verbose=1
+--ignore=^install-.*\.sh$
+--ignore=^bootstrap\.sh$
+--ignore=^packages$
+--ignore=^host-.*$
