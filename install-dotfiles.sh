@@ -40,4 +40,6 @@ echo "stowing for class=$CLASS:"
 printf '  %s\n' "${all_pkgs[@]}"
 echo
 
-stow -R "${all_pkgs[@]}"
+# --override lets host-<class> replace shared files where needed (e.g. claude/.claude/settings.json).
+# Harmless on hosts without overrides since no conflict exists.
+stow -R --override='^\.claude/settings\.json$' "${all_pkgs[@]}"

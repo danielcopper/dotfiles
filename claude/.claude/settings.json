@@ -39,6 +39,7 @@
       "Bash(mise trust:*)",
       "Bash(mise install:*)",
       "Bash(mise run test:*)",
+      "Bash(sqlcmd -S localhost -U sa -C:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
@@ -135,17 +136,7 @@
             "timeout": 10
           }
         ]
-      }<% if [ "$YADM_CLASS" = "arch" ]; then %>,
-      {
-        "matcher": "resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/daniel/projects/claude-matrix-bridge/scripts/session-hook.sh start",
-            "timeout": 5000
-          }
-        ]
-      }<% fi %>
+      }
     ],
     "PreCompact": [
       {
@@ -158,19 +149,7 @@
           }
         ]
       }
-    ]<% if [ "$YADM_CLASS" = "arch" ]; then %>,
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/daniel/projects/claude-matrix-bridge/scripts/session-hook.sh end",
-            "timeout": 5000
-          }
-        ]
-      }
-    ]<% fi %>
+    ]
   },
   "statusLine": {
     "type": "command",
@@ -201,5 +180,8 @@
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "high",
-  "voiceEnabled": true
+  "tui": "fullscreen",
+  "voiceEnabled": true,
+  "editorMode": "vim",
+  "verbose": true
 }
