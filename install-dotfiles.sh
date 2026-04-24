@@ -19,7 +19,7 @@ common_pkgs=(
 
 case "$CLASS" in
   arch)
-    class_pkgs=(alacritty hypr waybar rofi swaync walker wlogout host-arch)
+    class_pkgs=(alacritty host-arch)
     ;;
   steamdeck)
     class_pkgs=(host-steamdeck)
