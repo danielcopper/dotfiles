@@ -166,7 +166,7 @@ config.window_padding = {
 
 -- General
 config.scrollback_lines = 10000
-config.max_fps = 90
+config.max_fps = 165
 config.enable_kitty_keyboard = true
 
 -- Start maximized
@@ -247,6 +247,9 @@ config.keys = {
   { key = "c", mods = "CTRL|SHIFT", action = act.CopyTo("Clipboard") },
   { key = "v", mods = "CTRL|SHIFT", action = act.PasteFrom("Clipboard") },
 
+  -- Copy mode (vim-style navigation outside tmux)
+  { key = "Escape", mods = "LEADER", action = act.ActivateCopyMode },
+
   -- Pane Keybindings
   { key = "-", mods = "LEADER", action = act.SplitVertical { domain = "CurrentPaneDomain" } },
   { key = "|", mods = "LEADER", action = act.SplitHorizontal { domain = "CurrentPaneDomain" } },
@@ -324,5 +327,17 @@ config.key_tables = {
     { key = "Enter",  action = "PopKeyTable" },
   }
 }
+
+-- Per-host overrides: load wezterm.local.lua if present.
+-- The local file should return a function(config, wezterm, act) that mutates config.
+local local_path = wezterm.home_dir .. "/.config/wezterm/wezterm.local.lua"
+local f = io.open(local_path)
+if f then
+  f:close()
+  local apply = dofile(local_path)
+  if type(apply) == "function" then
+    apply(config, wezterm, act)
+  end
+end
 
 return config
