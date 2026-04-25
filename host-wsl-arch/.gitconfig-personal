@@ -1,0 +1,6 @@
+# Personal identity override. Loaded by [includeIf] in .gitconfig.local
+# whenever the current git dir is under ~/Repos/personal/ or ~/dotfiles/.
+
+[user]
+	name = danielcopper
+	email = daniel.kueppermann@gmail.com

@@ -1,1 +1,14 @@
-# WSL-specific git config. Included by shared .gitconfig via [include] path.
+# WSL-arch-specific git config. Included by shared .gitconfig via [include] path.
+#
+# Default identity is work; personal identity kicks in inside ~/Repos/personal/
+# and ~/dotfiles/ via the conditional includes below.
+
+[user]
+	name = Daniel Küppermann
+	email = daniel.kueppermann@l-p-a.com
+
+[includeIf "gitdir:~/Repos/personal/"]
+	path = ~/.gitconfig-personal
+
+[includeIf "gitdir:~/dotfiles/"]
+	path = ~/.gitconfig-personal

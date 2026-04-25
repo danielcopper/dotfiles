@@ -1,1 +1,5 @@
 # Arch-specific git config. Included by shared .gitconfig via [include] path.
+
+[user]
+	name = danielcopper
+	email = daniel.kueppermann@gmail.com
