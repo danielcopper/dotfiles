@@ -1,1 +1,34 @@
-# WSL-specific bash config. Sourced by shared .bashrc at the end.
+# WSL-arch-specific bash config. Sourced by shared .bashrc.
+
+# Greeter
+fastfetch
+
+# Prevent Claude Code from spawning powershell.exe ~38x on startup to resolve
+# this variable. Each call takes ~700ms on WSL2, causing 30-60s input freeze.
+# https://github.com/anthropics/claude-code/issues/29672
+export USERPROFILE="/mnt/c/Users/KueppermannD"
+
+# dbt profiles location
+export DBT_PROFILES_DIR="$HOME/.config/dbt"
+
+# Carapace shell completions (with cross-shell bridges)
+export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
+source <(carapace _carapace)
+
+# Pkgfile command-not-found
+source /usr/share/doc/pkgfile/command-not-found.bash
+
+# Auto-start gnome-keyring for MSAL token storage (WSL needs this manually)
+if [ -z "$GNOME_KEYRING_CONTROL" ]; then
+    mkdir -p "/run/user/$UID/keyring" 2>/dev/null
+    eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)"
+    export GNOME_KEYRING_CONTROL
+fi
+
+# Auto-start wsl-screenshot-cli (clipboard screenshot → WSL path)
+if command -v wsl-screenshot-cli &>/dev/null && wsl-screenshot-cli status 2>/dev/null | grep -q "not running"; then
+    wsl-screenshot-cli start --daemon &>/dev/null
+fi
+
+# opencode CLI on PATH
+export PATH="/home/daniel/.opencode/bin:$PATH"

@@ -1,1 +1,17 @@
-# Arch-specific bash config. Sourced by shared .bashrc at the end.
+# Arch-specific bash config. Sourced by shared .bashrc.
+
+# Greeter
+fastfetch
+
+# Proton ESYNC/FSYNC for Wine/Proton gaming
+export PROTON_NO_ESYNC=0
+export PROTON_NO_FSYNC=0
+
+# SSH agent socket fallback for nested non-login shells
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+
+# Pkgfile command-not-found
+source /usr/share/doc/pkgfile/command-not-found.bash
+
+# Pacman wrapper
+alias update='sudo -v && paru -Syu --noconfirm --skipreview'

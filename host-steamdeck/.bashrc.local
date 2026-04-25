@@ -1,1 +1,15 @@
-# Steamdeck-specific bash config. Sourced by shared .bashrc at the end.
+# Steamdeck-specific bash config. Sourced by shared .bashrc.
+
+# SSH agent socket fallback for nested non-login shells
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+
+# Homebrew (linuxbrew on steamdeck because pacman is read-only)
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# Nix daemon
+if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
+    . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+fi
+
+# Pacman wrapper
+alias update='sudo -v && paru -Syu --noconfirm --skipreview'
