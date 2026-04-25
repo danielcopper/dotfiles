@@ -1,0 +1,11 @@
+[http]
+	lowSpeedLimit = 1000
+	lowSpeedTime = 60
+	postBuffer = 524288000
+
+[user]
+	name = danielcopper
+	email = daniel.kueppermann@gmail.com
+
+[include]
+	path = ~/.gitconfig.local
