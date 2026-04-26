@@ -5,6 +5,7 @@ base-devel
 bash-completion
 fastfetch
 fd
+fzf
 git
 gitleaks
 jq
