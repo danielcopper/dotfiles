@@ -7,9 +7,12 @@ MODELS_DIR="$CLAUDE_DIR/hooks/utils/tts/models"
 echo "=== Claude Code Setup ==="
 
 # ── Step 1: Python dependencies ──────────────────────────────────────
+# Install to the user site so this works on PEP 668 distros (Arch, Debian
+# 12+, …) without --break-system-packages. python3 -m pip is more
+# portable than the bare `pip` binary, which may not exist on all hosts.
 echo ""
 echo "[1/3] Installing Python dependencies..."
-pip install -q -r "$CLAUDE_DIR/requirements.txt"
+python3 -m pip install --user -q -r "$CLAUDE_DIR/requirements.txt"
 echo "  Done."
 
 # ── Step 2: System packages (audio) ─────────────────────────────────
