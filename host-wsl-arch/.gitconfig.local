@@ -8,7 +8,7 @@
 	email = daniel.kueppermann@l-p-a.com
 
 [includeIf "gitdir:~/Repos/personal/"]
-	path = ~/.gitconfig-personal
+	path = ~/.gitconfig.personal
 
 [includeIf "gitdir:~/dotfiles/"]
-	path = ~/.gitconfig-personal
+	path = ~/.gitconfig.personal
