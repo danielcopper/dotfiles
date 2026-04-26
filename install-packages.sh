@@ -94,12 +94,18 @@ install_flatpak() {
   echo "$apps" | xargs -r flatpak install --user -y --noninteractive flathub
 
   # Flatpaks read config from their sandbox XDG_CONFIG_HOME
-  # (~/.var/app/<id>/config), not from ~/.config. Expose stow-managed configs
-  # via xdg-config:ro mounts so the symlinked files in ~/.config/<app> are
-  # visible inside the sandbox. `flatpak override` rewrites the per-app
-  # override file each call, so this is idempotent.
+  # (~/.var/app/<id>/config), not from ~/.config. For wezterm two pieces
+  # are needed: (1) expose the host's ~/.config/wezterm into the sandbox
+  # via xdg-config:ro, and (2) point wezterm at the file via
+  # WEZTERM_CONFIG_FILE. The filesystem override alone doesn't help —
+  # wezterm still searches its own sandbox XDG_CONFIG_HOME by default.
+  # `flatpak override` rewrites the per-app override file each call, so
+  # this is idempotent.
   if printf '%s\n' "$apps" | grep -qx 'org.wezfurlong.wezterm'; then
-    flatpak override --user --filesystem=xdg-config/wezterm:ro org.wezfurlong.wezterm
+    flatpak override --user \
+      --filesystem=xdg-config/wezterm:ro \
+      --env=WEZTERM_CONFIG_FILE="$HOME/.config/wezterm/wezterm.lua" \
+      org.wezfurlong.wezterm
   fi
 }
 
