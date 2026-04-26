@@ -4,6 +4,8 @@
 base-devel
 bash-completion
 fastfetch
+fd
+git
 gitleaks
 jq
 lazygit
@@ -12,9 +14,11 @@ mise
 neovim
 openssh
 pkgfile
+ripgrep
 starship
 stow
 tmux
+tree-sitter
 ttf-jetbrains-mono-nerd
 wezterm
 zoxide

@@ -5,13 +5,17 @@
 
 bash-completion@2
 fastfetch
+fd
+git
 gitleaks
 jq
 lazygit
 lsd
 mise
 neovim
+ripgrep
 starship
 stow
 tmux
+tree-sitter
 zoxide
