@@ -3,6 +3,11 @@
 	lowSpeedTime = 60
 	postBuffer = 524288000
 
+[core]
+	# Global hooks path — pre-push runs gitleaks on every repo.
+	# Project-local override: `git config core.hooksPath .git/hooks`.
+	hooksPath = ~/.githooks
+
 # [user] is host-specific (work-default on wsl, personal on arch/steamdeck).
 # Set in host-<class>/.gitconfig.local via [include] below.
 
