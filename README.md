@@ -22,7 +22,8 @@ Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 | `host-<class>/` | Per-host packages holding `.local` addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. Claude `settings.json`). |
 | `packages/common.pkglist`, `packages/<class>.pkglist` | Per-class pacman lists consumed by `install-packages.sh` for the `arch` and `wsl-arch` classes. Blank lines and `#` comments are ignored. |
 | `packages/steamdeck.brewlist` | Per-class brew list. SteamOS root is read-only, so the steamdeck class uses linuxbrew instead of pacman; `install-packages.sh` bootstraps brew if missing. |
-| `install-packages.sh <class>` | Install / update OS packages for the class (pacman on arch / wsl-arch, brew on steamdeck). |
+| `packages/steamdeck.flatpaklist` | Per-class flatpak list. Used for apps that ship as macOS-only Casks on Homebrew (e.g. wezterm) and need a Linux install path. Installed user-scope from flathub. |
+| `install-packages.sh <class>` | Install / update OS packages for the class (pacman on arch / wsl-arch, brew + flatpak on steamdeck). |
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. |
 | `bootstrap.sh <class>` | Convenience wrapper that runs both. |
 | `.stowrc` | Default stow flags (`--target=~`, verbose, ignores for scripts / `packages/` / `host-*`). |
