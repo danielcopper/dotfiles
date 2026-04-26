@@ -2,3 +2,8 @@
 # Used instead of common.pkglist/steamdeck.pkglist because SteamOS root is
 # read-only and pacman installs don't survive system updates.
 # One name per line. Blank lines and lines starting with `#` are ignored.
+
+gitleaks
+fastfetch
+wezterm
+neovim
