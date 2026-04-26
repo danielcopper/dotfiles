@@ -269,15 +269,6 @@ items:
         key: ","
         command: customize-mode -Z
   - separator: true
-  - name: SessionX
-    key: o
-    command: run-shell "$HOME/.config/tmux/plugins/tmux-sessionx/scripts/sessionx.sh"
-  - name: Floax (Alt+f)
-    key: f
-    command: run-shell "$HOME/.config/tmux/plugins/tmux-floax/scripts/floax.sh"
-  - name: Thumbs
-    key: t
-    command: run-shell -b "$HOME/.config/tmux/plugins/tmux-thumbs/tmux-thumbs.sh"
   - name: Split horizontal
     key: "|"
     command: "splitw -h -c #{pane_current_path}"
