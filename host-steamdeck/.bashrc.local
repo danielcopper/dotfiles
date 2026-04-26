@@ -3,8 +3,11 @@
 # SSH agent socket fallback for nested non-login shells
 export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
 
-# Homebrew (linuxbrew on steamdeck because pacman is read-only)
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# Homebrew (linuxbrew on steamdeck because pacman is read-only).
+# Bootstrap installs brew before stowing, but guard so a broken/missing
+# brew install doesn't break every shell startup.
+[ -x /home/linuxbrew/.linuxbrew/bin/brew ] && \
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 # Nix daemon
 if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
