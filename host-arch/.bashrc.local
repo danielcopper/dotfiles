@@ -8,7 +8,8 @@ export PROTON_NO_FSYNC=0
 export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
 
 # Pkgfile command-not-found
-source /usr/share/doc/pkgfile/command-not-found.bash
+[ -r /usr/share/doc/pkgfile/command-not-found.bash ] && \
+  . /usr/share/doc/pkgfile/command-not-found.bash
 
 # Pacman wrapper
 alias update='sudo -v && paru -Syu --noconfirm --skipreview'

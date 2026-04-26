@@ -13,7 +13,8 @@ export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
 command -v carapace >/dev/null && source <(carapace _carapace)
 
 # Pkgfile command-not-found
-source /usr/share/doc/pkgfile/command-not-found.bash
+[ -r /usr/share/doc/pkgfile/command-not-found.bash ] && \
+  . /usr/share/doc/pkgfile/command-not-found.bash
 
 # Auto-start gnome-keyring for MSAL token storage (WSL needs this manually)
 if [ -z "$GNOME_KEYRING_CONTROL" ]; then
