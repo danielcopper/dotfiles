@@ -11,5 +11,6 @@ if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
     . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
 fi
 
-# Pacman wrapper
-alias update='sudo -v && paru -Syu --noconfirm --skipreview'
+# Update wrapper — SteamOS root is read-only, so brew + flatpak stand in
+# for the pacman/paru combo on the arch hosts.
+alias update='brew update && brew upgrade && flatpak update --user -y'

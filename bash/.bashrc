@@ -6,7 +6,7 @@
 [[ $- != *i* ]] && return
 
 # Aliases
-alias ls='lsd'
+command -v lsd >/dev/null && alias ls='lsd'
 alias grep='grep --color=auto'
 alias ip='ip -color=auto'
 alias diff='diff --color=auto'
@@ -20,13 +20,18 @@ export VISUAL='nvim'
 export TERMINAL="wezterm"
 export PATH="$HOME/.local/bin:$HOME/.dotnet/tools:$PATH"
 
-# Bash completion
-source /usr/share/bash-completion/bash_completion
+# Bash completion. Distro path on arch/wsl-arch, brew path on steamdeck.
+for f in /usr/share/bash-completion/bash_completion \
+         "${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}/etc/profile.d/bash_completion.sh"; do
+  [ -r "$f" ] && . "$f" && break
+done
+unset f
 
-# Tool integrations
-eval "$(mise activate bash)"
-source <(ng completion script)
-source /usr/share/git/completion/git-completion.bash
+# Tool integrations — guard each so a missing tool doesn't spam errors.
+command -v mise >/dev/null && eval "$(mise activate bash)"
+command -v ng >/dev/null && source <(ng completion script)
+[ -r /usr/share/git/completion/git-completion.bash ] && \
+  . /usr/share/git/completion/git-completion.bash
 
 # Per-host overrides (greeter, package-manager tweaks, host-specific env)
 [ -f ~/.bashrc.local ] && . ~/.bashrc.local
@@ -35,5 +40,5 @@ source /usr/share/git/completion/git-completion.bash
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
 # Prompt + cd jumper — must run last
-eval "$(starship init bash)"
-eval "$(zoxide init bash --cmd cd)"
+command -v starship >/dev/null && eval "$(starship init bash)"
+command -v zoxide >/dev/null && eval "$(zoxide init bash --cmd cd)"
