@@ -33,7 +33,10 @@ command -v ng >/dev/null && source <(ng completion script)
 [ -r /usr/share/git/completion/git-completion.bash ] && \
   . /usr/share/git/completion/git-completion.bash
 
-# Per-host overrides (greeter, package-manager tweaks, host-specific env)
+# Greeter — installed on every host via package lists, but guard anyway.
+command -v fastfetch >/dev/null && fastfetch
+
+# Per-host overrides (package-manager tweaks, host-specific env)
 [ -f ~/.bashrc.local ] && . ~/.bashrc.local
 
 # Untracked secrets (API keys, SQLCMDPASSWORD, etc.) — file is gitignored.

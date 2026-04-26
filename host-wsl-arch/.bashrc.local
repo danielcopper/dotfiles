@@ -1,8 +1,5 @@
 # WSL-arch-specific bash config. Sourced by shared .bashrc.
 
-# Greeter
-fastfetch
-
 # Prevent Claude Code from spawning powershell.exe ~38x on startup to resolve
 # this variable. Each call takes ~700ms on WSL2, causing 30-60s input freeze.
 # https://github.com/anthropics/claude-code/issues/29672
