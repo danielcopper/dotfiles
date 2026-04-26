@@ -10,7 +10,7 @@ export DBT_PROFILES_DIR="$HOME/.config/dbt"
 
 # Carapace shell completions (with cross-shell bridges)
 export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
-source <(carapace _carapace)
+command -v carapace >/dev/null && source <(carapace _carapace)
 
 # Pkgfile command-not-found
 source /usr/share/doc/pkgfile/command-not-found.bash
