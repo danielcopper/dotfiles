@@ -17,7 +17,7 @@ macros:
   - name: reload-config
     commands:
       - display "#{log_info} Loading config... "
-      - source-file $HOME/.tmux.conf
+      - source-file ~/.config/tmux/tmux.conf
       - display -p "\n\n... Press ENTER to continue"
   - name: restart-pane
     commands:
@@ -292,7 +292,10 @@ items:
     command: "source-file ~/.config/tmux/tmux.conf \\; display-message tmux-reloaded"
   - name: Copy pane
     key: "y"
-    command: "capture-pane -J \\; save-buffer - \\; run clip.exe \\; display-message copied"
+    # capture-pane stores the pane into tmux's internal buffer; system-clipboard
+    # piping (was hard-coded clip.exe — WSL-only and broken on every other host)
+    # belongs in a per-host @copy-cmd, tracked in the tmux entknoten task.
+    command: "capture-pane -J \\; display-message 'pane → tmux buffer'"
   - separator: true
   - name: Time
     key: T
