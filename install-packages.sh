@@ -14,6 +14,14 @@ install_pacman() {
     echo "pacman not found; cannot install packages on this system" >&2
     exit 1
   fi
+
+  # Enable colour output in /etc/pacman.conf if currently commented.
+  # Idempotent: noop if Color is already active.
+  if grep -q '^#Color' /etc/pacman.conf; then
+    echo "enabling Color in /etc/pacman.conf"
+    sudo sed -i 's/^#Color/Color/' /etc/pacman.conf
+  fi
+
   for list in "$DIR/packages/common.pkglist" "$DIR/packages/${CLASS}.pkglist"; do
     if [[ ! -f "$list" ]]; then
       echo "skipping (not found): $list"
