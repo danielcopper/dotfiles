@@ -2,4 +2,5 @@
 --ignore=^install-.*\.sh$
 --ignore=^bootstrap\.sh$
 --ignore=^packages$
+--ignore=^samples$
 --ignore=^host-.*$

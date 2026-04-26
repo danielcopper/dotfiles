@@ -26,7 +26,8 @@ Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 | `install-packages.sh <class>` | Install / update OS packages for the class (pacman on arch / wsl-arch, brew + flatpak on steamdeck). |
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. |
 | `bootstrap.sh <class>` | Convenience wrapper that runs both. |
-| `.stowrc` | Default stow flags (`--target=~`, verbose, ignores for scripts / `packages/` / `host-*`). |
+| `samples/` | Snapshots that are *not* user dotfiles and aren't stow-managed (e.g. SDDM theme + login wallpapers — they live under `/usr/share/sddm/` and need manual root deploy). Kept in repo as a record. |
+| `.stowrc` | Default stow flags (`--target=~`, ignores for scripts / `packages/` / `samples/` / `host-*`). |
 
 ## Adding or changing a file
 
