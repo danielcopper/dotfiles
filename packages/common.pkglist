@@ -1,4 +1,5 @@
 # Packages installed on every host.
 # One name per line. Blank lines and lines starting with `#` are ignored.
 
+stow
 gitleaks
