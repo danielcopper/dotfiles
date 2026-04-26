@@ -5,6 +5,12 @@ set -euo pipefail
 CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 
+# Prompt for sudo upfront so the script doesn't pause mid-run waiting for a
+# password. No-op on systems with passwordless sudo (e.g. WSL by default).
+if command -v sudo >/dev/null 2>&1; then
+  sudo -v
+fi
+
 "$DIR/install-packages.sh" "$CLASS"
 "$DIR/install-dotfiles.sh" "$CLASS"
 
