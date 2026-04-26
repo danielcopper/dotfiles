@@ -5,6 +5,7 @@ base-devel
 bash-completion
 fastfetch
 gitleaks
+jq
 lazygit
 lsd
 mise
