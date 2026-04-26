@@ -7,3 +7,14 @@ DIR="$(dirname "$(readlink -f "$0")")"
 
 "$DIR/install-packages.sh" "$CLASS"
 "$DIR/install-dotfiles.sh" "$CLASS"
+
+cat <<'BANNER'
+
+─────────────────────────────────────────────────────────────
+  Bootstrap complete.
+
+  To pick up shell config changes:
+    • run:  exec bash -l
+    • or close this terminal and open a new one
+─────────────────────────────────────────────────────────────
+BANNER
