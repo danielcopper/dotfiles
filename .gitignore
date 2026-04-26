@@ -2,3 +2,8 @@
 
 # Untracked secrets file sourced from bash/.bashrc — never commit it.
 .bashrc.secrets
+
+# Per-package secrets and local-only Claude settings inside any stow package.
+# Defensive: catches future packages too, not just the current ones.
+**/.env
+**/.claude/settings.local.json

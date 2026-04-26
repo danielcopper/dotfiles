@@ -11,6 +11,7 @@ common_pkgs=(
   git
   inputrc
   claude
+  nvim
   starship
   tmux
   wezterm
