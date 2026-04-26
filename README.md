@@ -2,8 +2,6 @@
 
 Personal configuration files, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
-> **Migration in progress** (yadm → stow). The old yadm layout (`##class.*` alternates, ESH templates) still sits in-tree on `main` and is being translated per-app on branch `refactor/stow-migration`.
-
 ## Install on a fresh machine
 
 ```bash
@@ -36,11 +34,11 @@ cd ~/dotfiles
 stow -R <app>
 ```
 
-**Class-specific addition** (e.g. hypr config, only arch):
+**Class-specific addition** (e.g. konsole tweak, only on arch):
 
 ```bash
-# put it in the relevant app package (hypr/, waybar/, …)
-# include that package in install-dotfiles.sh's arch class_pkgs list if new
+# put it in the relevant app package (konsole/, …)
+# add the package to install-dotfiles.sh's arch class_pkgs list if new
 stow -R <app>
 ```
 

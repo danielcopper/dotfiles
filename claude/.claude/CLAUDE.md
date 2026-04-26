@@ -52,16 +52,16 @@ Rules:
 
 ## Dotfiles
 
-Managed with [yadm](https://yadm.io) (Yet Another Dotfiles Manager).
+Managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
-- All dotfiles commands: `yadm <command>` — behaves like git (`yadm status`, `yadm add`, `yadm commit`, `yadm push`, `yadm diff`)
-- Files can be added with relative or absolute paths
-- Bare repo at `~/.local/share/yadm/repo.git`
-- Remote: `origin` (use `yadm remote get-url origin` to check)
-- **Single `main` branch** — no more branch-per-machine drift
-- Platform-specific files use **yadm alternates** (`##class.<name>` suffix, e.g. `~/.bashrc##class.steamdeck`) or **esh templates** (`##template.esh` suffix with class-conditional blocks via `$YADM_CLASS`)
-- Machine class is set once via `yadm config local.class <name>` (e.g. `arch`, `wsl`, `steamdeck`)
-- Run `yadm alt` after class change or template edit to re-resolve alternates/templates
+- Regular git repo at `~/dotfiles/`. Remote: `origin` (use `git remote get-url origin` to check).
+- **Single branch** workflow; per-host differences live in `host-<class>/` packages.
+- Top-level dirs are stow packages (one per app: `bash/`, `git/`, `tmux/`, …).
+- `host-<class>/` packages carry per-host addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. Claude `settings.json`).
+- Files in `$HOME` are symlinks into the repo — edit anywhere; `cd ~/dotfiles && git diff` surfaces the change.
+- Re-link after structural changes: `cd ~/dotfiles && stow -R <pkg>`.
+- Bootstrap a fresh machine: `cd ~/dotfiles && ./bootstrap.sh <arch|steamdeck|wsl-arch>` (installs OS packages from `packages/<class>.pkglist`, then runs stow for the right set).
+- Secrets (API keys, `SQLCMDPASSWORD`) live in untracked `~/.bashrc.secrets`, sourced at the end of shared `.bashrc`.
 
 ## Infrastructure
 
@@ -69,6 +69,6 @@ Managed with [yadm](https://yadm.io) (Yet Another Dotfiles Manager).
 
 Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa`
 
-- Password is set via `SQLCMDPASSWORD` env var (in settings.json) — no `-P` flag needed
+- Password is exported as `SQLCMDPASSWORD` from untracked `~/.bashrc.secrets` (sourced by shared `.bashrc`) — no `-P` flag needed
 - Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -C`
 - Single quotes in `-Q` work normally: `-Q "SELECT * FROM t WHERE name = 'alice'"`
