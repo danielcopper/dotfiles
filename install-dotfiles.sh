@@ -53,12 +53,17 @@ for pkg in "${all_pkgs[@]}"; do
     if [ ! -e "$target" ] && [ ! -L "$target" ]; then
       continue
     fi
-    if [ -L "$target" ]; then
-      linkdest="$(readlink -f -- "$target" 2>/dev/null || true)"
-      expected="$(readlink -f -- "$DIR/$pkg/$rel" 2>/dev/null || true)"
-      if [ -n "$linkdest" ] && [ "$linkdest" = "$expected" ]; then
-        continue
-      fi
+    # If the target's canonical path already resolves to our repo file, treat
+    # it as already stowed. Covers two cases:
+    #   1. target itself is a symlink directly into our repo
+    #   2. target is reached via a parent dir symlink (stow's tree-folding,
+    #      e.g. ~/.githooks -> dotfiles/git/.githooks/) — an `-L` check on
+    #      the leaf alone misses this and an unguarded `mv` would move the
+    #      real file out of the repo.
+    target_canonical="$(readlink -f -- "$target" 2>/dev/null || true)"
+    expected_canonical="$(readlink -f -- "$DIR/$pkg/$rel" 2>/dev/null || true)"
+    if [ -n "$target_canonical" ] && [ "$target_canonical" = "$expected_canonical" ]; then
+      continue
     fi
     if [ -z "$backup_dir" ]; then
       backup_dir="$HOME/.dotfiles-pre-stow.$(date +%Y%m%d-%H%M%S)"
