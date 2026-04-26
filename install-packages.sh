@@ -19,8 +19,14 @@ install_pacman() {
       echo "skipping (not found): $list"
       continue
     fi
+    local pkgs
+    pkgs=$(grep -vE '^(#|$)' "$list" || true)
+    if [ -z "$pkgs" ]; then
+      echo "no packages in $list"
+      continue
+    fi
     echo "installing from $list"
-    grep -vE '^(#|$)' "$list" | sudo pacman -S --needed --noconfirm -
+    echo "$pkgs" | sudo pacman -S --needed --noconfirm -
   done
 }
 
