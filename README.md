@@ -2,7 +2,7 @@
 
 Personal configuration files, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
-## Install on a fresh machine
+## Install / update
 
 ```bash
 git clone git@github.com:danielcopper/dotfiles.git ~/dotfiles
@@ -12,14 +12,17 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 
+`bootstrap.sh` is the only command you need: same call on a fresh machine and after pulling dotfile changes. It is idempotent — pacman runs with `--needed`, brew skips already-installed packages and runs `upgrade` for new versions, stow re-links and only backs up files when there is a real conflict.
+
 ## Layout
 
 | path | purpose |
 |---|---|
 | `bash/`, `git/`, `tmux/`, … | Stow packages — one per app. Each mirrors the target tree under `$HOME`. |
 | `host-<class>/` | Per-host packages holding `.local` addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. Claude `settings.json`). |
-| `packages/<class>.pkglist` | Pacman package lists consumed by `install-packages.sh`. Blank lines and `#` comments are ignored. |
-| `install-packages.sh <class>` | Install OS packages for the class. |
+| `packages/common.pkglist`, `packages/<class>.pkglist` | Per-class pacman lists consumed by `install-packages.sh` for the `arch` and `wsl-arch` classes. Blank lines and `#` comments are ignored. |
+| `packages/steamdeck.brewlist` | Per-class brew list. SteamOS root is read-only, so the steamdeck class uses linuxbrew instead of pacman; `install-packages.sh` bootstraps brew if missing. |
+| `install-packages.sh <class>` | Install / update OS packages for the class (pacman on arch / wsl-arch, brew on steamdeck). |
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. |
 | `bootstrap.sh <class>` | Convenience wrapper that runs both. |
 | `.stowrc` | Default stow flags (`--target=~`, verbose, ignores for scripts / `packages/` / `host-*`). |
