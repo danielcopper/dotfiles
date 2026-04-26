@@ -79,7 +79,7 @@ into_our_repo() {
 # out of the source repo.
 for pkg in "${all_pkgs[@]}"; do
   while IFS= read -r entry; do
-    rel="${entry#$pkg/}"
+    rel="${entry#"$pkg"/}"
     target="$HOME/$rel"
     [ -L "$target" ] || continue
     canonical="$(readlink -f -- "$target" 2>/dev/null || true)"
@@ -99,7 +99,7 @@ backup_dir=""
 backed_up_count=0
 for pkg in "${all_pkgs[@]}"; do
   while IFS= read -r src; do
-    rel="${src#$pkg/}"
+    rel="${src#"$pkg"/}"
     target="$HOME/$rel"
     if [ ! -e "$target" ] && [ ! -L "$target" ]; then
       continue
