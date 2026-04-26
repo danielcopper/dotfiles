@@ -16,8 +16,11 @@ command -v carapace >/dev/null && source <(carapace _carapace)
 [ -r /usr/share/doc/pkgfile/command-not-found.bash ] && \
   . /usr/share/doc/pkgfile/command-not-found.bash
 
-# Auto-start gnome-keyring for MSAL token storage (WSL needs this manually)
-if [ -z "$GNOME_KEYRING_CONTROL" ]; then
+# Auto-start gnome-keyring for MSAL token storage (WSL needs this manually).
+# Only on the first shell of a session (SHLVL=1, no TMUX) — otherwise
+# parallel shells race and spawn multiple daemons. Subsequent shells
+# inherit GNOME_KEYRING_CONTROL from the parent env.
+if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -z "${TMUX:-}" ] && [ "${SHLVL:-1}" = "1" ]; then
     mkdir -p "/run/user/$UID/keyring" 2>/dev/null
     eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)"
     export GNOME_KEYRING_CONTROL
@@ -29,4 +32,4 @@ if command -v wsl-screenshot-cli &>/dev/null && wsl-screenshot-cli status 2>/dev
 fi
 
 # opencode CLI on PATH
-export PATH="/home/daniel/.opencode/bin:$PATH"
+[ -d "$HOME/.opencode/bin" ] && export PATH="$HOME/.opencode/bin:$PATH"
