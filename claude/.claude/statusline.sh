@@ -65,7 +65,7 @@ build_bar() {
     local fill_pos=$((pct * width / 100))
     local filled="${full_text:0:$fill_pos}"
     local empty="${full_text:$fill_pos}"
-    echo "${bg_fill}\033[30m${filled}${RESET}${BG_SURFACE0}${FG_SUBTEXT1}${empty}${RESET}"
+    printf '%s\\033[30m%s%s%s%s%s%s' "$bg_fill" "$filled" "$RESET" "$BG_SURFACE0" "$FG_SUBTEXT1" "$empty" "$RESET"
 }
 
 # ── Git cache ────────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ if [ -n "$BRANCH" ]; then
     if [ "$IS_WORKTREE" = "1" ]; then
         GIT_ICON="${FG_MAUVE}${RESET}"
     else
-        GIT_ICON="${FG_BLUE}${RESET}"
+        GIT_ICON="${FG_SAPPHIRE}${RESET}"
     fi
     if [ "$HAS_UPSTREAM" = "1" ]; then
         SYNC_INFO="${FG_GREEN}↑${AHEAD}${RESET} ${FG_RED}↓${BEHIND}${RESET}"
