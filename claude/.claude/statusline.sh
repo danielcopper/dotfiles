@@ -1,95 +1,129 @@
 #!/bin/bash
+# Claude Code statusline.
+#
+# Colour strategy is a hybrid (256-bg + truecolor-fg) because Claude Code
+# v2.1.78+ ships a global truecolor transformation that washes/inverts
+# 24-bit RGB backgrounds — dark crust came out as warm peach, the opposite
+# of what was set. See https://github.com/anthropics/claude-code/issues/35806
+# (washed-out custom colours) and #6466 (separate consecutive escape
+# sequences mishandled).
+#
+# Workarounds applied here:
+#   - bg uses 256-colour palette (\e[48;5;Nm) — bypasses the truecolor
+#     transform path.
+#   - fg keeps truecolor (\e[38;2;R;G;Bm) so Catppuccin tones stay
+#     accurate.
+#   - bg+fg are always combined in a single escape (\e[48;…;38;…m), never
+#     two consecutive ones — separate escapes are also broken in Claude.
+# Drop the 256-bg trick once Anthropic ships a fix.
+
 input=$(cat)
 
-# Auto-detect: API key set = api, otherwise subscription
-if [ -n "$ANTHROPIC_API_KEY" ]; then PLAN="api"; else PLAN="sub"; fi
+##### Parse JSON in a single jq call ##########################################
+data=$(printf '%s' "$input" | jq -r '
+  [
+    ((.model.display_name // "?") | gsub(" \\([^)]*context\\)"; "")),
+    (.workspace.current_dir // "."),
+    ((.context_window.used_percentage // 0) | floor),
+    (.context_window.context_window_size // 200000),
+    ((.rate_limits.five_hour.used_percentage // 0) | floor),
+    ((.rate_limits.seven_day.used_percentage // 0) | floor),
+    (.rate_limits.five_hour.resets_at // 0),
+    (.rate_limits.seven_day.resets_at // 0),
+    (.cost.total_lines_added // 0),
+    (.cost.total_lines_removed // 0)
+  ] | @tsv
+')
+IFS=$'\t' read -r MODEL DIR PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D LINES_ADD LINES_REM <<< "$data"
 
-# ── JSON fields ──────────────────────────────────────────────────────
-MODEL=$(echo "$input" | jq -r '.model.display_name // "?"' | sed 's/ ([^)]*context)//g')
-DIR=$(echo "$input" | jq -r '.workspace.current_dir // "."')
-PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
-COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
-LINES_ADD=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
-LINES_REM=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
-MAX_TOKENS=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
-PCT_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // 0' | cut -d. -f1)
-PCT_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // 0' | cut -d. -f1)
-RESET_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // 0')
-RESET_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // 0')
-
-# Format token capacity: 200000→"200k", 1000000→"1m"
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
     TOKEN_LABEL="$((MAX_TOKENS / 1000000))m"
 else
     TOKEN_LABEL="$((MAX_TOKENS / 1000))k"
 fi
 
-# ── Catppuccin Mocha ─────────────────────────────────────────────────
-# Foreground
-FG_GREEN='\033[38;2;166;227;161m'
-FG_RED='\033[38;2;243;139;168m'
-FG_YELLOW='\033[38;2;249;226;175m'
-FG_PEACH='\033[38;2;250;179;135m'
-FG_MAUVE='\033[38;2;203;166;247m'
-FG_SAPPHIRE='\033[38;2;116;199;236m'
-FG_SUBTEXT0='\033[38;2;166;173;200m'
-FG_OVERLAY0='\033[38;2;108;112;134m'
-FG_CRUST='\033[38;2;17;17;27m'
-FG_SUBTEXT1='\033[38;2;186;194;222m'
-# Background
-BG_GREEN='\033[48;2;166;227;161m'
-BG_YELLOW='\033[48;2;249;226;175m'
-BG_RED='\033[48;2;243;139;168m'
-BG_BLUE='\033[48;2;137;180;250m'
-BG_LAVENDER='\033[48;2;180;190;254m'
-BG_PEACH='\033[48;2;250;179;135m'
-BG_SURFACE0='\033[48;2;49;50;68m'
+##### Hybrid bg=256 + fg=truecolor (Catppuccin Mocha) #########################
+# 256-bg sidesteps the v2.1.78+ truecolor wash bug; truecolor fg keeps the
+# real Catppuccin tones. Combined into single escape per segment.
+# bg 237 ≈ neutral grey, bar fills warm-shifted (114 olive-green / 216 peach / 174 maroon-red).
+B_ROSE=$'\e[48;2;56;56;56;38;2;245;224;220m'
+B_FG=$'\e[48;2;56;56;56;38;2;205;214;244m'
+B_FG_B=$'\e[48;2;56;56;56;38;2;205;214;244;1m'
+B_SAP=$'\e[48;2;56;56;56;38;2;116;199;236m'
+B_GR=$'\e[48;2;56;56;56;38;2;166;227;161m'
+B_GR_B=$'\e[48;2;56;56;56;38;2;166;227;161;1m'
+B_ST0=$'\e[48;2;56;56;56;38;2;166;173;200m'
+B_OV0=$'\e[48;2;56;56;56;38;2;108;112;134m'
+B_PEACH=$'\e[48;2;56;56;56;38;2;250;179;135m'
+B_RED=$'\e[48;2;56;56;56;38;2;243;139;168m'
 
-BOLD='\033[1m'; STRIKE='\033[9m'; RESET='\033[0m'
+# Per-bar gradient palettes — all share the warning ramp (peach mid, red high)
+# but each starts from a distinct base colour to keep the three bars visually
+# distinguishable at typical low percentages.
+FILL_GR=$'\e[48;5;114;38;2;17;17;27m'        # context low — olive green
+FILL_PEACH=$'\e[48;5;216;38;2;17;17;27m'     # mid — soft peach (shared)
+FILL_RED=$'\e[48;5;174;38;2;17;17;27m'       # high — muted red (shared)
+FILL_5H_LOW=$'\e[48;5;222;38;2;17;17;27m'    # 5h low — warm yellow
+FILL_7D_LOW=$'\e[48;5;147;38;2;17;17;27m'    # 7d low — lavender
 
-# ── Progress bar builder ─────────────────────────────────────────────
-# Usage: build_bar WIDTH PERCENTAGE BG_LOW BG_MID BG_HIGH LABEL
+R=$'\e[0m'
+
+##### Progress bar — BG-fill on dark with centered label ######################
+# Args: width pct label [low [mid [high]]]
+# Defaults to the context palette (green/peach/red). Pass a different low
+# (e.g. $FILL_5H_LOW) to give a bar its own base colour while keeping the
+# warning ramp shared.
 build_bar() {
-    local width=$1 pct=$2 bg_low=$3 bg_mid=$4 bg_high=$5 label=$6
-    local bg_fill
-    if [ "$pct" -ge 85 ]; then bg_fill="$bg_high"
-    elif [ "$pct" -ge 65 ]; then bg_fill="$bg_mid"
-    else bg_fill="$bg_low"; fi
-    local label_len=${#label}
-    local pad_total=$((width - label_len))
-    [ "$pad_total" -lt 0 ] && pad_total=0
-    local pad_left=$((pad_total / 2))
-    local pad_right=$((pad_total - pad_left))
-    local full_text=$(printf '%*s%s%*s' "$pad_left" "" "$label" "$pad_right" "")
-    local fill_pos=$((pct * width / 100))
-    local filled="${full_text:0:$fill_pos}"
-    local empty="${full_text:$fill_pos}"
-    printf '%s\\033[30m%s%s%s%s%s%s' "$bg_fill" "$filled" "$RESET" "$BG_SURFACE0" "$FG_SUBTEXT1" "$empty" "$RESET"
+    local width=$1 pct=$2 label=$3
+    local low=${4:-$FILL_GR} mid=${5:-$FILL_PEACH} high=${6:-$FILL_RED}
+    local fill
+    if [ "$pct" -ge 85 ]; then fill="$high"
+    elif [ "$pct" -ge 65 ]; then fill="$mid"
+    else fill="$low"; fi
+    local llen=${#label}
+    local pad=$((width - llen)); [ "$pad" -lt 0 ] && pad=0
+    local pl=$((pad / 2)) pr=$((pad - pad / 2))
+    local full
+    full=$(printf '%*s%s%*s' "$pl" '' "$label" "$pr" '')
+    local fpos=$((pct * width / 100))
+    [ "$pct" -gt 0 ] && [ "$fpos" -lt 1 ] && fpos=1
+    printf '%s%s%s%s%s' "$fill" "${full:0:fpos}" "$B_FG" "${full:fpos}" "$R"
 }
 
-# ── Git cache ────────────────────────────────────────────────────────
+##### Reset countdowns ########################################################
+NOW=$(date +%s)
+fmt_remain() {
+    local remain=$(( $1 - NOW ))
+    [ "$remain" -lt 0 ] && remain=0
+    if [ "$remain" -ge 86400 ]; then
+        printf '%dd %dh' "$((remain / 86400))" "$(((remain % 86400) / 3600))"
+    else
+        printf '%dh %dm' "$((remain / 3600))" "$(((remain % 3600) / 60))"
+    fi
+}
+RESET_5H_FMT=$(fmt_remain "$RESET_5H")
+RESET_7D_FMT=$(fmt_remain "$RESET_7D")
+
+##### Git info — cached, single block per query ###############################
 CACHE_DIR="/tmp/statusline-cache"
 mkdir -p "$CACHE_DIR"
-CACHE_KEY=$(echo "$DIR" | md5sum | cut -d' ' -f1)
-CACHE_FILE="$CACHE_DIR/$CACHE_KEY"
-CACHE_MAX_AGE=5
+CACHE_FILE="$CACHE_DIR/$(echo "$DIR" | md5sum | cut -d' ' -f1)"
+CACHE_MAX_AGE=10
 
 cache_is_stale() {
     [ ! -f "$CACHE_FILE" ] || \
     [ $(($(date +%s) - $(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0))) -gt $CACHE_MAX_AGE ]
 }
 
-BRANCH="" ; HAS_UPSTREAM=0 ; AHEAD=0 ; BEHIND=0 ; STAGED=0 ; MODIFIED=0 ; UNTRACKED=0 ; REMOTE_URL="" ; IS_WORKTREE=0
+BRANCH="" HAS_UPSTREAM=0 AHEAD=0 BEHIND=0
+STAGED=0 MODIFIED=0 UNTRACKED=0 REMOTE_URL="" IS_WORKTREE=0
 
-if git -C "$DIR" rev-parse --git-dir > /dev/null 2>&1; then
+if git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1; then
     if cache_is_stale; then
         BRANCH=$(git -C "$DIR" branch --show-current 2>/dev/null)
-        # Detect worktree: git-dir differs from git-common-dir
         GIT_DIR=$(git -C "$DIR" rev-parse --git-dir 2>/dev/null)
         GIT_COMMON=$(git -C "$DIR" rev-parse --git-common-dir 2>/dev/null)
         [ "$GIT_DIR" != "$GIT_COMMON" ] && IS_WORKTREE=1
-        # Only use the actual tracked upstream — no fallbacks
         UPSTREAM=$(git -C "$DIR" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
         if [ -n "$UPSTREAM" ]; then
             HAS_UPSTREAM=1
@@ -103,96 +137,53 @@ if git -C "$DIR" rev-parse --git-dir > /dev/null 2>&1; then
             | sed 's|git@github\.com:|https://github.com/|' \
             | sed 's|git@\([^:]*\):|https://\1/|' \
             | sed 's|\.git$||')
-        echo "$BRANCH|$HAS_UPSTREAM|$AHEAD|$BEHIND|$STAGED|$MODIFIED|$UNTRACKED|$REMOTE_URL|$IS_WORKTREE" > "$CACHE_FILE"
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+            "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$REMOTE_URL" "$IS_WORKTREE" \
+            > "$CACHE_FILE"
     else
         IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED REMOTE_URL IS_WORKTREE < "$CACHE_FILE"
     fi
 fi
 
-# ── LINE 1: Project ──────────────────────────────────────────────────
-LINE1="📁 ${DIR##*/}"
+##### Compose LINE 1: project + git ###########################################
+LINE1="$B_ROSE 󰉋 $B_FG_B${DIR##*/} $R"
 
-# Git info
 if [ -n "$BRANCH" ]; then
-    # Branch or worktree icon
-    if [ "$IS_WORKTREE" = "1" ]; then
-        GIT_ICON="${FG_MAUVE}${RESET}"
-    else
-        GIT_ICON="${FG_SAPPHIRE}${RESET}"
-    fi
+    if [ "$IS_WORKTREE" = "1" ]; then BR_ICON=" "; else BR_ICON=" "; fi
+    LINE1+="  $B_SAP$BR_ICON$B_GR_B$BRANCH"
     if [ "$HAS_UPSTREAM" = "1" ]; then
-        SYNC_INFO="${FG_GREEN}↑${AHEAD}${RESET} ${FG_RED}↓${BEHIND}${RESET}"
+        LINE1+="$B_ST0 ↑$AHEAD ↓$BEHIND $R"
     else
-        SYNC_INFO="${FG_SUBTEXT0}↑- ↓-${RESET}"
-    fi
-    LINE1="${LINE1} | ${GIT_ICON} ${FG_GREEN}${BRANCH}${RESET} ${SYNC_INFO}"
-
-    # Working tree status
-    WT_PARTS=""
-    [ "$STAGED" -gt 0 ]    && WT_PARTS="${WT_PARTS}${FG_GREEN}+${STAGED}${RESET} "
-    [ "$MODIFIED" -gt 0 ]  && WT_PARTS="${WT_PARTS}${FG_PEACH}~${MODIFIED}${RESET} "
-    [ "$UNTRACKED" -gt 0 ] && WT_PARTS="${WT_PARTS}${FG_SUBTEXT0}?${UNTRACKED}${RESET} "
-    [ -n "$WT_PARTS" ] && LINE1="${LINE1} | ${WT_PARTS% }"
-
-    # Lines changed (session total)
-    if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_REM" -gt 0 ]; then
-        LINE1="${LINE1} | ${FG_GREEN}+${LINES_ADD}${RESET} ${FG_RED}-${LINES_REM}${RESET}"
-    fi
-
-    # Repo link (OSC 8 hyperlinks don't work in tmux through Claude Code's renderer)
-    if [ -n "$REMOTE_URL" ]; then
-        REPO_NAME=$(basename "$REMOTE_URL")
-        if [ -n "$TMUX" ]; then
-            LINE1="${LINE1} | 🔗 ${FG_SAPPHIRE}${REPO_NAME}${RESET} ${FG_OVERLAY0}${REMOTE_URL}${RESET}"
-        else
-            LINE1="${LINE1} | 🔗 \033]8;;${REMOTE_URL}\a${FG_SAPPHIRE}${REPO_NAME}${RESET}\033]8;;\a"
-        fi
+        LINE1+="$B_OV0 ↑- ↓- $R"
     fi
 fi
 
-# ── LINE 2: Session ─────────────────────────────────────────────────
-# Format reset countdowns
-NOW=$(date +%s)
-REMAIN_5H=$(( RESET_5H - NOW ))
-REMAIN_7D=$(( RESET_7D - NOW ))
-[ "$REMAIN_5H" -lt 0 ] && REMAIN_5H=0
-[ "$REMAIN_7D" -lt 0 ] && REMAIN_7D=0
-
-# 5h: always h+m
-R5H_H=$((REMAIN_5H / 3600))
-R5H_M=$(((REMAIN_5H % 3600) / 60))
-RESET_5H_FMT="${R5H_H}h ${R5H_M}m"
-
-# 7d: days if >=1d, otherwise h+m
-R7D_D=$((REMAIN_7D / 86400))
-if [ "$R7D_D" -ge 1 ]; then
-    R7D_H=$(((REMAIN_7D % 86400) / 3600))
-    RESET_7D_FMT="${R7D_D}d ${R7D_H}h"
-else
-    R7D_H=$((REMAIN_7D / 3600))
-    R7D_M=$(((REMAIN_7D % 3600) / 60))
-    RESET_7D_FMT="${R7D_H}h ${R7D_M}m"
+if [ "$STAGED" -gt 0 ] || [ "$MODIFIED" -gt 0 ] || [ "$UNTRACKED" -gt 0 ]; then
+    WT="$B_FG "
+    [ "$STAGED" -gt 0 ]    && WT+="$B_GR$STAGED$B_FG "
+    [ "$MODIFIED" -gt 0 ]  && WT+="$B_PEACH$MODIFIED$B_FG "
+    [ "$UNTRACKED" -gt 0 ] && WT+="$B_OV0$UNTRACKED$B_FG "
+    LINE1+="  $WT$R"
 fi
 
-# Build progress bars
-CTX_BAR=$(build_bar 20 "$PCT" "$BG_GREEN" "$BG_PEACH" "$BG_RED" "${MODEL} ${TOKEN_LABEL}")
-HOUR_BAR=$(build_bar 18 "$PCT_5H" "$BG_BLUE" "$BG_PEACH" "$BG_RED" "5h ${PCT_5H}% | ${RESET_5H_FMT}")
-WEEK_BAR=$(build_bar 18 "$PCT_7D" "$BG_LAVENDER" "$BG_PEACH" "$BG_RED" "7d ${PCT_7D}% | ${RESET_7D_FMT}")
-
-# Cost — strikethrough+dim for subscription, yellow for API
-COST_FMT=$(printf '$%.2f' "$COST")
-if [ "$PLAN" = "sub" ]; then
-    COST_PART="💰 ${FG_OVERLAY0}${STRIKE}${COST_FMT}${RESET}"
-else
-    COST_PART="💰 ${FG_YELLOW}${COST_FMT}${RESET}"
+if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_REM" -gt 0 ]; then
+    LINE1+="  $B_GR +$LINES_ADD $B_RED-$LINES_REM $R"
 fi
 
-# Duration
-DURATION_SEC=$((DURATION_MS / 1000))
-MINS=$((DURATION_SEC / 60)); SECS=$((DURATION_SEC % 60))
+if [ -n "$REMOTE_URL" ]; then
+    REPO_PATH=${REMOTE_URL#https://github.com/}
+    REPO_PATH=${REPO_PATH#https://*/}
+    LINE1+="  $B_OV0 󰌷 $REPO_PATH $R"
+fi
 
-LINE2="${CTX_BAR} ${HOUR_BAR} ${WEEK_BAR} | ${COST_PART} | ⏱️ ${MINS}m ${SECS}s"
+##### Compose LINE 2: three progress bars #####################################
+CTX_BAR=$(build_bar 18 "$PCT" "$MODEL $TOKEN_LABEL ${PCT}%")
+H_BAR=$(build_bar 18 "$PCT_5H" "5h ${PCT_5H}% · $RESET_5H_FMT" "$FILL_5H_LOW")
+W_BAR=$(build_bar 18 "$PCT_7D" "7d ${PCT_7D}% · $RESET_7D_FMT" "$FILL_7D_LOW")
 
-# ── Output ───────────────────────────────────────────────────────────
-printf '%b\n' "$LINE1"
-printf '%b\n' "$LINE2"
+LINE2="$CTX_BAR  $H_BAR  $W_BAR"
+
+##### Output ##################################################################
+printf '%s\n' "$LINE1"
+printf '\n'
+printf '%s\n' "$LINE2"
