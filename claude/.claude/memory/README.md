@@ -33,6 +33,7 @@ When you (Claude) learn a fact and want to record it, decide where it belongs:
 **Store #1 only** also has:
 
 - `daily/<YYYY-MM-DD>.md` — time-bound running log; today + yesterday auto-injected by the hook
+- `daily/archive/<YYYY>/<YYYY-MM-DD>.md` — older dailies moved here by `/memory-dream`. Not injected, kept on disk.
 - `README.md` — this file (system docs)
 
 Keep individual files under ~200 lines; split when they grow past that.
@@ -69,6 +70,6 @@ Multiple sessions per day OK. Append-only. Two write mechanisms:
 
 ## Slash commands
 
-- `/memory-dream` — review dailies, propose promotions to durable memory (general/tools/domain or repo memory), archive stale dailies. Plan-then-apply.
+- `/memory-dream` — triage dailies: propose promotions to durable memory (general/tools/domain or repo memory), and archive of older dailies (>30d default) to `daily/archive/<year>/`. Plan-then-apply. Never deletes daily content.
 - `/memory-consolidate` — full sweep: runs dream first, then dedup/merge/split durables, refresh `MEMORY.md` index. Plan-then-apply, three approval gates.
 - `/memory-promote <from> <to>` — explicit single-item move. Validates destination against routing rules.
