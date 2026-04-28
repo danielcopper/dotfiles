@@ -73,6 +73,11 @@ R=$'\e[0m'
 # Defaults to the context palette (green/peach/red). Pass a different low
 # (e.g. $FILL_5H_LOW) to give a bar its own base colour while keeping the
 # warning ramp shared.
+#
+# Sub-cell resolution: each cell is split into 8 sub-units using Unicode
+# eighth-block glyphs (▏▎▍▌▋▊▉) so a width-18 bar resolves ~0.7% per step
+# instead of ~5.5% — separates 1% from 8% visually.
+PARTIALS=('' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
 build_bar() {
     local width=$1 pct=$2 label=$3
     local low=${4:-$FILL_GR} mid=${5:-$FILL_PEACH} high=${6:-$FILL_RED}
@@ -85,9 +90,21 @@ build_bar() {
     local pl=$((pad / 2)) pr=$((pad - pad / 2))
     local full
     full=$(printf '%*s%s%*s' "$pl" '' "$label" "$pr" '')
-    local fpos=$((pct * width / 100))
-    [ "$pct" -gt 0 ] && [ "$fpos" -lt 1 ] && fpos=1
-    printf '%s%s%s%s%s' "$fill" "${full:0:fpos}" "$B_FG" "${full:fpos}" "$R"
+    local sub=$((pct * width * 8 / 100))
+    [ "$pct" -gt 0 ] && [ "$sub" -lt 1 ] && sub=1
+    local fcells=$((sub / 8)) rem=$((sub % 8))
+    if [ "$rem" -eq 0 ]; then
+        printf '%s%s%s%s%s' "$fill" "${full:0:fcells}" "$B_FG" "${full:fcells}" "$R"
+    else
+        # Partial cell: eighth-block glyph in fill colour over empty bar bg.
+        # Derive fg index from fill ANSI (\e[48;5;N;38;2;...m).
+        local idx=${fill#*48;5;}; idx=${idx%%;*}
+        local part=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
+        printf '%s%s%s%s%s%s%s' \
+            "$fill" "${full:0:fcells}" \
+            "$part" "${PARTIALS[rem]}" \
+            "$B_FG" "${full:$((fcells+1))}" "$R"
+    fi
 }
 
 ##### Reset countdowns ########################################################
