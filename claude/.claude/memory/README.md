@@ -1,6 +1,6 @@
 # Memory System
 
-This file is auto-injected into every Claude Code session and subagent (first tool call) by `~/.claude/hooks/pre-tool-memory.py`. It defines the structure and routing rules for the memory system.
+This file is auto-injected into every Claude Code session and subagent (first tool call) by `~/.claude/hooks/memory_inject.py`. It defines the structure and routing rules for the memory system.
 
 ## Three stores
 
@@ -66,7 +66,7 @@ Format:
 Multiple sessions per day OK. Append-only. Two write mechanisms:
 
 - **Ad-hoc** — when the user says "note in today's daily that …", append immediately.
-- **Auto-summary** — `PreCompact` and `Stop` hooks invoke `memory-summarize.py` to extract key bullets from the session and append. Idempotent: only adds what isn't already there.
+- **Auto-summary** — `PreCompact` and `Stop` hooks invoke `memory_summarize.py` to extract key bullets from the session and append. Idempotent: only adds what isn't already there.
 
 ## Slash commands
 
