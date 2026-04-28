@@ -134,12 +134,17 @@ vim.api.nvim_create_autocmd("VimResized", {
   command = "wincmd =",
 })
 
--- Enable spell and wrap for text files
+-- Enable spell for text files; wrap for markdown only
 vim.api.nvim_create_autocmd("FileType", {
   group = augroup("text_files"),
   pattern = { "gitcommit", "markdown", "text" },
   callback = function()
     vim.opt_local.spell = true
+    if vim.bo.filetype == "markdown" then
+      vim.opt_local.wrap = true
+      vim.opt_local.linebreak = true
+      vim.opt_local.breakindent = true
+    end
   end,
 })
 
