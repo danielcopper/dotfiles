@@ -72,3 +72,15 @@ Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa`
 - Password is exported as `SQLCMDPASSWORD` from untracked `~/.bashrc.secrets` (sourced by shared `.bashrc`) — no `-P` flag needed
 - Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -C`
 - Single quotes in `-Q` work normally: `-Q "SELECT * FROM t WHERE name = 'alice'"`
+
+## Memory
+
+Routing rules and full structure: `~/.claude/memory/README.md` (auto-injected at first tool call by `~/.claude/hooks/memory_inject.py`).
+
+Three stores:
+
+- `~/.claude/memory/` — global personal (general/tools/domain/daily, gitignored content)
+- `<repo>/.claude/memory/` — project-shared, committed in the repo
+- `~/.claude/projects/<cwd>/memory/` — Anthropic's auto-memory; **never write here**, read-only continuity
+
+Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
