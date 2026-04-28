@@ -16,7 +16,7 @@ local root_markers = { "pom.xml", "build.gradle", "settings.gradle", ".git" }
 local root_dir = require("jdtls.setup").find_root(root_markers)
 
 -- Workspace per project (based on project root, not cwd)
-local project_name = vim.fn.fnamemodify(root_dir or vim.fn.getcwd(), ":p:h:t")
+local project_name = vim.fs.basename(vim.fs.normalize(root_dir or vim.fn.getcwd()))
 local workspace_dir = vim.fn.stdpath("data") .. "/jdtls-workspace/" .. project_name
 
 -- Detect OS for config folder

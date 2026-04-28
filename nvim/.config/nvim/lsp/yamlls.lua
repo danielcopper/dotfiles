@@ -4,7 +4,9 @@ return {
   root_markers = { ".git" },
   settings = {
     yaml = {
-      schemaStore = { enable = true },
+      -- schemastore.nvim provides schemas explicitly; disable yamlls's built-in
+      -- store to avoid double-loading.
+      schemaStore = { enable = false, url = "" },
       schemas = require("schemastore").yaml.schemas(),
     },
   },

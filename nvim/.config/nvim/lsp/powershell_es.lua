@@ -2,6 +2,10 @@ local bundle_path = vim.fs.joinpath(vim.fn.stdpath("data"), "mason", "packages",
 
 return {
   cmd = function(dispatchers)
+    if vim.fn.executable("pwsh") == 0 then
+      vim.notify("powershell_es: pwsh not found in PATH", vim.log.levels.WARN)
+      return nil
+    end
     local temp_path = vim.fn.stdpath("cache")
     local script = vim.fs.joinpath(bundle_path, "PowerShellEditorServices", "Start-EditorServices.ps1")
     local log_path = vim.fs.joinpath(temp_path, "powershell_es.log")

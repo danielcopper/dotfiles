@@ -85,9 +85,10 @@ require("mason-tool-installer").setup({
     "sonarlint-language-server",
   },
 
+  -- run_on_start=false: don't reach for the registry every nvim launch. Trigger
+  -- explicitly via :MasonToolsInstall (or :Mason UI) after editing the list.
   auto_update = false,
-  run_on_start = true,
-  start_delay = 3000,
+  run_on_start = false,
 })
 
 vim.keymap.set("n", "<leader>tm", "<cmd>Mason<cr>", { desc = "Mason" })

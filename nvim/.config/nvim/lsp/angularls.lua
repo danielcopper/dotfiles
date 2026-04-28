@@ -27,7 +27,9 @@ local function get_angular_core_version(root_dir)
   local ok, content = pcall(fn.readblob, package_json)
   if not ok or not content then return "" end
 
-  local json = vim.json.decode(content) or {}
+  local decoded_ok, json = pcall(vim.json.decode, content)
+  if not decoded_ok or type(json) ~= "table" then return "" end
+
   local version = (json.dependencies or {})["@angular/core"]
     or (json.devDependencies or {})["@angular/core"]
     or ""
