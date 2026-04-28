@@ -28,3 +28,7 @@ hooks/logs/
 # README.md
 # hooks/*.py (but not logs/)
 # skills/
+
+# Memory: track machinery (README, .gitkeep) and ignore personal content (general.md, tools/*.md, domain/*.md, daily/**)
+memory/**/*.md
+!memory/README.md
