@@ -23,3 +23,16 @@ tree-sitter
 ttf-jetbrains-mono-nerd
 wezterm
 zoxide
+
+# Language runtimes — required by Mason-installed LSPs/tools in nvim.
+# - nodejs/npm: ts_ls, eslint-lsp, angular-language-server, html/css/json/yaml LSPs, prettier, markdownlint
+# - python/python-pip: basedpyright, ruff, debugpy, sqlfluff, yamllint
+# - jdk-openjdk: jdtls, lemminx
+# - dotnet-sdk: netcoredbg, roslyn, sonarlint-language-server
+# pwsh (powershell-bin) is AUR-only — install manually if you edit .ps1.
+nodejs
+npm
+python
+python-pip
+jdk-openjdk
+dotnet-sdk

@@ -20,3 +20,10 @@ stow
 tmux
 tree-sitter
 zoxide
+
+# Language runtimes — required by Mason-installed LSPs/tools in nvim.
+# Steam Deck doubles as a casual dev box; .NET tooling is omitted (no linuxbrew
+# dotnet formula). pwsh is available but rarely needed here — install on demand.
+node
+python@3.13
+openjdk
