@@ -140,7 +140,7 @@ def call_claude(prompt, timeout=CLAUDE_TIMEOUT_SECONDS):
     env["MEMORY_SUMMARIZE_NO_RECURSE"] = "1"
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt],
+            ["claude", "-p", "--model", "sonnet", prompt],
             capture_output=True, text=True, timeout=timeout, env=env,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
