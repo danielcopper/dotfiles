@@ -130,11 +130,18 @@ Append-ready markdown only:"""
 
 
 def call_claude(prompt, timeout=CLAUDE_TIMEOUT_SECONDS):
-    """Invoke `claude -p`. Returns stdout (stripped) or None on failure."""
+    """Invoke `claude -p`. Returns stdout (stripped) or None on failure.
+
+    Sets MEMORY_SUMMARIZE_NO_RECURSE=1 in the subprocess env so the inner
+    `claude -p` session's Stop hook (which is this same script) detects the
+    env var and exits early instead of recursing.
+    """
+    env = os.environ.copy()
+    env["MEMORY_SUMMARIZE_NO_RECURSE"] = "1"
     try:
         result = subprocess.run(
             ["claude", "-p", prompt],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=env,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         log_event("claude_call_failed", {"error": type(e).__name__, "msg": str(e)[:200]})
@@ -172,6 +179,13 @@ def main():
             event = "precompact"
         else:
             event = "unknown"
+
+        # Recursion guard: a `claude -p` we spawn is itself a Claude Code session
+        # that fires Stop on exit. We set MEMORY_SUMMARIZE_NO_RECURSE=1 in that
+        # subprocess's env so this hook bails out cleanly and we don't cascade.
+        if os.environ.get("MEMORY_SUMMARIZE_NO_RECURSE") == "1":
+            log_event("skip_recursion_guard", {"event": event})
+            sys.exit(0)
 
         session_id = data.get("session_id", "")
         transcript_path = data.get("transcript_path", "")
