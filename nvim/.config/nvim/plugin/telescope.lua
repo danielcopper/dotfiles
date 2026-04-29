@@ -102,6 +102,10 @@ pcall(telescope.load_extension, "ui-select")
 -- Keymaps
 vim.keymap.set("n", "<leader>ff", "<cmd>Telescope find_files<cr>", { desc = "Find files" })
 vim.keymap.set("n", "<leader>fr", function()
+  -- v:oldfiles is nvim's edit history, not gitignore-aware. Worktree copies of
+  -- the same logical file end up in the list as duplicates, so filter them out
+  -- when running from the main repo (inside a worktree, .worktrees/ paths
+  -- wouldn't appear anyway).
   local cwd = vim.fn.getcwd()
   local git_path = cwd .. "/.git"
   local is_main_repo = vim.fn.isdirectory(git_path) == 1
