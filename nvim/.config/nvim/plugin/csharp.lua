@@ -95,7 +95,10 @@ vim.lsp.config("roslyn", {
 })
 
 require("roslyn").setup({
-  broad_search = true,
+  -- broad_search walks the whole git tree synchronously (skipping only obj/bin/.git),
+  -- so it scans all of .worktrees/ on every LSP start and blocks file open by 15+s.
+  -- Upward search finds the correct solution in both the main repo and worktrees.
+  broad_search = false,
   lock_target = true,
   choose_target = choose_target,
   filewatching = "off",

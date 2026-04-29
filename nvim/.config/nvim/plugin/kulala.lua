@@ -1,4 +1,9 @@
-vim.pack.add({ "https://github.com/mistweaverco/kulala.nvim" })
+vim.pack.add({
+  -- nvim-treesitter must be packadd'd before kulala so its setup can find the
+  -- nvim-treesitter.parsers module (kulala loads alphabetically before treesitter.lua).
+  { src = "https://github.com/nvim-treesitter/nvim-treesitter", version = "main" },
+  "https://github.com/mistweaverco/kulala.nvim",
+})
 
 require("kulala").setup({
   request_timeout = 30000,
