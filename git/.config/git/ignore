@@ -1,0 +1,12 @@
+# XDG global gitignore — applies to every repo on this machine.
+# Personal-workflow noise that should never be committed anywhere.
+
+# Worktrees: per the ~/dotfiles/claude/.claude/CLAUDE.md worktree workflow,
+# `.worktrees/` lives inside the main repo and holds full sibling worktrees.
+# Without this entry, `git status` in the main repo lists every worktree as
+# untracked, and gitignore-respecting tools (rg, fd, fzf, telescope) walk into
+# the (potentially multi-GB) worktree copies and show duplicate hits.
+.worktrees/
+
+# Per-host Claude Code settings — never share machine-specific overrides.
+**/.claude/settings.local.json
