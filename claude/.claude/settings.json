@@ -122,16 +122,6 @@
             "timeout": 30
           }
         ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/memory_summarize.py --event=stop",
-            "timeout": 200
-          }
-        ]
       }
     ],
     "SubagentStop": [
@@ -166,16 +156,6 @@
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/pre_compact.py --backup",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/memory_summarize.py --event=precompact",
-            "timeout": 200
           }
         ]
       }
