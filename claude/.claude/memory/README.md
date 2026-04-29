@@ -63,10 +63,7 @@ Format:
 - bullet 3 (3–5 bullets max per session)
 ```
 
-Multiple sessions per day OK. Append-only. Two write mechanisms:
-
-- **Ad-hoc** — when the user says "note in today's daily that …", append immediately.
-- **Auto-summary** — `PreCompact` and `Stop` hooks invoke `memory_summarize.py` to extract key bullets from the session and append. Idempotent: only adds what isn't already there.
+Multiple sessions per day OK. Append-only. When the user says "note in today's daily that …" or similar, append immediately using the format above.
 
 ## Slash commands
 
