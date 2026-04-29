@@ -40,7 +40,7 @@ Present a plan organized as four groups:
 
 For each approved item:
 
-- **Promote**: append/merge into the destination file. Don't blindly duplicate — check for existing entries first. Optionally leave a one-line marker in the source daily entry like `→ promoted to general.md` so it's clear the bullet has graduated. Keep the original daily text intact (it's history).
+- **Promote**: append/merge into the destination file. Don't blindly duplicate — check for existing entries first. **Then remove the source entry from the daily** (the whole `## HH:MM — topic` section). Content now lives in the topic file; leaving it in the daily is duplication. Skipped (not-promoted) entries stay in the daily for pattern detection over time.
 - **Archive**: `mkdir -p ~/.claude/memory/daily/archive/<year>/` and `mv` the daily file there. Use plain `mv` — daily files are gitignored, no git history involvement.
 - **Refresh `~/.claude/memory/MEMORY.md`** index: bump last-updated dates for topic files touched. Daily files are not indexed; promoted bullets land in topic files which already have their own index sections.
 

@@ -43,8 +43,10 @@ If $ARGUMENTS is empty, ask for both source and destination.
 
 6. **Apply**:
    - Write to destination (create file if missing, append/merge if existing).
-   - In the source: leave the daily entry as-is (it's history); for entries already in durable memory being moved between durable files, remove from the source file.
-   - If a new file was created, update `MEMORY.md` index in that store.
+   - **Remove the source entry**:
+     - If source is a daily: remove the whole `## HH:MM — topic` section from the daily file. Content now lives in the destination; keeping it in the daily is duplication.
+     - If source is a durable topic file: remove the entry from the source file.
+   - Update `MEMORY.md` index in the destination store: bump the last-updated date for the destination file. If a new file was created, also add a new descriptive index entry.
 
 ## Constraints
 
