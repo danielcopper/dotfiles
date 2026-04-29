@@ -46,6 +46,17 @@ Keep individual files under ~200 lines; split when they grow past that.
 
 At the repo level (store #3), `general.md` holds repo-wide conventions (test runner, build, deploy, code style); `tools/` and `domain/` work the same way but scoped to that codebase.
 
+## Updating the index
+
+Golden rule: **eager-load the index, lazy-load the details.** `MEMORY.md` is the index for topic files; details live in `general.md`, `tools/X.md`, `domain/X.md` and are read on demand based on the index.
+
+When you create or modify a topic file:
+
+1. Bump the file's last-updated date in its `MEMORY.md` section.
+2. If it's a new file, add a new section with a *rich, keyword-dense* description so future sessions can match user prompts to the right file.
+
+Daily files don't go in the index. Today + yesterday auto-inject directly; older dailies eventually graduate to topic files via `/memory-promote` or `/memory-dream`, and *then* they're indexed via their topic file.
+
 ## Treat store #3 like committed code
 
 No secrets, no in-flight personal thinking, no "I'm confused" entries — those go to store #1 `daily/`.

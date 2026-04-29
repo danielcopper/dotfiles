@@ -34,7 +34,8 @@ Present the plan. **Wait for approval.** Apply.
 ## Phase 3 — Index refresh
 
 Rewrite `~/.claude/memory/MEMORY.md` (and `<repo>/.claude/memory/MEMORY.md` if applicable) to reflect current state:
-- Table listing each topic file with one-line description and last-updated date.
+- One section per topic file with a rich, keyword-dense description and a last-updated date. Sections give space for descriptions that match how the user phrases topics in conversation.
+- Daily files are not indexed.
 - Note last-consolidated date at the top.
 
 If `MEMORY.md` doesn't exist yet, create it.
