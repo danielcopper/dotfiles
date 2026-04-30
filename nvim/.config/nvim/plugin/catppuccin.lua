@@ -51,6 +51,26 @@ require("catppuccin").setup({
       hl.FloatFooter = { bg = colors.crust, fg = colors.overlay1 }
     end
 
+    -- Bufferline: tab bar bg = mantle (matches neo-tree), active tab = base
+    local bl_inactive = { "Fill", "Background", "BufferVisible", "Separator",
+      "SeparatorVisible", "OffsetSeparator", "Modified", "ModifiedVisible",
+      "Duplicate", "DuplicateVisible", "CloseButton", "CloseButtonVisible",
+      "Tab", "TabSeparator", "DevIconDefault",
+      "Diagnostic", "DiagnosticVisible",
+      "Error", "ErrorVisible", "Warning", "WarningVisible",
+      "Info", "InfoVisible", "Hint", "HintVisible",
+      "Numbers", "NumbersVisible" }
+    for _, g in ipairs(bl_inactive) do
+      hl["BufferLine" .. g] = { bg = colors.mantle }
+    end
+    local bl_active = { "BufferSelected", "SeparatorSelected", "ModifiedSelected",
+      "DuplicateSelected", "CloseButtonSelected", "TabSelected", "IndicatorSelected",
+      "ErrorSelected", "WarningSelected", "InfoSelected", "HintSelected",
+      "DiagnosticSelected", "NumbersSelected", "PickSelected" }
+    for _, g in ipairs(bl_active) do
+      hl["BufferLine" .. g] = { bg = colors.base }
+    end
+
     -- Notify highlights
     local notify_bg = colors.crust
     hl.NotifyBackground = { fg = colors.text, bg = notify_bg }
