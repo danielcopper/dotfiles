@@ -54,6 +54,7 @@ opt.timeoutlen = 300
 opt.splitright = true
 opt.splitbelow = true
 opt.confirm = true
+opt.exrc = true -- load project-local .nvim.lua / .nvimrc / .exrc (must be :trust'ed)
 
 -- Completion
 opt.completeopt = "menu,menuone"
