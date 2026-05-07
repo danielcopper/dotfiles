@@ -189,9 +189,12 @@
     }
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
+  "cleanupPeriodDays": 90,
+  "effortLevel": "xhigh",
   "tui": "fullscreen",
-  "voiceEnabled": true,
+  "voice": {
+    "enabled": true
+  },
   "editorMode": "vim",
-  "verbose": true
+  "viewMode": "default"
 }
