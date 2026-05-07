@@ -17,13 +17,27 @@ vim.diagnostic.config({
     source = true,
     border = borders,
   },
-  update_in_insert = false,
+  update_in_insert = true,
   underline = true,
   severity_sort = true,
   virtual_text = false,
   virtual_lines = {
     current_line = true,
   },
+})
+
+-- Hide virtual_lines while typing — they shift content around.
+-- Signs + underline still update live (update_in_insert = true).
+local diag_insert = vim.api.nvim_create_augroup("user_diag_insert", { clear = true })
+vim.api.nvim_create_autocmd("InsertEnter", {
+  group = diag_insert,
+  callback = function() vim.diagnostic.config({ virtual_lines = false }) end,
+})
+vim.api.nvim_create_autocmd("InsertLeave", {
+  group = diag_insert,
+  callback = function()
+    vim.diagnostic.config({ virtual_lines = { current_line = true } })
+  end,
 })
 
 -- Default capabilities for all LSP servers
