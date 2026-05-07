@@ -23,25 +23,62 @@ lint.linters.yamllint.args = {
   "-",
 }
 
+-- markdownlint reads from stdin, so it can't auto-discover configs by
+-- walking up from the file. Inject --config ourselves: project config
+-- if found upward, else the global ~/.markdownlint.json.
+local md_global = vim.fn.expand("~/.markdownlint.json")
+local md_stdin_only = { "--stdin" }
+local md_default = vim.fn.filereadable(md_global) == 1
+    and { "--stdin", "--config", md_global }
+    or md_stdin_only
+lint.linters.markdownlint.args = md_default
+
 local lint_augroup = vim.api.nvim_create_augroup("nvim_lint", { clear = true })
 
-vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost", "BufEnter", "InsertLeave" }, {
+local function run_lint(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local ft = vim.bo[buf].filetype
+  if not lint.linters_by_ft[ft] then return end
+
+  if ft == "sql" then
+    local dir = vim.fs.dirname(vim.api.nvim_buf_get_name(buf))
+    if dir == "" then dir = vim.fn.getcwd() end
+    local has_cfg = #vim.fs.find({ ".sqlfluff" }, { upward = true, path = dir }) > 0
+    lint.linters.sqlfluff.args = has_cfg and sqlfluff_project or sqlfluff_default
+  end
+  if ft == "markdown" then
+    local dir = vim.fs.dirname(vim.api.nvim_buf_get_name(buf))
+    if dir == "" then dir = vim.fn.getcwd() end
+    local found = vim.fs.find(
+      { ".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml" },
+      { upward = true, path = dir }
+    )
+    lint.linters.markdownlint.args = #found > 0
+        and { "--stdin", "--config", found[1] }
+        or md_default
+  end
+
+  vim.api.nvim_buf_call(buf, function() lint.try_lint() end)
+end
+
+-- Debounce live linting so shellcheck/sqlfluff don't spawn a process
+-- on every keystroke. 300ms feels responsive without thrashing.
+local timer = assert(vim.uv.new_timer())
+local DEBOUNCE_MS = 300
+
+vim.api.nvim_create_autocmd({
+  "BufWritePost", "BufReadPost", "BufEnter", "TextChanged", "TextChangedI",
+}, {
   group = lint_augroup,
   callback = function(ev)
-    if vim.bo[ev.buf].filetype == "sql" then
-      local dir = vim.fs.dirname(vim.api.nvim_buf_get_name(ev.buf))
-      if dir == "" then
-        dir = vim.fn.getcwd()
-      end
-      local has_cfg = #vim.fs.find({ ".sqlfluff" }, { upward = true, path = dir }) > 0
-      lint.linters.sqlfluff.args = has_cfg and sqlfluff_project or sqlfluff_default
-    end
-    if lint.linters_by_ft[vim.bo[ev.buf].filetype] then
-      lint.try_lint()
-    end
+    local buf = ev.buf
+    timer:stop()
+    timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
+      run_lint(buf)
+    end))
   end,
 })
 
 vim.api.nvim_create_user_command("Lint", function()
-  lint.try_lint()
+  run_lint(vim.api.nvim_get_current_buf())
 end, { desc = "Trigger linting for current file" })
