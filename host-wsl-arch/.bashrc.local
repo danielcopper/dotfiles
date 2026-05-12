@@ -26,6 +26,13 @@ if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -z "${TMUX:-}" ] && [ "${SHLVL:-1}" 
     export GNOME_KEYRING_CONTROL
 fi
 
+# Force Azure Artifacts Credential Provider to use device-code flow instead
+# of MSAL loopback (localhost:44927 callback). Loopback fails under WSL2
+# mirrored networking because MSAL binds 127.0.0.1 but Windows resolves
+# localhost to ::1 first → browser hits an IPv6 socket nobody's listening on.
+# Device-code prints a URL+code, you paste in any browser → token is cached.
+export NUGET_CREDENTIALPROVIDER_FORCE_CANSHOWDIALOG_TO=false
+
 # Auto-start wsl-screenshot-cli (clipboard screenshot → WSL path)
 if command -v wsl-screenshot-cli &>/dev/null && wsl-screenshot-cli status 2>/dev/null | grep -q "not running"; then
     wsl-screenshot-cli start --daemon &>/dev/null
