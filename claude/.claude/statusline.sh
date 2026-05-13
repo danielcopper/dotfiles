@@ -24,17 +24,16 @@ data=$(printf '%s' "$input" | jq -r '
   [
     ((.model.display_name // "?") | gsub(" \\([^)]*context\\)"; "")),
     (.workspace.current_dir // "."),
+    (.workspace.project_dir // .workspace.current_dir // "."),
     ((.context_window.used_percentage // 0) | floor),
     (.context_window.context_window_size // 200000),
     ((.rate_limits.five_hour.used_percentage // 0) | floor),
     ((.rate_limits.seven_day.used_percentage // 0) | floor),
     (.rate_limits.five_hour.resets_at // 0),
-    (.rate_limits.seven_day.resets_at // 0),
-    (.cost.total_lines_added // 0),
-    (.cost.total_lines_removed // 0)
+    (.rate_limits.seven_day.resets_at // 0)
   ] | @tsv
 ')
-IFS=$'\t' read -r MODEL DIR PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D LINES_ADD LINES_REM <<< "$data"
+IFS=$'\t' read -r MODEL DIR PROJECT_DIR PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
 
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
     TOKEN_LABEL="$((MAX_TOKENS / 1000000))m"
@@ -45,7 +44,6 @@ fi
 ##### Hybrid bg=256 + fg=truecolor (Catppuccin Mocha) #########################
 # 256-bg sidesteps the v2.1.78+ truecolor wash bug; truecolor fg keeps the
 # real Catppuccin tones. Combined into single escape per segment.
-# bg 237 ≈ neutral grey, bar fills warm-shifted (114 olive-green / 216 peach / 174 maroon-red).
 B_ROSE=$'\e[48;2;56;56;56;38;2;245;224;220m'
 B_FG=$'\e[48;2;56;56;56;38;2;205;214;244m'
 B_FG_B=$'\e[48;2;56;56;56;38;2;205;214;244;1m'
@@ -56,6 +54,7 @@ B_ST0=$'\e[48;2;56;56;56;38;2;166;173;200m'
 B_OV0=$'\e[48;2;56;56;56;38;2;108;112;134m'
 B_PEACH=$'\e[48;2;56;56;56;38;2;250;179;135m'
 B_RED=$'\e[48;2;56;56;56;38;2;243;139;168m'
+B_RED_B=$'\e[48;2;56;56;56;38;2;243;139;168;1m'
 
 # Per-bar gradient palettes — all share the warning ramp (peach mid, red high)
 # but each starts from a distinct base colour to keep the three bars visually
@@ -81,6 +80,8 @@ PARTIALS=('' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
 build_bar() {
     local width=$1 pct=$2 label=$3
     local low=${4:-$FILL_GR} mid=${5:-$FILL_PEACH} high=${6:-$FILL_RED}
+    [ "$pct" -lt 0 ] && pct=0
+    [ "$pct" -gt 100 ] && pct=100
     local fill
     if [ "$pct" -ge 85 ]; then fill="$high"
     elif [ "$pct" -ge 65 ]; then fill="$mid"
@@ -96,8 +97,14 @@ build_bar() {
     if [ "$rem" -eq 0 ]; then
         printf '%s%s%s%s%s' "$fill" "${full:0:fcells}" "$B_FG" "${full:fcells}" "$R"
     else
-        # Partial cell: eighth-block glyph in fill colour over empty bar bg.
-        # Derive fg index from fill ANSI (\e[48;5;N;38;2;...m).
+        # Partial cell: eighth-block glyph REPLACES the label character at
+        # the boundary (industry pattern — indicatif, tqdm). Bar stays at
+        # constant `width` cells; the inserting alternative grew the bar
+        # by 1 cell on partial fill, causing visible label gaps. One char
+        # disappears at a time, sliding across the label as pct changes.
+        # Derives fg index from fill escape — assumes 256-color bg form
+        # (\e[48;5;N;…). If any FILL_* switches to truecolor (\e[48;2;…)
+        # this parse silently breaks.
         local idx=${fill#*48;5;}; idx=${idx%%;*}
         local part=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
         printf '%s%s%s%s%s%s%s' \
@@ -133,7 +140,7 @@ cache_is_stale() {
 }
 
 BRANCH="" HAS_UPSTREAM=0 AHEAD=0 BEHIND=0
-STAGED=0 MODIFIED=0 UNTRACKED=0 REMOTE_URL="" IS_WORKTREE=0
+STAGED=0 MODIFIED=0 UNTRACKED=0 IS_WORKTREE=0 GIT_STATE=""
 
 if git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1; then
     if cache_is_stale; then
@@ -150,57 +157,82 @@ if git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1; then
         STAGED=$(git -C "$DIR" diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
         MODIFIED=$(git -C "$DIR" diff --numstat 2>/dev/null | wc -l | tr -d ' ')
         UNTRACKED=$(git -C "$DIR" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
-        REMOTE_URL=$(git -C "$DIR" remote get-url origin 2>/dev/null \
-            | sed 's|git@github\.com:|https://github.com/|' \
-            | sed 's|git@\([^:]*\):|https://\1/|' \
-            | sed 's|\.git$||')
+        # In-progress operation state (merge/rebase/cherry-pick/revert/bisect).
+        # State files live in the per-worktree git dir, not the common dir.
+        if [ -f "$GIT_DIR/MERGE_HEAD" ]; then
+            GIT_STATE="MERGING"
+        elif [ -d "$GIT_DIR/rebase-merge" ] || [ -d "$GIT_DIR/rebase-apply" ]; then
+            if [ -f "$GIT_DIR/rebase-merge/msgnum" ] && [ -f "$GIT_DIR/rebase-merge/end" ]; then
+                GIT_STATE="REBASE $(cat "$GIT_DIR/rebase-merge/msgnum")/$(cat "$GIT_DIR/rebase-merge/end")"
+            elif [ -f "$GIT_DIR/rebase-apply/next" ] && [ -f "$GIT_DIR/rebase-apply/last" ]; then
+                GIT_STATE="REBASE $(cat "$GIT_DIR/rebase-apply/next")/$(cat "$GIT_DIR/rebase-apply/last")"
+            else
+                GIT_STATE="REBASE"
+            fi
+        elif [ -f "$GIT_DIR/CHERRY_PICK_HEAD" ]; then
+            GIT_STATE="CHERRY-PICK"
+        elif [ -f "$GIT_DIR/REVERT_HEAD" ]; then
+            GIT_STATE="REVERT"
+        elif [ -f "$GIT_DIR/BISECT_LOG" ]; then
+            GIT_STATE="BISECT"
+        fi
         printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
-            "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$REMOTE_URL" "$IS_WORKTREE" \
+            "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$IS_WORKTREE" "$GIT_STATE" \
             > "$CACHE_FILE"
     else
-        IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED REMOTE_URL IS_WORKTREE < "$CACHE_FILE"
+        IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
     fi
 fi
 
 ##### Compose LINE 1: project + git ###########################################
-LINE1="$B_ROSE 󰉋 $B_FG_B${DIR##*/} $R"
+# Each colored block has 1-space internal padding on left and right (matches
+# the dir block style). Blocks are separated by 1 uncolored space.
+LINE1="$B_ROSE 󰉋 $B_FG_B${PROJECT_DIR##*/} $R"
 
 if [ -n "$BRANCH" ]; then
-    if [ "$IS_WORKTREE" = "1" ]; then BR_ICON=" "; else BR_ICON=" "; fi
-    LINE1+="  $B_SAP$BR_ICON$B_GR_B$BRANCH"
+    LINE1+=" $B_GR_B $BRANCH $R"
+
+    if [ -n "$GIT_STATE" ]; then
+        LINE1+=" $B_RED_B $GIT_STATE $R"
+    fi
+
     if [ "$HAS_UPSTREAM" = "1" ]; then
-        LINE1+="$B_ST0 ↑$AHEAD ↓$BEHIND $R"
+        if [ "$AHEAD" -gt 0 ] || [ "$BEHIND" -gt 0 ]; then
+            # Colorize the non-zero side: green ahead (ready to push),
+            # peach behind (pull needed). Zero side stays slate.
+            LINE1+=" $B_ST0 "
+            if [ "$AHEAD" -gt 0 ]; then LINE1+="$B_GR↑$AHEAD$B_ST0"
+            else                        LINE1+="↑$AHEAD"; fi
+            LINE1+=" "
+            if [ "$BEHIND" -gt 0 ]; then LINE1+="$B_PEACH↓$BEHIND$B_ST0"
+            else                         LINE1+="↓$BEHIND"; fi
+            LINE1+=" $R"
+        fi
     else
-        LINE1+="$B_OV0 ↑- ↓- $R"
+        LINE1+=" $B_OV0 ↑- ↓- $R"
     fi
 fi
 
 if [ "$STAGED" -gt 0 ] || [ "$MODIFIED" -gt 0 ] || [ "$UNTRACKED" -gt 0 ]; then
-    WT="$B_FG "
-    [ "$STAGED" -gt 0 ]    && WT+="$B_GR$STAGED$B_FG "
-    [ "$MODIFIED" -gt 0 ]  && WT+="$B_PEACH$MODIFIED$B_FG "
-    [ "$UNTRACKED" -gt 0 ] && WT+="$B_OV0$UNTRACKED$B_FG "
-    LINE1+="  $WT$R"
-fi
-
-if [ "$LINES_ADD" -gt 0 ] || [ "$LINES_REM" -gt 0 ]; then
-    LINE1+="  $B_GR +$LINES_ADD $B_RED-$LINES_REM $R"
-fi
-
-if [ -n "$REMOTE_URL" ]; then
-    REPO_PATH=${REMOTE_URL#https://github.com/}
-    REPO_PATH=${REPO_PATH#https://*/}
-    LINE1+="  $B_OV0 󰌷 $REPO_PATH $R"
+    LINE1+=" $B_FG "
+    [ "$STAGED" -gt 0 ]    && LINE1+="$B_GR●$STAGED$B_FG "
+    [ "$MODIFIED" -gt 0 ]  && LINE1+="$B_PEACH▲$MODIFIED$B_FG "
+    [ "$UNTRACKED" -gt 0 ] && LINE1+="$B_OV0?$UNTRACKED$B_FG "
+    LINE1+="$R"
 fi
 
 ##### Compose LINE 2: three progress bars #####################################
-CTX_BAR=$(build_bar 18 "$PCT" "$MODEL $TOKEN_LABEL ${PCT}%")
-H_BAR=$(build_bar 18 "$PCT_5H" "5h ${PCT_5H}% · $RESET_5H_FMT" "$FILL_5H_LOW")
-W_BAR=$(build_bar 18 "$PCT_7D" "7d ${PCT_7D}% · $RESET_7D_FMT" "$FILL_7D_LOW")
+# Width is tight — just the label plus 1 cell of padding on each side, like
+# the dir/git blocks. Labels vary slightly with model/reset time, so we
+# compute each width from its label length.
+CTX_LABEL="$MODEL $TOKEN_LABEL"
+H_LABEL="5h · $RESET_5H_FMT"
+W_LABEL="7d · $RESET_7D_FMT"
+CTX_BAR=$(build_bar $((${#CTX_LABEL} + 2)) "$PCT"    "$CTX_LABEL")
+H_BAR=$(build_bar   $((${#H_LABEL}   + 2)) "$PCT_5H" "$H_LABEL"   "$FILL_5H_LOW")
+W_BAR=$(build_bar   $((${#W_LABEL}   + 2)) "$PCT_7D" "$W_LABEL"   "$FILL_7D_LOW")
 
-LINE2="$CTX_BAR  $H_BAR  $W_BAR"
-
-##### Output ##################################################################
-printf '%s\n' "$LINE1"
-printf '\n'
-printf '%s\n' "$LINE2"
+##### Output (single line) ###################################################
+# Everything on one line: dir + git + three bars. Avoids the 2-line drop
+# when the Claude Code pane is short.
+printf '%s  %s  %s  %s\n' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR"
