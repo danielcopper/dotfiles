@@ -190,7 +190,8 @@ fi
 LINE1="$B_ROSE 󰉋 $B_FG_B${PROJECT_DIR##*/} $R"
 
 if [ -n "$BRANCH" ]; then
-    LINE1+=" $B_GR_B $BRANCH $R"
+    if [ "$IS_WORKTREE" = "1" ]; then BR_ICON=""; else BR_ICON=""; fi
+    LINE1+=" $B_SAP $BR_ICON $B_GR_B$BRANCH $R"
 
     if [ -n "$GIT_STATE" ]; then
         LINE1+=" $B_RED_B $GIT_STATE $R"
