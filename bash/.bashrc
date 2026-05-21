@@ -16,6 +16,19 @@ command -v lsd >/dev/null && alias ls='lsd'
 alias grep='grep --color=auto'
 alias ip='ip -color=auto'
 alias diff='diff --color=auto'
+alias cc='command claude --model "claude-opus-4-7[1m]" --effort xhigh'
+# Default `claude` to opus xhigh for interactive/print use; pass subcommands
+# (mcp, config, doctor, ...) through to the real binary unchanged.
+claude() {
+    case "$1" in
+        agents|auth|auto-mode|doctor|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade|-h|--help|-v|--version)
+            command claude "$@"
+            ;;
+        *)
+            command claude --model "claude-opus-4-7[1m]" --effort xhigh "$@"
+            ;;
+    esac
+}
 
 # Prompt
 PS1='\u@\h \W > '
