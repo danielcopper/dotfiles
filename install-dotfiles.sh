@@ -13,6 +13,7 @@ common_pkgs=(
   claude
   nvim
   starship
+  systemd
   tmux
   wezterm
   lazygit

@@ -25,6 +25,10 @@ export EDITOR='nvim'
 export VISUAL='nvim'
 export TERMINAL="wezterm"
 
+# ssh-agent socket from the user-level systemd unit (see systemd/ pkg).
+[ -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ] && \
+  export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+
 # Idempotent PATH prepend — re-sourcing this file shouldn't grow $PATH.
 prepend_path() {
   case ":$PATH:" in
