@@ -3,11 +3,11 @@
 palette = "catppuccin_mocha"
 
 format = """\
-[╭╴](overlay1)$os\
-$all[╰─](overlay1)$character"""
+[╭╴](overlay1)$os$username$hostname$directory$git_branch$git_status$cmd_duration$line_break\
+[╰─](overlay1)$battery$character"""
 
 [character]
-success_symbol = "[[♥](mauve) ❯](lavender)"
+success_symbol = "[❯](lavender)"
 error_symbol = "[❯](red)"
 vimcmd_symbol = "[❮](mauve)"
 
