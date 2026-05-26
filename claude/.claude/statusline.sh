@@ -55,10 +55,11 @@ IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_
 # Order: tmux pane_width (live, reactive) → $COLUMNS env (rarely set in
 # render context but cheap to check) → conservative default. `/dev/tty`
 # probes were tried; they fail in piped subprocesses on this setup.
-COLS=""
+TMUX_PANE_W=""
 if [ -n "${TMUX_PANE:-}" ]; then
-    COLS=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
+    TMUX_PANE_W=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
 fi
+COLS="$TMUX_PANE_W"
 if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
     COLS=${COLUMNS:-}
 fi
@@ -290,21 +291,27 @@ W_BAR=$(build_bar   $((${#W_LABEL}   + 2)) "$PCT_7D" "$W_LABEL"   "$FILL_7D_LOW"
 # and a coarse fill level via glyph. Three "pillars" side by side.
 MINI_GLYPHS=(' ' '▁' '▂' '▃' '▄' '▅' '▆' '▇' '█')
 build_mini_bar() {
-    local pct=$1 low=$2 mid=$3 high=${4:-$FILL_RED}
+    # mid/high have defaults so callers can pass just (pct, low) and still
+    # transition through the warning ramp at 65/85% — earlier signature
+    # required all four and a 2-arg call silently produced empty bg/fg.
+    local pct=$1 low=$2 mid=${3:-$FILL_PEACH} high=${4:-$FILL_RED}
     local fill
     if   [ "$pct" -ge 85 ]; then fill="$high"
     elif [ "$pct" -ge 65 ]; then fill="$mid"
     else                          fill="$low"; fi
     # Reuse the fill's palette index as the FG so the eighth-block glyph
-    # appears as a coloured column rising from the dark cell bg.
+    # appears as a coloured column rising from the dark cell bg. 256-bg
+    # (233 ≈ #121212) instead of truecolor (17,17,27) to bypass the same
+    # Claude TUI wash that motivates the bar/FILL palette — the dark
+    # crust would otherwise get inverted to warm peach.
     local idx; idx=$(palette_idx_from_fill "$fill")
-    local style=$'\e[48;2;17;17;27;38;5;'"$idx"'m'
+    local style=$'\e[48;5;233;38;5;'"$idx"'m'
     local g=$((pct * 8 / 100))
     [ "$g" -gt 8 ] && g=8
     [ "$pct" -gt 0 ] && [ "$g" -lt 1 ] && g=1
     printf '%s%s%s' "$style" "${MINI_GLYPHS[g]}" "$R"
 }
-MINI_BARS="$(build_mini_bar "$PCT"    "$FILL_GR")$(build_mini_bar "$PCT_5H" "$FILL_5H_LOW")$(build_mini_bar "$PCT_7D" "$FILL_7D_LOW")"
+MINI_BARS="$(build_mini_bar "$PCT"    "$FILL_GR") $(build_mini_bar "$PCT_5H" "$FILL_5H_LOW") $(build_mini_bar "$PCT_7D" "$FILL_7D_LOW")"
 
 ##### Compose LINE 1: dir + git ###############################################
 # Content-aware shrinking: build every variable element at full width, measure
@@ -450,3 +457,16 @@ for combo in \
 done
 
 printf '%s\n' "$FULL_LINE"
+
+# Temporary debug log — enable with `export STATUSLINE_DEBUG=1`. Captures
+# each render's COLS detection inputs and the tier chosen, so we can
+# diagnose why a paste-triggered rerender picks a different layout than
+# the prior render in the same pane. Remove once the rerender bug is
+# understood.
+if [ -n "${STATUSLINE_DEBUG:-}" ]; then
+    printf '%s | TMUX_PANE=%s tmux_w=%s COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
+        "$(date '+%H:%M:%S.%3N')" \
+        "${TMUX_PANE:-unset}" "${TMUX_PANE_W:-empty}" "${COLUMNS:-unset}" \
+        "$COLS" "$BUDGET" "$combo" "$(visible_width "$FULL_LINE")" \
+        >> /tmp/statusline-debug.log
+fi
