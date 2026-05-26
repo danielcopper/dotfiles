@@ -201,7 +201,7 @@
     }
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
+  "effortLevel": "xhigh",
   "tui": "fullscreen",
   "voiceEnabled": true,
   "editorMode": "vim",
