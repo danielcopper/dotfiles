@@ -208,7 +208,14 @@ fi
 ##### Compose LINE 1: project + git ###########################################
 # Each colored block has 1-space internal padding on left and right (matches
 # the dir block style). Blocks are separated by 1 uncolored space.
-LINE1="$B_ROSE 󰉋 $B_FG_B${PROJECT_DIR##*/} $R"
+# When project_dir and current_dir diverge (claude was started in dir A,
+# then navigated into subdir/worktree B), show both basenames with visual
+# hierarchy: project dimmed (history), current bright (where you are now).
+if [ "$PROJECT_DIR" = "$DIR" ]; then
+    LINE1="$B_ROSE 󰉋 $B_FG_B${PROJECT_DIR##*/} $R"
+else
+    LINE1="$B_ROSE 󰉋 $B_OV0${PROJECT_DIR##*/}$B_FG · $B_FG_B${DIR##*/} $R"
+fi
 
 if [ -n "$BRANCH" ]; then
     if [ "$IS_WORKTREE" = "1" ]; then BR_ICON=""; else BR_ICON=""; fi
