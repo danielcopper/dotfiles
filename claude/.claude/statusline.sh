@@ -25,6 +25,7 @@ data=$(printf '%s' "$input" | jq -r '
     ((.model.display_name // "?") | gsub(" \\([^)]*context\\)"; "")),
     (.workspace.current_dir // "."),
     (.workspace.project_dir // .workspace.current_dir // "."),
+    (.workspace.git_worktree // ""),
     ((.context_window.used_percentage // 0) | floor),
     (.context_window.context_window_size // 200000),
     ((.rate_limits.five_hour.used_percentage // 0) | floor),
@@ -33,7 +34,26 @@ data=$(printf '%s' "$input" | jq -r '
     (.rate_limits.seven_day.resets_at // 0)
   ] | @tsv
 ')
-IFS=$'\t' read -r MODEL DIR PROJECT_DIR PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
+IFS=$'\t' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
+
+##### Terminal width detection (no JSON field exposes this) ###################
+# Anthropic's statusline JSON omits terminal dimensions, so derive from shell.
+# Order: $COLUMNS env (rarely set in non-interactive sub-shells) → tput cols
+# (works when stdout is a tty, which Claude Code's statusline render is) →
+# stty size (fallback if tput is missing) → conservative default.
+COLS=${COLUMNS:-}
+[ -z "$COLS" ] && COLS=$(tput cols 2>/dev/null) && [ -n "$COLS" ] || true
+[ -z "$COLS" ] && COLS=$(stty size 2>/dev/null | awk '{print $2}') || true
+[ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null && COLS=140
+
+# Thresholds — picked from realistic worst-case totals (long worktree branch +
+# deep path + dirty + 3 bars). Tune here, not deeper in the rendering code.
+WIDE_THRESHOLD=150       # full parent/leaf + full branch
+MEDIUM_THRESHOLD=125     # …/leaf + full branch
+NARROW_THRESHOLD=105     # …/leaf + truncated branch
+# below NARROW_THRESHOLD: …/<truncated-leaf>… + truncated branch
+MAX_BRANCH_CHARS=24      # cap when truncating
+MAX_LEAF_CHARS=20        # cap when truncating leaf (very narrow tier)
 
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
     TOKEN_LABEL="$((MAX_TOKENS / 1000000))m"
@@ -182,7 +202,14 @@ if cache_is_stale; then
         # Absolute form also makes the in-progress state file checks below
         # work regardless of where cwd lands.
         GIT_DIR=$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)
-        [[ "$GIT_DIR" == */.git/worktrees/* ]] && IS_WORKTREE=1
+        # Prefer Anthropic's official workspace.git_worktree signal when
+        # present; fall back to the path-pattern check for older Claude
+        # Code versions or any case where the JSON field is absent.
+        if [ -n "$JSON_WORKTREE" ]; then
+            IS_WORKTREE=1
+        elif [[ "$GIT_DIR" == */.git/worktrees/* ]]; then
+            IS_WORKTREE=1
+        fi
 
         # In-progress operation state (merge/rebase/cherry-pick/revert/bisect).
         # State files live in the per-worktree git dir, not the common dir.
@@ -217,15 +244,47 @@ fi
 # When project_dir and current_dir diverge (claude was started in dir A,
 # then navigated into subdir/worktree B), show both basenames with visual
 # hierarchy: project dimmed (history), current bright (where you are now).
+PROJ_BN="${PROJECT_DIR##*/}"
+LEAF="${DIR##*/}"
+
 if [ "$PROJECT_DIR" = "$DIR" ]; then
-    LINE1="$B_ROSE 󰉋 $B_FG_B${PROJECT_DIR##*/} $R"
+    LINE1="$B_ROSE 󰉋 $B_FG_B$PROJ_BN $R"
 else
-    LINE1="$B_ROSE 󰉋 $B_OV0${PROJECT_DIR##*/}$B_FG · $B_FG_B${DIR##*/} $R"
+    # Compute path relative to project_dir if current is below it.
+    REL=""
+    [[ "$DIR" == "$PROJECT_DIR"/* ]] && REL="${DIR#"$PROJECT_DIR"/}"
+
+    # Decide path display variant based on COLS:
+    #   wide   ≥WIDE_THRESHOLD     → "project · parent/leaf"
+    #   medium ≥MEDIUM_THRESHOLD   → "project · …/leaf" (also when only 1 level deep — no `…/`)
+    #   narrow ≥NARROW_THRESHOLD   → "project · …/leaf" (always with `…/`)
+    #   v-narrow                   → "project · …/<truncated-leaf>"
+    if [ "$COLS" -ge "$WIDE_THRESHOLD" ] && [ -n "$REL" ] && [[ "$REL" == */* ]]; then
+        PARENT="${REL%/*}"
+        PARENT_BN="${PARENT##*/}"
+        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_OV0$PARENT_BN/$B_FG_B$LEAF $R"
+    elif [ -n "$REL" ] && [[ "$REL" != */* ]]; then
+        # 1-level-deep diverged — already short, no `…/` needed.
+        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_FG_B$LEAF $R"
+    elif [ "$COLS" -ge "$NARROW_THRESHOLD" ]; then
+        # Medium or narrow tier — drop parent, keep leaf intact.
+        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_OV0…/$B_FG_B$LEAF $R"
+    else
+        # Very narrow — also truncate the leaf itself.
+        TLEAF="$LEAF"
+        [ "${#TLEAF}" -gt "$MAX_LEAF_CHARS" ] && TLEAF="${TLEAF:0:$((MAX_LEAF_CHARS - 1))}…"
+        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_OV0…/$B_FG_B$TLEAF $R"
+    fi
 fi
 
 if [ -n "$BRANCH" ]; then
     if [ "$IS_WORKTREE" = "1" ]; then BR_ICON=""; else BR_ICON=""; fi
-    LINE1+=" $B_SAP $BR_ICON $B_GR_B$BRANCH $R"
+    # Hard-truncate branch when terminal is narrow.
+    BR_DISPLAY="$BRANCH"
+    if [ "$COLS" -lt "$NARROW_THRESHOLD" ] && [ "${#BR_DISPLAY}" -gt "$MAX_BRANCH_CHARS" ]; then
+        BR_DISPLAY="${BR_DISPLAY:0:$((MAX_BRANCH_CHARS - 1))}…"
+    fi
+    LINE1+=" $B_SAP $BR_ICON $B_GR_B$BR_DISPLAY $R"
 
     if [ -n "$GIT_STATE" ]; then
         LINE1+=" $B_RED_B $GIT_STATE $R"
