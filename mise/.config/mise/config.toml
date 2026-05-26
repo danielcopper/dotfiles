@@ -1,0 +1,13 @@
+[tools]
+ansible = "latest"
+carapace = "latest"
+java = "temurin-21"
+maven = "3"
+node = "lts"
+"npm:@angular/cli" = "latest"
+"npm:@angular/language-server" = "latest"
+"npm:typescript-language-server" = "latest"
+"pipx:pyright" = "latest"
+pipx = "latest"
+python = "3.12"
+uv = "latest"
