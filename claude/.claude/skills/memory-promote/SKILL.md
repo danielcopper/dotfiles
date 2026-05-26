@@ -1,4 +1,5 @@
 ---
+name: memory-promote
 description: Move a specific memory entry to a durable destination. Validates against routing rules in memory/README.md.
 argument-hint: "<from-description> <to-destination>  (e.g. 'sqlcmd quoting trick' tools/sql-server)"
 ---

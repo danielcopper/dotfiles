@@ -1,4 +1,5 @@
 ---
+name: memory-consolidate
 description: Full memory sweep. Runs /memory-dream first, then dedupes/merges/splits durables and refreshes the index. Three approval gates.
 ---
 

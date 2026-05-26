@@ -1,4 +1,5 @@
 ---
+name: memory-dream
 description: Triage daily logs - propose promotions to durable memory and archive of older dailies. Plan-then-apply.
 ---
 
