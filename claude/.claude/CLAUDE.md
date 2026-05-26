@@ -24,14 +24,16 @@
 
 When working with code in a language that has LSP coverage (TypeScript, Python, C#, …):
 
-- **Prefer LSP over grep/read for symbol queries** — it's faster, precise, and avoids dragging entire files into context.
+- **Prefer LSP over Grep/Glob/Read for symbol queries** — faster, precise, no whole-file reads.
   - `LSP goToDefinition` / `goToImplementation` — jump to source
   - `LSP findReferences` — every usage across the codebase
   - `LSP hover` — type/signature info without reading the file
   - `LSP documentSymbol` — overview of a single file's structure
-- **Use grep** for text/pattern searches LSP can't satisfy: comments, string literals, config values, non-LSP languages.
-- **Avoid `LSP workspaceSymbol`** — the tool schema exposes no `query` parameter, so it dumps the entire workspace and burns context. Use `documentSymbol` on a likely file + grep for path narrowing instead.
-- After writing or editing code, run `LSP` diagnostics on the touched files and fix errors before reporting the task done.
+  - `LSP incomingCalls` / `outgoingCalls` — call hierarchy (prepare first via `prepareCallHierarchy`)
+- **Before renaming or changing a function signature**, run `LSP findReferences` first to know every call site.
+- **Use Grep/Glob** only for text/pattern searches LSP can't satisfy: comments, string literals, config values, non-LSP languages.
+- **Avoid `LSP workspaceSymbol`** — the tool schema exposes no `query` parameter (anthropics/claude-code#17149), so it dumps the entire workspace and burns context. Use `documentSymbol` on a likely file + Grep for path narrowing instead.
+- After writing or editing code, check `LSP` diagnostics on the touched files. Fix type errors and missing imports immediately, before reporting the task done.
 
 ## Git
 
