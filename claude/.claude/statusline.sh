@@ -114,6 +114,19 @@ R=$'\e[0m'
 # eighth-block glyphs (▏▎▍▌▋▊▉) so a width-18 bar resolves ~0.7% per step
 # instead of ~5.5% — separates 1% from 8% visually.
 PARTIALS=('' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
+
+# Extract the 256-palette index N from a fill escape of the form
+# \e[48;5;N;38;…m. Both bar builders derive a matching foreground from
+# the fill so partial-cell / mini-bar glyphs blend with the surrounding
+# fill colour. Assumes 256-bg form — if any FILL_* switches to truecolor
+# (\e[48;2;…) this parse silently breaks and callers produce garbled
+# escapes. Centralised here so the assumption lives in one place.
+palette_idx_from_fill() {
+    local fill=$1
+    local idx=${fill#*48;5;}
+    printf '%s' "${idx%%;*}"
+}
+
 build_bar() {
     local width=$1 pct=$2 label=$3
     local low=${4:-$FILL_GR} mid=${5:-$FILL_PEACH} high=${6:-$FILL_RED}
@@ -139,10 +152,7 @@ build_bar() {
         # constant `width` cells; the inserting alternative grew the bar
         # by 1 cell on partial fill, causing visible label gaps. One char
         # disappears at a time, sliding across the label as pct changes.
-        # Derives fg index from fill escape — assumes 256-color bg form
-        # (\e[48;5;N;…). If any FILL_* switches to truecolor (\e[48;2;…)
-        # this parse silently breaks.
-        local idx=${fill#*48;5;}; idx=${idx%%;*}
+        local idx; idx=$(palette_idx_from_fill "$fill")
         local part=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
         printf '%s%s%s%s%s%s%s' \
             "$fill" "${full:0:fcells}" \
@@ -166,6 +176,11 @@ RESET_5H_FMT=$(fmt_remain "$RESET_5H")
 RESET_7D_FMT=$(fmt_remain "$RESET_7D")
 
 ##### Git info — cached, single block per query ###############################
+# TTL of 10s is an explicit staleness trade-off: a commit, branch switch, or
+# staging change won't reflect in the statusline until the TTL expires. The
+# statusline renders on every keystroke and during streaming — re-running the
+# consolidated git query at that rate would dominate render time. Cache key
+# is the cwd's md5, so per-repo branches and counts don't bleed across panes.
 CACHE_DIR="/tmp/statusline-cache"
 mkdir -p "$CACHE_DIR"
 CACHE_FILE="$CACHE_DIR/$(echo "$DIR" | md5sum | cut -d' ' -f1)"
@@ -186,9 +201,10 @@ STAGED=0 MODIFIED=0 UNTRACKED=0 IS_WORKTREE=0 GIT_STATE=""
 # git repo?" — replaces the prior standalone rev-parse existence check.
 if cache_is_stale; then
     if STATUS=$(git -C "$DIR" status --porcelain=v2 --branch 2>/dev/null); then
-        # Single-pass awk parse of porcelain v2. Pipe-delimited so branch
-        # names with shell-metachars can't break the bash read below.
-        IFS='|' read -r BRANCH UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED < <(awk '
+        # Single-pass awk parse of porcelain v2. SOH-delimited (\x01) for
+        # consistency with the jq output above — non-whitespace and not
+        # permitted in git refnames, so safe against any branch name.
+        IFS=$'\1' read -r BRANCH UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED < <(awk '
             /^# branch\.head /     { if ($3 != "(detached)") branch = $3 }
             /^# branch\.upstream / { upstream = $3 }
             /^# branch\.ab /       { ahead = substr($3, 2) + 0; behind = substr($4, 2) + 0 }
@@ -202,7 +218,7 @@ if cache_is_stale; then
             }
             /^\? / { untracked++ }
             END {
-                printf "%s|%s|%d|%d|%d|%d|%d\n",
+                printf "%s\1%s\1%d\1%d\1%d\1%d\1%d\n",
                        branch, upstream, ahead+0, behind+0,
                        staged+0, modified+0, untracked+0
             }
@@ -247,12 +263,12 @@ if cache_is_stale; then
         elif [ -f "$GIT_DIR/BISECT_LOG" ]; then
             GIT_STATE="BISECT"
         fi
-        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+        printf '%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\n' \
             "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$IS_WORKTREE" "$GIT_STATE" \
             > "$CACHE_FILE"
     fi
 elif [ -f "$CACHE_FILE" ]; then
-    IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
+    IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
 fi
 
 ##### Build progress bars #####################################################
@@ -279,10 +295,9 @@ build_mini_bar() {
     if   [ "$pct" -ge 85 ]; then fill="$high"
     elif [ "$pct" -ge 65 ]; then fill="$mid"
     else                          fill="$low"; fi
-    # Extract the 256-palette index from the fill escape (\e[48;5;N;38;…m)
-    # and reuse it as the FG over a dark cell bg, so the eighth-block glyph
-    # appears as a coloured column rising from the bottom.
-    local idx=${fill#*48;5;}; idx=${idx%%;*}
+    # Reuse the fill's palette index as the FG so the eighth-block glyph
+    # appears as a coloured column rising from the dark cell bg.
+    local idx; idx=$(palette_idx_from_fill "$fill")
     local style=$'\e[48;2;17;17;27;38;5;'"$idx"'m'
     local g=$((pct * 8 / 100))
     [ "$g" -gt 8 ] && g=8
