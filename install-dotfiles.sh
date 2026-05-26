@@ -135,6 +135,28 @@ fi
 # Harmless on hosts without overrides since no conflict exists.
 stow -R --override='^\.claude/settings\.json$' "${all_pkgs[@]}"
 
+# Post-stow: prune dangling symlinks under managed package roots that point
+# into this repo. These appear when a previously-stowed source file is
+# removed or moved in the repo — vanilla stow only manages what currently
+# exists in the package, not what used to. Without this, every refactor
+# leaves orphaned links in $HOME.
+for pkg in "${all_pkgs[@]}"; do
+  while IFS= read -r entry; do
+    rel="${entry#"$pkg"/}"
+    home_dir="$HOME/$rel"
+    [ -d "$home_dir" ] || continue
+    while IFS= read -r broken; do
+      # -m (canonicalize-missing) instead of -f: -f returns empty when the
+      # symlink's parent dir also no longer exists in the repo, which is
+      # exactly the case for sources removed by a refactor.
+      canonical="$(readlink -m -- "$broken" 2>/dev/null || true)"
+      case "$canonical" in
+        "$DIR"/*) rm -- "$broken" ;;
+      esac
+    done < <(find "$home_dir" -xtype l)
+  done < <(find "$pkg" -mindepth 1 -maxdepth 1 -type d)
+done
+
 # Materialize mise-managed tools (runtimes + LSPs) declared in the
 # just-stowed ~/.config/mise/config.toml. mise itself is installed
 # by install-packages.sh via packages/common.pkglist.
