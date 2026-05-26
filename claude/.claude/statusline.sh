@@ -266,6 +266,31 @@ CTX_BAR=$(build_bar $((${#CTX_LABEL} + 2)) "$PCT"    "$CTX_LABEL")
 H_BAR=$(build_bar   $((${#H_LABEL}   + 2)) "$PCT_5H" "$H_LABEL"   "$FILL_5H_LOW")
 W_BAR=$(build_bar   $((${#W_LABEL}   + 2)) "$PCT_7D" "$W_LABEL"   "$FILL_7D_LOW")
 
+##### Mini-bars (last-resort fallback for very narrow panes) ##################
+# When even max-truncated path + branch still overflow the pane, replace the
+# three labelled bars with one-cell vertical-block glyphs (▁ → █). Each bar
+# becomes a single column whose fill height = percentage / 12.5. Loses the
+# reset-time label and exact %, but keeps the tier (low/mid/high) via colour
+# and a coarse fill level via glyph. Three "pillars" side by side.
+MINI_GLYPHS=(' ' '▁' '▂' '▃' '▄' '▅' '▆' '▇' '█')
+build_mini_bar() {
+    local pct=$1 low=$2 mid=$3 high=${4:-$FILL_RED}
+    local fill
+    if   [ "$pct" -ge 85 ]; then fill="$high"
+    elif [ "$pct" -ge 65 ]; then fill="$mid"
+    else                          fill="$low"; fi
+    # Extract the 256-palette index from the fill escape (\e[48;5;N;38;…m)
+    # and reuse it as the FG over a dark cell bg, so the eighth-block glyph
+    # appears as a coloured column rising from the bottom.
+    local idx=${fill#*48;5;}; idx=${idx%%;*}
+    local style=$'\e[48;2;17;17;27;38;5;'"$idx"'m'
+    local g=$((pct * 8 / 100))
+    [ "$g" -gt 8 ] && g=8
+    [ "$pct" -gt 0 ] && [ "$g" -lt 1 ] && g=1
+    printf '%s%s%s' "$style" "${MINI_GLYPHS[g]}" "$R"
+}
+MINI_BARS="$(build_mini_bar "$PCT"    "$FILL_GR")$(build_mini_bar "$PCT_5H" "$FILL_5H_LOW")$(build_mini_bar "$PCT_7D" "$FILL_7D_LOW")"
+
 ##### Compose LINE 1: dir + git ###############################################
 # Content-aware shrinking: build every variable element at full width, measure
 # the line's visible width, and shrink the dir-block (parent → …/leaf →
@@ -373,18 +398,40 @@ visible_width() {
 }
 
 ##### Greedy shrink + output ##################################################
-# Try variants from most-info to least, pick the first that fits in $COLS.
-# If even vnarrow + trunc exceeds the pane (tiny split), fall through to the
-# smallest combo — the terminal wraps regardless and at least the info is
-# minimally compressed.
+# Try variants from most-info to least, pick the first that fits within the
+# budget. Combo format: "<path-variant> <branch-variant> <bars-mode>".
+#
+# Tiers (info loss grows down the list):
+#   1. wide   / full  / full-bars  — full path (parent/leaf), full branch
+#   2. narrow / full  / full-bars  — drop parent, keep leaf
+#   3. narrow / trunc / full-bars  — drop parent + truncate branch
+#   4. vnarrow/ trunc / full-bars  — also truncate leaf
+#   5. vnarrow/ trunc / mini-bars  — pillar-glyph bars (last resort)
+#
+# Budget: $COLS minus a safety margin. `visible_width` counts characters via
+# `${#var}` which equals visual cells for ASCII + most glyphs, but some Nerd
+# Font icons may render as 2 cells in some fonts. The margin absorbs that
+# off-by-a-few uncertainty so a "fits" result actually fits in practice.
+SAFETY_MARGIN=4
+BUDGET=$((COLS - SAFETY_MARGIN))
+
 FULL_LINE=""
-for combo in "wide full" "narrow full" "narrow trunc" "vnarrow trunc"; do
-    read -r pv bv <<< "$combo"
+for combo in \
+    "wide full full-bars" \
+    "narrow full full-bars" \
+    "narrow trunc full-bars" \
+    "vnarrow trunc full-bars" \
+    "vnarrow trunc mini-bars"; do
+    read -r pv bv bm <<< "$combo"
     dir_blk=$(build_dir_block "$pv")
     br_blk=$(build_branch_block "$bv")
     LINE1="$dir_blk$br_blk$STATIC_BLK"
-    FULL_LINE=$(printf '%s  %s  %s  %s' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR")
-    [ "$(visible_width "$FULL_LINE")" -le "$COLS" ] && break
+    if [ "$bm" = "mini-bars" ]; then
+        FULL_LINE=$(printf '%s  %s' "$LINE1" "$MINI_BARS")
+    else
+        FULL_LINE=$(printf '%s  %s  %s  %s' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR")
+    fi
+    [ "$(visible_width "$FULL_LINE")" -le "$BUDGET" ] && break
 done
 
 printf '%s\n' "$FULL_LINE"
