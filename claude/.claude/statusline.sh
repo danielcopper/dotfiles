@@ -354,7 +354,7 @@ fi
 
 # Pick the branch icon once. Worktree gets the fork-style glyph; main
 # checkout gets the regular branch glyph.
-if [ "$IS_WORKTREE" = "1" ]; then BR_ICON_GLYPH=""; else BR_ICON_GLYPH=""; fi
+if [ "$IS_WORKTREE" = "1" ]; then BR_ICON_GLYPH=""; else BR_ICON_GLYPH=""; fi
 
 # Build the dir block for a given variant: wide | narrow | vnarrow.
 # When PROJECT_DIR == DIR there is no parent/leaf — all variants return
@@ -450,9 +450,15 @@ for combo in \
     br_blk=$(build_branch_block "$bv")
     LINE1="$dir_blk$br_blk$STATIC_BLK"
     if [ "$bm" = "mini-bars" ]; then
+        # 2 literal spaces: mini-bar glyphs have no internal chip padding, so
+        # gap = 1 trailing-internal + 2 literal + 0 leading = 3 cells, matching
+        # the 3-cell rhythm between full chips.
         FULL_LINE=$(printf '%s  %s' "$LINE1" "$MINI_BARS")
     else
-        FULL_LINE=$(printf '%s  %s  %s  %s' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR")
+        # 1 literal space between bar chips: each has [sp][label][sp] internal
+        # padding, so gap = 1 trailing + 1 literal + 1 leading = 3 cells,
+        # consistent with the dir→branch→static rhythm above.
+        FULL_LINE=$(printf '%s %s %s %s' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR")
     fi
     [ "$(visible_width "$FULL_LINE")" -le "$BUDGET" ] && break
 done
