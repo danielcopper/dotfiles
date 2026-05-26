@@ -11,6 +11,7 @@ common_pkgs=(
   git
   inputrc
   claude
+  mise
   nvim
   starship
   systemd
@@ -133,3 +134,12 @@ fi
 # --override lets host-<class> replace shared files where needed (e.g. claude/.claude/settings.json).
 # Harmless on hosts without overrides since no conflict exists.
 stow -R --override='^\.claude/settings\.json$' "${all_pkgs[@]}"
+
+# Materialize mise-managed tools (runtimes + LSPs) declared in the
+# just-stowed ~/.config/mise/config.toml. mise itself is installed
+# by install-packages.sh via packages/common.pkglist.
+if command -v mise >/dev/null 2>&1; then
+  echo
+  echo "running mise install"
+  (cd "$HOME" && mise install)
+fi
