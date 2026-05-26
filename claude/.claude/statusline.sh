@@ -37,7 +37,7 @@ data=$(printf '%s' "$input" | jq -r '
     ((.rate_limits.seven_day.used_percentage // 0) | floor),
     (.rate_limits.five_hour.resets_at // 0),
     (.rate_limits.seven_day.resets_at // 0)
-  ] | join("")
+  ] | join("\u0001")
 ')
 IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
 
@@ -66,14 +66,11 @@ if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
     COLS=140
 fi
 
-# Thresholds — picked from realistic worst-case totals (long worktree branch +
-# deep path + dirty + 3 bars). Tune here, not deeper in the rendering code.
-WIDE_THRESHOLD=150       # full parent/leaf + full branch
-MEDIUM_THRESHOLD=125     # …/leaf + full branch
-NARROW_THRESHOLD=105     # …/leaf + truncated branch
-# below NARROW_THRESHOLD: …/<truncated-leaf>… + truncated branch
-MAX_BRANCH_CHARS=24      # cap when truncating
-MAX_LEAF_CHARS=20        # cap when truncating leaf (very narrow tier)
+# Truncation caps used by the content-aware shrink loop further below. The
+# loop measures the rendered line's visible width and shrinks variants from
+# most-info to least until it fits — no width thresholds to tune.
+MAX_BRANCH_CHARS=24      # cap when branch is truncated
+MAX_LEAF_CHARS=20        # cap when leaf segment is truncated
 
 if [ "$MAX_TOKENS" -ge 1000000 ]; then
     TOKEN_LABEL="$((MAX_TOKENS / 1000000))m"
@@ -258,87 +255,10 @@ elif [ -f "$CACHE_FILE" ]; then
     IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
 fi
 
-##### Compose LINE 1: project + git ###########################################
-# Each colored block has 1-space internal padding on left and right (matches
-# the dir block style). Blocks are separated by 1 uncolored space.
-# When project_dir and current_dir diverge (claude was started in dir A,
-# then navigated into subdir/worktree B), show both basenames with visual
-# hierarchy: project dimmed (history), current bright (where you are now).
-PROJ_BN="${PROJECT_DIR##*/}"
-LEAF="${DIR##*/}"
-
-if [ "$PROJECT_DIR" = "$DIR" ]; then
-    LINE1="$B_ROSE 󰉋 $B_FG_B$PROJ_BN $R"
-else
-    # Compute path relative to project_dir if current is below it.
-    REL=""
-    [[ "$DIR" == "$PROJECT_DIR"/* ]] && REL="${DIR#"$PROJECT_DIR"/}"
-
-    # Decide path display variant based on COLS:
-    #   wide   ≥WIDE_THRESHOLD     → "project · parent/leaf"
-    #   medium ≥MEDIUM_THRESHOLD   → "project · …/leaf" (also when only 1 level deep — no `…/`)
-    #   narrow ≥NARROW_THRESHOLD   → "project · …/leaf" (always with `…/`)
-    #   v-narrow                   → "project · …/<truncated-leaf>"
-    if [ "$COLS" -ge "$WIDE_THRESHOLD" ] && [ -n "$REL" ] && [[ "$REL" == */* ]]; then
-        PARENT="${REL%/*}"
-        PARENT_BN="${PARENT##*/}"
-        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_OV0$PARENT_BN/$B_FG_B$LEAF $R"
-    elif [ -n "$REL" ] && [[ "$REL" != */* ]]; then
-        # 1-level-deep diverged — already short, no `…/` needed.
-        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_FG_B$LEAF $R"
-    elif [ "$COLS" -ge "$NARROW_THRESHOLD" ]; then
-        # Medium or narrow tier — drop parent, keep leaf intact.
-        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_OV0…/$B_FG_B$LEAF $R"
-    else
-        # Very narrow — also truncate the leaf itself.
-        TLEAF="$LEAF"
-        [ "${#TLEAF}" -gt "$MAX_LEAF_CHARS" ] && TLEAF="${TLEAF:0:$((MAX_LEAF_CHARS - 1))}…"
-        LINE1="$B_ROSE 󰉋 $B_OV0$PROJ_BN$B_FG · $B_OV0…/$B_FG_B$TLEAF $R"
-    fi
-fi
-
-if [ -n "$BRANCH" ]; then
-    if [ "$IS_WORKTREE" = "1" ]; then BR_ICON=""; else BR_ICON=""; fi
-    # Hard-truncate branch when terminal is narrow.
-    BR_DISPLAY="$BRANCH"
-    if [ "$COLS" -lt "$NARROW_THRESHOLD" ] && [ "${#BR_DISPLAY}" -gt "$MAX_BRANCH_CHARS" ]; then
-        BR_DISPLAY="${BR_DISPLAY:0:$((MAX_BRANCH_CHARS - 1))}…"
-    fi
-    LINE1+=" $B_SAP $BR_ICON $B_GR_B$BR_DISPLAY $R"
-
-    if [ -n "$GIT_STATE" ]; then
-        LINE1+=" $B_RED_B $GIT_STATE $R"
-    fi
-
-    if [ "$HAS_UPSTREAM" = "1" ]; then
-        if [ "$AHEAD" -gt 0 ] || [ "$BEHIND" -gt 0 ]; then
-            # Colorize the non-zero side: green ahead (ready to push),
-            # peach behind (pull needed). Zero side stays slate.
-            LINE1+=" $B_ST0 "
-            if [ "$AHEAD" -gt 0 ]; then LINE1+="$B_GR↑$AHEAD$B_ST0"
-            else                        LINE1+="↑$AHEAD"; fi
-            LINE1+=" "
-            if [ "$BEHIND" -gt 0 ]; then LINE1+="$B_PEACH↓$BEHIND$B_ST0"
-            else                         LINE1+="↓$BEHIND"; fi
-            LINE1+=" $R"
-        fi
-    else
-        LINE1+=" $B_OV0 ↑- ↓- $R"
-    fi
-fi
-
-if [ "$STAGED" -gt 0 ] || [ "$MODIFIED" -gt 0 ] || [ "$UNTRACKED" -gt 0 ]; then
-    LINE1+=" $B_FG "
-    [ "$STAGED" -gt 0 ]    && LINE1+="$B_GR●$STAGED$B_FG "
-    [ "$MODIFIED" -gt 0 ]  && LINE1+="$B_PEACH▲$MODIFIED$B_FG "
-    [ "$UNTRACKED" -gt 0 ] && LINE1+="$B_OV0?$UNTRACKED$B_FG "
-    LINE1+="$R"
-fi
-
-##### Compose LINE 2: three progress bars #####################################
-# Width is tight — just the label plus 1 cell of padding on each side, like
-# the dir/git blocks. Labels vary slightly with model/reset time, so we
-# compute each width from its label length.
+##### Build progress bars #####################################################
+# Width is label + 2 cells of padding. Labels vary with model and reset time.
+# Built up here (before the dir/branch blocks) because the content-aware
+# shrink loop below needs to measure the full rendered line including bars.
 CTX_LABEL="$MODEL $TOKEN_LABEL"
 H_LABEL="5h · $RESET_5H_FMT"
 W_LABEL="7d · $RESET_7D_FMT"
@@ -346,7 +266,125 @@ CTX_BAR=$(build_bar $((${#CTX_LABEL} + 2)) "$PCT"    "$CTX_LABEL")
 H_BAR=$(build_bar   $((${#H_LABEL}   + 2)) "$PCT_5H" "$H_LABEL"   "$FILL_5H_LOW")
 W_BAR=$(build_bar   $((${#W_LABEL}   + 2)) "$PCT_7D" "$W_LABEL"   "$FILL_7D_LOW")
 
-##### Output (single line) ###################################################
-# Everything on one line: dir + git + three bars. Avoids the 2-line drop
-# when the Claude Code pane is short.
-printf '%s  %s  %s  %s\n' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR"
+##### Compose LINE 1: dir + git ###############################################
+# Content-aware shrinking: build every variable element at full width, measure
+# the line's visible width, and shrink the dir-block (parent → …/leaf →
+# truncated leaf) and the branch (full → truncated) in tiers until the line
+# actually fits in $COLS. Bars and per-counter blocks are never truncated.
+
+PROJ_BN="${PROJECT_DIR##*/}"
+LEAF="${DIR##*/}"
+REL=""
+[[ "$DIR" == "$PROJECT_DIR"/* ]] && REL="${DIR#"$PROJECT_DIR"/}"
+
+# Static (non-truncatable) blocks: in-progress state, ahead/behind, dirty.
+# Computed once; appended after the dir+branch in every variant.
+STATIC_BLK=""
+if [ -n "$BRANCH" ]; then
+    [ -n "$GIT_STATE" ] && STATIC_BLK+=" $B_RED_B $GIT_STATE $R"
+    if [ "$HAS_UPSTREAM" = "1" ]; then
+        if [ "$AHEAD" -gt 0 ] || [ "$BEHIND" -gt 0 ]; then
+            STATIC_BLK+=" $B_ST0 "
+            if [ "$AHEAD" -gt 0 ]; then STATIC_BLK+="$B_GR↑$AHEAD$B_ST0"
+            else                        STATIC_BLK+="↑$AHEAD"; fi
+            STATIC_BLK+=" "
+            if [ "$BEHIND" -gt 0 ]; then STATIC_BLK+="$B_PEACH↓$BEHIND$B_ST0"
+            else                         STATIC_BLK+="↓$BEHIND"; fi
+            STATIC_BLK+=" $R"
+        fi
+    else
+        STATIC_BLK+=" $B_OV0 ↑- ↓- $R"
+    fi
+fi
+if [ "$STAGED" -gt 0 ] || [ "$MODIFIED" -gt 0 ] || [ "$UNTRACKED" -gt 0 ]; then
+    STATIC_BLK+=" $B_FG "
+    [ "$STAGED" -gt 0 ]    && STATIC_BLK+="$B_GR●$STAGED$B_FG "
+    [ "$MODIFIED" -gt 0 ]  && STATIC_BLK+="$B_PEACH▲$MODIFIED$B_FG "
+    [ "$UNTRACKED" -gt 0 ] && STATIC_BLK+="$B_OV0?$UNTRACKED$B_FG "
+    STATIC_BLK+="$R"
+fi
+
+# Pick the branch icon once. Worktree gets the fork-style glyph; main
+# checkout gets the regular branch glyph.
+if [ "$IS_WORKTREE" = "1" ]; then BR_ICON_GLYPH=""; else BR_ICON_GLYPH=""; fi
+
+# Build the dir block for a given variant: wide | narrow | vnarrow.
+# When PROJECT_DIR == DIR there is no parent/leaf — all variants return
+# the same single-basename block.
+build_dir_block() {
+    local v="$1"
+    if [ "$PROJECT_DIR" = "$DIR" ]; then
+        printf '%s 󰉋 %s%s %s' "$B_ROSE" "$B_FG_B" "$PROJ_BN" "$R"
+        return
+    fi
+    local has_parent=0
+    [ -n "$REL" ] && [[ "$REL" == */* ]] && has_parent=1
+    case "$v" in
+        wide)
+            if [ "$has_parent" = 1 ]; then
+                local p="${REL%/*}"; p="${p##*/}"
+                printf '%s 󰉋 %s%s%s · %s%s/%s%s %s' \
+                    "$B_ROSE" "$B_OV0" "$PROJ_BN" "$B_FG" "$B_OV0" "$p" "$B_FG_B" "$LEAF" "$R"
+            else
+                printf '%s 󰉋 %s%s%s · %s%s %s' \
+                    "$B_ROSE" "$B_OV0" "$PROJ_BN" "$B_FG" "$B_FG_B" "$LEAF" "$R"
+            fi
+            ;;
+        narrow)
+            if [ "$has_parent" = 1 ]; then
+                printf '%s 󰉋 %s%s%s · %s…/%s%s %s' \
+                    "$B_ROSE" "$B_OV0" "$PROJ_BN" "$B_FG" "$B_OV0" "$B_FG_B" "$LEAF" "$R"
+            else
+                # one-level diverged — no parent to drop, same as wide
+                printf '%s 󰉋 %s%s%s · %s%s %s' \
+                    "$B_ROSE" "$B_OV0" "$PROJ_BN" "$B_FG" "$B_FG_B" "$LEAF" "$R"
+            fi
+            ;;
+        vnarrow)
+            local tl="$LEAF"
+            [ "${#tl}" -gt "$MAX_LEAF_CHARS" ] && tl="${tl:0:$((MAX_LEAF_CHARS-1))}…"
+            if [ "$has_parent" = 1 ]; then
+                printf '%s 󰉋 %s%s%s · %s…/%s%s %s' \
+                    "$B_ROSE" "$B_OV0" "$PROJ_BN" "$B_FG" "$B_OV0" "$B_FG_B" "$tl" "$R"
+            else
+                printf '%s 󰉋 %s%s%s · %s%s %s' \
+                    "$B_ROSE" "$B_OV0" "$PROJ_BN" "$B_FG" "$B_FG_B" "$tl" "$R"
+            fi
+            ;;
+    esac
+}
+
+# Build the branch block (full | trunc). Empty when no branch info available.
+build_branch_block() {
+    [ -z "$BRANCH" ] && return
+    local v="$1"
+    local br="$BRANCH"
+    if [ "$v" = "trunc" ] && [ "${#br}" -gt "$MAX_BRANCH_CHARS" ]; then
+        br="${br:0:$((MAX_BRANCH_CHARS-1))}…"
+    fi
+    printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
+}
+
+# Visible width of an ANSI-laden string (strip escape codes, count chars).
+visible_width() {
+    local s
+    s=$(printf '%s' "$1" | sed $'s/\x1b\\[[0-9;]*m//g')
+    printf '%d' "${#s}"
+}
+
+##### Greedy shrink + output ##################################################
+# Try variants from most-info to least, pick the first that fits in $COLS.
+# If even vnarrow + trunc exceeds the pane (tiny split), fall through to the
+# smallest combo — the terminal wraps regardless and at least the info is
+# minimally compressed.
+FULL_LINE=""
+for combo in "wide full" "narrow full" "narrow trunc" "vnarrow trunc"; do
+    read -r pv bv <<< "$combo"
+    dir_blk=$(build_dir_block "$pv")
+    br_blk=$(build_branch_block "$bv")
+    LINE1="$dir_blk$br_blk$STATIC_BLK"
+    FULL_LINE=$(printf '%s  %s  %s  %s' "$LINE1" "$CTX_BAR" "$H_BAR" "$W_BAR")
+    [ "$(visible_width "$FULL_LINE")" -le "$COLS" ] && break
+done
+
+printf '%s\n' "$FULL_LINE"
