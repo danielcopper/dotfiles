@@ -172,11 +172,17 @@ if cache_is_stale; then
         ' <<< "$STATUS")
         [ -n "$UPSTREAM" ] && HAS_UPSTREAM=1
 
-        # Worktree + in-progress state aren't in porcelain output.
-        # One rev-parse covers both git-dir and git-common-dir.
-        mapfile -t REVS < <(git -C "$DIR" rev-parse --git-dir --git-common-dir 2>/dev/null)
-        GIT_DIR=${REVS[0]} GIT_COMMON=${REVS[1]}
-        [ "$GIT_DIR" != "$GIT_COMMON" ] && IS_WORKTREE=1
+        # Worktree detection by path pattern of the absolute git-dir.
+        # String-comparing --git-dir against --git-common-dir is unreliable:
+        # when cwd traverses a symlink into the repo, one side comes back
+        # absolute (after git's internal physical-path resolution) and the
+        # other relative, producing a false-positive worktree even in a
+        # plain main checkout. `*/.git/worktrees/*` is the canonical layout
+        # of every git-managed worktree dir, so it's a stable marker.
+        # Absolute form also makes the in-progress state file checks below
+        # work regardless of where cwd lands.
+        GIT_DIR=$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)
+        [[ "$GIT_DIR" == */.git/worktrees/* ]] && IS_WORKTREE=1
 
         # In-progress operation state (merge/rebase/cherry-pick/revert/bisect).
         # State files live in the per-worktree git dir, not the common dir.
