@@ -20,6 +20,11 @@
 input=$(cat)
 
 ##### Parse JSON in a single jq call ##########################################
+# Use SOH (\x01) as the field separator, not tab. bash `read` treats tab as
+# whitespace and *collapses* consecutive tabs into a single separator — which
+# silently shifts every subsequent variable when an upstream field (like
+# `workspace.git_worktree`, optional and often empty) is the empty string.
+# SOH is non-whitespace, so empty fields are preserved.
 data=$(printf '%s' "$input" | jq -r '
   [
     ((.model.display_name // "?") | gsub(" \\([^)]*context\\)"; "")),
@@ -32,9 +37,9 @@ data=$(printf '%s' "$input" | jq -r '
     ((.rate_limits.seven_day.used_percentage // 0) | floor),
     (.rate_limits.five_hour.resets_at // 0),
     (.rate_limits.seven_day.resets_at // 0)
-  ] | @tsv
+  ] | join("")
 ')
-IFS=$'\t' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
+IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
 
 ##### Terminal width detection (no JSON field exposes this) ###################
 # Anthropic's statusline JSON omits terminal dimensions, so derive from shell.
