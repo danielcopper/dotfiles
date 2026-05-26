@@ -142,21 +142,42 @@ cache_is_stale() {
 BRANCH="" HAS_UPSTREAM=0 AHEAD=0 BEHIND=0
 STAGED=0 MODIFIED=0 UNTRACKED=0 IS_WORKTREE=0 GIT_STATE=""
 
-if git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1; then
-    if cache_is_stale; then
-        BRANCH=$(git -C "$DIR" branch --show-current 2>/dev/null)
-        GIT_DIR=$(git -C "$DIR" rev-parse --git-dir 2>/dev/null)
-        GIT_COMMON=$(git -C "$DIR" rev-parse --git-common-dir 2>/dev/null)
+# Consolidated git query: one `git status --porcelain=v2 --branch` covers
+# branch, upstream, ahead/behind, and all file counts. Worktree detection
+# still needs rev-parse (not exposed by porcelain); in-progress state lives
+# in the per-worktree git dir. The status exit code doubles as "is this a
+# git repo?" — replaces the prior standalone rev-parse existence check.
+if cache_is_stale; then
+    if STATUS=$(git -C "$DIR" status --porcelain=v2 --branch 2>/dev/null); then
+        # Single-pass awk parse of porcelain v2. Pipe-delimited so branch
+        # names with shell-metachars can't break the bash read below.
+        IFS='|' read -r BRANCH UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED < <(awk '
+            /^# branch\.head /     { if ($3 != "(detached)") branch = $3 }
+            /^# branch\.upstream / { upstream = $3 }
+            /^# branch\.ab /       { ahead = substr($3, 2) + 0; behind = substr($4, 2) + 0 }
+            /^[12u] / {
+                # $2 is XY: X = index/staged status, Y = worktree status.
+                # Dot means unmodified. Unmerged (u) counts as both, matching
+                # the prior wc-based logic where unmerged files appeared in
+                # both `diff --cached` and `diff`.
+                if (substr($2, 1, 1) != ".") staged++
+                if (substr($2, 2, 1) != ".") modified++
+            }
+            /^\? / { untracked++ }
+            END {
+                printf "%s|%s|%d|%d|%d|%d|%d\n",
+                       branch, upstream, ahead+0, behind+0,
+                       staged+0, modified+0, untracked+0
+            }
+        ' <<< "$STATUS")
+        [ -n "$UPSTREAM" ] && HAS_UPSTREAM=1
+
+        # Worktree + in-progress state aren't in porcelain output.
+        # One rev-parse covers both git-dir and git-common-dir.
+        mapfile -t REVS < <(git -C "$DIR" rev-parse --git-dir --git-common-dir 2>/dev/null)
+        GIT_DIR=${REVS[0]} GIT_COMMON=${REVS[1]}
         [ "$GIT_DIR" != "$GIT_COMMON" ] && IS_WORKTREE=1
-        UPSTREAM=$(git -C "$DIR" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
-        if [ -n "$UPSTREAM" ]; then
-            HAS_UPSTREAM=1
-            AHEAD=$(git -C "$DIR" rev-list --count "${UPSTREAM}..HEAD" 2>/dev/null || echo 0)
-            BEHIND=$(git -C "$DIR" rev-list --count "HEAD..${UPSTREAM}" 2>/dev/null || echo 0)
-        fi
-        STAGED=$(git -C "$DIR" diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
-        MODIFIED=$(git -C "$DIR" diff --numstat 2>/dev/null | wc -l | tr -d ' ')
-        UNTRACKED=$(git -C "$DIR" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+
         # In-progress operation state (merge/rebase/cherry-pick/revert/bisect).
         # State files live in the per-worktree git dir, not the common dir.
         if [ -f "$GIT_DIR/MERGE_HEAD" ]; then
@@ -179,9 +200,9 @@ if git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1; then
         printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
             "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$IS_WORKTREE" "$GIT_STATE" \
             > "$CACHE_FILE"
-    else
-        IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
     fi
+elif [ -f "$CACHE_FILE" ]; then
+    IFS='|' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
 fi
 
 ##### Compose LINE 1: project + git ###########################################
