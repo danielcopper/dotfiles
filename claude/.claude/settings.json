@@ -53,6 +53,9 @@
       "Edit(.worktrees/**)",
       "Write(.worktrees/**)"
     ],
+    "deny": [
+      "Bash(sed:*)"
+    ],
     "ask": [
       "Read(**/.env)",
       "Read(**/.env.local)",
