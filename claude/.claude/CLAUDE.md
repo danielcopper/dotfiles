@@ -20,6 +20,19 @@
 
 - **Line endings:** New files use LF. Existing files keep their current line endings (CRLF or LF) — never bulk-convert.
 
+## Code Navigation
+
+When working with code in a language that has LSP coverage (TypeScript, Python, C#, …):
+
+- **Prefer LSP over grep/read for symbol queries** — it's faster, precise, and avoids dragging entire files into context.
+  - `LSP goToDefinition` / `goToImplementation` — jump to source
+  - `LSP findReferences` — every usage across the codebase
+  - `LSP hover` — type/signature info without reading the file
+  - `LSP documentSymbol` — overview of a single file's structure
+- **Use grep** for text/pattern searches LSP can't satisfy: comments, string literals, config values, non-LSP languages.
+- **Avoid `LSP workspaceSymbol`** — the tool schema exposes no `query` parameter, so it dumps the entire workspace and burns context. Use `documentSymbol` on a likely file + grep for path narrowing instead.
+- After writing or editing code, run `LSP` diagnostics on the touched files and fix errors before reporting the task done.
+
 ## Git
 
 - **Conventional Commits** — always use the format: `<type>(<scope>): <description>`
