@@ -6,12 +6,19 @@ Injects memory content into Claude's context on the first tool call of each
 session/subagent. Uses parent-pid marker files to ensure single-shot per process.
 
 Sources, in order:
-  1. ~/.claude/memory/README.md           system docs + routing rules
+  1. Inline routing cheatsheet (constant below)
+       — replaces the full ~/.claude/memory/README.md eager-inject (~83 lines)
+       — the README stays as the canonical doc and is read on demand by the
+         /memory-* skills when their workflows actually need the full ruleset
   2. ~/.claude/memory/MEMORY.md           personal global index (if exists)
   3. ~/.claude/memory/daily/<today>.md    today's running log (if exists)
   4. ~/.claude/memory/daily/<yest>.md     yesterday's running log (if exists)
   5. <git-root>/.claude/memory/MEMORY.md  per-repo index (if cwd in a git repo)
   6. ~/.claude/projects/<encoded-cwd>/memory/MEMORY.md  Anthropic auto-memory, read-only
+
+Lazy-loading philosophy: eager-load only indices and time-bound running logs,
+never topic-file bodies. Claude fetches `general.md`, `tools/<tool>.md`, etc.
+on demand by matching the user's prompt against the index entries' keywords.
 
 Failure mode: catch everything, exit 0, never block tool execution.
 """
@@ -24,6 +31,28 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 MAX_INJECTION_CHARS = 30_000  # ~7-8k tokens, soft cap; truncates from the bottom
+
+ROUTING_SUMMARY = """\
+When you learn something worth recording, pick the destination:
+
+1. True/useful across projects? → `~/.claude/memory/general.md`
+2. Tool-specific quirk? → `~/.claude/memory/tools/<tool>.md`
+3. Cross-tool conceptual knowledge? → `~/.claude/memory/domain/<topic>.md`
+4. Repo-specific, team-useful? → `<repo>/.claude/memory/<file>.md` (committed)
+5. Private/WIP or just-noted-today? → `~/.claude/memory/daily/<YYYY-MM-DD>.md`
+
+Per-entry format for feedback/project memories: lead with the rule/fact,
+then `**Why:**` (reason) and `**How to apply:**` lines. Link related
+memories via `[[name]]`.
+
+After creating or modifying a topic file: bump its `Updated:` date in
+the corresponding `MEMORY.md` section; new files get a new section
+with a keyword-dense description so future sessions match prompts to
+the right file.
+
+Full structure docs and slash-command behaviour: `~/.claude/memory/README.md`
+(read on demand for `/memory-dream`, `/memory-consolidate`, `/memory-promote`).
+"""
 
 
 def log_event(event_type, details):
@@ -98,9 +127,7 @@ def collect_sections(cwd):
     memory_dir = home / ".claude" / "memory"
     sections = []
 
-    readme = read_file(memory_dir / "README.md")
-    if readme:
-        sections.append(("Global memory README — `~/.claude/memory/README.md`", readme))
+    sections.append(("Memory routing — quick reference", ROUTING_SUMMARY))
 
     index = read_file(memory_dir / "MEMORY.md")
     if index:

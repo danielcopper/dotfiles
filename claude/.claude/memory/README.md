@@ -1,6 +1,6 @@
 # Memory System
 
-This file is auto-injected into every Claude Code session and subagent (first tool call) by `~/.claude/hooks/memory_inject.py`. It defines the structure and routing rules for the memory system.
+`~/.claude/hooks/memory_inject.py` injects a compact **routing digest** at the first tool call of every Claude Code session and subagent — not the full content of this file. This file is the canonical structure/routing reference, read on demand when the digest isn't enough (typically inside `/memory-dream`, `/memory-consolidate`, `/memory-promote` workflows).
 
 ## Three stores
 
