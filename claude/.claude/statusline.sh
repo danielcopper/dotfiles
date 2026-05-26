@@ -300,12 +300,13 @@ build_mini_bar() {
     elif [ "$pct" -ge 65 ]; then fill="$mid"
     else                          fill="$low"; fi
     # Reuse the fill's palette index as the FG so the eighth-block glyph
-    # appears as a coloured column rising from the dark cell bg. 256-bg
-    # (233 ≈ #121212) instead of truecolor (17,17,27) to bypass the same
-    # Claude TUI wash that motivates the bar/FILL palette — the dark
-    # crust would otherwise get inverted to warm peach.
+    # appears as a coloured column rising from the cell bg. Bg matches the
+    # B_* chip palette (truecolor 56,56,56) so mini-bars sit visually flush
+    # with dotfiles/main/etc. The Claude TUI truecolor wash hits specific
+    # values (e.g. dark crust 17,17,27 → peach) but leaves 56,56,56 alone,
+    # same as the full-bar track and every other chip in the line.
     local idx; idx=$(palette_idx_from_fill "$fill")
-    local style=$'\e[48;5;233;38;5;'"$idx"'m'
+    local style=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
     local g=$((pct * 8 / 100))
     [ "$g" -gt 8 ] && g=8
     [ "$pct" -gt 0 ] && [ "$g" -lt 1 ] && g=1
