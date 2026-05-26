@@ -43,13 +43,28 @@ IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_
 
 ##### Terminal width detection (no JSON field exposes this) ###################
 # Anthropic's statusline JSON omits terminal dimensions, so derive from shell.
-# Order: $COLUMNS env (rarely set in non-interactive sub-shells) → tput cols
-# (works when stdout is a tty, which Claude Code's statusline render is) →
-# stty size (fallback if tput is missing) → conservative default.
-COLS=${COLUMNS:-}
-[ -z "$COLS" ] && COLS=$(tput cols 2>/dev/null) && [ -n "$COLS" ] || true
-[ -z "$COLS" ] && COLS=$(stty size 2>/dev/null | awk '{print $2}') || true
-[ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null && COLS=140
+# In the statusline-render context, stdin is the JSON pipe and the subprocess
+# has no controlling tty — `tput cols` and `stty size` (with or without
+# `</dev/tty`) fail or return terminfo defaults (typically 80) and ignore
+# real resize events.
+#
+# When inside tmux (the primary setup here), querying `pane_width` directly
+# from the tmux server gives the **live** pane width every render — reactive
+# to splits, resizes, and zooms without any extra plumbing.
+#
+# Order: tmux pane_width (live, reactive) → $COLUMNS env (rarely set in
+# render context but cheap to check) → conservative default. `/dev/tty`
+# probes were tried; they fail in piped subprocesses on this setup.
+COLS=""
+if [ -n "${TMUX_PANE:-}" ]; then
+    COLS=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
+fi
+if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
+    COLS=${COLUMNS:-}
+fi
+if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
+    COLS=140
+fi
 
 # Thresholds — picked from realistic worst-case totals (long worktree branch +
 # deep path + dirty + 3 bars). Tune here, not deeper in the rendering code.
