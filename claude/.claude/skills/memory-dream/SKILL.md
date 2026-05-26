@@ -18,17 +18,17 @@ Two distinct reads — different roles:
 
 - **Source material** (what we triage): all files under `~/.claude/memory/daily/` (excluding `daily/archive/`).
 - **Reference material** (so we know what already exists, avoid duplicates, pick correct destinations):
-  - `~/.claude/memory/general.md`, `tools/*.md`, `domain/*.md` (global durables)
-  - If cwd is inside a git repo (`git rev-parse --show-toplevel`), also `<repo>/.claude/memory/general.md`, `<repo>/.claude/memory/tools/*.md`, `<repo>/.claude/memory/domain/*.md` (repo durables)
+  - `~/.claude/memory/*.md` (top-level rule files, one concept per file), `tools/*.md`, `domain/*.md` (global durables)
+  - If cwd is inside a git repo (`git rev-parse --show-toplevel`), also `<repo>/.claude/memory/*.md`, `<repo>/.claude/memory/tools/*.md`, `<repo>/.claude/memory/domain/*.md` (repo durables)
 
 ## Plan groups
 
 Present a plan organized as four groups:
 
 1. **Promote → durable memory**: recurring themes, durable decisions, codebase facts that benefit teammates.
-   - "Promote → `general.md`: …"
+   - "Promote → `<rule-name>.md` (NEW top-level rule file): …"
    - "Promote → `tools/sql-server.md` (NEW): …"
-   - "Promote → `<repo>/.claude/memory/general.md`: …"
+   - "Promote → `<repo>/.claude/memory/<rule-name>.md` (NEW): …"
    - Validate destination against the routing rules in `README.md` and check reference material to avoid dupes.
 
 2. **Skip (not durable yet — leave in daily for context)**: bullets that aren't worth promoting today but might recur. They stay in their daily file. No movement.

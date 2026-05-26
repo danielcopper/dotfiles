@@ -16,10 +16,10 @@ Expected form: `/memory-promote <from-description> <to-destination>`
 
 - **`<from-description>`**: a phrase identifying the source entry. Could be a quote, a topic name, or a date+timestamp (e.g. "today's 14:30 sql-server bullet"). If unclear, ask for clarification.
 - **`<to-destination>`**: one of:
-  - `general` → `~/.claude/memory/general.md`
+  - `<rule-name>` → `~/.claude/memory/<rule-name>.md` (top-level rule file; one rule per file, kebab-case)
   - `tools/<X>` → `~/.claude/memory/tools/<X>.md`
   - `domain/<X>` → `~/.claude/memory/domain/<X>.md`
-  - `repo/general`, `repo/tools/<X>`, `repo/domain/<X>` → expands to `<git-root>/.claude/memory/...`. Requires cwd inside a git repo.
+  - `repo/<rule-name>`, `repo/tools/<X>`, `repo/domain/<X>` → expands to `<git-root>/.claude/memory/...`. Requires cwd inside a git repo.
   - A literal path (advanced) → use as-is.
 
 If $ARGUMENTS is empty, ask for both source and destination.

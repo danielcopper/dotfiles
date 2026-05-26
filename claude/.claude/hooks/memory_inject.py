@@ -17,7 +17,7 @@ Sources, in order:
   6. ~/.claude/projects/<encoded-cwd>/memory/MEMORY.md  Anthropic auto-memory, read-only
 
 Lazy-loading philosophy: eager-load only indices and time-bound running logs,
-never topic-file bodies. Claude fetches `general.md`, `tools/<tool>.md`, etc.
+never topic-file bodies. Claude fetches `<rule>.md`, `tools/<tool>.md`, etc.
 on demand by matching the user's prompt against the index entries' keywords.
 
 Failure mode: catch everything, exit 0, never block tool execution.
@@ -35,7 +35,7 @@ MAX_INJECTION_CHARS = 30_000  # ~7-8k tokens, soft cap; truncates from the botto
 ROUTING_SUMMARY = """\
 When you learn something worth recording, pick the destination:
 
-1. True/useful across projects? → `~/.claude/memory/general.md`
+1. True/useful across projects? → `~/.claude/memory/<rule-name>.md` (one rule per file)
 2. Tool-specific quirk? → `~/.claude/memory/tools/<tool>.md`
 3. Cross-tool conceptual knowledge? → `~/.claude/memory/domain/<topic>.md`
 4. Repo-specific, team-useful? → `<repo>/.claude/memory/<file>.md` (committed)
@@ -44,6 +44,11 @@ When you learn something worth recording, pick the destination:
 Per-entry format for feedback/project memories: lead with the rule/fact,
 then `**Why:**` (reason) and `**How to apply:**` lines. Link related
 memories via `[[name]]`.
+
+File naming and frontmatter: kebab-case filenames, no type prefix
+(e.g. `no-bulk-sed.md`, not `feedback_no_bulk_sed.md`). Frontmatter
+uses top-level `type:` (not nested under `metadata:`), and `name:`
+must equal the filename slug — `[[wiki-links]]` resolve against that.
 
 After creating or modifying a topic file: bump its `Updated:` date in
 the corresponding `MEMORY.md` section; new files get a new section

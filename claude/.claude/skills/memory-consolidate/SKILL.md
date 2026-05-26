@@ -32,10 +32,10 @@ Do everything `/memory-dream` does — see `~/.claude/commands/memory-dream.md` 
 ## Phase 2 — Durable sweep
 
 Read the durable layer in scope:
-- `~/.claude/memory/general.md`
+- `~/.claude/memory/*.md` (top-level rule files, one concept per file)
 - `~/.claude/memory/tools/*.md`
 - `~/.claude/memory/domain/*.md`
-- For each in-scope repo: `<repo>/.claude/memory/general.md`, `<repo>/.claude/memory/tools/*.md`, `<repo>/.claude/memory/domain/*.md`
+- For each in-scope repo: `<repo>/.claude/memory/*.md`, `<repo>/.claude/memory/tools/*.md`, `<repo>/.claude/memory/domain/*.md`
 
 (Scope = current repo only by default; all discovered repos with `--all`.)
 

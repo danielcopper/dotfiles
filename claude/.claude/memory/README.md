@@ -26,7 +26,7 @@ When you (Claude) learn a fact and want to record it, decide where it belongs:
 ## Layout (stores #1 and #3 use the same shape)
 
 - `MEMORY.md` — index of topic files in this dir
-- `general.md` — cross-cutting conventions and preferences
+- `<rule-name>.md` — one rule / observation / preference per file at the top level
 - `tools/<tool>.md` — quirks/configs/workarounds for a specific tool
 - `domain/<topic>.md` — durable conceptual knowledge per topic
 
@@ -38,17 +38,36 @@ When you (Claude) learn a fact and want to record it, decide where it belongs:
 
 Keep individual files under ~200 lines; split when they grow past that.
 
-### What goes in `general.md` vs `tools/` vs `domain/`
+### Filename and frontmatter convention
 
-- About *you* or a cross-project rule → `general.md` (e.g. "prefers terse commits", "Conventional Commits everywhere")
+- **Filename**: kebab-case, no type prefix. `validate-runtime-claims.md` ✓, not `feedback_validate_runtime_claims.md`. The type lives in frontmatter, not the filename.
+- **Frontmatter**: top-level `type:` (one of `feedback`, `user`, `project`, `reference`, `tools`, `domain`). Not nested under `metadata:`.
+- **`name:` must equal the filename slug** (without `.md`). So a file named `commit-per-task.md` has `name: commit-per-task`. This is what `[[wiki-links]]` and grep both resolve against.
+- **Wiki-links** `[[other-name]]` use the target file's `name:` slug — which by the rule above equals its filename slug.
+
+Example:
+
+```yaml
+---
+name: no-bulk-sed
+description: Avoid bulk sed -i loops; use Edit per file or a guarded Python script
+type: feedback
+---
+```
+
+Stored as `no-bulk-sed.md`, referenced from other files as `[[no-bulk-sed]]`.
+
+### What goes at the top level vs `tools/` vs `domain/`
+
+- About *you* or a cross-project rule → top-level `<rule-name>.md` (e.g. `challenge-pushback.md`, `commit-per-task.md`, `no-inline-comments.md`). One concept per file.
 - About a specific tool's behaviour → `tools/<tool>.md` (e.g. `tools/sql-server.md`, `tools/yt-dlp.md`)
 - Conceptual reference knowledge spanning tools → `domain/<topic>.md` (e.g. `domain/oauth.md`)
 
-At the repo level (store #3), `general.md` holds repo-wide conventions (test runner, build, deploy, code style); `tools/` and `domain/` work the same way but scoped to that codebase.
+At the repo level (store #3), the same shape applies: one rule per top-level file, `tools/` and `domain/` for the same purposes as in the global store, scoped to that codebase.
 
 ## Updating the index
 
-Golden rule: **eager-load the index, lazy-load the details.** `MEMORY.md` is the index for topic files; details live in `general.md`, `tools/X.md`, `domain/X.md` and are read on demand based on the index.
+Golden rule: **eager-load the index, lazy-load the details.** `MEMORY.md` is the index for topic files; details live in `<rule-name>.md`, `tools/<tool>.md`, `domain/<topic>.md` and are read on demand based on the index.
 
 When you create or modify a topic file:
 
@@ -78,6 +97,6 @@ Multiple sessions per day OK. Append-only. When the user says "note in today's d
 
 ## Slash commands
 
-- `/memory-dream` — triage dailies: propose promotions to durable memory (general/tools/domain or repo memory), and archive of older dailies (>30d default) to `daily/archive/<year>/`. Plan-then-apply. Never deletes daily content.
+- `/memory-dream` — triage dailies: propose promotions to durable memory (top-level rule files / tools / domain or repo memory), and archive of older dailies (>30d default) to `daily/archive/<year>/`. Plan-then-apply. Never deletes daily content.
 - `/memory-consolidate` — full sweep: runs dream first, then dedup/merge/split durables, refresh `MEMORY.md` index. Plan-then-apply, three approval gates.
 - `/memory-promote <from> <to>` — explicit single-item move. Validates destination against routing rules.
