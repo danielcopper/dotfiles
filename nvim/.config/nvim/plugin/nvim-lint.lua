@@ -50,7 +50,7 @@ local function run_lint(buf)
     local dir = vim.fs.dirname(vim.api.nvim_buf_get_name(buf))
     if dir == "" then dir = vim.fn.getcwd() end
     local found = vim.fs.find(
-      { ".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml" },
+      { ".markdownlint.jsonc", ".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml" },
       { upward = true, path = dir }
     )
     lint.linters.markdownlint.args = #found > 0

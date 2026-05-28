@@ -12,7 +12,7 @@ require("conform").setup({
     html = { "prettier" },
     json = { "prettier" },
     yaml = { "prettier" },
-    markdown = { "prettier" },
+    markdown = { "deno_fmt" },
     bash = { "shfmt" },
     sh = { "shfmt" },
     sql = { "sqlfluff" },
