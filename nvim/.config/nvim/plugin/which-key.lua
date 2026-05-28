@@ -17,6 +17,7 @@ require("which-key").setup({
     { "<leader>h", group = "hunk", icon = { icon = icons.git.change, color = "purple" } },
     { "<leader>r", group = "request", icon = { icon = icons.ui.http, color = "orange" } },
     { "<leader>j", group = "jupyter", icon = { icon = icons.ui.jupyter, color = "yellow" } },
+    { "<leader>m", group = "markdown", icon = { icon = icons.ui.pencil, color = "cyan" } },
     { "<leader>n", group = "neovim", icon = { icon = icons.ui.nvim, color = "green" } },
     { "<leader>p", group = "pr/azure", icon = { icon = icons.git.branch, color = "azure" } },
     { "<leader>pl", group = "load" },

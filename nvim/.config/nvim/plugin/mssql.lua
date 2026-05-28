@@ -1,7 +1,7 @@
 vim.pack.add({ "https://github.com/Kurren123/mssql.nvim" })
 
 require("mssql").setup({
-  keymap_prefix = "<leader>m",
+  keymap_prefix = "<leader>S",
 
   open_results_in = "split",
   view_messages_in = "notification",
