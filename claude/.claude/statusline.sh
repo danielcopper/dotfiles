@@ -114,6 +114,14 @@ R=$'\e[0m'
 # Sub-cell resolution: each cell is split into 8 sub-units using Unicode
 # eighth-block glyphs (▏▎▍▌▋▊▉) so a width-18 bar resolves ~0.7% per step
 # instead of ~5.5% — separates 1% from 8% visually.
+#
+# Caveat: the partial-cell glyph replaces whatever char already sits at
+# the boundary cell. In the *padding* cells around the label that's
+# harmless (overwrites a space). Inside the *label* range it would eat
+# one label char per partial frame — so build_bar snaps to the nearest
+# full cell when the boundary lands on the label, keeping sub-cell
+# resolution only where it doesn't cost a character. The bar therefore
+# moves smoothly in padding and steps cell-by-cell across the label.
 PARTIALS=('' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
 
 # Extract the 256-palette index N from a fill escape of the form
@@ -145,14 +153,18 @@ build_bar() {
     local sub=$((pct * width * 8 / 100))
     [ "$pct" -gt 0 ] && [ "$sub" -lt 1 ] && sub=1
     local fcells=$((sub / 8)) rem=$((sub % 8))
+    # Snap to nearest full cell when the partial-glyph would land on a
+    # label char — see PARTIALS comment above for the geometric reason.
+    # rem≥4 advances, rem<4 holds. Switch to "always round up" (more
+    # conservative — shows usage slightly early, never late) by replacing
+    # the inner guard with an unconditional `fcells=$((fcells + 1))`.
+    if [ "$rem" -gt 0 ] && [ "$fcells" -ge "$pl" ] && [ "$fcells" -lt "$((pl + llen))" ]; then
+        if [ "$rem" -ge 4 ]; then fcells=$((fcells + 1)); fi
+        rem=0
+    fi
     if [ "$rem" -eq 0 ]; then
         printf '%s%s%s%s%s' "$fill" "${full:0:fcells}" "$B_FG" "${full:fcells}" "$R"
     else
-        # Partial cell: eighth-block glyph REPLACES the label character at
-        # the boundary (industry pattern — indicatif, tqdm). Bar stays at
-        # constant `width` cells; the inserting alternative grew the bar
-        # by 1 cell on partial fill, causing visible label gaps. One char
-        # disappears at a time, sliding across the label as pct changes.
         local idx; idx=$(palette_idx_from_fill "$fill")
         local part=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
         printf '%s%s%s%s%s%s%s' \
@@ -312,7 +324,16 @@ build_mini_bar() {
     [ "$pct" -gt 0 ] && [ "$g" -lt 1 ] && g=1
     printf '%s%s%s' "$style" "${MINI_GLYPHS[g]}" "$R"
 }
-MINI_BARS="$(build_mini_bar "$PCT"    "$FILL_GR") $(build_mini_bar "$PCT_5H" "$FILL_5H_LOW") $(build_mini_bar "$PCT_7D" "$FILL_7D_LOW")"
+# Prefix each mini-bar with a tiny label so the three pillars stay
+# identifiable when the full bars are gone. ctx uses the model's context
+# window size (200k / 1m) — the model NAME doesn't fit at this width and
+# the capacity is the part that actually changes between sessions. The
+# label sits in the same chip bg as the glyph so each (label, glyph) pair
+# reads as one unit; single space separates pairs.
+mini_label() { printf '%s%s' "$B_FG" "$1"; }
+MINI_BARS="$(mini_label "$TOKEN_LABEL")$(build_mini_bar "$PCT"    "$FILL_GR")"
+MINI_BARS+=" $(mini_label "5h")$(build_mini_bar "$PCT_5H" "$FILL_5H_LOW")"
+MINI_BARS+=" $(mini_label "7d")$(build_mini_bar "$PCT_7D" "$FILL_7D_LOW")"
 
 ##### Compose LINE 1: dir + git ###############################################
 # Content-aware shrinking: build every variable element at full width, measure
@@ -402,13 +423,28 @@ build_dir_block() {
     esac
 }
 
+# Middle-truncate $1 to at most $2 chars, replacing the middle with "…".
+# Branch names tend to follow "<type>/<ticket>-<slug>" — the suffix carries
+# the discriminating info, so the kept portion is biased toward the back
+# (~⅓ front, ~⅔ back). End-truncation would drop the slug, which is
+# usually what you actually want to recognise.
+middle_truncate() {
+    local s=$1 max=$2
+    local len=${#s}
+    [ "$len" -le "$max" ] && { printf '%s' "$s"; return; }
+    local keep=$((max - 1))
+    local front=$((keep / 3))
+    local back=$((keep - front))
+    printf '%s…%s' "${s:0:front}" "${s: -back}"
+}
+
 # Build the branch block (full | trunc). Empty when no branch info available.
 build_branch_block() {
     [ -z "$BRANCH" ] && return
     local v="$1"
     local br="$BRANCH"
     if [ "$v" = "trunc" ] && [ "${#br}" -gt "$MAX_BRANCH_CHARS" ]; then
-        br="${br:0:$((MAX_BRANCH_CHARS-1))}…"
+        br=$(middle_truncate "$br" "$MAX_BRANCH_CHARS")
     fi
     printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
 }
