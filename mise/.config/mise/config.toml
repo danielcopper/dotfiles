@@ -6,8 +6,19 @@ maven = "3"
 node = "lts"
 "npm:@angular/cli" = "latest"
 "npm:@angular/language-server" = "latest"
+"npm:@mermaid-js/mermaid-cli" = "latest"
 "npm:typescript-language-server" = "latest"
 "pipx:pyright" = "latest"
 pipx = "latest"
 python = "3.12"
 uv = "latest"
+
+# Headless Chrome that mermaid-cli/puppeteer needs to render diagrams (used by
+# nvim's diagram.nvim). It's a dependency of the mermaid-cli npm package above —
+# NOT a system package. It lives in puppeteer's version-matched cache
+# (~/.cache/puppeteer), so no full browser ends up on the system. puppeteer's
+# npm install doesn't fetch it, so pull it explicitly after `mise install`:
+#   mise run mermaid-browser
+[tasks.mermaid-browser]
+description = "Install chrome-headless-shell for mermaid-cli/puppeteer"
+run = '"$(mise where npm:@mermaid-js/mermaid-cli)/lib/node_modules/@mermaid-js/mermaid-cli/node_modules/.bin/puppeteer" browsers install chrome-headless-shell'
