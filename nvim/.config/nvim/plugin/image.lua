@@ -1,10 +1,12 @@
 vim.pack.add({ "https://github.com/3rd/image.nvim" })
 
 -- image.nvim: image display via terminal graphics protocol.
--- Only set up if terminal + ImageMagick are available.
+-- Only set up if terminal + ImageMagick are available. The TMUX clause lets it
+-- run inside tmux (outer term is WezTerm, allow-passthrough is on).
 local supported_term = vim.env.TERM_PROGRAM == "WezTerm"
   or vim.env.TERM == "xterm-kitty"
   or vim.env.TERM_PROGRAM == "ghostty"
+  or vim.env.TMUX ~= nil
 local has_magick = vim.fn.executable("magick") == 1 or vim.fn.executable("convert") == 1
 
 if not (supported_term and has_magick) then return end
