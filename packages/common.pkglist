@@ -6,6 +6,7 @@ bash-completion
 fastfetch
 fd
 fzf
+gh
 git
 gitleaks
 jq
