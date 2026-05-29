@@ -16,7 +16,7 @@ command -v lsd >/dev/null && alias ls='lsd'
 alias grep='grep --color=auto'
 alias ip='ip -color=auto'
 alias diff='diff --color=auto'
-alias cc='command claude --model "claude-opus-4-7[1m]" --effort xhigh'
+alias cc='command claude --model "claude-opus-4-8[1m]" --effort xhigh'
 # Default `claude` to opus xhigh for interactive/print use; pass subcommands
 # (mcp, config, doctor, ...) through to the real binary unchanged.
 claude() {
@@ -25,7 +25,7 @@ claude() {
             command claude "$@"
             ;;
         *)
-            command claude --model "claude-opus-4-7[1m]" --effort xhigh "$@"
+            command claude --model "claude-opus-4-8[1m]" --effort xhigh "$@"
             ;;
     esac
 }
