@@ -12,6 +12,7 @@ node = "lts"
 pipx = "latest"
 python = "3.12"
 uv = "latest"
+"ubi:joshmedeski/sesh" = "latest"
 
 # Headless Chrome that mermaid-cli/puppeteer needs to render diagrams (used by
 # nvim's diagram.nvim). It's a dependency of the mermaid-cli npm package above —

@@ -75,11 +75,41 @@ command -v ng >/dev/null && source <(ng completion script)
 # Untracked secrets (API keys, SQLCMDPASSWORD, etc.) — file is gitignored.
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
-# Greeter — only on a top-level shell that's not inside tmux. Skips
-# subshells (`bash` inside an existing shell) and tmux panes where the
-# fastfetch art is just noise.
-if [ -z "${TMUX:-}" ] && [ "${SHLVL:-1}" = "1" ] && command -v fastfetch >/dev/null; then
-  fastfetch
+# Always in tmux via sesh: per-window session, picker when ambiguous.
+# Runs only in a real interactive terminal (TTY, not already in tmux) — never
+# in scripts, SSH command runs, or agent/tool shells (those are
+# non-interactive or have no TTY, both filtered here). Opt out for a window
+# with NO_TMUX_AUTOSTART=1. Placed after secrets/env so the tmux server
+# inherits a fully set-up environment, and before the greeter so the brief
+# launcher shell never flashes fastfetch before exec'ing into tmux.
+if [[ $- == *i* ]] && [[ -t 0 && -t 1 ]] && [[ -z "${TMUX:-}" ]] \
+   && [[ -z "${NO_TMUX_AUTOSTART:-}" ]] && command -v sesh >/dev/null 2>&1; then
+  # Pick an existing session/dir, or type a new name to create one. `exec`
+  # ties this window's lifetime to its tmux session. fzf exit codes: 0 = item
+  # chosen, 1 = new name typed (no match), 130 = Esc -> fall through to a
+  # plain shell.
+  _pick=$(sesh list 2>/dev/null | fzf --print-query --reverse --height=40% \
+            --prompt='⚡ ' \
+            --header='Enter: attach/create · Name tippen + Enter: neu · Esc: Shell')
+  _rc=$?
+  if [[ "$_rc" -eq 0 || "$_rc" -eq 1 ]]; then
+    _sel=$(printf '%s\n' "$_pick" | tail -n1)
+    [[ -n "$_sel" ]] && exec sesh connect "$_sel"
+  fi
+  unset _pick _rc _sel
+fi
+
+# Greeter — fastfetch on a fresh shell, never as repeated noise. Outside
+# tmux: any top-level shell. Inside tmux: only the first pane of a brand-new
+# single-window/single-pane session, so splits, extra windows, and attaches
+# to existing multi-pane sessions stay quiet.
+if command -v fastfetch >/dev/null; then
+  if [ -z "${TMUX:-}" ]; then
+    [ "${SHLVL:-1}" = "1" ] && fastfetch
+  elif [ "$(tmux display-message -p '#{session_windows}' 2>/dev/null)" = "1" ] \
+    && [ "$(tmux display-message -p '#{window_panes}' 2>/dev/null)" = "1" ]; then
+    fastfetch
+  fi
 fi
 
 # Prompt + cd jumper — must run last

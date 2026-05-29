@@ -1,0 +1,14 @@
+#:schema https://github.com/joshmedeski/sesh/raw/main/sesh.schema.json
+
+# Use the last 2 path segments when auto-naming a session from a directory.
+dir_length = 2
+
+[default_session]
+# Preview shown in the picker for the highlighted entry ({} = its path).
+preview_command = "lsd --tree --depth 2 --color=always {}"
+
+# Pin project sessions here as you go, e.g.:
+# [[session]]
+# name = "dotfiles"
+# path = "~/dotfiles"
+# startup_command = "nvim"

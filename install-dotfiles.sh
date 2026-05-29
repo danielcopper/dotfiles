@@ -13,6 +13,7 @@ common_pkgs=(
   claude
   mise
   nvim
+  sesh
   starship
   systemd
   tmux
