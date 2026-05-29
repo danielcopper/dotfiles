@@ -5,6 +5,11 @@
 # `sesh connect` switches the client instead of nesting tmux.
 set -uo pipefail
 
+# The tmux popup inherits the tmux server's environment, which may predate
+# sesh's install (a long-lived server has a frozen PATH). Put mise's shim dir
+# up front so `sesh` resolves regardless of when the server started.
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+
 sel=$(
   sesh list --icons | fzf \
     --reverse --ansi --no-sort --border-label ' sesh ' --prompt '⚡  ' \
