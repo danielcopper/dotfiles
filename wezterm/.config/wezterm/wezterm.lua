@@ -60,6 +60,12 @@ end)
 config.keys = {
   { key = "c", mods = "CTRL|SHIFT", action = act.CopyTo("Clipboard") },
   { key = "v", mods = "CTRL|SHIFT", action = act.PasteFrom("Clipboard") },
+
+  -- Shift+Enter -> newline. TUIs like Claude Code treat LF (Ctrl+J) as
+  -- "insert newline" and CR (Enter) as "submit". The kitty-protocol Shift+Enter
+  -- doesn't survive the trip through tmux, so send LF explicitly -- the same
+  -- byte Ctrl+J sends, which is known to work.
+  { key = "Enter", mods = "SHIFT", action = act.SendString("\n") },
 }
 
 ---------------------------------------------------------

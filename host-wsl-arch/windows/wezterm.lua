@@ -32,4 +32,9 @@ return {
   font_size = 13,
   enable_tab_bar = false,
   window_background_opacity = 0.95,
+  enable_kitty_keyboard = true,
+  keys = {
+    -- Shift+Enter -> newline (LF), same byte as Ctrl+J -- for TUIs like Claude Code.
+    { key = "Enter", mods = "SHIFT", action = wezterm.action.SendString("\n") },
+  },
 }
