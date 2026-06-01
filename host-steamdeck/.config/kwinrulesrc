@@ -1,0 +1,11 @@
+[General]
+count=1
+rules=b3d7c1a2-8e4f-4a6b-9c0d-1e2f3a4b5c6d
+
+[b3d7c1a2-8e4f-4a6b-9c0d-1e2f3a4b5c6d]
+Description=wezterm always fullscreen
+fullscreen=true
+fullscreenrule=2
+wmclass=org.wezfurlong.wezterm
+wmclasscomplete=false
+wmclassmatch=1
