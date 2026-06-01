@@ -16,6 +16,8 @@
 
 - **Don't ask about stopping.** Never ask "willst du weitermachen?", "genug für heute?", "Pause?" or similar. Just keep working. The user will say when to stop.
 
+- **Don't expose the agentic process in published artifacts.** How the work was produced — subagents, multi-agent workflows, "architect → implement → review", adversarial-verification / "capstone" passes — must never appear in PR or issue descriptions, commit messages, code comments, or any committed/published text. State the results, decisions, and rationale, not the orchestration used to reach them.
+
 ## Environment
 
 - **Line endings:** New files use LF. Existing files keep their current line endings (CRLF or LF) — never bulk-convert.
