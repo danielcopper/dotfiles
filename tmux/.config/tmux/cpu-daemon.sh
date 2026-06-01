@@ -13,9 +13,13 @@
 # Sample interval in seconds may be passed as $1 (match status-interval).
 
 interval="${1:-1}"
-# Fixed path (not $TMPDIR) so the kill-previous check below finds the prior
-# instance regardless of which environment launched it.
-pidfile="/tmp/tmux-cpu-daemon.${EUID}.pid"
+# PID file in a per-user, private runtime dir (XDG_RUNTIME_DIR is mode 700) —
+# not world-writable /tmp — to avoid symlink / predictable-name games. Fixed
+# path so the kill-previous check below finds the prior instance across launches.
+runtime_dir="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+[ -d "$runtime_dir" ] || runtime_dir="$HOME/.cache"
+mkdir -p "$runtime_dir" 2>/dev/null
+pidfile="$runtime_dir/tmux-cpu-daemon.pid"
 
 # Re-exec detached in our own session, so this is NOT a tracked tmux run-shell
 # job: the launcher returns at once (no hang) and the kill-on-reload below stays
@@ -25,9 +29,17 @@ if [ -z "${CPU_DAEMON_DETACHED:-}" ]; then
   exit 0
 fi
 
-# Replace any previous daemon (e.g. after `tmux source-file`) so loops never stack.
-[ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null
-echo "$$" >"$pidfile"
+# Replace any previous daemon (e.g. after `tmux source-file`) so loops never
+# stack. Only signal a strictly-numeric PID, so a corrupted/tampered pidfile
+# cannot turn this into e.g. `kill -1` (signal every process we own).
+if [ -f "$pidfile" ] && [ ! -L "$pidfile" ]; then
+  prev=$(cat "$pidfile" 2>/dev/null)
+  case "$prev" in
+    '' | *[!0-9]*) ;;
+    *) kill "$prev" 2>/dev/null ;;
+  esac
+fi
+(umask 077 && printf '%s\n' "$$" >"$pidfile")
 # Remove the pidfile on exit ONLY if it still holds our PID — otherwise a
 # successor that already took over (and rewrote it) would lose its own entry,
 # which would let the next reload stack a second daemon.
