@@ -46,6 +46,9 @@ require("noice").setup({
   routes = {
     -- Suppress LSP "quit with exit code" warnings — always noise from force-stopped servers (e.g. worktree switch)
     { filter = { event = "notify", find = "quit with exit code" }, opts = { skip = true } },
+    -- FIXME: benign roslyn pull-diagnostics noise — the server throws this for documents it can't map yet
+    -- (init race, or untitled/unmapped buffers). Upstream bug: dotnet/roslyn#81410. Drop this route once fixed.
+    { filter = { find = "Failed to get language for textDocument/diagnostic" }, opts = { skip = true } },
     { filter = { event = "notify" }, view = "notify" },
   },
 })
