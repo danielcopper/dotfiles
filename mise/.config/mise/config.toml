@@ -11,6 +11,7 @@ node = "lts"
 "pipx:pyright" = "latest"
 pipx = "latest"
 python = "3.12"
+sonarqube-cli = "latest"
 uv = "latest"
 "github:joshmedeski/sesh" = "latest"
 
