@@ -3,6 +3,26 @@ vim.pack.add({
   "https://github.com/khoido2003/roslyn-filewatch.nvim",
 })
 
+-- roslyn-filewatch ships an optional native Rust scanner (much faster full scans than the fd/Lua
+-- fallback). vim.pack has no per-spec build step, so build it via PackChanged on install/update.
+vim.api.nvim_create_autocmd("PackChanged", {
+  desc = "Build roslyn-filewatch's native Rust module",
+  callback = function(args)
+    local d = args.data or {}
+    local path = d.path or (d.spec and d.spec.path) or ""
+    local is_fw = path:find("roslyn-filewatch.nvim", 1, true) ~= nil
+      or (d.spec and d.spec.name == "roslyn-filewatch.nvim")
+    if is_fw and (d.kind == "install" or d.kind == "update") then
+      local build = path ~= "" and (path .. "/build.lua")
+        or (vim.fn.stdpath("data") .. "/site/pack/core/opt/roslyn-filewatch.nvim/build.lua")
+      if vim.fn.filereadable(build) == 1 then
+        vim.notify("[roslyn-filewatch] building native Rust module…", vim.log.levels.INFO)
+        pcall(dofile, build)
+      end
+    end
+  end,
+})
+
 -- Worktree-aware solution chooser for roslyn.nvim
 local function choose_target(targets)
   if #targets == 0 then
@@ -105,6 +125,11 @@ require("roslyn").setup({
 })
 
 require("roslyn_filewatch").setup({
+  -- Poll instead of event-watching: watchman's adapter rejects >1 root, but solution_aware yields
+  -- 12 roots (our .slnx) -> endless recovery loop; libuv fs_event is non-recursive on Linux (warns
+  -- every restart). The fs-poller runs under every backend anyway, so this just drops the broken
+  -- event layer. Cheap now via the native Rust scanner; solution_aware stays on.
+  force_polling = true,
   ignore_dirs = {
     ".worktrees",
     "node_modules",
