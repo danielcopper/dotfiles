@@ -30,7 +30,7 @@ config.font_size = 13
 -- Native OS window decorations — a real titlebar, like every other app.
 config.window_decorations = "TITLE | RESIZE"
 config.window_background_opacity = 0.95
-config.window_close_confirmation = "AlwaysPrompt"
+config.window_close_confirmation = "NeverPrompt"
 config.window_padding = {
   top = 5,
   right = 5,
