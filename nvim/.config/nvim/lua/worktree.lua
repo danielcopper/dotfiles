@@ -20,27 +20,37 @@
 --      - Roslyn state: vim.g.roslyn_nvim_selected_solution is cleared so
 --        lock_target doesn't reuse a stale solution path from the old worktree.
 --
---   2. Change working directory (vim.fn.chdir)
+--   2. Wait for the old servers to actually exit (wait_for_lsp_shutdown)
+--      - Roslyn stops lazily: even a forced stop detaches asynchronously. The
+--        previous fixed defer_fn timers re-attached on top of a half-dead
+--        server and raced Roslyn's async solution-load, leaving a degraded
+--        compilation where every `using` was flagged IDE0005 ("unnecessary").
+--      - Blocking until vim.lsp.get_clients() drains turns the re-attach into a
+--        clean cold start — the path that loads the worktree solution correctly.
+--
+--   3. Change working directory (vim.fn.chdir)
 --      - Fires DirChanged autocmd → neo-tree, gitsigns, lualine react.
 --
---   3. Remap buffers
+--   4. Remap buffers
 --      - For each loaded buffer under the old worktree path:
 --        - If the file exists in the new worktree → rename buffer + reload
 --        - If not → close buffer (prompt to save if modified)
 --      - Safe to do now because no LSP clients are watching these buffers.
 --
---   4. Reset neo-tree
+--   5. Reset neo-tree
 --      - Worktrees live under .worktrees/ which is a subdir of the main repo.
 --        Neo-tree's is_subpath() matches the new path to the already-cached
 --        parent repo, so git status lookups fail. Clearing the internal worktree
 --        cache forces re-discovery via git rev-parse from the new cwd.
 --
---   5. Re-enable LSP clients after 500ms delay
---      - Managed clients: vim.lsp.enable(name) re-enables auto-attachment,
---        which starts fresh clients that discover the new worktree's project files.
---      - doautocmd FileType re-triggers filetype detection for the current buffer,
---        which causes unmanaged LSPs (sonarlint) to start fresh via their own
---        FileType autocmd handlers.
+--   6. Re-attach LSP clients, event-driven (no fixed delays)
+--      - Managed clients: vim.lsp.enable(name) re-attaches them to the open
+--        buffers; Roslyn re-runs root_dir → choose_target and opens the new
+--        worktree's solution fresh.
+--      - Unmanaged LSPs (sonarlint) start via their own FileType handler. We
+--        sweep FileType only AFTER a managed client has attached (LspAttach), so
+--        the re-fired event can't race Roslyn's init into a duplicate client.
+--        A timeout backstop covers buffers no managed server handles.
 --
 -- Keymaps (set in config/keymaps.lua):
 --   <leader>gw → M.pick()    (interactive worktree picker)
@@ -142,19 +152,67 @@ local function stop_all_lsp()
   return managed_names
 end
 
---- Re-enable LSP clients after a delay to let old clients fully shut down.
-local function restart_lsp(managed_names)
-  vim.defer_fn(function()
-    for name in pairs(managed_names) do
-      vim.lsp.enable(name)
-    end
-  end, 500)
+--- Block until every stopped client has actually exited.
+--- Roslyn stops lazily — a forced stop still detaches asynchronously, and the
+--- old blind defer_fn timers re-attached on top of a half-dead server. That race
+--- left Roslyn with an incomplete compilation (every `using` flagged IDE0005,
+--- "unnecessary"). Waiting for a real teardown makes the re-attach a clean cold
+--- start, which loads the worktree solution correctly. Capped so a wedged server
+--- can't hang the switch; vim.wait pumps the loop so detach callbacks fire.
+local function wait_for_lsp_shutdown()
+  vim.wait(2000, function()
+    return #vim.lsp.get_clients() == 0
+  end, 20)
+end
 
-  -- Re-trigger FileType with a longer delay so unmanaged LSPs (sonarlint)
-  -- re-attach AFTER managed clients have fully started (avoids duplicate roslyn).
-  vim.defer_fn(function()
+--- Re-attach LSP clients for the new worktree, event-driven (no fixed delays).
+--- Managed servers re-attach via vim.lsp.enable; Roslyn re-runs root_dir →
+--- choose_target and opens the new worktree's solution fresh. Unmanaged servers
+--- (sonarlint) start through their own FileType handler — we sweep FileType only
+--- AFTER a managed client has attached, so the re-fired event can't race Roslyn's
+--- init into a duplicate client. A timeout backstop covers buffers no managed
+--- server handles.
+local function restart_lsp(managed_names)
+  for name in pairs(managed_names) do
+    vim.lsp.enable(name)
+  end
+
+  if next(managed_names) == nil then
     vim.cmd("doautocmd FileType")
-  end, 1500)
+    return
+  end
+
+  local swept = false
+  local attach_au
+  local function sweep()
+    if swept then
+      return
+    end
+    swept = true
+    -- Defer to the next tick so we don't re-enter the LSP attach flow we fired from.
+    vim.schedule(function()
+      vim.cmd("doautocmd FileType")
+    end)
+  end
+
+  attach_au = vim.api.nvim_create_autocmd("LspAttach", {
+    callback = function(args)
+      local client = vim.lsp.get_client_by_id(args.data.client_id)
+      if client and managed_names[client.name] then
+        sweep()
+        return true -- self-delete: a managed server is up, ordering satisfied
+      end
+    end,
+  })
+
+  -- Backstop: no managed server attached (e.g. a filetype Roslyn ignores) — start
+  -- the unmanaged ones anyway and drop the pending autocmd.
+  vim.defer_fn(function()
+    sweep()
+    if attach_au then
+      pcall(vim.api.nvim_del_autocmd, attach_au)
+    end
+  end, 2000)
 end
 
 --- Switch to a worktree by path. See module header for detailed orchestration docs.
@@ -170,13 +228,16 @@ function M.switch(target_path)
   -- 1. Stop LSP clients (must happen before buffer remap)
   local managed_names = stop_all_lsp()
 
-  -- 2. Change directory
+  -- 2. Wait for the old servers to fully exit before re-attaching (see header)
+  wait_for_lsp_shutdown()
+
+  -- 3. Change directory
   vim.fn.chdir(target_path)
 
-  -- 3. Remap buffers (safe — no LSP clients are watching)
+  -- 4. Remap buffers (safe — no LSP clients are watching)
   remap_buffers(old_path, target_path)
 
-  -- 4. Reset neo-tree (clear worktree cache, refresh at new root)
+  -- 5. Reset neo-tree (clear worktree cache, refresh at new root)
   if pcall(require, "neo-tree") then
     local prev_win = vim.api.nvim_get_current_win()
     pcall(function()
@@ -208,7 +269,7 @@ function M.switch(target_path)
     end
   end
 
-  -- 5. Re-enable LSP after delay
+  -- 6. Re-attach LSP, event-driven (see header)
   restart_lsp(managed_names)
 
   -- Notify with branch name
