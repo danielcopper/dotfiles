@@ -23,9 +23,3 @@ fi
 # Update wrapper — SteamOS root is read-only, so brew + flatpak stand in
 # for the pacman/paru combo on the arch hosts.
 alias update='brew update && brew upgrade && flatpak update --user -y'
-
-# sonarqube-cli (standalone install — mise registry has no sonarqube-cli).
-case ":$PATH:" in
-  *":$HOME/.local/share/sonarqube-cli/bin:"*) ;;
-  *) export PATH="$HOME/.local/share/sonarqube-cli/bin:$PATH" ;;
-esac
