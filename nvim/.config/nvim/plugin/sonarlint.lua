@@ -120,10 +120,10 @@ require("sonarlint").setup({
     },
 
     before_init = has_connected_mode and function(params, config)
-      local config_path = params.rootPath .. "/.sonarlint.json"
+      local config_path = params.rootPath .. "/.sonarlint/connectedMode.json"
       if vim.fn.filereadable(config_path) ~= 1 then
         vim.notify(
-          "SonarLint: no .sonarlint.json in " .. params.rootPath .. " — no project binding, analysis will be limited",
+          "SonarLint: no .sonarlint/connectedMode.json in " .. params.rootPath .. " — no project binding, analysis will be limited",
           vim.log.levels.WARN
         )
         return
@@ -131,11 +131,11 @@ require("sonarlint").setup({
 
       local ok, project = pcall(vim.fn.json_decode, vim.fn.readfile(config_path))
       if not ok then
-        vim.notify("SonarLint: failed to parse .sonarlint.json", vim.log.levels.ERROR)
+        vim.notify("SonarLint: failed to parse .sonarlint/connectedMode.json", vim.log.levels.ERROR)
         return
       end
       if not project.projectKey then
-        vim.notify("SonarLint: .sonarlint.json is missing 'projectKey'", vim.log.levels.ERROR)
+        vim.notify("SonarLint: .sonarlint/connectedMode.json is missing 'projectKey'", vim.log.levels.ERROR)
         return
       end
 
