@@ -1,6 +1,7 @@
 [tools]
 ansible = "latest"
 carapace = "latest"
+deno = "latest"
 java = "temurin-21"
 maven = "3"
 node = "lts"
