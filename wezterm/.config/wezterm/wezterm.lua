@@ -45,11 +45,8 @@ config.scrollback_lines = 10000
 config.max_fps = 165
 config.enable_kitty_keyboard = true
 
--- Start in fullscreen.
-wezterm.on("gui-startup", function(cmd)
-  local _, _, window = wezterm.mux.spawn_window(cmd or {})
-  window:gui_window():toggle_fullscreen()
-end)
+-- Window size & position are left entirely to the window manager. wezterm
+-- deliberately does not maximize, fullscreen, or place its window on startup.
 
 ---------------------------------------------------------
 --                     Keymaps                         --
