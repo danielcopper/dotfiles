@@ -46,6 +46,14 @@ When working with code in a language that has LSP coverage (TypeScript, Python, 
 - Never include "Co-authored by", "Generated with", or any similar AI/Claude mentions in commit messages
 - `git add .` is forbidden — always add files individually
 
+## Azure DevOps boards
+
+For work-item tasks tracked on an Azure DevOps board (columns like New → In Progress → In PR / Work Done → Done):
+
+- **When you start implementing, move every task you are actively working on to In Progress** (e.g. `az boards work-item update --id <id> --state 'In Progress'`).
+- **You may move tasks autonomously only into In Progress or In PR / Work Done** — those two transitions are pre-authorized.
+- **Moving a task to Done always requires asking me first.** Never close or mark a board item Done without my explicit confirmation.
+
 ## Worktree Workflow
 
 When asked to create a new branch or work on a new feature/task:
