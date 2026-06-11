@@ -48,10 +48,10 @@ When working with code in a language that has LSP coverage (TypeScript, Python, 
 
 ## Azure DevOps boards
 
-For work-item tasks tracked on an Azure DevOps board (columns like New → In Progress → In PR / Work Done → Done):
+For work-item tasks tracked on an Azure DevOps board (Task states: To Do → In Progress → Done):
 
 - **When you start implementing, move every task you are actively working on to In Progress** (e.g. `az boards work-item update --id <id> --state 'In Progress'`).
-- **You may move tasks autonomously only into In Progress or In PR / Work Done** — those two transitions are pre-authorized.
+- **You may move tasks autonomously only into In Progress** — that transition is pre-authorized.
 - **Moving a task to Done always requires asking me first.** Never close or mark a board item Done without my explicit confirmation.
 
 ## Worktree Workflow
