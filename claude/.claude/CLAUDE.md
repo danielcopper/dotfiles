@@ -67,6 +67,7 @@ Rules:
 - Base branch is the current branch unless specified otherwise
 - Never modify files outside the assigned worktree
 - Push from inside the worktree — `git push` works normally (same remote/origin)
+- **If the repo uses `mise`** (a fresh worktree gets its own **empty** `.venv` — mise makes per-directory venvs, so the worktree's tests/linters/LSP won't run until set up): use the global **`mise run worktree-new <type> <slug> [base]`** task for step 2 — it does `git worktree add` + `mise trust` + the repo's `setup` in one shot (then still do step 3, `EnterWorktree`). To run a tool inside a worktree by hand: `mise -C <worktree> exec -- <cmd>`.
 
 ## Dotfiles
 

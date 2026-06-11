@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Global mise task: create a .worktrees/<type>/<slug> worktree and, if the repo
+# uses mise, trust the fresh worktree's config and run its `setup` task — so the
+# empty per-worktree .venv / deps get populated and tooling (tests, linters, LSP)
+# work immediately. Pair with EnterWorktree({ path: ".worktrees/<type>/<slug>" })
+# to re-root the Claude session into the worktree for clean diagnostics.
+#
+# Usage: mise run worktree-new <type> <slug> [base]   (base defaults to current HEAD)
+set -euo pipefail
+
+type="${1:?usage: mise run worktree-new <type> <slug> [base=current branch]}"
+slug="${2:?usage: mise run worktree-new <type> <slug> [base=current branch]}"
+base="${3:-HEAD}"
+wt=".worktrees/${type}/${slug}"
+
+git worktree add "$wt" -b "${type}/${slug}" "$base"
+
+# Only the mise dance if the repo actually uses mise.
+if [ -f "$wt/mise.toml" ] || [ -f "$wt/.mise.toml" ] || [ -f "$wt/.config/mise/config.toml" ]; then
+  mise -C "$wt" trust >/dev/null 2>&1 || true
+  if mise -C "$wt" tasks 2>/dev/null | grep -qw setup; then
+    mise -C "$wt" run setup
+  fi
+fi
+
+echo "✓ worktree ready: $wt  (branch ${type}/${slug})"
+echo "  next: EnterWorktree({ path: \"$wt\" })  — re-roots the session for clean LSP/tooling"
