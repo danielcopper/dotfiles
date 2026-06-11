@@ -57,8 +57,9 @@ When asked to create a new branch or work on a new feature/task:
    - Examples:
      - `git worktree add .worktrees/feature/oauth-login -b feature/oauth-login main`
      - `git worktree add .worktrees/feature/123-oauth-login -b feature/123-oauth-login main`
-3. **Work** inside the new worktree for all changes on that branch
-4. **Cleanup:** `git worktree remove .worktrees/<type>/<slug> && git branch -d <type>/<slug>`
+3. **Enter** (re-root the session): `EnterWorktree({ path: ".worktrees/<type>/<slug>" })` — switches the session's cwd into the worktree so the LSP and tooling resolve against the worktree's own files and config. **Verified** to clear the false "import could not be resolved" diagnostics that otherwise appear when the session stays rooted in the main repo (the LSP root is locked to the session cwd). Skip this for a multi-worktree fan-out (lead stays in main, agents get absolute worktree paths) — there, re-run the real type-checker instead of trusting the harness diagnostics on worktree files.
+4. **Work** inside the worktree for all changes on that branch
+5. **Cleanup:** `ExitWorktree({ action: "keep" })` to return the session to the main repo (worktree left intact), then `git worktree remove .worktrees/<type>/<slug> && git branch -d <type>/<slug>` once the branch is merged/done
 
 Rules:
 
