@@ -23,13 +23,6 @@ description: Create new agent skills with proper structure, progressive disclosu
    - Anything missing or unclear?
    - Should any section be more/less detailed?
 
-## Where skills live
-
-- **Global** (available in every project): `~/.claude/skills/<skill-name>/`
-- **Repo-local** (committed with the project): `<repo>/.claude/skills/<skill-name>/`
-
-Ask the user which one — global by default unless the skill is tied to a specific repo's conventions.
-
 ## Skill Structure
 
 ```
@@ -47,7 +40,6 @@ skill-name/
 ---
 name: skill-name
 description: Brief description of capability. Use when [specific triggers].
-# disable-model-invocation: true   # add this for slash-command-only skills
 ---
 
 # Skill Name
@@ -64,10 +56,6 @@ description: Brief description of capability. Use when [specific triggers].
 
 [Link to separate files: See [REFERENCE.md](REFERENCE.md)]
 ```
-
-### Frontmatter options
-
-- **`disable-model-invocation: true`** — the skill is only triggered when the user explicitly runs `/skill-name`, never auto-selected by the model based on the description. Useful for skills that should only fire on explicit intent (e.g. `zoom-out`, `handoff`).
 
 ## Description Requirements
 
