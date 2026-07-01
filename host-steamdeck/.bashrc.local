@@ -15,6 +15,15 @@ case ":$PATH:" in
     ;;
 esac
 
+# Drive brew's internal git operations with the system git rather than
+# brew's own. brew ships bottles whose glibc requirement can outrun the
+# bundled brew glibc (e.g. git 2.55 needs GLIBC_2.38 while brew glibc was
+# still 2.35). When that happens brew's git breaks, and since brew needs
+# git to run `brew update`, it can't self-heal — a deadlock. Pointing
+# HOMEBREW_GIT_PATH at the stable system git lets `brew update`/`upgrade`
+# always run and pull the newer glibc that repairs brew's git.
+[ -x /usr/bin/git ] && export HOMEBREW_GIT_PATH=/usr/bin/git
+
 # Nix daemon
 if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
     . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
