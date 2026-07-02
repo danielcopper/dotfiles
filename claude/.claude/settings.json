@@ -86,6 +86,15 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"AskUserQuestion is disabled. Do NOT use it. Ask your question(s) as plain text in your normal response, then stop and wait for the user reply. Never proceed on best judgment for a decision that needs the user just because a prompt timed out - a plain-text turn waits with no timeout.\"}}'"
+          }
+        ]
+      },
+      {
         "matcher": "*",
         "hooks": [
           {
