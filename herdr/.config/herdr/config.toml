@@ -1,0 +1,27 @@
+onboarding = false
+
+[experimental]
+pane_history = true
+switch_ascii_input_source_in_prefix = false
+
+[ui]
+pane_borders = true
+pane_gaps = false
+show_agent_labels_on_pane_borders = true
+
+[ui.toast]
+delivery = "system"
+
+[theme]
+name = "catppuccin"
+auto_switch = false
+
+# Keybindings — leader/prefix on ctrl+space to match the tmux muscle memory.
+# Splits mirror the tmux binds: prefix then `-` stacks (new pane below),
+# prefix then `|` sits side by side (new pane right). herdr's own defaults pair
+# `-` with split_horizontal and pipe with split_vertical, so this lands on the
+# same visual result as tmux `split -v` / `split -h`.
+[keys]
+prefix = "ctrl+space"
+split_horizontal = "prefix+minus"
+split_vertical = "prefix+|"

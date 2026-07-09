@@ -9,6 +9,7 @@ cd "$DIR"
 common_pkgs=(
   bash
   git
+  herdr
   inputrc
   claude
   mise
