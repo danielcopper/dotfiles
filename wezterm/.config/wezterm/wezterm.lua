@@ -43,7 +43,12 @@ config.enable_tab_bar = false
 
 config.scrollback_lines = 10000
 config.max_fps = 165
-config.enable_kitty_keyboard = true
+-- Kitty keyboard protocol left OFF: wezterm's implementation sends Esc
+-- incorrectly (wezterm#3621), which breaks the Escape key in TUIs run directly
+-- in wezterm — e.g. herdr's overlays won't close on Esc. herdr supplies the
+-- kitty protocol to its own panes itself, so agents running inside herdr are
+-- unaffected. The Shift+Enter -> LF binding below is independent of this.
+config.enable_kitty_keyboard = false
 
 -- Window size & position are left entirely to the window manager. wezterm
 -- deliberately does not maximize, fullscreen, or place its window on startup.
