@@ -76,14 +76,17 @@ command -v ng >/dev/null && source <(ng completion script)
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
 # Always in tmux via sesh: per-window session, picker when ambiguous.
-# Runs only in a real interactive terminal (TTY, not already in tmux) — never
-# in scripts, SSH command runs, or agent/tool shells (those are
-# non-interactive or have no TTY, both filtered here). Opt out for a window
-# with NO_TMUX_AUTOSTART=1. Placed after secrets/env so the tmux server
-# inherits a fully set-up environment, and before the greeter so the brief
-# launcher shell never flashes fastfetch before exec'ing into tmux.
+# Runs only in a real interactive terminal (TTY, not already inside a
+# multiplexer) — never in scripts, SSH command runs, or agent/tool shells
+# (those are non-interactive or have no TTY, both filtered here). Skipped
+# inside a herdr pane (HERDR_PANE_ID, herdr's own pane marker): herdr is itself
+# a multiplexer, so autostarting tmux there would nest a tmux in every pane.
+# Opt out for any window with NO_TMUX_AUTOSTART=1. Placed after secrets/env so
+# the tmux server inherits a fully set-up environment, and before the greeter so
+# the brief launcher shell never flashes fastfetch before exec'ing into tmux.
 if [[ $- == *i* ]] && [[ -t 0 && -t 1 ]] && [[ -z "${TMUX:-}" ]] \
-   && [[ -z "${NO_TMUX_AUTOSTART:-}" ]] && command -v sesh >/dev/null 2>&1; then
+   && [[ -z "${HERDR_PANE_ID:-}" ]] && [[ -z "${NO_TMUX_AUTOSTART:-}" ]] \
+   && command -v sesh >/dev/null 2>&1; then
   # Pick an existing session/dir, or type a new name to create one. `exec`
   # ties this window's lifetime to its tmux session. fzf exit codes: 0 = item
   # chosen, 1 = new name typed (no match), 130 = Esc -> fall through to a
