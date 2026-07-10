@@ -25,3 +25,38 @@ auto_switch = false
 prefix = "ctrl+space"
 split_horizontal = "prefix+minus"
 split_vertical = "prefix+|"
+
+# Resize uses two complementary mechanisms — herdr 0.7.3 has no single binding
+# that is both repeatable and fine-grained (resize_mode's step is hardcoded and
+# not configurable), so we combine both:
+#   - resize_mode: enter once, then h/j/k/l repeat freely, esc to exit.
+#     Fast and coarse.
+#   - prefix+Shift+HJKL: one-shot fine nudges via the CLI; amount is tunable.
+#     lowercase prefix+hjkl stays focus_pane_* (pane navigation).
+resize_mode = "prefix+r"
+
+# Copy/scrollback mode (vi-style): prefix+v mirrors vim's "enter visual". Inside:
+# h/j/k/l move, ctrl+d/ctrl+u half-page scroll, v/V select (char/linewise),
+# y or enter to copy, esc/q to exit. herdr's default entry is prefix+[; remapped
+# here to the vim key (split_vertical lives on prefix+| so prefix+v is free).
+copy_mode = "prefix+v"
+
+[[keys.command]]
+key = "prefix+shift+h"
+type = "shell"
+command = "herdr pane resize --direction left --amount 0.02"
+
+[[keys.command]]
+key = "prefix+shift+j"
+type = "shell"
+command = "herdr pane resize --direction down --amount 0.02"
+
+[[keys.command]]
+key = "prefix+shift+k"
+type = "shell"
+command = "herdr pane resize --direction up --amount 0.02"
+
+[[keys.command]]
+key = "prefix+shift+l"
+type = "shell"
+command = "herdr pane resize --direction right --amount 0.02"
