@@ -1,21 +1,15 @@
 #!/bin/bash
 # Claude Code statusline.
 #
-# Colour strategy is a hybrid (256-bg + truecolor-fg) because Claude Code
-# v2.1.78+ ships a global truecolor transformation that washes/inverts
-# 24-bit RGB backgrounds — dark crust came out as warm peach, the opposite
-# of what was set. See https://github.com/anthropics/claude-code/issues/35806
-# (washed-out custom colours) and #6466 (separate consecutive escape
-# sequences mishandled).
+# Colour strategy: truecolor bg + truecolor fg throughout, so every chip and bar
+# uses exact Catppuccin Mocha tones. This file previously used a 256-palette bg
+# to dodge a Claude Code truecolor-wash bug (v2.1.78+ inverted 24-bit RGB
+# backgrounds — dark crust rendered as warm peach; issue #35806). That bug was
+# verified fixed on Linux / CC 2.1.206, so the 256-bg workaround is gone.
 #
-# Workarounds applied here:
-#   - bg uses 256-colour palette (\e[48;5;Nm) — bypasses the truecolor
-#     transform path.
-#   - fg keeps truecolor (\e[38;2;R;G;Bm) so Catppuccin tones stay
-#     accurate.
-#   - bg+fg are always combined in a single escape (\e[48;…;38;…m), never
-#     two consecutive ones — separate escapes are also broken in Claude.
-# Drop the 256-bg trick once Anthropic ships a fix.
+# One rule kept from issue #6466: bg+fg are always combined into a single escape
+# (\e[48;…;38;…m), never two consecutive ones — separate consecutive escapes
+# were mishandled by Claude's renderer.
 
 input=$(cat)
 
@@ -42,24 +36,26 @@ data=$(printf '%s' "$input" | jq -r '
 IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
 
 ##### Terminal width detection (no JSON field exposes this) ###################
-# Anthropic's statusline JSON omits terminal dimensions, so derive from shell.
-# In the statusline-render context, stdin is the JSON pipe and the subprocess
-# has no controlling tty — `tput cols` and `stty size` (with or without
-# `</dev/tty`) fail or return terminfo defaults (typically 80) and ignore
-# real resize events.
+# Anthropic's statusline JSON omits terminal dimensions, so derive it here. In
+# the render context stdin is the JSON pipe and the subprocess has no
+# controlling tty — `tput cols` and `stty size` (with or without `</dev/tty`)
+# fail or return terminfo defaults (typically 80) and ignore real resize events.
 #
-# When inside tmux (the primary setup here), querying `pane_width` directly
-# from the tmux server gives the **live** pane width every render — reactive
-# to splits, resizes, and zooms without any extra plumbing.
+# Inside a herdr pane ($HERDR_PANE_ID set), ask the herdr server for this pane's
+# live width every render — reactive to splits, resizes, and zooms, ~5ms per
+# call over the local socket. `pane current` omits width, so use `pane layout`
+# and pick this pane's rect out of its tab's layout.
 #
-# Order: tmux pane_width (live, reactive) → $COLUMNS env (rarely set in
-# render context but cheap to check) → conservative default. `/dev/tty`
-# probes were tried; they fail in piped subprocesses on this setup.
-TMUX_PANE_W=""
-if [ -n "${TMUX_PANE:-}" ]; then
-    TMUX_PANE_W=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
+# Order: herdr pane width (live, reactive) → $COLUMNS env (rarely set in render
+# context but cheap to check) → conservative default. `/dev/tty` probes were
+# tried; they fail in piped subprocesses on this setup.
+HERDR_PANE_W=""
+if [ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null 2>&1; then
+    HERDR_PANE_W=$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | jq -r \
+        --arg pid "$HERDR_PANE_ID" \
+        '.result.layout.panes[]? | select(.pane_id == $pid) | .rect.width // empty')
 fi
-COLS="$TMUX_PANE_W"
+COLS="$HERDR_PANE_W"
 if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
     COLS=${COLUMNS:-}
 fi
@@ -79,9 +75,9 @@ else
     TOKEN_LABEL="$((MAX_TOKENS / 1000))k"
 fi
 
-##### Hybrid bg=256 + fg=truecolor (Catppuccin Mocha) #########################
-# 256-bg sidesteps the v2.1.78+ truecolor wash bug; truecolor fg keeps the
-# real Catppuccin tones. Combined into single escape per segment.
+##### Truecolor bg + fg (Catppuccin Mocha) ###################################
+# Every chip is bg 56,56,56 (surface) + a truecolor Catppuccin fg, combined
+# into a single escape per segment (see the #6466 note at the top).
 B_ROSE=$'\e[48;2;56;56;56;38;2;245;224;220m'
 B_FG=$'\e[48;2;56;56;56;38;2;205;214;244m'
 B_FG_B=$'\e[48;2;56;56;56;38;2;205;214;244;1m'
@@ -97,11 +93,11 @@ B_RED_B=$'\e[48;2;56;56;56;38;2;243;139;168;1m'
 # Per-bar gradient palettes — all share the warning ramp (peach mid, red high)
 # but each starts from a distinct base colour to keep the three bars visually
 # distinguishable at typical low percentages.
-FILL_GR=$'\e[48;5;114;38;2;17;17;27m'        # context low — olive green
-FILL_PEACH=$'\e[48;5;216;38;2;17;17;27m'     # mid — soft peach (shared)
-FILL_RED=$'\e[48;5;174;38;2;17;17;27m'       # high — muted red (shared)
-FILL_5H_LOW=$'\e[48;5;222;38;2;17;17;27m'    # 5h low — warm yellow
-FILL_7D_LOW=$'\e[48;5;147;38;2;17;17;27m'    # 7d low — lavender
+FILL_GR=$'\e[48;2;166;227;161;38;2;17;17;27m'     # context low — green (#a6e3a1)
+FILL_PEACH=$'\e[48;2;250;179;135;38;2;17;17;27m'  # mid — peach (#fab387, shared)
+FILL_RED=$'\e[48;2;243;139;168;38;2;17;17;27m'    # high — red (#f38ba8, shared)
+FILL_5H_LOW=$'\e[48;2;249;226;175;38;2;17;17;27m' # 5h low — yellow (#f9e2af)
+FILL_7D_LOW=$'\e[48;2;180;190;254;38;2;17;17;27m' # 7d low — lavender (#b4befe)
 
 R=$'\e[0m'
 
@@ -124,16 +120,19 @@ R=$'\e[0m'
 # moves smoothly in padding and steps cell-by-cell across the label.
 PARTIALS=('' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
 
-# Extract the 256-palette index N from a fill escape of the form
-# \e[48;5;N;38;…m. Both bar builders derive a matching foreground from
-# the fill so partial-cell / mini-bar glyphs blend with the surrounding
-# fill colour. Assumes 256-bg form — if any FILL_* switches to truecolor
-# (\e[48;2;…) this parse silently breaks and callers produce garbled
-# escapes. Centralised here so the assumption lives in one place.
-palette_idx_from_fill() {
+# Extract the truecolor RGB triple "R;G;B" from a fill escape of the form
+# \e[48;2;R;G;B;38;…m. Both bar builders derive a matching foreground from the
+# fill so partial-cell / mini-bar glyphs blend with the surrounding fill colour.
+# Assumes truecolor-bg form — if any FILL_* reverts to 256 (\e[48;5;…) this
+# parse silently breaks and callers produce garbled escapes. Centralised here so
+# the assumption lives in one place.
+fill_rgb_from_fill() {
     local fill=$1
-    local idx=${fill#*48;5;}
-    printf '%s' "${idx%%;*}"
+    local rest=${fill#*48;2;}   # R;G;B;38;2;…m
+    local r=${rest%%;*}; rest=${rest#*;}
+    local g=${rest%%;*}; rest=${rest#*;}
+    local b=${rest%%;*}
+    printf '%s;%s;%s' "$r" "$g" "$b"
 }
 
 build_bar() {
@@ -165,8 +164,8 @@ build_bar() {
     if [ "$rem" -eq 0 ]; then
         printf '%s%s%s%s%s' "$fill" "${full:0:fcells}" "$B_FG" "${full:fcells}" "$R"
     else
-        local idx; idx=$(palette_idx_from_fill "$fill")
-        local part=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
+        local rgb; rgb=$(fill_rgb_from_fill "$fill")
+        local part=$'\e[48;2;56;56;56;38;2;'"$rgb"'m'
         printf '%s%s%s%s%s%s%s' \
             "$fill" "${full:0:fcells}" \
             "$part" "${PARTIALS[rem]}" \
@@ -311,14 +310,11 @@ build_mini_bar() {
     if   [ "$pct" -ge 85 ]; then fill="$high"
     elif [ "$pct" -ge 65 ]; then fill="$mid"
     else                          fill="$low"; fi
-    # Reuse the fill's palette index as the FG so the eighth-block glyph
-    # appears as a coloured column rising from the cell bg. Bg matches the
-    # B_* chip palette (truecolor 56,56,56) so mini-bars sit visually flush
-    # with dotfiles/main/etc. The Claude TUI truecolor wash hits specific
-    # values (e.g. dark crust 17,17,27 → peach) but leaves 56,56,56 alone,
-    # same as the full-bar track and every other chip in the line.
-    local idx; idx=$(palette_idx_from_fill "$fill")
-    local style=$'\e[48;2;56;56;56;38;5;'"$idx"'m'
+    # Reuse the fill's RGB as the FG so the eighth-block glyph appears as a
+    # coloured column rising from the cell bg. Bg matches the B_* chip palette
+    # (truecolor 56,56,56) so mini-bars sit visually flush with dotfiles/main/etc.
+    local rgb; rgb=$(fill_rgb_from_fill "$fill")
+    local style=$'\e[48;2;56;56;56;38;2;'"$rgb"'m'
     local g=$((pct * 8 / 100))
     [ "$g" -gt 8 ] && g=8
     [ "$pct" -gt 0 ] && [ "$g" -lt 1 ] && g=1
@@ -507,9 +503,9 @@ printf '%s\n' "$FULL_LINE"
 # the prior render in the same pane. Remove once the rerender bug is
 # understood.
 if [ -n "${STATUSLINE_DEBUG:-}" ]; then
-    printf '%s | TMUX_PANE=%s tmux_w=%s COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
+    printf '%s | HERDR_PANE_ID=%s herdr_w=%s COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
         "$(date '+%H:%M:%S.%3N')" \
-        "${TMUX_PANE:-unset}" "${TMUX_PANE_W:-empty}" "${COLUMNS:-unset}" \
+        "${HERDR_PANE_ID:-unset}" "${HERDR_PANE_W:-empty}" "${COLUMNS:-unset}" \
         "$COLS" "$BUDGET" "$combo" "$(visible_width "$FULL_LINE")" \
         >> /tmp/statusline-debug.log
 fi
