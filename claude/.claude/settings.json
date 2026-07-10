@@ -1,8 +1,8 @@
 {
   "cleanupPeriodDays": 90,
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"
+    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "permissions": {
     "allow": [
@@ -84,6 +84,42 @@
   },
   "model": "claude-opus-4-8[1m]",
   "hooks": {
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/notification.py --notify",
+            "timeout": 25
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/post_tool_use.py --notify",
+            "timeout": 25
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/pre_compact.py --backup",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion",
@@ -125,25 +161,18 @@
         ]
       }
     ],
-    "PostToolUse": [
+    "SessionStart": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $HOME/.claude/hooks/post_tool_use.py --notify",
-            "timeout": 25
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
+            "command": "python3 $HOME/.claude/hooks/session_start.py --load-context",
+            "timeout": 10
+          },
           {
             "type": "command",
-            "command": "python3 $HOME/.claude/hooks/user_prompt_submit.py",
+            "command": "python3 $HOME/.claude/hooks/remote_settings_watch.py",
             "timeout": 5
           }
         ]
@@ -153,20 +182,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/sonar-secrets/build-scripts/prompt-secrets.sh",
-            "timeout": 60
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/notification.py --notify",
-            "timeout": 25
+            "command": "bash '/home/deck/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10
           }
         ]
       }
@@ -195,31 +212,24 @@
         ]
       }
     ],
-    "SessionStart": [
+    "UserPromptSubmit": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $HOME/.claude/hooks/session_start.py --load-context",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "python3 $HOME/.claude/hooks/remote_settings_watch.py",
+            "command": "python3 $HOME/.claude/hooks/user_prompt_submit.py",
             "timeout": 5
           }
         ]
-      }
-    ],
-    "PreCompact": [
+      },
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $HOME/.claude/hooks/pre_compact.py --backup",
-            "timeout": 10
+            "command": "~/.claude/hooks/sonar-secrets/build-scripts/prompt-secrets.sh",
+            "timeout": 60
           }
         ]
       }
@@ -231,19 +241,19 @@
     "padding": 1
   },
   "enabledPlugins": {
-    "frontend-design@claude-plugins-official": false,
-    "context7@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true,
-    "feature-dev@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
-    "security-guidance@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": false,
+    "lua-lsp@claude-plugins-official": false,
     "pr-review-toolkit@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
-    "csharp-lsp@claude-plugins-official": true,
-    "lua-lsp@claude-plugins-official": false,
-    "sonarqube@claude-plugins-official": true
+    "security-guidance@claude-plugins-official": true,
+    "sonarqube@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -256,7 +266,7 @@
   "viewMode": "default",
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
-  "tui": "fullscreen",
+  "tui": "default",
   "voice": {
     "enabled": true
   },
