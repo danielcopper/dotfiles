@@ -75,44 +75,12 @@ command -v ng >/dev/null && source <(ng completion script)
 # Untracked secrets (API keys, SQLCMDPASSWORD, etc.) — file is gitignored.
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
-# Always in tmux via sesh: per-window session, picker when ambiguous.
-# Runs only in a real interactive terminal (TTY, not already inside a
-# multiplexer) — never in scripts, SSH command runs, or agent/tool shells
-# (those are non-interactive or have no TTY, both filtered here). Skipped
-# inside a herdr pane (HERDR_PANE_ID, herdr's own pane marker): herdr is itself
-# a multiplexer, so autostarting tmux there would nest a tmux in every pane.
-# Opt out for any window with NO_TMUX_AUTOSTART=1. Placed after secrets/env so
-# the tmux server inherits a fully set-up environment, and before the greeter so
-# the brief launcher shell never flashes fastfetch before exec'ing into tmux.
-if [[ $- == *i* ]] && [[ -t 0 && -t 1 ]] && [[ -z "${TMUX:-}" ]] \
-   && [[ -z "${HERDR_PANE_ID:-}" ]] && [[ -z "${NO_TMUX_AUTOSTART:-}" ]] \
-   && command -v sesh >/dev/null 2>&1; then
-  # Pick an existing session/dir, or type a new name to create one. `exec`
-  # ties this window's lifetime to its tmux session. fzf exit codes: 0 = item
-  # chosen, 1 = new name typed (no match), 130 = Esc -> fall through to a
-  # plain shell.
-  _pick=$(sesh list 2>/dev/null | fzf --print-query --reverse --height=40% \
-            --prompt='⚡ ' \
-            --header='Enter: attach/create · Name tippen + Enter: neu · Esc: Shell')
-  _rc=$?
-  if [[ "$_rc" -eq 0 || "$_rc" -eq 1 ]]; then
-    _sel=$(printf '%s\n' "$_pick" | tail -n1)
-    [[ -n "$_sel" ]] && exec sesh connect "$_sel"
-  fi
-  unset _pick _rc _sel
-fi
-
-# Greeter — fastfetch on a fresh shell, never as repeated noise. Outside
-# tmux: any top-level shell. Inside tmux: only the first pane of a brand-new
-# single-window/single-pane session, so splits, extra windows, and attaches
-# to existing multi-pane sessions stay quiet.
-if command -v fastfetch >/dev/null; then
-  if [ -z "${TMUX:-}" ]; then
-    [ "${SHLVL:-1}" = "1" ] && fastfetch
-  elif [ "$(tmux display-message -p '#{session_windows}' 2>/dev/null)" = "1" ] \
-    && [ "$(tmux display-message -p '#{window_panes}' 2>/dev/null)" = "1" ]; then
-    fastfetch
-  fi
+# Greeter — fastfetch on a fresh top-level shell, never as repeated noise.
+# Skipped inside herdr panes (HERDR_PANE_ID, herdr's own pane marker): those are
+# working panes, so a greeter in every one is just noise. SHLVL=1 keeps it to
+# the outermost shell, not subshells.
+if command -v fastfetch >/dev/null && [ -z "${HERDR_PANE_ID:-}" ]; then
+  [ "${SHLVL:-1}" = "1" ] && fastfetch
 fi
 
 # Prompt + cd jumper — must run last
