@@ -5,7 +5,8 @@ deno = "latest"
 # herdr — agent multiplexer (github:ogulcancelik/herdr). Managed by mise on every
 # host: it isn't in the Arch repos, and the pkglist path is plain `pacman -S`
 # (no AUR helper), so mise is the only cross-class install — same rationale as
-# the sesh entry below. Resolves to the aqua backend (checksum-verified binary).
+# the sesh entry below. Resolves via mise's github backend, which verifies the
+# release checksum plus GitHub artifact attestations and SLSA provenance.
 herdr = "latest"
 java = "temurin-21"
 maven = "3"

@@ -51,6 +51,34 @@ printf '\nexport PATH="$HOME/extra:$PATH"\n' >> host-arch/.bashrc.local
 stow -R host-arch
 ```
 
+## herdr ⇄ Claude Code agent-state hook
+
+herdr shows each Claude session's state (working / idle / blocked) in its
+sidebar via a hook that `herdr integration install claude` installs. That
+command does **not** compose with this repo: it bakes an **absolute** `$HOME`
+path into `~/.claude/settings.json` (a stowed symlink into the repo) and
+rewrites the whole file alphabetically — both fight the single, shared
+`settings.json`. So the integration is vendored by hand instead:
+
+- **The hook script is committed** at `claude/.claude/hooks/herdr-agent-state.sh`
+  and stows to every host. It is portable — a no-op unless run inside a herdr
+  pane (`HERDR_ENV` / `HERDR_SOCKET_PATH` / `HERDR_PANE_ID`) — and carries a
+  `HERDR_INTEGRATION_VERSION` marker.
+- **Its `SessionStart` entry in `settings.json` uses `$HOME`**, not an absolute
+  path, so it works on every machine. Hand-maintained — don't let
+  `herdr integration install` own it.
+
+Do **not** run `herdr integration install claude` during setup; `mise install`
+(the `herdr` entry) plus a normal stow is all a machine needs. Only re-run it to
+regenerate the script when `herdr integration status` reports `stale` (herdr
+bumped the integration version), then:
+
+1. It rewrites the script *through the symlink* — the repo copy updates, good —
+   and reformats `settings.json`.
+2. `git restore claude/.claude/settings.json` to drop the reformat.
+3. Re-apply the one-line `$HOME` hook path if it was lost, then commit the
+   updated script.
+
 ## Recovery
 
 - **Pre-stow conflict backups** are created at `~/.dotfiles-pre-stow.<timestamp>/` whenever `install-dotfiles.sh` finds existing `$HOME` files that would clash with the stow run.
