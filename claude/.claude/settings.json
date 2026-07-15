@@ -49,9 +49,7 @@
       "Read(~/Repos/**)",
       "Read(~/repos/**)",
       "Read(/tmp/**)",
-      "Read(~/.claude/feature-progress/**)",
-      "Edit(.worktrees/**)",
-      "Write(.worktrees/**)"
+      "Read(~/.claude/feature-progress/**)"
     ],
     "deny": [
       "Bash(sed:*)"

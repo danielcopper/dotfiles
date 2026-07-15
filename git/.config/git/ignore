@@ -2,10 +2,14 @@
 # Personal-workflow noise that should never be committed anywhere.
 
 # Worktrees: per the ~/dotfiles/claude/.claude/CLAUDE.md worktree workflow,
-# `.worktrees/` lives inside the main repo and holds full sibling worktrees.
-# Without this entry, `git status` in the main repo lists every worktree as
-# untracked, and gitignore-respecting tools (rg, fd, fzf, telescope) walk into
-# the (potentially multi-GB) worktree copies and show duplicate hits.
+# worktrees live inside the main repo under `.claude/worktrees/` — Claude Code's
+# native worktree location, so entering one fires no permission-root relocation
+# prompt. Without these entries, `git status` in the main repo lists every
+# worktree as untracked, and gitignore-respecting tools (rg, fd, fzf, telescope)
+# walk into the (potentially multi-GB) worktree copies and show duplicate hits.
+# `.worktrees/` is the pre-migration location, kept until the last old worktree
+# there is removed.
+**/.claude/worktrees/
 .worktrees/
 
 # Per-host Claude Code settings — never share machine-specific overrides.

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Global mise task: create a .worktrees/<type>/<slug> worktree and, if the repo
+# Global mise task: create a .claude/worktrees/<type>/<slug> worktree and, if the repo
 # uses mise, trust the fresh worktree's config and run its `setup` task — so the
 # empty per-worktree .venv / deps get populated and tooling (tests, linters, LSP)
-# work immediately. Pair with EnterWorktree({ path: ".worktrees/<type>/<slug>" })
-# to re-root the Claude session into the worktree for clean diagnostics.
+# work immediately. Pair with EnterWorktree({ path: ".claude/worktrees/<type>/<slug>" })
+# to re-root the Claude session into the worktree for clean diagnostics. .claude/
+# worktrees/ is Claude Code's native worktree location, so EnterWorktree fires no
+# permission-root relocation prompt.
 #
 # Usage: mise run worktree-new <type> <slug> [base]   (base defaults to current branch)
 set -euo pipefail
@@ -14,7 +16,7 @@ slug="${2:?usage: mise run worktree-new <type> <slug> [base=current branch]}"
 # mise runs a *global* file task from the global config root ($HOME), not from
 # where it was invoked — so resolve everything against MISE_ORIGINAL_CWD (the
 # caller's dir). --git-common-dir always points at the MAIN worktree's .git, so
-# .worktrees/ lands beside src/ even when invoked from inside another worktree
+# .claude/worktrees/ lands beside src/ even when invoked from inside another worktree
 # (never nested). PWD is the fallback when run outside mise.
 orig="${MISE_ORIGINAL_CWD:-$PWD}"
 if ! common_git="$(git -C "$orig" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
@@ -29,7 +31,7 @@ default_base="$(git -C "$orig" rev-parse --abbrev-ref HEAD)"
 base="${3:-$default_base}"
 
 cd "$repo_root"
-wt=".worktrees/${type}/${slug}"
+wt=".claude/worktrees/${type}/${slug}"
 
 git worktree add "$wt" -b "${type}/${slug}" "$base"
 

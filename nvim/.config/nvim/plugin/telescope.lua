@@ -104,14 +104,14 @@ vim.keymap.set("n", "<leader>ff", "<cmd>Telescope find_files<cr>", { desc = "Fin
 vim.keymap.set("n", "<leader>fr", function()
   -- v:oldfiles is nvim's edit history, not gitignore-aware. Worktree copies of
   -- the same logical file end up in the list as duplicates, so filter them out
-  -- when running from the main repo (inside a worktree, .worktrees/ paths
+  -- when running from the main repo (inside a worktree, .claude/worktrees/ paths
   -- wouldn't appear anyway).
   local cwd = vim.fn.getcwd()
   local git_path = cwd .. "/.git"
   local is_main_repo = vim.fn.isdirectory(git_path) == 1
   require("telescope.builtin").oldfiles({
     cwd_only = true,
-    file_ignore_patterns = is_main_repo and { "%.worktrees/" } or nil,
+    file_ignore_patterns = is_main_repo and { "%.worktrees/", "%.claude/worktrees/" } or nil,
   })
 end, { desc = "Recent files (cwd)" })
 vim.keymap.set("n", "<leader>fR", "<cmd>Telescope oldfiles<cr>", { desc = "Recent files (all)" })

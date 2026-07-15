@@ -43,7 +43,7 @@ local function choose_target(targets)
       end):totable()
     else
       local_targets = vim.iter(targets):filter(function(t)
-        return t:find("/.worktrees/", 1, true) == nil
+        return t:find("/.worktrees/", 1, true) == nil and t:find("/.claude/worktrees/", 1, true) == nil
       end):totable()
     end
     if #local_targets > 0 then
@@ -116,7 +116,7 @@ vim.lsp.config("roslyn", {
 
 require("roslyn").setup({
   -- broad_search walks the whole git tree synchronously (skipping only obj/bin/.git),
-  -- so it scans all of .worktrees/ on every LSP start and blocks file open by 15+s.
+  -- so it scans all of .worktrees/ + .claude/worktrees/ on every LSP start and blocks file open by 15+s.
   -- Upward search finds the correct solution in both the main repo and worktrees.
   broad_search = false,
   lock_target = true,
@@ -132,6 +132,7 @@ require("roslyn_filewatch").setup({
   force_polling = true,
   ignore_dirs = {
     ".worktrees",
+    ".claude",  -- worktrees now live under .claude/worktrees/
     "node_modules",
     "obj", "Obj",
     "bin", "Bin",
