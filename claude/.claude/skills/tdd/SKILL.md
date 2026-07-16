@@ -15,6 +15,14 @@ description: Test-driven development with red-green-refactor loop. Use when user
 
 See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
+## Anti-Pattern: Tautological Tests
+
+**DO NOT compute the expected value the way the code computes it.** A tautological test recomputes the expected value using the same logic as the code under test (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself). It passes by construction and can never disagree with the code.
+
+The warning sign: the assertion mirrors the implementation. Such a test stays green even when the code is wrong, because both sides repeat the same mistake.
+
+**Correct approach**: Expected values come from an independent source of truth — a known-good literal, a worked example, or the spec.
+
 ## Anti-Pattern: Horizontal Slices
 
 **DO NOT write all tests first, then all implementation.** This is "horizontal slicing" - treating RED as "write all tests" and GREEN as "write all code."
