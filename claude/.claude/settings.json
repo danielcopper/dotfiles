@@ -80,7 +80,7 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "claude-opus-4-8[1m]",
+  "model": "fable",
   "hooks": {
     "Notification": [
       {
@@ -155,6 +155,31 @@
             "type": "command",
             "command": "~/.claude/hooks/sonar-secrets/build-scripts/pretool-secrets.sh",
             "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/block_ai_attribution.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/block_commit_on_main.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/block_plugin_code_reviewer.py",
+            "timeout": 10
           }
         ]
       }
@@ -240,11 +265,9 @@
   },
   "enabledPlugins": {
     "claude-md-management@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
     "csharp-lsp@claude-plugins-official": true,
-    "feature-dev@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": false,
     "lua-lsp@claude-plugins-official": false,
     "pr-review-toolkit@claude-plugins-official": true,
@@ -264,7 +287,7 @@
   "viewMode": "default",
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
-  "tui": "default",
+  "tui": "fullscreen",
   "voice": {
     "enabled": true
   },
