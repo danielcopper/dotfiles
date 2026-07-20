@@ -57,6 +57,7 @@ vim.lsp.enable({
   "azure_pipelines_ls",
   "basedpyright",
   "bashls",
+  "clangd",
   "cssls",
   "dockerls",
   "emmet_language_server",

@@ -54,6 +54,10 @@ require("mason-tool-installer").setup({
     "ruff",
     "debugpy",
 
+    -- C
+    "clangd",
+    "clang-format",
+
     -- Bash/Shell
     "bash-language-server",
     "shfmt",
