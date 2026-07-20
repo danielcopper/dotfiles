@@ -18,6 +18,20 @@
 
 - **Don't expose the agentic process in published artifacts.** How the work was produced — subagents, multi-agent workflows, "architect → implement → review", adversarial-verification / "capstone" passes — must never appear in PR or issue descriptions, commit messages, code comments, or any committed/published text. State the results, decisions, and rationale, not the orchestration used to reach them.
 
+## Task delivery workflow (default for all implementation work)
+
+The default loop for any non-trivial implementation work, unless I say otherwise. Group work into **functional cuts** and ship **one PR per cut** — a cut is the smallest independently reviewable/deployable unit (e.g. "the DB exists and can be deployed"). Keep a task list that mirrors the work-item/story tasks; when tasks are missing, add them **both** to the local list and to the board (Azure DevOps).
+
+For each task (and each cut):
+
+1. **Plan when needed; clarify open questions first.** If there are design or architecture choices, resolve them _with me_ before writing code — we make design/arch decisions together, I don't decide them unilaterally. No code until the open questions are closed.
+2. **Implement via agent.**
+3. **Review via agent** — one or more code-review agents, scaled to the implementation's complexity.
+4. **Push and open the PR** (per the repo's branch/merge model and work-item-linking rules).
+5. **I review the PR myself before we move to the next task** — wait for my go.
+
+Composes with the Worktree Workflow (one branch/worktree per cut) and the Azure DevOps boards rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
+
 ## Environment
 
 - **Line endings:** New files use LF. Existing files keep their current line endings (CRLF or LF) — never bulk-convert.
@@ -50,6 +64,7 @@ When working with code in a language that has LSP coverage (TypeScript, Python, 
 
 For work-item tasks tracked on an Azure DevOps board (Task states: To Do → In Progress → Done):
 
+- **Always use the `az boards` CLI — never the Azure DevOps MCP connector.** This is a convention, not enforced by a permission rule; reading or updating work items goes through `az` (e.g. `az boards work-item show --id <id>`). Don't attempt the MCP auth flow.
 - **When you start implementing, move every task you are actively working on to In Progress** (e.g. `az boards work-item update --id <id> --state 'In Progress'`).
 - **You may move tasks autonomously only into In Progress** — that transition is pre-authorized.
 - **Moving a task to Done always requires asking me first.** Never close or mark a board item Done without my explicit confirmation.
