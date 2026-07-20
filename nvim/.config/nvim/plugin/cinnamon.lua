@@ -6,7 +6,10 @@ cinnamon.setup({
   options = {
     delay = 3,
     max_delta = {
-      time = 100,
+      -- Keep the whole animation shorter than the key-repeat interval (~30-40ms):
+      -- an interrupted scroll strands mid-way without snapping to its target, so
+      -- rapid/held <C-d>/<C-u> otherwise lose distance per press.
+      time = 40,
     },
   },
   keymaps = {
