@@ -74,6 +74,47 @@ vim.lsp.enable({
 
 local lsp_state = require("lsp_state")
 
+-- :LspRestart [name] — restart the active clients (or just the named one).
+-- The native lsp/ config flow has no built-in restart command. Managed clients
+-- (those with a vim.lsp.config entry) are bounced via the enable toggle, which
+-- re-attaches them to the open buffers (same mechanism worktree.lua uses);
+-- unmanaged clients (jdtls, roslyn, sonarlint) are just stopped — their own
+-- plumbing restarts them on the next buffer event.
+vim.api.nvim_create_user_command("LspRestart", function(opts)
+  local names = {}
+  for _, client in ipairs(vim.lsp.get_clients()) do
+    if opts.args == "" or client.name == opts.args then
+      names[client.name] = true
+    end
+  end
+  for name in pairs(names) do
+    if vim.lsp.config[name] ~= nil then
+      vim.lsp.enable(name, false)
+    else
+      for _, client in ipairs(vim.lsp.get_clients({ name = name })) do
+        client:stop()
+      end
+    end
+  end
+  vim.defer_fn(function()
+    for name in pairs(names) do
+      if vim.lsp.config[name] ~= nil then
+        vim.lsp.enable(name)
+      end
+    end
+  end, 100)
+end, {
+  nargs = "?",
+  complete = function()
+    local seen = {}
+    for _, client in ipairs(vim.lsp.get_clients()) do
+      seen[client.name] = true
+    end
+    return vim.tbl_keys(seen)
+  end,
+  desc = "Restart active LSP clients (optionally a single named one)",
+})
+
 vim.api.nvim_create_autocmd("LspProgress", {
   callback = function(ev)
     if ev.data.params.value.kind == "end" then
