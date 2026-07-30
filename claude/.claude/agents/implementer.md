@@ -2,6 +2,7 @@
 name: implementer
 description: Use this agent to implement a scoped, specified coding task — a GitHub issue, a plan step, or a spec slice — inside its assigned worktree. Expects a brief naming the goal, the in-scope area, what is out of scope, and the verification commands. Commits its work; never pushes. Returns a short status report with a four-state outcome.
 model: opus
+effort: high
 color: green
 ---
 
