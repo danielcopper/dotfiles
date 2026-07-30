@@ -4,33 +4,13 @@
 
 - When a tool call is rejected/cancelled, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed.
 
-- **Don't be hyper-proactive.** Do exactly what was asked — no more. Don't invent couplings between independent tools ("tool A could read tool B's config"), don't add auto-detection layers, don't build smart fallbacks on top of smart fallbacks. Prefer a dumb default + simple override file over clever runtime logic. If you catch yourself writing a "detects X and automatically does Y" hook, stop and ask whether the user actually wanted that.
+- **Don't be hyper-proactive.** Do exactly what was asked — no more. Don't invent couplings between independent tools ("tool A could read tool B's config"), don't add auto-detection layers, don't stack smart fallbacks on smart fallbacks. Prefer a dumb default + simple override file over clever runtime logic. If you catch yourself writing a "detects X and automatically does Y" hook, stop and ask whether the user actually wanted that.
 
-- **Planning vs. implementation — scope is the user's decision, not mine.** During planning/ideation, stay in discussion mode. Do not:
-  - Start implementing just because several discussion turns have passed
-  - Declare things "explicitly not in scope", "separate refactor", or similar — scope is the user's call
-  - Skip research or user instructions to save effort
-  - Enforce production-code discipline (minimal diffs, tight scope) on personal configs or projects where the user has not asked for it
-
-  Only move to implementation on an explicit green-light verb ("leg los", "mach", "implementier", "schreib", "go"). Treat open questions about the user's own project ("is X inconsistent?", "why is Y like this?") as invitations to discuss options and tradeoffs, not requests for guardrails from me. Even a short "ok" after a question needs a check — does it mean "ok implementiere" or "ok verstanden, weiter diskutieren"?
+- **Planning vs. implementation — scope is the user's decision, not mine.** During planning/ideation stay in discussion mode: don't start implementing just because turns have passed, don't declare things "explicitly not in scope" / "separate refactor" (scope is the user's call), don't skip research or user instructions to save effort, and don't enforce production-code discipline (minimal diffs, tight scope) on personal configs the user hasn't asked to tighten. Move to implementation only on an explicit green-light verb ("leg los", "mach", "implementier", "schreib", "go"). Treat open questions about the user's own project ("is X inconsistent?", "why is Y like this?") as invitations to discuss options and tradeoffs, not requests for guardrails. Even a short "ok" after a question needs a check — does it mean "ok implementiere" or "ok verstanden, weiter diskutieren"?
 
 - **Don't ask about stopping.** Never ask "willst du weitermachen?", "genug für heute?", "Pause?" or similar. Just keep working. The user will say when to stop.
 
 - **Don't expose the agentic process in published artifacts.** How the work was produced — subagents, multi-agent workflows, "architect → implement → review", adversarial-verification / "capstone" passes — must never appear in PR or issue descriptions, commit messages, code comments, or any committed/published text. State the results, decisions, and rationale, not the orchestration used to reach them.
-
-## Task delivery workflow (default for all implementation work)
-
-The default loop for any non-trivial implementation work, unless I say otherwise. Group work into **functional cuts** and ship **one PR per cut** — a cut is the smallest independently reviewable/deployable unit (e.g. "the DB exists and can be deployed"). Keep a task list that mirrors the work-item/story tasks; when tasks are missing, add them **both** to the local list and to the board (Azure DevOps).
-
-For each task (and each cut):
-
-1. **Plan when needed; clarify open questions first.** If there are design or architecture choices, resolve them _with me_ before writing code — we make design/arch decisions together, I don't decide them unilaterally. No code until the open questions are closed.
-2. **Implement via agent.**
-3. **Review via agent** — one or more code-review agents, scaled to the implementation's complexity.
-4. **Push and open the PR** (per the repo's branch/merge model and work-item-linking rules).
-5. **I review the PR myself before we move to the next task** — wait for my go.
-
-Composes with the Worktree Workflow (one branch/worktree per cut) and the Azure DevOps boards rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
 
 ## Environment
 
@@ -38,94 +18,23 @@ Composes with the Worktree Workflow (one branch/worktree per cut) and the Azure 
 
 ## Code Navigation
 
-When working with code in a language that has LSP coverage (TypeScript, Python, C#, …):
-
-- **Prefer LSP over Grep/Glob/Read for symbol queries** — faster, precise, no whole-file reads.
-  - `LSP goToDefinition` / `goToImplementation` — jump to source
-  - `LSP findReferences` — every usage across the codebase
-  - `LSP hover` — type/signature info without reading the file
-  - `LSP documentSymbol` — overview of a single file's structure
-  - `LSP incomingCalls` / `outgoingCalls` — call hierarchy (prepare first via `prepareCallHierarchy`)
-- **Before renaming or changing a function signature**, run `LSP findReferences` first to know every call site.
-- **Use Grep/Glob** only for text/pattern searches LSP can't satisfy: comments, string literals, config values, non-LSP languages.
-- **Avoid `LSP workspaceSymbol`** — the tool schema exposes no `query` parameter (anthropics/claude-code#17149), so it dumps the entire workspace and burns context. Use `documentSymbol` on a likely file + Grep for path narrowing instead.
-- After writing or editing code, check `LSP` diagnostics on the touched files. Fix type errors and missing imports immediately, before reporting the task done.
+- **Prefer LSP over Grep/Glob/Read for symbol queries** in LSP-covered languages (TS, Python, C#, …) — definitions, references, hover, `documentSymbol`, call hierarchy. Precise, no whole-file reads. Run `LSP findReferences` before renaming or changing a signature. Use Grep/Glob only for text LSP can't reach: comments, string literals, config values, non-LSP languages.
+- **Avoid `LSP workspaceSymbol`** — its schema exposes no `query` parameter (anthropics/claude-code#17149), so it dumps the entire workspace and burns context. Use `documentSymbol` on a likely file + Grep for path narrowing instead.
+- After writing or editing code, check `LSP` diagnostics on the touched files and fix type errors / missing imports before reporting the task done.
 
 ## Git
 
-- **Conventional Commits** — always use the format: `<type>(<scope>): <description>`
-  - Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `ci`, `build`, `perf`, `style`
-  - Scope is optional but preferred (e.g., `feat(relay): add SSE endpoint`)
-  - Description is lowercase, imperative, no period
-- Never include "Co-authored by", "Generated with", or any similar AI/Claude mentions in commit messages
-- `git add .` is forbidden — always add files individually
-
-## Azure DevOps boards
-
-For work-item tasks tracked on an Azure DevOps board (Task states: To Do → In Progress → Done):
-
-- **Always use the `az boards` CLI — never the Azure DevOps MCP connector.** This is a convention, not enforced by a permission rule; reading or updating work items goes through `az` (e.g. `az boards work-item show --id <id>`). Don't attempt the MCP auth flow.
-- **When you start implementing, move every task you are actively working on to In Progress** (e.g. `az boards work-item update --id <id> --state 'In Progress'`).
-- **You may move tasks autonomously only into In Progress** — that transition is pre-authorized.
-- **Moving a task to Done always requires asking me first.** Never close or mark a board item Done without my explicit confirmation.
-
-## Worktree Workflow
-
-When asked to create a new branch or work on a new feature/task:
-
-1. **Never use `git checkout -b` in place** — always create a worktree
-2. **Create:** `git worktree add .claude/worktrees/<type>/<slug> -b <type>/<slug> <base-branch>`
-   - Types: `feature/`, `fix/`, `refactor/`, `chore/`, `docs/`
-   - If a ticket number exists (Azure DevOps, GitHub issue), prefix the slug: `<type>/<ticket>-<slug>`
-   - Examples:
-     - `git worktree add .claude/worktrees/feature/oauth-login -b feature/oauth-login main`
-     - `git worktree add .claude/worktrees/feature/123-oauth-login -b feature/123-oauth-login main`
-3. **Enter** (re-root the session): `EnterWorktree({ path: ".claude/worktrees/<type>/<slug>" })` — switches the session's cwd into the worktree so the LSP and tooling resolve against the worktree's own files and config. Because `.claude/worktrees/` is Claude Code's native worktree location, entering it triggers **no** permission-root relocation prompt. **Verified** to clear the false "import could not be resolved" diagnostics that otherwise appear when the session stays rooted in the main repo (the LSP root is locked to the session cwd). Skip this for a multi-worktree fan-out (lead stays in main, agents get absolute worktree paths) — there, re-run the real type-checker instead of trusting the harness diagnostics on worktree files.
-4. **Work** inside the worktree for all changes on that branch
-5. **Cleanup:** `ExitWorktree({ action: "keep" })` to return the session to the main repo (worktree left intact), then `git worktree remove .claude/worktrees/<type>/<slug> && git branch -d <type>/<slug>` once the branch is merged/done
-
-Rules:
-
-- Worktrees live in `.claude/worktrees/` inside the repo root (globally gitignored; Claude Code's native worktree location, so entering one triggers no permission-root relocation prompt). `.worktrees/` (the pre-migration location) stays gitignored too until its last old worktree is removed
-- Base branch is the current branch unless specified otherwise
-- Never modify files outside the assigned worktree
-- Push from inside the worktree — `git push` works normally (same remote/origin)
-- **If the repo uses `mise`** (a fresh worktree gets its own **empty** `.venv` — mise makes per-directory venvs, so the worktree's tests/linters/LSP won't run until set up): use the global **`mise run worktree-new <type> <slug> [base]`** task for step 2 — it does `git worktree add` + `mise trust` + the repo's `setup` in one shot (then still do step 3, `EnterWorktree`). To run a tool inside a worktree by hand: `mise -C <worktree> exec -- <cmd>`.
-
-## Dotfiles
-
-Managed with [GNU Stow](https://www.gnu.org/software/stow/).
-
-- Regular git repo at `~/dotfiles/`. Remote: `origin` (use `git remote get-url origin` to check).
-- **Single branch** workflow; per-host differences live in `host-<class>/` packages.
-- Top-level dirs are stow packages (one per app: `bash/`, `git/`, `tmux/`, …).
-- `host-<class>/` packages carry per-host addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. Claude `settings.json`).
-- Files in `$HOME` are symlinks into the repo — edit anywhere; `cd ~/dotfiles && git diff` surfaces the change.
-- Re-link after structural changes: `cd ~/dotfiles && stow -R <pkg>`.
-- Bootstrap a fresh machine: `cd ~/dotfiles && ./bootstrap.sh <arch|steamdeck|wsl-arch>` (installs OS packages from `packages/<class>.pkglist`, then runs stow for the right set).
-- Secrets (API keys, `SQLCMDPASSWORD`) live in untracked `~/.bashrc.secrets`, sourced at the end of shared `.bashrc`.
-
-## Infrastructure
-
-### SQL Server
-
-Container: `sqlserver2022` · Host: `localhost:1433` · User: `sa`
-
-- Password is exported as `SQLCMDPASSWORD` from untracked `~/.bashrc.secrets` (sourced by shared `.bashrc`) — no `-P` flag needed
-- Use `sqlcmd` directly: `sqlcmd -S localhost -U sa -C`
-- Single quotes in `-Q` work normally: `-Q "SELECT * FROM t WHERE name = 'alice'"`
+- **Conventional Commits** — `<type>(<scope>): <description>` (`feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `ci`, `build`, `perf`, `style`). Scope optional but preferred; description lowercase, imperative, no period.
+- Never include "Co-authored-by", "Generated with", or any similar AI/Claude mention in commit messages.
+- **`git add .` is forbidden by default** — stage files individually. A repo may override this in its own CLAUDE.md when its `.gitignore` is known-clean.
 
 ## Memory
 
-Routing rules and full structure: `~/.claude/memory/README.md` (auto-injected at first tool call by `~/.claude/hooks/memory_inject.py`).
+Routing rules and full structure live in `~/.claude/memory/README.md`, auto-injected at first tool call by `~/.claude/hooks/memory_inject.py` — don't restate them here. One hard rule the injection may not carry: **never write to `~/.claude/projects/<cwd>/memory/`** (Anthropic's auto-memory — read-only continuity). Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
 
-Three stores:
+## Worktrees & branching
 
-- `~/.claude/memory/` — global personal (general/tools/domain/daily, gitignored content)
-- `<repo>/.claude/memory/` — project-shared, committed in the repo
-- `~/.claude/projects/<cwd>/memory/` — Anthropic's auto-memory; **never write here**, read-only continuity
-
-Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
+**Never use `git checkout -b` in place — always work in a worktree** under `.claude/worktrees/<type>/<slug>`. The full procedure (create, `EnterWorktree`, `mise run worktree-new`, cleanup, rules) lives in the **`worktree` skill** — load it when starting any new branch / feature / task / fix.
 
 ## Project documentation discovery
 
@@ -133,12 +42,6 @@ If the current repo has any of the following at its root, treat them as canonica
 
 - **`CONTEXT.md`** — the project's domain glossary. Defines what terms mean *here*. When a term gets resolved during conversation, update `CONTEXT.md` inline — don't batch. It is a glossary, **not** a spec or implementation doc.
 - **`CONTEXT-MAP.md`** — present in multi-context monorepos. Points to per-context `CONTEXT.md` files under each module.
-- **`docs/adr/`** — Architectural Decision Records, numbered sequentially (`0001-slug.md`, `0002-slug.md`, …). Each ADR records why a decision was made and what alternatives were rejected. Read before redesigning in a settled area.
+- **`docs/adr/`** — Architectural Decision Records, numbered sequentially (`0001-slug.md`, …). Each records why a decision was made and what alternatives were rejected. Read before redesigning in a settled area.
 
-Rules when these files exist:
-
-- **Use the glossary's vocabulary in outputs.** When naming a domain concept in an issue title, test name, refactor proposal, or PR description, use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
-- **Flag ADR conflicts explicitly.** If a proposed design contradicts an existing ADR, surface the contradiction out loud (e.g. *"Contradicts ADR-0007 — but worth reopening because…"*); don't silently override.
-- **Only propose a new ADR when all three apply**: hard-to-reverse, surprising-without-context, **and** a real trade-off. If any leg is missing, skip it.
-
-If these files don't exist, proceed silently — don't flag their absence or suggest creating them upfront. They get created lazily during planning sessions (e.g. `/grill-with-docs`) when terms or decisions actually resolve.
+When these files exist: use the glossary's vocabulary in outputs (don't drift to synonyms it explicitly avoids); flag ADR conflicts out loud (*"Contradicts ADR-0007 — but worth reopening because…"*) rather than silently overriding; propose a new ADR only when all three apply — hard-to-reverse, surprising-without-context, **and** a real trade-off. If these files don't exist, proceed silently — don't flag their absence or suggest creating them upfront. They get created lazily during planning sessions (e.g. `/grill-with-docs`) when terms or decisions actually resolve.
