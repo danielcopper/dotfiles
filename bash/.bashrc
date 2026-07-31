@@ -86,3 +86,6 @@ fi
 # Prompt + cd jumper — must run last
 command -v starship >/dev/null && eval "$(starship init bash)"
 command -v zoxide >/dev/null && eval "$(zoxide init bash --cmd cd)"
+
+# opencode
+export PATH=/home/deck/.opencode/bin:$PATH
