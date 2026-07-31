@@ -70,14 +70,20 @@ def log_error(hook_name, message):
         pass
 
 
-def log_json(filename, data, max_entries=100):
-    """Log data as JSONL (one JSON object per line, append-only)."""
+def log_json(filename, data):
+    """Log data as JSONL (one JSON object per line, append-only).
+
+    Rotates at 10 MB: the current file moves to `<name>.jsonl.1` (replacing the
+    previous generation), so a log can occupy at most ~20 MB on disk.
+    """
     log_dir = Path.home() / ".claude" / "hooks" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     # Use .jsonl extension for new format
     log_file = log_dir / filename.replace(".json", ".jsonl")
 
     try:
+        if log_file.exists() and log_file.stat().st_size > 10_000_000:
+            log_file.replace(log_file.with_name(log_file.name + ".1"))
         data['timestamp'] = datetime.now().isoformat()
         with open(log_file, 'a') as f:
             f.write(json.dumps(data) + "\n")

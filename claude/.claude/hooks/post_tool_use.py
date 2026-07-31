@@ -19,9 +19,8 @@ from common import announce, log_json, log_error
 def check_for_errors(data):
     """Check if tool execution had errors or warnings."""
     try:
-        hook_data = data.get("hookSpecificInput", {})
-        tool_name = hook_data.get("tool_name", "unknown")
-        tool_result = hook_data.get("tool_result", {})
+        tool_name = data.get("tool_name", "unknown")
+        tool_result = data.get("tool_response", {})
 
         if isinstance(tool_result, dict):
             if tool_result.get("error"):
@@ -57,12 +56,19 @@ def main():
         if not hook_enabled:
             sys.exit(0)
 
-        log_json("post_tool_use.json", data)
+        has_error, error_msg = check_for_errors(data)
 
-        if "--notify" in sys.argv and tts_enabled:
-            has_error, error_msg = check_for_errors(data)
-            if has_error and error_msg:
-                announce(f"Warning: {error_msg}")
+        # Metadata only — full tool_response payloads made this log grow ~11 KB
+        # per tool call, unbounded.
+        log_json("post_tool_use.json", {
+            "session_id": data.get("session_id", ""),
+            "tool_name": data.get("tool_name", "unknown"),
+            "has_error": has_error,
+            **({"error": error_msg} if has_error else {}),
+        })
+
+        if "--notify" in sys.argv and tts_enabled and has_error and error_msg:
+            announce(f"Warning: {error_msg}")
 
     except json.JSONDecodeError:
         print("Invalid JSON input", file=sys.stderr)
