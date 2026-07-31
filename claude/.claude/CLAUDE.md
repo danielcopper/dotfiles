@@ -19,7 +19,7 @@
 ## Code Navigation
 
 - **Prefer LSP over Grep/Glob/Read for symbol queries** in LSP-covered languages (TS, Python, C#, …) — definitions, references, hover, `documentSymbol`, call hierarchy. Precise, no whole-file reads. Run `LSP findReferences` before renaming or changing a signature. Use Grep/Glob only for text LSP can't reach: comments, string literals, config values, non-LSP languages.
-- **Avoid `LSP workspaceSymbol`** — its schema exposes no `query` parameter (anthropics/claude-code#17149), so it dumps the entire workspace and burns context. Use `documentSymbol` on a likely file + Grep for path narrowing instead.
+- **`LSP workspaceSymbol` always takes an explicit `query`** — with one it is the fastest repo-wide symbol lookup; an empty query returns nothing from most servers. Reach for `documentSymbol` instead once you already know the file.
 - After writing or editing code, check `LSP` diagnostics on the touched files and fix type errors / missing imports before reporting the task done.
 
 ## Git
