@@ -2,23 +2,27 @@
 """
 PreToolUse Memory Injection Hook
 
-Injects memory content into Claude's context on the first tool call of each
-session/subagent. Uses parent-pid marker files to ensure single-shot per process.
+Injects the time- and place-bound memory slices into Claude's context on the
+first tool call of a session. The always-true slices no longer live here:
+the routing rules and the global index load natively via ~/.claude/CLAUDE.md
+(inline section + @import), which also reaches subagents — something this
+hook never could.
 
-Sources, in order:
-  1. Inline routing cheatsheet (constant below)
-       — replaces the full ~/.claude/memory/README.md eager-inject (~83 lines)
-       — the README stays as the canonical doc and is read on demand by the
-         /memory-* skills when their workflows actually need the full ruleset
-  2. ~/.claude/memory/MEMORY.md           personal global index (if exists)
-  3. ~/.claude/memory/daily/<today>.md    today's running log (if exists)
-  4. ~/.claude/memory/daily/<yest>.md     yesterday's running log (if exists)
-  5. <git-root>/.claude/memory/MEMORY.md  per-repo index (if cwd in a git repo)
-  6. ~/.claude/projects/<encoded-cwd>/memory/MEMORY.md  Anthropic auto-memory, read-only
+Sections, in order:
+  1. ~/.claude/memory/daily/<today>.md     today's running log (if exists)
+  2. ~/.claude/memory/daily/<yest>.md      yesterday's running log (if exists)
+  3. <main-repo>/.claude/memory/MEMORY.md  per-repo index (worktree-safe)
+  4. ~/.claude/projects/<encoded-cwd>/memory/MEMORY.md
+       Anthropic auto-memory, read-only continuity while that store still
+       holds unmerged content (auto memory itself is disabled in settings)
 
 Lazy-loading philosophy: eager-load only indices and time-bound running logs,
 never topic-file bodies. Claude fetches `<rule>.md`, `tools/<tool>.md`, etc.
 on demand by matching the user's prompt against the index entries' keywords.
+
+Single-shot per session, keyed on the hook input's session_id (a resumed or
+cleared session gets a fresh id and therefore a fresh injection). Falls back
+to the parent pid if no session_id arrives.
 
 Failure mode: catch everything, exit 0, never block tool execution.
 """
@@ -32,33 +36,6 @@ from pathlib import Path
 
 MAX_INJECTION_CHARS = 30_000  # ~7-8k tokens, soft cap; truncates from the bottom
 
-ROUTING_SUMMARY = """\
-When you learn something worth recording, pick the destination:
-
-1. True/useful across projects? → `~/.claude/memory/<rule-name>.md` (one rule per file)
-2. Tool-specific quirk? → `~/.claude/memory/tools/<tool>.md`
-3. Cross-tool conceptual knowledge? → `~/.claude/memory/domain/<topic>.md`
-4. Repo-specific, team-useful? → `<repo>/.claude/memory/<file>.md` (committed)
-5. Private/WIP or just-noted-today? → `~/.claude/memory/daily/<YYYY-MM-DD>.md`
-
-Per-entry format for feedback/project memories: lead with the rule/fact,
-then `**Why:**` (reason) and `**How to apply:**` lines. Link related
-memories via `[[name]]`.
-
-File naming and frontmatter: kebab-case filenames, no type prefix
-(e.g. `no-bulk-sed.md`, not `feedback_no_bulk_sed.md`). Frontmatter
-uses top-level `type:` (not nested under `metadata:`), and `name:`
-must equal the filename slug — `[[wiki-links]]` resolve against that.
-
-After creating or modifying a topic file: bump its `Updated:` date in
-the corresponding `MEMORY.md` section; new files get a new section
-with a keyword-dense description so future sessions match prompts to
-the right file.
-
-Full structure docs and slash-command behaviour: `~/.claude/memory/README.md`
-(read on demand for `/memory-dream`, `/memory-consolidate`, `/memory-promote`).
-"""
-
 
 def log_event(event_type, details):
     """Append a JSONL log entry. Never raises."""
@@ -66,6 +43,8 @@ def log_event(event_type, details):
         log_dir = Path.home() / ".claude" / "hooks" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "memory_injection.jsonl"
+        if log_file.exists() and log_file.stat().st_size > 10_000_000:
+            log_file.replace(log_file.with_name(log_file.name + ".1"))
         entry = {
             "timestamp": datetime.now().isoformat(),
             "event": event_type,
@@ -77,9 +56,9 @@ def log_event(event_type, details):
         pass
 
 
-def already_injected(ppid):
+def already_injected(key):
     """Check + set marker. Returns True if marker already existed."""
-    marker = Path(f"/tmp/claude-memory-injected-{ppid}")
+    marker = Path(f"/tmp/claude-memory-injected-{key}")
     if marker.exists():
         return True
     try:
@@ -106,15 +85,20 @@ def read_file(path, max_lines=None):
 
 
 def get_git_root(cwd):
-    """Return absolute path to git repo root containing cwd, or None."""
+    """Absolute path to the MAIN repository root for cwd, or None.
+
+    Uses --git-common-dir rather than --show-toplevel so a worktree resolves
+    to the main checkout, where the untracked .claude/memory/ actually lives.
+    """
     try:
         result = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
             capture_output=True, text=True, timeout=2,
         )
         if result.returncode == 0:
-            root = result.stdout.strip()
-            return root or None
+            common_dir = result.stdout.strip()
+            if common_dir:
+                return str(Path(common_dir).parent)
     except Exception:
         pass
     return None
@@ -132,12 +116,6 @@ def collect_sections(cwd):
     memory_dir = home / ".claude" / "memory"
     sections = []
 
-    sections.append(("Memory routing — quick reference", ROUTING_SUMMARY))
-
-    index = read_file(memory_dir / "MEMORY.md")
-    if index:
-        sections.append(("Global memory index — `~/.claude/memory/MEMORY.md`", index))
-
     today = datetime.now().strftime("%Y-%m-%d")
     today_daily = read_file(memory_dir / "daily" / f"{today}.md")
     if today_daily:
@@ -154,7 +132,9 @@ def collect_sections(cwd):
         if repo_mem:
             sections.append((f"Repo memory — `{git_root}/.claude/memory/MEMORY.md`", repo_mem))
 
-    anthropic = anthropic_memory_path(cwd)
+    # Encode from the main repo root, not the cwd — a worktree cwd would
+    # otherwise point at a project dir that never existed.
+    anthropic = anthropic_memory_path(git_root or cwd)
     anthropic_content = read_file(anthropic, max_lines=80)
     if anthropic_content:
         sections.append((f"Anthropic auto-memory (read-only continuity) — `{anthropic}`", anthropic_content))
@@ -180,26 +160,25 @@ def main():
         sys.exit(0)
 
     try:
-        ppid = os.getppid()
-        if already_injected(ppid):
-            log_event("skip_already_injected", {"ppid": ppid})
+        key = data.get("session_id") or f"ppid-{os.getppid()}"
+        if already_injected(key):
+            log_event("skip_already_injected", {"key": key})
             sys.exit(0)
 
         cwd = data.get("cwd") or os.getcwd()
         sections = collect_sections(cwd)
 
         if not sections:
-            log_event("nothing_to_inject", {"ppid": ppid, "cwd": cwd})
+            log_event("nothing_to_inject", {"key": key, "cwd": cwd})
             sys.exit(0)
 
         text = assemble(sections)
 
         log_event("injected", {
-            "ppid": ppid,
+            "key": key,
             "cwd": cwd,
             "section_count": len(sections),
             "chars": len(text),
-            "session_id": data.get("session_id", ""),
         })
 
         print(json.dumps({

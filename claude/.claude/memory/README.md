@@ -1,16 +1,16 @@
 # Memory System
 
-`~/.claude/hooks/memory_inject.py` injects a compact **routing digest** at the first tool call of every Claude Code session and subagent — not the full content of this file. This file is the canonical structure/routing reference, read on demand when the digest isn't enough (typically inside `/memory-dream`, `/memory-consolidate`, `/memory-promote` workflows).
+The always-true slices load natively via `~/.claude/CLAUDE.md`: the routing rules live inline there, the global `MEMORY.md` index arrives through an `@import` — both reach every session **and every subagent**. `~/.claude/hooks/memory_inject.py` injects only the time- and place-bound slices at the first tool call: today's + yesterday's dailies and the per-repo index (worktree-safe via `--git-common-dir`). This file is the canonical structure/routing reference, read on demand when that isn't enough (typically inside `/memory-dream`, `/memory-consolidate`, `/memory-promote` workflows).
 
-## Three stores
+## Stores
 
 | # | Path | Owner | Visibility |
 |---|---|---|---|
 | 1 | `~/.claude/memory/` | Us — global personal | Personal; gitignored content, machinery tracked |
-| 2 | `~/.claude/projects/<mapped-cwd>/memory/` | Anthropic auto-memory | Personal; **never write here** |
-| 3 | `<repo-root>/.claude/memory/` | Us — project-shared | Committed; team-visible |
+| 2 | `~/.claude/projects/<mapped-cwd>/memory/` | Anthropic auto-memory (**disabled**) | Read-only archive; **never write here** |
+| 3 | `<repo-root>/.claude/memory/` | Us — project-shared | Committed; **may be public** |
 
-Anthropic's auto-memory (store #2) keeps writing to its own location. We never write there. The hook reads its `MEMORY.md` for continuity at session start, that's it.
+Anthropic's auto memory is disabled in settings (`autoMemoryEnabled: false`) — this system is the only writer. Store #2 is a frozen archive awaiting its one-time merge into stores #1/#3; until then the hook still reads its `MEMORY.md` for continuity.
 
 ## Routing rule
 
@@ -19,9 +19,10 @@ When you (Claude) learn a fact and want to record it, decide where it belongs:
 1. **Would this still be true and useful in a different project tomorrow?**
    - Yes → **store #1 global** (this folder)
    - No → step 2
-2. **Would teammates working on this codebase benefit?**
-   - Yes → **store #3 project-shared** (`<repo>/.claude/memory/<file>.md`, committed)
-   - No (private/WIP/personal observation about the codebase) → **store #1 global daily** (`daily/<YYYY-MM-DD>.md`, gitignored)
+2. **Would teammates working on this codebase benefit — and is it public-safe?** (the repo may be public: no secrets or credential recipes, no game/ROM names, no personal device details)
+   - Yes to both → **store #3 project-shared** (`<repo>/.claude/memory/<file>.md`, committed)
+   - Repo-specific but **private** → **store #1 global**, with a `<repo>-` filename prefix
+   - No (WIP/personal observation about the codebase) → **store #1 global daily** (`daily/<YYYY-MM-DD>.md`, gitignored)
 
 ## Layout (stores #1 and #3 use the same shape)
 
