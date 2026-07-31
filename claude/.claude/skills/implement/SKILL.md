@@ -4,7 +4,7 @@ description: Implement a GitHub issue end-to-end — align, worktree, board, imp
 disable-model-invocation: true
 ---
 
-Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → merged. You are the lead: you orchestrate, commit nothing an agent already committed, and own push, PR, and merge. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue.
+Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → user handoff. You are the lead: you orchestrate, commit nothing an agent already committed, and own push and PR preparation. Merge remains the user's responsibility unless they explicitly grant full-auto for the current run. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue.
 
 ## 1. Load the repo workflow config
 
@@ -67,15 +67,16 @@ Draft the PR: conventional-commit title, body with `Closes #<N>`, docs handled p
 
 Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. The bar is the config's `green_definition` — typically CI green **and** the quality gate green with **0 new issues**.
 
-At green, follow `merge_policy`: `auto-when-green` → merge, except paths matching `merge_exceptions`, which are handed to the user; `ask` → report green and wait.
+At green, run any applicable `user_gate`: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready.
 
-*Done when:* the PR is merged, or handed over per policy.
+Green means the automated implementation work is complete; it is not merge authorization. With the default `user` policy, report the evidence and wait for the user to merge. Merge only when the user explicitly grants full-auto for the current run and the user gate has passed. Do not infer full-auto from an earlier issue or session.
+
+*Done when:* the PR is green, any user gate has passed, and the PR is handed to the user or merged under an explicit current-run full-auto grant.
 
 ## 10. Close the loop
 
-- Verify the board: the merged PR closes the issue (automation moves it to Done); the epic stays In Progress while siblings remain open.
-- When the change matches the config's `user_gate` — a verification only the user can perform — prepare it fully (state prep done, exact steps, expected result) and stop for their verdict. Their pass is the real done.
+- After a merge, verify that automation closed the issue and moved it to Done; the epic stays In Progress while siblings remain open. At user handoff before merge, leave the issue In Progress and state that automation will close it after the user's merge.
 - File the approved follow-up issues.
 - If context is running low, write `/handoff` (where we stopped, open PRs, pending tests, board state) and tell the user to compact.
 
-*Done when:* board consistent, user gate prepared if due, follow-ups filed.
+*Done when:* board consistent, any required user gate passed, follow-ups filed.

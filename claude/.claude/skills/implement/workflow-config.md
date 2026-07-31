@@ -34,14 +34,14 @@ board:
 # Optional repo task that creates + sets up a worktree (type + slug + base).
 worktree_task: mise run worktree-new
 
-# auto-when-green: lead merges once green_definition holds, except merge_exceptions.
-# ask: lead reports green and waits.
-merge_policy: auto-when-green
-merge_exceptions:
-  - .github/workflows/**        # user's token scope, user merges
+# user: green completes the implementation work; the lead reports and waits for
+# the user to merge. Full-auto is never stored here: it is a per-run override
+# only when the user explicitly grants it.
+merge_policy: user
 
-# What "green" means before merge.
-green_definition: CI green AND Sonar quality gate green with 0 new issues
+# What "green" means for implementation completion and user handoff. This does
+# not authorize a merge.
+green_definition: All required CI checks pass AND Sonar quality gate passes AND Sonar reports 0 unresolved issues introduced by the PR
 
 # always: PR bodies + new issues are drafted for approval before posting.
 # waived: post directly, concise and clean.
@@ -58,7 +58,7 @@ user_gate: <when and how the user verifies, or empty>
 
 1. **Gate**: derive candidates from the repo's CLAUDE.md build/test section and `mise.toml` tasks.
 2. **Board**: reuse `project_owner` / `project_number` / `project_id` / `status_field_id` from `.claude/agents/github.md` if present; resolve the In-Progress option id via `gh project field-list <n> --owner <owner> --format json`.
-3. **Policies**: propose `merge_policy`, `merge_exceptions`, `public_text_drafts`, `user_gate` from what the user has said in this repo; anything unknown, ask.
+3. **Policies**: default `merge_policy` to `user`; full-auto is available only as an explicit current-run grant and is never persisted. Propose `public_text_drafts` and `user_gate` from what the user has said in this repo; anything unknown, ask.
 4. Present the drafted yaml to the user, write the file on their OK, and continue the pipeline.
 
 ## Board moves
