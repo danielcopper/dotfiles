@@ -1,6 +1,6 @@
 ---
 name: memory-consolidate
-description: Full memory sweep. Runs /memory-dream first, then dedupes/merges/splits durables and refreshes the index. Three approval gates. Pass --all to extend the durable sweep across every discovered repo with team-shared memory.
+description: Full memory sweep. Runs /memory-dream first, then dedupes/merges/splits durables (incl. wiki graduation) and refreshes the indexes. Three approval gates. Pass --all to sweep every repo tier under ~/Memory/.
 argument-hint: "[--all]"
 ---
 
@@ -8,22 +8,21 @@ argument-hint: "[--all]"
 
 You are running the `/memory-consolidate` command — a superset of `/memory-dream`. Three phases, each gated by user approval before applying.
 
-Read the routing rules at `~/.claude/memory/README.md` first if not already in context.
+Read the routing rules at `~/Memory/global/README.md` first if not already in context.
 
 ## Scope
 
-Default scope (no flag): the user's global personal memory (`~/.claude/memory/`) plus the current repo's memory if cwd is inside a git repo (`<cwd-repo>/.claude/memory/`).
+Default scope (no flag): the user's global personal memory (`~/Memory/global/`) plus the current repo's tier if cwd is
+inside a git repo (`~/Memory/<repo-name>/`, repo-name = basename of the main repo root via
+`git rev-parse --path-format=absolute --git-common-dir`, parent dir).
 
-With `--all`: in addition, discover every other repo on the machine that has team-shared memory and include them in Phase 2 and Phase 3. Discovery:
-
-- Roots to scan: `~/Projects/`, `~/repos/`, `~/Repos/`, and direct subdirs of `~` (skip dotfiles already covered as part of global memory).
-- For each root, search up to depth 3. A directory qualifies as a Tier-3 repo iff it contains **both** `.git/` (or `.git` file in a worktree) **and** `.claude/memory/`.
-- De-dup found repos by their git-common-dir so worktrees of the same repo aren't processed twice.
-- Phase 1 (dream pass) is unchanged in `--all` mode — dailies live only in the global Tier-1 store, there's nothing repo-local to dream over.
+With `--all`: every subdirectory of `~/Memory/` except `global/` joins Phase 2 and Phase 3 — that IS the full repo-tier
+inventory, no filesystem scan needed. Phase 1 (dream pass) is unchanged in `--all` mode — dailies live only in the
+global store, there's nothing repo-local to dream over.
 
 ## Phase 1 — Dream pass (dailies → durable, plus archive)
 
-Do everything `/memory-dream` does — see `~/.claude/commands/memory-dream.md` for full behaviour. Briefly:
+Do everything `/memory-dream` does — see the `memory-dream` skill for full behaviour. Briefly:
 - Read dailies as source; read durables (global + repo) as reference.
 - Plan: promote recurring/durable bullets, archive old dailies (>30d default), skip not-yet-durable.
 - **Wait for approval.**
@@ -32,28 +31,32 @@ Do everything `/memory-dream` does — see `~/.claude/commands/memory-dream.md` 
 ## Phase 2 — Durable sweep
 
 Read the durable layer in scope:
-- `~/.claude/memory/*.md` (top-level rule files, one concept per file)
-- `~/.claude/memory/tools/*.md`
-- `~/.claude/memory/domain/*.md`
-- For each in-scope repo: `<repo>/.claude/memory/*.md`, `<repo>/.claude/memory/tools/*.md`, `<repo>/.claude/memory/domain/*.md`
+- `~/Memory/global/*.md` (top-level rule files, one concept per file)
+- `~/Memory/global/tools/*.md`
+- `~/Memory/global/domain/*.md`
+- For each in-scope repo tier: `~/Memory/<repo-name>/*.md` (plus its `tools/`, `domain/` if present)
 
-(Scope = current repo only by default; all discovered repos with `--all`.)
+(Scope = current repo only by default; every repo tier with `--all`.)
 
 Propose, **per scope**:
 - **Dedupe** overlapping entries (same fact in two files within the same scope → merge into the better-fit one). Do **not** dedupe across scopes — a fact in global vs. a fact in a repo can legitimately differ.
+- **Conflict rule** when merging: an explicit user statement beats an observation; newer evidence with a source beats
+  older. Record the correction in place — never keep both versions side by side.
 - **Merge** related entries within a file (consolidate sections).
 - **Split** files that exceed ~200 lines into topic-specific siblings (e.g. `tools/git.md` becomes `tools/git.md` + `tools/git-worktree.md`).
+- **Wiki graduation**: `domain/` entries that have proven durable are candidates to leave memory for `~/Notes/wiki/`
+  (translated per `~/Notes/CLAUDE.md`, indexes + log updated there, source entry removed here).
 
 Group the plan by scope (Global / `<repo-a>` / `<repo-b>` / …) so the user can approve scopes independently. **Wait for approval.** Apply.
 
 ## Phase 3 — Index refresh
 
 Rewrite the `MEMORY.md` index in each scope touched by Phase 2 to reflect current state:
-- `~/.claude/memory/MEMORY.md` for the global scope
-- `<repo>/.claude/memory/MEMORY.md` for each in-scope repo
+- `~/Memory/global/MEMORY.md` for the global scope
+- `~/Memory/<repo-name>/MEMORY.md` for each in-scope repo tier
 
 For each `MEMORY.md`:
-- One section per topic file with a rich, keyword-dense description and a last-updated date. Sections give space for descriptions that match how the user phrases topics in conversation.
+- One section per topic file with a keyword-dense description of **at most ~3 lines** and a last-updated date — dense enough to match how the user phrases topics, short enough that the eager-loaded index stays cheap.
 - Daily files are not indexed.
 - Note last-consolidated date at the top.
 

@@ -9,9 +9,10 @@ the routing rules and the global index load natively via ~/.claude/CLAUDE.md
 hook never could.
 
 Sections, in order:
-  1. ~/.claude/memory/daily/<today>.md     today's running log (if exists)
-  2. ~/.claude/memory/daily/<yest>.md      yesterday's running log (if exists)
-  3. <main-repo>/.claude/memory/MEMORY.md  per-repo index (worktree-safe)
+  1. ~/Memory/global/daily/<today>.md      today's running log (if exists)
+  2. ~/Memory/global/daily/<yest>.md       yesterday's running log (if exists)
+  3. ~/Memory/<repo-name>/MEMORY.md        per-repo index (repo-name = basename
+       of the MAIN repository root, so worktrees resolve to the same tier)
 
 Lazy-loading philosophy: eager-load only indices and time-bound running logs,
 never topic-file bodies. Claude fetches `<rule>.md`, `tools/<tool>.md`, etc.
@@ -85,7 +86,7 @@ def get_git_root(cwd):
     """Absolute path to the MAIN repository root for cwd, or None.
 
     Uses --git-common-dir rather than --show-toplevel so a worktree resolves
-    to the main checkout, where the untracked .claude/memory/ actually lives.
+    to the main repo root — its basename keys the ~/Memory/<repo-name>/ tier.
     """
     try:
         result = subprocess.run(
@@ -104,24 +105,25 @@ def get_git_root(cwd):
 def collect_sections(cwd):
     """Return list of (header, content) tuples for available memory sources."""
     home = Path.home()
-    memory_dir = home / ".claude" / "memory"
+    memory_dir = home / "Memory" / "global"
     sections = []
 
     today = datetime.now().strftime("%Y-%m-%d")
     today_daily = read_file(memory_dir / "daily" / f"{today}.md")
     if today_daily:
-        sections.append((f"Today's daily ({today}) — `~/.claude/memory/daily/{today}.md`", today_daily))
+        sections.append((f"Today's daily ({today}) — `~/Memory/global/daily/{today}.md`", today_daily))
 
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     yest_daily = read_file(memory_dir / "daily" / f"{yesterday}.md")
     if yest_daily:
-        sections.append((f"Yesterday's daily ({yesterday}) — `~/.claude/memory/daily/{yesterday}.md`", yest_daily))
+        sections.append((f"Yesterday's daily ({yesterday}) — `~/Memory/global/daily/{yesterday}.md`", yest_daily))
 
     git_root = get_git_root(cwd)
     if git_root:
-        repo_mem = read_file(Path(git_root) / ".claude" / "memory" / "MEMORY.md")
+        repo_tier = home / "Memory" / Path(git_root).name
+        repo_mem = read_file(repo_tier / "MEMORY.md")
         if repo_mem:
-            sections.append((f"Repo memory — `{git_root}/.claude/memory/MEMORY.md`", repo_mem))
+            sections.append((f"Repo memory — `{repo_tier}/MEMORY.md`", repo_mem))
 
     return sections
 

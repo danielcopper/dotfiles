@@ -6,11 +6,16 @@ The always-true slices load natively via `~/.claude/CLAUDE.md`: the routing rule
 
 | # | Path | Owner | Visibility |
 |---|---|---|---|
-| 1 | `~/.claude/memory/` | Us — global personal | Personal; gitignored content, machinery tracked |
-| 2 | `~/.claude/projects/<mapped-cwd>/memory/` | Anthropic auto-memory (**disabled**) | Read-only archive; **never write here** |
-| 3 | `<repo-root>/.claude/memory/` | Us — project-shared | Committed; **may be public** |
+| 1 | `~/Memory/global/` | Us — global personal | Private; Nextcloud-synced (`~/.claude/memory` is a compat symlink here) |
+| 2 | `~/.claude/projects/<mapped-cwd>/memory/` | Anthropic auto-memory (**disabled**) | Merged read-only archive; **never write here** |
+| 3 | `~/Memory/<repo-name>/` | Us — per repo | Private; Nextcloud-synced; never committed to the repo |
 
-Anthropic's auto memory is disabled in settings (`autoMemoryEnabled: false`) — this system is the only writer. Store #2 is a frozen archive awaiting its one-time merge into stores #1/#3; until then the hook still reads its `MEMORY.md` for continuity.
+Anthropic's auto memory is disabled in settings (`autoMemoryEnabled: false`) — this system is the only writer. This
+README stays version-tracked in the dotfiles repo and is symlinked into `~/Memory/global/`.
+
+Above the stores sits the **canon**: the Obsidian wiki at `~/Notes/wiki/`, maintained per `~/Notes/CLAUDE.md`. Memory
+is the working set — provisional until proven; the wiki is where proven reference knowledge gets promoted to (see
+"Promotion & provenance" below).
 
 ## Routing rule
 
@@ -19,10 +24,9 @@ When you (Claude) learn a fact and want to record it, decide where it belongs:
 1. **Would this still be true and useful in a different project tomorrow?**
    - Yes → **store #1 global** (this folder)
    - No → step 2
-2. **Would teammates working on this codebase benefit — and is it public-safe?** (the repo may be public: no secrets or credential recipes, no game/ROM names, no personal device details)
-   - Yes to both → **store #3 project-shared** (`<repo>/.claude/memory/<file>.md`, committed)
-   - Repo-specific but **private** → **store #1 global**, with a `<repo>-` filename prefix
-   - No (WIP/personal observation about the codebase) → **store #1 global daily** (`daily/<YYYY-MM-DD>.md`, gitignored)
+2. **Would future work on this codebase benefit?**
+   - Yes → **store #3 repo tier** (`~/Memory/<repo-name>/<file>.md`; repo-name = basename of the main repo root)
+   - No (WIP/personal observation about the codebase) → **store #1 global daily** (`daily/<YYYY-MM-DD>.md`)
 
 ## Layout (stores #1 and #3 use the same shape)
 
@@ -45,6 +49,8 @@ Keep individual files under ~200 lines; split when they grow past that.
 - **Frontmatter**: top-level `type:` (one of `feedback`, `user`, `project`, `reference`, `tools`, `domain`). Not nested under `metadata:`.
 - **`name:` must equal the filename slug** (without `.md`). So a file named `commit-per-task.md` has `name: commit-per-task`. This is what `[[wiki-links]]` and grep both resolve against.
 - **Wiki-links** `[[other-name]]` use the target file's `name:` slug — which by the rule above equals its filename slug.
+- Links may cross tiers. Repo → global always resolves (the global tier is loaded everywhere); global → repo resolves
+  only in sessions inside that repo — elsewhere such a link is an inert pointer, which is acceptable.
 
 Example:
 
@@ -77,11 +83,24 @@ When you create or modify a topic file:
 
 Daily files don't go in the index. Today + yesterday auto-inject directly; older dailies eventually graduate to topic files via `/memory-promote` or `/memory-dream`, and *then* they're indexed via their topic file.
 
-## Treat store #3 like committed code
+## Promotion & provenance
 
-No secrets, no in-flight personal thinking, no "I'm confused" entries — those go to store #1 `daily/`.
+The tiers form a ladder of proof: **daily** (observed once) → **durable memory** (confirmed / recurring) → **wiki
+canon** (`~/Notes/wiki/`, curated by the user). Rules:
 
-Store #3 is created lazily. The first time you write a project fact, create `<repo>/.claude/memory/` and a `MEMORY.md` index inside that repo.
+- **Trust ladder**: promote only what the user confirmed or what was observed repeatedly — a single observation stays
+  in the daily. (User-stated > repeatedly observed > observed once > inferred.)
+- **Conflict rule**: an explicit user statement beats an observation; newer evidence with a source beats older. Record
+  the correction in place — don't keep both versions.
+- **TTL marker**: time-bound facts carry `TIME-BOUND, delete when <condition>` in their index entry; `/memory-dream`
+  checks the condition each pass.
+- **Wiki promotion**: durable *reference* knowledge (typically `domain/`) graduates out of memory into
+  `~/Notes/wiki/`, translated to the wiki's own format (German, its page format and index/log discipline per
+  `~/Notes/CLAUDE.md`). Like every promotion, the memory source entry is removed — facts live in exactly one place.
+  Agent operating rules (`feedback`/`user`/`tools`) never go to the wiki.
+
+Store #3 is created lazily. The first time you write a project fact, create `~/Memory/<repo-name>/` with a `MEMORY.md`
+index. No secret values in any tier — reference by location, never by value.
 
 ## Daily entries
 

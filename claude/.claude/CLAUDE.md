@@ -30,19 +30,21 @@
 
 ## Memory
 
-Anthropic's auto memory is deliberately **disabled** (`autoMemoryEnabled: false`) — all memory flows through the file-based system under `~/.claude/memory/`. Its old store under `~/.claude/projects/<cwd>/memory/` is a merged, read-only archive; never write there. Full structure and slash-command docs: `~/.claude/memory/README.md` (read on demand). Dailies (today + yesterday) and the per-repo index are injected by `~/.claude/hooks/memory_inject.py` at the first tool call; the global index loads below.
+Anthropic's auto memory is deliberately **disabled** (`autoMemoryEnabled: false`) — all memory flows through the file-based system under `~/Memory/` (Nextcloud-synced; `~/.claude/memory` remains a compat symlink to `~/Memory/global`). The old store under `~/.claude/projects/<cwd>/memory/` is a merged, read-only archive; never write there. Full structure and slash-command docs: `~/Memory/global/README.md` (read on demand). Dailies (today + yesterday) and the per-repo index are injected by `~/.claude/hooks/memory_inject.py` at the first tool call; the global index loads below.
 
-When you learn something worth recording, pick the destination:
+Memory is the **working set** — provisional knowledge that still has to prove itself. The curated canon is the Obsidian wiki at `~/Notes/wiki/` (maintained per `~/Notes/CLAUDE.md`): reference knowledge that has proven durable gets **promoted** there via the memory skills, translated into the wiki's format. When you learn something worth recording, pick the destination:
 
-1. True/useful across projects? → `~/.claude/memory/<rule-name>.md` (one rule per file)
-2. Tool-specific quirk? → `~/.claude/memory/tools/<tool>.md`
-3. Cross-tool conceptual knowledge? → `~/.claude/memory/domain/<topic>.md`
-4. Repo-specific **and public-safe**? → `<repo>/.claude/memory/<file>.md` — committed, and the repo may be public: no secrets or credential recipes, no game/ROM names, no personal device details. Repo-specific but private → global tier with a `<repo>-` filename prefix.
-5. Private/WIP or just-noted-today? → `~/.claude/memory/daily/<YYYY-MM-DD>.md` (`## HH:MM — slug` + 3–5 bullets, append-only)
+1. True/useful across projects? → `~/Memory/global/<rule-name>.md` (one rule per file)
+2. Tool-specific quirk? → `~/Memory/global/tools/<tool>.md`
+3. Cross-tool conceptual knowledge? → `~/Memory/global/domain/<topic>.md` — and once proven durable, promote to `~/Notes/wiki/`
+4. Repo-specific? → `~/Memory/<repo-name>/<file>.md` (repo-name = basename of the main repo root; private, synced, never committed)
+5. Private/WIP or just-noted-today? → `~/Memory/global/daily/<YYYY-MM-DD>.md` (`## HH:MM — slug` + 3–5 bullets, append-only)
+
+Provenance rules: promote only what the user confirmed or was observed repeatedly — a single observation stays in the daily. On conflict, an explicit user statement beats an observation, and newer evidence beats older. Time-bound facts get a `TIME-BOUND, delete when <condition>` marker in their index entry.
 
 Entry format for feedback/project memories: lead with the rule/fact, then `**Why:**` and `**How to apply:**`. Kebab-case filenames; top-level `type:` frontmatter; `name:` equals the filename slug (`[[wiki-links]]` resolve against it). After creating or modifying a topic file, update its entry in the owning `MEMORY.md` index — new files get a keyword-dense description so future sessions can match prompts to the right file.
 
-Global memory index (topic files load on demand, never eagerly): @~/.claude/memory/MEMORY.md
+Global memory index (topic files load on demand, never eagerly): @~/Memory/global/MEMORY.md
 
 Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
 

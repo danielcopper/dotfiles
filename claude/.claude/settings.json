@@ -80,7 +80,7 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "fable",
+  "model": "opus",
   "autoMemoryEnabled": false,
   "hooks": {
     "Notification": [
@@ -292,6 +292,7 @@
   "voice": {
     "enabled": true
   },
+  "autoMemoryEnabled": false,
   "skipWorkflowUsageWarning": true,
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true
