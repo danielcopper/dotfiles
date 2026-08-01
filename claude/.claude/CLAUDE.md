@@ -30,7 +30,7 @@
 
 ## Memory
 
-Anthropic's auto memory is deliberately **disabled** (`autoMemoryEnabled: false`) — all memory flows through the file-based system under `~/.claude/memory/`. Its remaining store under `~/.claude/projects/<cwd>/memory/` is a read-only archive until merged; never write there. Full structure and slash-command docs: `~/.claude/memory/README.md` (read on demand). Dailies (today + yesterday) and the per-repo index are injected by `~/.claude/hooks/memory_inject.py` at the first tool call; the global index loads below.
+Anthropic's auto memory is deliberately **disabled** (`autoMemoryEnabled: false`) — all memory flows through the file-based system under `~/.claude/memory/`. Its old store under `~/.claude/projects/<cwd>/memory/` is a merged, read-only archive; never write there. Full structure and slash-command docs: `~/.claude/memory/README.md` (read on demand). Dailies (today + yesterday) and the per-repo index are injected by `~/.claude/hooks/memory_inject.py` at the first tool call; the global index loads below.
 
 When you learn something worth recording, pick the destination:
 

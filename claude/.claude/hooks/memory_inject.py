@@ -12,9 +12,6 @@ Sections, in order:
   1. ~/.claude/memory/daily/<today>.md     today's running log (if exists)
   2. ~/.claude/memory/daily/<yest>.md      yesterday's running log (if exists)
   3. <main-repo>/.claude/memory/MEMORY.md  per-repo index (worktree-safe)
-  4. ~/.claude/projects/<encoded-cwd>/memory/MEMORY.md
-       Anthropic auto-memory, read-only continuity while that store still
-       holds unmerged content (auto memory itself is disabled in settings)
 
 Lazy-loading philosophy: eager-load only indices and time-bound running logs,
 never topic-file bodies. Claude fetches `<rule>.md`, `tools/<tool>.md`, etc.
@@ -104,12 +101,6 @@ def get_git_root(cwd):
     return None
 
 
-def anthropic_memory_path(cwd):
-    """Anthropic auto-memory location for this cwd. Encoding: '/' -> '-'."""
-    encoded = cwd.replace("/", "-")
-    return Path.home() / ".claude" / "projects" / encoded / "memory" / "MEMORY.md"
-
-
 def collect_sections(cwd):
     """Return list of (header, content) tuples for available memory sources."""
     home = Path.home()
@@ -131,13 +122,6 @@ def collect_sections(cwd):
         repo_mem = read_file(Path(git_root) / ".claude" / "memory" / "MEMORY.md")
         if repo_mem:
             sections.append((f"Repo memory — `{git_root}/.claude/memory/MEMORY.md`", repo_mem))
-
-    # Encode from the main repo root, not the cwd — a worktree cwd would
-    # otherwise point at a project dir that never existed.
-    anthropic = anthropic_memory_path(git_root or cwd)
-    anthropic_content = read_file(anthropic, max_lines=80)
-    if anthropic_content:
-        sections.append((f"Anthropic auto-memory (read-only continuity) — `{anthropic}`", anthropic_content))
 
     return sections
 

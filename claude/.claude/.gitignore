@@ -32,3 +32,4 @@ hooks/logs/
 # Memory: track machinery (README, .gitkeep) and ignore personal content (general.md, tools/*.md, domain/*.md, daily/**)
 memory/**/*.md
 !memory/README.md
+__pycache__/
