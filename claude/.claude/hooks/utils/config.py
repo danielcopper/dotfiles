@@ -51,16 +51,6 @@ def get_tts_config():
     config = get_config()
     return config.get("tts", {})
 
-def get_security_config():
-    """Get security configuration."""
-    config = get_config()
-    return config.get("security", {
-        "block_dangerous_commands": True,
-        "protect_env_files": True,
-        "blocked_paths": ["/", "/etc", "/usr"],
-        "dangerous_patterns": ["rm -rf", "rm -fr", "rm -r /", "mkfs", "dd if="]
-    })
-
 def get_logging_config():
     """Get logging configuration."""
     config = get_config()
