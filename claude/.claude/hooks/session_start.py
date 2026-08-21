@@ -29,11 +29,10 @@ def log_session(data):
     log_file = log_dir / "session_start.jsonl"
 
     try:
-        hook_data = data.get("hookSpecificInput", {})
         entry = {
             "timestamp": datetime.now().isoformat(),
             "session_id": data.get("session_id", ""),
-            "source": hook_data.get("source", "unknown"),
+            "source": data.get("source", "unknown"),
             "cwd": data.get("cwd", "")
         }
         with open(log_file, 'a') as f:
@@ -109,8 +108,7 @@ def main():
         if not enabled:
             sys.exit(0)
 
-        hook_data = data.get("hookSpecificInput", {})
-        source = hook_data.get("source", "unknown")
+        source = data.get("source", "unknown")
 
         # Log the session
         log_session(data)
@@ -135,7 +133,10 @@ def main():
             # Output additional context for Claude
             if context_parts:
                 print(json.dumps({
-                    "additionalContext": "\n\n".join(context_parts)
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": "\n\n".join(context_parts)
+                    }
                 }))
 
         # Announce if --announce flag is passed

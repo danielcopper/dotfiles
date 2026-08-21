@@ -32,8 +32,7 @@ def log_prompt(data, logging_config):
     log_file = log_dir / "user_prompt_submit.jsonl"
 
     try:
-        hook_data = data.get("hookSpecificInput", {})
-        prompt = hook_data.get("prompt", "")
+        prompt = data.get("prompt", "")
         entry = {
             "timestamp": datetime.now().isoformat(),
             "session_id": data.get("session_id", ""),
@@ -129,8 +128,7 @@ def main():
 
         # Validate if --validate flag is passed
         if "--validate" in sys.argv:
-            hook_data = data.get("hookSpecificInput", {})
-            prompt = hook_data.get("prompt", "")
+            prompt = data.get("prompt", "")
 
             is_valid, reason = validate_prompt(prompt)
 

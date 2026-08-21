@@ -19,9 +19,8 @@ from common import announce, log_json, log_error, get_subagent_message
 def should_announce(data):
     """Determine if we should announce this subagent completion."""
     try:
-        hook_data = data.get("hookSpecificInput", {})
-        agent_type = hook_data.get("subagentType", "")
-        description = hook_data.get("description", "")
+        agent_type = data.get("agent_type", "")
+        description = data.get("last_assistant_message", "")
 
         # Skip background/startup agents
         skip_types = {"general-purpose"}

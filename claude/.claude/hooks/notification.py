@@ -30,9 +30,8 @@ def main():
 
         # Announce if TTS enabled
         if "--notify" in sys.argv and tts_enabled:
-            hook_data = data.get("hookSpecificInput", {})
-            notification_type = hook_data.get("type", "unknown")
-            message_text = hook_data.get("message", "")
+            notification_type = data.get("notification_type", "unknown")
+            message_text = data.get("message", "")
 
             # Skip generic waiting messages
             if "waiting" in message_text.lower() and "claude" in message_text.lower():
