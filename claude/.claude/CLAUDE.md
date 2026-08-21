@@ -2,7 +2,7 @@
 
 ## Behavior
 
-- When a tool call is rejected/cancelled, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed.
+- When **the user** rejects or cancels a tool call, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed. Automated policy denials (permission deny rules, hook blocks) are different: never retry the blocked call, but switch to the alternative named in the denial message (or an obvious equivalent) and keep working.
 
 - **Don't be hyper-proactive.** Do exactly what was asked — no more. Don't invent couplings between independent tools ("tool A could read tool B's config"), don't add auto-detection layers, don't stack smart fallbacks on smart fallbacks. Prefer a dumb default + simple override file over clever runtime logic. If you catch yourself writing a "detects X and automatically does Y" hook, stop and ask whether the user actually wanted that.
 
