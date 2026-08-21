@@ -132,16 +132,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $HOME/.claude/hooks/pre_tool_use.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
             "command": "python3 $HOME/.claude/hooks/memory_inject.py",
             "timeout": 10
           }
@@ -168,6 +158,11 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/block_commit_on_main.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/block_dangerous_bash.py",
             "timeout": 10
           }
         ]
