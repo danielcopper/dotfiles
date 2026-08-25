@@ -288,6 +288,7 @@
   "autoMemoryEnabled": false,
   "skipWorkflowUsageWarning": true,
   "editorMode": "vim",
+  "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "autoMode": {
     "environment": [
