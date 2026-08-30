@@ -54,6 +54,10 @@
       "Bash(sed:*)"
     ],
     "ask": [
+      "Bash(*registration.yaml*)",
+      "Bash(*mautrix-*/config.yaml*)",
+      "Bash(*/srv/secrets/*)",
+      "Bash(*homeserver.yaml*)",
       "Read(**/.env)",
       "Read(**/.env.local)",
       "Read(**/.env.*.local)",
