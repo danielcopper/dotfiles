@@ -24,7 +24,7 @@ common_pkgs=(
 
 case "$CLASS" in
   arch)
-    class_pkgs=(konsole host-arch)
+    class_pkgs=(host-arch)
     ;;
   steamdeck)
     class_pkgs=(host-steamdeck)

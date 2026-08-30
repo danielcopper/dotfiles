@@ -1,6 +1,0 @@
-<!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="session" version="99">
-<!--<ToolBar name="sessionToolbar">
- <text>Session Toolbar</text>
-</ToolBar>-->
-</gui>
