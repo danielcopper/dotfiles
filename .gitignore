@@ -7,3 +7,9 @@
 # Defensive: catches future packages too, not just the current ones.
 **/.env
 **/.claude/settings.local.json
+
+# herdr runtime state written through the stow links; only config.toml is ours.
+herdr/.config/herdr/*.log
+herdr/.config/herdr/session*.json
+herdr/.config/herdr/release-notes.json
+herdr/.config/herdr/.plugins.lock

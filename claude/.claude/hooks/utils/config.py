@@ -2,15 +2,12 @@
 """
 Hook configuration utility.
 Reads config.toml to determine which hooks are enabled.
-Falls back to config.json for backwards compatibility.
 """
 
-import json
 import tomllib
 from pathlib import Path
 
 CONFIG_TOML = Path.home() / ".claude" / "hooks" / "config.toml"
-CONFIG_JSON = Path.home() / ".claude" / "hooks" / "config.json"
 
 _config_cache = None
 
@@ -21,15 +18,9 @@ def get_config():
         return _config_cache
 
     try:
-        if CONFIG_TOML.exists():
-            with open(CONFIG_TOML, 'rb') as f:
-                _config_cache = tomllib.load(f)
-        elif CONFIG_JSON.exists():
-            with open(CONFIG_JSON, 'r') as f:
-                _config_cache = json.load(f)
-        else:
-            _config_cache = {}
-    except Exception:
+        with open(CONFIG_TOML, 'rb') as f:
+            _config_cache = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
         _config_cache = {}
 
     return _config_cache
