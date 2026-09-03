@@ -7,6 +7,7 @@ rejects. Feature/worktree branches pass untouched.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -18,14 +19,11 @@ GIT_COMMIT_RE = re.compile(r"\bgit(?:\s+-C\s+\S+)?(?:\s+-c\s+\S+)*\s+commit\b")
 
 
 def target_dir(command: str, cwd: str) -> str:
-    """Best-effort directory the git command runs in."""
-    m = re.search(r"(?:^|&&|;)\s*cd\s+(\S+)", command)
-    if m:
-        return m.group(1).strip("'\"")
-    m = re.search(r"git\s+-C\s+(\S+)", command)
-    if m:
-        return m.group(1).strip("'\"")
-    return cwd or "."
+    """Best-effort directory the git command runs in, expanded like the shell would."""
+    m = re.search(r"(?:^|&&|;)\s*cd\s+([^\s;&|]+)", command) or re.search(r"git\s+-C\s+([^\s;&|]+)", command)
+    if not m:
+        return cwd or "."
+    return os.path.expandvars(os.path.expanduser(m.group(1).strip("'\"")))
 
 
 def main() -> int:
