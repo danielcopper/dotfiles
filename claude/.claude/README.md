@@ -74,7 +74,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 
 | Hook                    | Event            | Purpose                                             |
 | ----------------------- | ---------------- | --------------------------------------------------- |
-| `pre_tool_use.py`       | PreToolUse       | Security guard — blocks dangerous ops (fail-closed) |
+| `block_dangerous_bash.py` | PreToolUse (Bash) | Judges `rm` by resolved target: below cwd or /tmp passes, elsewhere asks, roots/$HOME/disk-wipes are denied |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
 | `stop.py`               | Stop             | TTS on task completion                              |
 | `notification.py`       | Notification     | TTS when user input needed                          |
