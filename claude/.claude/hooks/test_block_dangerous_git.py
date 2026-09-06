@@ -7,14 +7,15 @@ Run: python3 claude/.claude/hooks/test_block_dangerous_git.py
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 HOOK = Path(__file__).with_name("block_dangerous_git.py")
 
 
-def run(command):
-    payload = json.dumps({"tool_input": {"command": command}, "cwd": "/home/someone/project"})
+def run(command, cwd="/home/someone/project"):
+    payload = json.dumps({"tool_input": {"command": command}, "cwd": cwd})
     proc = subprocess.run(
         [sys.executable, str(HOOK)], input=payload, capture_output=True, text=True, check=True
     )
@@ -104,6 +105,55 @@ class BlockDangerousGit(unittest.TestCase):
                 decision, reason = run(command)
                 self.assertEqual(decision, "ask", reason)
                 self.assertIn(fragment, reason)
+
+    def test_branch_D_passes_for_a_branch_that_holds_nothing_to_lose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            origin = Path(tmp) / "origin.git"
+            git = lambda *a, cwd=repo: subprocess.run(  # noqa: E731
+                ["git", *a], cwd=cwd, capture_output=True, text=True, check=True
+            )
+            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+            subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            git("config", "user.email", "t@example.invalid")
+            git("config", "user.name", "t")
+            (repo / "a").write_text("a")
+            git("add", "a")
+            git("commit", "-q", "-m", "init")
+            git("remote", "add", "origin", str(origin))
+            git("push", "-q", "-u", "origin", "main")
+            # merged by ancestry
+            git("checkout", "-q", "-b", "merged")
+            (repo / "b").write_text("b")
+            git("add", "b")
+            git("commit", "-q", "-m", "b")
+            git("checkout", "-q", "main")
+            git("merge", "-q", "--no-ff", "merged", "-m", "merge")
+            # squash-merged upstream: pushed, then deleted on the remote, not pruned locally
+            git("checkout", "-q", "-b", "squashed")
+            (repo / "c").write_text("c")
+            git("add", "c")
+            git("commit", "-q", "-m", "c")
+            git("push", "-q", "-u", "origin", "squashed")
+            git("push", "-q", "origin", "--delete", "squashed")
+            git("checkout", "-q", "main")
+            # local only, unmerged
+            git("checkout", "-q", "-b", "local-only")
+            (repo / "d").write_text("d")
+            git("add", "d")
+            git("commit", "-q", "-m", "d")
+            git("checkout", "-q", "main")
+
+            self.assertEqual(run("git branch -D merged", cwd=str(repo)), (None, ""))
+            self.assertEqual(run("git branch -D squashed", cwd=str(repo)), (None, ""))
+            self.assertEqual(run(f"git -C {repo} branch -D merged squashed"), (None, ""))
+            decision, reason = run("git branch -D local-only", cwd=str(repo))
+            self.assertEqual(decision, "ask", reason)
+            self.assertIn("local-only", reason)
+            decision, reason = run("git branch -D merged local-only", cwd=str(repo))
+            self.assertEqual(decision, "ask", reason)
+            self.assertIn("local-only", reason)
+            self.assertNotIn("merged", reason.split("(")[-1])
 
     def test_unparseable_input_passes(self):
         proc = subprocess.run(

@@ -9,6 +9,13 @@ reset --hard, clean -f), and dropping stashes, unmerged branches (-D) or
 dirty worktrees (--force). Everything else passes and nothing is denied
 outright - the user decides.
 
+`git branch -D` is asked about only when a named branch is really at risk:
+a branch already merged into the default branch, or one whose upstream
+the remote no longer has (a squash-merged PR with delete-on-merge), holds
+nothing the deletion would lose, so it passes. A branch that exists only
+locally, or is unmerged with its upstream still present, asks. When git
+cannot answer (no repository, a timeout), the prompt stays.
+
 Token-based like block_dangerous_bash.py: each `;`/`|`/`&`/newline
 segment is inspected on its own, git's global options (-C, -c, ...) are
 skipped to find the subcommand, and `git` inside a quoted string keeps
@@ -16,7 +23,9 @@ its quote character and doesn't match.
 """
 
 import json
+import os
 import re
+import subprocess
 import sys
 
 SEGMENT = re.compile(r"[|;&\r\n]+")
@@ -70,13 +79,64 @@ def hazard(sub, args):
     return None
 
 
-def check(command):
+def target_dir(command, cwd):
+    """Best-effort directory the git command runs in, expanded like the shell would."""
+    m = re.search(r"(?:^|&&|;)\s*cd\s+([^\s;&|]+)", command) or re.search(r"git\s+-C\s+([^\s;&|]+)", command)
+    if not m:
+        return cwd or "."
+    return os.path.expandvars(os.path.expanduser(m.group(1).strip("'\"")))
+
+
+def _git(repo, *args):
+    """git's completed process, or None when it could not run at all."""
+    try:
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _upstream_gone(repo, name):
+    """True when *name* tracks an upstream branch the remote no longer has."""
+    ref = _git(repo, "for-each-ref", "--format=%(upstream)|%(upstream:track)", f"refs/heads/{name}")
+    if ref is None or ref.returncode != 0:
+        return False
+    upstream, _, track = ref.stdout.strip().partition("|")
+    if not upstream:
+        return False
+    if track.strip() == "[gone]":
+        return True
+    remote, _, branch = upstream.removeprefix("refs/remotes/").partition("/")
+    probe = _git(repo, "ls-remote", "--exit-code", "--heads", remote, branch)
+    return probe is not None and probe.returncode == 2
+
+
+def at_risk(names, repo):
+    """The branches among *names* a `-D` would really lose, or None when git cannot say."""
+    merged = None
+    for base in ("origin/HEAD", "main", "master"):
+        listed = _git(repo, "branch", "--format=%(refname:short)", "--merged", base)
+        if listed is not None and listed.returncode == 0:
+            merged = set(listed.stdout.split())
+            break
+    if merged is None:
+        return None
+    return [name for name in names if name not in merged and not _upstream_gone(repo, name)]
+
+
+def check(command, cwd="."):
     for segment in SEGMENT.split(command):
         call = invocation(segment.split())
         if call is None:
             continue
         sub, args = call
         why = hazard(sub, args)
+        if why and sub == "branch":
+            names = [a for a in args if not a.startswith("-")]
+            risky = at_risk(names, target_dir(command, cwd)) if names else None
+            if risky == []:
+                continue
+            if risky:
+                why = f"{why} ({', '.join(risky)})"
         if why:
             return f"git {sub}: {why} - approve explicitly"
     return None
@@ -88,7 +148,7 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
     command = (data.get("tool_input") or {}).get("command") or ""
-    reason = check(command) if command else None
+    reason = check(command, data.get("cwd") or ".") if command else None
     if reason:
         print(
             json.dumps(

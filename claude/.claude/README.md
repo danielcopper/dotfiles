@@ -84,7 +84,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | `pre_compact.py`        | PreCompact       | Backup transcript before compaction                 |
 | `block_ai_attribution.py` | PreToolUse (Bash) | Block commits carrying AI attribution markers     |
 | `block_commit_on_main.py` | PreToolUse (Bash) | Protected-branch commits (main/develop/release/*) become a permission prompt |
-| `block_dangerous_git.py` | PreToolUse (Bash) | Force pushes, remote ref deletes, checkout/restore of paths, reset --hard, clean -f, stash drop, branch -D, worktree remove --force become a permission prompt |
+| `block_dangerous_git.py` | PreToolUse (Bash) | Force pushes, remote ref deletes, checkout/restore of paths, reset --hard, clean -f, stash drop, branch -D of a branch that is unmerged or local-only (merged or remote-deleted branches pass), worktree remove --force become a permission prompt |
 | `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's generic code-reviewer — routes to the custom `reviewer` agent |
 
 ### Debounce
