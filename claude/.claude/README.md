@@ -74,7 +74,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 
 | Hook                    | Event            | Purpose                                             |
 | ----------------------- | ---------------- | --------------------------------------------------- |
-| `block_dangerous_bash.py` | PreToolUse (Bash) | Judges `rm` by resolved target: below cwd or /tmp passes, elsewhere asks, roots/$HOME/disk-wipes are denied |
+| `block_dangerous_bash.py` | PreToolUse (Bash) | Judges `rm` by resolved target: below cwd or /tmp passes, elsewhere asks, roots/$HOME/disk-wipes are denied; a deleting `find` (`-delete`, `-exec rm`) is judged by its start points and only ever asks |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
 | `stop.py`               | Stop             | TTS on task completion                              |
 | `notification.py`       | Notification     | TTS when user input needed                          |

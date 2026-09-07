@@ -48,6 +48,11 @@ PASSES = [
     'echo "rm -rf /"',
     "git rm -r --cached .",
     "find . -name '*.pyc' | xargs rm",
+    # A deleting find whose start point is disposable passes; one that only
+    # matches or hands the result to a non-deleter never counts.
+    "find build -name '*.o' -delete",
+    "find /tmp/cache -type f -delete",
+    "find src -name '*.py' -exec grep -l foo {} +",
     # An interpreter whose payload names no deletion primitive stays out of the way.
     "python3 -c \"print('hello')\"",
     "python3 - <<'PY'\nimport json\nprint(json.dumps({}))\nPY",
@@ -73,6 +78,12 @@ ASKS = [
     ('rm -rf "$UNDEFINED"', "unresolved"),
     ('T=$(mktemp -d)\nrm -rf "$T"', "unresolved"),
     ("find . -name x -exec rm -rf {} +", "unresolved"),
+    # A deleting find is judged by its start points, and only ever asks -
+    # even for a protected one, since its tests make the delete selective.
+    ("find . -name __pycache__ -delete", "find deletes"),
+    ("find ~/.cache -name '*.tmp' -delete", "find deletes"),
+    ("find / -name core -delete", "find deletes"),
+    ("find .. -name '*.log' -exec rm {} +", "find deletes"),
     ("cat list | xargs rm -rf", "no explicit target"),
     ('S=""\nrm -rf $S', "no explicit target"),
     # The inline hole: the payload names no rm token at all.

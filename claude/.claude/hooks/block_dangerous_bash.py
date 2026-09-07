@@ -7,6 +7,11 @@ prompts ("ask"), and a recursive delete of a filesystem root, $HOME, the
 cwd itself or its bare wildcard is denied outright - as are disk-wipe
 commands (mkfs, dd or a redirect onto a block device, wipefs).
 
+A `find` that deletes what it matches (`-delete`, or `-exec`/`-ok` handed
+rm, rmdir, unlink or shred) is judged by its starting points the same
+way, but only ever asks: its tests make the delete selective, so even a
+protected start point is a question, not a deny.
+
 A multi-line script is judged per command (split on newlines as well as
 `;`, `|`, `&`). Variables assigned earlier in the same command
 (`S=/tmp/x; rm -rf "$S"`) are resolved first, seeded with HOME and PWD;
@@ -69,6 +74,11 @@ DELETE_CALL = re.compile(
     r"|\bremovedirs\b|\bmkfs\b|\bwipefs\b"
 )
 
+# find expressions that delete what they match. -exec and friends count only
+# when the command they hand each match to is itself a deleter.
+FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
+FIND_DELETERS = ("rm", "rmdir", "unlink", "shred")
+
 
 def substitute(text, variables):
     return VARIABLE.sub(
@@ -109,6 +119,33 @@ def judge(operand, cwd):
     if any(below(path, root) for root in (cwd, *SAFE_ROOTS)):
         return None
     return ("outside", path)
+
+
+def is_find(tokens, i):
+    name = tokens[i]
+    return name in ("find", "\\find") or name.endswith("/find")
+
+
+def find_deletes(args):
+    """True when the find expression deletes what it matches."""
+    for i, arg in enumerate(args):
+        if arg == "-delete":
+            return True
+        if arg in FIND_EXEC and i + 1 < len(args) and os.path.basename(unquote(args[i + 1])) in FIND_DELETERS:
+            return True
+    return False
+
+
+def find_starts(args):
+    """find's starting points - the paths before the expression (none means the cwd)."""
+    starts = []
+    for token in args:
+        if token in ("-H", "-L", "-P") or token.startswith(("-D", "-O")):
+            continue
+        if token.startswith("-") or token in ("(", "!", "\\(", "\\!"):
+            break
+        starts.append(token)
+    return starts or ["."]
 
 
 def interpreter(tokens):
@@ -176,28 +213,33 @@ def check(command, cwd, depth=0):
             return ("deny", "disk-wipe pattern (mkfs / dd or redirect onto a block device / wipefs)")
         tokens = segment.split()
         at = next((i for i in range(len(tokens)) if is_rm(tokens, i)), None)
-        if at is None:
-            continue
-        args = tokens[at + 1:]
-        flags = [t for t in args if t.startswith("-")]
-        short = "".join(f for f in flags if not f.startswith("--"))
-        recursive = "r" in short or "R" in short or "--recursive" in flags
-        operands = [t for t in args if not t.startswith("-")]
-        if recursive and not operands:
-            escalate("ask", "recursive delete with no explicit target (stdin/xargs) - approve explicitly")
-        for operand in operands:
-            verdict = judge(operand, cwd)
-            if verdict is None:
-                continue
-            kind, path = verdict
-            if kind == "protected" and recursive:
-                return ("deny", f"recursive delete of protected path '{path}'")
-            if kind == "protected":
-                escalate("ask", f"delete of protected path '{path}' - approve explicitly")
-            elif kind == "opaque" and recursive:
-                escalate("ask", f"recursive delete with unresolved target '{path}' - approve explicitly")
-            elif kind == "outside":
-                escalate("ask", f"'{path}' is not below cwd or /tmp - approve explicitly")
+        if at is not None:
+            args = tokens[at + 1:]
+            flags = [t for t in args if t.startswith("-")]
+            short = "".join(f for f in flags if not f.startswith("--"))
+            recursive = "r" in short or "R" in short or "--recursive" in flags
+            operands = [t for t in args if not t.startswith("-")]
+            if recursive and not operands:
+                escalate("ask", "recursive delete with no explicit target (stdin/xargs) - approve explicitly")
+            for operand in operands:
+                verdict = judge(operand, cwd)
+                if verdict is None:
+                    continue
+                kind, path = verdict
+                if kind == "protected" and recursive:
+                    return ("deny", f"recursive delete of protected path '{path}'")
+                if kind == "protected":
+                    escalate("ask", f"delete of protected path '{path}' - approve explicitly")
+                elif kind == "opaque" and recursive:
+                    escalate("ask", f"recursive delete with unresolved target '{path}' - approve explicitly")
+                elif kind == "outside":
+                    escalate("ask", f"'{path}' is not below cwd or /tmp - approve explicitly")
+        started = next((i for i in range(len(tokens)) if is_find(tokens, i)), None)
+        if started is not None and find_deletes(tokens[started + 1:]):
+            for start in find_starts(tokens[started + 1:]):
+                verdict = judge(start, cwd)
+                if verdict is not None:
+                    escalate("ask", f"find deletes under '{verdict[1]}' - approve explicitly")
     return worst
 
 
