@@ -14,7 +14,10 @@ a branch already merged into the default branch, or one whose upstream
 the remote no longer has (a squash-merged PR with delete-on-merge), holds
 nothing the deletion would lose, so it passes. A branch that exists only
 locally, or is unmerged with its upstream still present, asks. When git
-cannot answer (no repository, a timeout), the prompt stays.
+cannot answer (no repository, a timeout), the prompt stays. Its probes
+share one time budget kept below the hook's own timeout in settings.json:
+a hung remote runs the budget out (and the prompt stays) instead of
+letting the harness kill the hook, which would wave the command through.
 
 Token-based like block_dangerous_bash.py: each `;`/`|`/`&`/newline
 segment is inspected on its own, git's global options (-C, -c, ...) are
@@ -34,6 +37,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 SEGMENT = re.compile(r"[|;&\r\n]+")
 GLOBAL_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
@@ -99,17 +103,27 @@ def target_dir(command, cwd):
     return os.path.expandvars(os.path.expanduser(m.group(1).strip("'\"")))
 
 
-def _git(repo, *args):
-    """git's completed process, or None when it could not run at all."""
+# Total budget for the git calls answering one command, in seconds. Kept below
+# the hook's 15s timeout in settings.json: when a probe hangs, the budget runs
+# out first and the prompt stays - the harness killing the hook at its timeout
+# would wave the command through instead.
+BUDGET = 12
+
+
+def _git(repo, deadline, *args):
+    """git's completed process, or None when it could not run within the budget."""
+    timeout = deadline - time.monotonic()
+    if timeout <= 0:
+        return None
     try:
-        return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=15)
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
 
 
-def _upstream_gone(repo, name):
+def _upstream_gone(repo, name, deadline):
     """True when *name* tracks an upstream branch the remote no longer has."""
-    ref = _git(repo, "for-each-ref", "--format=%(upstream)|%(upstream:track)", f"refs/heads/{name}")
+    ref = _git(repo, deadline, "for-each-ref", "--format=%(upstream)|%(upstream:track)", f"refs/heads/{name}")
     if ref is None or ref.returncode != 0:
         return False
     upstream, _, track = ref.stdout.strip().partition("|")
@@ -118,21 +132,22 @@ def _upstream_gone(repo, name):
     if track.strip() == "[gone]":
         return True
     remote, _, branch = upstream.removeprefix("refs/remotes/").partition("/")
-    probe = _git(repo, "ls-remote", "--exit-code", "--heads", remote, branch)
+    probe = _git(repo, deadline, "ls-remote", "--exit-code", "--heads", remote, branch)
     return probe is not None and probe.returncode == 2
 
 
 def at_risk(names, repo):
     """The branches among *names* a `-D` would really lose, or None when git cannot say."""
+    deadline = time.monotonic() + BUDGET
     merged = None
     for base in ("origin/HEAD", "main", "master"):
-        listed = _git(repo, "branch", "--format=%(refname:short)", "--merged", base)
+        listed = _git(repo, deadline, "branch", "--format=%(refname:short)", "--merged", base)
         if listed is not None and listed.returncode == 0:
             merged = set(listed.stdout.split())
             break
     if merged is None:
         return None
-    return [name for name in names if name not in merged and not _upstream_gone(repo, name)]
+    return [name for name in names if name not in merged and not _upstream_gone(repo, name, deadline)]
 
 
 def interpreter(tokens):

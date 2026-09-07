@@ -194,7 +194,7 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/block_dangerous_git.py",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       },
