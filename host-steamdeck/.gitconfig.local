@@ -8,5 +8,5 @@
 	directory = /home/deck/Repos/decky-romm-sync
 
 [credential]
-	# Forgejo-Token (git.kueppermann.com) im Keyring statt Klartext
+	# Forgejo-Token im Keyring statt Klartext
 	helper = /usr/lib/git-core/git-credential-libsecret
