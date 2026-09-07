@@ -16,8 +16,14 @@ Relative paths resolve against the hook's cwd - a `cd` earlier in the
 same command is not tracked, which is the accepted blind spot.
 
 Token-based on purpose: `rm` inside a quoted string keeps its quote
-character and doesn't match. No config, no state - edit this file to
-tune the pattern lists.
+character and doesn't match. That scan cannot read code handed to an
+interpreter, so a `-c`/`-e` one-liner or a heredoc is judged on its own:
+a shell payload goes back through the full analysis with its quotes
+stripped and keeps every verdict, another language asks as soon as its
+payload names a deletion primitive. Only the payload is searched, and
+the contents of a script file stay invisible.
+
+No config, no state - edit this file to tune the pattern lists.
 """
 
 import json
@@ -48,6 +54,20 @@ ASSIGNMENT = re.compile(r"^\s*(?:export\s+|local\s+)?([A-Za-z_]\w*)=(.*)$")
 VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 
 RANK = {"ask": 1, "deny": 2}
+
+INLINE_FLAGS = {"-c", "-e", "-E", "--eval", "--command"}
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+LANGUAGES = {"python", "python2", "python3", "perl", "ruby", "node", "deno", "php", "lua"}
+HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?\r?\n(.*?)\r?\n\s*\1", re.S)
+
+# Filesystem-deletion primitives, as words. `remove` is deliberately absent:
+# it is far more often a list operation than a file one, and the noise would
+# swamp the signal. That is an accepted blind spot, as is a payload that
+# builds the call name at runtime.
+DELETE_CALL = re.compile(
+    r"\brm\b|\brmSync\b|\brmdir\w*|\brmtree\b|\brm_rf\b|\bunlink\w*"
+    r"|\bremovedirs\b|\bmkfs\b|\bwipefs\b"
+)
 
 
 def substitute(text, variables):
@@ -91,9 +111,54 @@ def judge(operand, cwd):
     return ("outside", path)
 
 
-def check(command, cwd):
+def interpreter(tokens):
+    """(name, index) of the first interpreter token in *tokens*, or None."""
+    for index, token in enumerate(tokens):
+        name = os.path.basename(token.strip("'\""))
+        if name in SHELLS or name in LANGUAGES:
+            return name, index
+    return None
+
+
+def opaque_code(command, cwd, depth):
+    """The verdict on code an interpreter hides from the token scan, or None.
+
+    The scan below reads `rm` as a token, so an inline payload slips past it:
+    `python3 -c "shutil.rmtree(HOME)"` names no `rm` at all. A `-c`/`-e`
+    one-liner or a heredoc is therefore judged on its own. A shell payload is
+    shell syntax, so it goes back through the full analysis with its quotes
+    stripped and keeps the precise verdict, deny included; another language is
+    not ours to parse, so a deletion primitive in its payload asks - never
+    denies, because the target cannot be resolved. Only the payload is
+    searched, so an `rm` elsewhere on the line is still judged as itself.
+    """
+    tokens = command.split()
+    found = interpreter(tokens)
+    if not found or depth:
+        return None
+    name, index = found
+    rest = tokens[index + 1:]
+    inline = next((i for i, arg in enumerate(rest) if arg in INLINE_FLAGS), None)
+    body = HEREDOC.search(command)
+    if inline is not None:
+        payload = " ".join(rest[inline + 1:])
+    elif body:
+        payload = body.group(2)
+    else:
+        return None
+    if name in SHELLS:
+        return check(payload.replace('"', " ").replace("'", " "), cwd, depth=1)
+    if DELETE_CALL.search(payload):
+        return ("ask", f"{name}: deletion driven through an interpreter the scan cannot parse - approve explicitly")
+    return None
+
+
+def check(command, cwd, depth=0):
     """('deny'|'ask', reason) for the worst command in the block, or None."""
     variables = {"HOME": HOME, "PWD": cwd}
+    hidden = opaque_code(command, cwd, depth)
+    if hidden:
+        return hidden
     worst = None
 
     def escalate(decision, reason):
