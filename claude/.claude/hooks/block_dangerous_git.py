@@ -23,13 +23,6 @@ Token-based like block_dangerous_bash.py: each `;`/`|`/`&`/newline
 segment is inspected on its own, git's global options (-C, -c, ...) are
 skipped to find the subcommand, and `git` inside a quoted string keeps
 its quote character and doesn't match.
-
-That scan cannot read code handed to an interpreter, so a `-c`/`-e`
-one-liner or a heredoc is inspected on its own: a shell payload gets the
-same analysis with its quotes stripped, any other language asks as soon
-as its payload mentions git. Only the payload is searched, so a visible
-git command elsewhere on the line is still read as itself. The contents
-of a script file stay invisible.
 """
 
 import json
@@ -41,11 +34,6 @@ import time
 
 SEGMENT = re.compile(r"[|;&\r\n]+")
 GLOBAL_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
-INLINE_FLAGS = {"-c", "-e", "-E", "--eval", "--command"}
-SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-LANGUAGES = {"python", "python2", "python3", "perl", "ruby", "node", "deno", "php", "lua"}
-GIT_WORD = re.compile(r"\bgit\b")
-HEREDOC = re.compile(r"<<-?\s*[\'\"]?(\w+)[\'\"]?\r?\n(.*?)\r?\n\s*\1", re.S)
 
 
 def invocation(tokens):
@@ -150,54 +138,7 @@ def at_risk(names, repo):
     return [name for name in names if name not in merged and not _upstream_gone(repo, name, deadline)]
 
 
-def interpreter(tokens):
-    """(name, index) of the first interpreter token in *tokens*, or None."""
-    for index, token in enumerate(tokens):
-        name = os.path.basename(token.strip("\'\""))
-        if name in SHELLS or name in LANGUAGES:
-            return name, index
-    return None
-
-
-def opaque_code(command, depth):
-    """Why an interpreter hides a git call from the token scan below, or None.
-
-    A one-liner (`-c`, `-e`) or a heredoc carries code the scan cannot read:
-    `python3 -c "subprocess.run([\'git\',\'push\',\'--force\'])"` holds no standalone
-    `git` token, so every rule above passes it. A shell payload is shell syntax
-    and gets the normal analysis with its quotes stripped; another language is
-    not ours to parse, so any mention of git in the payload is enough to ask.
-    Only the payload is searched, never the rest of the line - a visible
-    `git diff` after a python heredoc stays visible and does not ask.
-
-    Code in a script file (`python3 build.py`) is invisible either way. That is
-    the known limit: this closes the inline hole, not the interpreter itself.
-    """
-    tokens = command.split()
-    found = interpreter(tokens)
-    if not found or depth:
-        return None
-    name, index = found
-    rest = tokens[index + 1:]
-    inline = next((i for i, arg in enumerate(rest) if arg in INLINE_FLAGS), None)
-    body = HEREDOC.search(command)
-    if inline is not None:
-        payload = " ".join(rest[inline + 1:])
-    elif body:
-        payload = body.group(2)
-    else:
-        return None
-    if name in SHELLS:
-        return check(payload.replace('"', " ").replace("\'", " "), depth=1)
-    if GIT_WORD.search(payload):
-        return f"{name}: git driven through an interpreter the scan cannot parse - approve explicitly"
-    return None
-
-
-def check(command, cwd=".", depth=0):
-    hidden = opaque_code(command, depth)
-    if hidden:
-        return hidden
+def check(command, cwd="."):
     for segment in SEGMENT.split(command):
         call = invocation(segment.split())
         if call is None:

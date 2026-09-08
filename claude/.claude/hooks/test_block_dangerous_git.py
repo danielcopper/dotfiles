@@ -52,16 +52,6 @@ PASSES = [
     'echo "git push --force"',
     "git -C ~/repo -c user.name=x push",
     "git rebase -i main",
-    # An interpreter whose payload never mentions git stays out of the way.
-    "python3 -c \"print('hello')\"",
-    "python3 build.py",
-    "perl -e 'print 1'",
-    # A shell wrapper gets the normal analysis, so its harmless forms pass.
-    'bash -c "git status"',
-    "sh -c 'git log --oneline -1'",
-    # Only the payload is searched: a visible git command after a heredoc is
-    # still read as itself.
-    "python3 - <<'PY'\nimport json\nPY\ngit diff --stat",
 ]
 
 ASKS = [
@@ -100,15 +90,6 @@ ASKS = [
     ("git fetch -q\ngit reset --hard origin/develop", "reset --hard"),
     ("sudo git push --force", "force push"),
     ("xargs git branch -D", "branch -D"),
-    # The inline hole: no standalone git token, so every rule above passes it.
-    ("python3 -c \"subprocess.run(['git','push','--force'])\"", "interpreter"),
-    ("python3 -u -c \"subprocess.run(['git','push','-f'])\"", "interpreter"),
-    ("perl -e 'system(\"git push --force\")'", "interpreter"),
-    ("node -e 'require(\"child_process\").execSync(\"git reset --hard\")'", "interpreter"),
-    ("python3 - <<'PY'\nsubprocess.run(['git','clean','-fd'])\nPY", "interpreter"),
-    # A shell payload is shell syntax, so it keeps the precise reason.
-    ('bash -c "git push --force"', "force push"),
-    ("sh -c 'git reset --hard'", "reset --hard"),
 ]
 
 

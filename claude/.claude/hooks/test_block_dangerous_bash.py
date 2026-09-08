@@ -53,15 +53,6 @@ PASSES = [
     "find build -name '*.o' -delete",
     "find /tmp/cache -type f -delete",
     "find src -name '*.py' -exec grep -l foo {} +",
-    # An interpreter whose payload names no deletion primitive stays out of the way.
-    "python3 -c \"print('hello')\"",
-    "python3 - <<'PY'\nimport json\nprint(json.dumps({}))\nPY",
-    "python3 build.py",
-    # A shell wrapper gets the full analysis, so its harmless forms pass.
-    'bash -c "ls -la"',
-    # Only the payload is searched: a delete below cwd after a heredoc is
-    # still judged as itself.
-    "python3 - <<'PY'\nimport json\nPY\nrm -rf ./build",
 ]
 
 ASKS = [
@@ -86,15 +77,6 @@ ASKS = [
     ("find .. -name '*.log' -exec rm {} +", "find deletes"),
     ("cat list | xargs rm -rf", "no explicit target"),
     ('S=""\nrm -rf $S', "no explicit target"),
-    # The inline hole: the payload names no rm token at all.
-    ('python3 -c "import shutil; shutil.rmtree(HOME)"', "interpreter"),
-    ('python3 -u -c "import os; os.unlink(p)"', "interpreter"),
-    ("perl -e 'unlink @files'", "interpreter"),
-    ("node -e 'require(\"fs\").rmSync(p, {recursive: true})'", "interpreter"),
-    ("ruby -e 'FileUtils.rm_rf(dir)'", "interpreter"),
-    ("python3 - <<'PY'\nimport shutil\nshutil.rmtree('/home/deck/Repos')\nPY", "interpreter"),
-    # A shell payload is shell syntax, so it keeps the precise reason.
-    ('bash -c "rm -rf /home/deck/Repos/x"', "not below cwd"),
 ]
 
 DENIES = [

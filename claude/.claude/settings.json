@@ -60,7 +60,6 @@
       "Bash(.venv/bin/pytest:*)",
       "Bash(.venv/bin/basedpyright:*)",
       "Bash(deno fmt:*)",
-      "Bash(python3:*)",
       "Bash(sonar list:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
@@ -74,7 +73,6 @@
     ],
     "deny": [],
     "ask": [
-      "Bash(python3 -c *)",
       "Bash(gh pr merge *)",
       "Bash(*registration.yaml*)",
       "Bash(*mautrix-*/config.yaml*)",
