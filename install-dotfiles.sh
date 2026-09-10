@@ -106,6 +106,12 @@ for pkg in "${all_pkgs[@]}"; do
   while IFS= read -r src; do
     rel="${src#"$pkg"/}"
     target="$HOME/$rel"
+    # The Claude settings are a reference copy, not a stow source (see
+    # claude/.stow-local-ignore). The file at the target belongs to the user
+    # and to Claude Code, which writes model, effort and the auto-mode
+    # environment into it; moving it aside as a "conflict" would take the
+    # live configuration with it.
+    [ "$src" = "claude/.claude/settings.json" ] && continue
     if [ ! -e "$target" ] && [ ! -L "$target" ]; then
       continue
     fi
@@ -133,9 +139,18 @@ if [ "$backed_up_count" -gt 0 ]; then
   echo
 fi
 
-# --override lets host-<class> replace shared files where needed (e.g. claude/.claude/settings.json).
-# Harmless on hosts without overrides since no conflict exists.
-stow -R --override='^\.claude/settings\.json$' "${all_pkgs[@]}"
+stow -R "${all_pkgs[@]}"
+
+# Seed the live Claude settings from the repo's reference copy on a fresh
+# machine. The reference is deliberately not stowed: Claude Code writes the
+# model, the effort level and the auto-mode environment description into the
+# live file, and this repo is public. After this first copy the two drift on
+# purpose - diff them when you want to carry something over.
+if [ ! -e "$HOME/.claude/settings.json" ]; then
+  mkdir -p "$HOME/.claude"
+  cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
+  echo "seeded ~/.claude/settings.json from the repo reference"
+fi
 
 # Post-stow: prune dangling symlinks under managed package roots that point
 # into this repo. These appear when a previously-stowed source file is

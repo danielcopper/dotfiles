@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Global mise task: re-link stow packages and restore the write protection on the
-# Claude settings file. Run it after a pull that touched the dotfiles repo.
+# Global mise task: re-link stow packages after a pull that touched the dotfiles
+# repo.
 #
-# Two things a pull silently breaks:
-#   - New files in a package have no symlink yet. For claude/.claude/hooks/ that
-#     is not cosmetic: settings.json wires a hook the moment it lands, while the
-#     script it names is still only in the repo, and every Bash call then fails
-#     with "can't open file" - including the stow that would fix it.
-#   - git recreates a file it changes and gives it mode 644, so the write
-#     protection on settings.json is gone exactly when new commits arrive. That
-#     protection is what stops Claude Code persisting /model, /effort and the
-#     auto-mode environment description into a public repo.
+# New files in a package have no symlink yet, and for claude/.claude/hooks/ that
+# is not cosmetic: settings.json wires a hook the moment its entry lands, while
+# the script it names is still only in the repo, and every Bash call then fails
+# with "can't open file" - including the stow that would fix it.
+#
+# ~/.claude/settings.json is NOT stowed and is not touched here. It is the live
+# file Claude Code writes model, effort and the auto-mode environment into; the
+# repo keeps a reference copy under claude/.claude/settings.json to diff against.
 #
 # Usage: mise run dotfiles-relink [package...]   (defaults to claude)
 set -euo pipefail
@@ -24,7 +23,3 @@ packages=("$@")
 
 stow -R "${packages[@]}"
 echo "✓ relinked: ${packages[*]}"
-
-settings="claude/.claude/settings.json"
-chmod a-w "$settings"
-echo "✓ write-protected: $settings ($(stat -c %A "$settings"))"
