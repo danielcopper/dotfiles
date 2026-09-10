@@ -16,19 +16,10 @@ command -v lsd >/dev/null && alias ls='lsd'
 alias grep='grep --color=auto'
 alias ip='ip -color=auto'
 alias diff='diff --color=auto'
+# Deliberate one-off override. Plain `claude` takes model and effort from
+# ~/.claude/settings.json; a wrapper that passed them as flags outranked the
+# settings file, so `modelSettings` there could never take effect.
 alias cc='command claude --model opus --effort xhigh'
-# Default `claude` to opus xhigh for interactive/print use; pass subcommands
-# (mcp, config, doctor, ...) through to the real binary unchanged.
-claude() {
-    case "$1" in
-        agents|auth|auto-mode|doctor|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade|-h|--help|-v|--version)
-            command claude "$@"
-            ;;
-        *)
-            command claude --model opus --effort xhigh "$@"
-            ;;
-    esac
-}
 
 # Prompt
 PS1='\u@\h \W > '
