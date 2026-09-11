@@ -59,6 +59,14 @@ unset f
 
 # Tool integrations — guard each so a missing tool doesn't spam errors.
 command -v mise >/dev/null && eval "$(mise activate bash)"
+# Wrappers that must outrank mise's install paths (see the scripts for why).
+# Placed after `mise activate` on purpose: mise prepends its paths, and a
+# directory added before it would lose the lookup. Measured to hold after
+# mise's prompt hook re-runs.
+case ":$PATH:" in
+  *":$HOME/.local/bin/lsp-wrappers:"*) ;;
+  *) PATH="$HOME/.local/bin/lsp-wrappers:$PATH" ;;
+esac
 command -v ng >/dev/null && source <(ng completion script)
 [ -r /usr/share/git/completion/git-completion.bash ] && \
   . /usr/share/git/completion/git-completion.bash
