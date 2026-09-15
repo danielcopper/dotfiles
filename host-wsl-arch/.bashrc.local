@@ -33,10 +33,5 @@ fi
 # Device-code prints a URL+code, you paste in any browser → token is cached.
 export NUGET_CREDENTIALPROVIDER_FORCE_CANSHOWDIALOG_TO=false
 
-# Auto-start wsl-screenshot-cli (clipboard screenshot → WSL path)
-if command -v wsl-screenshot-cli &>/dev/null && wsl-screenshot-cli status 2>/dev/null | grep -q "not running"; then
-    wsl-screenshot-cli start --daemon &>/dev/null
-fi
-
 # opencode CLI on PATH
 [ -d "$HOME/.opencode/bin" ] && export PATH="$HOME/.opencode/bin:$PATH"
