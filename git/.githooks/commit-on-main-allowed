@@ -1,0 +1,9 @@
+# Repos whose work legitimately lives on main — one path per line.
+# Read by the pre-commit hook next to this file and by the Claude Code hook
+# block_commit_on_main.py, so the exemption is stated once.
+#
+# A path that no longer exists is simply never matched: the guard then fires
+# in that repo, which is noticed on the next commit and fixed here.
+
+~/dotfiles
+~/Repos/homelab

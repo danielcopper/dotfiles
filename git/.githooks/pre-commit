@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Refuse a commit on a protected branch.
+#
+# git resolves the repository and the branch itself, so this hook always
+# judges the branch the commit actually lands on. A wrapper that reads a
+# command line instead has to guess a directory, and a guess is wrong
+# exactly when it matters: a shell that changed directory without the
+# caller noticing.
+#
+# Repos whose work legitimately lives on main are listed in
+# commit-on-main-allowed next to this file, one path per line. A missing or
+# unreadable list means no exemptions — the guard fires, which is the loud
+# direction to fail in.
+#
+# Escape hatch: git commit --no-verify. It skips every hook, which is the
+# point: the guard is there to catch a mistake, not to fight its owner.
+
+set -u
+
+PROTECTED='^(main|master|develop|release/.+)$'
+ALLOWLIST="$(dirname "$(readlink -f "$0")")/commit-on-main-allowed"
+
+# Detached HEAD has no branch to protect (rebase, bisect, a raw checkout).
+branch=$(git symbolic-ref --short -q HEAD) || exit 0
+[[ $branch =~ $PROTECTED ]] || exit 0
+
+repo=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+repo=$(readlink -f "$repo")
+
+if [ -r "$ALLOWLIST" ]; then
+    # Unquoted read: leading and trailing whitespace is trimmed for us.
+    while read -r line; do
+        line=${line%%#*}
+        [ -n "$line" ] || continue
+        allowed=$(readlink -f "${line/#\~/$HOME}" 2>/dev/null) || continue
+        [ "$allowed" = "$repo" ] && exit 0
+    done < "$ALLOWLIST"
+fi
+
+echo "pre-commit: '$branch' is a protected branch in $repo." >&2
+echo "            Work on a worktree branch, or add this repo to" >&2
+echo "            ${ALLOWLIST/#$HOME/\~} if its work belongs on $branch." >&2
+exit 1
