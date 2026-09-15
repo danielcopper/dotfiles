@@ -18,8 +18,9 @@ Personal dotfiles, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
 ## Claude config lives here
 
-The `claude/` package stows `~/.claude/` (`CLAUDE.md`, `skills/`, `memory/`, `hooks/`). So editing `~/.claude/…` edits this repo; commit those changes here.
+The `claude/` package stows `~/.claude/` (`CLAUDE.md`, `skills/`, `hooks/`). So editing `~/.claude/…` edits this repo; commit those changes here.
 
+- **`memory/` is not stowed and does not live here.** `~/.claude/memory` is a symlink to `~/Memory/global` — the Nextcloud-synced private store that `hooks/memory_inject.py` and the memory skills actually read. It is excluded from stow in `claude/.stow-local-ignore`. The `memory/**/*.md` rule in `claude/.claude/.gitignore` stays as a safety net: should the directory ever be recreated here, its contents must not reach this public repo.
 - **`settings.json` is the exception: it is not stowed.** `claude/.claude/settings.json` is a *reference copy* — "this is roughly how it should look" — excluded from stow in `claude/.stow-local-ignore`. The file Claude Code actually reads is `~/.claude/settings.json`, an ordinary local file outside this repo and outside git.
 - **Why.** Claude Code writes into the live file by itself: `/model`, `/effort`, and the auto-mode environment description that `/auto-mode-setup` generates. That description names internal hosts and addresses, and this repo is public — it was published once that way. The classifier reads `autoMode` only from `~/.claude/settings.json`, never from a project settings file, so keeping the live file out of the repo is the only arrangement where the description both works and stays private.
 - **Carrying something over.** The two drift on purpose. `diff ~/.claude/settings.json claude/.claude/settings.json` shows what each has; copy across in either direction by hand and commit the reference when you want to keep a change. On a fresh machine `install-dotfiles.sh` seeds the live file from the reference if none exists.
