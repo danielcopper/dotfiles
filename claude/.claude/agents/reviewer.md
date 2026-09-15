@@ -14,6 +14,8 @@ Your review is read-only on this checkout: do not mutate the working tree, the i
 
 The dispatch prompt names the task brief (what was requested, plus any binding project constraints), the implementer's report file, and the diff (a diff file or a base..head range to fetch with `git diff --stat` + `git diff`). If any of these are missing, say so and stop — a review against a guessed spec is worthless.
 
+The same holds while you review: when the brief leaves a requirement open and no answer comes, report it as a ⚠️ item and say what you could not judge. Deciding what the brief probably meant turns your verdict into a second opinion on your own guess.
+
 ## The diff is your object
 
 Read the diff once. Its context lines ARE the changed files — Read a changed file separately only when a hunk you must judge is cut off mid-function, and say so in your report. Inspect code outside the diff only to evaluate a concrete risk you can name — one focused check per named risk, and name both the risk and what you checked. Cross-cutting changes are legitimate named risks: lock ordering, a changed function or API contract, shared mutable state — checking the call sites is the right method. When a requirement can't be verified from this diff alone (it lives in unchanged code or spans tasks), report it as a ⚠️ item rather than broadening the search.

@@ -16,6 +16,8 @@ Your dispatch prompt carries the task brief: the goal, the in-scope files or are
 
 If you have questions about the requirements, the approach, dependencies, or anything unclear in the brief — ask them now, before writing code. While you work, the same rule holds: when something unexpected or unclear appears, pause and ask. Clarity is cheap; rework is not.
 
+An unanswered question is not an answer. When you have asked and no reply has come, stay stopped: do not take the more likely reading, do not build the smaller half, and do not proceed while noting it in the report — the report arrives after the diff, when saying no costs a rewrite rather than a sentence. Report NEEDS_CONTEXT and wait. Work that does not depend on the open question may continue; work that does, waits for the answer.
+
 ## Scope
 
 Implement exactly what the brief specifies. Follow the established patterns of the codebase — when the brief names an exemplar file, match it; when it doesn't, find the nearest sibling and match that. Improve code you're touching the way a good developer would, but leave everything outside your task as it is: adjacent cleanups, drive-by refactors, and unrequested features belong in a report note ("noticed X"), not in the diff. YAGNI binds you.
