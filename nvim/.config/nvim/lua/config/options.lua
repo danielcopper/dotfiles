@@ -57,6 +57,12 @@ opt.confirm = true
 opt.exrc = true -- load project-local .nvim.lua / .nvimrc / .exrc (must be :trust'ed)
 
 -- Completion
+-- Nothing here reaches the built-in popup menu at the moment: blink.cmp draws
+-- its own menu in Insert mode, and noice draws the cmdline one (popupmenu
+-- UI, command_palette preset), so pumheight is inert. It becomes live again
+-- the day noice goes -- ui2 does not implement the popup menu, so cmdline
+-- completion would fall back to the built-in one. 'pumborder' and
+-- 'pummaxwidth' (0.12) are the knobs to restore the borderless look then.
 opt.completeopt = "menu,menuone"
 opt.pumheight = 10
 
