@@ -15,7 +15,7 @@ require("noice").setup({
     hover = { enabled = true, silent = true },
     signature = { enabled = true },
 
-    progress = { enabled = false }, -- Using native LspProgress + ui2
+    progress = { enabled = false }, -- Using the native LspProgress event; rendered by lualine off lua/lsp_state.lua
   },
   presets = {
     bottom_search = true,
