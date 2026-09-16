@@ -5,6 +5,13 @@
 -- Needs mmdc (mermaid-cli, via mise) + chrome-headless-shell (puppeteer-config.json).
 -- Dark theme on a solid dark fill so the standalone image reads well externally.
 -- No terminal/graphics gate: opening externally works regardless of terminal.
+-- The viewer half of this is WSL-only (wslpath + explorer.exe), so the mapping
+-- only exists there. On a native Linux host it would render the PNG and then
+-- fail on a missing wslpath.
+if vim.fn.has("wsl") == 0 then
+  return
+end
+
 vim.keymap.set("n", "<leader>md", function()
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   local cur = vim.api.nvim_win_get_cursor(0)[1]

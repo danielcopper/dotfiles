@@ -69,27 +69,11 @@ local function choose_target(targets)
   return nil
 end
 
--- Configure LSP settings for roslyn
+-- Configure LSP settings for roslyn.
+-- No root_dir override here on purpose: the plugin's own default already does
+-- lock_target, choose_target and source-generated-file reuse, and it is the only
+-- place that records the resolved target for on_init to pick up.
 vim.lsp.config("roslyn", {
-  root_dir = function(bufnr, on_dir)
-    local cfg = require("roslyn.config").get()
-    if cfg.lock_target and vim.g.roslyn_nvim_selected_solution then
-      on_dir(vim.fs.dirname(vim.g.roslyn_nvim_selected_solution))
-      return
-    end
-    local root = require("roslyn.sln.utils").root_dir(bufnr)
-    if root then
-      on_dir(root)
-    end
-  end,
-  handlers = {
-    ["$/progress"] = function(err, result, ctx, config)
-      if result and result.value and not result.token then
-        result.token = "roslyn-progress"
-      end
-      vim.lsp.handlers["$/progress"](err, result, ctx, config)
-    end,
-  },
   on_attach = function(client, bufnr)
     vim.keymap.set("n", "<leader>ct", "<cmd>Roslyn target<cr>", { buffer = bufnr, desc = "Select target framework" })
   end,

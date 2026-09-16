@@ -7,6 +7,11 @@ local borders = ui.borders
 require("catppuccin").setup({
   flavour = variant,
   dim_inactive = { enabled = true },
+  -- Let catppuccin read the installed plugins out of vim.pack and enable the
+  -- matching integrations itself. Integrations that hang off no plugin can
+  -- never be auto-detected, so they have to be named here.
+  auto_integrations = true,
+  integrations = { markdown = true },
   custom_highlights = function(colors)
     local hl = {}
 
