@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Provides `cc` on a host that has no system C compiler.
+#
+# SteamOS is immutable and ships no toolchain, and Homebrew's neovim formula
+# stopped pulling one in: after the tree-sitter split it installs only
+# libtree-sitter, with the CLI in a separate formula. Homebrew's gcc is here,
+# but only under its versioned name, so anything probing the conventional `cc`
+# finds nothing -- and every caller reports it differently while none of them
+# stop. nvim-treesitter printed "Failed to execute the C compiler" for each
+# parser and still exited 0, leaving old parsers against new queries until diff
+# highlighting broke; kulala.nvim hit the same wall building its own http
+# grammar and blamed it on a missing parser. Both read like plugin bugs.
+#
+# Pinned to one compiler on purpose instead of probing for whichever gcc-* is
+# around: when Homebrew moves to the next major this fails loudly with the
+# message below, which is the whole point -- the failure mode being fixed here
+# is a build that fails without anyone noticing.
+set -euo pipefail
+
+real=/home/linuxbrew/.linuxbrew/bin/gcc-16
+
+if [ ! -x "$real" ]; then
+  echo "cc: $real is gone -- Homebrew's gcc has likely moved to a new major." >&2
+  echo "cc: point dotfiles/bash/.local/bin/cc at the new one." >&2
+  exit 127
+fi
+
+exec "$real" "$@"
