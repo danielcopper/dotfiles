@@ -129,7 +129,14 @@ require("sonarlint").setup({
         return
       end
 
-      local ok, project = pcall(vim.fn.json_decode, vim.fn.readfile(config_path))
+      -- luanil turns JSON null into nil. Without it a null arrives as vim.NIL,
+      -- which is truthy, so the two checks below would wave it through and the
+      -- binding would fail silently later instead of reporting here.
+      local ok, project = pcall(
+        vim.json.decode,
+        table.concat(vim.fn.readfile(config_path), "\n"),
+        { luanil = { object = true } }
+      )
       if not ok then
         vim.notify("SonarLint: failed to parse .sonarlint/connectedMode.json", vim.log.levels.ERROR)
         return

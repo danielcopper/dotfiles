@@ -106,11 +106,7 @@ vim.api.nvim_create_user_command("LspRestart", function(opts)
 end, {
   nargs = "?",
   complete = function()
-    local seen = {}
-    for _, client in ipairs(vim.lsp.get_clients()) do
-      seen[client.name] = true
-    end
-    return vim.tbl_keys(seen)
+    return vim.iter(vim.lsp.get_clients()):map(function(c) return c.name end):unique():totable()
   end,
   desc = "Restart active LSP clients (optionally a single named one)",
 })
