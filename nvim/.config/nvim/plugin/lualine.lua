@@ -47,6 +47,18 @@ local opts = {
     },
     lualine_x = {
       {
+        -- Progress of anything reporting via Progress messages -- vim.pack
+        -- updates and :checkhealth. Note this does NOT cover LSP progress:
+        -- that goes through client.progress/LspProgress and is rendered by
+        -- the LSP component below, off lua/lsp_state.lua.
+        function()
+          return vim.ui.progress_status()
+        end,
+        cond = function()
+          return vim.ui.progress_status() ~= ""
+        end,
+      },
+      {
         "diagnostics",
         symbols = {
           error = icons.diagnostics.error,
