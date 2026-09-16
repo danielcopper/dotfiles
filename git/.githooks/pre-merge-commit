@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# git runs this hook, not pre-commit, for the commit a merge writes. Same
+# question, different hook name — measured: `git merge --no-ff` fires
+# pre-merge-commit and never pre-commit, so a merge onto a protected branch
+# would otherwise walk past a guard that only pre-commit carries.
+#
+# A fast-forward merge writes no commit and fires nothing, which is why a
+# plain `git pull` on main stays unaffected.
+exec "$(dirname "$(readlink -f "$0")")/pre-commit"
