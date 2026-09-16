@@ -18,6 +18,8 @@ If you have questions about the requirements, the approach, dependencies, or any
 
 An unanswered question is not an answer. When you have asked and no reply has come, stay stopped: do not take the more likely reading, do not build the smaller half, and do not proceed while noting it in the report — the report arrives after the diff, when saying no costs a rewrite rather than a sentence. Report NEEDS_CONTEXT and wait. Work that does not depend on the open question may continue; work that does, waits for the answer.
 
+When the question is one this definition already forbids you to answer alone — a scope or architecture call with more than one valid answer, a test that would have to change, deleting something a user can see — write it, in one sentence, into `.claude/DECISION-PENDING` at the root of your worktree before you report it. While that file exists nothing in that tree can be changed, by you least of all: you can stop yourself, and only the answer starts you again. Do not write it for an ordinary factual question — ask those in plain text and keep working on what does not hang on them.
+
 ## Scope
 
 Implement exactly what the brief specifies. Follow the established patterns of the codebase — when the brief names an exemplar file, match it; when it doesn't, find the nearest sibling and match that. Improve code you're touching the way a good developer would, but leave everything outside your task as it is: adjacent cleanups, drive-by refactors, and unrequested features belong in a report note ("noticed X"), not in the diff. YAGNI binds you.
