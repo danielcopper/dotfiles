@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) hook: commits to protected branches are refused.
+"""PreToolUse(Bash) hook: writes to protected branches are refused.
 
-This is the early warning, not the lock. The lock is the global git
-pre-commit hook in ~/.githooks, which git runs inside the repository it
-resolved itself and which aborts the commit outright. This hook reads a
-command line instead, so it can only judge what that line says.
+For `git commit` this is the early warning and the lock is elsewhere: the
+global git pre-commit hook in ~/.githooks, which git runs inside the
+repository it resolved itself and which aborts the commit outright. For
+rebase, cherry-pick and revert there is no lock — git runs no pre-commit
+hook for them, measured — so on those this is the only guard. It reads a
+command line, so it can only judge what that line says.
 
 Where the line pins its directory - `git -C <path>`, or a `cd` in an
 earlier segment, including through a variable assigned in the same block -
@@ -29,8 +31,18 @@ ALLOWLIST = os.path.join(HOME, ".githooks", "commit-on-main-allowed")
 
 PROTECTED = re.compile(r"^(main|master|develop|release/.+)$")
 
-# git commit, also with leading -C <path> / -c <key=val> options
-GIT_COMMIT_RE = re.compile(r"\bgit(?:\s+-C\s+\S+)?(?:\s+-c\s+\S+)*\s+commit\b")
+# The operations that write a commit onto the current branch, also with
+# leading -C <path> / -c <key=val> options. Only `commit` reaches git's own
+# pre-commit hook; rebase, cherry-pick and revert write commits without it,
+# so for those this hook is the only guard there is. `merge` is left out: on
+# a protected branch it is nearly always the fast-forward half of a pull,
+# which writes nothing, and git runs pre-merge-commit for the other half.
+GIT_COMMIT_RE = re.compile(
+    r"\bgit(?:\s+-C\s+\S+)?(?:\s+-c\s+\S+)*\s+(commit|rebase|cherry-pick|revert)\b"
+)
+
+# Steering an operation that is already running creates nothing.
+CONTROL_FLAG = re.compile(r"--(abort|continue|skip|quit)\b")
 GIT_DASH_C = re.compile(r"\bgit\s+-C\s+(\S+)")
 CD = re.compile(r"^\s*\(*\s*cd\s+([^\s;&|]+)")
 
@@ -94,8 +106,8 @@ def resolve(token: str, current: str, variables: dict) -> str | None:
     return os.path.normpath(os.path.join(current, os.path.expanduser(target)))
 
 
-def commit_dirs(command: str, cwd: str) -> list[str]:
-    """Every directory this block commits in, walked segment by segment."""
+def commit_dirs(command: str, cwd: str) -> list[tuple[str, str]]:
+    """(directory, operation) for every commit this block writes, segment by segment."""
     variables = {"HOME": HOME, "PWD": cwd}
     current = cwd
     targets = []
@@ -109,11 +121,15 @@ def commit_dirs(command: str, cwd: str) -> list[str]:
         if moved:
             current = resolve(moved.group(1), current, variables) or current
         resolved = substitute(segment, variables)
-        if not GIT_COMMIT_RE.search(resolved):
+        writing = GIT_COMMIT_RE.search(resolved)
+        if not writing:
+            continue
+        operation = writing.group(1)
+        if operation != "commit" and CONTROL_FLAG.search(resolved):
             continue
         pinned = GIT_DASH_C.search(resolved)
         here = resolve(pinned.group(1), current, variables) if pinned else current
-        targets.append(here or current)
+        targets.append((here or current, operation))
     return targets
 
 
@@ -127,7 +143,7 @@ def main() -> int:
         return 0
 
     exempt = allowed_repos()
-    for directory in commit_dirs(command, data.get("cwd") or "."):
+    for directory, operation in commit_dirs(command, data.get("cwd") or "."):
         if repo_root(directory) in exempt:
             continue
         branch = _git(directory, "branch", "--show-current")
@@ -140,8 +156,8 @@ def main() -> int:
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
                         "permissionDecisionReason": (
-                            f"This commit targets protected branch '{branch}' in "
-                            f"{directory}. Work on a worktree branch instead."
+                            f"This {operation} writes to protected branch '{branch}' "
+                            f"in {directory}. Work on a worktree branch instead."
                         ),
                     }
                 }
