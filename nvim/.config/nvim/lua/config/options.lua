@@ -66,6 +66,17 @@ opt.exrc = true -- load project-local .nvim.lua / .nvimrc / .exrc (must be :trus
 opt.completeopt = "menu,menuone"
 opt.pumheight = 10
 
+-- Diff
+-- Word-wise instead of character-wise inline highlighting, so a changed line
+-- reads as "these two words differ" rather than as individually coloured
+-- characters; it also merges change blocks separated only by small gaps and
+-- punctuation. Edited rather than assigned so the rest of the default (which
+-- gained indent-heuristic and linematch:40 in 0.12) keeps coming from Nvim.
+-- Applies to anything using Nvim's diff mode -- :diffthis, :DiffTool and
+-- diffview -- but not to gitsigns, which diffs on its own via vim.diff.
+opt.diffopt:remove("inline:char")
+opt.diffopt:append("inline:word")
+
 -- Formatting (jcroqlnt: see :help fo-table)
 opt.formatoptions = "jcroqlnt"
 
