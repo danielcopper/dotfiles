@@ -1,6 +1,10 @@
 vim.pack.add({
   "https://github.com/rafamadriz/friendly-snippets",
   { src = "https://github.com/L3MON4D3/LuaSnip", version = vim.version.range("2.x") },
+  -- Stays on the 1.x line deliberately. main is v2, which is unreleased: no v2
+  -- tag means no pre-built Rust matcher, and building it needs a cargo
+  -- toolchain this host does not have. Revisit when v2 is actually tagged --
+  -- it then also wants blink.lib as a separate package and LuaSnip unpinned.
   { src = "https://github.com/saghen/blink.cmp", version = vim.version.range("1.x") },
 })
 
