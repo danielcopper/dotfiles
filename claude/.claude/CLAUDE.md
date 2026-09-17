@@ -26,6 +26,12 @@ For each task (and each cut):
 
 Composes with the worktree skill (one branch/worktree per cut) and the board skills' rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
 
+**One report per agent.** An agent's prompt says "report back and wait for shutdown" so it stops rather than picking up
+more work — not so it delivers twice. Add to every agent prompt: *"Your final answer IS the report — do not also send
+it as a message."* Without that line the report arrives twice: once because the agent sends it, and once inside the
+harness's own idle notification, which carries the agent's final output with it. The second copy lands after the agent
+has gone idle, so stopping it earlier does not prevent it.
+
 ## Environment
 
 - **Line endings:** New files use LF. In my own repos on Linux (dotfiles, homelab, personal projects) everything is LF — convert stray CRLF when touching a file. In work/third-party repos keep existing line endings (CRLF or LF) — never bulk-convert.
