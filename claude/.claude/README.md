@@ -74,7 +74,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 
 | Hook                    | Event            | Purpose                                             |
 | ----------------------- | ---------------- | --------------------------------------------------- |
-| `block_dangerous_bash.py` | PreToolUse (Bash) | Judges `rm` by resolved target: below cwd or /tmp passes, elsewhere asks, roots/$HOME/disk-wipes are denied; a deleting `find` (`-delete`, `-exec rm`) is judged by its start points and only ever asks |
+| `block_disk_wipe.py`    | PreToolUse (Bash) | Denies mkfs, wipefs, dd onto a device node and redirects onto a block device — the one destruction the auto-mode classifier does not name. Every other deletion (`rm`, `git reset --hard`, `checkout -- path`, `branch -D`, force push) is the classifier's call |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
 | `stop.py`               | Stop             | TTS on task completion                              |
 | `notification.py`       | Notification     | TTS when user input needed                          |
@@ -83,8 +83,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | `session_start.py`      | SessionStart     | Load context on session init                        |
 | `pre_compact.py`        | PreCompact       | Backup transcript before compaction                 |
 | `block_ai_attribution.py` | PreToolUse (Bash) | Block commits carrying AI attribution markers     |
-| `block_commit_on_main.py` | PreToolUse (Bash) | Protected-branch commits (main/develop/release/*) become a permission prompt |
-| `block_dangerous_git.py` | PreToolUse (Bash) | Force pushes, remote ref deletes, checkout/restore of paths, reset --hard, clean -f, stash drop, branch -D of a branch that is unmerged or local-only (merged or remote-deleted branches pass), worktree remove --force become a permission prompt |
+| `block_commit_on_main.py` | PreToolUse (Bash) | Refuses commit/rebase/cherry-pick/revert on a protected branch (main/develop/release/*) unless the repo is listed in `~/.githooks/commit-on-main-allowed` |
 | `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's generic code-reviewer — routes to the custom `reviewer` agent |
 
 ### Debounce
