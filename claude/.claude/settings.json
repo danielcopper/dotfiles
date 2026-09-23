@@ -256,6 +256,17 @@
           }
         ]
       }
+    ],
+    "WorktreeCreate": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.claude/hooks/worktree_create.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

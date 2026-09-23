@@ -11,7 +11,8 @@ description: Worktree-based branching workflow. Use when creating a new branch o
 - Worktree: `<repo-parent>/<repo-name>.worktrees/<type>/<slug>` — a sibling directory of the main checkout, one subfolder per type. Example: branch `feature/123-oauth` in `~/Repos/decky-romm-sync` → `~/Repos/decky-romm-sync.worktrees/feature/123-oauth`.
 - Why outside the repo: a worktree nested in the main checkout also loads the main checkout's `mise.toml` (its `.venv/bin` lands on PATH as fallback), Claude pulls the worktree's copy of CLAUDE.md in on top of the main checkout's when it reads files there (two versions of the same instructions), and linters/watchers need per-repo excludes; a sibling has none of that.
 - Base branch is the current branch unless specified otherwise.
-- Worktrees under `.claude/worktrees/` (Claude Code's own, from `claude --worktree` and `isolation: "worktree"` agents) and under `<repo>__worktrees/` or `.worktrees/` keep working until removed.
+- Worktrees Claude Code creates under an auto-generated name (`claude --worktree`, `isolation: "worktree"` agents) go through the same `WorktreeCreate` hook and land flat at `<repo-parent>/<repo-name>.worktrees/<name>`.
+- Older worktrees under `.claude/worktrees/`, `<repo>__worktrees/` or `.worktrees/` keep working until removed.
 
 ## Create
 
@@ -30,7 +31,7 @@ The main session stays in the main checkout. It dispatches implementer and revie
 - Tell them to work only in the assigned worktree — never modify the main checkout or another worktree.
 - To run a tool inside the worktree by hand: `mise -C <worktree> exec -- <cmd>`.
 
-Occasionally the main session enters the worktree itself: `EnterWorktree` with `path` set to the worktree's absolute path. A path outside `.claude/worktrees/` asks the user for approval on every entry — neither a permission rule nor "don't ask again" suppresses it (only `bypassPermissions` mode skips it). From inside a worktree, `EnterWorktree` only reaches `.claude/worktrees/`, so switching to another sibling worktree goes through `ExitWorktree` first. `ExitWorktree` with `action: "keep"` returns to the main checkout and leaves the worktree in place.
+Occasionally the main session works in a worktree itself. To work in a **new** worktree from the start, call `EnterWorktree` with `name: "<type>/<slug>"`: the `WorktreeCreate` hook (`hooks/worktree_create.sh`) creates it at the convention path through `worktree-new` (branch and setup included), and the session enters it without an approval prompt. To enter an **existing** worktree, call `EnterWorktree` with `path` set to its absolute path — a path outside `.claude/worktrees/` asks the user for approval on every entry; neither a permission rule nor "don't ask again" suppresses it (only `bypassPermissions` mode skips it). From inside a worktree, `EnterWorktree` only reaches `.claude/worktrees/`, so switching to another sibling worktree goes through `ExitWorktree` first. `ExitWorktree` with `action: "keep"` returns to the main checkout and leaves the worktree in place.
 
 Push with `git -C <worktree> push -u origin <type>/<slug>` — the new branch has no upstream yet; later pushes need only `git -C <worktree> push`.
 
