@@ -6,18 +6,21 @@
 #   post-restore <state-file>  @resurrect-hook-post-restore-all
 #
 # Claude Code: a pane whose foreground process is `claude` and that carries
-# @claude_session_id (set by the Claude SessionStart hook) is saved with the
-# command `claude-resume <id>`; @resurrect-processes turns that into
-# `claude --resume <id>` on restore. A Claude pane without an id keeps its
-# plain saved command, which is not on the restore list, so it comes back as
-# a shell.
+# @claude_session_id (kept by the Claude SessionStart/SessionEnd hook) is
+# saved with the command `claude-resume <id>`; @resurrect-processes turns
+# that into `claude --resume <id>` on restore. A Claude pane without an id
+# keeps its plain saved command, which is not on the restore list, so it comes
+# back as a shell.
 #
-# Agent sidebars (tmux-agent-sidebar): their panes stay in the state file (so
-# each saved window layout keeps matching its pane count) and come back as
-# shell panes. After the restore those panes are killed and every window gets
-# a fresh sidebar from agent-sidebar-ensure.sh. While the restore runs,
-# @resurrect_restore_running pauses sidebar creation for new windows and
-# sessions.
+# Agent sidebars (tmux-agent-sidebar): their panes stay in the state file and
+# come back as shell panes in the saved layout. After the restore each of
+# them is restarted in place as a sidebar (the sidebar binary plus the pane
+# option @pane_role=sidebar, as the plugin creates one), so the layout stays
+# as saved. Where the window already has a sidebar, the stray shell is removed
+# instead (never a window's only pane); windows without one get a sidebar from
+# agent-sidebar-ensure.sh.
+# While the restore runs, @resurrect_restore_running pauses sidebar creation
+# for new windows and sessions.
 
 set -u
 
@@ -25,21 +28,37 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tab=$'\t'
 
 # State file columns of a `pane` line (tab-separated, see resurrect's save.sh):
-# 1 "pane", 2 session, 3 window index, 6 pane index, 10 pane command,
-# 11 ":" + full command.
+# 1 "pane", 2 session, 3 window index, 6 pane index, 8 ":" + directory (first
+# space escaped as "\ "), 10 pane command, 11 ":" + full command.
+#
+# The ids come from a second pane listing taken after resurrect wrote the
+# file. A window gets ids only if its panes in that listing (index, command,
+# directory, in order) are exactly the ones resurrect saved; otherwise panes
+# may have closed or moved in between, and its Claude panes keep their plain
+# command (a shell on restore beats a wrong conversation).
 save() {
-  local file="$1" ids
-  ids="$(tmux list-panes -a -F "#{session_name}${tab}#{window_index}${tab}#{pane_index}${tab}#{@claude_session_id}")" || return 0
+  local file="$1" live
+  live="$(tmux list-panes -a -F "#{session_name}${tab}#{window_index}${tab}#{pane_index}${tab}#{pane_current_command}${tab}#{pane_current_path}${tab}#{@claude_session_id}")" || return 0
   awk -F '\t' -v OFS='\t' '
-    NR == FNR {
-      if ($4 ~ /^[0-9A-Za-z-]+$/) id[$1 FS $2 FS $3] = $4
+    FILENAME == ARGV[1] {
+      w = $1 FS $2
+      dir = $5
+      i = index(dir, " ")
+      if (i) dir = substr(dir, 1, i - 1) "\\" substr(dir, i)
+      live[w] = live[w] "|" $3 ":" $4 ":" dir
+      if ($6 ~ /^[0-9A-Za-z-]+$/) id[w FS $3] = $6
       next
     }
-    $1 == "pane" && $10 == "claude" && (($2 FS $3 FS $6) in id) {
+    FNR == 1 { pass++ }
+    pass == 1 {
+      if ($1 == "pane") saved[$2 FS $3] = saved[$2 FS $3] "|" $6 ":" $10 ":" substr($8, 2)
+      next
+    }
+    $1 == "pane" && $10 == "claude" && saved[$2 FS $3] == live[$2 FS $3] && (($2 FS $3 FS $6) in id) {
       $11 = ":claude-resume " id[$2 FS $3 FS $6]
     }
     { print }
-  ' <(printf '%s\n' "$ids") "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+  ' <(printf '%s\n' "$live") "$file" "$file" >"$file.tmp" && mv "$file.tmp" "$file"
   rm -f "$file.tmp"
 }
 
@@ -55,23 +74,31 @@ pre_restore() {
     awk -F '\t' '$2 == "sidebar" { print $1 }' <<<"$panes" |
       while read -r pane; do tmux kill-pane -t "$pane"; done
   fi
-  # Panes that exist before the restore are never treated as leftovers.
+  # Panes that exist before the restore are never touched afterwards.
   tmux set-option -g @resurrect_restore_existing \
     " $(tmux list-panes -a -F '#{pane_id}' | tr '\n' ' ')"
 }
 
 post_restore() {
-  local file="$1" existing leftovers=() session window index pane
+  local file="$1" bin existing restored=() session window index pane
   if [ -f "$file" ]; then
+    bin="$(tmux show-option -gqv @agent_sidebar_bin)"
     existing="$(tmux show-option -gqv @resurrect_restore_existing)"
-    # Resolve every saved sidebar position to a pane id before killing any
-    # pane, since a kill renumbers the panes after it.
+    # Saved sidebar positions whose pane the restore created.
     while IFS="$tab" read -r session window index; do
       pane="$(tmux display-message -p -t "${session}:${window}.${index}" '#{pane_id}' 2>/dev/null)" || continue
-      [[ -n "$pane" && "$existing" != *" $pane "* ]] && leftovers+=("$pane")
+      [[ -n "$pane" && "$existing" != *" $pane "* ]] && restored+=("$pane")
     done < <(awk -F '\t' -v OFS='\t' '$1 == "pane" && $10 == "tmux-agent-sidebar" { print $2, $3, $6 }' "$file")
-    for pane in "${leftovers[@]}"; do
-      tmux kill-pane -t "$pane"
+    for pane in "${restored[@]}"; do
+      if [ -n "$bin" ] && ! tmux list-panes -t "$pane" -F '#{@pane_role}' | grep -qx sidebar; then
+        tmux respawn-pane -k -t "$pane" \
+          -c "$(tmux display-message -p -t "$pane" '#{pane_current_path}')" "$bin"
+        tmux set-option -p -t "$pane" @pane_role sidebar
+      elif [ "$(tmux display-message -p -t "$pane" '#{window_panes}')" -gt 1 ]; then
+        # The window has a sidebar already (or the plugin is missing): drop the
+        # restored shell, unless it is the window's only pane.
+        tmux kill-pane -t "$pane"
+      fi
     done
   fi
   tmux set-option -gu @resurrect_restore_existing
