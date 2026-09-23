@@ -1,23 +1,3 @@
-# workmux global config.
-# Worktrees land in the default sibling dir `<project>__worktrees/`.
-
-# Same mise steps as the global `mise run worktree-new` task: trust the fresh
-# worktree's config and run the repo's `setup` task, but only when the repo
-# uses mise and defines one.
-post_create:
-  - |
-    if [ -f mise.toml ] || [ -f .mise.toml ] || [ -f .config/mise/config.toml ]; then
-      mise trust >/dev/null 2>&1 || true
-      if mise tasks 2>/dev/null | grep -qw setup; then
-        mise run setup
-      fi
-    fi
+# workmux global config. workmux serves only as the agent overview in tmux:
+# status tracking, the sidebar and the dashboard (bindings in tmux.conf).
 nerdfont: true
-
-# Each worktree gets its own tmux session instead of a window in the current one.
-mode: session
-
-# Only the agent — no second shell pane next to it.
-panes:
-  - command: <agent>
-    focus: true
