@@ -116,7 +116,7 @@ require("roslyn_filewatch").setup({
   force_polling = true,
   ignore_dirs = {
     ".worktrees",
-    ".claude",  -- worktrees now live under .claude/worktrees/
+    ".claude",  -- nested worktrees under .claude/worktrees/
     "node_modules",
     "obj", "Obj",
     "bin", "Bin",

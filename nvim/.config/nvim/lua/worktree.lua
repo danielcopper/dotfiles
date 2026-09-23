@@ -38,9 +38,11 @@
 --      - Safe to do now because no LSP clients are watching these buffers.
 --
 --   5. Reset neo-tree
---      - Worktrees live under .claude/worktrees/ which is a subdir of the main repo.
---        Neo-tree's is_subpath() matches the new path to the already-cached
---        parent repo, so git status lookups fail. Clearing the internal worktree
+--      - A worktree nested inside the main repo (.claude/worktrees/, Claude
+--        Code's own location for `claude --worktree` and isolation: "worktree"
+--        agents, or the older .worktrees/) is a subdir of the already-cached repo.
+--        Neo-tree's is_subpath() matches the new path to that cached parent
+--        repo, so git status lookups fail. Clearing the internal worktree
 --        cache forces re-discovery via git rev-parse from the new cwd.
 --
 --   6. Re-attach LSP clients, event-driven (no fixed delays)

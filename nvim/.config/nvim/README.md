@@ -67,15 +67,18 @@ Lockfile: `nvim-pack-lock.json` (auto-managed, check into version control).
 
 ## Worktree workflow
 
-Branches live as git worktrees under `.claude/worktrees/`:
+Branches live as git worktrees in a sibling directory of the repo,
+`<repo>__worktrees/<type>-<slug>`:
 
 ```bash
-git worktree add .claude/worktrees/feature/oauth -b feature/oauth main
+mise run worktree-new feature oauth     # under tmux: workmux add feature/oauth
 ```
 
 - Types: `feature/`, `fix/`, `refactor/`, `chore/`, `docs/`
 - Switch inside Neovim: `<leader>gw` (picker via `lua/worktree.lua`)
-- Remove: `git worktree remove .claude/worktrees/feature/oauth && git branch -d feature/oauth`
+- Remove, only after the PR is merged (squash merge, so `git branch -d` refuses):
+  `git worktree remove ../<repo>__worktrees/feature-oauth && git branch -D feature/oauth`
+  (under tmux: `git fetch --prune && workmux remove --gone`)
 
 ## Keybinding conventions
 

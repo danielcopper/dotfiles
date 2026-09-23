@@ -98,7 +98,7 @@ GitHub-issue work runs through user-invoked skills backed by two custom agents, 
 
 | Skill                    | Invocation                     | Does                                                                                                                                              |
 | ------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **implement**            | `/implement <issue#> [--go]`   | One issue end-to-end: read → align (questions one at a time; `--go` skips when nothing is unclear) → worktree + board → implementer → reviewer loop → gate evidence → PR draft → watch CI to green → merge per policy → user gate if due |
+| **implement**            | `/implement <issue#> [--go] [--here]` | One issue end-to-end: read → align (questions one at a time; `--go` skips when nothing is unclear) → worktree + worker session under tmux/herdr (`--here` is the worker's entry) → board → implementer → reviewer loop → gate evidence → PR draft → watch CI to green → merge per policy → user gate if due |
 | **epic**                 | `/epic <epic#>`                | Assembly line over an epic's native sub-issues: align once on all issues, then the implement pipeline per issue, merging between issues (fresh worktree from updated main) |
 | **plan-epic**            | `/plan-epic [topic\|issue#]`   | Planning only, never code: discuss → slice (tracer bullets, or expand→contract for wide refactors) → drafts for approval → epic + native sub-issues in Ready |
 | **writing-great-skills** | reference                      | Vendored from [mattpocock/skills](https://github.com/mattpocock/skills) — the vocabulary for authoring/reviewing skills                            |
@@ -118,7 +118,7 @@ Standing rules encoded in the skills/agents (not in CLAUDE.md): the gate battery
 
 ### Per-repo config (`<repo>/.claude/agents/workflow.md`)
 
-Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-config.md`: `gate` (the battery — prefer mise tasks mirroring CI), `review_checks` (changed-files linter/typecheck for the reviewer), `board` (GraphQL IDs), `worktree_task`, `merge_policy` + `merge_exceptions`, `green_definition`, `public_text_drafts`, `user_gate` (what only the user can verify — e.g. an on-device pass). `/implement` bootstraps the file when missing.
+Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-config.md`: `gate` (the battery — prefer mise tasks mirroring CI), `review_checks` (changed-files linter/typecheck for the reviewer), `board` (GraphQL IDs), `worktree_task`, `merge_policy` + `merge_exceptions`, `green_definition`, `public_text_drafts`, `user_gate` (what only the user can verify — e.g. an on-device pass). `/implement` bootstraps the file when missing (a `--here` worker stops and asks instead).
 
 ### Guard hooks
 

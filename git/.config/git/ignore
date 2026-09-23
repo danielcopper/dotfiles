@@ -1,14 +1,14 @@
 # XDG global gitignore — applies to every repo on this machine.
 # Personal-workflow noise that should never be committed anywhere.
 
-# Worktrees: per the ~/dotfiles/claude/.claude/CLAUDE.md worktree workflow,
-# worktrees live inside the main repo under `.claude/worktrees/` — Claude Code's
-# native worktree location, so entering one fires no permission-root relocation
-# prompt. Without these entries, `git status` in the main repo lists every
-# worktree as untracked, and gitignore-respecting tools (rg, fd, fzf, telescope)
-# walk into the (potentially multi-GB) worktree copies and show duplicate hits.
-# `.worktrees/` is the pre-migration location, kept until the last old worktree
-# there is removed.
+# Worktrees nested inside a repo. The default worktree location is a sibling
+# directory outside the repo (`<repo>__worktrees/`, see the `worktree` skill),
+# which needs no entry here. `.claude/worktrees/` is Claude Code's own
+# location (`claude --worktree`, `isolation: "worktree"` agents) and holds older
+# worktrees; `.worktrees/` holds even older ones. Without these entries,
+# `git status` in the main repo lists every nested worktree as untracked, and
+# gitignore-respecting tools (rg, fd, fzf, telescope) walk into the (potentially
+# multi-GB) worktree copies and show duplicate hits.
 **/.claude/worktrees/
 .worktrees/
 

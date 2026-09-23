@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Global mise task: create a .claude/worktrees/<type>/<slug> worktree and, if the repo
-# uses mise, trust the fresh worktree's config and run its `setup` task — so the
-# empty per-worktree .venv / deps get populated and tooling (tests, linters, LSP)
-# work immediately. Pair with EnterWorktree({ path: ".claude/worktrees/<type>/<slug>" })
-# to re-root the Claude session into the worktree for clean diagnostics. .claude/
-# worktrees/ is Claude Code's native worktree location, so EnterWorktree fires no
-# permission-root relocation prompt.
+# Global mise task: create a worktree for branch <type>/<slug> in the sibling
+# directory <repo-parent>/<repo-name>__worktrees/<type>-<slug> (workmux's default
+# location and naming) and, if the repo uses mise, trust the fresh worktree's
+# config and run its `setup` task — so the empty per-worktree .venv / deps get
+# populated and tooling (tests, linters, LSP) work immediately. The worktree is
+# then ready for its own Claude session (see the `worktree` skill).
 #
 # Usage: mise run worktree-new <type> <slug> [base]   (base defaults to current branch)
 set -euo pipefail
@@ -16,8 +15,8 @@ slug="${2:?usage: mise run worktree-new <type> <slug> [base=current branch]}"
 # mise runs a *global* file task from the global config root ($HOME), not from
 # where it was invoked — so resolve everything against MISE_ORIGINAL_CWD (the
 # caller's dir). --git-common-dir always points at the MAIN worktree's .git, so
-# .claude/worktrees/ lands beside src/ even when invoked from inside another worktree
-# (never nested). PWD is the fallback when run outside mise.
+# the worktree lands in the one shared sibling directory even when invoked from
+# inside another worktree. PWD is the fallback when run outside mise.
 orig="${MISE_ORIGINAL_CWD:-$PWD}"
 if ! common_git="$(git -C "$orig" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
   echo "worktree-new: not inside a git repository (cwd: $orig)" >&2
@@ -30,10 +29,11 @@ default_base="$(git -C "$orig" rev-parse --abbrev-ref HEAD)"
 [ "$default_base" = "HEAD" ] && default_base="$(git -C "$orig" rev-parse HEAD)"
 base="${3:-$default_base}"
 
-cd "$repo_root"
-wt=".claude/worktrees/${type}/${slug}"
+wt_parent="$(dirname "$repo_root")/$(basename "$repo_root")__worktrees"
+wt="$wt_parent/${type}-${slug}"
 
-git worktree add "$wt" -b "${type}/${slug}" "$base"
+mkdir -p "$wt_parent"
+git -C "$repo_root" worktree add "$wt" -b "${type}/${slug}" "$base"
 
 # Only the mise dance if the repo actually uses mise.
 if [ -f "$wt/mise.toml" ] || [ -f "$wt/.mise.toml" ] || [ -f "$wt/.config/mise/config.toml" ]; then
@@ -43,5 +43,5 @@ if [ -f "$wt/mise.toml" ] || [ -f "$wt/.mise.toml" ] || [ -f "$wt/.config/mise/c
   fi
 fi
 
-echo "✓ worktree ready: $repo_root/$wt  (branch ${type}/${slug}, base ${base})"
-echo "  next: EnterWorktree({ path: \"$wt\" })  — re-roots the session for clean LSP/tooling"
+echo "✓ worktree ready: $wt  (branch ${type}/${slug}, base ${base})"
+echo "  next: start a worker session in it — see the \`worktree\` skill"

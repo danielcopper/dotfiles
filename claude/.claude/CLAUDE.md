@@ -71,7 +71,7 @@ Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
 
 ## Worktrees & branching
 
-**Never use `git checkout -b` in place — always work in a worktree** under `.claude/worktrees/<type>/<slug>`. The full procedure (create, `EnterWorktree`, `mise run worktree-new`, cleanup, rules) lives in the **`worktree` skill** — load it when starting any new branch / feature / task / fix.
+**Never use `git checkout -b` in place — always work in a worktree**, a sibling of the main checkout at `<repo-parent>/<repo-name>__worktrees/<type>-<slug>`; under tmux or herdr each worktree gets its own Claude session. The full procedure (create, start the worker session, `mise run worktree-new`, cleanup, rules) lives in the **`worktree` skill** — load it when starting any new branch / feature / task / fix.
 
 ## Project documentation discovery
 

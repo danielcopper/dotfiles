@@ -1,6 +1,6 @@
 # Repo workflow config — `.claude/agents/workflow.md`
 
-Per-repo facts the pipeline needs. The skill stays generic; everything repo-specific lives in this file, next to the board config that `to-issues`/`to-prd` keep in `.claude/agents/github.md`.
+Per-repo facts the pipeline needs. The file lives in the main checkout (it may be gitignored; worktrees read it from there). The skill stays generic; everything repo-specific lives in this file, next to the board config that `to-issues`/`to-prd` keep in `.claude/agents/github.md`.
 
 ## Schema
 
@@ -31,7 +31,8 @@ board:
   in_progress_option_id: <hex>
   ready_option_id: <hex>
 
-# Optional repo task that creates + sets up a worktree (type + slug + base).
+# Optional repo task that creates + sets up a worktree (type + slug + base) —
+# used where workmux does not create the worktree (herdr, no multiplexer).
 worktree_task: mise run worktree-new
 
 # user: green completes the implementation work; the lead reports and waits for
@@ -56,10 +57,12 @@ user_gate: <when and how the user verifies, or empty>
 
 ## Bootstrap (config missing)
 
+Only the invoking session bootstraps. A `--here` worker that finds no config stops and asks the user.
+
 1. **Gate**: derive candidates from the repo's CLAUDE.md build/test section and `mise.toml` tasks.
-2. **Board**: reuse `project_owner` / `project_number` / `project_id` / `status_field_id` from `.claude/agents/github.md` if present; resolve the In-Progress option id via `gh project field-list <n> --owner <owner> --format json`.
+2. **Board**: reuse `project_owner` / `project_number` / `project_id` / `status_field_id` from `.claude/agents/github.md` in the main checkout if present; resolve the In-Progress option id via `gh project field-list <n> --owner <owner> --format json`.
 3. **Policies**: default `merge_policy` to `user`; full-auto is available only as an explicit current-run grant and is never persisted. Propose `public_text_drafts` and `user_gate` from what the user has said in this repo; anything unknown, ask.
-4. Present the drafted yaml to the user, write the file on their OK, and continue the pipeline.
+4. Present the drafted yaml to the user, write the file into the main checkout on their OK, and continue the pipeline.
 
 ## Board moves
 

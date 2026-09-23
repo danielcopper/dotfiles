@@ -1,14 +1,14 @@
 ---
 name: implement
-description: Implement a GitHub issue end-to-end — align, worktree, board, implementer + reviewer agents, gates, PR. Argument: the issue number; append --go to skip the align gate when nothing is unclear.
+description: Implement a GitHub issue end-to-end — align, worktree + worker session, board, implementer + reviewer agents, gates, PR. Argument: the issue number; append --go to skip the align gate when nothing is unclear, --here when the session is the issue's worker, already inside its worktree.
 disable-model-invocation: true
 ---
 
-Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → user handoff. You are the lead: you orchestrate, commit nothing an agent already committed, and own push and PR preparation. Merge remains the user's responsibility unless they explicitly grant full-auto for the current run. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue.
+Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → user handoff. You are the lead: you orchestrate, commit nothing an agent already committed, and own push and PR preparation. Merge remains the user's responsibility unless they explicitly grant full-auto for the current run. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue. The session the user invoked aligns; under a terminal multiplexer the implementation then runs in a worker session inside the issue's worktree (step 4).
 
 ## 1. Load the repo workflow config
 
-Read `.claude/agents/workflow.md` in the repo root. If it is missing, bootstrap it per [`workflow-config.md`](workflow-config.md) before anything else.
+Read `.claude/agents/workflow.md` from the **main checkout**, in every mode — it may be gitignored, so a sibling worktree need not have it: `$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/agents/workflow.md` (read-only; the same goes for `.claude/agents/github.md`). If it is missing, the invoking session bootstraps it per [`workflow-config.md`](workflow-config.md) before anything else and writes it there. With `--here`, a missing config stops: ask the user — the worker writes nothing into the main checkout.
 
 *Done when:* gate commands, board config, merge policy, and the user gate are loaded.
 
@@ -24,14 +24,17 @@ Present a compact readiness statement: intended approach, scope, what you'll lea
 
 With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode.
 
+With `--here` the session is the issue's worker (step 4): its prompt carries the align outcome, which is the green light — skip this step. A question the outcome leaves open still stops.
+
 *Done when:* green light received.
 
 ## 4. Stage the work
 
-- Create the worktree `<type>/<N>-<slug>` from main (via the repo's worktree task if the config names one) and enter it.
-- Move the issue **and** its parent epic to **In Progress** on the board (commands in [`workflow-config.md`](workflow-config.md)).
+- **Default:** create the worktree for branch `<type>/<N>-<slug>` from main **and start a worker session in it**, per the `worktree` skill (workmux under tmux, or herdr). Where workmux does not create the worktree, use the config's `worktree_task` when it names one. The worker's prompt file holds `/implement <N> --here` followed by the align outcome — approach, scope, what stays untouched, the answered questions — so the worker does not re-align. The prompt file carries a full-auto grant only when the user gave one for this issue in this run; otherwise the worker hands the green PR to the user. Report the worker's handle and how to find it (`workmux list` under tmux, the herdr workspace under herdr); this session is then done. The worker moves the board and runs steps 5–10.
+- **`--here`:** the session is the worker, already inside the issue's worktree — create no worktree and start no worker (step 1 has read the config from the main checkout). Move the issue **and** its parent epic to **In Progress** on the board (commands in [`workflow-config.md`](workflow-config.md)), then continue with step 5.
+- **Fallback (no multiplexer):** no worker is started. This session creates the worktree (the config's `worktree_task` when it names one), moves both board items, and runs steps 5–10 itself from the main checkout; implementer and reviewer get the absolute worktree path.
 
-*Done when:* the session is in the worktree and the board shows both items In Progress.
+*Done when:* the worker runs with its prompt and this session has reported where — or, with `--here` and in the fallback, the worktree exists and the board shows both items In Progress.
 
 ## 5. Implement
 
