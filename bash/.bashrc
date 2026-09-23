@@ -28,6 +28,11 @@ PS1='\u@\h \W > '
 export EDITOR='nvim'
 export VISUAL='nvim'
 export TERMINAL="wezterm"
+# Claude Code clamps colours to 256 whenever $TMUX is set, and the Catppuccin
+# palette remaps index 16/17 — dark statusline text turns near-white. tmux and
+# wezterm both pass truecolor, so lift the clamp. It is read at startup, before
+# settings.json's env, so it has to come from the shell.
+export CLAUDE_CODE_TMUX_TRUECOLOR=1
 
 # ssh-agent socket from the user-level systemd unit (see systemd/ pkg).
 [ -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ] && \
