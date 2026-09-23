@@ -9,7 +9,7 @@ Match the current situation against this index and recommend the right skill(s).
 ## Issue & epic pipeline (user-invoked)
 
 - `/next [hint]` — what to work on next: reads board + PRs + commits, commits to one recommendation
-- `/implement <N> [--go] [--here]` — one GitHub issue end-to-end: align → worktree + worker session (`--here` runs inside it) → board → implementer → reviewer → PR → watch to green → merge per policy
+- `/implement <N> [--go]` — one GitHub issue end-to-end: align → worktree + board → implementer → reviewer → PR → watch to green → merge per policy
 - `/epic <N>` — assembly line over an epic's native sub-issues; merge between issues, fresh worktree from updated main
 - `/plan-epic [topic|N]` — idea → discussion → native sub-issues in Ready; produces a plan and issues, never code
 - `/handoff` — compact the session into a handoff doc (context nearly full, or the work continues in a fresh session)

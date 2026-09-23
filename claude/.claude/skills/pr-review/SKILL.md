@@ -64,7 +64,7 @@ Then present the task list summary and **stop**. Ask the user where to start.
 
 For each task, **in the order the user picks** (or sequential if they say "go from one to the next"):
 
-1. **Set up what you need.** If validating requires running PR code and the review worktree doesn't exist yet, create it now: `git worktree add ../<repo>__worktrees/review-<PR#>-<short-slug> <PR-head-sha>` (detached HEAD). Use the PR head commit, not the branch name. Run `npm ci` / `dotnet restore` / etc. once, reuse across tasks.
+1. **Set up what you need.** If validating requires running PR code and the review worktree doesn't exist yet, create it now: `git worktree add ../<repo>.worktrees/review/<PR#>-<short-slug> <PR-head-sha>` (detached HEAD). Use the PR head commit, not the branch name. Run `npm ci` / `dotnet restore` / etc. once, reuse across tasks.
 2. **Validate empirically.** Don't argue from training-data knowledge — run, mutate, probe. Cite source lines or capture exit codes. Watch for traps:
    - `cmd | tail` returns `tail`'s exit code, not `cmd`'s. Capture `${PIPESTATUS[0]}` or redirect to a file.
    - Flaky tests aren't deterministic — use forced timeouts (`--testTimeout=1`) for repeatable failures.
@@ -105,7 +105,7 @@ Comment style:
 
 ## Phase 6 — Wrap up
 
-When all tasks are closed by the user, print a final summary table: `# | outcome | thread ID (if posted)`. Don't tear down the review worktree — the user may want to revisit. Mention that it lives at `../<repo>__worktrees/review-<PR#>-<slug>`.
+When all tasks are closed by the user, print a final summary table: `# | outcome | thread ID (if posted)`. Don't tear down the review worktree — the user may want to revisit. Mention that it lives at `../<repo>.worktrees/review/<PR#>-<short-slug>`.
 
 ## Inputs
 

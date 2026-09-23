@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Global mise task: create a worktree for branch <type>/<slug> in the sibling
-# directory <repo-parent>/<repo-name>__worktrees/<type>-<slug> (workmux's default
-# location and naming) and, if the repo uses mise, trust the fresh worktree's
-# config and run its `setup` task — so the empty per-worktree .venv / deps get
-# populated and tooling (tests, linters, LSP) work immediately. The worktree is
-# then ready for its own Claude session (see the `worktree` skill).
+# Global mise task: create a worktree for branch <type>/<slug> at
+# <repo-parent>/<repo-name>.worktrees/<type>/<slug>, next to the main
+# checkout, and, if the repo uses mise, trust the fresh worktree's config and run
+# its `setup` task — so the empty per-worktree .venv / deps get populated and
+# tooling (tests, linters, LSP) work immediately. The creating session stays in
+# the main checkout and hands subagents the worktree's absolute path (see the
+# `worktree` skill).
 #
 # Usage: mise run worktree-new <type> <slug> [base]   (base defaults to current branch)
 set -euo pipefail
@@ -29,8 +30,8 @@ default_base="$(git -C "$orig" rev-parse --abbrev-ref HEAD)"
 [ "$default_base" = "HEAD" ] && default_base="$(git -C "$orig" rev-parse HEAD)"
 base="${3:-$default_base}"
 
-wt_parent="$(dirname "$repo_root")/$(basename "$repo_root")__worktrees"
-wt="$wt_parent/${type}-${slug}"
+wt_parent="$(dirname "$repo_root")/$(basename "$repo_root").worktrees/${type}"
+wt="$wt_parent/${slug}"
 
 mkdir -p "$wt_parent"
 git -C "$repo_root" worktree add "$wt" -b "${type}/${slug}" "$base"
@@ -44,4 +45,4 @@ if [ -f "$wt/mise.toml" ] || [ -f "$wt/.mise.toml" ] || [ -f "$wt/.config/mise/c
 fi
 
 echo "✓ worktree ready: $wt  (branch ${type}/${slug}, base ${base})"
-echo "  next: start a worker session in it — see the \`worktree\` skill"
+echo "  next: hand subagents this absolute path — see the \`worktree\` skill"

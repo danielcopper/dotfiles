@@ -2,7 +2,7 @@
 # Personal-workflow noise that should never be committed anywhere.
 
 # Worktrees nested inside a repo. The default worktree location is a sibling
-# directory outside the repo (`<repo>__worktrees/`, see the `worktree` skill),
+# directory outside the repo (`<repo>.worktrees/`, see the `worktree` skill),
 # which needs no entry here. `.claude/worktrees/` is Claude Code's own
 # location (`claude --worktree`, `isolation: "worktree"` agents) and holds older
 # worktrees; `.worktrees/` holds even older ones. Without these entries,

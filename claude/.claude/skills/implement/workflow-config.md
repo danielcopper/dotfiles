@@ -31,8 +31,8 @@ board:
   in_progress_option_id: <hex>
   ready_option_id: <hex>
 
-# Optional repo task that creates + sets up a worktree (type + slug + base) —
-# used where workmux does not create the worktree (herdr, no multiplexer).
+# Optional repo task that creates + sets up a worktree at the convention path
+# (type + slug + base).
 worktree_task: mise run worktree-new
 
 # user: green completes the implementation work; the lead reports and waits for
@@ -56,8 +56,6 @@ user_gate: <when and how the user verifies, or empty>
 ```
 
 ## Bootstrap (config missing)
-
-Only the invoking session bootstraps. A `--here` worker that finds no config stops and asks the user.
 
 1. **Gate**: derive candidates from the repo's CLAUDE.md build/test section and `mise.toml` tasks.
 2. **Board**: reuse `project_owner` / `project_number` / `project_id` / `status_field_id` from `.claude/agents/github.md` in the main checkout if present; resolve the In-Progress option id via `gh project field-list <n> --owner <owner> --format json`.
