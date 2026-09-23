@@ -1,3 +1,0 @@
-# workmux global config. workmux serves only as the agent overview in tmux:
-# status tracking, the sidebar and the dashboard (bindings in tmux.conf).
-nerdfont: true

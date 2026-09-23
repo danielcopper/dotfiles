@@ -20,7 +20,6 @@ alias diff='diff --color=auto'
 # ~/.claude/settings.json; a wrapper that passed them as flags outranked the
 # settings file, so `modelSettings` there could never take effect.
 alias cc='command claude --model opus --effort xhigh'
-alias wm='workmux'
 
 # Prompt
 PS1='\u@\h \W > '
