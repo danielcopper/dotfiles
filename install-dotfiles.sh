@@ -20,6 +20,7 @@ common_pkgs=(
   tmux
   wezterm
   lazygit
+  workmux
 )
 
 case "$CLASS" in
