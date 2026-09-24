@@ -9,14 +9,20 @@ the routing rules and the global index load natively via ~/.claude/CLAUDE.md
 hook never could.
 
 Sections, in order:
-  1. ~/Memory/global/daily/<today>.md      today's running log (if exists)
-  2. ~/Memory/global/daily/<yest>.md       yesterday's running log (if exists)
-  3. ~/Memory/<repo-name>/MEMORY.md        per-repo index (repo-name = basename
-       of the MAIN repository root, so worktrees resolve to the same tier)
+  1. ~/Memory/<repo-name>/MEMORY.md        per-repo index, in full (repo-name =
+       basename of the MAIN repository root, so worktrees resolve to the same tier)
+  2. ~/Memory/global/daily/<today>.md      today's entry headings (if any)
+  3. ~/Memory/global/daily/<yest>.md       yesterday's entry headings (if any)
 
-Lazy-loading philosophy: eager-load only indices and time-bound running logs,
-never topic-file bodies. Claude fetches `<rule>.md`, `tools/<tool>.md`, etc.
-on demand by matching the user's prompt against the index entries' keywords.
+Lazy-loading philosophy: eager-load only indices, never bodies. The dailies
+arrive as their `## HH:MM — slug` headings only; Claude reads the day's file
+when a heading matters, the same way it fetches `<rule>.md`, `tools/<tool>.md`,
+etc. on demand by matching the user's prompt against the index entries.
+
+The output stays under Claude Code's limit for hook context: above 10,000
+characters it is moved to a file and only a 2 KB preview reaches the model.
+MAX_INJECTION_CHARS cuts below that, from the bottom, so the repo index goes
+first and a cut costs daily headings before it costs the index.
 
 Single-shot per session, keyed on the hook input's session_id (a resumed or
 cleared session gets a fresh id and therefore a fresh injection). Falls back
@@ -32,7 +38,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-MAX_INJECTION_CHARS = 30_000  # ~7-8k tokens, soft cap; truncates from the bottom
+MAX_INJECTION_CHARS = 9_500  # hard cap (see the docstring)
 
 
 def log_event(event_type, details):
@@ -102,40 +108,49 @@ def get_git_root(cwd):
     return None
 
 
+def entry_headings(text):
+    """The `## HH:MM — slug` headings of a daily, one per line."""
+    return "\n".join(line[3:] for line in text.splitlines() if line.startswith("## "))
+
+
 def collect_sections(cwd):
-    """Return list of (header, content) tuples for available memory sources."""
+    """Return list of (header, content, path) tuples for available memory sources."""
     home = Path.home()
     memory_dir = home / "Memory" / "global"
     sections = []
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_daily = read_file(memory_dir / "daily" / f"{today}.md")
-    if today_daily:
-        sections.append((f"Today's daily ({today}) — `~/Memory/global/daily/{today}.md`", today_daily))
-
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    yest_daily = read_file(memory_dir / "daily" / f"{yesterday}.md")
-    if yest_daily:
-        sections.append((f"Yesterday's daily ({yesterday}) — `~/Memory/global/daily/{yesterday}.md`", yest_daily))
 
     git_root = get_git_root(cwd)
     if git_root:
         repo_tier = home / "Memory" / Path(git_root).name
         repo_mem = read_file(repo_tier / "MEMORY.md")
         if repo_mem:
-            sections.append((f"Repo memory — `{repo_tier}/MEMORY.md`", repo_mem))
+            path = f"{repo_tier}/MEMORY.md"
+            sections.append((f"Repo memory — `{path}`", repo_mem, path))
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    for label, day in (("Today's", today), ("Yesterday's", yesterday)):
+        daily = read_file(memory_dir / "daily" / f"{day}.md")
+        headings = entry_headings(daily) if daily else ""
+        if headings:
+            path = f"~/Memory/global/daily/{day}.md"
+            sections.append((f"{label} daily ({day}), headings only — read `{path}` for an entry", headings, path))
 
     return sections
 
 
 def assemble(sections):
-    """Concat sections with headers, hard-cap total length."""
-    parts = []
-    for header, content in sections:
-        parts.append(f"## {header}\n\n{content}")
+    """Concat sections with headers, hard-cap total length.
+
+    The cut note names every source, because the cut can remove a section
+    together with the header that named its file.
+    """
+    parts = [f"## {header}\n\n{content}" for header, content, _ in sections]
     text = "\n\n---\n\n".join(parts)
     if len(text) > MAX_INJECTION_CHARS:
-        text = text[:MAX_INJECTION_CHARS] + "\n\n... (memory injection truncated due to size cap)"
+        sources = ", ".join(f"`{path}`" for _, _, path in sections)
+        note = f"\n\n... (cut at the size cap — read the rest in {sources})"
+        text = text[:MAX_INJECTION_CHARS - len(note)] + note
     return text
 
 

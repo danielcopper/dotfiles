@@ -54,7 +54,7 @@ If $ARGUMENTS is empty, ask for both source and destination.
    - **Remove the source entry**:
      - If source is a daily: remove the whole `## HH:MM — topic` section from the daily file. Content now lives in the destination; keeping it in the daily is duplication.
      - If source is a durable topic file: remove the entry from the source file.
-   - Update `MEMORY.md` index in the destination store: bump the last-updated date for the destination file. If a new file was created, also add a new descriptive index entry.
+   - Update `MEMORY.md` index in the destination store: bump the last-updated date for the destination file. If a new file was created, also add a one-line index entry (see "Index size" in `~/Memory/global/README.md`). Then measure the index against its limit (global under 25 KB, repo tier under 7.5 KB) and say so when it is near or over.
 
 ## Constraints
 

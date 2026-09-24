@@ -50,7 +50,7 @@ For each approved item:
 
 - **Promote**: append/merge into the destination file. Don't blindly duplicate — check for existing entries first. **Then remove the source entry from the daily** (the whole `## HH:MM — topic` section). Content now lives in the topic file; leaving it in the daily is duplication. Skipped (not-promoted) entries stay in the daily for pattern detection over time.
 - **Archive**: `mkdir -p ~/Memory/global/daily/archive/<year>/` and `mv` the daily file there. Plain `mv` — no git involved.
-- **Refresh `~/Memory/global/MEMORY.md`** index: bump last-updated dates for topic files touched. Daily files are not indexed; promoted bullets land in topic files which already have their own index sections.
+- **Refresh `~/Memory/global/MEMORY.md`** index: bump last-updated dates for topic files touched; a new file gets a one-line entry (see "Index size" in `~/Memory/global/README.md`). Daily files are not indexed; promoted bullets land in topic files which already have their own index entries. Then measure every index you wrote to against its limit (global under 25 KB, repo tier under 7.5 KB) and say so when it is near or over.
 - **TTL check**: for every index entry marked `TIME-BOUND, delete when <condition>`, check the condition (e.g. via `gh`); if met, propose deleting file + entry.
 
 ## Constraints

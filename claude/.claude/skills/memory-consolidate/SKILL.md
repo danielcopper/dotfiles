@@ -38,14 +38,25 @@ Read the durable layer in scope:
 
 (Scope = current repo only by default; every repo tier with `--all`.)
 
+Start by measuring each index in scope against its limit (see "Index size" in the README). An index over its limit
+shapes this phase's plan: its fixes — consolidating, moving location-bound entries, promoting to the wiki — are Phase 2
+work.
+
 Propose, **per scope**:
 - **Dedupe** overlapping entries (same fact in two files within the same scope → merge into the better-fit one). Do **not** dedupe across scopes — a fact in global vs. a fact in a repo can legitimately differ.
 - **Conflict rule** when merging: an explicit user statement beats an observation; newer evidence with a source beats
   older. Record the correction in place — never keep both versions side by side.
 - **Merge** related entries within a file (consolidate sections).
 - **Split** files that exceed ~200 lines into topic-specific siblings (e.g. `tools/git.md` becomes `tools/git.md` + `tools/git-worktree.md`).
+- **Location-bound entries**: a global entry that only matters inside one repository moves to that repo's tier. Fix
+  `[[wiki-links]]` that point at a moved file.
 - **Wiki graduation**: `domain/` entries that have proven durable are candidates to leave memory for `~/Notes/wiki/`
   (translated per `~/Notes/CLAUDE.md`, indexes + log updated there, source entry removed here).
+  - Proven means unchanged for at least 30 days, with no open additions. An entry still growing stays.
+  - Split first: the reference part goes to the wiki; an operating rule for Claude inside the same entry stays in
+    memory as a small `tools/` or rule file.
+  - Only `~/Notes/wiki/` is written; `~/Notes/personal/` is the user's and is never touched.
+  - List each candidate with its target wiki page (existing page to extend, or a new page and folder).
 
 Group the plan by scope (Global / `<repo-a>` / `<repo-b>` / …) so the user can approve scopes independently. **Wait for approval.** Apply.
 
@@ -56,9 +67,13 @@ Rewrite the `MEMORY.md` index in each scope touched by Phase 2 to reflect curren
 - `~/Memory/<repo-name>/MEMORY.md` for each in-scope repo tier
 
 For each `MEMORY.md`:
-- One section per topic file with a keyword-dense description of **at most ~3 lines** and a last-updated date — dense enough to match how the user phrases topics, short enough that the eager-loaded index stays cheap.
+- One line per topic file (~200 bytes): link, keyword-dense description, type, last-updated date — dense enough to
+  match how the user phrases topics. Detail that only the index carried moves into the topic file first.
 - Daily files are not indexed.
 - Note last-consolidated date at the top.
+- Measure each index against its limit (global under 25 KB, repo tier under 7.5 KB — see "Index size" in the README) and
+  report the sizes with the proposal. Over the limit: apply the README's order (consolidate, move location-bound
+  entries, promote to the wiki, and only then a two-level index).
 
 If a `MEMORY.md` doesn't exist yet in a scope that has topic files, create it.
 
