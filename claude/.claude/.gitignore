@@ -23,6 +23,9 @@ statsig/
 # Hook logs (these contain session data)
 hooks/logs/
 
+# claude.ai account skills, cached by Claude Code on each sync (carry account ids)
+skills/synced/
+
 # Keep these (configuration and custom code)
 # settings.json
 # README.md
