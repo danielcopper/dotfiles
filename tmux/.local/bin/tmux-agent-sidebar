@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# tmux-agent-sidebar's binary on PATH. The Claude Code plugin's hook.sh looks for
+# it in its own cache dir, in ~/.tmux/plugins (hard-coded) or on PATH - and TPM
+# puts it under ~/.config/tmux/plugins here. Silent while the binary is missing,
+# like hook.sh itself, so a hook never fails on a machine without it.
+bin="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar"
+[ -x "$bin" ] || exit 0
+exec "$bin" "$@"

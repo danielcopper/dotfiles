@@ -100,7 +100,11 @@ and it has three parts. Stow brings none of them:
    claude plugin install tmux-agent-sidebar@hiroppy
    ```
 
-   Running Claude sessions pick the hooks up only after a restart.
+   Running Claude sessions pick the hooks up only after a restart. The plugin's
+   `hook.sh` finds the binary only in its own cache dir (empty for a GitHub
+   source), in a hard-coded `~/.tmux/plugins` or on `PATH`, so the `tmux`
+   package stows a wrapper `~/.local/bin/tmux-agent-sidebar` that execs the TPM
+   copy under `~/.config/tmux/plugins`.
 
 ## Recovery
 
