@@ -79,6 +79,29 @@ bumped the integration version), then:
 3. Re-apply the one-line `$HOME` hook path if it was lost, then commit the
    updated script.
 
+## tmux agent sidebar
+
+The agent overview in tmux is [tmux-agent-sidebar](https://github.com/hiroppy/tmux-agent-sidebar),
+and it has three parts. Stow brings none of them:
+
+1. **The tmux plugin**, declared in `tmux.conf` and installed by TPM: `prefix + I`.
+2. **Its binary**, which the plugin's install wizard fetches. The wizard pops up
+   on the first tmux start after the plugin landed. Headless:
+   `~/.config/tmux/plugins/tmux-agent-sidebar/install-wizard.sh download-binary`.
+3. **The Claude Code plugin** `tmux-agent-sidebar@hiroppy`, whose hooks report each
+   Claude pane's state to the sidebar. Without it the sidebar is up but lists no
+   agents. It is declared in the reference `claude/.claude/settings.json`
+   (`extraKnownMarketplaces.hiroppy`, `enabledPlugins`), so a fresh machine gets
+   it through the seeded live file. A machine whose live `~/.claude/settings.json`
+   predates it registers it once:
+
+   ```bash
+   claude plugin marketplace add hiroppy/tmux-agent-sidebar
+   claude plugin install tmux-agent-sidebar@hiroppy
+   ```
+
+   Running Claude sessions pick the hooks up only after a restart.
+
 ## Recovery
 
 - **Pre-stow conflict backups** are created at `~/.dotfiles-pre-stow.<timestamp>/` whenever `install-dotfiles.sh` finds existing `$HOME` files that would clash with the stow run.
