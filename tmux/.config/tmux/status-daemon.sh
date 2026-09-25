@@ -19,12 +19,16 @@
 interval="${1:-1}"
 
 # PID file in a per-user, private runtime dir (XDG_RUNTIME_DIR is mode 700) --
-# not world-writable /tmp. Fixed path so the kill-previous check finds the prior
-# instance across launches.
+# not world-writable /tmp. One per tmux server, named after its socket, so the
+# kill-previous check finds this server's prior instance across launches and
+# never the daemon of another server (a second `tmux -L` would otherwise kill
+# the main server's daemon, and with it continuum's periodic save).
 runtime_dir="${XDG_RUNTIME_DIR:-$HOME/.cache}"
 [ -d "$runtime_dir" ] || runtime_dir="$HOME/.cache"
 mkdir -p "$runtime_dir" 2>/dev/null
-pidfile="$runtime_dir/tmux-status-daemon.pid"
+socket="${TMUX%%,*}"
+[ -n "$socket" ] || socket=$(tmux display -p '#{socket_path}' 2>/dev/null)
+pidfile="$runtime_dir/tmux-status-daemon.${socket//\//_}.pid"
 
 # Re-exec detached in our own session, so this is NOT a tracked tmux run-shell
 # job: the launcher returns at once (no hang) and the kill-on-reload stays silent
