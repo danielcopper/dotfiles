@@ -105,7 +105,7 @@ post_restore() {
   tmux set-option -gu @resurrect_restore_existing
   tmux set-option -gu @resurrect_restore_running
   "$here/agent-sidebar-ensure.sh"
-  "$here/agent-sidebar-width.sh"
+  "$here/agent-sidebar-width.sh" fit
 }
 
 case "${1:-}" in
