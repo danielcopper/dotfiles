@@ -113,7 +113,7 @@ GitHub-issue work runs through user-invoked skills backed by two custom agents, 
 | Agent           | Model | Role                                                                                                                                     |
 | --------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **implementer** | Opus  | Builds exactly the brief, asks before guessing, escalates via `DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT`, commits in its worktree, never pushes |
-| **reviewer**    | Opus  | Fresh-context, read-only. Spec compliance first, then quality; confidence-scored findings (reports ≥ 80 only), hard `Approved / Needs fixes` verdict     |
+| **reviewer**    | Opus  | Fresh-context, read-only. Spec compliance first, then quality; confidence-scored findings (reports ≥ 80 only; ≥ 50 in PR-review mode for `/pr-review`), hard `Approved / Needs fixes` verdict |
 
 Standing rules encoded in the skills/agents (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text (PRs, issues) is drafted for approval; review findings are presented, the user rules on Minors; the issue **and** its parent epic go to In Progress on the board; a Fable-model reviewer only on explicit confirmation. Tool names (linter, type checker) never live in the global agents — they come from the repo config via the dispatch.
 

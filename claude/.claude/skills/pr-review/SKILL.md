@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review an Azure DevOps pull request together with the user. Fetches the PR, runs a code-reviewer agent, turns findings into a severity-ordered task list, then validates each finding empirically with the user before deciding to drop it or post a comment on the PR. Use when the user says "review this PR", "lets do a review", or sends an Azure DevOps PR URL/number and wants to review.
+description: Review an Azure DevOps pull request together with the user. Fetches the PR, runs the reviewer agent plus matching specialists, turns findings into a severity-ordered task list, then validates each finding empirically with the user before deciding to drop it or post a comment on the PR. Use when the user says "review this PR", "lets do a review", or sends an Azure DevOps PR URL/number and wants to review.
 ---
 
 # PR Review (Azure DevOps)
@@ -25,11 +25,11 @@ Do **not** fetch the diff yourself, slice it, or skim it. The reviewer agents in
 
 ## Phase 2 — Run the reviewer agents
 
-Always run `pr-review-toolkit:code-reviewer`. In addition, scan the list of changed files from Phase 1 and run any specialist sub-agents whose triggers apply. **All applicable agents run in parallel** — single message, multiple `Agent` tool uses. Don't re-analyse the diff yourself.
+Always run `reviewer` (the custom agent in `~/.claude/agents/reviewer.md`, in its PR-review mode). In addition, scan the list of changed files from Phase 1 and run any specialist sub-agents whose triggers apply. **All applicable agents run in parallel** — single message, multiple `Agent` tool uses. Don't re-analyse the diff yourself.
 
 | Sub-agent | Run when | Why |
 |---|---|---|
-| `pr-review-toolkit:code-reviewer` | always | general bugs, logic errors, project-guideline violations |
+| `reviewer` | always | does the diff deliver what the PR description claims, correctness, project-guideline violations |
 | `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | are new tests pinning the claimed behaviour, or vacuous? |
 | `pr-review-toolkit:silent-failure-hunter` | error-handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches added in the diff) | swallowed exceptions, silent fallbacks, missing logs |
 | `pr-review-toolkit:type-design-analyzer` | new types added or existing types' shapes changed (records, classes, interfaces, type aliases) | encapsulation, invariants, useful vs anaemic types |
@@ -43,6 +43,8 @@ For each agent, the prompt must include:
 - A request to return findings as a flat list with: **severity** (blocker / major / minor / nit), **file:line**, **claim**, **suggested fix**, **confidence**
 - An instruction to skip cosmetic nits unless they actively harm reviewability
 
+The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full PR description (it is both the brief and the author's claims to verify).
+
 Do **not** run `code-simplifier` — this skill posts comments on someone else's PR, not refactors our own code.
 
 When all agents return, merge their findings into a single severity-ordered list for Phase 3, tagging each finding with the agent that raised it (helps triage when two agents flag the same line).
@@ -52,7 +54,7 @@ When all agents return, merge their findings into a single severity-ordered list
 Use `TaskCreate` to register one task per finding, ordered **severity desc** (blocker → major → minor → nit). Each task content should include:
 
 - The finding (file:line, claim, suggested fix)
-- The **agent** that raised it (`code-reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer` / `comment-analyzer`)
+- The **agent** that raised it (`reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer` / `comment-analyzer`)
 - An **"Empirical check"** section — exactly what command/probe/source-read proves or refutes the claim
 - An **"Outcome"** section left blank until validated
 
