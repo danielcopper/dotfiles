@@ -11,12 +11,14 @@ Run: python3 claude/.claude/hooks/test_block_ai_attribution.py
 import importlib.util
 import io
 import json
+import os
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -32,10 +34,19 @@ CREDIT = "Generated " + "with [Claude Code](https://claude.com/claude-code)"
 HARNESS_LINE = "\U0001f916 " + CREDIT
 
 
+def run_hook_raw(payload: str) -> subprocess.CompletedProcess[str]:
+    """The hook as the harness runs it, fed `payload` on stdin.
+
+    The timeout turns a hook that hangs into a failing test instead of a hung suite.
+    """
+    return subprocess.run(
+        [sys.executable, str(_HOOK)], input=payload, capture_output=True, text=True, check=False, timeout=15
+    )
+
+
 def run_hook(command: str, cwd: str) -> int:
     """The hook as the harness runs it: JSON on stdin, 2 means blocked."""
-    payload = json.dumps({"tool_input": {"command": command}, "cwd": cwd})
-    return subprocess.run([sys.executable, str(_HOOK)], input=payload, capture_output=True, text=True).returncode
+    return run_hook_raw(json.dumps({"tool_input": {"command": command}, "cwd": cwd})).returncode
 
 
 def temp_dir(test: unittest.TestCase) -> str:
@@ -142,6 +153,10 @@ class MessageFiles(unittest.TestCase):
 class EndToEnd(unittest.TestCase):
     """Over the hole that let a real commit through: the message in a file."""
 
+    dir: str = ""
+    dirty: Path = Path()
+    clean: Path = Path()
+
     def setUp(self):
         self.dir = temp_dir(self)
         self.dirty = Path(self.dir) / "dirty.txt"
@@ -178,7 +193,8 @@ def heredoc(text: str) -> str:
 
 # Every publishing command, with the three ways its text arrives: inline, a
 # heredoc in the command string, and a file it reads.
-FAMILIES = {
+Form = Callable[[str], str]
+FAMILIES: dict[str, tuple[Form, Form, Form]] = {
     "gh pr create": (
         lambda t: f"gh pr create --title 'feat: x' --body {shlex.quote(t)}",
         lambda t: f"gh pr create --title 'feat: x' --body {heredoc(t)}",
@@ -265,6 +281,8 @@ CLEAN_BODIES = {
 
 class PublishedText(unittest.TestCase):
     """What gh and az publish is held to the same patterns as a commit message."""
+
+    dir: str = ""
 
     def setUp(self):
         self.dir = temp_dir(self)
@@ -370,6 +388,41 @@ class PublishedText(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(guard.publish_block(command, self.dir) is not None, blocked)
 
+    def test_a_cat_in_backticks_or_behind_a_prefix_is_read(self):
+        self.body_file("dirty.md", MARKED_BODIES["a co-author trailer"])
+        for command in (
+            'gh pr create --title x --body "`cat dirty.md`"',
+            "gh pr create --title x --body `cat dirty.md`",
+            'gh pr create --title x --body "$(LC_ALL=C cat dirty.md)"',
+            'gh pr create --title x --body "$(command cat dirty.md)"',
+            'gh issue comment 3 --body "$(sudo cat dirty.md)"',
+        ):
+            with self.subTest(command=command):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_cat_reading_its_stdin_from_a_file_is_read(self):
+        self.body_file("dirty.md", MARKED_BODIES["a co-author trailer"])
+        for command in ('gh pr create --title x --body "$(cat < dirty.md)"', 'gh pr create --title x --body "$(cat <dirty.md)"'):
+            with self.subTest(command=command):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_a_cd_inside_a_subshell_stays_there(self):
+        # body.md here carries the marker; sub/body.md does not.
+        self.body_file("body.md", MARKED_BODIES["a co-author trailer"])
+        (Path(self.dir) / "sub").mkdir()
+        (Path(self.dir) / "sub" / "body.md").write_text(CLEAN_BODIES["a plain body"])
+        for command, blocked in (
+            ("(cd sub && ls); gh pr create --title x --body-file body.md", True),
+            ("X=$(cd sub && ls); gh pr create --title x --body-file body.md", True),
+            ("X=`cd sub`; gh pr create --title x --body-file body.md", True),
+            ('gh pr create --title x --body "$(cd sub && pwd)" --body-file body.md', True),
+            ("cd sub && gh pr create --title x --body-file body.md", False),
+            ("(cd sub && gh pr create --title x --body-file body.md)", False),
+            ('cd sub && gh pr create --title x --body "$(cat body.md)"', False),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard.publish_block(command, self.dir) is not None, blocked)
+
     def test_close_and_reopen_comments_are_checked(self):
         for command in ("gh pr close 7 -c", "gh pr reopen 7 --comment", "gh issue close 3 --comment", "gh issue reopen 3 -c"):
             with self.subTest(command=command):
@@ -415,6 +468,8 @@ class PublishedText(unittest.TestCase):
 
 class GhApi(unittest.TestCase):
     """`gh api` is judged on what it sends, never on what it reads."""
+
+    dir: str = ""
 
     def setUp(self):
         self.dir = temp_dir(self)
@@ -470,6 +525,8 @@ class GhApi(unittest.TestCase):
 class SearchPatterns(unittest.TestCase):
     """A grep/rg pattern names what to find; it is not text that gets published."""
 
+    dir: str = ""
+
     def setUp(self):
         self.dir = temp_dir(self)
         (Path(self.dir) / "clean.md").write_text(CLEAN_BODIES["a plain body"])
@@ -497,10 +554,56 @@ class SearchPatterns(unittest.TestCase):
             f"! grep -q {robot} dirty.md && gh pr create --title x --body-file dirty.md",
             f"! grep -q {robot} clean.md && gh pr create --title x --body 'Done. \U0001f916'",
             f"grep -v {robot} clean.md && gh pr create --title x --body " + shlex.quote(MARKED_BODIES["a co-author trailer"]),
-            f'gh api repos/o/r/issues -f body="$(grep -v x clean.md) \U0001f916"',
+            'gh api repos/o/r/issues -f body="$(grep -v x clean.md) \U0001f916"',
         ):
             with self.subTest(command=command):
                 self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_an_rg_replacement_is_not_mistaken_for_the_pattern(self):
+        # rg's `-r` takes the replacement text; the pattern is the word after it.
+        command = "rg -r 'x' '\U0001f916' clean.md || gh pr create --title x -F clean.md"
+        self.assertIsNone(guard.publish_block(command, self.dir))
+
+    def test_a_commit_chain_leaves_the_pattern_out_and_still_reads_the_message_file(self):
+        rewrite = "git log -1 --format=%B | grep -v '\U0001f916' > m.txt && git commit --amend -F m.txt"
+        message = Path(self.dir) / "m.txt"
+        message.write_text("feat: x\n\nA plain body.\n")
+        self.assertIsNone(guard.commit_block(rewrite, self.dir))
+        message.write_text("feat: x\n\n" + TRAILER + "\n")
+        self.assertIsNotNone(guard.commit_block(rewrite, self.dir))
+        message.write_text("feat: x\n\nA plain body.\n")
+        self.assertIsNotNone(guard.commit_block(f"{rewrite} -m 'feat: y \U0001f916'", self.dir))
+
+
+class FilesThatAreNotPlainText(unittest.TestCase):
+    """Only regular files are read, and only their start: nothing may stall the Bash call."""
+
+    dir: str = ""
+
+    def setUp(self):
+        self.dir = temp_dir(self)
+
+    def test_a_fifo_or_a_device_is_not_read(self):
+        fifo = Path(self.dir) / "pipe"
+        os.mkfifo(fifo)
+        for command in (
+            f'gh pr create --title x --body "$(cat {fifo})"',
+            f"gh pr create --title x --body-file {fifo}",
+            f"gh api repos/o/r/issues --input {fifo}",
+            f"git commit -F {fifo}",
+            'gh pr create --title x --body "$(cat /dev/zero | head -c 10)"',
+            "gh pr create --title x --body-file /dev/zero",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run_hook(command, self.dir), 0)
+
+    def test_only_the_start_of_a_huge_file_is_read(self):
+        path = Path(self.dir) / "big.md"
+        filler = "a" * (guard.MAX_READ + 10) + "\n"
+        path.write_text(TRAILER + "\n" + filler)
+        self.assertIsNotNone(guard.publish_block(f"gh pr create --title x --body-file {path}", self.dir))
+        path.write_text(filler + TRAILER + "\n")
+        self.assertIsNone(guard.publish_block(f"gh pr create --title x --body-file {path}", self.dir))
 
 
 class ParseCommands(unittest.TestCase):
@@ -552,6 +655,21 @@ class ParseCommands(unittest.TestCase):
     def test_a_line_continuation_between_words_is_a_blank(self):
         self.assertEqual(self.parsed("gh \\\n  pr view 1"), [(["gh", "pr", "view", "1"], [])])
 
+    def test_backticks_are_read_as_commands_like_a_substitution(self):
+        parsed = self.parsed('gh pr edit 1 --body "`cat a.md`" `echo -t` x')
+        self.assertEqual([words for words, _ in parsed[:2]], [["cat", "a.md"], ["echo", "-t"]])
+        self.assertEqual(parsed[2][0][:4], ["gh", "pr", "edit", "1"])
+
+    def test_a_subshell_or_substitution_opens_a_group_inside_its_parent(self):
+        commands = guard.parse_commands("a; (b; c); d $(e) `f`")
+        groups = {c.words[0]: c.group for c in commands}
+        self.assertEqual(groups["a"], groups["d"])
+        self.assertEqual(groups["b"], groups["c"])
+        for inner in ("b", "e", "f"):
+            with self.subTest(inner=inner):
+                self.assertNotEqual(groups[inner], groups["a"])
+                self.assertEqual(groups[inner][: len(groups["a"])], groups["a"])
+
 
 class PublishEndToEnd(unittest.TestCase):
     """The hook as the harness runs it, over the publishing commands."""
@@ -567,6 +685,12 @@ class PublishEndToEnd(unittest.TestCase):
         for command, expected in cases.items():
             with self.subTest(command=command[:30]):
                 self.assertEqual(run_hook(command, tempfile.gettempdir()), expected)
+
+    def test_input_of_the_wrong_shape_is_let_through_quietly(self):
+        for payload in ("[]", '"text"', "3", '{"tool_input": []}', '{"tool_input": {"command": 5}}', "not json"):
+            with self.subTest(payload=payload):
+                result = run_hook_raw(payload)
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
 
     def test_an_error_inside_the_hook_lets_the_call_through(self):
         payload = json.dumps({"tool_input": {"command": "gh pr create --title x --body y"}, "cwd": "/"})

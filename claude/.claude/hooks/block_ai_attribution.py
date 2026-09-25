@@ -22,28 +22,33 @@ either. Exit 2 blocks the call; anything else lets it through.
   rather than the option values alone, because the text is often put together
   earlier in the same call — a variable filled from a heredoc, or a file a
   heredoc writes just before the command reads it, which does not exist yet
-  when this hook runs. The az flags follow the az documentation; the az CLI was
-  not at hand to check them against.
+  when this hook runs. The az flags follow the az documentation.
 - `gh api`, unless the call says `GET`: the values of `-f`/`--raw-field` and
   `-F`/`--field`, the file behind a `@path` field value or `--input`, and every
   heredoc body in the command — the files and heredocs also decoded as JSON, so
   a `\\n` or `\\u` escape inside a string is read as what it stands for. Not the
   endpoint path and not `--jq`/`--template`: those choose what is read and
   publish nothing, and a jq filter naming a bot beside `.created_at` would
-  otherwise read as a credit.
-- With any of these present, also every file a `cat` in the command prints and
-  every `$(< file)`: `--body "$(cat body.md)"` and `cat body.md | gh … -F -`
-  publish that file.
+  otherwise read as a credit. A GraphQL call is a POST with fields, so its
+  query is checked even when it only reads.
+- With any of these present, also every file a `cat` in the command prints,
+  inside `$(…)`, backticks or a pipe, and every `$(< file)`:
+  `--body "$(cat body.md)"` and `cat body.md | gh … -F -` publish that file.
+  Every such `cat` counts, whether or not its output reaches the published
+  text: `cat notes.md; gh pr create --body 'plain'` is judged on `notes.md` too.
 
-Left out of the whole-string scan: the pattern of a `grep`/`rg` in the same
-command. A check for a credit line (`grep -q`, `grep -v`) names the marker it
-looks for and publishes nothing; the text that would be published is still
-read.
+Left out of the whole-string scan, for commits and published text alike: the
+pattern of a `grep`/`rg` in the same command. A check for a credit line
+(`grep -q`, `grep -v`) names the marker it looks for and publishes nothing; the
+text that would be published is still read, message and body files included.
 
 Relative paths resolve against the call's working directory, or against the
-directory of a `cd <path>` earlier in the command. Anything that does not parse
-lets the call through, and so does an error inside the hook: a guard that
-blocks a harmless command by accident gets switched off.
+directory of a `cd <path>` earlier in the command — within its subshell only:
+a `cd` inside `( … )`, `$( … )` or backticks does not reach the commands after
+it. Files are read only when they are regular files, and only up to
+`MAX_READ` characters (about a megabyte). Anything that does not parse lets
+the call through, and so does an error inside the hook: a guard that blocks a
+harmless command by accident gets switched off.
 
 **What this hook cannot see.** Text typed into git's editor or gh's prompts;
 a message already in `.git/COMMIT_EDITMSG` for `--amend`; a body on stdin that
@@ -51,10 +56,11 @@ is neither a heredoc in the command nor a file `cat` prints (`make-notes |
 gh … -F -`, `gh … -F - < body.md`), and a body put together by any other
 reader (`$(sed … file)`, `$(head file)`) — those are skipped, not guessed at; a
 relative path after `cd -` or a `cd` to a `$`/backtick path, which resolves
-against the call's working directory; a `gh api` call hidden inside a
-`bash -c` or `eval` string. For commits the complete guard is git's own
-`commit-msg` hook, which sees the final message however it arrived; this hook
-is the early, specific error, not the last line of defence.
+against the call's working directory; text past `MAX_READ` in a file; a
+product-page link written without its `https://`; a `gh api` call hidden
+inside a `bash -c` or `eval` string. For commits the complete guard is git's
+own `commit-msg` hook, which sees the final message however it arrived; this
+hook is the early, specific error, not the last line of defence.
 
 **Why tool names are not matched on their own.** `CLAUDE.md` is a real file in
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
@@ -67,8 +73,10 @@ import json
 import os
 import re
 import shlex
+import stat
 import sys
 from dataclasses import dataclass, field
+from typing import cast
 
 # git commit, also with leading -C <path> / -c <key=val> options
 GIT_COMMIT_RE = re.compile(r"\bgit(?:\s+-C\s+\S+)?(?:\s+-c\s+\S+)*\s+commit\b")
@@ -130,7 +138,7 @@ def message_files(command: str) -> list[str]:
         if token in FILE_OPTIONS:
             if index + 1 < len(tokens):
                 paths.append(tokens[index + 1])
-        elif token.startswith("--file=") or token.startswith("--template="):
+        elif token.startswith(("--file=", "--template=")):
             paths.append(token.split("=", 1)[1])
         elif len(token) > 2 and token.startswith("-F") and not token.startswith("--"):
             paths.append(token[2:])
@@ -143,11 +151,9 @@ def read_message_files(command: str, cwd: str) -> str:
     chunks: list[str] = []
     for path in message_files(command):
         candidate = path if os.path.isabs(path) else os.path.join(cwd or ".", path)
-        try:
-            with open(candidate, encoding="utf-8", errors="replace") as handle:
-                chunks.append(handle.read())
-        except OSError:
-            continue
+        text = read_text(candidate)
+        if text is not None:
+            chunks.append(text)
     return "\n".join(chunks)
 
 
@@ -195,15 +201,15 @@ GH_API_OTHER_VALUE_OPTIONS = {"-H", "--header", "-q", "--jq", "-t", "--template"
 
 # grep and rg, whose pattern argument is left out of the whole-command scan.
 SEARCH_TOOLS = {"grep", "egrep", "fgrep", "rg"}
-# Their options that take a value in grep or rg. `-r` and `-T` stay out: they
-# take none in grep, and reading them as valued only costs a pattern that then
-# still gets scanned, never a miss.
+# Their options that take a value, in grep and rg alike.
 SEARCH_VALUE_OPTIONS = {
     "-A", "-B", "-C", "-m", "-f", "-d", "-D", "-g", "-t", "-M", "-j",
     "--max-count", "--after-context", "--before-context", "--context", "--glob", "--type",
-    "--type-not", "--include", "--exclude", "--exclude-dir", "--replace", "--max-columns",
+    "--type-not", "--include", "--exclude", "--exclude-dir", "--max-columns",
     "--threads", "--max-depth", "--binary-files", "--devices", "--directories", "--label",
 }
+# Options that take a value in rg only: grep's `-r` recurses and its `-T` aligns tabs.
+RG_VALUE_OPTIONS = {"-r", "--replace", "-T"}
 # Words that can stand before the command they run: `! grep …`, `sudo cat …`.
 COMMAND_PREFIXES = {"!", "command", "sudo", "env", "time", "nice", "xargs"}
 ASSIGNMENT_RE = re.compile(r"[A-Za-z_]\w*=")
@@ -217,15 +223,21 @@ _DELIMITER_END = " \t\n;&|()<>"
 @dataclass
 class SimpleCommand:
     """One simple command: its words as written (quotes kept), where each word
-    starts in the command string, and the bodies of its heredocs."""
+    starts in the command string, the bodies of its heredocs, and its group.
+
+    `group` names the subshell the command runs in. `( … )`, `$( … )` and
+    backticks each open a new group inside the enclosing one, so a `cd` reaches
+    only the commands whose group begins with its own.
+    """
 
     words: list[str] = field(default_factory=list)
     starts: list[int] = field(default_factory=list)
     heredocs: list[str] = field(default_factory=list)
+    group: tuple[int, ...] = ()
 
 
 def parse_commands(command: str) -> list[SimpleCommand]:
-    """The simple commands in `command`, those inside `$(…)` included.
+    """The simple commands in `command`, those inside `$(…)` and backticks included.
 
     A small shell reader rather than `shlex`: an apostrophe in a heredoc body —
     "it's", "doesn't" — makes `shlex` give up on the whole command, and a PR body
@@ -236,133 +248,137 @@ def parse_commands(command: str) -> list[SimpleCommand]:
     in fewer, longer words, and nesting too deep to follow ends the reading with
     the commands found so far.
     """
-    commands: list[SimpleCommand] = []
+    reader = _Reader(command)
     try:
-        _parse(command, 0, commands, nested=False)
+        _ = reader.commands(0, None, (0,))
     except RecursionError:
         pass
-    return commands
+    return reader.out
 
 
-def _parse(text: str, i: int, out: list[SimpleCommand], nested: bool) -> int:
-    """Read commands from `text[i:]` into `out`; return the index where reading stopped.
+class _Reader:
+    """What `parse_commands` shares across nesting levels: the text, the commands found, the group count."""
 
-    `nested` is inside `$(`: an unmatched `)` ends it.
-    """
-    n = len(text)
-    current = SimpleCommand()
-    pending: list[tuple[str, bool, SimpleCommand]] = []
-    word_start: int | None = None
-    depth = 0
+    def __init__(self, text: str) -> None:
+        self.text: str = text
+        self.out: list[SimpleCommand] = []
+        self._groups: int = 0
 
-    def finish_word(end: int) -> None:
-        nonlocal word_start
-        if word_start is not None:
-            current.words.append(text[word_start:end])
-            current.starts.append(word_start)
-            word_start = None
+    def _new_group(self, parent: tuple[int, ...]) -> tuple[int, ...]:
+        self._groups += 1
+        return (*parent, self._groups)
 
-    def finish_command() -> None:
-        nonlocal current
-        if current.words:
-            out.append(current)
-        current = SimpleCommand()
+    def commands(self, i: int, closer: str | None, group: tuple[int, ...]) -> int:
+        """Read commands from `text[i:]`; return the index where reading stopped.
 
-    while i < n:
-        char = text[i]
-        if char == "\n":
-            finish_word(i)
-            i = _read_heredocs(text, i + 1, pending, nested)
-            finish_command()
-            continue
-        if char in " \t":
-            finish_word(i)
-            i += 1
-            continue
-        if text.startswith("\\\n", i) and word_start is None:
-            i += 2  # a line continuation between words
-            continue
-        if char == "#" and word_start is None:
-            while i < n and text[i] != "\n":
+        `closer` is `)` inside `$(`, a backtick inside backticks and None at the
+        top: an unmatched closer ends the reading.
+        """
+        text = self.text
+        n = len(text)
+        groups = [group]
+        current = SimpleCommand(group=group)
+        pending: list[tuple[str, bool, SimpleCommand]] = []
+        word_start: int | None = None
+
+        def finish_word(end: int) -> None:
+            nonlocal word_start
+            if word_start is not None:
+                current.words.append(text[word_start:end])
+                current.starts.append(word_start)
+                word_start = None
+
+        def finish_command() -> None:
+            nonlocal current
+            if current.words:
+                self.out.append(current)
+            current = SimpleCommand(group=groups[-1])
+
+        while i < n:
+            char = text[i]
+            if char == "\n":
+                finish_word(i)
+                i = _read_heredocs(text, i + 1, pending, closer == ")")
+                finish_command()
+                continue
+            if char in " \t":
+                finish_word(i)
                 i += 1
-            continue
-        if char == ")" and nested and depth == 0:
-            finish_word(i)
-            finish_command()
-            return i + 1
-        if char == "&" and (text.startswith("&>", i) or (i > 0 and text[i - 1] in "<>")):
-            pass  # a redirection such as `2>&1` or `&>file`, not a separator
-        elif char in ";&|()":
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth = max(0, depth - 1)
-            finish_word(i)
-            finish_command()
-            i += 1
-            continue
-        elif text.startswith("<<<", i):
-            finish_word(i)
-            current.words.append("<<<")  # a here-string: the next word is its text
-            i += 3
-            continue
-        elif text.startswith("<<", i):
-            finish_word(i)
-            i, delimiter, strip_tabs = _heredoc_operator(text, i + 2)
-            if delimiter:
-                pending.append((delimiter, strip_tabs, current))
-            continue
-        if word_start is None:
-            word_start = i
-        i = _skip_word_char(text, i, out)
-    finish_word(n)
-    finish_command()
-    return n
+                continue
+            if text.startswith("\\\n", i) and word_start is None:
+                i += 2  # a line continuation between words
+                continue
+            if char == "#" and word_start is None:
+                while i < n and text[i] != "\n":
+                    i += 1
+                continue
+            if char == closer and (closer == "`" or len(groups) == 1):
+                finish_word(i)
+                finish_command()
+                return i + 1
+            if char == "&" and (text.startswith("&>", i) or (i > 0 and text[i - 1] in "<>")):
+                pass  # a redirection such as `2>&1` or `&>file`, not a separator
+            elif char in ";&|()":
+                finish_word(i)
+                finish_command()
+                if char == "(":
+                    groups.append(self._new_group(groups[-1]))
+                elif char == ")" and len(groups) > 1:
+                    _ = groups.pop()
+                current.group = groups[-1]
+                i += 1
+                continue
+            elif text.startswith("<<<", i):
+                finish_word(i)
+                current.words.append("<<<")  # a here-string: the next word is its text
+                current.starts.append(i)
+                i += 3
+                continue
+            elif text.startswith("<<", i):
+                finish_word(i)
+                i, delimiter, strip_tabs = _heredoc_operator(text, i + 2)
+                if delimiter:
+                    pending.append((delimiter, strip_tabs, current))
+                continue
+            if word_start is None:
+                word_start = i
+            i = self._word_part(i, groups[-1])
+        finish_word(n)
+        finish_command()
+        return n
 
+    def _word_part(self, i: int, group: tuple[int, ...]) -> int:
+        """Step over one character of a word, or over a whole quoted/substituted part of it."""
+        text = self.text
+        char = text[i]
+        if char == "\\":
+            return i + 2
+        if char == "'":
+            close = text.find("'", i + 1)
+            return len(text) if close < 0 else close + 1
+        if char == '"':
+            return self._double_quoted(i + 1, group)
+        if char == "`":
+            return self.commands(i + 1, "`", self._new_group(group))
+        if text.startswith("$(", i):
+            return self.commands(i + 2, ")", self._new_group(group))
+        return i + 1
 
-def _skip_word_char(text: str, i: int, out: list[SimpleCommand]) -> int:
-    """Step over one character of a word, or over a whole quoted/substituted part of it."""
-    char = text[i]
-    if char == "\\":
-        return i + 2
-    if char == "'":
-        close = text.find("'", i + 1)
-        return len(text) if close < 0 else close + 1
-    if char == '"':
-        return _skip_double_quoted(text, i + 1, out)
-    if char == "`":
-        return _skip_backticks(text, i + 1)
-    if text.startswith("$(", i):
-        return _parse(text, i + 2, out, nested=True)
-    return i + 1
-
-
-def _skip_double_quoted(text: str, i: int, out: list[SimpleCommand]) -> int:
-    n = len(text)
-    while i < n:
-        if text[i] == "\\":
-            i += 2
-        elif text[i] == '"':
-            return i + 1
-        elif text[i] == "`":
-            i = _skip_backticks(text, i + 1)
-        elif text.startswith("$(", i):
-            i = _parse(text, i + 2, out, nested=True)
-        else:
-            i += 1
-    return n
-
-
-def _skip_backticks(text: str, i: int) -> int:
-    n = len(text)
-    while i < n:
-        if text[i] == "\\":
-            i += 2
-        elif text[i] == "`":
-            return i + 1
-        else:
-            i += 1
-    return n
+    def _double_quoted(self, i: int, group: tuple[int, ...]) -> int:
+        text = self.text
+        n = len(text)
+        while i < n:
+            if text[i] == "\\":
+                i += 2
+            elif text[i] == '"':
+                return i + 1
+            elif text[i] == "`":
+                i = self.commands(i + 1, "`", self._new_group(group))
+            elif text.startswith("$(", i):
+                i = self.commands(i + 2, ")", self._new_group(group))
+            else:
+                i += 1
+        return n
 
 
 def _heredoc_operator(text: str, i: int) -> tuple[int, str, bool]:
@@ -457,11 +473,22 @@ def resolve(path: str, cwd: str) -> str:
     return path if os.path.isabs(path) else os.path.join(cwd or ".", path)
 
 
+# The most of one file this hook reads, in characters. A body is a few KB; the
+# cap keeps a huge file from stalling the Bash call behind it.
+MAX_READ = 1 << 20
+
+
 def read_text(path: str) -> str | None:
-    """The text of `path`, or None when it cannot be read."""
+    """The first `MAX_READ` characters of `path` when it is a regular file, or None.
+
+    Only regular files: opening a FIFO waits for a writer that may never come,
+    and a device such as `/dev/zero` never ends.
+    """
     try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return None
         with open(path, encoding="utf-8", errors="replace") as handle:
-            return handle.read()
+            return handle.read(MAX_READ)
     except OSError:
         return None
 
@@ -501,11 +528,9 @@ def body_files(family: str, args: list[str]) -> list[str]:
     """Paths whose text the gh/az command `family` publishes; stdin (`-`) is left out."""
     if family.startswith("az "):
         paths = [value[1:] for value in az_text_values(args) if value.startswith("@")]
-    elif family.split()[1] in GH_FILE_OPTIONS:
+    else:
         short, long = GH_FILE_OPTIONS[family.split()[1]]
         paths = option_values(args, short, long)
-    else:
-        paths = []
     return [path for path in paths if path and path != "-"]
 
 
@@ -552,7 +577,7 @@ def json_strings(text: str) -> str | None:
     `\\u` escape; decoded, a trailer is back at the start of a line.
     """
     try:
-        stack = [json.loads(text)]
+        stack: list[object] = [json.loads(text)]
     except (ValueError, RecursionError):
         return None
     strings: list[str] = []
@@ -561,10 +586,18 @@ def json_strings(text: str) -> str | None:
         if isinstance(item, str):
             strings.append(item)
         elif isinstance(item, dict):
-            stack.extend(item.values())
+            stack.extend(cast("dict[str, object]", item).values())
         elif isinstance(item, list):
-            stack.extend(item)
+            stack.extend(cast("list[object]", item))
     return "\n".join(strings) if strings else None
+
+
+def command_word(words: list[str]) -> int:
+    """Index of the word naming the program `words` runs, past `!`, `sudo`, `VAR=value` and the like."""
+    index = 0
+    while index < len(words) and (words[index] in COMMAND_PREFIXES or ASSIGNMENT_RE.match(words[index])):
+        index += 1
+    return index
 
 
 def search_pattern_words(words: list[str]) -> list[int]:
@@ -574,11 +607,12 @@ def search_pattern_words(words: list[str]) -> list[int]:
     `grep -q`, `grep -v` — carries the very marker it looks for. It publishes
     nothing.
     """
-    index = 0
-    while index < len(words) and (words[index] in COMMAND_PREFIXES or ASSIGNMENT_RE.match(words[index])):
-        index += 1
+    index = command_word(words)
     if index >= len(words) or os.path.basename(words[index]) not in SEARCH_TOOLS:
         return []
+    value_options = SEARCH_VALUE_OPTIONS
+    if os.path.basename(words[index]) == "rg":
+        value_options = value_options | RG_VALUE_OPTIONS
     patterns: list[int] = []
     from_file = False
     operand: int | None = None
@@ -600,14 +634,14 @@ def search_pattern_words(words: list[str]) -> list[int]:
             from_file = True
             index += 2 if word == "--file" else 1
         elif word.startswith("--"):
-            index += 2 if word in SEARCH_VALUE_OPTIONS else 1
+            index += 2 if word in value_options else 1
         elif "e" in word[1:]:
             # `-e`, or a cluster such as `-ve PATTERN` / `-vePATTERN`.
             patterns.append(index + 1 if word[-1] == "e" else index)
             index += 2 if word[-1] == "e" else 1
         else:
             from_file = from_file or word[1:].startswith("f")
-            index += 2 if word[:2] in SEARCH_VALUE_OPTIONS and len(word) == 2 else 1
+            index += 2 if word[:2] in value_options and len(word) == 2 else 1
     if not patterns and not from_file and operand is not None:
         patterns.append(operand)
     return [index for index in patterns if index < len(words)]
@@ -627,6 +661,7 @@ def without_search_patterns(command: str, commands: list[SimpleCommand]) -> str:
 
 def read_into_command(words: list[str]) -> list[str]:
     """Paths whose text `words` puts on stdout: what `cat` reads, or `< path` alone (`$(< path)`)."""
+    words = words[command_word(words) :]
     if not words:
         return []
     if words[0] == "<" and len(words) == 2:
@@ -639,13 +674,13 @@ def read_into_command(words: list[str]) -> list[str]:
     rest = iter(words[1:])
     for word in rest:
         if word == "<<<":
-            next(rest, None)  # a here-string: text, not a file
+            _ = next(rest, None)  # a here-string: text, not a file
         elif word == "<":
             paths.append(next(rest, "-"))  # `cat < file` prints the file
         elif word.startswith("<") and not word.startswith("<<"):
             paths.append(word[1:])
         elif REDIRECTION_RE.fullmatch(word):
-            next(rest, None)  # `> out`: the next word is where output goes
+            _ = next(rest, None)  # `> out`: the next word is where output goes
         elif REDIRECTION_RE.match(word) or word.startswith("<<") or (word.startswith("-") and word != "-"):
             continue
         else:
@@ -656,16 +691,23 @@ def read_into_command(words: list[str]) -> list[str]:
 def working_directories(commands: list[SimpleCommand], words: list[list[str]], cwd: str) -> list[str]:
     """The directory each command runs in, following `cd <path>` to the commands after it.
 
-    `cd -` and a path built from `$`/backticks are not followed: the directory
-    they name is not in the command.
+    A `cd` reaches only the commands of its own group and the groups inside it:
+    one in `( … )`, `$( … )` or backticks ends with that subshell. `cd -` and a
+    path built from `$`/backticks are not followed: the directory they name is
+    not in the command.
     """
     directories: list[str] = []
+    changes: list[tuple[tuple[int, ...], str]] = []
     for simple, dequoted in zip(commands, words):
-        directories.append(cwd)
+        here = cwd
+        for group, directory in changes:
+            if simple.group[: len(group)] == group:
+                here = directory
+        directories.append(here)
         if len(dequoted) == 2 and dequoted[0] == "cd":
             raw = simple.words[1]
             if dequoted[1] != "-" and "$" not in raw and "`" not in raw:
-                cwd = resolve(dequoted[1], cwd)
+                changes.append((simple.group, resolve(dequoted[1], here)))
     return directories
 
 
@@ -728,7 +770,10 @@ def commit_block(command: str, cwd: str) -> str | None:
     """Why the `git commit` in `command` is blocked, or None."""
     if not GIT_COMMIT_RE.search(command):
         return None
-    sources = [("the commit command", command)]
+    scanned = without_search_patterns(command, parse_commands(command))
+    if not GIT_COMMIT_RE.search(scanned):
+        return None
+    sources = [("the commit command", scanned)]
     from_files = read_message_files(command, cwd)
     if from_files:
         sources.append(("a message file the commit reads", from_files))
@@ -759,11 +804,20 @@ def publish_block(command: str, cwd: str) -> str | None:
 
 def main() -> int:
     try:
-        data = json.load(sys.stdin)
+        data = cast(object, json.load(sys.stdin))
     except (json.JSONDecodeError, ValueError):
         return 0
-    command = (data.get("tool_input") or {}).get("command") or ""
-    cwd = data.get("cwd") or ""
+    if not isinstance(data, dict):
+        return 0
+    payload = cast("dict[str, object]", data)
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    command = cast("dict[str, object]", tool_input).get("command")
+    cwd = payload.get("cwd")
+    if not isinstance(command, str):
+        return 0
+    cwd = cwd if isinstance(cwd, str) else ""
     try:
         reason = commit_block(command, cwd) or publish_block(command, cwd)
     except Exception as error:  # noqa: BLE001 - a guard that crashes must not block the call
