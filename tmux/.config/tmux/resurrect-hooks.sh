@@ -20,7 +20,8 @@
 # instead (never a window's only pane); windows without one get a sidebar from
 # agent-sidebar-ensure.sh.
 # While the restore runs, @resurrect_restore_running pauses sidebar creation
-# for new windows and sessions.
+# for new windows and sessions, and agent-sidebar-width.sh; afterwards every
+# sidebar is put back to @sidebar_width.
 
 set -u
 
@@ -104,6 +105,7 @@ post_restore() {
   tmux set-option -gu @resurrect_restore_existing
   tmux set-option -gu @resurrect_restore_running
   "$here/agent-sidebar-ensure.sh"
+  "$here/agent-sidebar-width.sh"
 }
 
 case "${1:-}" in
