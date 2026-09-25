@@ -42,10 +42,11 @@ pattern of a `grep`/`rg` in the same command. A check for a credit line
 (`grep -q`, `grep -v`) names the marker it looks for and publishes nothing; the
 text that would be published is still read, message and body files included.
 
-Relative paths resolve against the call's working directory, or against the
-directory of a `cd <path>` earlier in the command — within its subshell only:
-a `cd` inside `( … )`, `$( … )` or backticks does not reach the commands after
-it. Files are read only when they are regular files, and only up to
+Relative paths resolve against the call's working directory. For the gh and az
+commands they also follow a `cd <path>` earlier in the command — within its
+subshell only: a `cd` inside `( … )`, `$( … )` or backticks does not reach the
+commands after it. A `git commit` message file always resolves against the
+call's working directory. Files are read only when they are regular files, and only up to
 `MAX_READ` characters (about a megabyte). Anything that does not parse lets
 the call through, and so does an error inside the hook: a guard that blocks a
 harmless command by accident gets switched off.
@@ -55,12 +56,17 @@ a message already in `.git/COMMIT_EDITMSG` for `--amend`; a body on stdin that
 is neither a heredoc in the command nor a file `cat` prints (`make-notes |
 gh … -F -`, `gh … -F - < body.md`), and a body put together by any other
 reader (`$(sed … file)`, `$(head file)`) — those are skipped, not guessed at; a
-relative path after `cd -` or a `cd` to a `$`/backtick path, which resolves
-against the call's working directory; text past `MAX_READ` in a file; a
-product-page link written without its `https://`; a `gh api` call hidden
-inside a `bash -c` or `eval` string. For commits the complete guard is git's
-own `commit-msg` hook, which sees the final message however it arrived; this
-hook is the early, specific error, not the last line of defence.
+`cat` behind a prefix that takes options of its own (`env -i cat`,
+`sudo -u X cat`, `nice -n 5 cat`, `timeout 5 cat`); a `$(cat …)` or backtick
+`cat` inside an unquoted heredoc body, which the shell expands and this hook
+does not; a relative path after `cd -` or a `cd` to a `$`/backtick path, which
+resolves against the call's working directory; a relative `git commit`
+message file after a `cd` or behind `git -C <dir>`, which resolves against the
+call's working directory too; text past `MAX_READ` in a file; a product-page
+link written without its `https://`; a `gh api` call hidden inside a
+`bash -c` or `eval` string. For commits, a git `commit-msg` hook would be the
+complete guard, since it sees the final message however it arrived; this hook
+is the early, specific error, not the last line of defence.
 
 **Why tool names are not matched on their own.** `CLAUDE.md` is a real file in
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
@@ -201,15 +207,19 @@ GH_API_OTHER_VALUE_OPTIONS = {"-H", "--header", "-q", "--jq", "-t", "--template"
 
 # grep and rg, whose pattern argument is left out of the whole-command scan.
 SEARCH_TOOLS = {"grep", "egrep", "fgrep", "rg"}
-# Their options that take a value, in grep and rg alike.
+# Their options read as taking a value whichever tool runs: each takes one in at
+# least one of GNU grep, ugrep and rg, and none of them is a valueless flag in
+# another. Reading an option as valued when it is not only costs a pattern that
+# then still gets scanned, never a miss.
 SEARCH_VALUE_OPTIONS = {
-    "-A", "-B", "-C", "-m", "-f", "-d", "-D", "-g", "-t", "-M", "-j",
+    "-A", "-B", "-C", "-m", "-f", "-d", "-D", "-g", "-t", "-M",
     "--max-count", "--after-context", "--before-context", "--context", "--glob", "--type",
     "--type-not", "--include", "--exclude", "--exclude-dir", "--max-columns",
     "--threads", "--max-depth", "--binary-files", "--devices", "--directories", "--label",
 }
-# Options that take a value in rg only: grep's `-r` recurses and its `-T` aligns tabs.
-RG_VALUE_OPTIONS = {"-r", "--replace", "-T"}
+# Options that take a value in rg only: grep's `-r` recurses, its `-T` aligns
+# tabs, and in ugrep (what `grep` runs in this shell) `-j` is `--smart-case`.
+RG_VALUE_OPTIONS = {"-r", "--replace", "-T", "-j"}
 # Words that can stand before the command they run: `! grep …`, `sudo cat …`.
 COMMAND_PREFIXES = {"!", "command", "sudo", "env", "time", "nice", "xargs"}
 ASSIGNMENT_RE = re.compile(r"[A-Za-z_]\w*=")

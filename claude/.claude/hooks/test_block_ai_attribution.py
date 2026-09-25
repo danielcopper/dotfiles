@@ -559,6 +559,11 @@ class SearchPatterns(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNotNone(guard.publish_block(command, self.dir))
 
+    def test_grep_j_takes_no_value(self):
+        # In ugrep `-j` is `--smart-case`: the word after it is the pattern.
+        command = "grep -j '\U0001f916' clean.md; gh pr create --title x -F clean.md"
+        self.assertIsNone(guard.publish_block(command, self.dir))
+
     def test_an_rg_replacement_is_not_mistaken_for_the_pattern(self):
         # rg's `-r` takes the replacement text; the pattern is the word after it.
         command = "rg -r 'x' '\U0001f916' clean.md || gh pr create --title x -F clean.md"
@@ -634,6 +639,12 @@ class ParseCommands(unittest.TestCase):
         self.assertEqual(parsed[0], (["cat"], ['Says "hi"']))
         self.assertEqual(parsed[1][0][:5], ["gh", "pr", "edit", "1", "--body"])
         self.assertEqual(len(parsed[1][0]), 6)
+
+    def test_every_word_has_its_start_even_after_a_here_string(self):
+        command = 'grep <<< "$x" -e p'
+        (parsed,) = guard.parse_commands(command)
+        self.assertEqual(len(parsed.starts), len(parsed.words))
+        self.assertEqual([command[start : start + len(word)] for word, start in zip(parsed.words, parsed.starts)], parsed.words)
 
     def test_a_here_string_is_not_a_heredoc(self):
         self.assertEqual(self.parsed('gh pr edit 1 -F - <<< "$x"'), [(["gh", "pr", "edit", "1", "-F", "-", "<<<", '"$x"'], [])])
