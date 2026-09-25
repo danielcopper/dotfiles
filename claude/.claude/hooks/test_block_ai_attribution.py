@@ -9,13 +9,16 @@ Run: python3 claude/.claude/hooks/test_block_ai_attribution.py
 """
 
 import importlib.util
+import io
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _HOOK = Path(__file__).with_name("block_ai_attribution.py")
 _spec = importlib.util.spec_from_file_location("block_ai_attribution", _HOOK)
@@ -33,6 +36,13 @@ def run_hook(command: str, cwd: str) -> int:
     """The hook as the harness runs it: JSON on stdin, 2 means blocked."""
     payload = json.dumps({"tool_input": {"command": command}, "cwd": cwd})
     return subprocess.run([sys.executable, str(_HOOK)], input=payload, capture_output=True, text=True).returncode
+
+
+def temp_dir(test: unittest.TestCase) -> str:
+    """A fresh directory, removed when `test` finishes."""
+    path = tempfile.mkdtemp()
+    test.addCleanup(shutil.rmtree, path, ignore_errors=True)
+    return path
 
 
 class WhatCounts(unittest.TestCase):
@@ -72,6 +82,15 @@ class WhatCounts(unittest.TestCase):
     def test_the_robot_emoji_counts(self):
         self.assertIsNotNone(guard.offence("feat: x\n\n\U0001f916 with a tool"))
 
+    def test_a_link_to_the_tool_page_counts_whatever_verb_stands_before_it(self):
+        for line in (
+            "Built using [Claude Code](https://" + "claude.com/claude-code)",
+            "See https://www." + "claude.com/claude-code",
+            "Made in https://" + "claude.ai/code",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNotNone(guard.offence("feat: x\n\n" + line))
+
 
 class WhatMustStillPass(unittest.TestCase):
     """A guard that refuses honest commits gets turned off, so these matter as much."""
@@ -91,6 +110,9 @@ class WhatMustStillPass(unittest.TestCase):
 
     def test_an_ordinary_message_passes(self):
         self.assertIsNone(guard.offence("fix(qam): claim the band a wide page was leaving under itself\n\nA plain body."))
+
+    def test_the_tool_named_in_prose_without_a_link_is_not_attribution(self):
+        self.assertIsNone(guard.offence("feat(hooks): run the guard in every Claude Code session\n\nClaude Code reads it."))
 
     def test_a_signed_off_by_trailer_is_not_attribution(self):
         self.assertIsNone(guard.offence("feat: x\n\nSigned-off-by: A Person <a@b.c>"))
@@ -121,7 +143,7 @@ class EndToEnd(unittest.TestCase):
     """Over the hole that let a real commit through: the message in a file."""
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp()
+        self.dir = temp_dir(self)
         self.dirty = Path(self.dir) / "dirty.txt"
         self.clean = Path(self.dir) / "clean.txt"
         self.dirty.write_text("feat: x\n\n" + TRAILER + "\n")
@@ -222,6 +244,11 @@ FAMILIES = {
         lambda t: f"az repos pr update --id 5 --description {heredoc(t)}",
         lambda p: f"az repos pr update --id 5 --description @{p} --title 'feat: x'",
     ),
+    "az repos pr create -d": (
+        lambda t: f"az repos pr create --title 'feat: x' -d 'First line.' {shlex.quote(t)}",
+        lambda t: f"az repos pr create --title 'feat: x' -d {heredoc(t)}",
+        lambda p: f"az repos pr create -d @{p} --title 'feat: x'",
+    ),
 }
 
 MARKED_BODIES = {
@@ -240,7 +267,7 @@ class PublishedText(unittest.TestCase):
     """What gh and az publish is held to the same patterns as a commit message."""
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp()
+        self.dir = temp_dir(self)
 
     def body_file(self, name: str, text: str) -> str:
         path = Path(self.dir) / name
@@ -300,9 +327,71 @@ class PublishedText(unittest.TestCase):
             with self.subTest(command=command.split("\n")[0]):
                 self.assertIsNotNone(guard.publish_block(command, self.dir))
 
-    def test_a_piped_body_cannot_be_read_and_does_not_block_on_its_own(self):
+    def test_a_stdin_body_from_elsewhere_does_not_block_on_its_own(self):
+        self.assertIsNone(guard.publish_block("make-notes | gh pr create --title x --body-file -", self.dir))
+
+    def test_a_body_piped_from_cat_is_read(self):
         path = self.body_file("body.md", MARKED_BODIES["the robot line"])
-        self.assertIsNone(guard.publish_block(f"cat {path} | gh pr create --title x --body-file -", self.dir))
+        self.assertIsNotNone(guard.publish_block(f"cat {path} | gh pr create --title x --body-file -", self.dir))
+
+    def test_a_file_read_into_the_command_is_read(self):
+        dirty = self.body_file("dirty.md", MARKED_BODIES["a co-author trailer"])
+        self.body_file("clean.md", CLEAN_BODIES["a plain body"])
+        for command, blocked in (
+            ('gh pr create --title x --body "$(cat dirty.md)"', True),
+            ('gh pr comment 7 --body "$(< dirty.md)"', True),
+            ('gh pr comment 7 --body "$(<dirty.md)"', True),
+            ('gh api repos/o/r/issues/3/comments -f body="$(cat dirty.md)"', True),
+            ('gh issue create -t x -b "$(cat -- clean.md dirty.md)"', True),
+            ('gh pr create --title x --body "$(cat clean.md)"', False),
+            # `> dirty.md` is where cat writes, not what it reads.
+            (f"cat > {dirty} <<'EOF'\nA plain body.\nEOF\ngh pr create --title x --body-file clean.md", False),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard.publish_block(command, self.dir) is not None, blocked)
+
+    def test_a_read_only_command_s_cat_is_not_read(self):
+        self.body_file("dirty.md", MARKED_BODIES["a co-author trailer"])
+        self.assertIsNone(guard.publish_block("cat dirty.md && gh pr view 7", self.dir))
+
+    def test_a_relative_body_file_follows_a_cd_earlier_in_the_command(self):
+        sub = Path(self.dir) / "sub"
+        sub.mkdir()
+        (sub / "body.md").write_text(MARKED_BODIES["a co-author trailer"])
+        for command, blocked in (
+            (f"cd {sub} && gh pr create --title x --body-file body.md", True),
+            ("cd sub && gh pr create --title x --body-file body.md", True),
+            ('cd sub; gh pr create --title x --body "$(cat body.md)"', True),
+            ("cd sub && gh api repos/o/r/issues -F body=@body.md", True),
+            # Not followed: the directory is not in the command.
+            ("cd - && gh pr create --title x --body-file body.md", False),
+            ("cd $SUB && gh pr create --title x --body-file body.md", False),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard.publish_block(command, self.dir) is not None, blocked)
+
+    def test_close_and_reopen_comments_are_checked(self):
+        for command in ("gh pr close 7 -c", "gh pr reopen 7 --comment", "gh issue close 3 --comment", "gh issue reopen 3 -c"):
+            with self.subTest(command=command):
+                self.assertIsNotNone(guard.publish_block(f"{command} {shlex.quote(MARKED_BODIES['the robot line'])}", self.dir))
+                self.assertIsNone(guard.publish_block(f"{command} {shlex.quote(CLEAN_BODIES['a plain body'])}", self.dir))
+
+    def test_option_and_line_continuation_spellings(self):
+        self.body_file("body.md", MARKED_BODIES["a co-author trailer"])
+        for command in (
+            "gh pr create --title x -F=body.md",
+            "gh release edit v1 -F=body.md",
+            "gh \\\n  pr create --title x --body-file body.md",
+            "gh \\\n  pr create --title x --body " + shlex.quote(MARKED_BODIES["the robot line"]),
+        ):
+            with self.subTest(command=command):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_a_link_to_the_tool_page_blocks_published_text(self):
+        body = "Adds the export button.\n\nBuilt using [Claude Code](https://" + "claude.com/claude-code)"
+        self.assertIsNotNone(guard.publish_block(f"gh pr create --title x --body {shlex.quote(body)}", self.dir))
+        prose = "Adds a hook that every Claude Code session runs."
+        self.assertIsNone(guard.publish_block(f"gh pr create --title x --body {shlex.quote(prose)}", self.dir))
 
     def test_a_publishing_command_is_found_in_a_chain(self):
         body = MARKED_BODIES["the credit without the emoji"]
@@ -328,7 +417,7 @@ class GhApi(unittest.TestCase):
     """`gh api` is judged on what it sends, never on what it reads."""
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp()
+        self.dir = temp_dir(self)
 
     def test_a_field_value_is_checked(self):
         marked = shlex.quote(MARKED_BODIES["the robot line"])
@@ -356,6 +445,62 @@ class GhApi(unittest.TestCase):
         path.write_text(MARKED_BODIES["a co-author trailer"])
         self.assertIsNone(guard.publish_block(f"gh api repos/o/r/issues -f body=@{path}", self.dir))
         self.assertIsNotNone(guard.publish_block(f"gh api repos/o/r/issues -F body=@{path}", self.dir))
+
+    def test_json_escapes_are_read_as_what_they_stand_for(self):
+        # json.dumps writes the line breaks as `\n` and the emoji as a `\u` escape;
+        # these markers show only once that is decoded.
+        for marker, body in (
+            ("a trailer naming a person", "Adds the button.\n\nCo-" + "authored-by: A Person <a@b.c>"),
+            ("the emoji alone", "Adds the button.\n\n\U0001f916 Shipped"),
+        ):
+            payload = json.dumps({"title": "x", "body": body})
+            self.assertIsNone(guard.offence(payload))
+            path = Path(self.dir) / "payload.json"
+            path.write_text(payload)
+            for command in (
+                f"gh api repos/o/r/issues --input {path}",
+                f"gh api repos/o/r/issues --input - <<'EOF'\n{payload}\nEOF",
+            ):
+                with self.subTest(marker=marker, command=command.split(" <<")[0]):
+                    self.assertIsNotNone(guard.publish_block(command, self.dir))
+        path.write_text(json.dumps({"body": CLEAN_BODIES["a plain body"]}))
+        self.assertIsNone(guard.publish_block(f"gh api repos/o/r/issues --input {path}", self.dir))
+
+
+class SearchPatterns(unittest.TestCase):
+    """A grep/rg pattern names what to find; it is not text that gets published."""
+
+    def setUp(self):
+        self.dir = temp_dir(self)
+        (Path(self.dir) / "clean.md").write_text(CLEAN_BODIES["a plain body"])
+        (Path(self.dir) / "dirty.md").write_text(MARKED_BODIES["the robot line"])
+
+    def test_a_check_for_a_credit_line_passes(self):
+        robot = "'\U0001f916'"
+        for command in (
+            f'gh pr edit 7 --body "$(gh pr view 7 --json body -q .body | grep -v {robot})"',
+            f"! grep -q {robot} clean.md && gh pr create --title x --body-file clean.md",
+            f"grep -n -e {robot} clean.md; gh pr create --title x -F clean.md",
+            f"grep -ve {robot} clean.md > out.md && gh pr create --title x -F clean.md",
+            f"grep --regexp={robot} clean.md || gh pr create --title x -F clean.md",
+            f"rg -q -- {robot} clean.md || gh issue comment 3 -F clean.md",
+            f"LC_ALL=C grep -m 1 -c {shlex.quote(CREDIT)} clean.md && gh pr create --title x -F clean.md",
+            # A pattern that names a publishing command does not make one.
+            "grep -c 'gh pr create' clean.md; cat dirty.md",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(guard.publish_block(command, self.dir))
+
+    def test_what_would_be_published_is_still_checked(self):
+        robot = "'\U0001f916'"
+        for command in (
+            f"! grep -q {robot} dirty.md && gh pr create --title x --body-file dirty.md",
+            f"! grep -q {robot} clean.md && gh pr create --title x --body 'Done. \U0001f916'",
+            f"grep -v {robot} clean.md && gh pr create --title x --body " + shlex.quote(MARKED_BODIES["a co-author trailer"]),
+            f'gh api repos/o/r/issues -f body="$(grep -v x clean.md) \U0001f916"',
+        ):
+            with self.subTest(command=command):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
 
 
 class ParseCommands(unittest.TestCase):
@@ -399,6 +544,14 @@ class ParseCommands(unittest.TestCase):
                 guard.parse_commands(command)
                 self.assertIsNone(guard.publish_block(command, "/nonexistent"))
 
+    def test_nesting_too_deep_to_follow_does_not_raise(self):
+        command = "gh pr create -b " + "$(" * 5000 + "x" + ")" * 5000
+        guard.parse_commands(command)
+        self.assertIsNone(guard.publish_block(command, "/nonexistent"))
+
+    def test_a_line_continuation_between_words_is_a_blank(self):
+        self.assertEqual(self.parsed("gh \\\n  pr view 1"), [(["gh", "pr", "view", "1"], [])])
+
 
 class PublishEndToEnd(unittest.TestCase):
     """The hook as the harness runs it, over the publishing commands."""
@@ -414,6 +567,16 @@ class PublishEndToEnd(unittest.TestCase):
         for command, expected in cases.items():
             with self.subTest(command=command[:30]):
                 self.assertEqual(run_hook(command, tempfile.gettempdir()), expected)
+
+    def test_an_error_inside_the_hook_lets_the_call_through(self):
+        payload = json.dumps({"tool_input": {"command": "gh pr create --title x --body y"}, "cwd": "/"})
+        with (
+            mock.patch.object(guard, "publishing_sources", side_effect=RuntimeError("boom")),
+            mock.patch.object(sys, "stdin", io.StringIO(payload)),
+            mock.patch.object(sys, "stderr", io.StringIO()) as stderr,
+        ):
+            self.assertEqual(guard.main(), 0)
+        self.assertIn("boom", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -4,43 +4,57 @@ the text that gh and az publish.
 
 Blocks a command whose text carries attribution — an attribution trailer
 whoever it names, a vendor noreply address, the robot emoji, an assistant
-session link, or a tool/model name standing next to a word like "generated".
-Commit messages stay plain Conventional Commits; pull requests, issues, comments
-and release notes carry no tool credit either. Exit 2 blocks the call; anything
-else lets it through.
+session link, a link to a tool's product page, or a tool/model name standing
+next to a word like "generated". Commit messages stay plain Conventional
+Commits; pull requests, issues, comments and release notes carry no tool credit
+either. Exit 2 blocks the call; anything else lets it through.
 
 **What is read, per command.**
 
 - `git commit`: the command string, and the files `-F`/`--file`/`-t`/
   `--template` name. A heredoc is part of the command string; a message file is
   not, so the file forms are resolved and read too.
-- `gh pr create|edit|comment|review|merge`, `gh issue create|edit|comment`,
-  `gh release create|edit` (and the `new` aliases), `az repos pr create|update`:
-  the whole command string, and the files `--body-file`/`-F`
-  (`--notes-file`/`-F` for a release) and az's `@file` values of `--title`/
-  `--description` name. The whole string rather than the option values alone,
-  because the text is often put together earlier in the same call — a variable
-  filled from a heredoc, or a file a heredoc writes just before the command
-  reads it, which does not exist yet when this hook runs.
+- `gh pr create|edit|comment|review|merge|close|reopen`,
+  `gh issue create|edit|comment|close|reopen`, `gh release create|edit` (and
+  the `new` aliases), `az repos pr create|update`: the whole command string,
+  and the files `--body-file`/`-F` (`--notes-file`/`-F` for a release) and az's
+  `@file` values of `--title`/`--description`/`-d` name. The whole string
+  rather than the option values alone, because the text is often put together
+  earlier in the same call — a variable filled from a heredoc, or a file a
+  heredoc writes just before the command reads it, which does not exist yet
+  when this hook runs. The az flags follow the az documentation; the az CLI was
+  not at hand to check them against.
 - `gh api`, unless the call says `GET`: the values of `-f`/`--raw-field` and
   `-F`/`--field`, the file behind a `@path` field value or `--input`, and every
-  heredoc body in the command. Not the endpoint path and not `--jq`/
-  `--template`: those choose what is read and publish nothing, and a jq filter
-  naming a bot beside `.created_at` would otherwise read as a credit.
+  heredoc body in the command — the files and heredocs also decoded as JSON, so
+  a `\\n` or `\\u` escape inside a string is read as what it stands for. Not the
+  endpoint path and not `--jq`/`--template`: those choose what is read and
+  publish nothing, and a jq filter naming a bot beside `.created_at` would
+  otherwise read as a credit.
+- With any of these present, also every file a `cat` in the command prints and
+  every `$(< file)`: `--body "$(cat body.md)"` and `cat body.md | gh … -F -`
+  publish that file.
 
-Relative paths resolve against the call's working directory. Anything that does
-not parse lets the call through: a guard that blocks a harmless command by
-accident gets switched off.
+Left out of the whole-string scan: the pattern of a `grep`/`rg` in the same
+command. A check for a credit line (`grep -q`, `grep -v`) names the marker it
+looks for and publishes nothing; the text that would be published is still
+read.
+
+Relative paths resolve against the call's working directory, or against the
+directory of a `cd <path>` earlier in the command. Anything that does not parse
+lets the call through, and so does an error inside the hook: a guard that
+blocks a harmless command by accident gets switched off.
 
 **What this hook cannot see.** Text typed into git's editor or gh's prompts;
-a message already in `.git/COMMIT_EDITMSG` for `--amend`; a body read from
-stdin that is not a heredoc in the command (`--body-file -` fed by a pipe or a
-`< file` redirect) — such a body is skipped, not guessed at; a relative body
-file after a `cd` in the same command, since paths are resolved against the
-call's working directory only; a `gh api` call hidden inside a `bash -c` or
-`eval` string. For commits the complete guard is git's own `commit-msg` hook,
-which sees the final message however it arrived; this hook is the early,
-specific error, not the last line of defence.
+a message already in `.git/COMMIT_EDITMSG` for `--amend`; a body on stdin that
+is neither a heredoc in the command nor a file `cat` prints (`make-notes |
+gh … -F -`, `gh … -F - < body.md`), and a body put together by any other
+reader (`$(sed … file)`, `$(head file)`) — those are skipped, not guessed at; a
+relative path after `cd -` or a `cd` to a `$`/backtick path, which resolves
+against the call's working directory; a `gh api` call hidden inside a
+`bash -c` or `eval` string. For commits the complete guard is git's own
+`commit-msg` hook, which sees the final message however it arrived; this hook
+is the early, specific error, not the last line of defence.
 
 **Why tool names are not matched on their own.** `CLAUDE.md` is a real file in
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
@@ -92,6 +106,9 @@ PATTERNS = [
     (re.compile(r"\U0001F916"), "the robot emoji"),
     (re.compile(r"noreply@(?:anthropic|openai)\.com", re.IGNORECASE), "a vendor noreply address"),
     (re.compile(r"https?://(?:claude\.ai|chatgpt\.com|chat\.openai\.com)/\S*", re.IGNORECASE), "an assistant session link"),
+    # The page a tool credit links to. Prose naming the tool passes; the link is
+    # what a credit line carries, whatever verb stands before it.
+    (re.compile(r"https?://(?:www\.)?claude\.com/claude-code", re.IGNORECASE), "a link to an AI tool's page"),
 ]
 
 # Options whose value is a path holding the message text.
@@ -145,17 +162,19 @@ def offence(text: str) -> str | None:
 # gh and az commands that publish text. Matched anywhere in the command, like
 # `git commit` above, so `cd x && …`, `$(…)` and `bash -c "…"` forms all count.
 GH_VERBS = {
-    "pr": {"create", "new", "edit", "comment", "review", "merge"},
-    "issue": {"create", "new", "edit", "comment"},
+    "pr": {"create", "new", "edit", "comment", "review", "merge", "close", "reopen"},
+    "issue": {"create", "new", "edit", "comment", "close", "reopen"},
     "release": {"create", "new", "edit"},
 }
 AZ_VERBS = {"create", "update"}
+# Blanks between words, a line continuation included (`gh \` newline `pr create`).
+_GAP = r"(?:\s|\\\n)+"
 PUBLISH_RE = re.compile(
-    r"(?<![\w.-])(?:gh\s+(?:"
-    + "|".join(rf"{group}\s+(?:{'|'.join(sorted(verbs))})" for group, verbs in GH_VERBS.items())
-    + rf")|az\s+repos\s+pr\s+(?:{'|'.join(sorted(AZ_VERBS))}))\b"
+    rf"(?<![\w.-])(?:gh{_GAP}(?:"
+    + "|".join(rf"{group}{_GAP}(?:{'|'.join(sorted(verbs))})" for group, verbs in GH_VERBS.items())
+    + rf")|az{_GAP}repos{_GAP}pr{_GAP}(?:{'|'.join(sorted(AZ_VERBS))}))\b"
 )
-PUBLISH_HINT_RE = re.compile(r"(?<![\w.-])(?:gh|az)\s")
+PUBLISH_HINT_RE = re.compile(r"(?<![\w.-])(?:gh|az)(?:\s|\\\n)")
 
 # Options naming a file whose text a gh command publishes, as (short, long).
 GH_FILE_OPTIONS = {
@@ -174,15 +193,34 @@ GH_API_SENDING_OPTIONS = (
 # not mistaken for an option of its own.
 GH_API_OTHER_VALUE_OPTIONS = {"-H", "--header", "-q", "--jq", "-t", "--template", "-p", "--preview", "--hostname", "--cache"}
 
+# grep and rg, whose pattern argument is left out of the whole-command scan.
+SEARCH_TOOLS = {"grep", "egrep", "fgrep", "rg"}
+# Their options that take a value in grep or rg. `-r` and `-T` stay out: they
+# take none in grep, and reading them as valued only costs a pattern that then
+# still gets scanned, never a miss.
+SEARCH_VALUE_OPTIONS = {
+    "-A", "-B", "-C", "-m", "-f", "-d", "-D", "-g", "-t", "-M", "-j",
+    "--max-count", "--after-context", "--before-context", "--context", "--glob", "--type",
+    "--type-not", "--include", "--exclude", "--exclude-dir", "--replace", "--max-columns",
+    "--threads", "--max-depth", "--binary-files", "--devices", "--directories", "--label",
+}
+# Words that can stand before the command they run: `! grep …`, `sudo cat …`.
+COMMAND_PREFIXES = {"!", "command", "sudo", "env", "time", "nice", "xargs"}
+ASSIGNMENT_RE = re.compile(r"[A-Za-z_]\w*=")
+# A redirection operator, alone (`>`) or with its target attached (`>out`, `2>&1`).
+REDIRECTION_RE = re.compile(r"\d*(?:&>>?|>>?&?|<&|>\|)")
+
 # Characters that end a heredoc delimiter written outside quotes.
 _DELIMITER_END = " \t\n;&|()<>"
 
 
 @dataclass
 class SimpleCommand:
-    """One simple command: its words as written (quotes kept) and the bodies of its heredocs."""
+    """One simple command: its words as written (quotes kept), where each word
+    starts in the command string, and the bodies of its heredocs."""
 
     words: list[str] = field(default_factory=list)
+    starts: list[int] = field(default_factory=list)
     heredocs: list[str] = field(default_factory=list)
 
 
@@ -191,13 +229,18 @@ def parse_commands(command: str) -> list[SimpleCommand]:
 
     A small shell reader rather than `shlex`: an apostrophe in a heredoc body —
     "it's", "doesn't" — makes `shlex` give up on the whole command, and a PR body
-    is exactly where such text lives. It knows quotes, escapes, `$(…)`,
-    backticks, comments, heredocs and the separators `;`, `&`, `|`, `&&`, `||`,
-    parentheses and newlines. Never raises: input it cannot follow just ends up
-    in fewer, longer words.
+    is exactly where such text lives. It knows quotes, escapes, line
+    continuations, `$(…)`, backticks, comments, heredocs and the separators `;`,
+    `&`, `|`, `&&`, `||`, parentheses and newlines. A command substitution comes
+    before the command it sits in. Never raises: input it cannot follow ends up
+    in fewer, longer words, and nesting too deep to follow ends the reading with
+    the commands found so far.
     """
     commands: list[SimpleCommand] = []
-    _parse(command, 0, commands, nested=False)
+    try:
+        _parse(command, 0, commands, nested=False)
+    except RecursionError:
+        pass
     return commands
 
 
@@ -216,6 +259,7 @@ def _parse(text: str, i: int, out: list[SimpleCommand], nested: bool) -> int:
         nonlocal word_start
         if word_start is not None:
             current.words.append(text[word_start:end])
+            current.starts.append(word_start)
             word_start = None
 
     def finish_command() -> None:
@@ -234,6 +278,9 @@ def _parse(text: str, i: int, out: list[SimpleCommand], nested: bool) -> int:
         if char in " \t":
             finish_word(i)
             i += 1
+            continue
+        if text.startswith("\\\n", i) and word_start is None:
+            i += 2  # a line continuation between words
             continue
         if char == "#" and word_start is None:
             while i < n and text[i] != "\n":
@@ -377,8 +424,8 @@ def dequote(word: str) -> str:
 def option_value(words: list[str], index: int, short: str | None, long: str) -> tuple[str | None, int]:
     """The value `words[index]` gives the option `short`/`long`, and how many words that took.
 
-    Handles `--long value`, `--long=value`, `-s value` and `-svalue`. Returns
-    `(None, 0)` when the word is not that option.
+    Handles `--long value`, `--long=value`, `-s value`, `-svalue` and
+    `-s=value`. Returns `(None, 0)` when the word is not that option.
     """
     word = words[index]
     if word == long or (short and word == short):
@@ -387,7 +434,8 @@ def option_value(words: list[str], index: int, short: str | None, long: str) -> 
     if word.startswith(long + "="):
         return word[len(long) + 1 :], 1
     if short and word.startswith(short) and len(word) > len(short) and not word.startswith("--"):
-        return word[len(short) :], 1
+        value = word[len(short) :]
+        return value.removeprefix("="), 1
     return None, 0
 
 
@@ -434,16 +482,18 @@ def publisher(words: list[str]) -> tuple[str, list[str]] | None:
 
 
 def az_text_values(args: list[str]) -> list[str]:
-    """The values of `--title` and `--description`; the latter takes several words."""
+    """The values of `--title` and `--description`/`-d`; the description takes several words."""
     values = option_values(args, None, "--title")
     for index, word in enumerate(args):
-        if word == "--description":
+        if word in ("--description", "-d"):
             for value in args[index + 1 :]:
                 if value.startswith("-") and len(value) > 1:
                     break
                 values.append(value)
         elif word.startswith("--description="):
             values.append(word.split("=", 1)[1])
+        elif word.startswith("-d") and len(word) > 2:
+            values.append(word[2:].removeprefix("="))
     return values
 
 
@@ -451,17 +501,19 @@ def body_files(family: str, args: list[str]) -> list[str]:
     """Paths whose text the gh/az command `family` publishes; stdin (`-`) is left out."""
     if family.startswith("az "):
         paths = [value[1:] for value in az_text_values(args) if value.startswith("@")]
-    else:
+    elif family.split()[1] in GH_FILE_OPTIONS:
         short, long = GH_FILE_OPTIONS[family.split()[1]]
         paths = option_values(args, short, long)
+    else:
+        paths = []
     return [path for path in paths if path and path != "-"]
 
 
-def gh_api_texts(args: list[str], cwd: str, heredocs: list[str]) -> list[tuple[str, str]]:
-    """(where, text) for what a `gh api` call sends, `heredocs` included.
+def gh_api_request(args: list[str]) -> tuple[list[str], list[str]] | None:
+    """What a `gh api` call sends, as (field values, paths of files it reads), or None.
 
-    Nothing for an explicit GET or for a call that sends no field and no input:
-    such a call reads, and publishes nothing.
+    None for an explicit GET and for a call that sends no field and no input:
+    such a call reads, and publishes nothing. A path of `-` is stdin.
     """
     method: str | None = None
     values: list[str] = []
@@ -489,41 +541,186 @@ def gh_api_texts(args: list[str], cwd: str, heredocs: list[str]) -> list[tuple[s
                     values.append(value)
         index += max(used, 1)
     if (method or "").upper() == "GET" or not (values or files):
+        return None
+    return values, files
+
+
+def json_strings(text: str) -> str | None:
+    """Every string value in `text` read as JSON, one per line, or None when it is not JSON.
+
+    A request body carries its line breaks as `\\n` and may spell the emoji as a
+    `\\u` escape; decoded, a trailer is back at the start of a line.
+    """
+    try:
+        stack = [json.loads(text)]
+    except (ValueError, RecursionError):
+        return None
+    strings: list[str] = []
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            strings.append(item)
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return "\n".join(strings) if strings else None
+
+
+def search_pattern_words(words: list[str]) -> list[int]:
+    """Indexes of the words that are a `grep`/`rg` search pattern, if `words` runs one.
+
+    The pattern names what to find or filter out, so a check for a credit line —
+    `grep -q`, `grep -v` — carries the very marker it looks for. It publishes
+    nothing.
+    """
+    index = 0
+    while index < len(words) and (words[index] in COMMAND_PREFIXES or ASSIGNMENT_RE.match(words[index])):
+        index += 1
+    if index >= len(words) or os.path.basename(words[index]) not in SEARCH_TOOLS:
         return []
-    texts = [("a field value of the gh api call", value) for value in values]
-    texts += [("a heredoc in the gh api command", body) for body in heredocs]
-    for path in files:
-        if path and path != "-":
-            text = read_text(resolve(path, cwd))
-            if text:
-                texts.append(("a file the gh api call sends", text))
-    return texts
+    patterns: list[int] = []
+    from_file = False
+    operand: int | None = None
+    options_ended = False
+    index += 1
+    while index < len(words):
+        word = words[index]
+        if options_ended or not word.startswith("-") or word == "-":
+            if operand is None:
+                operand = index
+            index += 1
+        elif word == "--":
+            options_ended = True
+            index += 1
+        elif word == "--regexp" or word.startswith("--regexp="):
+            patterns.append(index + 1 if word == "--regexp" else index)
+            index += 2 if word == "--regexp" else 1
+        elif word == "--file" or word.startswith("--file="):
+            from_file = True
+            index += 2 if word == "--file" else 1
+        elif word.startswith("--"):
+            index += 2 if word in SEARCH_VALUE_OPTIONS else 1
+        elif "e" in word[1:]:
+            # `-e`, or a cluster such as `-ve PATTERN` / `-vePATTERN`.
+            patterns.append(index + 1 if word[-1] == "e" else index)
+            index += 2 if word[-1] == "e" else 1
+        else:
+            from_file = from_file or word[1:].startswith("f")
+            index += 2 if word[:2] in SEARCH_VALUE_OPTIONS and len(word) == 2 else 1
+    if not patterns and not from_file and operand is not None:
+        patterns.append(operand)
+    return [index for index in patterns if index < len(words)]
+
+
+def without_search_patterns(command: str, commands: list[SimpleCommand]) -> str:
+    """`command` with every `grep`/`rg` pattern blanked out, positions kept."""
+    chars = list(command)
+    for simple in commands:
+        for index in search_pattern_words([dequote(word) for word in simple.words]):
+            start = simple.starts[index]
+            for position in range(start, start + len(simple.words[index])):
+                if chars[position] != "\n":
+                    chars[position] = " "
+    return "".join(chars)
+
+
+def read_into_command(words: list[str]) -> list[str]:
+    """Paths whose text `words` puts on stdout: what `cat` reads, or `< path` alone (`$(< path)`)."""
+    if not words:
+        return []
+    if words[0] == "<" and len(words) == 2:
+        return [words[1]]
+    if words[0].startswith("<") and not words[0].startswith("<<") and len(words) == 1:
+        return [words[0][1:]]
+    if os.path.basename(words[0]) != "cat":
+        return []
+    paths: list[str] = []
+    rest = iter(words[1:])
+    for word in rest:
+        if word == "<<<":
+            next(rest, None)  # a here-string: text, not a file
+        elif word == "<":
+            paths.append(next(rest, "-"))  # `cat < file` prints the file
+        elif word.startswith("<") and not word.startswith("<<"):
+            paths.append(word[1:])
+        elif REDIRECTION_RE.fullmatch(word):
+            next(rest, None)  # `> out`: the next word is where output goes
+        elif REDIRECTION_RE.match(word) or word.startswith("<<") or (word.startswith("-") and word != "-"):
+            continue
+        else:
+            paths.append(word)
+    return [path for path in paths if path != "-"]
+
+
+def working_directories(commands: list[SimpleCommand], words: list[list[str]], cwd: str) -> list[str]:
+    """The directory each command runs in, following `cd <path>` to the commands after it.
+
+    `cd -` and a path built from `$`/backticks are not followed: the directory
+    they name is not in the command.
+    """
+    directories: list[str] = []
+    for simple, dequoted in zip(commands, words):
+        directories.append(cwd)
+        if len(dequoted) == 2 and dequoted[0] == "cd":
+            raw = simple.words[1]
+            if dequoted[1] != "-" and "$" not in raw and "`" not in raw:
+                cwd = resolve(dequoted[1], cwd)
+    return directories
 
 
 def publishing_sources(command: str, cwd: str) -> list[tuple[str, str]]:
     """(where, text) for every piece of text the gh/az commands in `command` publish."""
     if not PUBLISH_HINT_RE.search(command):
         return []
+    scanned = without_search_patterns(command, parse_commands(command))
+    commands = parse_commands(scanned)
+    words = [[dequote(word) for word in simple.words] for simple in commands]
+    directories = working_directories(commands, words, cwd)
+    heredocs = [body for simple in commands for body in simple.heredocs]
+
     sources: list[tuple[str, str]] = []
-    match = PUBLISH_RE.search(command)
-    if match:
-        sources.append((f"the {' '.join(match.group(0).split())} command", command))
-    commands = parse_commands(command)
-    for simple in commands:
-        found = publisher([dequote(word) for word in simple.words])
+    match = PUBLISH_RE.search(scanned)
+    family = " ".join(match.group(0).replace("\\\n", " ").split()) if match else None
+    if family:
+        sources.append((f"the {family} command", scanned))
+    for dequoted, here in zip(words, directories):
+        found = publisher(dequoted)
         if not found:
             continue
-        family, args = found
-        if family == "gh api":
-            # Every heredoc, not only this command's: the body is often written
-            # to a variable or file first, then handed to `gh api`.
-            heredocs = [body for other in commands for body in other.heredocs]
-            sources.extend(gh_api_texts(args, cwd, heredocs))
+        name, args = found
+        if name != "gh api":
+            for path in body_files(name, args):
+                text = read_text(resolve(path, here))
+                if text:
+                    sources.append((f"a file the {name} command reads", text))
             continue
-        for path in body_files(family, args):
-            text = read_text(resolve(path, cwd))
+        request = gh_api_request(args)
+        if request is None:
+            continue
+        family = family or name
+        values, files = request
+        sources += [("a field value of the gh api call", value) for value in values]
+        # Every heredoc, not only this command's: the body is often written to
+        # a variable or file first, then handed to `gh api`.
+        sent = [("a heredoc in the gh api command", body) for body in heredocs]
+        for path in files:
+            text = read_text(resolve(path, here)) if path != "-" else None
             if text:
-                sources.append((f"a file the {family} command reads", text))
+                sent.append(("a file the gh api call sends", text))
+        for where, text in sent:
+            sources.append((where, text))
+            decoded = json_strings(text)
+            if decoded:
+                sources.append((f"{where} (read as JSON)", decoded))
+    if family:
+        # Files `cat` prints into the command (`$(cat file)`, `cat file | gh … -F -`)
+        # and `$(< file)`.
+        for dequoted, here in zip(words, directories):
+            for path in read_into_command(dequoted):
+                text = read_text(resolve(path, here))
+                if text:
+                    sources.append((f"a file read into the {family} command", text))
     return sources
 
 
@@ -567,7 +764,11 @@ def main() -> int:
         return 0
     command = (data.get("tool_input") or {}).get("command") or ""
     cwd = data.get("cwd") or ""
-    reason = commit_block(command, cwd) or publish_block(command, cwd)
+    try:
+        reason = commit_block(command, cwd) or publish_block(command, cwd)
+    except Exception as error:  # noqa: BLE001 - a guard that crashes must not block the call
+        print(f"block_ai_attribution: letting the call through after an error: {error!r}", file=sys.stderr)
+        return 0
     if reason:
         print(reason, file=sys.stderr)
         return 2
