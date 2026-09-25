@@ -27,7 +27,8 @@
 # The script cannot tell a focus tmux handed over from one the user chose: when
 # the user is in the sidebar on purpose and another pane of that window closes,
 # focus leaves the sidebar all the same. A kill-pane of a pane in a background
-# window checks the current window instead of that one.
+# window checks the current window instead of that one, so it also moves focus
+# out of a sidebar the user chose in the current window.
 #
 # Usage: agent-sidebar-focus.sh <window>
 set -u
