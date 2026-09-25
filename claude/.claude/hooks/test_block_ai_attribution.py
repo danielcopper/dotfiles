@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Unit tests for block_ai_attribution: what counts as attribution, and where it can hide.
+"""Unit tests for block_ai_attribution: what counts as attribution, and where it can hide —
+in a commit message, and in the text gh and az publish.
 
 Markers are assembled from pieces so this file never carries a literal a grep
 for stray attribution would flag.
@@ -9,6 +10,7 @@ Run: python3 claude/.claude/hooks/test_block_ai_attribution.py
 
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,9 @@ guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
 
 TRAILER = "Co-" + "authored-" + "by: Claude <noreply@" + "anthropic.com>"
+# The line a harness appends to PR descriptions, and its credit without the emoji.
+CREDIT = "Generated " + "with [Claude Code](https://claude.com/claude-code)"
+HARNESS_LINE = "\U0001f916 " + CREDIT
 
 
 def run_hook(command: str, cwd: str) -> int:
@@ -142,6 +147,273 @@ class EndToEnd(unittest.TestCase):
 
     def test_an_unreadable_message_file_does_not_break_the_commit(self):
         self.assertEqual(run_hook(f"git commit -F {self.dir}/missing.txt", self.dir), 0)
+
+
+def heredoc(text: str) -> str:
+    """`text` as the `"$(cat <<'EOF' … EOF)"` argument an agent writes for a long body."""
+    return f"\"$(cat <<'EOF'\n{text}\nEOF\n)\""
+
+
+# Every publishing command, with the three ways its text arrives: inline, a
+# heredoc in the command string, and a file it reads.
+FAMILIES = {
+    "gh pr create": (
+        lambda t: f"gh pr create --title 'feat: x' --body {shlex.quote(t)}",
+        lambda t: f"gh pr create --title 'feat: x' --body {heredoc(t)}",
+        lambda p: f"gh pr create --title 'feat: x' --body-file {p}",
+    ),
+    "gh pr edit": (
+        lambda t: f"gh pr edit 7 -b {shlex.quote(t)}",
+        lambda t: f"gh pr edit 7 --body {heredoc(t)}",
+        lambda p: f"gh pr edit 7 -F{p}",
+    ),
+    "gh pr comment": (
+        lambda t: f"gh pr comment 7 --body={shlex.quote(t)}",
+        lambda t: f"gh pr comment 7 -b {heredoc(t)}",
+        lambda p: f"gh pr comment 7 -F {p}",
+    ),
+    "gh pr review": (
+        lambda t: f"gh pr review 7 --approve -b {shlex.quote(t)}",
+        lambda t: f"gh pr review 7 --comment --body {heredoc(t)}",
+        lambda p: f"gh pr review 7 --request-changes --body-file {p}",
+    ),
+    "gh pr merge": (
+        lambda t: f"gh pr merge 7 --squash --subject 'feat: x' --body {shlex.quote(t)}",
+        lambda t: f"gh pr merge 7 --squash -t 'feat: x' -b {heredoc(t)}",
+        lambda p: f"gh pr merge 7 --squash --body-file={p}",
+    ),
+    "gh issue create": (
+        lambda t: f"gh issue create -t 'Bug' -b {shlex.quote(t)}",
+        lambda t: f"gh issue create --title 'Bug' --body {heredoc(t)}",
+        lambda p: f"gh issue create --title 'Bug' -F {p}",
+    ),
+    "gh issue edit": (
+        lambda t: f"gh issue edit 3 --body {shlex.quote(t)}",
+        lambda t: f"gh issue edit 3 --body {heredoc(t)}",
+        lambda p: f"gh issue edit 3 --body-file {p}",
+    ),
+    "gh issue comment": (
+        lambda t: f"gh issue comment 3 -b {shlex.quote(t)}",
+        lambda t: f"gh issue comment 3 --body {heredoc(t)}",
+        lambda p: f"gh issue comment 3 -F {p}",
+    ),
+    "gh release create": (
+        lambda t: f"gh release create v1.0.0 --title v1.0.0 --notes {shlex.quote(t)}",
+        lambda t: f"gh release create v1.0.0 -t v1.0.0 -n {heredoc(t)}",
+        lambda p: f"gh release create v1.0.0 --notes-file {p} dist/app.zip",
+    ),
+    "gh release edit": (
+        lambda t: f"gh release edit v1.0.0 -n {shlex.quote(t)}",
+        lambda t: f"gh release edit v1.0.0 --notes {heredoc(t)}",
+        lambda p: f"gh release edit v1.0.0 -F {p}",
+    ),
+    "gh api": (
+        lambda t: f"gh api repos/o/r/issues/3/comments -f body={shlex.quote(t)}",
+        lambda t: f"gh api repos/o/r/issues/3/comments --raw-field body={heredoc(t)}",
+        lambda p: f"gh api repos/o/r/issues/3/comments -F body=@{p}",
+    ),
+    "az repos pr create": (
+        lambda t: f"az repos pr create --title 'feat: x' --description {shlex.quote(t)}",
+        lambda t: f"az repos pr create --title 'feat: x' --description {heredoc(t)}",
+        lambda p: f"az repos pr create --title 'feat: x' --description @{p}",
+    ),
+    "az repos pr update": (
+        lambda t: f"az repos pr update --id 5 --description 'First line.' {shlex.quote(t)}",
+        lambda t: f"az repos pr update --id 5 --description {heredoc(t)}",
+        lambda p: f"az repos pr update --id 5 --description @{p} --title 'feat: x'",
+    ),
+}
+
+MARKED_BODIES = {
+    "the robot line": "Adds the export button.\n\n" + HARNESS_LINE,
+    "the credit without the emoji": "Adds the export button.\n\n" + CREDIT,
+    "a co-author trailer": "Adds the export button.\n\n" + TRAILER,
+}
+CLEAN_BODIES = {
+    "a plain body": "Adds the export button.\n\nIt's wired to the existing endpoint.",
+    "a body naming CLAUDE.md": "Documents the rule in CLAUDE.md and the hooks under ~/.claude.",
+    "a body about a generated file": "Regenerates the lockfile; the generated file is checked in.",
+}
+
+
+class PublishedText(unittest.TestCase):
+    """What gh and az publish is held to the same patterns as a commit message."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def body_file(self, name: str, text: str) -> str:
+        path = Path(self.dir) / name
+        path.write_text(text + "\n")
+        return str(path)
+
+    def forms(self, family: str, body: str):
+        inline, in_heredoc, from_file = FAMILIES[family]
+        yield "inline", inline(body)
+        yield "heredoc", in_heredoc(body)
+        yield "file", from_file(self.body_file("body.md", body))
+
+    def test_attribution_is_blocked_in_every_family_and_form(self):
+        for family in FAMILIES:
+            for marker, body in MARKED_BODIES.items():
+                for form, command in self.forms(family, body):
+                    with self.subTest(family=family, marker=marker, form=form):
+                        self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_honest_text_passes_in_every_family_and_form(self):
+        for family in FAMILIES:
+            for kind, body in CLEAN_BODIES.items():
+                for form, command in self.forms(family, body):
+                    with self.subTest(family=family, body=kind, form=form):
+                        self.assertIsNone(guard.publish_block(command, self.dir))
+
+    def test_the_reason_names_the_command_and_the_finding(self):
+        reason = guard.publish_block(FAMILIES["gh pr create"][0]("Adds a button.\n\n\U0001f916 Shipped"), self.dir) or ""
+        self.assertIn("gh pr create", reason)
+        self.assertIn("robot emoji", reason)
+        path = self.body_file("notes.md", MARKED_BODIES["a co-author trailer"])
+        reason = guard.publish_block(f"gh release edit v1 --notes-file {path}", self.dir) or ""
+        self.assertIn("a file the gh release edit command reads", reason)
+        self.assertIn("trailer", reason)
+
+    def test_a_relative_body_file_is_read_against_the_command_cwd(self):
+        self.body_file("body.md", MARKED_BODIES["a co-author trailer"])
+        self.assertIsNotNone(guard.publish_block("gh pr comment 7 -F body.md", self.dir))
+
+    def test_a_heredoc_on_stdin_is_read(self):
+        body = MARKED_BODIES["the robot line"]
+        for command in (
+            f"gh pr create --title x --body-file - <<'EOF'\n{body}\nEOF",
+            f"gh api repos/o/r/issues/3/comments --input - <<'EOF'\n{json.dumps({'body': body})}\nEOF",
+        ):
+            with self.subTest(command=command.split(" <<")[0]):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_text_put_together_earlier_in_the_same_call_is_caught(self):
+        body = MARKED_BODIES["a co-author trailer"]
+        later = str(Path(self.dir) / "written-in-this-call.md")
+        for command in (
+            f"cat > {later} <<'EOF'\n{body}\nEOF\ngh pr create --title x --body-file {later}",
+            f'BODY={heredoc(body)} && gh pr create --title x --body "$BODY"',
+            f'BODY={heredoc(body)} && gh api repos/o/r/issues/3/comments -f body="$BODY"',
+        ):
+            with self.subTest(command=command.split("\n")[0]):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_a_piped_body_cannot_be_read_and_does_not_block_on_its_own(self):
+        path = self.body_file("body.md", MARKED_BODIES["the robot line"])
+        self.assertIsNone(guard.publish_block(f"cat {path} | gh pr create --title x --body-file -", self.dir))
+
+    def test_a_publishing_command_is_found_in_a_chain(self):
+        body = MARKED_BODIES["the credit without the emoji"]
+        for command in (
+            f"cd {self.dir} && gh pr create --title x --body {shlex.quote(body)} 2>&1 | tail -3",
+            f"git push -u origin HEAD; URL=$(gh pr create --title x -b {shlex.quote(body)}) && echo $URL",
+        ):
+            with self.subTest(command=command[:40]):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
+
+    def test_commands_that_only_read_are_left_alone(self):
+        for command in (
+            "gh pr view 7 --json body -q .body | grep -c '\U0001f916'",
+            "gh issue list --search " + shlex.quote(CREDIT),
+            "gh release view v1.0.0",
+            "az repos pr list --status active",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(guard.publish_block(command, self.dir))
+
+
+class GhApi(unittest.TestCase):
+    """`gh api` is judged on what it sends, never on what it reads."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def test_a_field_value_is_checked(self):
+        marked = shlex.quote(MARKED_BODIES["the robot line"])
+        clean = shlex.quote(CLEAN_BODIES["a plain body"])
+        self.assertIsNotNone(guard.publish_block(f"gh api repos/o/r/pulls/7 -X PATCH -f body={marked}", self.dir))
+        self.assertIsNone(guard.publish_block(f"gh api repos/o/r/pulls/7 -X PATCH -f body={clean}", self.dir))
+
+    def test_an_input_file_is_read(self):
+        path = Path(self.dir) / "payload.json"
+        path.write_text(json.dumps({"body": MARKED_BODIES["a co-author trailer"]}))
+        self.assertIsNotNone(guard.publish_block(f"gh api repos/o/r/issues --input {path}", self.dir))
+
+    def test_the_endpoint_and_the_jq_filter_are_not_checked(self):
+        jq = shlex.quote('.[] | select(.user.login=="claude") | .created_at')
+        self.assertIsNone(guard.publish_block(f"gh api repos/anthropics/claude-code/issues -f title=Bug --jq {jq}", self.dir))
+
+    def test_an_explicit_get_sends_nothing_to_publish(self):
+        query = shlex.quote("author:app/" + "copilot created:>2024-01-01")
+        self.assertIsNone(guard.publish_block(f"gh api -X GET search/issues -f q={query}", self.dir))
+        # Without `-X GET` the same fields make gh send a POST.
+        self.assertIsNotNone(guard.publish_block(f"gh api search/issues -f q={query}", self.dir))
+
+    def test_a_raw_field_sends_an_at_path_as_written(self):
+        path = Path(self.dir) / "body.md"
+        path.write_text(MARKED_BODIES["a co-author trailer"])
+        self.assertIsNone(guard.publish_block(f"gh api repos/o/r/issues -f body=@{path}", self.dir))
+        self.assertIsNotNone(guard.publish_block(f"gh api repos/o/r/issues -F body=@{path}", self.dir))
+
+
+class ParseCommands(unittest.TestCase):
+    """The shell reader behind the gh and az checks."""
+
+    def parsed(self, command: str) -> list[tuple[list[str], list[str]]]:
+        return [(c.words, c.heredocs) for c in guard.parse_commands(command)]
+
+    def test_separators_split_commands_and_redirections_do_not(self):
+        self.assertEqual(
+            self.parsed("cd /x && gh pr view 1 2>&1 | tail -3; echo done &>/dev/null"),
+            [
+                (["cd", "/x"], []),
+                (["gh", "pr", "view", "1", "2>&1"], []),
+                (["tail", "-3"], []),
+                (["echo", "done", "&>/dev/null"], []),
+            ],
+        )
+
+    def test_a_heredoc_body_belongs_to_its_command_even_with_apostrophes_and_pipes(self):
+        self.assertEqual(
+            self.parsed("gh pr create -F - <<'EOF' && echo ok\nIt's done | a table |\nEOF\nls"),
+            [(["gh", "pr", "create", "-F", "-"], ["It's done | a table |"]), (["echo", "ok"], []), (["ls"], [])],
+        )
+
+    def test_a_command_substitution_is_read_as_commands_too(self):
+        parsed = self.parsed("gh pr edit 1 --body \"$(cat <<'EOF'\nSays \"hi\"\nEOF\n)\"")
+        self.assertEqual(parsed[0], (["cat"], ['Says "hi"']))
+        self.assertEqual(parsed[1][0][:5], ["gh", "pr", "edit", "1", "--body"])
+        self.assertEqual(len(parsed[1][0]), 6)
+
+    def test_a_here_string_is_not_a_heredoc(self):
+        self.assertEqual(self.parsed('gh pr edit 1 -F - <<< "$x"'), [(["gh", "pr", "edit", "1", "-F", "-", "<<<", '"$x"'], [])])
+
+    def test_a_comment_is_skipped(self):
+        self.assertEqual(self.parsed("gh pr view 1 # it's a note\nls"), [(["gh", "pr", "view", "1"], []), (["ls"], [])])
+
+    def test_input_it_cannot_follow_does_not_raise(self):
+        for command in ('gh pr create -F "unclosed', "gh pr create -b $(unclosed", "cat <<EOF", "gh api x -f", "\\"):
+            with self.subTest(command=command):
+                guard.parse_commands(command)
+                self.assertIsNone(guard.publish_block(command, "/nonexistent"))
+
+
+class PublishEndToEnd(unittest.TestCase):
+    """The hook as the harness runs it, over the publishing commands."""
+
+    def test_exit_codes(self):
+        cases = {
+            "gh pr create --title x --body " + shlex.quote(MARKED_BODIES["the robot line"]): 2,
+            "gh api repos/o/r/issues/3/comments -f body=" + shlex.quote(MARKED_BODIES["a co-author trailer"]): 2,
+            "az repos pr create --title x --description " + shlex.quote(MARKED_BODIES["the credit without the emoji"]): 2,
+            "gh pr create --title x --body " + shlex.quote(CLEAN_BODIES["a body naming CLAUDE.md"]): 0,
+            "gh pr view 7": 0,
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command[:30]):
+                self.assertEqual(run_hook(command, tempfile.gettempdir()), expected)
 
 
 if __name__ == "__main__":

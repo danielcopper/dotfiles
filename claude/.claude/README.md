@@ -82,7 +82,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | `user_prompt_submit.py` | UserPromptSubmit | Prompt logging                                      |
 | `session_start.py`      | SessionStart     | Load context on session init                        |
 | `pre_compact.py`        | PreCompact       | Backup transcript before compaction                 |
-| `block_ai_attribution.py` | PreToolUse (Bash) | Block commits carrying AI attribution markers     |
+| `block_ai_attribution.py` | PreToolUse (Bash) | Block commits, PR/issue/release text and `gh api` writes carrying AI attribution markers |
 | `block_commit_on_main.py` | PreToolUse (Bash) | Refuses commit/rebase/cherry-pick/revert on a protected branch (main/develop/release/*) unless the repo is listed in `~/.githooks/commit-on-main-allowed` |
 | `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's generic code-reviewer — routes to the custom `reviewer` agent |
 | `worktree_create.sh`    | WorktreeCreate   | Creates worktrees at `<repo-parent>/<repo>.worktrees/<name>` instead of `.claude/worktrees/`; a `<type>/<slug>` name runs the `worktree-new` task script (branch + setup) |
@@ -125,7 +125,7 @@ Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-
 
 | Hook                      | Scope                                             | Blocks                                                            |
 | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
-| `block_ai_attribution.py` | global (`settings.json`)                          | `git commit` whose message carries AI attribution markers         |
+| `block_ai_attribution.py` | global (`settings.json`)                          | `git commit`, `gh pr`/`issue`/`release`, `gh api` and `az repos pr` commands whose message or published text carries AI attribution markers |
 | `block_commit_on_main.py` | global (`settings.json`)                          | `git commit` targeting a protected branch (main/master, develop, release/*) — turns into a permission prompt for explicit approval |
 | `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's generic code-reviewer — denied with a redirect to the custom `reviewer` agent |
 
