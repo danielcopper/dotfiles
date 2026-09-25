@@ -70,7 +70,7 @@ Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (
 
 At green, run any applicable `user_gate`: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready.
 
-Green means the automated implementation work is complete; it is not merge authorization. With the default `user` policy, report the evidence and wait for the user to merge. Merge only when the user explicitly grants full-auto for the current run and the user gate has passed. Do not infer full-auto from an earlier issue or session.
+Green means the automated implementation work is complete; it is not merge authorization. With the default `user` policy, report the evidence and wait for the user to merge. Merge only when the user explicitly asks for this merge, or grants full-auto for the current run, and the user gate has passed; the merge goes through a permission prompt. Do not infer full-auto from an earlier issue or session.
 
 *Done when:* the PR is green, any user gate has passed, and the PR is handed to the user or merged under an explicit current-run full-auto grant.
 

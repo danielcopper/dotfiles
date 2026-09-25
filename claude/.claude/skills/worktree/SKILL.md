@@ -37,7 +37,7 @@ Push with `git -C <worktree> push -u origin <type>/<slug>` — the new branch ha
 
 ## Merge and cleanup
 
-- The user merges; an agent merges only on the user's explicit full-auto grant for the current run (see `implement`).
+- The user merges, unless they explicitly ask for that merge in the conversation or grant full-auto for the current run (see `implement`); `gh pr merge` then goes through a permission prompt.
 - Cleanup is the main session's job, and only after the PR is merged. The PR is merged when:
   - GitHub: `gh pr view <type>/<slug> --json state -q .state` prints `MERGED`.
   - Azure DevOps: `az repos pr list --source-branch <type>/<slug> --status completed` returns the PR.

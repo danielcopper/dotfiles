@@ -50,7 +50,6 @@
       "Read(~/.claude/feature-progress/**)"
     ],
     "deny": [
-      "Bash(gh pr merge *)",
       "Bash(*cat */srv/matrix/*)",
       "Bash(*cat */srv/secrets/*)",
       "Bash(*cat */mnt/cache/appdata/matrix/*)",
@@ -73,7 +72,10 @@
       "Bash(*scp */srv/secrets/*)",
       "Bash(*scp */mnt/cache/appdata/matrix/*)"
     ],
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "ask": [
+      "Bash(gh pr merge *)"
+    ]
   },
   "model": "opus",
   "hooks": {
