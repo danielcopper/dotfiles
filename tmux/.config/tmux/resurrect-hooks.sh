@@ -27,6 +27,7 @@ set -u
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tab=$'\t'
+. "$here/sidebar-log.sh"
 
 # State file columns of a `pane` line (tab-separated, see resurrect's save.sh):
 # 1 "pane", 2 session, 3 window index, 6 pane index, 8 ":" + directory (first
@@ -65,6 +66,7 @@ save() {
 
 pre_restore() {
   tmux set-option -g @resurrect_restore_running 1
+  sidebar_log "pre-restore"
   # resurrect restores "from scratch" (it replaces the only pane and drops a
   # session named 0) only when the server has exactly one pane; the sidebar
   # tmux.conf adds to a freshly started session must not count as a second.
@@ -82,6 +84,7 @@ pre_restore() {
 
 post_restore() {
   local file="$1" bin existing restored=() session window index pane
+  sidebar_log "post-restore start"
   if [ -f "$file" ]; then
     bin="$(tmux show-option -gqv @agent_sidebar_bin)"
     existing="$(tmux show-option -gqv @resurrect_restore_existing)"
@@ -95,10 +98,12 @@ post_restore() {
         tmux respawn-pane -k -t "$pane" \
           -c "$(tmux display-message -p -t "$pane" '#{pane_current_path}')" "$bin"
         tmux set-option -p -t "$pane" @pane_role sidebar
+        sidebar_log "post-restore respawned $pane"
       elif [ "$(tmux display-message -p -t "$pane" '#{window_panes}')" -gt 1 ]; then
         # The window has a sidebar already (or the plugin is missing): drop the
         # restored shell, unless it is the window's only pane.
         tmux kill-pane -t "$pane"
+        sidebar_log "post-restore killed $pane"
       fi
     done
   fi
@@ -106,6 +111,7 @@ post_restore() {
   tmux set-option -gu @resurrect_restore_running
   "$here/agent-sidebar-ensure.sh"
   "$here/agent-sidebar-width.sh" fit
+  sidebar_log "post-restore done"
 }
 
 case "${1:-}" in
