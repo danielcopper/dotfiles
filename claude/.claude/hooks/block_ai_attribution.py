@@ -79,8 +79,9 @@ unreadable file or an error inside the check included, exits 0. The git
 `commit-msg` hook runs it on the message git is about to commit and blocks only
 on 2: Python itself exits 1 when this file cannot even load, and a guard that
 is broken is no reason to refuse a commit. The whole file is read, not only
-`MAX_READ`: git wrote it, as a regular file. Lines are split on `\\n` alone, as
-git splits them.
+`MAX_READ`: git wrote it, as a regular file. It is read without newline
+translation and split on `\\n` alone, as git splits it: a carriage return,
+alone or before `\\n`, stays part of its line.
 
 Lines starting with the comment string (`#` unless given) are left out: git
 strips them from a message that comes from its editor. Without the editor —
@@ -513,16 +514,17 @@ def resolve(path: str, cwd: str) -> str:
 MAX_READ = 1 << 20
 
 
-def read_text(path: str, limit: int | None = MAX_READ) -> str | None:
+def read_text(path: str, limit: int | None = MAX_READ, newline: str | None = None) -> str | None:
     """The first `limit` characters of `path`, all of it for None, when it is a regular file; else None.
 
     Only regular files: opening a FIFO waits for a writer that may never come,
-    and a device such as `/dev/zero` never ends.
+    and a device such as `/dev/zero` never ends. `newline` is `open`'s: None
+    turns `\\r` and `\\r\\n` into `\\n`, `""` leaves them as written.
     """
     try:
         if not stat.S_ISREG(os.stat(path).st_mode):
             return None
-        with open(path, encoding="utf-8", errors="replace") as handle:
+        with open(path, encoding="utf-8", errors="replace", newline=newline) as handle:
             return handle.read(limit)
     except OSError:
         return None
@@ -836,12 +838,12 @@ def committed_text(text: str, comment: str = "#") -> str:
     cut line of `git commit -v`: the diff below it is not part of the message.
     Lines end at `\\n` only, as in git; `str.splitlines` would also split at a
     form feed or U+2028 and turn the rest of a line into a line of its own.
-    git 2.55 still finds the cut line with blanks, tabs or a carriage return
-    after it (measured), so those are trimmed before comparing.
+    The cut line counts only exactly as git writes it: with a blank, a tab or a
+    carriage return after it, git 2.55 does not cut there (measured).
     """
     kept: list[str] = []
     for line in text.split("\n"):
-        if line.rstrip(" \t\r") == f"{comment} {CUT_LINE}":
+        if line == f"{comment} {CUT_LINE}":
             break
         if not line.startswith(comment):
             kept.append(line)
@@ -852,11 +854,12 @@ def message_block(path: str, comment: str = "#") -> str | None:
     """Why the commit message in the file `path` is refused, or None.
 
     The whole file is read: git wrote it, and a cap would let a trailer through
-    behind a long enough body. A file that cannot be read is let through, with
-    a warning on stderr: the guard being unavailable is no reason to refuse a
-    commit.
+    behind a long enough body. It is read without newline translation: to git a
+    lone `\\r` does not end a line, so it must not end one here. A file that
+    cannot be read is let through, with a warning on stderr: the guard being
+    unavailable is no reason to refuse a commit.
     """
-    text = read_text(path, None)
+    text = read_text(path, None, newline="")
     if text is None:
         print(f"block_ai_attribution: cannot read {path}; the message was not checked.", file=sys.stderr)
         return None

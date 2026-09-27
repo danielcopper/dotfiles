@@ -202,8 +202,9 @@ class CheckMessage(unittest.TestCase):
         self.dir = temp_dir(self)
 
     def message(self, text: str) -> str:
+        """`text` as the message file, written byte for byte: no newline translation."""
         path = Path(self.dir) / "COMMIT_EDITMSG"
-        path.write_text(text)
+        _ = path.write_text(text, newline="")
         return str(path)
 
     def test_a_message_carrying_attribution_is_refused_and_the_reason_named(self):
@@ -251,23 +252,27 @@ class CheckMessage(unittest.TestCase):
         self.assertEqual(run_check(self.message(f"feat: x\n\n{body}\n{TRAILER}\n")).returncode, 2)
 
     def test_lines_end_at_a_newline_only_as_in_git(self):
-        for separator in ("\f", "\v", "\x1c", "\x85", " ", " "):
+        # Read through the real message file, so the way it is opened counts too.
+        for separator in ("\r", "\f", "\v", "\x1c", "\x85", "\u2028", "\u2029"):
             with self.subTest(separator=repr(separator)):
                 # Not a line break to git: the comment is part of a message line,
-                self.assertIsNotNone(guard.offence(guard.committed_text(f"feat: x{separator}# {HARNESS_LINE}\n")))
+                self.assertEqual(run_check(self.message(f"feat: x{separator}# {HARNESS_LINE}\n")).returncode, 2)
                 # and the credit is part of a comment line.
-                self.assertIsNone(guard.offence(guard.committed_text(f"feat: x\n# note{separator}{HARNESS_LINE}\n")))
+                self.assertEqual(run_check(self.message(f"feat: x\n# note{separator}{HARNESS_LINE}\n")).returncode, 0)
 
-    def test_trailing_blanks_and_carriage_returns_as_in_git(self):
+    def test_crlf_lines_as_in_git(self):
+        # A comment line ending in `\r\n` is still a comment line, which git strips,
+        self.assertEqual(run_check(self.message(f"feat: x\r\n\r\n# {HARNESS_LINE}\r\n")).returncode, 0)
+        # and a marked line ending in `\r\n` is still read.
+        self.assertEqual(run_check(self.message(f"feat: x\r\n\r\n{TRAILER}\r\n")).returncode, 2)
+
+    def test_only_the_exact_cut_line_ends_the_message(self):
         cut = "# " + guard.CUT_LINE
-        # A comment line ending in a carriage return is still a comment line.
-        self.assertIsNone(guard.offence(guard.committed_text(f"feat: x\r\n# {HARNESS_LINE}\r\n")))
-        # git finds the cut line with blanks, tabs or a carriage return after it,
-        for tail in ("\r", " ", "\t", " \r"):
+        # git 2.55 does not cut at a cut line with anything after it, blanks included.
+        for tail in ("\r", " ", "\t", " \r", "x"):
             with self.subTest(tail=repr(tail)):
-                self.assertIsNone(guard.offence(guard.committed_text(f"feat: x\n{cut}{tail}\n{HARNESS_LINE}\n")))
-        # but not with any other text after it.
-        self.assertIsNotNone(guard.offence(guard.committed_text(f"feat: x\n{cut}x\n{HARNESS_LINE}\n")))
+                self.assertEqual(run_check(self.message(f"feat: x\n{cut}{tail}\n{HARNESS_LINE}\n")).returncode, 2)
+        self.assertEqual(run_check(self.message(f"feat: x\n{cut}\n{HARNESS_LINE}\n")).returncode, 0)
 
     def test_an_unreadable_message_file_lets_the_commit_through_with_a_warning(self):
         result = run_check(f"{self.dir}/missing")
@@ -366,10 +371,12 @@ class CommitMsgHook(unittest.TestCase):
                 self.assertEqual(self.run_git_hook(f"feat: x\n\n; {HARNESS_LINE}\n").returncode, 0)
                 self.assertEqual(self.run_git_hook(f"feat: x\n\n% {HARNESS_LINE}\n").returncode, 1)
 
-    def test_auto_empty_or_valueless_means_hash(self):
-        for value in (" = auto", ' = ""', ""):
+    def test_auto_in_any_letter_case_means_hash(self):
+        # git compares `auto` without regard to case. An empty or valueless
+        # setting needs no test: git refuses to run with it.
+        for value in ("auto", "AUTO", "Auto"):
             with self.subTest(value=value):
-                self.git_config(f"[core]\n\tcommentChar{value}\n")
+                self.git_config(f"[core]\n\tcommentChar = {value}\n")
                 self.assertEqual(self.run_git_hook(f"feat: x\n\n# {HARNESS_LINE}\n").returncode, 0)
 
 
