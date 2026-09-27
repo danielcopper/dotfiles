@@ -9,10 +9,12 @@
 #
 # git strips lines starting with the comment character from an edited
 # message; the guard leaves them out too, so the template's own comments
-# never count. core.commentChar is respected; unset or `auto` means `#`.
+# never count. core.commentString is read first, then its older name
+# core.commentChar; unset or `auto` means `#`.
 #
 # A missing python3 or guard lets the commit through with a warning: the
-# guard being unavailable is no reason to refuse work.
+# guard being unavailable is no reason to refuse work. So does a guard that
+# fails in any other way — only its own "refused" exit blocks.
 #
 # Escape hatch: git commit --no-verify. It skips every hook, which is the
 # point: the guard is there to catch a mistake, not to fight its owner.
@@ -30,17 +32,19 @@ if [ ! -r "$GUARD" ]; then
     exit 0
 fi
 
-comment=$(git config --get core.commentChar) || comment='#'
-[ "$comment" = auto ] && comment='#'
+comment=$(git config --get core.commentString || git config --get core.commentChar)
+case $comment in '' | auto) comment='#' ;; esac
 
-# The guard exits 1 when it refuses the message and says why on stderr.
-python3 "$GUARD" --check-message "$1" "$comment"
+# The guard exits 2 when it refuses the message and says why on stderr. Not 1:
+# Python exits 1 on its own when the guard cannot load, say mid-edit with a
+# syntax error, and that must not refuse every commit on the machine.
+# Its stderr is held back until the exit status says what it is: the reason
+# or a warning to pass on, or a traceback to shorten to its last line.
+report=$(python3 "$GUARD" --check-message "$1" "$comment" 2>&1 >/dev/null)
 status=$?
 case $status in
-    0) exit 0 ;;
-    1) exit 1 ;;
-    *)
-        echo "commit-msg: the attribution check failed (exit $status); commit let through." >&2
-        exit 0
-        ;;
+    0 | 2) [ -z "$report" ] || echo "$report" >&2 ;;
+    *) echo "commit-msg: the attribution check failed (exit $status: ${report##*$'\n'}); commit let through." >&2 ;;
 esac
+[ "$status" -eq 2 ] && exit 1
+exit 0

@@ -187,14 +187,14 @@ class EndToEnd(unittest.TestCase):
 
 
 def run_check(*args: str) -> subprocess.CompletedProcess[str]:
-    """The guard as the git commit-msg hook runs it: `--check-message <file> [<comment-char>]`."""
+    """The guard as the git commit-msg hook runs it: `--check-message <file> [<comment>]`."""
     return subprocess.run(
         [sys.executable, str(_HOOK), "--check-message", *args], capture_output=True, text=True, check=False, timeout=15
     )
 
 
 class CheckMessage(unittest.TestCase):
-    """The commit-msg mode: the message file git is about to commit, 1 means refused."""
+    """The commit-msg mode: the message file git is about to commit, 2 means refused."""
 
     dir: str = ""
 
@@ -218,7 +218,7 @@ class CheckMessage(unittest.TestCase):
         for name, (line, label) in cases.items():
             with self.subTest(name=name):
                 result = run_check(self.message(f"feat: x\n\nA plain body.\n\n{line}\n"))
-                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.returncode, 2)
                 self.assertIn(f"Blocked: the commit message carries {label}.", result.stderr)
 
     def test_a_plain_message_passes_quietly(self):
@@ -234,16 +234,16 @@ class CheckMessage(unittest.TestCase):
     def test_the_comment_character_given_is_the_one_left_out(self):
         text = f"feat: x\n\n; {HARNESS_LINE}\n"
         self.assertEqual(run_check(self.message(text), ";").returncode, 0)
-        self.assertEqual(run_check(self.message(text)).returncode, 1)
+        self.assertEqual(run_check(self.message(text)).returncode, 2)
         # With `;` as the comment character a `#` line is part of the message.
-        self.assertEqual(run_check(self.message(f"feat: x\n\n# {HARNESS_LINE}\n"), ";").returncode, 1)
+        self.assertEqual(run_check(self.message(f"feat: x\n\n# {HARNESS_LINE}\n"), ";").returncode, 2)
 
     def test_the_diff_below_the_verbose_cut_line_is_not_read(self):
         cut = "# " + guard.CUT_LINE
         self.assertEqual(run_check(self.message(f"feat: x\n{cut}\ndiff --git a/x b/x\n+{HARNESS_LINE}\n")).returncode, 0)
-        self.assertEqual(run_check(self.message(f"feat: x\n{HARNESS_LINE}\n{cut}\n")).returncode, 1)
+        self.assertEqual(run_check(self.message(f"feat: x\n{HARNESS_LINE}\n{cut}\n")).returncode, 2)
         # Only the cut line with this comment character ends the message.
-        self.assertEqual(run_check(self.message(f"feat: x\n{cut}\n{HARNESS_LINE}\n"), ";").returncode, 1)
+        self.assertEqual(run_check(self.message(f"feat: x\n{cut}\n{HARNESS_LINE}\n"), ";").returncode, 2)
 
     def test_an_unreadable_message_file_lets_the_commit_through_with_a_warning(self):
         result = run_check(f"{self.dir}/missing")
@@ -264,6 +264,81 @@ class CheckMessage(unittest.TestCase):
         ):
             self.assertEqual(guard.check_message([self.message("feat: x")]), 0)
         self.assertIn("boom", stderr.getvalue())
+
+
+# The git hook that runs the guard, found from this file's place in the dotfiles repo.
+_GIT_HOOK = _HOOK.resolve().parents[3] / "git" / ".githooks" / "commit-msg"
+
+
+class CommitMsgHook(unittest.TestCase):
+    """The git commit-msg hook itself, with HOME pointed at a throwaway home.
+
+    The hook finds the guard under `$HOME/.claude/hooks`, so a copy there — the
+    real one, a broken one, or none — is what it runs, and `$HOME/.gitconfig`
+    is the only git config it reads.
+    """
+
+    home: str = ""
+    guard_copy: Path = Path()
+
+    def setUp(self):
+        self.home = temp_dir(self)
+        self.guard_copy = Path(self.home) / ".claude" / "hooks" / "block_ai_attribution.py"
+        self.guard_copy.parent.mkdir(parents=True)
+        _ = shutil.copy(_HOOK, self.guard_copy)
+
+    def run_git_hook(self, text: str) -> subprocess.CompletedProcess[str]:
+        message = Path(self.home) / "COMMIT_EDITMSG"
+        _ = message.write_text(text)
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env |= {"HOME": self.home, "GIT_CONFIG_NOSYSTEM": "1"}
+        return subprocess.run(
+            ["bash", str(_GIT_HOOK), str(message)],
+            cwd=self.home, env=env, capture_output=True, text=True, check=False, timeout=15,
+        )
+
+    def git_config(self, text: str) -> None:
+        """Write `text` as the global git config; `;` starts a comment there unless quoted."""
+        _ = (Path(self.home) / ".gitconfig").write_text(text)
+
+    def test_a_marked_message_is_refused_and_a_plain_one_passes_quietly(self):
+        refused = self.run_git_hook(f"feat: x\n\n{TRAILER}\n")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("Blocked: the commit message carries an attribution trailer.", refused.stderr)
+        passed = self.run_git_hook("feat: x\n")
+        self.assertEqual((passed.returncode, passed.stderr), (0, ""))
+
+    def test_a_guard_that_cannot_load_lets_the_commit_through_with_a_warning(self):
+        _ = self.guard_copy.write_text(self.guard_copy.read_text() + "\ndef broken(:\n")
+        for text in ("feat: x\n", f"feat: x\n\n{TRAILER}\n"):
+            with self.subTest(text=text[:10]):
+                result = self.run_git_hook(text)
+                self.assertEqual(result.returncode, 0)
+                # One line, the traceback shortened to its last.
+                self.assertEqual(
+                    result.stderr,
+                    "commit-msg: the attribution check failed (exit 1: SyntaxError: invalid syntax); commit let through.\n",
+                )
+
+    def test_a_missing_guard_lets_the_commit_through_with_a_warning(self):
+        self.guard_copy.unlink()
+        result = self.run_git_hook(f"feat: x\n\n{TRAILER}\n")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("block_ai_attribution.py not found", result.stderr)
+
+    def test_the_configured_comment_string_is_left_out(self):
+        text = f"feat: x\n\n; {HARNESS_LINE}\n"
+        self.assertEqual(self.run_git_hook(text).returncode, 1)
+        for config in ("[core]\n\tcommentChar = \";\"\n", "[core]\n\tcommentString = \";\"\n"):
+            with self.subTest(config=config):
+                self.git_config(config)
+                self.assertEqual(self.run_git_hook(text).returncode, 0)
+
+    def test_comment_string_wins_over_comment_char_and_auto_means_hash(self):
+        self.git_config("[core]\n\tcommentString = \";\"\n\tcommentChar = %\n")
+        self.assertEqual(self.run_git_hook(f"feat: x\n\n; {HARNESS_LINE}\n").returncode, 0)
+        self.git_config("[core]\n\tcommentChar = auto\n")
+        self.assertEqual(self.run_git_hook(f"feat: x\n\n# {HARNESS_LINE}\n").returncode, 0)
 
 
 def heredoc(text: str) -> str:
