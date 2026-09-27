@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Refuse a commit whose message carries AI attribution.
+#
+# git hands this hook the message it is about to commit, however it arrived:
+# typed in the editor, kept by --amend, written by any tool. The Claude Code
+# hook block_ai_attribution.py only sees a message a command spells out, so
+# this is the complete guard. It asks that same file, so the patterns that
+# count as attribution live in one place.
+#
+# git strips lines starting with the comment character from an edited
+# message; the guard leaves them out too, so the template's own comments
+# never count. core.commentChar is respected; unset or `auto` means `#`.
+#
+# A missing python3 or guard lets the commit through with a warning: the
+# guard being unavailable is no reason to refuse work.
+#
+# Escape hatch: git commit --no-verify. It skips every hook, which is the
+# point: the guard is there to catch a mistake, not to fight its owner.
+
+set -u
+
+GUARD="$HOME/.claude/hooks/block_ai_attribution.py"
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "commit-msg: python3 not found; commit message not checked for attribution." >&2
+    exit 0
+fi
+if [ ! -r "$GUARD" ]; then
+    echo "commit-msg: ${GUARD/#$HOME/\~} not found; commit message not checked for attribution." >&2
+    exit 0
+fi
+
+comment=$(git config --get core.commentChar) || comment='#'
+[ "$comment" = auto ] && comment='#'
+
+# The guard exits 1 when it refuses the message and says why on stderr.
+python3 "$GUARD" --check-message "$1" "$comment"
+status=$?
+case $status in
+    0) exit 0 ;;
+    1) exit 1 ;;
+    *)
+        echo "commit-msg: the attribution check failed (exit $status); commit let through." >&2
+        exit 0
+        ;;
+esac

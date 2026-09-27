@@ -186,6 +186,86 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(run_hook(f"git commit -F {self.dir}/missing.txt", self.dir), 0)
 
 
+def run_check(*args: str) -> subprocess.CompletedProcess[str]:
+    """The guard as the git commit-msg hook runs it: `--check-message <file> [<comment-char>]`."""
+    return subprocess.run(
+        [sys.executable, str(_HOOK), "--check-message", *args], capture_output=True, text=True, check=False, timeout=15
+    )
+
+
+class CheckMessage(unittest.TestCase):
+    """The commit-msg mode: the message file git is about to commit, 1 means refused."""
+
+    dir: str = ""
+
+    def setUp(self):
+        self.dir = temp_dir(self)
+
+    def message(self, text: str) -> str:
+        path = Path(self.dir) / "COMMIT_EDITMSG"
+        path.write_text(text)
+        return str(path)
+
+    def test_a_message_carrying_attribution_is_refused_and_the_reason_named(self):
+        cases = {
+            # The first pattern that matches names the reason; the credit comes before the emoji.
+            "the robot line": (HARNESS_LINE, "an AI tool named as an author"),
+            "the robot emoji alone": ("\U0001f916 a plain note", "the robot emoji"),
+            "the credit without the emoji": (CREDIT, "an AI tool named as an author"),
+            "a co-author trailer": (TRAILER, "an attribution trailer"),
+            "the product link alone": ("See https://" + "claude.com/claude-code", "a link to an AI tool's page"),
+        }
+        for name, (line, label) in cases.items():
+            with self.subTest(name=name):
+                result = run_check(self.message(f"feat: x\n\nA plain body.\n\n{line}\n"))
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(f"Blocked: the commit message carries {label}.", result.stderr)
+
+    def test_a_plain_message_passes_quietly(self):
+        for text in ("fix(qam): claim the band\n\nA plain body.\n", "docs: update CLAUDE.md\n"):
+            with self.subTest(text=text):
+                result = run_check(self.message(text))
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+
+    def test_attribution_only_in_comment_lines_passes(self):
+        text = f"feat: x\n\nA plain body.\n# {TRAILER}\n# {HARNESS_LINE}\n#{CREDIT}\n"
+        self.assertEqual(run_check(self.message(text)).returncode, 0)
+
+    def test_the_comment_character_given_is_the_one_left_out(self):
+        text = f"feat: x\n\n; {HARNESS_LINE}\n"
+        self.assertEqual(run_check(self.message(text), ";").returncode, 0)
+        self.assertEqual(run_check(self.message(text)).returncode, 1)
+        # With `;` as the comment character a `#` line is part of the message.
+        self.assertEqual(run_check(self.message(f"feat: x\n\n# {HARNESS_LINE}\n"), ";").returncode, 1)
+
+    def test_the_diff_below_the_verbose_cut_line_is_not_read(self):
+        cut = "# " + guard.CUT_LINE
+        self.assertEqual(run_check(self.message(f"feat: x\n{cut}\ndiff --git a/x b/x\n+{HARNESS_LINE}\n")).returncode, 0)
+        self.assertEqual(run_check(self.message(f"feat: x\n{HARNESS_LINE}\n{cut}\n")).returncode, 1)
+        # Only the cut line with this comment character ends the message.
+        self.assertEqual(run_check(self.message(f"feat: x\n{cut}\n{HARNESS_LINE}\n"), ";").returncode, 1)
+
+    def test_an_unreadable_message_file_lets_the_commit_through_with_a_warning(self):
+        result = run_check(f"{self.dir}/missing")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("was not checked", result.stderr)
+
+    def test_a_wrong_call_lets_the_commit_through_with_a_warning(self):
+        for args in ((), (self.message(HARNESS_LINE), "#", "extra"), (self.message(HARNESS_LINE), "")):
+            with self.subTest(args=args):
+                result = run_check(*args)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("usage", result.stderr)
+
+    def test_an_error_inside_the_check_lets_the_commit_through(self):
+        with (
+            mock.patch.object(guard, "message_block", side_effect=RuntimeError("boom")),
+            mock.patch.object(sys, "stderr", io.StringIO()) as stderr,
+        ):
+            self.assertEqual(guard.check_message([self.message("feat: x")]), 0)
+        self.assertIn("boom", stderr.getvalue())
+
+
 def heredoc(text: str) -> str:
     """`text` as the `"$(cat <<'EOF' … EOF)"` argument an agent writes for a long body."""
     return f"\"$(cat <<'EOF'\n{text}\nEOF\n)\""

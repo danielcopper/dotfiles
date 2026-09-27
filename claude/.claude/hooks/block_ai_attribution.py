@@ -64,9 +64,22 @@ resolves against the call's working directory; a relative `git commit`
 message file after a `cd` or behind `git -C <dir>`, which resolves against the
 call's working directory too; text past `MAX_READ` in a file; a product-page
 link written without its `https://`; a `gh api` call hidden inside a
-`bash -c` or `eval` string. For commits, a git `commit-msg` hook would be the
-complete guard, since it sees the final message however it arrived; this hook
-is the early, specific error, not the last line of defence.
+`bash -c` or `eval` string. For commits, the git `commit-msg` hook in
+`~/.githooks` is the complete guard, since it sees the final message however it
+arrived; this hook is the early, specific error, not the last line of defence.
+
+**The commit-msg mode.** `block_ai_attribution.py --check-message <file>
+[<comment-char>]` checks a commit message file with the same patterns and
+exits 1 when it carries attribution, naming what it found on stderr; anything
+else, an unreadable file or an error inside the check included, exits 0. The
+git `commit-msg` hook runs it on the message git is about to commit. Lines
+starting with the comment character (`#` unless given) are left out, and so is
+everything from the cut line `git commit -v` writes above its diff on: git
+strips both when the message comes from its editor. Without the editor — `-m`,
+`-F` — git keeps comment lines by default, and so does `--cleanup=verbatim` or
+`whitespace`: such a line is committed but not read here. `core.commentChar`
+`auto` is read as `#`, which misses the lines git keeps when it picked another
+character.
 
 **Why tool names are not matched on their own.** `CLAUDE.md` is a real file in
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
@@ -799,6 +812,63 @@ def commit_block(command: str, cwd: str) -> str | None:
     return None
 
 
+# The line `git commit -v` writes, after the comment character and a blank,
+# above the diff it shows; git drops it and everything below it.
+CUT_LINE = "------------------------ >8 ------------------------"
+
+
+def committed_text(text: str, comment: str = "#") -> str:
+    """The part of a commit message file git keeps when it strips comments.
+
+    Lines starting with `comment` are dropped, and the reading stops at the
+    cut line of `git commit -v`: the diff below it is not part of the message.
+    """
+    kept: list[str] = []
+    for line in text.splitlines():
+        if line == f"{comment} {CUT_LINE}":
+            break
+        if not line.startswith(comment):
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def message_block(path: str, comment: str = "#") -> str | None:
+    """Why the commit message in the file `path` is refused, or None.
+
+    A file that cannot be read is let through, with a warning on stderr: the
+    guard being unavailable is no reason to refuse a commit.
+    """
+    text = read_text(path)
+    if text is None:
+        print(f"block_ai_attribution: cannot read {path}; the message was not checked.", file=sys.stderr)
+        return None
+    label = offence(committed_text(text, comment))
+    if label:
+        return (
+            f"Blocked: the commit message carries {label}. "
+            "Commit with a plain Conventional-Commit message: "
+            "<type>(<scope>): <description>, optional plain body - "
+            "no attribution trailers, no tool credits."
+        )
+    return None
+
+
+def check_message(args: list[str]) -> int:
+    """The `--check-message <file> [<comment-char>]` mode: 1 when the message is refused, else 0."""
+    if len(args) not in (1, 2) or not args[-1]:
+        print("block_ai_attribution: usage: --check-message <file> [<comment-char>]", file=sys.stderr)
+        return 0
+    try:
+        reason = message_block(*args)
+    except Exception as error:  # noqa: BLE001 - a guard that crashes must not block the commit
+        print(f"block_ai_attribution: letting the commit through after an error: {error!r}", file=sys.stderr)
+        return 0
+    if reason:
+        print(reason, file=sys.stderr)
+        return 1
+    return 0
+
+
 def publish_block(command: str, cwd: str) -> str | None:
     """Why a gh/az command in `command` is blocked from publishing, or None."""
     for where, text in publishing_sources(command, cwd):
@@ -840,4 +910,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--check-message"]:
+        sys.exit(check_message(sys.argv[2:]))
     sys.exit(main())
