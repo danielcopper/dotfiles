@@ -2,15 +2,20 @@
 # Refuse a commit whose message carries AI attribution.
 #
 # git hands this hook the message it is about to commit, however it arrived:
-# typed in the editor, kept by --amend, written by any tool. The Claude Code
-# hook block_ai_attribution.py only sees a message a command spells out, so
-# this is the complete guard. It asks that same file, so the patterns that
-# count as attribution live in one place.
+# typed in the editor, kept by --amend, given with -m or -F. The Claude Code
+# hook block_ai_attribution.py only sees a message a command spells out; this
+# hook asks that same file, so the patterns that count as attribution live in
+# one place.
+#
+# git runs it for `git commit`, `git merge` and a rebase `reword` — not for
+# cherry-pick, revert, am, a rebase squash, fixup or pick, commit-tree, or a
+# tool that writes commits without `git commit` (measured with git 2.55).
+# Those messages go through unchecked.
 #
 # git strips lines starting with the comment character from an edited
 # message; the guard leaves them out too, so the template's own comments
-# never count. core.commentString is read first, then its older name
-# core.commentChar; unset or `auto` means `#`.
+# never count. git reads core.commentChar and core.commentString as one
+# setting, the one set last winning; unset, empty or `auto` means `#`.
 #
 # A missing python3 or guard lets the commit through with a warning: the
 # guard being unavailable is no reason to refuse work. So does a guard that
@@ -32,7 +37,11 @@ if [ ! -r "$GUARD" ]; then
     exit 0
 fi
 
-comment=$(git config --get core.commentString || git config --get core.commentChar)
+# `<key> <value>` per line, in the order git reads them; a key set without a
+# value prints the key alone.
+setting=$(git config --get-regexp '^core\.comment(char|string)$' | tail -n 1)
+comment=${setting#* }
+[ "$comment" = "$setting" ] && comment=''
 case $comment in '' | auto) comment='#' ;; esac
 
 # The guard exits 2 when it refuses the message and says why on stderr. Not 1:

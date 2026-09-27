@@ -65,23 +65,33 @@ message file after a `cd` or behind `git -C <dir>`, which resolves against the
 call's working directory too; text past `MAX_READ` in a file; a product-page
 link written without its `https://`; a `gh api` call hidden inside a
 `bash -c` or `eval` string. For commits, the git `commit-msg` hook in
-`~/.githooks` is the complete guard, since it sees the final message however it
-arrived; this hook is the early, specific error, not the last line of defence.
+`~/.githooks` sees the final message however it arrived, editor and `--amend`
+included, but git runs it only for `git commit`, `git merge` and a rebase
+`reword` — not for `cherry-pick`, `revert`, `am`, a rebase `squash`, `fixup` or
+`pick`, `commit-tree`, or a tool that writes commits without `git commit`
+(measured with git 2.55). This hook is the early, specific error; neither is a
+complete guard.
 
 **The commit-msg mode.** `block_ai_attribution.py --check-message <file>
-[<comment>]` checks a commit message file with the same patterns and
-exits 2 when it carries attribution, naming what it found on stderr; anything
-else, an unreadable file or an error inside the check included, exits 0. The
-git `commit-msg` hook runs it on the message git is about to commit and blocks
-only on 2: Python itself exits 1 when this file cannot even load, and a guard
-that is broken is no reason to refuse a commit. Lines starting with the
-comment string (`#` unless given) are left out, and so is everything from the
-cut line `git commit -v` writes above its diff on: git strips both when the
-message comes from its editor. Without the editor — `-m`,
-`-F` — git keeps comment lines by default, and so does `--cleanup=verbatim` or
-`whitespace`: such a line is committed but not read here. A comment character
-of `auto` is read as `#`, which misses the lines git keeps when it picked
-another character.
+[<comment>]` checks a commit message file with the same patterns and exits 2
+when it carries attribution, naming what it found on stderr; anything else, an
+unreadable file or an error inside the check included, exits 0. The git
+`commit-msg` hook runs it on the message git is about to commit and blocks only
+on 2: Python itself exits 1 when this file cannot even load, and a guard that
+is broken is no reason to refuse a commit. The whole file is read, not only
+`MAX_READ`: git wrote it, as a regular file. Lines are split on `\\n` alone, as
+git splits them.
+
+Lines starting with the comment string (`#` unless given) are left out: git
+strips them from a message that comes from its editor. Without the editor —
+`-m`, `-F` — git keeps them by default, and so do `--cleanup=verbatim`,
+`whitespace` and `scissors`: such a line is committed but not read here. A
+comment string of `auto` is read as `#`, which misses the lines git keeps when
+it picked another character. Everything from the cut line `git commit -v`
+writes above its diff on is left out too, since git drops it under `-v`,
+`commit.verbose` or `--cleanup=scissors`. Whether one of those applies is not
+visible here, so a message that carries the cut line itself without them has
+the text below it committed but not read.
 
 **Why tool names are not matched on their own.** `CLAUDE.md` is a real file in
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
@@ -503,8 +513,8 @@ def resolve(path: str, cwd: str) -> str:
 MAX_READ = 1 << 20
 
 
-def read_text(path: str) -> str | None:
-    """The first `MAX_READ` characters of `path` when it is a regular file, or None.
+def read_text(path: str, limit: int | None = MAX_READ) -> str | None:
+    """The first `limit` characters of `path`, all of it for None, when it is a regular file; else None.
 
     Only regular files: opening a FIFO waits for a writer that may never come,
     and a device such as `/dev/zero` never ends.
@@ -513,7 +523,7 @@ def read_text(path: str) -> str | None:
         if not stat.S_ISREG(os.stat(path).st_mode):
             return None
         with open(path, encoding="utf-8", errors="replace") as handle:
-            return handle.read(MAX_READ)
+            return handle.read(limit)
     except OSError:
         return None
 
@@ -824,10 +834,14 @@ def committed_text(text: str, comment: str = "#") -> str:
 
     Lines starting with `comment` are dropped, and the reading stops at the
     cut line of `git commit -v`: the diff below it is not part of the message.
+    Lines end at `\\n` only, as in git; `str.splitlines` would also split at a
+    form feed or U+2028 and turn the rest of a line into a line of its own.
+    git 2.55 still finds the cut line with blanks, tabs or a carriage return
+    after it (measured), so those are trimmed before comparing.
     """
     kept: list[str] = []
-    for line in text.splitlines():
-        if line == f"{comment} {CUT_LINE}":
+    for line in text.split("\n"):
+        if line.rstrip(" \t\r") == f"{comment} {CUT_LINE}":
             break
         if not line.startswith(comment):
             kept.append(line)
@@ -837,10 +851,12 @@ def committed_text(text: str, comment: str = "#") -> str:
 def message_block(path: str, comment: str = "#") -> str | None:
     """Why the commit message in the file `path` is refused, or None.
 
-    A file that cannot be read is let through, with a warning on stderr: the
-    guard being unavailable is no reason to refuse a commit.
+    The whole file is read: git wrote it, and a cap would let a trailer through
+    behind a long enough body. A file that cannot be read is let through, with
+    a warning on stderr: the guard being unavailable is no reason to refuse a
+    commit.
     """
-    text = read_text(path)
+    text = read_text(path, None)
     if text is None:
         print(f"block_ai_attribution: cannot read {path}; the message was not checked.", file=sys.stderr)
         return None

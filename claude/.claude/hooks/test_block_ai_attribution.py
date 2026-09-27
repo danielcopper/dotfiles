@@ -245,6 +245,30 @@ class CheckMessage(unittest.TestCase):
         # Only the cut line with this comment character ends the message.
         self.assertEqual(run_check(self.message(f"feat: x\n{cut}\n{HARNESS_LINE}\n"), ";").returncode, 2)
 
+    def test_the_whole_message_is_read_however_long(self):
+        body = ("a" * 99 + "\n") * 12_500  # 1.25 MB, past the MAX_READ cap of the command checks
+        self.assertGreater(len(body), guard.MAX_READ)
+        self.assertEqual(run_check(self.message(f"feat: x\n\n{body}\n{TRAILER}\n")).returncode, 2)
+
+    def test_lines_end_at_a_newline_only_as_in_git(self):
+        for separator in ("\f", "\v", "\x1c", "\x85", " ", " "):
+            with self.subTest(separator=repr(separator)):
+                # Not a line break to git: the comment is part of a message line,
+                self.assertIsNotNone(guard.offence(guard.committed_text(f"feat: x{separator}# {HARNESS_LINE}\n")))
+                # and the credit is part of a comment line.
+                self.assertIsNone(guard.offence(guard.committed_text(f"feat: x\n# note{separator}{HARNESS_LINE}\n")))
+
+    def test_trailing_blanks_and_carriage_returns_as_in_git(self):
+        cut = "# " + guard.CUT_LINE
+        # A comment line ending in a carriage return is still a comment line.
+        self.assertIsNone(guard.offence(guard.committed_text(f"feat: x\r\n# {HARNESS_LINE}\r\n")))
+        # git finds the cut line with blanks, tabs or a carriage return after it,
+        for tail in ("\r", " ", "\t", " \r"):
+            with self.subTest(tail=repr(tail)):
+                self.assertIsNone(guard.offence(guard.committed_text(f"feat: x\n{cut}{tail}\n{HARNESS_LINE}\n")))
+        # but not with any other text after it.
+        self.assertIsNotNone(guard.offence(guard.committed_text(f"feat: x\n{cut}x\n{HARNESS_LINE}\n")))
+
     def test_an_unreadable_message_file_lets_the_commit_through_with_a_warning(self):
         result = run_check(f"{self.dir}/missing")
         self.assertEqual(result.returncode, 0)
@@ -334,11 +358,19 @@ class CommitMsgHook(unittest.TestCase):
                 self.git_config(config)
                 self.assertEqual(self.run_git_hook(text).returncode, 0)
 
-    def test_comment_string_wins_over_comment_char_and_auto_means_hash(self):
-        self.git_config("[core]\n\tcommentString = \";\"\n\tcommentChar = %\n")
-        self.assertEqual(self.run_git_hook(f"feat: x\n\n; {HARNESS_LINE}\n").returncode, 0)
-        self.git_config("[core]\n\tcommentChar = auto\n")
-        self.assertEqual(self.run_git_hook(f"feat: x\n\n# {HARNESS_LINE}\n").returncode, 0)
+    def test_the_comment_key_set_last_wins_whichever_it_is(self):
+        # git reads commentChar and commentString as one setting.
+        for first, last in (("commentString", "commentChar"), ("commentChar", "commentString")):
+            with self.subTest(last=last):
+                self.git_config(f'[core]\n\t{first} = "%"\n\t{last} = ";"\n')
+                self.assertEqual(self.run_git_hook(f"feat: x\n\n; {HARNESS_LINE}\n").returncode, 0)
+                self.assertEqual(self.run_git_hook(f"feat: x\n\n% {HARNESS_LINE}\n").returncode, 1)
+
+    def test_auto_empty_or_valueless_means_hash(self):
+        for value in (" = auto", ' = ""', ""):
+            with self.subTest(value=value):
+                self.git_config(f"[core]\n\tcommentChar{value}\n")
+                self.assertEqual(self.run_git_hook(f"feat: x\n\n# {HARNESS_LINE}\n").returncode, 0)
 
 
 def heredoc(text: str) -> str:
