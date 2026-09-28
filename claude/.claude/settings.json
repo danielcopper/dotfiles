@@ -299,7 +299,7 @@
     "pr-review-toolkit@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
     "security-guidance@claude-plugins-official": true,
-    "sonarqube@claude-plugins-official": true,
+    "sonarqube@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
     "tmux-agent-sidebar@hiroppy": true
   },
