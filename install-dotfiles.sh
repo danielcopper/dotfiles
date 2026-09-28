@@ -20,6 +20,7 @@ common_pkgs=(
   tmux
   wezterm
   lazygit
+  opencode
 )
 
 case "$CLASS" in
@@ -150,6 +151,17 @@ if [ ! -e "$HOME/.claude/settings.json" ]; then
   mkdir -p "$HOME/.claude"
   cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
   echo "seeded ~/.claude/settings.json from the repo reference"
+fi
+
+# OpenCode reports its panes to the tmux agent sidebar through a plugin file that
+# ships with the sidebar (installed by TPM). OpenCode loads every file in its
+# plugins directory, so the file is linked in by name rather than stowed. On a
+# fresh machine TPM has not installed the sidebar yet; run this script again after
+# the first tmux start.
+sidebar_bridge="$HOME/.config/tmux/plugins/tmux-agent-sidebar/.opencode/plugins/tmux-agent-sidebar.js"
+if [ -f "$sidebar_bridge" ]; then
+  mkdir -p "$HOME/.config/opencode/plugins"
+  ln -sfn "$sidebar_bridge" "$HOME/.config/opencode/plugins/tmux-agent-sidebar.js"
 fi
 
 # Post-stow: prune dangling symlinks under managed package roots that point
