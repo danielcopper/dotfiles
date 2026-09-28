@@ -243,6 +243,10 @@ items:
       - name: +Plugins
         key: P
         menu:
+          - name: Panel
+            key: p
+            command:
+              display-popup -E -w 80% -h 70% "$TMUX_PLUGIN_MANAGER_PATH/tmux-plugin-panel/scripts/panel.sh"
           - name: Install
             key: i
             command:
