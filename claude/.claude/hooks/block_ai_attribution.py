@@ -81,7 +81,9 @@ on 2: Python itself exits 1 when this file cannot even load, and a guard that
 is broken is no reason to refuse a commit. The whole file is read, not only
 `MAX_READ`: git wrote it, as a regular file. It is read without newline
 translation and split on `\\n` alone, as git splits it: a carriage return,
-alone or before `\\n`, stays part of its line.
+alone or before `\\n`, stays part of its line while comment lines are found.
+The patterns then read it as a line break, since a terminal or a web page
+shows the text after it as a line of its own.
 
 Lines starting with the comment string (`#` unless given) are left out: git
 strips them from a message that comes from its editor. Without the editor —
@@ -855,15 +857,17 @@ def message_block(path: str, comment: str = "#") -> str | None:
 
     The whole file is read: git wrote it, and a cap would let a trailer through
     behind a long enough body. It is read without newline translation: to git a
-    lone `\\r` does not end a line, so it must not end one here. A file that
-    cannot be read is let through, with a warning on stderr: the guard being
-    unavailable is no reason to refuse a commit.
+    lone `\\r` does not end a line, so it must not end one when comment lines
+    are dropped. Only after that is it turned into `\\n` for the patterns: git
+    commits it unchanged, and a trailer behind it shows as a line of its own.
+    A file that cannot be read is let through, with a warning on stderr: the
+    guard being unavailable is no reason to refuse a commit.
     """
     text = read_text(path, None, newline="")
     if text is None:
         print(f"block_ai_attribution: cannot read {path}; the message was not checked.", file=sys.stderr)
         return None
-    label = offence(committed_text(text, comment))
+    label = offence(committed_text(text, comment).replace("\r", "\n"))
     if label:
         return (
             f"Blocked: the commit message carries {label}. "

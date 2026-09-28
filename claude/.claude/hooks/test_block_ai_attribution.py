@@ -266,6 +266,16 @@ class CheckMessage(unittest.TestCase):
         # and a marked line ending in `\r\n` is still read.
         self.assertEqual(run_check(self.message(f"feat: x\r\n\r\n{TRAILER}\r\n")).returncode, 2)
 
+    def test_a_trailer_behind_a_lone_carriage_return_is_read_as_a_line_of_its_own(self):
+        # A key-only trailer: nothing but its place at a line start marks it.
+        human = "Co-" + "authored-by: A Human <a@b.c>"
+        for text in (f"feat: x\n\nbody\r{human}\n", f"feat: x\r\rbody\r{human}\r"):
+            with self.subTest(text=text.replace(human, "<trailer>")):
+                self.assertEqual(run_check(self.message(text)).returncode, 2)
+        # The carriage return is a line break only after comment lines are
+        # dropped: git strips `# note\r<credit>` whole, and so does the check.
+        self.assertEqual(run_check(self.message(f"feat: x\n# note\r{human}\n")).returncode, 0)
+
     def test_only_the_exact_cut_line_ends_the_message(self):
         cut = "# " + guard.CUT_LINE
         # git 2.55 does not cut at a cut line with anything after it, blanks included.
