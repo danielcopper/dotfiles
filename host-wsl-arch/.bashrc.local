@@ -35,3 +35,7 @@ export NUGET_CREDENTIALPROVIDER_FORCE_CANSHOWDIALOG_TO=false
 
 # opencode CLI on PATH
 [ -d "$HOME/.opencode/bin" ] && export PATH="$HOME/.opencode/bin:$PATH"
+
+# OpenCode: host-local config (the LiteLLM provider on the internal network),
+# merged over the shared ~/.config/opencode/opencode.jsonc. Not in this repo.
+export OPENCODE_CONFIG="$HOME/.config/opencode/local.jsonc"
