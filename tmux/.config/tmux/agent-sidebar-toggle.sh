@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Toggles the tmux-agent-sidebar pane from the which-key menu (+Windows a, A):
+# Toggles the tmux-agent-sidebar pane from the which-key root menu (a, A):
 # without an argument in the current window, as the plugin's prefix binding
 # @sidebar_key does; with `all` in every window, as @sidebar_key_all does.
 # The menu cannot pass the window and path the way that binding does

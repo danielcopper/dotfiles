@@ -36,22 +36,29 @@ items:
   - name: Last pane
     key: "`"
     command: last-pane
-  - name: Copy
-    key: c
-    menu:
-      - name: Copy
-        key: c
-        command: copy-mode
-      - name: List buffers
-        key: "#"
-        command: list-buffers
+  - name: Zoom pane
+    key: z
+    command: resizep -Z
+  - name: Split horizontal
+    key: "|"
+    command: 'splitw -h -c "#{pane_current_path}"'
+  - name: Split vertical
+    key: "-"
+    command: 'splitw -v -c "#{pane_current_path}"'
+  - name: Agent sidebar
+    key: a
+    command: 'run-shell "~/.config/tmux/agent-sidebar-toggle.sh"'
+  - name: Agent sidebars, all windows
+    key: A
+    command: 'run-shell "~/.config/tmux/agent-sidebar-toggle.sh all"'
+  - name: Plugin panel
+    key: P
+    command:
+      display-popup -E -w 80% -h 70% "$TMUX_PLUGIN_MANAGER_PATH/tmux-plugin-panel/scripts/panel.sh"
   - separator: true
   - name: +Windows
     key: w
     menu:
-      - name: Last
-        key: tab
-        command: last-window
       - name: Choose
         key: w
         command: choose-tree -Zw
@@ -64,6 +71,9 @@ items:
       - name: New
         key: c
         command: 'neww -c "#{pane_current_path}"'
+      - name: Rename
+        key: R
+        command: 'command-prompt -I "#W" { renamew -- "%%" }'
       - separator: true
       - name: +Layout
         key: l
@@ -87,12 +97,6 @@ items:
           - name: Vertical main
             key: V
             command: selectl main-vertical
-      - name: Split horizontal
-        key: /
-        command: 'splitw -h -c "#{pane_current_path}"'
-      - name: Split vertical
-        key: "-"
-        command: 'splitw -v -c "#{pane_current_path}"'
       - name: Rotate
         key: o
         command: rotatew
@@ -102,25 +106,12 @@ items:
         command: rotatew -D
         transient: true
       - separator: true
-      - name: Rename
-        key: R
-        command: 'command-prompt -I "#W" { renamew -- "%%" }'
       - name: Kill
         key: X
         command: 'confirm -p "Kill window #W? (y/n)" killw'
-      - separator: true
-      - name: Agent sidebar
-        key: a
-        command: 'run-shell "~/.config/tmux/agent-sidebar-toggle.sh"'
-      - name: Agent sidebars, all windows
-        key: A
-        command: 'run-shell "~/.config/tmux/agent-sidebar-toggle.sh all"'
   - name: +Panes
     key: p
     menu:
-      - name: Last
-        key: tab
-        command: lastp
       - name: Choose
         key: p
         command: displayp -d 0
@@ -138,9 +129,6 @@ items:
         key: l
         command: selectp -R
       - separator: true
-      - name: Zoom
-        key: z
-        command: resizep -Z
       - name: +Resize
         key: r
         menu:
@@ -204,21 +192,12 @@ items:
       - name: Respawn pane
         key: R
         macro: restart-pane
+      - name: Sync panes
+        key: S
+        command: "setw synchronize-panes"
       - name: Kill
         key: X
         command: 'confirm -p "Kill pane #P? (y/n)" killp'
-  - name: +Buffers
-    key: b
-    menu:
-      - name: Choose
-        key: b
-        command: choose-buffer -Z
-      - name: List
-        key: l
-        command: lsb
-      - name: Paste
-        key: p
-        command: pasteb
   - name: +Sessions
     key: s
     menu:
@@ -231,6 +210,28 @@ items:
       - name: Rename
         key: r
         command: 'command-prompt -I "#S" { rename-session -- "%%" }'
+  - name: +Copy
+    key: c
+    menu:
+      - name: Copy mode
+        key: c
+        command: copy-mode
+      - name: Copy pane to buffer
+        key: "y"
+        # capture-pane stores the pane into tmux's internal buffer; system-clipboard
+        # piping (was hard-coded clip.exe — WSL-only and broken on every other host)
+        # belongs in a per-host @copy-cmd, tracked in the tmux entknoten task.
+        command: "capture-pane -J \\; display-message \"pane → tmux buffer\""
+      - separator: true
+      - name: Choose buffer
+        key: b
+        command: choose-buffer -Z
+      - name: Paste buffer
+        key: p
+        command: pasteb
+      - name: List buffers
+        key: "#"
+        command: list-buffers
   - name: +Client
     key: C
     menu:
@@ -250,25 +251,6 @@ items:
       - name: Refresh
         key: R
         command: refresh
-      - name: +Plugins
-        key: P
-        menu:
-          - name: Panel
-            key: p
-            command:
-              display-popup -E -w 80% -h 70% "$TMUX_PLUGIN_MANAGER_PATH/tmux-plugin-panel/scripts/panel.sh"
-          - name: Install
-            key: i
-            command:
-              run-shell $TMUX_PLUGIN_MANAGER_PATH/tpm/bindings/install_plugins
-          - name: Update
-            key: u
-            command:
-              run-shell $TMUX_PLUGIN_MANAGER_PATH/tpm/bindings/update_plugins
-          - name: Clean
-            key: c
-            command:
-              run-shell $TMUX_PLUGIN_MANAGER_PATH/tpm/bindings/clean_plugins
       - name: Detach
         key: D
         command: detach
@@ -276,38 +258,19 @@ items:
         key: Z
         command: suspendc
       - separator: true
-      - name: Reload config
-        key: r
-        macro: reload-config
+      - name: Show messages
+        key: "~"
+        command: show-messages
+      - name: Time
+        key: t
+        command: clock-mode
       - name: Customize
         key: ","
         command: customize-mode -Z
   - separator: true
-  - name: Split horizontal
-    key: "|"
-    command: 'splitw -h -c "#{pane_current_path}"'
-  - name: Split vertical
-    key: "-"
-    command: 'splitw -v -c "#{pane_current_path}"'
-  - name: Sync panes
-    key: S
-    command: "setw synchronize-panes"
   - name: Reload config
     key: r
     command: "source-file ~/.config/tmux/tmux.conf \\; display-message tmux-reloaded"
-  - name: Copy pane
-    key: "y"
-    # capture-pane stores the pane into tmux's internal buffer; system-clipboard
-    # piping (was hard-coded clip.exe — WSL-only and broken on every other host)
-    # belongs in a per-host @copy-cmd, tracked in the tmux entknoten task.
-    command: "capture-pane -J \\; display-message \"pane → tmux buffer\""
-  - separator: true
-  - name: Time
-    key: T
-    command: clock-mode
-  - name: Show messages
-    key: "~"
-    command: show-messages
   - name: +Keys
     key: "?"
     command: list-keys -N
