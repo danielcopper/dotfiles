@@ -14,11 +14,6 @@ custom_variables:
   - name: log_info
     value: "#[fg=green,italics] [info]#[default]#[italics]"
 macros:
-  - name: reload-config
-    commands:
-      - display "#{log_info} Loading config... "
-      - source-file ~/.config/tmux/tmux.conf
-      - display -p "\n\n... Press ENTER to continue"
   - name: restart-pane
     # A macro becomes a command alias through `set -gF`, which expands formats
     # when the plugin loads; ## keeps #{pane_current_path} for respawnp to
@@ -186,9 +181,6 @@ items:
       - name: Unmark
         key: M
         command: selectp -M
-      - name: Capture
-        key: C
-        command: capture-pane
       - name: Respawn pane
         key: R
         macro: restart-pane
