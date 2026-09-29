@@ -2,7 +2,7 @@
 command_alias_start_index: 200
 keybindings:
   # root_table: C-Space
-  prefix_table: ?
+  prefix_table: "?"
 title:
   style: align=centre,bold
   prefix: tmux
@@ -20,9 +20,12 @@ macros:
       - source-file ~/.config/tmux/tmux.conf
       - display -p "\n\n... Press ENTER to continue"
   - name: restart-pane
+    # A macro becomes a command alias through `set -gF`, which expands formats
+    # when the plugin loads; ## keeps #{pane_current_path} for respawnp to
+    # expand when the macro runs.
     commands:
       - display "#{log_info} Restarting pane"
-      - "respawnp -k -c #{pane_current_path}"
+      - 'respawnp -k -c "##{pane_current_path}"'
 items:
   - name: Run
     key: space
@@ -60,7 +63,7 @@ items:
         command: next-window
       - name: New
         key: c
-        command: "neww -c #{pane_current_path}"
+        command: 'neww -c "#{pane_current_path}"'
       - separator: true
       - name: +Layout
         key: l
@@ -71,7 +74,7 @@ items:
             transient: true
           - name: Tiled
             key: t
-            command: selectnl tiled
+            command: selectl tiled
           - name: Horizontal
             key: h
             command: selectl even-horizontal
@@ -86,10 +89,10 @@ items:
             command: selectl main-vertical
       - name: Split horizontal
         key: /
-        command: "splitw -h -c #{pane_current_path}"
+        command: 'splitw -h -c "#{pane_current_path}"'
       - name: Split vertical
         key: "-"
-        command: "splitw -v -c #{pane_current_path}"
+        command: 'splitw -v -c "#{pane_current_path}"'
       - name: Rotate
         key: o
         command: rotatew
@@ -101,7 +104,7 @@ items:
       - separator: true
       - name: Rename
         key: R
-        command: command-prompt -I "#W" "renamew -- \"%%\""
+        command: 'command-prompt -I "#W" { renamew -- "%%" }'
       - name: Kill
         key: X
         command: 'confirm -p "Kill window #W? (y/n)" killw'
@@ -220,7 +223,7 @@ items:
         command: new
       - name: Rename
         key: r
-        command: rename
+        command: 'command-prompt -I "#S" { rename-session -- "%%" }'
   - name: +Client
     key: C
     menu:
@@ -275,10 +278,10 @@ items:
   - separator: true
   - name: Split horizontal
     key: "|"
-    command: "splitw -h -c #{pane_current_path}"
+    command: 'splitw -h -c "#{pane_current_path}"'
   - name: Split vertical
     key: "-"
-    command: "splitw -v -c #{pane_current_path}"
+    command: 'splitw -v -c "#{pane_current_path}"'
   - name: Sync panes
     key: S
     command: "setw synchronize-panes"
@@ -290,7 +293,7 @@ items:
     # capture-pane stores the pane into tmux's internal buffer; system-clipboard
     # piping (was hard-coded clip.exe — WSL-only and broken on every other host)
     # belongs in a per-host @copy-cmd, tracked in the tmux entknoten task.
-    command: "capture-pane -J \\; display-message 'pane → tmux buffer'"
+    command: "capture-pane -J \\; display-message \"pane → tmux buffer\""
   - separator: true
   - name: Time
     key: T
