@@ -108,6 +108,13 @@ items:
       - name: Kill
         key: X
         command: 'confirm -p "Kill window #W? (y/n)" killw'
+      - separator: true
+      - name: Agent sidebar
+        key: a
+        command: 'run-shell "~/.config/tmux/agent-sidebar-toggle.sh"'
+      - name: Agent sidebars, all windows
+        key: A
+        command: 'run-shell "~/.config/tmux/agent-sidebar-toggle.sh all"'
   - name: +Panes
     key: p
     menu:
