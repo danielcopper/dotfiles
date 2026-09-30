@@ -93,7 +93,7 @@ TTS calls are debounced (2s) to prevent overlapping announcements when multiple 
 
 ## Workflow system
 
-GitHub-issue work runs through user-invoked skills backed by two custom agents, a per-repo config file, and guard hooks. Everything global lives in this package (stowed); everything repo-specific lives in the repo.
+GitHub-issue work runs through skills (user-invoked, except where the table says otherwise) backed by two custom agents, a per-repo config file, and guard hooks. Everything global lives in this package (stowed); everything repo-specific lives in the repo.
 
 ### Skills (`skills/`)
 
@@ -102,7 +102,7 @@ GitHub-issue work runs through user-invoked skills backed by two custom agents, 
 | **implement**            | `/implement <issue#> [--go]`   | One issue end-to-end: read → align (questions one at a time; `--go` skips when nothing is unclear) → worktree + board → implementer → reviewer loop → gate evidence → PR draft → watch CI to green → merge per policy → user gate if due |
 | **epic**                 | `/epic <epic#>`                | Assembly line over an epic's native sub-issues: align once on all issues, then the implement pipeline per issue, merging between issues (fresh worktree from updated main) |
 | **plan-epic**            | `/plan-epic [topic\|issue#]`   | Planning only, never code: discuss → slice (tracer bullets, or expand→contract for wide refactors) → drafts for approval → epic + native sub-issues in Ready |
-| **writing-great-skills** | reference                      | Vendored from [mattpocock/skills](https://github.com/mattpocock/skills) — the vocabulary for authoring/reviewing skills                            |
+| **writing-for-agents**   | model-invoked                  | Vendored from [mattpocock/skills](https://github.com/mattpocock/skills): how to write documents agents consume (skills, CLAUDE.md)                 |
 | **toolbox**              | `/toolbox`                     | Router: names every skill and when to reach for it — the entry point when unsure which skill fits                                                  |
 | **next**                 | `/next [hint]`                 | Board picker: reads Ready + In Progress, open PRs, and recent commits, then commits to one recommendation for what to work on next                 |
 | **deps-triage**          | `/deps-triage [merge]`         | Classify open dependency/chore PRs (SAFE / LOOK / STUCK) with reasoning; merges the safe bucket on OK                                              |

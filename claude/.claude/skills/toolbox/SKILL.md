@@ -43,7 +43,7 @@ Match the current situation against this index and recommend the right skill(s).
 
 ## Meta & recurring
 
-- `/writing-great-skills` — the vocabulary for authoring and reviewing skills; read it before writing one
+- `/writing-for-agents` - how to write what agents read: skills, CLAUDE.md, docs reached by a pointer; model-invoked, so it also fires on its own
 - `/retro` - after a session, propose improvements to the environment: checks, pointers, standards, CLAUDE.md, memory
 - `/loop <interval> <prompt|skill>` — run something on a recurring interval (e.g. `/loop 1h /deps-triage`)
 - `/deep-research <question>` — multi-source, fact-checked research report
