@@ -140,6 +140,11 @@ if [ "$backed_up_count" -gt 0 ]; then
   echo
 fi
 
+# ~/.claude must be a real directory before stow runs. On a fresh machine it
+# does not exist yet, and stow would fold the whole directory into one link to
+# this repo: the live settings.json would be the public reference, and every
+# file Claude Code writes there would land in the repo.
+mkdir -p "$HOME/.claude"
 stow -R "${all_pkgs[@]}"
 
 # Seed the live Claude settings from the repo's reference copy on a fresh
@@ -147,7 +152,16 @@ stow -R "${all_pkgs[@]}"
 # model, the effort level and the auto-mode environment description into the
 # live file, and this repo is public. After this first copy the two drift on
 # purpose - diff them when you want to carry something over.
-if [ ! -e "$HOME/.claude/settings.json" ]; then
+# A machine set up before that split still has the live file as a symlink into
+# this repo, so everything Claude Code writes lands in the public reference.
+# Replace such a link with a local copy of what it points at.
+live_settings="$HOME/.claude/settings.json"
+if [ -L "$live_settings" ] && into_our_repo "$(readlink -f -- "$live_settings")"; then
+  settings_src="$(readlink -f -- "$live_settings")"
+  [ -f "$settings_src" ] || settings_src="$DIR/claude/.claude/settings.json"
+  cp --remove-destination -- "$settings_src" "$live_settings"
+  echo "replaced the ~/.claude/settings.json link into the repo with a local copy"
+elif [ ! -e "$live_settings" ] && [ ! -L "$live_settings" ]; then
   mkdir -p "$HOME/.claude"
   cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
   echo "seeded ~/.claude/settings.json from the repo reference"
