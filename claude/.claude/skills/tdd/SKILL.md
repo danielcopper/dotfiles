@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Test-driven development with red-green-refactor loop. Use when user wants to build features or fix bugs using TDD, mentions "red-green-refactor", wants integration tests, or asks for test-first development.
+description: Test-driven development with a red-green loop at pre-agreed seams. Use when user wants to build features or fix bugs using TDD, mentions "red-green-refactor", wants integration tests, or asks for test-first development.
 ---
 
 # Test-Driven Development
@@ -14,6 +14,19 @@ description: Test-driven development with red-green-refactor loop. Use when user
 **Bad tests** are coupled to implementation. They mock internal collaborators, test private methods, or verify through external means (like querying a database directly instead of using the interface). The warning sign: your test breaks when you refactor, but behavior hasn't changed. If you rename an internal function and tests fail, those tests were testing implementation, not behavior.
 
 See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
+
+## Seams: Where Tests Go
+
+A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
+
+**Test only at pre-agreed seams.** Before writing any test, propose the seams under test and get the user's confirmation. No test is written at an unconfirmed seam. When choosing seams:
+
+- Prefer existing seams to new ones.
+- Use the highest seam that covers the behavior. A test there exercises the most real code and survives the most internal change.
+- Keep the number small. The ideal is one seam per feature.
+- If no existing seam fits, propose a new one at the highest point you can, and say that it is new.
+
+**You can't test everything.** Agreeing the seams up front is how testing effort lands on critical paths and complex logic instead of every possible edge case.
 
 ## Anti-Pattern: Tautological Tests
 
@@ -56,16 +69,12 @@ When exploring the codebase, use the project's domain glossary so that test name
 
 Before writing any code:
 
-- [ ] Confirm with user what interface changes are needed
-- [ ] Confirm with user which behaviors to test (prioritize)
-- [ ] Identify opportunities for [deep modules](deep-modules.md) (small interface, deep implementation)
-- [ ] Design interfaces for [testability](interface-design.md)
-- [ ] List the behaviors to test (not implementation steps)
-- [ ] Get user approval on the plan
+- [ ] Propose the seams under test (see [Seams](#seams-where-tests-go))
+- [ ] List the behaviors to test at each seam (not implementation steps), prioritized
+- [ ] If a new seam is needed, shape it as a [deep module](deep-modules.md) (small interface, deep implementation) and design it for [testability](interface-design.md)
+- [ ] Get the user's confirmation on seams and behaviors
 
-Ask: "What should the public interface look like? Which behaviors are most important to test?"
-
-**You can't test everything.** Confirm with the user exactly which behaviors matter most. Focus testing effort on critical paths and complex logic, not every possible edge case.
+Present the proposed seams and ask: "Should we test at these seams?" Confirm the behavior list as a separate question once the seams are agreed.
 
 ### 2. Tracer Bullet
 
@@ -89,26 +98,20 @@ GREEN: Minimal code to pass → passes
 
 Rules:
 
+- Only at agreed seams. A test that needs a new seam goes back to the user first
 - One test at a time
 - Only enough code to pass current test
 - Don't anticipate future tests
 - Keep tests focused on observable behavior
 
-### 4. Refactor
+### No Refactor Stage
 
-After all tests pass, look for [refactor candidates](refactoring.md):
-
-- [ ] Extract duplication
-- [ ] Deepen modules (move complexity behind simple interfaces)
-- [ ] Apply SOLID principles where natural
-- [ ] Consider what new code reveals about existing code
-- [ ] Run tests after each refactor step
-
-**Never refactor while RED.** Get to GREEN first.
+The loop is red → green and ends at green. Refactoring is not a TDD stage: it belongs to the review stage that follows implementation (plan → implement → review → PR). Don't refactor inside the loop; leave cleanup for review.
 
 ## Checklist Per Cycle
 
 ```
+[ ] Test sits at an agreed seam
 [ ] Test describes behavior, not implementation
 [ ] Test uses public interface only
 [ ] Test would survive internal refactor
