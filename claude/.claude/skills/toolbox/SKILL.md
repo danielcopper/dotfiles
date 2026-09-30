@@ -21,7 +21,7 @@ Match the current situation against this index and recommend the right skill(s).
 - `/to-prd` — turn the current conversation into a PRD on the project board
 - `/to-issues` — break a plan/PRD into tracer-bullet issues on the board
 - `/improve-codebase-architecture` — find deepening and consolidation opportunities in a codebase
-- `/zoom-out` — explain how the code at hand fits the bigger picture
+- `/to-questionnaire` - turn a decision you cannot answer yourself into a questionnaire for the person who can (PO, client)
 
 ## Quality & debugging
 
@@ -44,5 +44,6 @@ Match the current situation against this index and recommend the right skill(s).
 ## Meta & recurring
 
 - `/writing-great-skills` — the vocabulary for authoring and reviewing skills; read it before writing one
+- `/retro` - after a session, propose improvements to the environment: checks, pointers, standards, CLAUDE.md, memory
 - `/loop <interval> <prompt|skill>` — run something on a recurring interval (e.g. `/loop 1h /deps-triage`)
 - `/deep-research <question>` — multi-source, fact-checked research report
