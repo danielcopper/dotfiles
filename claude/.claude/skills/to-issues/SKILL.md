@@ -46,6 +46,7 @@ Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an
 - Each slice delivers a narrow but COMPLETE path through every layer (schema, API, UI, tests)
 - A completed slice is demoable or verifiable on its own
 - Each slice is sized to fit in a single fresh context window
+- Any prefactoring should be done first
 - Prefer many thin slices over few thick ones
 </vertical-slice-rules>
 
