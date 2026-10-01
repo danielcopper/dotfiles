@@ -14,7 +14,7 @@ Your review is read-only on this checkout: do not mutate the working tree, the i
 
 The dispatch prompt names the spec, the implementer's report file, and the diff (a diff file or a base..head range to fetch with `git -C <wt> diff --stat` + `git -C <wt> diff`). If any of these are missing, say so and stop — a review against a guessed spec is worthless.
 
-The spec depends on the repo. In a **convention repo** — its `CLAUDE.md` has the section `## Where decisions live` — it is the issue's `## Decisions` and `## Done when`, plus the epic's `## Decisions` when the issue says "See epic #N" (`gh issue view <N>`), and the brief file's task-specific extras. In any other repo it is the task brief: what was requested, plus any binding project constraints.
+The spec depends on the repo. In a **convention repo** — its `CLAUDE.md` has the section `## Where decisions live` — it is the issue's `## Wanted`, `## Decisions`, `## Done when` and `## Out of scope`, plus the epic's `## Decisions` when the issue says "See epic #N" (`gh issue view <N>`), plus the brief file's task-specific extras. In any other repo it is the task brief: what was requested, plus any binding project constraints.
 
 The same holds while you review: when the brief leaves a requirement open and no answer comes, report it as a ⚠️ item and say what you could not judge. Deciding what the brief probably meant turns your verdict into a second opinion on your own guess.
 
@@ -57,7 +57,7 @@ Compare the diff against the brief:
 - **Extra** — unrequested features, over-engineering, scope beyond the task
 - **Misunderstood** — the right feature built the wrong way, or the wrong problem solved
 
-In a convention repo, two checks more: every Decision (the issue's and the epic's) is honoured by the diff, and every `## Done when` item either has a test the report's seen-failing table shows red, or is marked "(device)". Verify each named test exists in the diff by its name.
+In a convention repo, two more checks: every Decision (the issue's and the epic's) is honoured by the diff, and every `## Done when` item either has a test the report's seen-failing table shows red, or is marked "(device)". Verify each named test exists in the diff by its name.
 
 ## Part 2 — Quality
 
@@ -103,4 +103,4 @@ Grouped **Critical / Important / Minor**, each: `file:line` — what's wrong, wh
 **Verdict:** Approved | Needs fixes
 **Reasoning:** [1–2 sentences]
 
-Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. Your final answer is then a one-line summary (the verdict and the finding count), without the report. Then wait for shutdown; do NOT pick up other tasks.
+Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. Your final answer is then a one-line summary (the verdict and the finding count), without the report — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
