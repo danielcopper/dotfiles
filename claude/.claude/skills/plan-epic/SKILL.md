@@ -16,9 +16,9 @@ Whatever exists: the conversation so far, the referenced issue (`gh issue view <
 
 Stay in discussion mode: sharpen goals, surface trade-offs, challenge weak spots — one question at a time. When the plan is architecture-bearing or contentious, offer a `/grill-me` or `/grill-with-docs` pass before slicing.
 
-Record the outcome for the epic body: each answer one line under `## Decisions`, each question still open under `## To decide`. For a decision meeting the three ADR criteria in the global `CLAUDE.md`, offer an ADR in `docs/adr/`, linked from the epic.
+Record the outcome for the epic body: each question under `## To decide` as a checkbox (`- [ ] …`); each answer under `## Decisions` as a numbered entry (`- D1: …`), its question checked off and pointing to it (`- [x] … → D1`). For a decision meeting the three ADR criteria in the global `CLAUDE.md`, offer an ADR in `docs/adr/`, linked from the epic.
 
-*Done when:* the user confirms the plan is settled, and every answer stands under `## Decisions` or its question under `## To decide`.
+*Done when:* the user confirms the plan is settled, every answer stands under `## Decisions`, and every question under `## To decide`, checked off with its `→ Dn` or still open.
 
 ## 3. Slice
 
@@ -27,7 +27,7 @@ Cut the plan into sub-issues:
 - **Vertical tracer bullets** by default — each slice cuts through all layers end-to-end and leaves main runnable when merged.
 - **Expand→contract** for wide mechanical refactors whose blast radius breaks call sites repo-wide: add the new beside the old, migrate call sites in blast-radius-sized batches (each batch its own issue), remove the old last.
 
-Each sub-issue must be self-contained for a cold agent. Its body has the headings `## Today`, `## Wanted`, `## Decisions`, `## To decide`, `## Done when`, and `## Out of scope` when anything is ruled out. `## Decisions` reads "See epic #N" plus the slice's own decisions — the epic's decisions are referenced, not copied. `## To decide` holds the slice's open questions, or is left out. Bodies use the project's glossary vocabulary and generic data shapes — a concrete example is an anonymized shape, and the workflow that produced the plan stays out of the text.
+Each sub-issue must be self-contained for a cold agent. Its body has the headings `## Today`, `## Wanted`, `## Decisions`, `## To decide`, `## Done when`, and `## Out of scope` when anything is ruled out. `## Decisions` reads "See epic #N" plus the slice's own decisions — the epic's decisions are referenced, not copied. `## To decide` holds the slice's open questions as checkboxes (`- [ ] …`), or is left out. Bodies use the project's glossary vocabulary and generic data shapes — a concrete example is an anonymized shape, and the workflow that produced the plan stays out of the text.
 
 *Done when:* every slice is independently mergeable and no requirement of the plan is unassigned.
 

@@ -80,7 +80,7 @@ This list of user stories should be extremely extensive and cover all aspects of
 
 ## Decisions
 
-The decisions the user confirmed in this conversation, one line each. This can include:
+The decisions the user confirmed in this conversation, numbered `- D1: …`, `- D2: …`. This can include:
 
 - The modules that will be built/modified
 - The interfaces of those modules that will be modified
@@ -95,7 +95,7 @@ Do NOT include specific file paths or code snippets. They may end up being outda
 
 ## To decide
 
-Every decision you synthesized that the user did not confirm, phrased as an open question with your recommended answer. Leave the section out when there is none.
+Every decision you synthesized that the user did not confirm, one checkbox each (`- [ ] …`), phrased as an open question with your recommended answer; one the user answers later is checked off and points to its decision (`- [x] … → D1`). Leave the section out when there is none.
 
 ## Done when
 

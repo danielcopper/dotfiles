@@ -14,7 +14,7 @@ The dispatch prompt gives you these directly or in a brief file: the issue numbe
 
 Where the spec lives depends on the repo:
 
-- **Convention repo** — the repo's `CLAUDE.md` has the section `## Where decisions live`. The spec is the issue's `## Wanted`, `## Decisions`, `## Done when` and `## Out of scope`, plus the epic's `## Decisions` for "See epic #N" (`gh issue view <N>`; headings count at level 2 or 3). An issue with text under `## To decide`, or without `## Decisions`, is not ready: report NEEDS_CONTEXT.
+- **Convention repo** — the repo's `CLAUDE.md` has the section `## Where decisions live`. The spec is the issue's `## Wanted`, `## Decisions`, `## Done when` and `## Out of scope`, plus the epic's `## Decisions` for "See epic #N" (`gh issue view <N>`; headings count at level 2 or 3). An issue with an open question under `## To decide` — an unchecked item (`- [ ]`) or any text that is not a checked item — or without `## Decisions`, is not ready: report NEEDS_CONTEXT. A `## To decide` holding only checked items (`- [x] … → D1`) is ready.
 - **Any other repo** — the brief names the goal, the in-scope area, the out-of-scope boundaries and the verification commands.
 
 When any of this is missing or contradictory, report NEEDS_CONTEXT instead of guessing.

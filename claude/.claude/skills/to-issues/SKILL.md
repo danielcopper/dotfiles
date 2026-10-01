@@ -121,11 +121,11 @@ Avoid specific file paths or code snippets — they go stale fast.
 
 ## Decisions
 
-Only what the planning conversation actually settled: "See epic #<N>." when the source was an existing issue, plus the slice's own settled decisions, one line each. With neither, leave the section out rather than writing "None." — the issue then is not ready until its questions are answered, and "None." is decided later, in `/implement`'s align step.
+Only what the planning conversation actually settled: "See epic #<N>." when the source was an existing issue, plus the slice's own settled decisions, numbered `- D1: …`, `- D2: …`. With neither, leave the section out rather than writing "None." — the issue then is not ready until its questions are answered, and "None." is decided later, in `/implement`'s align step.
 
 ## To decide
 
-The slice's open points, one per line. Leave the section out when there is none.
+The slice's open points, one checkbox each (`- [ ] …`); one already answered is checked off and points to its decision (`- [x] … → D1`). Leave the section out when there is none.
 
 ## Done when
 
