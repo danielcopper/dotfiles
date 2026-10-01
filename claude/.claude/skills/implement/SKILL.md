@@ -24,7 +24,7 @@ Read `.claude/agents/workflow.md` from the **main checkout** — it may be gitig
 
 Present a compact readiness statement: intended approach, scope, what you'll leave untouched. Ask your open questions **one at a time**, waiting for each answer. Implementation starts on the user's green light.
 
-*(convention)* The answers go into the issue before step 4: draft the issue edit — each answer one line under `## Decisions`, `## To decide` removed (or renamed to `## Decisions`), `## Out of scope` when anything was ruled out — show it to the user, and post it on their approval (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the draft is `## Decisions` with "None.". A decision that is hard to reverse, surprising without context, and a real trade-off also gets an ADR in `docs/adr/`: the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it.
+*(convention)* The answers go into the issue before step 4: draft the issue edit — each answer one line under `## Decisions`, `## To decide` removed (or renamed to `## Decisions`), `## Out of scope` when anything was ruled out — show it to the user, and post it on their approval (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the draft is `## Decisions` with "None.". A decision meeting the three ADR criteria in the global `CLAUDE.md` also gets an ADR in `docs/adr/`: the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it.
 
 With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode. *(convention)* `--go` also needs a ready issue: no `## To decide` with text, and a `## Decisions` (a "See epic #N" pointer counts).
 
@@ -66,13 +66,13 @@ The battery runs once per code state. The implementer's final battery report is 
 
 Draft the PR: conventional-commit title, body with `Closes #<N>`, docs handled per repo policy (updated in the same PR, or the repo's explicit opt-out with a one-line reason). Present the draft and wait for approval — skip the wait only when the user has waived drafts. Then push and open the PR.
 
-*(convention)* The body becomes the squash commit body, so it holds exactly: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
+*(convention)* The body becomes the squash commit body, so it holds: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. A docs opt-out (the repo's docs-check marker) may also sit in the body. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
 
 *Done when:* the PR is open with approved text.
 
 ## 9. Watch to green
 
-Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. The bar is the config's `green_definition` — typically CI green **and** the quality gate green with **0 new issues**. *(convention)* The `decisions` check is among the required checks; it reads the linked issue, and an edit of that issue re-runs it.
+Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. When the implementer rebased onto a moved main, push with `git -C <wt> push --force-with-lease`. The bar is the config's `green_definition` — typically CI green **and** the quality gate green with **0 new issues**. *(convention)* The `decisions` check is among the required checks; it reads the linked issue, and an edit of that issue re-runs it.
 
 At green, run any applicable `user_gate`: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready. *(convention)* After the pass, draft one sentence with the device-check result for the PR body's summary — public text, so shown for approval per `public_text_drafts` — then edit the body (`gh pr edit <PR> --body-file <file>`).
 

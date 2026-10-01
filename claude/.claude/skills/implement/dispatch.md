@@ -44,7 +44,7 @@ First produce the diff artifact from the worktree, into the lead's scratchpad:
 { git -C <wt> log --oneline <base>..HEAD; git -C <wt> diff --stat <base>...HEAD; git -C <wt> diff <base>...HEAD; } > <diff-file>
 ```
 
-`<base>` is the base SHA the implementer's latest report names — after a rebase onto a moved main, the new one.
+`<base>` is the newest base SHA any implementer report names (it changes when the implementer rebased onto a moved main), else the brief's.
 
 Spawn the `reviewer` agent with:
 
