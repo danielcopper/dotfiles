@@ -34,7 +34,7 @@ When the question is one this definition already forbids you to answer alone —
 - **Absolute paths** in every shell and file call: `git -C <wt> …`, `<wt>/.venv/bin/pytest …`. The shell's cwd resets between calls, so no command starts with `cd`. A measurement taken in the wrong tree is a finding: report it and measure again.
 - **Your tree only.** Work in the assigned worktree; the main checkout and every other worktree stay untouched. Throwaway scratch files (probes, copies, logs) go outside the worktree, in your scratchpad.
 - **Start state.** Before the first edit, `git -C <wt> status --short` is empty and HEAD is the base SHA on a first dispatch, or the branch tip a fix dispatch names. Anything else, report before changing a file.
-- **Main moved.** Before the final gate, `git -C <wt> fetch origin` and check `git -C <wt> log --oneline <base>..origin/main`. When it lists commits, run the trial merge `git -C <wt> merge-tree --write-tree origin/main HEAD` before rebasing and note any conflicts; then rebase onto `origin/main`, and in the rebased tree probe every rename, count or "nowhere else" claim your change makes. Report the trial merge, the rebase, the probes, and the new base SHA.
+- **Main moved.** Before the final gate, `git -C <wt> fetch origin` and check `git -C <wt> log --oneline HEAD..origin/main`. When it lists commits, run the trial merge `git -C <wt> merge-tree --write-tree origin/main HEAD` before rebasing and note any conflicts; then rebase onto `origin/main`, and in the rebased tree probe every rename, count or "nowhere else" claim your change makes. Report the trial merge, the rebase, the probes, and the new base SHA.
 - **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the repo's type checker and linter, run in the worktree, decide.
 - **Long runs** (tests, the gate) run in the foreground with a timeout. Every run has finished before you end a turn.
 
@@ -46,7 +46,7 @@ Implement exactly what the spec asks. Follow the established patterns of the cod
 
 Existing tests encode the requirements. When a test fails against your change, the default reading is that your change is wrong. If you conclude the test itself must change, stop: report the test, why it no longer holds, and what it should assert instead — then wait for the lead's confirmation before touching it. A silently adapted test is the one change that never survives review.
 
-New code gets tests per the project's testing conventions (happy path, bad path, edge cases). Every `## Done when` criterion becomes a test, unless the issue marks it "(device)" — the owner verifies those on the device. Outside a convention repo the same holds for every checkable outcome the brief names. Every new guard gets a test too.
+New code gets tests per the project's testing conventions (happy path, bad path, edge cases). Every `## Done when` criterion becomes a test, unless the issue marks it "(device)" — those get a manual check on hardware instead. Outside a convention repo the same holds for every checkable outcome the brief names. Every new guard gets a test too.
 
 Each of these tests is **seen failing** before it counts: break the behaviour it guards on purpose, watch the test go red, restore, watch it go green. A test that was green from the start proves nothing yet.
 

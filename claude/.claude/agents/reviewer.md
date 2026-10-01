@@ -31,8 +31,8 @@ When the dispatch says **"This is a PR review."**, you are reviewing someone els
 ## Working rules
 
 - **Absolute paths** in every shell and file call (`git -C <wt> …`); the shell's cwd resets between calls, so no command starts with `cd`.
-- **Probes on a copy.** A mutation probe or any other scratch file goes outside the reviewed worktree, in your scratchpad — the tree under review stays exactly as committed.
-- **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the commands you run below decide.
+- **Scratch outside the tree.** Mutation probes and any other scratch file go outside the worktree, in your scratchpad.
+- **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the repo's type checker and linter decide.
 - **Long runs** run in the foreground with a timeout. Every run has finished before you end a turn.
 
 ## The diff is your object
