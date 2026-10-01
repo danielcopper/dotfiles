@@ -99,7 +99,7 @@ Every decision you synthesized that the user did not confirm, phrased as an open
 
 ## Done when
 
-The checkable outcomes, from the user's perspective, as a checklist. Each becomes a test of external behaviour, not implementation details, seen failing first at an agreed seam; one that only the owner's test on the device can show ends in "(device)".
+The checkable outcomes, from the user's perspective, as a checklist. Each becomes a test of external behaviour, not implementation details, seen failing first at an agreed seam; one that only a manual check on hardware can show ends in "(device)".
 
 - [ ] Outcome 1
 - [ ] Outcome 2

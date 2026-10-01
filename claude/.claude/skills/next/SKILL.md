@@ -1,6 +1,6 @@
 ---
 name: next
-description: Recommend the next ticket — reads the project board (Ready + In Progress), open PRs, and recent commits, then commits to one recommendation with reasoning. Argument: an optional focus hint (e.g. "was kleines", "saves", "frontend").
+description: 'Recommend the next ticket — reads the project board (Ready + In Progress), open PRs, and recent commits, then commits to one recommendation with reasoning. Argument: an optional focus hint (e.g. "was kleines", "saves", "frontend").'
 disable-model-invocation: true
 ---
 

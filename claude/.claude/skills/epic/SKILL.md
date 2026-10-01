@@ -1,6 +1,6 @@
 ---
 name: epic
-description: Work through an epic's sub-issues as an assembly line — align once on all issues, then run each through the implement pipeline, merging between issues. Argument: the epic issue number.
+description: "Work through an epic's sub-issues as an assembly line — align once on all issues, then run each through the implement pipeline, merging between issues. Argument: the epic issue number."
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: plan-epic
-description: Plan an epic from a loose idea, discussion, or existing issue — discussion first, then native sub-issues on the board as drafts for approval. Produces a plan and issues, never code. Argument: a topic, an issue number, or nothing (uses the conversation).
+description: "Plan an epic from a loose idea, discussion, or existing issue — discussion first, then native sub-issues on the board as drafts for approval. Produces a plan and issues, never code. Argument: a topic, an issue number, or nothing (uses the conversation)."
 disable-model-invocation: true
 ---
 

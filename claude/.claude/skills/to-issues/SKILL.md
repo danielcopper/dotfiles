@@ -121,18 +121,18 @@ Avoid specific file paths or code snippets — they go stale fast.
 
 ## Decisions
 
-"See epic #<N>." when the source was an existing issue, plus the decisions this slice settles on its own, one line each. Leave the section out when there is neither.
+Only what the planning conversation actually settled: "See epic #<N>." when the source was an existing issue, plus the slice's own settled decisions, one line each. With neither, leave the section out rather than writing "None." — the issue then is not ready until its questions are answered, and "None." is decided later, in `/implement`'s align step.
 
 ## To decide
 
-The slice's open questions, one per line. Leave the section out when there is none.
+The slice's open points, one per line. Leave the section out when there is none.
 
 ## Done when
 
 - [ ] Criterion 1
 - [ ] Criterion 2
 
-Each criterion becomes a test that is seen failing first; one that only the owner's test on the device can show ends in "(device)".
+Each criterion becomes a test that is seen failing first; one that only a manual check on hardware can show ends in "(device)".
 
 ## Out of scope
 
