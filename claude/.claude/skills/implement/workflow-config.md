@@ -51,15 +51,22 @@ public_text_drafts: always
 # What needs the user's own hands or eyes before a change counts as done —
 # a verification only they can run (target hardware, an environment only
 # they control), beyond decisions and approvals the skills already route
-# to them. Empty if the repo has none.
+# to them. Empty if the repo has none. In a convention repo, an issue's
+# user-gate items are its `## Done when` criteria marked "(device)".
 user_gate: <when and how the user verifies, or empty>
+
+# Repo-specific rules for the implementer and reviewer, beyond their agent
+# definitions: where scratch files go, the gate's timeout or staging, which
+# `.claude/rules/*.md` files to read. Free text; the lead copies it into
+# every brief verbatim. Empty when the definitions cover everything.
+agent_rules: <free text, or empty>
 ```
 
 ## Bootstrap (config missing)
 
 1. **Gate**: derive candidates from the repo's CLAUDE.md build/test section and `mise.toml` tasks.
 2. **Board**: reuse `project_owner` / `project_number` / `project_id` / `status_field_id` from `.claude/agents/github.md` in the main checkout if present; resolve the In-Progress option id via `gh project field-list <n> --owner <owner> --format json`.
-3. **Policies**: default `merge_policy` to `user`; full-auto is available only as an explicit current-run grant and is never persisted. Propose `public_text_drafts` and `user_gate` from what the user has said in this repo; anything unknown, ask.
+3. **Policies**: default `merge_policy` to `user`; full-auto is available only as an explicit current-run grant and is never persisted. Propose `public_text_drafts` and `user_gate` from what the user has said in this repo; anything unknown, ask. `agent_rules` starts empty unless the user names rules.
 4. Present the drafted yaml to the user, write the file into the main checkout on their OK, and continue the pipeline.
 
 ## Board moves
