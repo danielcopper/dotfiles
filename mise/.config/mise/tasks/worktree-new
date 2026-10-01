@@ -34,7 +34,10 @@ wt_parent="$(dirname "$repo_root")/$(basename "$repo_root").worktrees/${type}"
 wt="$wt_parent/${slug}"
 
 mkdir -p "$wt_parent"
-git -C "$repo_root" worktree add "$wt" -b "${type}/${slug}" "$base"
+# --no-track: a remote base (origin/release/x) would otherwise become the new
+# branch's upstream, so `git pull` merges the base and `git status` compares
+# against it; the first `git push -u origin <branch>` sets the real upstream.
+git -C "$repo_root" worktree add --no-track "$wt" -b "${type}/${slug}" "$base"
 
 # Only the mise dance if the repo actually uses mise.
 if [ -f "$wt/mise.toml" ] || [ -f "$wt/.mise.toml" ] || [ -f "$wt/.config/mise/config.toml" ]; then
