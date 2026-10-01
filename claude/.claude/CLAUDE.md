@@ -18,7 +18,7 @@ The default loop for any non-trivial implementation work, unless I say otherwise
 
 For each task (and each cut):
 
-1. **Plan when needed; clarify open questions first.** If there are design or architecture choices, resolve them _with me_ before writing code — we make design/arch decisions together, I don't decide them unilaterally. No code until the open questions are closed.
+1. **Plan when needed; clarify open questions first.** If there are design or architecture choices, resolve them _with me_ before writing code — we make design/arch decisions together, I don't decide them unilaterally. No code until the open questions are closed. In a repo whose `CLAUDE.md` has `## Where decisions live`, the answers are recorded in the issue's `## Decisions`, as that section describes.
 2. **Implement via agent.**
 3. **Review via agent** — one or more code-review agents, scaled to the implementation's complexity.
 4. **Push and open the PR** (per the repo's branch/merge model and work-item-linking rules).
@@ -26,12 +26,10 @@ For each task (and each cut):
 
 Composes with the worktree skill (one branch/worktree per cut) and the board skills' rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
 
-**One report per agent, and it goes in the message.** An agent's prompt says "report back and wait for shutdown" so it
-stops rather than picking up more work — not so it delivers twice. Left alone, the report arrives twice: once because
-the agent sends it, and once inside the harness's own idle notification, which carries the agent's final output with
-it. **The idle notification is truncated for a long report**, so the copy to keep is the message. Add to every agent
-prompt: *"Send your full report as a message. Your final answer is then a one-line summary — do not repeat the report
-in it."* The second copy lands at idle, before a stop can reach the agent, so stopping earlier does not prevent it.
+**One report per agent, and it goes in the message.** The `implementer` and `reviewer` definitions carry this
+themselves. To the prompt of any agent without its own definition (general-purpose, Explore, a fork) add: *"Send your
+full report as a message. Your final answer is then a one-line summary — do not repeat the report in it."* Otherwise
+the report arrives twice, and the copy in the harness's idle notification is truncated when long.
 
 ## Environment
 
@@ -41,7 +39,7 @@ in it."* The second copy lands at idle, before a stop can reach the agent, so st
 
 - **Prefer LSP over Grep/Glob/Read for symbol queries** in LSP-covered languages (TS, Python, C#, …) — definitions, references, hover, `documentSymbol`, call hierarchy. Precise, no whole-file reads. Run `LSP findReferences` before renaming or changing a signature. Use Grep/Glob only for text LSP can't reach: comments, string literals, config values, non-LSP languages.
 - **`LSP workspaceSymbol` always takes an explicit `query`** — with one it is the fastest repo-wide symbol lookup; an empty query returns nothing from most servers. Reach for `documentSymbol` instead once you already know the file.
-- After writing or editing code, check `LSP` diagnostics on the touched files and fix type errors / missing imports before reporting the task done.
+- After writing or editing code, check `LSP` diagnostics on the touched files and fix type errors / missing imports before reporting the task done. In a worktree those diagnostics are unreliable; the repo's real type checker and linter, run there, decide.
 
 ## Git
 
@@ -58,7 +56,7 @@ Memory is the **working set** — provisional knowledge that still has to prove 
 1. True/useful across projects? → `~/Memory/global/<rule-name>.md` (one rule per file)
 2. Tool-specific quirk? → `~/Memory/global/tools/<tool>.md`
 3. Cross-tool conceptual knowledge? → `~/Memory/global/domain/<topic>.md` — and once proven durable, promote to `~/Notes/wiki/`
-4. Repo-specific? → `~/Memory/<repo-name>/<file>.md` (repo-name = basename of the main repo root; private, synced, never committed)
+4. Repo-specific? → `~/Memory/<repo-name>/<file>.md` (repo-name = basename of the main repo root; private, synced, never committed). Working notes there (briefs, reports, reviews) never hold the only copy of a decision, and move to `archive/` once their work is merged — the rule lives in the `implement` skill, step "Close the loop".
 5. Private/WIP or just-noted-today? → `~/Memory/global/daily/<YYYY-MM-DD>.md` (`## HH:MM — slug` + 3–5 bullets, append-only)
 
 Provenance rules: promote only what the user confirmed or was observed repeatedly — a single observation stays in the daily. On conflict, an explicit user statement beats an observation, and newer evidence beats older. Time-bound facts get a `TIME-BOUND, delete when <condition>` marker in their index entry.
@@ -82,6 +80,8 @@ If the current repo has any of the following at its root, treat them as canonica
 - **`docs/adr/`** — Architectural Decision Records, numbered sequentially (`0001-slug.md`, …). Each records why a decision was made and what alternatives were rejected. Read before redesigning in a settled area.
 
 When these files exist: use the glossary's vocabulary in outputs (don't drift to synonyms it explicitly avoids); flag ADR conflicts out loud (*"Contradicts ADR-0007 — but worth reopening because…"*) rather than silently overriding; propose a new ADR only when all three apply — hard-to-reverse, surprising-without-context, **and** a real trade-off. If these files don't exist, proceed silently — don't flag their absence or suggest creating them upfront. They get created lazily during planning sessions (e.g. `/grill-with-docs`) when terms or decisions actually resolve.
+
+In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decisions` is the home of each change's decisions, and an ADR is linked from that issue.
 
 **ADR format and lifecycle** (default when writing or changing an ADR; a repo's own ADR convention or tooling wins):
 
