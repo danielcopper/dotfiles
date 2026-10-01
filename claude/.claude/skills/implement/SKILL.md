@@ -24,9 +24,9 @@ Read `.claude/agents/workflow.md` from the **main checkout** — it may be gitig
 
 Present a compact readiness statement: intended approach, scope, what you'll leave untouched. Ask your open questions **one at a time**, waiting for each answer. Implementation starts on the user's green light.
 
-*(convention)* The answers go into the issue before step 4: draft the issue edit — each answer appended under `## Decisions` as the next numbered entry (`- D1: …`), its question under `## To decide` checked off and kept, pointing to that entry (`- [x] … → D1`), `## Out of scope` when anything was ruled out — show it to the user, and post it on their approval (`gh issue edit <N> --body-file <file>`). A decision that changes later stays as a struck-through entry, and the new one follows with its date (`- ~~D2: …~~`, then `- D2 (changed YYYY-MM-DD): …`). When it turns out there is nothing to decide, the draft is `## Decisions` with "None.". A decision meeting the three ADR criteria in the global `CLAUDE.md` also gets an ADR in `docs/adr/`: the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it.
+*(convention)* The answers go into the issue before step 4: draft the issue edit in the format the global `CLAUDE.md` gives — each answer a new entry under `## Decisions`, its question checked off under `## To decide`, `## Out of scope` when anything was ruled out — show it to the user, and post it on their approval (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the draft is `## Decisions` with "None.". A decision meeting the three ADR criteria in the global `CLAUDE.md` also gets an ADR in `docs/adr/`: the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it.
 
-With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode. *(convention)* `--go` also needs a ready issue: no open question under `## To decide` (an unchecked item, or any text that is not a checked item), and a `## Decisions` (a "See epic #N" pointer counts).
+With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode. *(convention)* `--go` also needs a ready issue: no open question under `## To decide`, and a `## Decisions` (a "See epic #N" pointer counts).
 
 *Done when:* green light received *(convention)* and the posted issue holds every answer under `## Decisions`, its question checked off under `## To decide`.
 
@@ -40,7 +40,7 @@ With `--go` (or a standing automode grant from the user) and zero open questions
 
 ## 5. Implement
 
-Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer** agent per [`dispatch.md`](dispatch.md). Route its four-state status as dispatch.md describes; questions and BLOCKED/NEEDS_CONTEXT go to the user, not to your own judgment. *(convention)* An answer that is a decision is appended to the issue's `## Decisions` as the next D-entry, in step 3's format (drafted, approved, posted), before the agent resumes.
+Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer** agent per [`dispatch.md`](dispatch.md). Route its four-state status as dispatch.md describes; questions and BLOCKED/NEEDS_CONTEXT go to the user, not to your own judgment. *(convention)* An answer that is a decision goes into the issue's `## Decisions` as the global `CLAUDE.md` gives it — a new entry, or a changed decision struck through and re-added with its date — drafted, approved and posted before the agent resumes.
 
 *Done when:* status DONE, or DONE_WITH_CONCERNS with every concern resolved with the user.
 

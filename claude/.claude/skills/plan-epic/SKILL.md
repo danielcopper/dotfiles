@@ -16,9 +16,9 @@ Whatever exists: the conversation so far, the referenced issue (`gh issue view <
 
 Stay in discussion mode: sharpen goals, surface trade-offs, challenge weak spots — one question at a time. When the plan is architecture-bearing or contentious, offer a `/grill-me` or `/grill-with-docs` pass before slicing.
 
-Record the outcome for the epic body: each question under `## To decide` as a checkbox (`- [ ] …`); each answer under `## Decisions` as a numbered entry (`- D1: …`), its question checked off and pointing to it (`- [x] … → D1`). For a decision meeting the three ADR criteria in the global `CLAUDE.md`, offer an ADR in `docs/adr/`, linked from the epic.
+Record the outcome for the epic body: each decision the conversation settled under `## Decisions` (`- D1: …`), each question still open under `## To decide` (`- [ ] …`). When the plan builds on an existing issue, a question already open under its `## To decide` is checked off once answered (`- [x] … → D1`). For a decision meeting the three ADR criteria in the global `CLAUDE.md`, offer an ADR in `docs/adr/`, linked from the epic.
 
-*Done when:* the user confirms the plan is settled, every answer stands under `## Decisions`, and every question under `## To decide`, checked off with its `→ Dn` or still open.
+*Done when:* the user confirms the plan is settled, and every answer stands under `## Decisions` or its question under `## To decide`.
 
 ## 3. Slice
 

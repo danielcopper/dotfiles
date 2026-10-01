@@ -125,7 +125,7 @@ Only what the planning conversation actually settled: "See epic #<N>." when the 
 
 ## To decide
 
-The slice's open points, one checkbox each (`- [ ] …`); one already answered is checked off and points to its decision (`- [x] … → D1`). Leave the section out when there is none.
+The slice's open points, one checkbox each (`- [ ] …`). Leave the section out when there is none.
 
 ## Done when
 

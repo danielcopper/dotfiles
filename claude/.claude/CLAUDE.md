@@ -83,6 +83,12 @@ When these files exist: use the glossary's vocabulary in outputs (don't drift to
 
 In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decisions` is the home of each change's decisions, and an ADR is linked from that issue.
 
+**Questions and decisions in such an issue:**
+
+- **`## To decide` is a checkbox list, one question each.** An answered question is checked off and points to its decision (`- [x] … → D1`); the question stays.
+- **An open question is an unchecked item or any other text.** Checked items with their indented continuation lines, blank lines and `_No response_` are not open.
+- **Decisions are numbered and appended** (`- D1: …`). A decision that changes is struck through, and the new one follows with its date (`- ~~D2: …~~`, then `- D2 (changed YYYY-MM-DD): …`).
+
 **ADR format and lifecycle** (default when writing or changing an ADR; a repo's own ADR convention or tooling wins):
 
 - **Front matter carries the lifecycle.** Three required keys: `status` (`proposed` / `accepted` / `rejected` / `deprecated` / `superseded`), `decided` and `updated` (ISO dates — when it was decided, when the record last changed). Plus the relation keys that apply, each a list: `supersedes`, `superseded-by`, `amends`, `amended-by`, whose values are ADR numbers written as four digits (`[0020]`). Nothing else goes there, so a mistyped key is an error, not a silently missing relation.

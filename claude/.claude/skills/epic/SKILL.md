@@ -34,7 +34,7 @@ Move the **epic** to In Progress on the board (once). Then take the first sub-is
 
 Execute the implement pipeline steps 2–10 with these epic-mode adjustments:
 
-- **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user. In a convention repo "no open questions" means no open question under `## To decide` (an unchecked item, or any text that is not a checked item).
+- **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user. In a convention repo "no open questions" means no open question under `## To decide`.
 - **Merge between issues**: the sub-issue's PR reaches green and merges (per merge policy) **before** the next sub-issue starts — the next worktree branches from updated main. PRs stay small; every merge leaves main runnable.
 - **Issues needing the user** (the step-2 split): prepare everything up to the blocking point, present exactly what's needed (one verification, one decision), and continue with the next autonomous sub-issue while waiting where the order allows.
 

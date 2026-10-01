@@ -95,7 +95,7 @@ Do NOT include specific file paths or code snippets. They may end up being outda
 
 ## To decide
 
-Every decision you synthesized that the user did not confirm, one checkbox each (`- [ ] …`), phrased as an open question with your recommended answer; one the user answers later is checked off and points to its decision (`- [x] … → D1`). Leave the section out when there is none.
+Every decision you synthesized that the user did not confirm, one checkbox each (`- [ ] …`), phrased as an open question with your recommended answer. Leave the section out when there is none.
 
 ## Done when
 

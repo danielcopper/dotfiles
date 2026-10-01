@@ -79,7 +79,7 @@ When a term is resolved, update `CONTEXT.md` right there. Don't batch these up �
 
 ### Record decisions in the issue
 
-In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Draft the edit as you go — the decision appended under `## Decisions` as the next numbered entry (`- D1: …`), its question under `## To decide` checked off and kept, pointing to it (`- [x] … → D1`) — show the draft, and post it on approval (`gh issue edit <N> --body-file <file>`).
+In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Draft the edit as you go, in the format the global `CLAUDE.md` gives — the decision a new entry under `## Decisions`, its question checked off under `## To decide`; a decision that changes is struck through and re-added with its date — show the draft, and post it on approval (`gh issue edit <N> --body-file <file>`).
 
 ### Offer ADRs sparingly
 

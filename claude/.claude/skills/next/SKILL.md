@@ -21,7 +21,7 @@ Board config from `.claude/agents/workflow.md` (or `github.md`). Then gather:
 
 Before recommending: In Progress items with no matching open PR or recent commits are possibly stalled or forgotten — name them. Open PRs sitting green and unmerged — name them. These often ARE the real next action.
 
-A Ready issue with an open question under `## To decide` (or `### To decide`), meaning an unchecked item or any text that is not a checked item, is not startable — name it with its open questions. It can be the pick only as "decide these first", never as a straight `/implement`.
+A Ready issue with an open question under `## To decide` (or `### To decide`) is not startable — name it with its open questions. It can be the pick only as "decide these first", never as a straight `/implement`.
 
 ## 3. Recommend
 
