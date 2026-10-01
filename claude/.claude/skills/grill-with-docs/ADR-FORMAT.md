@@ -14,7 +14,7 @@ Scan `docs/adr/` for the highest existing number and increment by one.
 
 ## When to offer an ADR
 
-All three criteria from [SKILL.md](./SKILL.md) ("Offer ADRs sparingly") must hold. If a decision is easy to reverse, skip it — you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing."
+Only for a decision meeting the three ADR criteria in the global `CLAUDE.md`; [SKILL.md](./SKILL.md) ("Offer ADRs sparingly") explains them.
 
 ### What qualifies
 

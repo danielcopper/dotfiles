@@ -140,6 +140,6 @@ What this slice leaves untouched. Leave the section out when there is nothing to
 
 </issue-template>
 
-Do NOT close or modify any parent issue.
+Do NOT close or edit the body of any parent issue; the native sub-issue link is the only change it gets.
 
 Report all created issue URLs to the user at the end.
