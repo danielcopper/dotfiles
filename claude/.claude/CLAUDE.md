@@ -82,3 +82,11 @@ If the current repo has any of the following at its root, treat them as canonica
 - **`docs/adr/`** — Architectural Decision Records, numbered sequentially (`0001-slug.md`, …). Each records why a decision was made and what alternatives were rejected. Read before redesigning in a settled area.
 
 When these files exist: use the glossary's vocabulary in outputs (don't drift to synonyms it explicitly avoids); flag ADR conflicts out loud (*"Contradicts ADR-0007 — but worth reopening because…"*) rather than silently overriding; propose a new ADR only when all three apply — hard-to-reverse, surprising-without-context, **and** a real trade-off. If these files don't exist, proceed silently — don't flag their absence or suggest creating them upfront. They get created lazily during planning sessions (e.g. `/grill-with-docs`) when terms or decisions actually resolve.
+
+**ADR format and lifecycle** (default when writing or changing an ADR; a repo's own ADR convention or tooling wins):
+
+- **Front matter carries the lifecycle.** Three required keys: `status` (`proposed` / `accepted` / `rejected` / `deprecated` / `superseded`), `decided` and `updated` (ISO dates — when it was decided, when the record last changed). Plus the relation keys that apply, each a list: `supersedes`, `superseded-by`, `amends`, `amended-by`. Nothing else goes there, so a mistyped key is an error, not a silently missing relation.
+- **Then the H1 and a `## Status` section** that opens with the same state word (`Accepted 2026-05-12.`) and carries the narrative: what was decided, what changed, and why. Beyond that an ADR can be a single paragraph; add Considered Options / Consequences only when they add real value.
+- **Relations are declared from both ends** — if 0029 `amends: [0020]`, then 0020 carries `amended-by: [0029]`.
+- **A decided ADR is amended, never quietly rewritten.** Append `## Amendment — <what changed>` and bump `updated`; the decision text above stays as it was decided. Amending never changes `status` — only a replacement does, and then `superseded` and `superseded-by` appear together. If the change is itself a decision worth its own record, write a new ADR and declare the relation on both sides.
+- Existing ADRs without front matter are not retrofitted unasked.
