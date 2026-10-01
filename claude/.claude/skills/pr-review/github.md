@@ -11,7 +11,7 @@ PR URL: `https://github.com/<owner>/<repo>/pull/<n>`. Everything runs through `g
 Then run these in parallel:
 
 - **Metadata:** `gh pr view <n|url> --json number,title,author,state,isDraft,body,baseRefName,headRefName,headRefOid,isCrossRepository,url,closingIssuesReferences` - `headRefOid` is `HEAD_SHA`.
-- **Linked issues:** each entry of `closingIssuesReferences` (closing keywords and issues linked in the Development sidebar) - `gh issue view <url> --json title,body`. An issue the body only mentions ("refs #12") is not in that list; read it too when the body names it as the spec.
+- **Linked issues:** each entry of `closingIssuesReferences` (closing keywords and issues linked in the Development sidebar) - `gh issue view <url> --json title,body`. An issue the body only mentions ("refs #12") is not in that list; read it too when the body names it as the spec. When an issue's `## Decisions` says "See epic #N", read the epic the same way.
 - **The user:** `gh api user --jq .login` - the user's comments and reviews are those whose `user` matches it.
 - **Existing feedback:**
   - line comments: `gh api repos/{owner}/{repo}/pulls/<n>/comments --paginate --jq '.[] | {id, user: .user.login, path, line, body, in_reply_to_id, commit_id}'`
@@ -25,6 +25,8 @@ git fetch origin refs/heads/<base>:refs/remotes/origin/<base> refs/pull/<n>/head
 ```
 
 `BASE=origin/<base>`.
+
+**Convention repo:** `git show "$BASE":CLAUDE.md | grep -qx '## Where decisions live'` succeeds. Then the spec includes the linked issues' and the epic's `## Decisions` and `## Done when` (headings count at level 2 or 3).
 
 ## Re-review lookups
 

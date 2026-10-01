@@ -22,7 +22,7 @@ Then read the platform file - [`azure-devops.md`](azure-devops.md) or [`github.m
 Follow the platform file's Phase 1. It must leave you with:
 
 - PR metadata: title, author, source -> target, status
-- **The spec**: the PR description plus the linked work items (Azure DevOps) or linked issues (GitHub) - title, description, acceptance criteria
+- **The spec**: the PR description plus the linked work items (Azure DevOps) or linked issues (GitHub) - title, description, acceptance criteria. In a convention repo (GitHub; the platform file says how to tell) it also includes each linked issue's `## Decisions` and `## Done when`, and the epic's `## Decisions` when an issue says "See epic #N"
 - Existing threads/comments, so nobody duplicates what is already on the PR
 - The user's identity, and which of those threads are theirs
 - `BASE` (the fetched target ref) and `HEAD_SHA` (the PR head commit)
@@ -76,7 +76,7 @@ For each agent, the prompt must include:
 - An instruction to skip cosmetic nits unless they actively harm reviewability
 - This line, verbatim: **"Do not spawn further agents and do not invoke any review skill."**
 
-The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies.
+The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`, and asks the reviewer to check that the PR body's `## Decisions` matches the issue's.
 
 In a re-review, every agent reviews only the delta, and the specialist triggers apply to the delta's files. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread - **addressed / not addressed / partially** - each with evidence (file:line in the delta, or the check it ran).
 

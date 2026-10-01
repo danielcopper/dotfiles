@@ -26,9 +26,7 @@ mise run worktree-new <type> <slug> [base]
 
 The main session stays in the main checkout. It dispatches implementer and reviewer **subagents** that work in the worktree:
 
-- Give each subagent the worktree's **absolute** path, with the instruction to use absolute paths or `cd <worktree> &&` in every shell call (the shell cwd resets between calls).
-- LSP diagnostics on worktree files resolve against the main checkout — subagents run the real type checker in the worktree instead of trusting them.
-- Tell them to work only in the assigned worktree — never modify the main checkout or another worktree.
+- Give each subagent the worktree's **absolute** path. The rules for working there (absolute paths, no `cd`, and the rest) live in the `implementer` and `reviewer` definitions under `~/.claude/agents/`, so their prompts restate none of them; any other agent's prompt points to the `## Working rules` section of `implementer.md`.
 - To run a tool inside the worktree by hand: `mise -C <worktree> exec -- <cmd>`.
 
 Occasionally the main session works in a worktree itself. To work in a **new** worktree from the start, call `EnterWorktree` with `name: "<type>/<slug>"`: the `WorktreeCreate` hook (`hooks/worktree_create.sh`) creates it at the convention path through `worktree-new` (branch and setup included), and the session enters it without an approval prompt. To enter an **existing** worktree, call `EnterWorktree` with `path` set to its absolute path — a path outside `.claude/worktrees/` asks the user for approval on every entry; neither a permission rule nor "don't ask again" suppresses it (only `bypassPermissions` mode skips it). From inside a worktree, `EnterWorktree` only reaches `.claude/worktrees/`, so switching to another sibling worktree goes through `ExitWorktree` first. `ExitWorktree` with `action: "keep"` returns to the main checkout and leaves the worktree in place.
