@@ -76,7 +76,7 @@ For each agent, the prompt must include:
 - An instruction to skip cosmetic nits unless they actively harm reviewability
 - This line, verbatim: **"Do not spawn further agents and do not invoke any review skill."**
 
-The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`, and asks the reviewer to check that the PR body's `## Decisions` matches the issue's.
+The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`.
 
 In a re-review, every agent reviews only the delta, and the specialist triggers apply to the delta's files. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread - **addressed / not addressed / partially** - each with evidence (file:line in the delta, or the check it ran).
 
@@ -108,7 +108,7 @@ For each task, **in the order the user picks** (or sequential if they say "go fr
    - `cmd | tail` returns `tail`'s exit code, not `cmd`'s. Capture `${PIPESTATUS[0]}` or redirect to a file.
    - Flaky tests aren't deterministic - use forced timeouts (`--testTimeout=1`) for repeatable failures.
    - Training cutoff matters: spy-library behaviour, ESM internals, framework defaults all drift. Read the installed source.
-   - See `~/.claude/memory/validate-runtime-claims.md`.
+   - See `~/.claude/memory/verification-reachability.md`.
 3. **Report findings** to the user with the empirical evidence. State your lean (post / skip), but **the user decides**.
 4. **Wait for the user's call.** "Post" / "skip" / "shorter" / "more proof" / "draft it differently". If they want a draft, write the comment text and show it before posting.
 5. **Post or drop** based on their decision, per the platform file's Phase 5 - it says whether an approved comment goes out now or with the final batch. Update the task with the outcome.

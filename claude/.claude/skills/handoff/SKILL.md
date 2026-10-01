@@ -4,7 +4,7 @@ description: Compact the current conversation into a handoff document for anothe
 argument-hint: "What will the next session be used for?"
 ---
 
-Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save it to `~/Memory/<repo>/handoff-<slug>.md` (`<repo>` = basename of the main repo root) — persistent, unlike the OS temp dir, which is cleared on restart; never the current workspace.
+Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save it to `~/Memory/<repo>/handoff-<N>-<slug>.md` when the work belongs to issue #N, else `handoff-<slug>.md` (`<repo>` = basename of the main repo root) — persistent, unlike the OS temp dir, which is cleared on restart; never the current workspace.
 
 The document holds status and pointers: where the work stopped, what is open, and where each piece lives. A decision goes into its issue (`## Decisions` in a repo whose `CLAUDE.md` has `## Where decisions live`) — the handoff points there and is never its only home. The agents' working rules live in their definitions (`~/.claude/agents/`); point to those instead of copying them.
 
