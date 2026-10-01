@@ -11,6 +11,7 @@ Answer one question — "what do we work on next?" — with a single, reasoned r
 Board config from `.claude/agents/workflow.md` (or `github.md`). Then gather:
 
 - Board items in **In Progress** and **Ready**, with priority and parent epic (`gh project item-list <n> --owner <owner> --format json`, filter by status)
+- The body of each Ready issue (`gh issue view <N> --json body`)
 - Open PRs and their check states (`gh pr list --json number,title,statusCheckRollup`)
 - The last ~15 commits on main (what momentum exists, what just shipped)
 
@@ -19,6 +20,8 @@ Board config from `.claude/agents/workflow.md` (or `github.md`). Then gather:
 ## 2. Flag inconsistencies first
 
 Before recommending: In Progress items with no matching open PR or recent commits are possibly stalled or forgotten — name them. Open PRs sitting green and unmerged — name them. These often ARE the real next action.
+
+A Ready issue whose `## To decide` (or `### To decide`) still has text is not startable — name it with its open questions. It can be the pick only as "decide these first", never as a straight `/implement`.
 
 ## 3. Recommend
 

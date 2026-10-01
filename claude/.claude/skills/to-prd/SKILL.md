@@ -78,9 +78,9 @@ A LONG, numbered list of user stories. Each user story should be in the format o
 
 This list of user stories should be extremely extensive and cover all aspects of the feature.
 
-## Implementation Decisions
+## Decisions
 
-A list of implementation decisions that were made. This can include:
+The decisions the user confirmed in this conversation, one line each. This can include:
 
 - The modules that will be built/modified
 - The interfaces of those modules that will be modified
@@ -89,16 +89,20 @@ A list of implementation decisions that were made. This can include:
 - Schema changes
 - API contracts
 - Specific interactions
+- The test seams agreed in step 3, and why those seams; prior art for the tests (similar tests in the codebase)
 
 Do NOT include specific file paths or code snippets. They may end up being outdated very quickly.
 
-## Testing Decisions
+## To decide
 
-A list of testing decisions that were made. Include:
+Every decision you synthesized that the user did not confirm, phrased as an open question with your recommended answer. Leave the section out when there is none.
 
-- A description of what makes a good test (only test external behavior, not implementation details)
-- The seams at which the feature will be tested, as agreed in step 3, and why those seams
-- Prior art for the tests (i.e. similar types of tests in the codebase)
+## Done when
+
+The checkable outcomes, from the user's perspective, as a checklist. Each becomes a test of external behaviour, not implementation details, seen failing first at an agreed seam; one that only the owner's test on the device can show ends in "(device)".
+
+- [ ] Outcome 1
+- [ ] Outcome 2
 
 ## Out of Scope
 

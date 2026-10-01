@@ -16,7 +16,9 @@ Whatever exists: the conversation so far, the referenced issue (`gh issue view <
 
 Stay in discussion mode: sharpen goals, surface trade-offs, challenge weak spots — one question at a time. When the plan is architecture-bearing or contentious, offer a `/grill-me` or `/grill-with-docs` pass before slicing.
 
-*Done when:* the user confirms the plan is settled.
+Record the outcome for the epic body: each answer one line under `## Decisions`, each question still open under `## To decide`. When a decision is hard to reverse, surprising without context, and a real trade-off, offer an ADR in `docs/adr/`, linked from the epic.
+
+*Done when:* the user confirms the plan is settled, and every answer stands under `## Decisions` or its question under `## To decide`.
 
 ## 3. Slice
 
@@ -25,7 +27,7 @@ Cut the plan into sub-issues:
 - **Vertical tracer bullets** by default — each slice cuts through all layers end-to-end and leaves main runnable when merged.
 - **Expand→contract** for wide mechanical refactors whose blast radius breaks call sites repo-wide: add the new beside the old, migrate call sites in blast-radius-sized batches (each batch its own issue), remove the old last.
 
-Each sub-issue must be self-contained for a cold agent: context, acceptance criteria, out-of-scope. Bodies use the project's glossary vocabulary and generic data shapes — a concrete example is an anonymized shape, and the workflow that produced the plan stays out of the text.
+Each sub-issue must be self-contained for a cold agent. Its body has the headings `## Today`, `## Wanted`, `## Decisions`, `## To decide`, `## Done when`, and `## Out of scope` when anything is ruled out. `## Decisions` reads "See epic #N" plus the slice's own decisions — the epic's decisions are referenced, not copied. `## To decide` holds the slice's open questions, or is left out. Bodies use the project's glossary vocabulary and generic data shapes — a concrete example is an anonymized shape, and the workflow that produced the plan stays out of the text.
 
 *Done when:* every slice is independently mergeable and no requirement of the plan is unassigned.
 
@@ -35,6 +37,6 @@ Present the epic body and every sub-issue draft to the user, with a proposed ord
 
 ## 5. Publish
 
-On approval: create the epic and the sub-issues, link them **natively** (GitHub's Sub-issues API via `gh api graphql` — body-text lists are not the mechanism), put everything in the board's **Ready** column with priority and assignee set (board config: the `board` block in `.claude/agents/workflow.md`, or `.claude/agents/github.md` where that's the file the repo has).
+On approval: create the epic and the sub-issues, link them **natively** — parent via GitHub's Sub-issues API (`gh api graphql`), blocked-by via the issue-dependency API (command in the `to-issues` skill, Publish step); body-text lists are not the mechanism — put everything in the board's **Ready** column with priority and assignee set (board config: the `board` block in `.claude/agents/workflow.md`, or `.claude/agents/github.md` where that's the file the repo has).
 
-*Done when:* the board shows the epic with all sub-issues in Ready, natively linked, and the user has the recommended starting order — typically as a `/epic <N>` away.
+*Done when:* the board shows the epic with all sub-issues in Ready, natively linked as sub-issues and by blocked-by, and the user has the recommended starting order — typically as a `/epic <N>` away.

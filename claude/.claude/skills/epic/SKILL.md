@@ -20,6 +20,8 @@ Present to the user:
 - The split into **runs autonomously** vs **needs the user** — a verification the repo config's `user_gate` names, a decision only they can make, or a step only they can perform
 - Your questions about any issue — asked **one at a time**, before any work starts
 
+In a convention repo (see `implement`), epic-level answers go into the epic body's `## Decisions` — drafted, approved, posted — and each sub-issue's `## Decisions` reads "See epic #N", plus its own answers.
+
 The line starts on the user's green light. Questions that surface later stop the line at that issue, in every mode.
 
 *Done when:* order confirmed and green light received.
@@ -32,7 +34,7 @@ Move the **epic** to In Progress on the board (once). Then take the first sub-is
 
 Execute the implement pipeline steps 2–10 with these epic-mode adjustments:
 
-- **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user.
+- **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user. In a convention repo "no open questions" means no `## To decide` with text.
 - **Merge between issues**: the sub-issue's PR reaches green and merges (per merge policy) **before** the next sub-issue starts — the next worktree branches from updated main. PRs stay small; every merge leaves main runnable.
 - **Issues needing the user** (the step-2 split): prepare everything up to the blocking point, present exactly what's needed (one verification, one decision), and continue with the next autonomous sub-issue while waiting where the order allows.
 

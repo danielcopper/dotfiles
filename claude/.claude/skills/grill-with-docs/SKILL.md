@@ -77,6 +77,10 @@ When a term is resolved, update `CONTEXT.md` right there. Don't batch these up �
 
 `CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
 
+### Record decisions in the issue
+
+In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Draft the edit as you go — the decision one line under `## Decisions`, its question removed from `## To decide` — show the draft, and post it on approval (`gh issue edit <N> --body-file <file>`).
+
 ### Offer ADRs sparingly
 
 Only offer to create an ADR when all three are true:
@@ -85,6 +89,6 @@ Only offer to create an ADR when all three are true:
 2. **Surprising without context** — a future reader will wonder "why did they do it this way?"
 3. **The result of a real trade-off** — there were genuine alternatives and you picked one for specific reasons
 
-If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
+If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md). When the decision belongs to an issue, its line under `## Decisions` links the ADR.
 
 </supporting-info>

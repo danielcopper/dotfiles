@@ -70,7 +70,7 @@ When exploring the codebase, use the project's domain glossary so that test name
 Before writing any code:
 
 - [ ] Propose the seams under test (see [Seams](#seams-where-tests-go))
-- [ ] List the behaviors to test at each seam (not implementation steps), prioritized
+- [ ] List the behaviors to test at each seam (not implementation steps), prioritized. When the work comes from an issue with a `## Done when` section, derive the list from it: one behavior per criterion; those marked "(device)" are the owner's to verify on the device
 - [ ] If a new seam is needed, shape it as a [deep module](deep-modules.md) (small interface, deep implementation) and design it for [testability](interface-design.md)
 - [ ] Get the user's confirmation on seams and behaviors
 

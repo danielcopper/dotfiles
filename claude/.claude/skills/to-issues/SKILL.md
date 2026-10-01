@@ -74,7 +74,7 @@ Iterate until the user approves the breakdown.
 
 Detect the target repo from `git remote get-url origin` (parse `owner/name`).
 
-For each approved slice, in dependency order (blockers first) so each blocker exists before the issues it gates — its real issue number and internal id are then available for the native blocking relationship (the blocked_by sub-step below) and the "Blocked by" body text:
+For each approved slice, in dependency order (blockers first) so each blocker exists before the issues it gates — its internal id is then available for the native blocking relationship (the blocked_by sub-step below):
 
 1. Create the issue:
    ```
@@ -95,38 +95,48 @@ For each approved slice, in dependency order (blockers first) so each blocker ex
    gh api repos/<owner>/<name>/issues/<this-issue-number>/dependencies/blocked_by \
      --method POST -F issue_id=<blocker-issue-id>
    ```
-   `issue_id` is the blocker's **internal id**, not its issue number — resolve it with `gh api repos/<owner>/<name>/issues/<blocker-number> --jq .id`. Publishing blockers first (above) guarantees the blocker exists before this call. If the endpoint is unavailable (older GitHub Enterprise, missing scope), fall back to the "Blocked by" body text alone.
+   `issue_id` is the blocker's **internal id**, not its issue number — resolve it with `gh api repos/<owner>/<name>/issues/<blocker-number> --jq .id`. Publishing blockers first (above) guarantees the blocker exists before this call. If the endpoint is unavailable (older GitHub Enterprise, missing scope), fall back to a `Blocked by #<n>` line under the `Type:` line.
+5. When the source was an existing issue (an epic or a PRD), link this issue to it natively as a sub-issue — `sub_issue_id` is this issue's internal id, resolved the same way:
+   ```
+   gh api repos/<owner>/<name>/issues/<parent-number>/sub_issues \
+     --method POST -F sub_issue_id=<this-issue-id>
+   ```
 
 Use the issue body template below.
 
 <issue-template>
-## Parent
+Type: AFK
 
-A reference to the parent issue (if the source was an existing issue, otherwise omit this section).
+(or `Type: HITL — <the step that needs the human>`)
 
-## Type
+## Today
 
-HITL or AFK.
+What exists now, from the user's perspective, as far as this slice is concerned.
 
-## What to build
+## Wanted
 
 A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
 
 Avoid specific file paths or code snippets — they go stale fast.
 
-## Acceptance criteria
+## Decisions
+
+"See epic #<N>." when the source was an existing issue, plus the decisions this slice settles on its own, one line each. Leave the section out when there is neither.
+
+## To decide
+
+The slice's open questions, one per line. Leave the section out when there is none.
+
+## Done when
 
 - [ ] Criterion 1
 - [ ] Criterion 2
-- [ ] Criterion 3
 
-## Blocked by
+Each criterion becomes a test that is seen failing first; one that only the owner's test on the device can show ends in "(device)".
 
-The human-readable mirror of the native blocking relationship created by the blocked_by sub-step under Publish (and the fallback when that API is unavailable).
+## Out of scope
 
-- #<issue-number> — short title
-
-Or "None — can start immediately" if no blockers.
+What this slice leaves untouched. Leave the section out when there is nothing to name.
 
 </issue-template>
 
