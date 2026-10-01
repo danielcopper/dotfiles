@@ -86,7 +86,7 @@ In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decis
 **ADR format and lifecycle** (default when writing or changing an ADR; a repo's own ADR convention or tooling wins):
 
 - **Front matter carries the lifecycle.** Three required keys: `status` (`proposed` / `accepted` / `rejected` / `deprecated` / `superseded`), `decided` and `updated` (ISO dates — when it was decided, when the record last changed). Plus the relation keys that apply, each a list: `supersedes`, `superseded-by`, `amends`, `amended-by`. Nothing else goes there, so a mistyped key is an error, not a silently missing relation.
-- **Then the H1 and the decision with its reasons.** Status lives only in the front matter. An ADR can be a single paragraph; add Considered Options / Consequences only when they add real value. Later changes go into amendment sections (below).
+- **Then the H1 and the decision with its reasons, naming the alternative it was chosen over.** Status lives only in the front matter. An ADR can be a single paragraph; add Considered Options / Consequences only when they add real value. Later changes go into amendment sections (below).
 - **The ADR links the issue it came from**, in its text.
 - **Relations are declared from both ends** — if 0029 `amends: [0020]`, then 0020 carries `amended-by: [0029]`.
 - **A decided ADR is amended, never quietly rewritten.** Append `## Amendment — <what changed>` and bump `updated`; the decision text above stays as it was decided. Amending never changes `status` — only a replacement does, and then `superseded` and `superseded-by` appear together. If the change is itself a decision worth its own record, write a new ADR and declare the relation on both sides.
