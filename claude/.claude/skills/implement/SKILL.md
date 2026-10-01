@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement a GitHub issue end-to-end — align, worktree, board, implementer + reviewer agents, gates, PR. Argument: the issue number; append --go to skip the align gate when nothing is unclear.
+description: "Implement a GitHub issue end-to-end — align, worktree, board, implementer + reviewer agents, gates, PR. Argument: the issue number; append --go to skip the align gate when nothing is unclear."
 disable-model-invocation: true
 ---
 
@@ -24,7 +24,7 @@ Read `.claude/agents/workflow.md` from the **main checkout** — it may be gitig
 
 Present a compact readiness statement: intended approach, scope, what you'll leave untouched. Ask your open questions **one at a time**, waiting for each answer. Implementation starts on the user's green light.
 
-*(convention)* The answers go into the issue before step 4: draft the issue edit — each answer one line under `## Decisions`, `## To decide` removed (or renamed to `## Decisions`), `## Out of scope` when anything was ruled out — show it to the user, and post it on their approval (`gh issue edit <N> --body-file <file>`). A decision that is hard to reverse, surprising without context, and a real trade-off also gets an ADR in `docs/adr/`, shipped in the change and linked from the issue.
+*(convention)* The answers go into the issue before step 4: draft the issue edit — each answer one line under `## Decisions`, `## To decide` removed (or renamed to `## Decisions`), `## Out of scope` when anything was ruled out — show it to the user, and post it on their approval (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the draft is `## Decisions` with "None.". A decision that is hard to reverse, surprising without context, and a real trade-off also gets an ADR in `docs/adr/`: the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it.
 
 With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode. *(convention)* `--go` also needs a ready issue: no `## To decide` with text, and a `## Decisions` (a "See epic #N" pointer counts).
 
@@ -66,7 +66,7 @@ The battery runs once per code state. The implementer's final battery report is 
 
 Draft the PR: conventional-commit title, body with `Closes #<N>`, docs handled per repo policy (updated in the same PR, or the repo's explicit opt-out with a one-line reason). Present the draft and wait for approval — skip the wait only when the user has waived drafts. Then push and open the PR.
 
-*(convention)* The body becomes the squash commit body, so it holds exactly: a prose summary (with the device-check result once the user gate has run — edit the body then), `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and leaves the `## Decisions` section out; the text `decisions: none` is for outside contributors, since it would land in the commit.
+*(convention)* The body becomes the squash commit body, so it holds exactly: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
 
 *Done when:* the PR is open with approved text.
 
@@ -74,18 +74,18 @@ Draft the PR: conventional-commit title, body with `Closes #<N>`, docs handled p
 
 Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. The bar is the config's `green_definition` — typically CI green **and** the quality gate green with **0 new issues**. *(convention)* The `decisions` check is among the required checks; it reads the linked issue, and an edit of that issue re-runs it.
 
-At green, run any applicable `user_gate`: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready.
+At green, run any applicable `user_gate`: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready. *(convention)* After the pass, draft one sentence with the device-check result for the PR body's summary — public text, so shown for approval per `public_text_drafts` — then edit the body (`gh pr edit <PR> --body-file <file>`).
 
 Green means the automated implementation work is complete; it is not merge authorization. With the default `user` policy, report the evidence and wait for the user to merge. Merge only when the user explicitly asks for this merge, or grants full-auto for the current run, and the user gate has passed; the merge goes through a permission prompt. Do not infer full-auto from an earlier issue or session.
 
-*Done when:* the PR is green, any user gate has passed, and the PR is handed to the user or merged under an explicit current-run full-auto grant.
+*Done when:* the PR is green, any user gate has passed *(convention)* and its result stands in the PR body, and the PR is handed to the user or merged under an explicit current-run full-auto grant.
 
 ## 10. Close the loop
 
 - After a merge, verify that automation closed the issue and moved it to Done; the epic stays In Progress while siblings remain open. At user handoff before merge, leave the issue In Progress and state that automation will close it after the user's merge.
 - After the merge, clean up the worktree and branch per the `worktree` skill.
-- After the merge, move the issue's working files in `~/Memory/<repo>/` (brief, report, findings, reviews, inventory, design) to `~/Memory/<repo>/archive/<N>-<slug>/`, each with this first line: `Historical — working notes for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.` The repo's `MEMORY.md` lists `archive/` in one line only: historical working notes, not current.
+- Once the merge is confirmed (the user says so, or `gh pr view <PR> --json state` shows `MERGED`), move the issue's working files in `~/Memory/<repo>/` (brief, report, findings, reviews, inventory, design, handoff) to `~/Memory/<repo>/archive/<N>-<slug>/`. Working files carry the issue number in their name — `<kind>-<N>[-<suffix>].md` — so this step finds them. Each gets this line as its first line after any YAML front matter: `Historical — working notes for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.` The repo's `MEMORY.md` lists `archive/` in one line only: historical working notes, not current.
 - File the approved follow-up issues.
 - If context is running low, write `/handoff` (status and pointers: where we stopped, open PRs, pending tests, board state) and tell the user to compact.
 
-*Done when:* board consistent, any required user gate passed, working files archived, follow-ups filed.
+*Done when:* board consistent, any required user gate passed, follow-ups filed, and — once the merge is confirmed — working files archived. A run that ends at the handoff before the merge is complete without the archive step.

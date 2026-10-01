@@ -11,7 +11,7 @@ The lead writes the brief to `~/Memory/<repo>/brief-<N>.md` before dispatching (
 - **Base SHA** — the commit the branch starts from
 - **Gate** — the battery commands from the workflow config, verbatim
 - **Agent rules** — the config's `agent_rules`, verbatim, when set
-- **Extras** — task-specific only: files to read first, an exemplar file whose patterns to match, verification specifics
+- **Extras** — task-specific only: files to read first, an exemplar file whose patterns to match, verification specifics, an ADR to write
 
 In a convention repo the issue is the spec, so the brief holds nothing else: a decision lives in the issue's `## Decisions`, never in the brief. In any other repo the brief also names the spec the issue does not settle:
 
@@ -44,6 +44,8 @@ First produce the diff artifact from the worktree, into the lead's scratchpad:
 { git -C <wt> log --oneline <base>..HEAD; git -C <wt> diff --stat <base>...HEAD; git -C <wt> diff <base>...HEAD; } > <diff-file>
 ```
 
+`<base>` is the base SHA the implementer's latest report names — after a rebase onto a moved main, the new one.
+
 Spawn the `reviewer` agent with:
 
 - The brief file path (same file the implementer worked from; it names the issue)
@@ -55,4 +57,4 @@ Pass review findings and scope to the reviewer **unfiltered** — a dispatch tha
 
 ## Fix dispatch
 
-After a **Needs fixes** verdict, dispatch the implementer again (same brief) with the reviewer's findings **verbatim** — severity, file:line, reasoning intact. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report; append it to the saved report. Then re-review with a fresh reviewer: same dispatch shape, updated diff, previous round's findings listed as "addressed claims" for verification.
+After a **Needs fixes** verdict, dispatch the implementer again (same brief) with the reviewer's findings **verbatim** — severity, file:line, reasoning intact — and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report; append it to the saved report. Then re-review with a fresh reviewer: same dispatch shape, updated diff, previous round's findings listed as "addressed claims" for verification.
