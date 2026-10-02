@@ -17,7 +17,7 @@ Match the current situation against this index and recommend the right skill(s).
 ## Planning & design
 
 - `/grill-me` — stress-test a plan by relentless interview, one question at a time
-- `/grill-with-docs` — the same, challenged against CONTEXT.md and ADRs, updating them inline as decisions crystallise
+- `/grill-with-docs` — the same, challenged against GLOSSARY.md and ADRs, updating them inline as decisions crystallise
 - `/to-prd` — turn the current conversation into a PRD on the project board
 - `/to-issues` — break a plan/PRD into tracer-bullet issues on the board
 - `/improve-codebase-architecture` — find deepening and consolidation opportunities in a codebase

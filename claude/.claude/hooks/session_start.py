@@ -67,8 +67,8 @@ def get_context_files():
 
     # Check for context files in priority order
     context_files = [
-        Path.cwd() / ".claude" / "CONTEXT.md",
-        Path.cwd() / "CONTEXT.md",
+        Path.cwd() / ".claude" / "GLOSSARY.md",
+        Path.cwd() / "GLOSSARY.md",
         Path.cwd() / "TODO.md",
     ]
 

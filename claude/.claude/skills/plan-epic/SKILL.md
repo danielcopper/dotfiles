@@ -8,7 +8,7 @@ Turn an idea into an epic with grabbable sub-issues. This skill ends in issues o
 
 ## 1. Gather
 
-Whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, `CONTEXT.md` and the ADRs it touches.
+Whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, `GLOSSARY.md` and the ADRs it touches.
 
 *Done when:* you know the goal, the constraints, and the affected architecture well enough to challenge the plan, not just transcribe it.
 
