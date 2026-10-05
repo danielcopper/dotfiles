@@ -1,0 +1,16 @@
+# Every Claude Code session on this Deck runs in this slice (the `claude`
+# function in .bashrc.local starts it here), and so does everything a session
+# starts: agents, mise tasks, pytest and vitest workers. The limits keep the
+# desktop and Steam responsive when several sessions test at once: 8 threads
+# and 14 GB of RAM are shared with them.
+[Unit]
+Description=Claude Code sessions and everything they start
+
+[Slice]
+# 80% of the Deck's 8 threads.
+CPUQuota=640%
+# Above MemoryHigh the slice is throttled and reclaimed; at MemoryMax the
+# kernel kills inside the slice instead of freezing the whole machine.
+MemoryHigh=10G
+MemoryMax=11G
+MemorySwapMax=4G

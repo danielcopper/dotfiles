@@ -19,7 +19,7 @@ alias diff='diff --color=auto'
 # Deliberate one-off override. Plain `claude` takes model and effort from
 # ~/.claude/settings.json; a wrapper that passed them as flags outranked the
 # settings file, so `modelSettings` there could never take effect.
-alias cc='command claude --model opus --effort xhigh'
+alias cc='claude --model opus --effort xhigh'
 
 # Prompt
 PS1='\u@\h \W > '

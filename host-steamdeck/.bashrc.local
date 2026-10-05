@@ -32,3 +32,11 @@ fi
 # Update wrapper — SteamOS root is read-only, so brew + flatpak stand in
 # for the pacman/paru combo on the arch hosts.
 alias update='brew update && brew upgrade && flatpak update --user -y'
+
+# Start Claude Code inside claude.slice (~/.config/systemd/user/claude.slice),
+# which caps the CPU and memory of a session and everything it starts.
+# systemd-run execs the binary in place, so the process is still `claude` for
+# tmux's tab names and resurrect.
+claude() {
+    systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
+}
