@@ -9,8 +9,8 @@ Description=Claude Code sessions and everything they start
 [Slice]
 # 80% of the Deck's 8 threads.
 CPUQuota=640%
-# Above MemoryHigh the slice is throttled and reclaimed; at MemoryMax the
-# kernel kills inside the slice instead of freezing the whole machine.
+# Above MemoryHigh the slice is throttled and reclaimed, so it slows down
+# instead of starving the rest of the machine. There is deliberately no
+# MemoryMax: that limit kills a process inside the slice, a test run or a
+# whole session, where waiting is the better outcome.
 MemoryHigh=10G
-MemoryMax=11G
-MemorySwapMax=4G
