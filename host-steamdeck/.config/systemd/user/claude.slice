@@ -7,8 +7,13 @@
 Description=Claude Code sessions and everything they start
 
 [Slice]
-# 80% of the Deck's 8 threads.
-CPUQuota=640%
+# A weight, not a quota: it only matters when the CPU is contended, and then
+# Steam and Plasma (app.slice, session.slice, weight 100) win 2:1 over this
+# slice. On an otherwise idle machine the slice may use all 8 threads. A
+# CPUQuota would cap it even then and throttle it in bursts, which unsettles
+# tests with timeouts. A lower weight would leave a test run beside a busy
+# Steam too little to finish inside its timeouts.
+CPUWeight=50
 # Above MemoryHigh the slice is throttled and reclaimed, so it slows down
 # instead of starving the rest of the machine. There is deliberately no
 # MemoryMax: that limit kills a process inside the slice, a test run or a
