@@ -145,6 +145,11 @@ fi
 # this repo: the live settings.json would be the public reference, and every
 # file Claude Code writes there would land in the repo.
 mkdir -p "$HOME/.claude"
+# systemd skips a drop-in directory that is a symlink, so a folded
+# session.slice.d would leave the desktop's memory protection unloaded.
+if [ "$CLASS" = steamdeck ]; then
+  mkdir -p "$HOME/.config/systemd/user/session.slice.d"
+fi
 stow -R "${all_pkgs[@]}"
 
 # Seed the live Claude settings from the repo's reference copy on a fresh

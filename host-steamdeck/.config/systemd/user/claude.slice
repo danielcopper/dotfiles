@@ -18,4 +18,7 @@ CPUWeight=50
 # instead of starving the rest of the machine. There is deliberately no
 # MemoryMax: that limit kills a process inside the slice, a test run or a
 # whole session, where waiting is the better outcome.
-MemoryHigh=10G
+# 7G is what is left of the 14.5G once zram's compressed pages (~2.8G), the
+# desktop (~0.8G) and the apps beside it (~3-4G) are counted. One gate run
+# (~4.3G) and a few idle sessions fit; two gates at once are slowed here.
+MemoryHigh=7G
