@@ -112,8 +112,9 @@ On the Deck, `~/Memory` is a symlink into `~/memex`, a git clone that
 `host-steamdeck` keeps in sync: it stows the script `~/.local/bin/memex-sync`
 and the user units `memex-sync.service` and `memex-sync.timer`. Every 15
 minutes the timer commits whatever changed in the clone, rebases onto
-`origin/main` and pushes. What a run does offline, in a rebase conflict or
-when a push is refused is described at the top of the script; its output is in
+`origin/main` and pushes. What a run does offline, in a rebase conflict, when
+origin refuses a fetch or a push, or when a git operation was left unfinished
+in the clone is described at the top of the script; its output is in
 `journalctl --user -u memex-sync`.
 
 `install-dotfiles.sh` does not enable the timer, because on a fresh Deck the
@@ -124,8 +125,8 @@ cd ~/dotfiles && stow -R host-steamdeck
 systemctl --user enable --now memex-sync.timer
 ```
 
-A conflict or a refused push can also send an ntfy notification. Two files
-outside this repo switch that on; without them the script only logs:
+Each of the failures that need a hand can also send one ntfy notification.
+Two files outside this repo switch that on; without them the script only logs:
 
 - `~/.config/memex/ntfy_url` — the full topic URL
 - `~/.config/memex/ntfy_token` — an access token, sent as a Bearer header

@@ -3,34 +3,44 @@
 # 15 minutes; setup steps are in the README, section "memex sync on the
 # Steam Deck".
 #
+# - A rebase, merge, cherry-pick or revert left in progress in the clone, or
+#   unmerged files, stop the run before it touches anything: exit 1.
 # - Every change in the clone is committed as "sync(deck): N Dateien". The
 #   author is whatever user.name/user.email the clone's own config sets.
-# - Away from home the fetch fails: the run exits 0 and the commits wait.
+# - Away from home the fetch fails: the run logs why, exits 0 and the commits
+#   wait. A fetch that origin refuses (authentication, repository not found)
+#   exits 1.
 # - Local commits are rebased onto origin/main and pushed. A push that lost a
 #   race (origin moved since the fetch) exits 0; the next run tries again.
 #   A push that is refused for any other reason, such as the pre-push secret
-#   scan, exits 1 and sends one ntfy notification until a push gets through.
+#   scan, exits 1.
 # - A rebase that conflicts is aborted, which leaves the clone as it was. Its
-#   HEAD goes to the branch conflict/deck-<date> on origin, the run exits 1,
-#   and the first such run sends an ntfy notification. Later runs keep that
-#   branch current without notifying again, until a sync gets through.
+#   HEAD goes to the branch conflict/deck-<date> on origin and the run exits 1.
+#   Later runs keep that branch current until a sync gets through.
 #
-# MEMEX_DIR overrides the clone (default ~/memex). The notification needs
+# Each kind of failure that exits 1 sends one ntfy notification; it is not
+# sent again until a sync gets through. The notification needs
 # ~/.config/memex/ntfy_url (the full topic URL) and ~/.config/memex/ntfy_token;
-# when either file is missing, no notification is sent.
+# when either file is missing, none is sent. MEMEX_DIR overrides the clone
+# (default ~/memex).
 set -euo pipefail
 
 repo=${MEMEX_DIR:-$HOME/memex}
 config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/memex
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/memex-sync
-# Markers of a reported failure, so that it is notified once: the conflict
-# marker holds the name of the conflict branch.
+# One marker per kind of failure, present while it is unresolved and already
+# notified. The conflict marker holds the name of the conflict branch.
+busy_marker=$state_dir/operation-in-progress
+fetch_marker=$state_dir/fetch-refused
 conflict_marker=$state_dir/conflict
 refused_marker=$state_dir/push-refused
 lock=${XDG_RUNTIME_DIR:-/tmp}/memex-sync.lock
 net_timeout=30
 
 export GIT_TERMINAL_PROMPT=0
+# An empty GIT_ASKPASS keeps git from falling back to SSH_ASKPASS, which the
+# user manager sets to a desktop dialog, when origin asks for credentials.
+export GIT_ASKPASS=
 # A rebase never stops to ask for a message.
 export GIT_EDITOR=true
 
@@ -76,15 +86,56 @@ notify() { # notify <title> <message>
   fi
 }
 
+notify_once() { # notify_once <marker> <title> <message>
+  [ ! -e "$1" ] || return 0
+  mkdir -p "$state_dir"
+  : >"$1"
+  notify "$2" "$3"
+}
+
+# Prints what was left unfinished in the clone, if anything.
+unfinished_work() {
+  local path what
+  for path in rebase-merge:rebase rebase-apply:rebase MERGE_HEAD:merge \
+    CHERRY_PICK_HEAD:cherry-pick REVERT_HEAD:revert; do
+    what=${path#*:}
+    path=${path%%:*}
+    if [ -e "$(git rev-parse --git-path "$path")" ]; then
+      printf 'a %s in progress (%s)\n' "$what" "$path"
+      return 0
+    fi
+  done
+  if [ -n "$(git ls-files --unmerged)" ]; then
+    printf 'unmerged files\n'
+    return 0
+  fi
+  return 1
+}
+
+# Fetches origin. On failure, fetch_error holds git's messages on one line.
+fetch_origin() {
+  local status=0
+  fetch_error=$(timeout "$net_timeout" git fetch --quiet origin 2>&1 >/dev/null) || status=$?
+  [ "$status" -ne 0 ] || return 0
+  if [ "$status" -eq 124 ]; then
+    fetch_error="timed out after $net_timeout s"
+  else
+    fetch_error=$(awk 'NF { printf "%s%s", sep, $0; sep = " / " }' <<<"$fetch_error")
+  fi
+  return 1
+}
+
+# Origin answered, but refused us: wrong credentials, no access, no such
+# repository. Waiting does not fix that, unlike a network that is not there.
+fetch_refused() {
+  grep -qiE "Authentication failed|could not read (Username|Password)|returned error: (401|403|404)|repository '.*' not found|Permission denied \(publickey" <<<"$fetch_error"
+}
+
 # A refused push is reported once, until a push gets through.
 report_refused() { # report_refused <ref>
   log "push to $1 was refused" >&2
-  if [ ! -e "$refused_marker" ]; then
-    mkdir -p "$state_dir"
-    : >"$refused_marker"
-    notify "memex push refused" \
-      "The Deck's push to $1 was refused. Check journalctl --user -u memex-sync."
-  fi
+  notify_once "$refused_marker" "memex-sync (Deck): push refused" \
+    "The Deck's push to $1 was refused. Check journalctl --user -u memex-sync."
   exit 1
 }
 
@@ -100,12 +151,9 @@ on_conflict() {
     report_refused "$branch"
   rm -f "$refused_marker"
   log "local HEAD is on $branch"
-  if [ ! -e "$conflict_marker" ]; then
-    mkdir -p "$state_dir"
-    printf '%s\n' "$branch" >"$conflict_marker"
-    notify "memex sync conflict" \
-      "The Deck could not rebase onto origin/main. Its state is on the branch $branch."
-  fi
+  notify_once "$conflict_marker" "memex-sync (Deck): conflict" \
+    "The Deck could not rebase onto origin/main. Its state is on the branch $branch."
+  printf '%s\n' "$branch" >"$conflict_marker"
   exit 1
 }
 
@@ -113,8 +161,8 @@ on_conflict() {
 # reported. Which one it was shows in a fresh fetch: after a race, origin/main
 # holds commits that HEAD does not.
 on_push_failure() {
-  if ! timeout "$net_timeout" git fetch --quiet origin 2>/dev/null; then
-    log "push to origin/main failed and origin is unreachable now; the next run tries again"
+  if ! fetch_origin; then
+    log "push to origin/main failed and the fetch after it too ($fetch_error); the next run tries again"
     exit 0
   fi
   if has_origin_main && ! git merge-base --is-ancestor origin/main HEAD; then
@@ -124,6 +172,13 @@ on_push_failure() {
   report_refused main
 }
 
+if unfinished=$(unfinished_work); then
+  log "found $unfinished in $repo; nothing done" >&2
+  notify_once "$busy_marker" "memex-sync (Deck): git operation in progress" \
+    "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."
+  exit 1
+fi
+
 git add --all
 staged=$(git diff --cached --name-only --no-renames -z | tr -cd '\0' | wc -c)
 if [ "$staged" -gt 0 ]; then
@@ -131,14 +186,21 @@ if [ "$staged" -gt 0 ]; then
   log "committed $staged Dateien"
 fi
 
-if ! timeout "$net_timeout" git fetch --quiet origin 2>/dev/null; then
-  log "offline, $(commits_ahead) commits ahead"
+if ! fetch_origin; then
+  if fetch_refused; then
+    log "origin refused the fetch: $fetch_error" >&2
+    notify_once "$fetch_marker" "memex-sync (Deck): fetch refused" \
+      "Origin refused the Deck's fetch: $fetch_error. Check journalctl --user -u memex-sync."
+    exit 1
+  fi
+  log "offline, $(commits_ahead) commits ahead ($fetch_error)"
   exit 0
 fi
 
 # An origin without main yet (a fresh repo) has nothing to rebase onto.
 if has_origin_main && ! git rebase --quiet origin/main; then
-  # A rebase that never started leaves nothing to abort.
+  # Any rebase in progress now is this run's own: one that was already in
+  # progress stopped the run above.
   if [ -d "$(git rev-parse --git-path rebase-merge)" ] ||
     [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
     git rebase --abort
@@ -151,4 +213,4 @@ if [ "$ahead" -gt 0 ]; then
   timeout "$net_timeout" git push --quiet origin HEAD:main || on_push_failure
   log "pushed $ahead commits"
 fi
-rm -f "$conflict_marker" "$refused_marker"
+rm -f "$busy_marker" "$fetch_marker" "$conflict_marker" "$refused_marker"

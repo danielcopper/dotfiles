@@ -1,6 +1,7 @@
 # Commits, rebases and pushes the memex clone (~/memex). Started by
-# memex-sync.timer; a run that ends in a rebase conflict or a refused push
-# exits 1 and shows up as failed in `systemctl --user status memex-sync`.
+# memex-sync.timer; a run that needs a hand (a rebase conflict, a refused
+# fetch or push, an unfinished git operation in the clone) exits 1 and shows
+# up as failed in `systemctl --user status memex-sync`.
 [Unit]
 Description=Sync the memex clone with its origin
 
