@@ -37,6 +37,11 @@ alias update='brew update && brew upgrade && flatpak update --user -y'
 # which caps the CPU and memory of a session and everything it starts.
 # systemd-run execs the binary in place, so the process is still `claude` for
 # tmux's tab names and resurrect.
+# CLAUDE_CODE_TMPDIR moves each session's scratchpad and task output from /tmp
+# to /var/tmp: /tmp is a tmpfs on SteamOS, so whatever sessions left there held
+# RAM and swap until the next reboot. ~/.config/user-tmpfiles.d/claude.conf
+# ages out what lands in /var/tmp/claude-<uid> after 30 days.
 claude() {
-    systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
+    CLAUDE_CODE_TMPDIR=/var/tmp \
+        systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
 }

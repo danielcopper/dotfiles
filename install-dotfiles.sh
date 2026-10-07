@@ -152,6 +152,14 @@ if [ "$CLASS" = steamdeck ]; then
 fi
 stow -R "${all_pkgs[@]}"
 
+# The user's tmpfiles timer is what applies ~/.config/user-tmpfiles.d/claude.conf;
+# it is not enabled on SteamOS. Without a user bus (no login session) this only
+# warns, so the rest of the install still runs.
+if [ "$CLASS" = steamdeck ]; then
+  systemctl --user enable --now systemd-tmpfiles-clean.timer ||
+    echo "could not enable systemd-tmpfiles-clean.timer; run: systemctl --user enable --now systemd-tmpfiles-clean.timer" >&2
+fi
+
 # Seed the live Claude settings from the repo's reference copy on a fresh
 # machine. The reference is deliberately not stowed: Claude Code writes the
 # model, the effort level and the auto-mode environment description into the
