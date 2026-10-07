@@ -17,6 +17,9 @@
 # - A rebase that conflicts is aborted, which leaves the clone as it was. Its
 #   HEAD goes to the branch conflict/deck-<date> on origin and the run exits 1.
 #   Later runs keep that branch current until a sync gets through.
+# - A rebase that git refuses to start, typically because something wrote
+#   into the clone after this run's commit, is no conflict: the run logs git's
+#   reason and exits 0, and the next run commits that change and tries again.
 #
 # Unfinished work, a refused fetch or push, and a conflict each send one ntfy
 # notification; it is not sent again until a sync gets through. Any other
@@ -47,6 +50,8 @@ export GIT_ASKPASS=
 export GIT_EDITOR=true
 
 log() { printf 'memex-sync: %s\n' "$*"; }
+# Joins the non-empty lines of git's messages into one log line.
+one_line() { awk 'NF { printf "%s%s", sep, $0; sep = " / " }'; }
 
 if [ "$(git -C "$repo" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
   log "$repo is not a git work tree" >&2
@@ -122,7 +127,7 @@ fetch_origin() {
   if [ "$status" -eq 124 ]; then
     fetch_error="timed out after $net_timeout s"
   else
-    fetch_error=$(awk 'NF { printf "%s%s", sep, $0; sep = " / " }' <<<"$fetch_error")
+    fetch_error=$(one_line <<<"$fetch_error")
   fi
   return 1
 }
@@ -199,15 +204,27 @@ if ! fetch_origin; then
   exit 0
 fi
 
-# An origin without main yet (a fresh repo) has nothing to rebase onto.
-if has_origin_main && ! git rebase --quiet origin/main; then
-  # Any rebase in progress now is this run's own: one that was already in
-  # progress stopped the run above.
-  if [ -d "$(git rev-parse --git-path rebase-merge)" ] ||
-    [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+rebase_in_progress() {
+  [ -d "$(git rev-parse --git-path rebase-merge)" ] ||
+    [ -d "$(git rev-parse --git-path rebase-apply)" ]
+}
+
+# Nothing to rebase onto when origin has no main yet (a fresh repo), and
+# nothing to rebase when HEAD already contains origin/main.
+if has_origin_main && ! git merge-base --is-ancestor origin/main HEAD; then
+  if ! rebase_output=$(git rebase --quiet origin/main 2>&1); then
+    # A rebase that never started is no conflict: git refused it, most often
+    # because the working tree changed after this run's commit.
+    if ! rebase_in_progress; then
+      log "working tree changed during the run; the next run retries ($(one_line <<<"$rebase_output"))"
+      exit 0
+    fi
+    printf '%s\n' "$rebase_output"
+    # This rebase is this run's own: one that was already in progress
+    # stopped the run before the commit.
     git rebase --abort
+    on_conflict
   fi
-  on_conflict
 fi
 
 ahead=$(commits_ahead)
