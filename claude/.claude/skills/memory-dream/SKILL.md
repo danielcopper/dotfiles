@@ -7,7 +7,7 @@ description: Triage daily logs - propose promotions to durable memory and archiv
 
 You are running the `/memory-dream` command. Three things happen, all gated by user approval:
 1. Recurring or important themes from dailies are proposed for promotion to durable memory — or, for proven reference
-   knowledge, to the wiki canon (`~/Notes/wiki/`).
+   knowledge, to the wiki canon (`~/memex/daniel/wiki/`).
 2. Older dailies that aren't worth promoting are proposed for archival under `daily/archive/<year>/`.
 3. Daily index in `MEMORY.md` is refreshed, and `TIME-BOUND` index markers are checked against their conditions.
 
@@ -31,9 +31,9 @@ Present a plan organized as four groups:
    - "Promote → `<rule-name>.md` (NEW top-level rule file): …"
    - "Promote → `tools/sql-server.md` (NEW): …"
    - "Promote → `~/Memory/<repo-name>/<rule-name>.md` (NEW): …"
-   - "Promote → wiki `~/Notes/wiki/<area>/<page>.md`: …" — for **proven reference knowledge** only (typically
-     `domain/` material); translated to the wiki's format per `~/Notes/CLAUDE.md`, its `_index.md` /
-     `_master-index.md` / `log.md` updated. Agent operating rules never go to the wiki.
+   - "Promote → wiki `~/memex/daniel/wiki/<area>/<page>.md`: …" — for **proven reference knowledge** only
+     (typically `domain/` material); translated to the wiki's format per `~/memex/daniel/wiki/CLAUDE.md`, its
+     `_index.md` / `_master-index.md` / `log.md` updated. Agent operating rules never go to the wiki.
    - **Trust ladder**: propose promotion only for user-confirmed or repeatedly-observed facts; single observations
      stay in the daily (group 2).
    - Validate destination against the routing rules in `README.md` and check reference material to avoid dupes.

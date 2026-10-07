@@ -22,10 +22,10 @@ Expected form: `/memory-promote <from-description> <to-destination>`
   - `repo/<rule-name>`, `repo/tools/<X>`, `repo/domain/<X>` → expands to `~/Memory/<repo-name>/...` where repo-name is
     the basename of the MAIN repo root (`git rev-parse --path-format=absolute --git-common-dir`, parent dir — worktree-safe).
     Requires cwd inside a git repo.
-  - `wiki/<area>/<page>` → `~/Notes/wiki/<area>/<page>.md` — the curated canon. Promotion here means **translating**,
-    not copying: German, the wiki's page format and rules per `~/Notes/CLAUDE.md`, and updating that area's `_index.md`,
-    `_master-index.md`, and `log.md`. For durable reference knowledge only — agent operating rules
-    (`feedback`/`user`/`tools`) never go to the wiki.
+  - `wiki/<area>/<page>` → `~/memex/daniel/wiki/<area>/<page>.md` — the curated canon. Promotion here means
+    **translating**, not copying: German, the wiki's page format and rules per `~/memex/daniel/wiki/CLAUDE.md`, and
+    updating that area's `_index.md`, `_master-index.md`, and `log.md`. For durable reference knowledge only —
+    agent operating rules (`feedback`/`user`/`tools`) never go to the wiki.
   - A literal path (advanced) → use as-is.
 
 If $ARGUMENTS is empty, ask for both source and destination.

@@ -50,12 +50,14 @@ Propose, **per scope**:
 - **Split** files that exceed ~200 lines into topic-specific siblings (e.g. `tools/git.md` becomes `tools/git.md` + `tools/git-worktree.md`).
 - **Location-bound entries**: a global entry that only matters inside one repository moves to that repo's tier. Fix
   `[[wiki-links]]` that point at a moved file.
-- **Wiki graduation**: `domain/` entries that have proven durable are candidates to leave memory for `~/Notes/wiki/`
-  (translated per `~/Notes/CLAUDE.md`, indexes + log updated there, source entry removed here).
+- **Wiki graduation**: `domain/` entries that have proven durable are candidates to leave memory for
+  `~/memex/daniel/wiki/` (translated per `~/memex/daniel/wiki/CLAUDE.md`, indexes + log updated there, source entry
+  removed here).
   - Proven means unchanged for at least 30 days, with no open additions. An entry still growing stays.
   - Split first: the reference part goes to the wiki; an operating rule for Claude inside the same entry stays in
     memory as a small `tools/` or rule file.
-  - Only `~/Notes/wiki/` is written; `~/Notes/personal/` is the user's and is never touched.
+  - Only `~/memex/daniel/wiki/` is written; `~/Notes/` (including `~/Notes/personal/`) is the user's and is never
+    touched.
   - List each candidate with its target wiki page (existing page to extend, or a new page and folder).
 
 Group the plan by scope (Global / `<repo-a>` / `<repo-b>` / …) so the user can approve scopes independently. **Wait for approval.** Apply.
