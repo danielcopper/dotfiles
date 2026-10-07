@@ -23,8 +23,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   if [ "$remote_sha" = "$zero" ]; then
     # New branch on the remote — scan everything reachable from local_sha
-    # that isn't already on another branch or remote-tracking ref.
-    range="$local_sha --not --branches --remotes"
+    # that no remote-tracking ref has yet. Local branches are no exclusion:
+    # the commits being pushed are usually on one.
+    range="$local_sha --not --remotes"
   else
     # Updating an existing branch — scan the new commits only.
     range="${remote_sha}..${local_sha}"
