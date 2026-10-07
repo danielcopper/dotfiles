@@ -56,7 +56,7 @@ Memory is the **working set** — provisional knowledge that still has to prove 
 1. True/useful across projects? → `~/Memory/global/<rule-name>.md` (one rule per file)
 2. Tool-specific quirk? → `~/Memory/global/tools/<tool>.md`
 3. Cross-tool conceptual knowledge? → `~/Memory/global/domain/<topic>.md` — and once proven durable, promote to `~/Notes/wiki/`
-4. Repo-specific? → `~/Memory/<repo-name>/<file>.md` (repo-name = basename of the main repo root; private, synced, never committed). Working notes there (briefs, reports, reviews) never hold the only copy of a decision, and move to `archive/` once their work is merged — the rule lives in the `implement` skill, step "Close the loop".
+4. Repo-specific? → `~/Memory/<repo-name>/<file>.md` (repo-name = basename of the main repo root; private, outside the repo, never committed to it). Working notes there (briefs, reports, reviews) never hold the only copy of a decision, and move to `archive/` once their work is merged — the rule lives in the `implement` skill, step "Close the loop".
 5. Private/WIP or just-noted-today? → `~/Memory/global/daily/<YYYY-MM-DD>.md` (`## HH:MM — slug` + 3–5 bullets, append-only)
 
 Provenance rules: promote only what the user confirmed or was observed repeatedly — a single observation stays in the daily. On conflict, an explicit user statement beats an observation, and newer evidence beats older. Time-bound facts get a `TIME-BOUND, delete when <condition>` marker in their index entry.
