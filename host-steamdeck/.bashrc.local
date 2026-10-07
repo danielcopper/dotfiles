@@ -1,5 +1,13 @@
 # Steamdeck-specific bash config. Sourced by shared .bashrc.
 
+# Clear the prompt hooks SteamOS installs, before mise and starship add theirs.
+# In a login shell (every tmux pane, wezterm's `bash -l`) systemd's
+# /etc/profile.d/80-systemd-osc-context.sh turns PROMPT_COMMAND into an array,
+# and /etc/bash.bashrc's __holo_prompt_command ends up in an element after
+# starship's, so it overwrites starship's PS1 with "(deck@steamdeck ~)$" on
+# every prompt. PS0 carries systemd's matching per-command hook.
+unset PROMPT_COMMAND PS0
+
 # SSH agent socket fallback for nested non-login shells
 export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
 
