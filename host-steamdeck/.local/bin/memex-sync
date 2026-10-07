@@ -4,7 +4,7 @@
 # Steam Deck".
 #
 # - A rebase, merge, cherry-pick or revert left in progress in the clone, or
-#   unmerged files, stop the run before it touches anything: exit 1.
+#   unmerged files, stop the run before it stages or commits anything: exit 1.
 # - Every change in the clone is committed as "sync(deck): N Dateien". The
 #   author is whatever user.name/user.email the clone's own config sets.
 # - Away from home the fetch fails: the run logs why, exits 0 and the commits
@@ -182,19 +182,21 @@ on_push_failure() {
   report_refused main
 }
 
-if unfinished=$(unfinished_work); then
-  log "found $unfinished in $repo; nothing done" >&2
-  notify_once "$busy_marker" "memex-sync (Deck): git operation in progress" \
-    "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."
-  exit 1
-fi
-
 # The fetch comes before the commit, so the network wait does not lie
 # between the commit and the rebase: a write into the clone in that window
 # makes git refuse the rebase. Its outcome is acted on after the commit, so
 # local commits pile up whether origin answers or not.
 fetched=true
 fetch_origin || fetched=false
+
+# Checked after the fetch, right before the commit: an operation started
+# while the fetch waited on the network is caught too.
+if unfinished=$(unfinished_work); then
+  log "found $unfinished in $repo; nothing done" >&2
+  notify_once "$busy_marker" "memex-sync (Deck): git operation in progress" \
+    "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."
+  exit 1
+fi
 
 git add --all
 staged=$(git diff --cached --name-only --no-renames -z | tr -cd '\0' | wc -c)
