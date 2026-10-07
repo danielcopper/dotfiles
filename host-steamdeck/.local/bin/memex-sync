@@ -18,11 +18,13 @@
 #   HEAD goes to the branch conflict/deck-<date> on origin and the run exits 1.
 #   Later runs keep that branch current until a sync gets through.
 #
-# Each kind of failure that exits 1 sends one ntfy notification; it is not
-# sent again until a sync gets through. The notification needs
-# ~/.config/memex/ntfy_url (the full topic URL) and ~/.config/memex/ntfy_token;
-# when either file is missing, none is sent. MEMEX_DIR overrides the clone
-# (default ~/memex).
+# Unfinished work, a refused fetch or push, and a conflict each send one ntfy
+# notification; it is not sent again until a sync gets through. Any other
+# failure (no clone, a commit that git refuses, a rebase that cannot be
+# aborted) ends the run with a non-zero exit and only a message in the
+# journal. The notification needs ~/.config/memex/ntfy_url (the full topic
+# URL) and ~/.config/memex/ntfy_token; when either file is missing, none is
+# sent. MEMEX_DIR overrides the clone (default ~/memex).
 set -euo pipefail
 
 repo=${MEMEX_DIR:-$HOME/memex}

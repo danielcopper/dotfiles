@@ -15,7 +15,7 @@ fi
 zero='0000000000000000000000000000000000000000'
 exit_status=0
 
-while read -r local_ref local_sha remote_ref remote_sha; do
+while read -r _local_ref local_sha remote_ref remote_sha; do
   # Branch deletion — nothing to scan.
   if [ "$local_sha" = "$zero" ]; then
     continue
