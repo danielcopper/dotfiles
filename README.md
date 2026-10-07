@@ -27,6 +27,7 @@ Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. Worktree-aware; backs up real conflicts. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -135,6 +136,17 @@ The sync goes through the global git hooks like any other commit and push.
 `~/memex` is listed in `git/.githooks/commit-on-main-allowed`, so the
 pre-commit hook lets it commit on `main`, and `memex-sync.service` puts
 Homebrew on its `PATH`, so the pre-push hook finds gitleaks.
+
+`tests/memex-sync/` holds the script's tests. That directory is not a stow
+package, so nothing of it lands in `$HOME`. `mise run memex-sync-test` runs
+the scenarios against `host-steamdeck/.local/bin/memex-sync`, each on a
+throwaway bare origin with the script's own unit `PATH`; name scenarios to run
+only those, and set `VERBOSE=1` to see every run's output.
+`mise run memex-sync-test --mutants` breaks each guard of the script in turn
+and fails unless its scenario catches it. Both need git, python3, curl and
+flock, and stay on localhost: ntfy and the refusing origins are small python
+servers there. Without mise, run `tests/memex-sync/scenarios.sh` and
+`python3 tests/memex-sync/mutants.py` from the repo.
 
 ## Recovery
 
