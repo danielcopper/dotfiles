@@ -16,7 +16,10 @@
 #   scan, exits 1.
 # - A rebase that conflicts is aborted, which leaves the clone as it was. Its
 #   HEAD goes to the branch conflict/deck-<date> on origin and the run exits 1.
-#   Later runs keep that branch current until a sync gets through.
+#   Later runs keep that branch current until a sync gets through. The abort
+#   resets tracked files to their state before the rebase, so whatever another
+#   process writes into them between the conflict and the abort, a matter of
+#   milliseconds, is lost.
 # - A rebase that git refuses to start, typically because something wrote
 #   into the clone after this run's commit, is no conflict: the run logs git's
 #   reason and exits 0, and the next run commits that change and tries again.
@@ -186,6 +189,13 @@ if unfinished=$(unfinished_work); then
   exit 1
 fi
 
+# The fetch comes before the commit, so the network wait does not lie
+# between the commit and the rebase: a write into the clone in that window
+# makes git refuse the rebase. Its outcome is acted on after the commit, so
+# local commits pile up whether origin answers or not.
+fetched=true
+fetch_origin || fetched=false
+
 git add --all
 staged=$(git diff --cached --name-only --no-renames -z | tr -cd '\0' | wc -c)
 if [ "$staged" -gt 0 ]; then
@@ -193,7 +203,7 @@ if [ "$staged" -gt 0 ]; then
   log "committed $staged Dateien"
 fi
 
-if ! fetch_origin; then
+if [ "$fetched" = false ]; then
   if fetch_refused; then
     log "origin refused the fetch: $fetch_error" >&2
     notify_once "$fetch_marker" "memex-sync (Deck): fetch refused" \
