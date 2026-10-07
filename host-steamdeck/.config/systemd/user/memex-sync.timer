@@ -1,0 +1,13 @@
+# Runs memex-sync every 15 minutes. Persistent= makes up for a run missed
+# while the Deck was asleep or off, right after it wakes. Nothing runs at
+# shutdown: what changed since the last run waits for the next boot.
+# Enabled by hand once the clone exists: systemctl --user enable --now memex-sync.timer
+[Unit]
+Description=Sync the memex clone every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

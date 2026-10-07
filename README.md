@@ -106,6 +106,35 @@ and it has three parts. Stow brings none of them:
    package stows a wrapper `~/.local/bin/tmux-agent-sidebar` that execs the TPM
    copy under `~/.config/tmux/plugins`.
 
+## memex sync on the Steam Deck
+
+On the Deck, `~/Memory` is a symlink into `~/memex`, a git clone that
+`host-steamdeck` keeps in sync: it stows the script `~/.local/bin/memex-sync`
+and the user units `memex-sync.service` and `memex-sync.timer`. Every 15
+minutes the timer commits whatever changed in the clone, rebases onto
+`origin/main` and pushes. What a run does offline, in a rebase conflict or
+when a push is refused is described at the top of the script; its output is in
+`journalctl --user -u memex-sync`.
+
+`install-dotfiles.sh` does not enable the timer, because on a fresh Deck the
+clone does not exist yet. Once it does, enable it once:
+
+```bash
+cd ~/dotfiles && stow -R host-steamdeck
+systemctl --user enable --now memex-sync.timer
+```
+
+A conflict or a refused push can also send an ntfy notification. Two files
+outside this repo switch that on; without them the script only logs:
+
+- `~/.config/memex/ntfy_url` — the full topic URL
+- `~/.config/memex/ntfy_token` — an access token, sent as a Bearer header
+
+The sync goes through the global git hooks like any other commit and push.
+`~/memex` is listed in `git/.githooks/commit-on-main-allowed`, so the
+pre-commit hook lets it commit on `main`, and `memex-sync.service` puts
+Homebrew on its `PATH`, so the pre-push hook finds gitleaks.
+
 ## Recovery
 
 - **Pre-stow conflict backups** are created at `~/.dotfiles-pre-stow.<timestamp>/` whenever `install-dotfiles.sh` finds existing `$HOME` files that would clash with the stow run.

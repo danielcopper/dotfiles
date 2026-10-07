@@ -1,0 +1,13 @@
+# Commits, rebases and pushes the memex clone (~/memex). Started by
+# memex-sync.timer; a run that ends in a rebase conflict or a refused push
+# exits 1 and shows up as failed in `systemctl --user status memex-sync`.
+[Unit]
+Description=Sync the memex clone with its origin
+
+[Service]
+Type=oneshot
+# The user manager's PATH has no Homebrew. The global pre-push hook needs
+# gitleaks from there and refuses every push without it; system tools still
+# come first.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/home/linuxbrew/.linuxbrew/bin
+ExecStart=%h/.local/bin/memex-sync

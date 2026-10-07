@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Commit, rebase and push the memex clone. memex-sync.timer runs this every
+# 15 minutes; setup steps are in the README, section "memex sync on the
+# Steam Deck".
+#
+# - Every change in the clone is committed as "sync(deck): N Dateien". The
+#   author is whatever user.name/user.email the clone's own config sets.
+# - Away from home the fetch fails: the run exits 0 and the commits wait.
+# - Local commits are rebased onto origin/main and pushed. A push that lost a
+#   race (origin moved since the fetch) exits 0; the next run tries again.
+#   A push that is refused for any other reason, such as the pre-push secret
+#   scan, exits 1 and sends one ntfy notification until a push gets through.
+# - A rebase that conflicts is aborted, which leaves the clone as it was. Its
+#   HEAD goes to the branch conflict/deck-<date> on origin, the run exits 1,
+#   and the first such run sends an ntfy notification. Later runs keep that
+#   branch current without notifying again, until a sync gets through.
+#
+# MEMEX_DIR overrides the clone (default ~/memex). The notification needs
+# ~/.config/memex/ntfy_url (the full topic URL) and ~/.config/memex/ntfy_token;
+# when either file is missing, no notification is sent.
+set -euo pipefail
+
+repo=${MEMEX_DIR:-$HOME/memex}
+config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/memex
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/memex-sync
+# Markers of a reported failure, so that it is notified once: the conflict
+# marker holds the name of the conflict branch.
+conflict_marker=$state_dir/conflict
+refused_marker=$state_dir/push-refused
+lock=${XDG_RUNTIME_DIR:-/tmp}/memex-sync.lock
+net_timeout=30
+
+export GIT_TERMINAL_PROMPT=0
+# A rebase never stops to ask for a message.
+export GIT_EDITOR=true
+
+log() { printf 'memex-sync: %s\n' "$*"; }
+
+if [ "$(git -C "$repo" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+  log "$repo is not a git work tree" >&2
+  exit 1
+fi
+cd "$repo"
+
+exec 9>"$lock"
+if ! flock --nonblock 9; then
+  log "another run holds $lock; skipping"
+  exit 0
+fi
+
+has_origin_main() { git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; }
+
+commits_ahead() {
+  if has_origin_main; then
+    git rev-list --count origin/main..HEAD
+  else
+    git rev-list --count HEAD
+  fi
+}
+
+notify() { # notify <title> <message>
+  local url token
+  [ -r "$config_dir/ntfy_url" ] && [ -r "$config_dir/ntfy_token" ] || return 0
+  url=$(<"$config_dir/ntfy_url")
+  token=$(<"$config_dir/ntfy_token")
+  # The header goes through a file descriptor, so the token never shows up in
+  # the process list. ntfy reads a bare token only as a Bearer header.
+  if curl --silent --show-error --fail --max-time 15 \
+    --header @<(printf 'Authorization: Bearer %s\n' "$token") \
+    --header "Title: $1" \
+    --data "$2" \
+    "$url" >/dev/null; then
+    log "notification sent"
+  else
+    log "notification failed"
+  fi
+}
+
+# A refused push is reported once, until a push gets through.
+report_refused() { # report_refused <ref>
+  log "push to $1 was refused" >&2
+  if [ ! -e "$refused_marker" ]; then
+    mkdir -p "$state_dir"
+    : >"$refused_marker"
+    notify "memex push refused" \
+      "The Deck's push to $1 was refused. Check journalctl --user -u memex-sync."
+  fi
+  exit 1
+}
+
+on_conflict() {
+  local branch
+  if [ -s "$conflict_marker" ]; then
+    branch=$(<"$conflict_marker")
+  else
+    branch=conflict/deck-$(date +%F)
+  fi
+  log "rebase onto origin/main failed"
+  timeout "$net_timeout" git push --quiet --force origin "HEAD:refs/heads/$branch" ||
+    report_refused "$branch"
+  rm -f "$refused_marker"
+  log "local HEAD is on $branch"
+  if [ ! -e "$conflict_marker" ]; then
+    mkdir -p "$state_dir"
+    printf '%s\n' "$branch" >"$conflict_marker"
+    notify "memex sync conflict" \
+      "The Deck could not rebase onto origin/main. Its state is on the branch $branch."
+  fi
+  exit 1
+}
+
+# A push that lost a race is retried by the next run; any other refusal is
+# reported. Which one it was shows in a fresh fetch: after a race, origin/main
+# holds commits that HEAD does not.
+on_push_failure() {
+  if ! timeout "$net_timeout" git fetch --quiet origin 2>/dev/null; then
+    log "push to origin/main failed and origin is unreachable now; the next run tries again"
+    exit 0
+  fi
+  if has_origin_main && ! git merge-base --is-ancestor origin/main HEAD; then
+    log "push to origin/main lost a race; the next run tries again"
+    exit 0
+  fi
+  report_refused main
+}
+
+git add --all
+staged=$(git diff --cached --name-only --no-renames -z | tr -cd '\0' | wc -c)
+if [ "$staged" -gt 0 ]; then
+  git commit --quiet --message "sync(deck): $staged Dateien"
+  log "committed $staged Dateien"
+fi
+
+if ! timeout "$net_timeout" git fetch --quiet origin 2>/dev/null; then
+  log "offline, $(commits_ahead) commits ahead"
+  exit 0
+fi
+
+# An origin without main yet (a fresh repo) has nothing to rebase onto.
+if has_origin_main && ! git rebase --quiet origin/main; then
+  # A rebase that never started leaves nothing to abort.
+  if [ -d "$(git rev-parse --git-path rebase-merge)" ] ||
+    [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+    git rebase --abort
+  fi
+  on_conflict
+fi
+
+ahead=$(commits_ahead)
+if [ "$ahead" -gt 0 ]; then
+  timeout "$net_timeout" git push --quiet origin HEAD:main || on_push_failure
+  log "pushed $ahead commits"
+fi
+rm -f "$conflict_marker" "$refused_marker"
