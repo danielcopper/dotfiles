@@ -57,7 +57,8 @@ stow -R host-arch
 herdr shows each Claude session's state (working / idle / blocked) in its
 sidebar via a hook that `herdr integration install claude` installs. That
 command does **not** compose with this repo: it bakes an **absolute** `$HOME`
-path into `~/.claude/settings.json` (a stowed symlink into the repo) and
+path into `~/.claude/settings.json` (a local file, not stowed: the repo keeps
+a reference copy in step by hand, see `CLAUDE.md`) and
 rewrites the whole file alphabetically — both fight the single, shared
 `settings.json`. So the integration is vendored by hand instead:
 
