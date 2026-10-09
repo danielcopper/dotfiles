@@ -1,0 +1,15 @@
+# Deployed by hand to %USERPROFILE%\.wslconfig (Windows reads it, so it can't
+# be stowed). Takes effect after `wsl --shutdown`.
+
+[general]
+instanceIdleTimeout=-1
+
+[wsl2]
+networkingMode=mirrored
+vmIdleTimeout=-1
+# Hard ceiling so a runaway build or database can't starve Windows.
+memory=20GB
+
+[experimental]
+# Hand freed memory back to Windows instead of keeping it in the VM forever.
+autoMemoryReclaim=gradual
