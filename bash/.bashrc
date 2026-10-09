@@ -34,6 +34,11 @@ export TERMINAL="wezterm"
 # settings.json's env, so it has to come from the shell.
 export CLAUDE_CODE_TMUX_TRUECOLOR=1
 
+# MSBuild keeps one worker per core alive ~15 min after each build; with
+# several agent sessions building in parallel that piled up to 77 idle
+# workers (~11 GB). Slower builds, but nothing lingers.
+export MSBUILDDISABLENODEREUSE=1
+
 # ssh-agent socket from the user-level systemd unit (see systemd/ pkg).
 [ -S "$XDG_RUNTIME_DIR/ssh-agent.socket" ] && \
   export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
