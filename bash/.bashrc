@@ -34,6 +34,12 @@ export TERMINAL="wezterm"
 # settings.json's env, so it has to come from the shell.
 export CLAUDE_CODE_TMUX_TRUECOLOR=1
 
+# Claude Code keeps every session's scratchpad and task output under
+# <tmpdir>/claude-<uid> and never removes it. /tmp is a tmpfs on SteamOS, WSL
+# and Arch, so those files held RAM until the next reboot; /var/tmp is on disk.
+# ~/.config/user-tmpfiles.d/claude.conf ages them out after 30 days.
+export CLAUDE_CODE_TMPDIR=/var/tmp
+
 # MSBuild keeps one worker per core alive ~15 min after each build; with
 # several agent sessions building in parallel that piled up to 77 idle
 # workers (~11 GB). Slower builds, but nothing lingers.
