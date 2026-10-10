@@ -35,12 +35,14 @@
 # Resolving a conflict by hand, in the clone:
 # 1. systemctl --user stop memex-sync.timer memex-watch.service, so no run
 #    commits into the work below, and wait until systemctl --user is-active
-#    memex-sync.service says inactive: a run already going is left to finish.
+#    memex-sync.service no longer says activating: a run already going is
+#    left to finish.
 # 2. git fetch origin && git rebase --autostash origin/main, and resolve each
 #    conflicting file (in MEMORY.md, say, keep both lines, in the right
 #    order), git add it, git rebase --continue. When the stashed changes do
-#    not apply cleanly at the end, git keeps them in the stash: resolve those
-#    files too, then git stash drop.
+#    not apply cleanly at the end, git still exits 0, but leaves conflict
+#    markers in those files and keeps the changes in the stash: resolve those
+#    files too, git add them, then git stash drop.
 # 3. git push origin HEAD:main.
 # 4. systemctl --user start memex-sync.timer memex-watch.service. The next run
 #    finds nothing to rebase, gets through and removes the conflict marker,
