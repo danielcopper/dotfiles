@@ -28,9 +28,13 @@ GUARD = ('if unfinished=$(unfinished_work); then\n'
          '  exit 1\n'
          'fi\n')
 COMMIT = ("git add --all\n"
-          "staged=$(git diff --cached --name-only --no-renames -z | tr -cd '\\0' | wc -c)\n"
+          "# Status and path of each staged file, in turn; without rename detection a\n"
+          "# rename is a deletion and a creation.\n"
+          "mapfile -d '' -t changes < <(git diff --cached --name-status --no-renames -z)\n"
+          "wait $!\n"
+          "staged=$((${#changes[@]} / 2))\n"
           'if [ "$staged" -gt 0 ]; then\n'
-          '  git commit --quiet --message "sync(deck): $staged Dateien"\n'
+          "  commit_message | git commit --quiet --file=-\n"
           '  log "committed $staged Dateien"\n'
           "fi\n")
 
@@ -142,6 +146,26 @@ MUTANTS = [
     ("s25_fetch_403", "a refused fetch exits before the commit",
      "fetched=true\nfetch_origin || fetched=false\n",
      "fetched=true\nfetch_origin || fetched=false\nif [ \"$fetched\" = false ] && fetch_refused; then\n  log \"origin refused the fetch: $fetch_error\" >&2\n  notify_once \"$fetch_marker\" \"memex-sync (Deck): fetch refused\" \"Origin refused the Deck's fetch: $fetch_error.\"\n  exit 1\nfi\n"),
+    # Commit messages.
+    ("s34_message_one_file", "an added file is taken for an update",
+     '      A) lines+=("create $path") ;;\n', ""),
+    ("s34_message_one_file", "one file gets the several-files subject",
+     'if [ "${#lines[@]}" -eq 1 ]; then', "if false; then"),
+    ("s35_message_common_dir", "the first file's directory taken for the common one",
+     'while [ -n "$common" ] && [ "$dir"', 'while false && [ -n "$common" ] && [ "$dir"'),
+    ("s36_message_no_common_dir", "a shared start of names taken for a directory",
+     '[[ $dir != "$common"/* ]]', '[[ $dir != "$common"* ]]'),
+    ("s36_message_no_common_dir", "' in' even without a common directory",
+     '"${common:+ in $common}"', '" in $common"'),
+    ("s37_message_rename", "renames detected",
+     "git diff --cached --name-status --no-renames -z", "git diff --cached --name-status -z"),
+    ("s38_message_delete", "a deleted file is taken for an update",
+     '      D) lines+=("delete $path") ;;\n', ""),
+    ("s39_message_path_with_space", "the body split at spaces",
+     "printf '%s\\n' \"${lines[@]}\"", "printf '%s\\n' ${lines[@]}"),
+    ("s44_staged_list_fails", "a failed listing taken for no change",
+     "<(git diff --cached --name-status --no-renames -z)\nwait $!\n",
+     "<(git diff --cached --name-status --no-renames -z)\n"),
 ]
 
 ok = True

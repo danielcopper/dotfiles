@@ -104,6 +104,8 @@ peer_commit() { # peer_commit <file> <content> <message>
 origin_sha() { git -C "$T/origin.git" rev-parse --verify --quiet "$1"; }
 local_sha() { git -C "$T/memex" rev-parse HEAD; }
 count_commits() { git -C "$T/memex" rev-list --count HEAD; }
+# The full message of the clone's last commit, trailing newlines stripped.
+last_message() { git -C "$T/memex" log -1 --format=%B; }
 ntfy_count() { wc -l <"$NTFY_LOG"; }
 tree_hash() { (cd "$T/memex" && find . -path ./.git -prune -o -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum); }
 eq() { [ "$1" = "$2" ]; }
@@ -130,7 +132,7 @@ s2_three_files() {
   run_sut
   check "exit 0 (got $RC)" eq "$RC" 0
   check "exactly one new commit" eq "$(count_commits)" "$((before + 1))"
-  check "message" eq "$(git -C "$T/memex" log -1 --format=%s)" "sync(deck): 3 Dateien"
+  check "message" eq "$(last_message)" $'deck: 3 files\n\nupdate a.md\ncreate n1.md\ncreate sub/n2.md'
   check "pushed" eq "$(origin_sha main)" "$(local_sha)"
   check "work tree clean" eq "$(git -C "$T/memex" status --porcelain)" ""
 }
@@ -280,7 +282,7 @@ s11_push_refused_by_origin() {
   run_sut
   check "exit 1 (got $RC)" eq "$RC" 1
   check "refusal logged" grep -q "push to main was refused" <<<"$OUT"
-  check "commit kept locally" eq "$(git -C "$T/memex" log -1 --format=%s)" "sync(deck): 1 Dateien"
+  check "commit kept locally" eq "$(last_message)" "deck: create rej.md"
   check "one ntfy request" eq "$(($(ntfy_count) - requests_before))" 1
 }
 
@@ -505,7 +507,7 @@ expect_fetch_refused() {
   run_sut
   check "exit 1 (got $RC)" eq "$RC" 1
   check "the change is still committed" eq "$(count_commits)" "$((commits_before + 1))"
-  check "the commit is the sync commit" eq "$(git -C "$T/memex" log -1 --format=%s)" "sync(deck): 1 Dateien"
+  check "the commit is the sync commit" eq "$(last_message)" "deck: create during-refusal.md"
   check "reason logged" grep -qE "^memex-sync: origin refused the fetch: .*$1" <<<"$OUT"
   check "one ntfy request" eq "$(($(ntfy_count) - requests_before))" 1
   check "title names the device" eq "$(last_ntfy title)" "memex-sync (Deck): fetch refused"
@@ -699,6 +701,88 @@ EOF
   check "marker present" test -e "$T/state/memex-sync/operation-in-progress"
 }
 
+# --- Commit messages. ---
+
+# expect_message <message>: one run, one new commit with that message, pushed.
+expect_message() {
+  local before
+  before=$(count_commits)
+  run_sut
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "exactly one new commit" eq "$(count_commits)" "$((before + 1))"
+  check "message '${1%%$'\n'*}'" eq "$(last_message)" "$1"
+  check "pushed" eq "$(origin_sha main)" "$(local_sha)"
+}
+
+s34_message_one_file() {
+  mkdir -p "$T/memex/daniel/memory"
+  printf 'one\n' >"$T/memex/daniel/memory/note.md"
+  expect_message "deck: create daniel/memory/note.md"
+  printf 'two\n' >>"$T/memex/daniel/memory/note.md"
+  expect_message "deck: update daniel/memory/note.md"
+}
+
+# The first file lies deeper than the common directory.
+s35_message_common_dir() {
+  mkdir -p "$T/memex/daniel/memory/global"
+  printf 'a\n' >"$T/memex/daniel/memory/global/a.md"
+  printf 'c\n' >"$T/memex/daniel/memory/global/c.md"
+  printf 'z\n' >"$T/memex/daniel/memory/z.md"
+  expect_message $'deck: 3 files in daniel/memory\n\ncreate daniel/memory/global/a.md\ncreate daniel/memory/global/c.md\ncreate daniel/memory/z.md'
+}
+
+# notes/ and notes2/ share the start of their names, not a directory.
+s36_message_no_common_dir() {
+  mkdir -p "$T/memex/notes" "$T/memex/notes2"
+  printf 'x\n' >"$T/memex/notes/x.md"
+  printf 'y\n' >"$T/memex/notes2/y.md"
+  expect_message $'deck: 2 files\n\ncreate notes/x.md\ncreate notes2/y.md'
+}
+
+# Same content under a new name, which rename detection would pair up.
+s37_message_rename() {
+  mkdir -p "$T/memex/daniel/memory"
+  printf 'a note long enough to be taken for a rename\n' >"$T/memex/daniel/memory/old.md"
+  expect_message "deck: create daniel/memory/old.md"
+  mv "$T/memex/daniel/memory/old.md" "$T/memex/daniel/memory/new.md"
+  expect_message $'deck: 2 files in daniel/memory\n\ncreate daniel/memory/new.md\ndelete daniel/memory/old.md'
+}
+
+s38_message_delete() {
+  rm "$T/memex/a.md"
+  expect_message "deck: delete a.md"
+}
+
+s39_message_path_with_space() {
+  mkdir -p "$T/memex/my notes"
+  printf 'one\n' >"$T/memex/my notes/a b.md"
+  expect_message "deck: create my notes/a b.md"
+  printf 'two\n' >>"$T/memex/my notes/a b.md"
+  printf 'c\n' >"$T/memex/my notes/c d.md"
+  expect_message $'deck: 2 files in my notes\n\nupdate my notes/a b.md\ncreate my notes/c d.md'
+}
+
+# git fails to list the staged files: the run fails instead of taking the
+# change for none. A git first on the script's PATH refuses every diff.
+s44_staged_list_fails() {
+  mkdir -p "$T/bin"
+  cat >"$T/bin/git" <<EOF
+#!/bin/sh
+[ "\$1" = diff ] && { echo "diff refused for test" >&2; exit 128; }
+exec "$REAL_GIT" "\$@"
+EOF
+  chmod +x "$T/bin/git"
+  SUT_ENV+=(PATH="$T/bin:$SERVICE_PATH")
+  printf 'x\n' >"$T/memex/unlisted.md"
+  local before
+  before=$(count_commits)
+  run_sut
+  check "exit 128 (got $RC)" eq "$RC" 128
+  check "git's reason shown" grep -q 'diff refused for test' <<<"$OUT"
+  check "no commit" eq "$(count_commits)" "$before"
+  check "origin unchanged" eq "$(origin_sha main)" "$(local_sha)"
+}
+
 all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
   s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
   s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
@@ -706,7 +790,9 @@ all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conf
   s20_revert_in_progress s21_unmerged_files s22_askpass_never_called s23_fetch_401 s24_fetch_bad_credentials
   s25_fetch_403 s26_fetch_404 s27_fetch_ssh_denied s28_fetch_no_connection s29_fetch_ssh_unresolved
   s30_writer_during_rebase s31_writer_origin_not_ahead s32_fetch_before_commit
-  s33_merge_started_during_fetch)
+  s33_merge_started_during_fetch s34_message_one_file s35_message_common_dir s36_message_no_common_dir
+  s37_message_rename s38_message_delete s39_message_path_with_space
+  s44_staged_list_fails)
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do
   FAILED=0

@@ -5,8 +5,13 @@
 #
 # - A rebase, merge, cherry-pick or revert left in progress in the clone, or
 #   unmerged files, stop the run before it stages or commits anything: exit 1.
-# - Every change in the clone is committed as "sync(deck): N Dateien". The
-#   author is whatever user.name/user.email the clone's own config sets.
+# - Every change in the clone is committed in one commit. One file gives
+#   "deck: <action> <path>", e.g. "deck: update daniel/memory/MEMORY.md";
+#   several give "deck: N files in <dir>", <dir> the deepest directory that
+#   holds them all (left out when there is none), and one line "<action>
+#   <path>" per file in the body. The action is create, update or delete; a
+#   rename is a delete and a create, two files. The author is whatever
+#   user.name/user.email the clone's own config sets.
 # - Away from home the fetch fails: the run logs why, exits 0 and the commits
 #   wait. A fetch that origin refuses (authentication, repository not found)
 #   exits 1.
@@ -23,6 +28,16 @@
 # - A rebase that git refuses to start, typically because something wrote
 #   into the clone after this run's commit, is no conflict: the run logs git's
 #   reason and exits 0, and the next run commits that change and tries again.
+#
+# Resolving a conflict by hand, in the clone:
+# 1. git fetch origin && git rebase origin/main, and resolve each conflicting
+#    file (in MEMORY.md, say, keep both lines, in the right order), git add
+#    it, git rebase --continue. A run during the rebase leaves the clone
+#    alone and reports the rebase in progress.
+# 2. git push origin HEAD:main.
+# 3. The next run finds nothing to rebase, gets through and removes the
+#    conflict marker, so the next conflict notifies again. The conflict branch
+#    stays on origin: git push origin --delete conflict/deck-<date>.
 #
 # Unfinished work, a refused fetch or push, and a conflict each send one ntfy
 # notification; it is not sent again until a sync gets through. Any other
@@ -182,6 +197,36 @@ on_push_failure() {
   report_refused main
 }
 
+# Prints the commit message for the staged changes in $changes: one file is
+# "deck: <action> <path>"; several are "deck: N files in <dir>", <dir> the
+# deepest directory that holds them all, followed by one "<action> <path>"
+# line per file.
+commit_message() {
+  local i path dir common='' lines=()
+  for ((i = 0; i < ${#changes[@]}; i += 2)); do
+    path=${changes[i + 1]}
+    case ${changes[i]} in
+      A) lines+=("create $path") ;;
+      D) lines+=("delete $path") ;;
+      *) lines+=("update $path") ;;
+    esac
+    dir=
+    [[ $path != */* ]] || dir=${path%/*}
+    if [ "$i" -eq 0 ]; then
+      common=$dir
+    fi
+    while [ -n "$common" ] && [ "$dir" != "$common" ] && [[ $dir != "$common"/* ]]; do
+      if [[ $common == */* ]]; then common=${common%/*}; else common=; fi
+    done
+  done
+  if [ "${#lines[@]}" -eq 1 ]; then
+    printf 'deck: %s\n' "${lines[0]}"
+    return
+  fi
+  printf 'deck: %s files%s\n\n' "${#lines[@]}" "${common:+ in $common}"
+  printf '%s\n' "${lines[@]}"
+}
+
 # The fetch comes before the commit, so the network wait does not lie
 # between the commit and the rebase: a write into the clone in that window
 # makes git refuse the rebase. Its outcome is acted on after the commit, so
@@ -199,9 +244,13 @@ if unfinished=$(unfinished_work); then
 fi
 
 git add --all
-staged=$(git diff --cached --name-only --no-renames -z | tr -cd '\0' | wc -c)
+# Status and path of each staged file, in turn; without rename detection a
+# rename is a deletion and a creation.
+mapfile -d '' -t changes < <(git diff --cached --name-status --no-renames -z)
+wait $!
+staged=$((${#changes[@]} / 2))
 if [ "$staged" -gt 0 ]; then
-  git commit --quiet --message "sync(deck): $staged Dateien"
+  commit_message | git commit --quiet --file=-
   log "committed $staged Dateien"
 fi
 
