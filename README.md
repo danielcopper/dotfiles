@@ -133,8 +133,9 @@ systemctl --user enable --now memex-sync.timer
 systemctl --user enable --now memex-watch.service
 ```
 
-A Deck that synced before the watcher existed needs `inotify-tools` and the
-new schedule as well:
+On a Deck where the timer already runs, these steps take the place of the
+ones above: they install `inotify-tools`, load the timer's 2-minute schedule
+and enable the watcher.
 
 ```bash
 brew install inotify-tools
@@ -150,10 +151,13 @@ Two files outside this repo switch that on; without them the script only logs:
 - `~/.config/memex/ntfy_url` — the full topic URL
 - `~/.config/memex/ntfy_token` — an access token, sent as a Bearer header
 
-The sync goes through the global git hooks like any other commit and push.
-`~/memex` is listed in `git/.githooks/commit-on-main-allowed`, so the
-pre-commit hook lets it commit on `main`, and `memex-sync.service` puts
-Homebrew on its `PATH`, so the pre-push hook finds gitleaks.
+The sync's push goes through the global git hooks like any other push:
+`memex-sync.service` puts Homebrew on its `PATH`, so the pre-push hook finds
+gitleaks. Its commit skips them with `--no-verify`. The message is made of
+file paths, which the commit-msg hook's AI-attribution guard can take for an
+attribution (`daniel/wiki/ai/claude-written-summaries.md`, say) and would then
+refuse on every run; the pre-commit hook only guards `main`, which `~/memex`
+may commit on anyway, being listed in `git/.githooks/commit-on-main-allowed`.
 
 `tests/memex-sync/` holds the tests of both scripts. That directory is not a
 stow package, so nothing of it lands in `$HOME`. `mise run memex-sync-test`

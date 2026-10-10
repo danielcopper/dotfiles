@@ -855,9 +855,10 @@ at_least() { awk -v a="$1" -v b="$2" -v s="$3" 'BEGIN { exit !(a - b >= s) }'; }
 less_than() { awk -v a="$1" -v b="$2" -v s="$3" 'BEGIN { exit !(a - b < s) }'; }
 
 # Three writes a second apart, each well within the delay of the one before:
-# one start, no earlier than the delay after the last write. The checks wait
-# for events and compare measured times, so a slow machine makes them
-# neither fail nor pass by chance.
+# one start, no earlier than the delay after the last write. The checks on
+# that start wait for it and compare measured times, so a slow machine makes
+# them neither fail nor pass by chance; the check for no second start waits
+# a fixed delay + 2 s.
 s40_watch_debounce() {
   start_watch
   check "watches set up" eq "$WATCH_READY" true
@@ -1053,6 +1054,36 @@ s50_watch_clone_moved() {
   check "no start" eq "$(starts)" 0
 }
 
+# Commit hooks that refuse everything, in the clone's own hooks directory:
+# the sync commits past them, also through a rebase. A pre-push hook there
+# that refuses still stops the push.
+s51_commit_hooks_skipped() {
+  mkdir -p "$T/hooks"
+  for hook in commit-msg pre-commit; do
+    printf '#!/bin/sh\necho "%s: refused for test" >&2\nexit 1\n' "$hook" >"$T/hooks/$hook"
+    chmod +x "$T/hooks/$hook"
+  done
+  git -C "$T/memex" config core.hooksPath "$T/hooks"
+  peer_commit b.md 'from peer' 'peer: add b'
+  printf 'local\n' >"$T/memex/c.md"
+  run_sut
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "committed" eq "$(last_message)" "deck: create c.md"
+  check "pushed" eq "$(origin_sha main)" "$(local_sha)"
+  check "no hook spoke" not grep -q 'refused for test' <<<"$OUT"
+
+  printf '#!/bin/sh\necho "pre-push: refused for test" >&2\nexit 1\n' >"$T/hooks/pre-push"
+  chmod +x "$T/hooks/pre-push"
+  printf 'more\n' >"$T/memex/d.md"
+  local main_before
+  main_before=$(origin_sha main)
+  run_sut
+  check "exit 1 with a refusing pre-push hook (got $RC)" eq "$RC" 1
+  check "refusal logged" grep -q "push to main was refused" <<<"$OUT"
+  check "the pre-push hook ran" grep -q 'pre-push: refused for test' <<<"$OUT"
+  check "origin main unchanged" eq "$(origin_sha main)" "$main_before"
+}
+
 all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
   s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
   s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
@@ -1064,7 +1095,7 @@ all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conf
   s37_message_rename s38_message_delete s39_message_path_with_space
   s40_watch_debounce s41_watch_ignores_git_and_obsidian s42_watch_no_clone s43_watch_events_end
   s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
-  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved)
+  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped)
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do
   FAILED=0

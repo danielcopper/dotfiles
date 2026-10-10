@@ -8,12 +8,14 @@
 # are git's own, among them every commit of the sync, the second Obsidian's
 # settings and workspace, which the clone's .gitignore keeps out of git. A
 # pull by the sync changes files and so starts one more run, which finds
-# nothing to commit. A change made while a sync runs may start none: systemd
-# merges the start into the running sync, and the change waits for the
-# timer's next run.
+# nothing to commit. When a sync started earlier is still running 30 seconds
+# after a change, on a slow network say, systemd merges the new start into
+# it, and a change that sync did not commit waits for the timer's next run.
 #
 # Without a clone, when the clone is deleted or moved, or when inotifywait
-# stops, the script exits 1 and the unit starts it again.
+# stops, the script exits 1 and the unit starts it again. While another
+# process, a shell say, has its working directory anywhere inside the clone,
+# its deletion is reported only once that process has left.
 # MEMEX_DIR overrides the clone (default ~/memex), MEMEX_WATCH_DELAY the
 # 30 seconds.
 set -euo pipefail
@@ -58,7 +60,7 @@ if [ ! -d "$repo" ]; then
   log "cannot watch $repo: no such directory" >&2
   exit 1
 fi
-# An absolute path, and no working directory inside the clone: while a
+# An absolute path, and no working directory inside the clone: while any
 # process has its working directory there, deleting the clone is not
 # reported.
 root=$(readlink -f -- "$repo")

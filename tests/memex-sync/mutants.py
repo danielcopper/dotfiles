@@ -31,16 +31,10 @@ GUARD = ('if unfinished=$(unfinished_work); then\n'
          '    "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."\n'
          '  exit 1\n'
          'fi\n')
-COMMIT = ("git add --all\n"
-          "# Status and path of each staged file, in turn; without rename detection a\n"
-          "# rename is a deletion and a creation.\n"
-          "mapfile -d '' -t changes < <(git diff --cached --name-status --no-renames -z)\n"
-          "wait $!\n"
-          "staged=$((${#changes[@]} / 2))\n"
-          'if [ "$staged" -gt 0 ]; then\n'
-          "  commit_message | git commit --quiet --file=-\n"
-          '  log "committed $staged files"\n'
-          "fi\n")
+# The commit block, from "git add --all" to the end of its if, as it stands in
+# the script.
+COMMIT_END = '  log "committed $staged files"\nfi\n'
+COMMIT = text[text.find("git add --all\n"):text.find(COMMIT_END) + len(COMMIT_END)]
 
 MUTANTS = [
     ("s1_no_changes", "commit even when nothing is staged",
@@ -165,6 +159,10 @@ MUTANTS = [
      '      D) lines+=("delete $path") ;;\n', ""),
     ("s39_message_path_with_space", "the body split at spaces",
      "printf '%s\\n' \"${lines[@]}\"", "printf '%s\\n' ${lines[@]}"),
+    ("s51_commit_hooks_skipped", "the commit runs the commit hooks",
+     "git commit --quiet --no-verify --file=-", "git commit --quiet --file=-"),
+    ("s51_commit_hooks_skipped", "the push skips the pre-push hook",
+     "git push --quiet origin HEAD:main", "git push --quiet --no-verify origin HEAD:main"),
     # The rebase in a worktree of its own.
     ("s45_conflict_writes_nothing", "rebase in the clone",
      '(cd "$rebase_tree" && git rebase --quiet origin/main 2>&1)', "(git rebase --quiet origin/main 2>&1)"),
