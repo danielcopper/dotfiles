@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Global mise task: run the memex-sync scenario tests from the dotfiles repo
-# against the repo's host-steamdeck/.local/bin/memex-sync. They need git,
-# python3, curl and flock, and stay on localhost.
+# against the repo's host-steamdeck/.local/bin/memex-sync and memex-watch.
+# They need git, python3, curl, flock and inotifywait, and stay on localhost.
 #
 # Usage: mise run memex-sync-test [scenario...]          (defaults to all)
 #        mise run memex-sync-test --mutants              (break each guard in turn)

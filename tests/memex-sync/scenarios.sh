@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Scenario tests for memex-sync against throwaway repos, with stand-ins on
-# localhost for ntfy and for origins that refuse; nothing goes to the network.
+# Scenario tests for memex-sync and memex-watch against throwaway repos, with
+# stand-ins on localhost for ntfy and for origins that refuse; nothing goes to
+# the network.
 # usage: scenarios.sh [script-under-test] [scenario ...]
 #   The script defaults to the repo's host-steamdeck/.local/bin/memex-sync, the
-#   scenarios to all of them.
+#   scenarios to all of them. WATCH_SUT overrides the memex-watch under test
+#   (default host-steamdeck/.local/bin/memex-watch).
 # Prints "PASS <scenario>" or "FAIL <scenario>: <check>" per scenario; exits 1
 # when any scenario failed. VERBOSE=1 prints every run's output. All state
 # lives in a temporary directory that is removed at the end.
@@ -20,6 +22,12 @@ ROOT=$(mktemp -d "${TMPDIR:-/tmp}/memex-sync-test.XXXXXX")
 # The script runs with the PATH its unit sets.
 SERVICE_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/host-steamdeck/.config/systemd/user/memex-sync.service")
 [ -n "$SERVICE_PATH" ] || { echo "no PATH found in memex-sync.service" >&2; exit 2; }
+WATCH_SUT=$(readlink -f "${WATCH_SUT:-$REPO/host-steamdeck/.local/bin/memex-watch}")
+WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/host-steamdeck/.config/systemd/user/memex-watch.service")
+[ -n "$WATCH_PATH" ] || { echo "no PATH found in memex-watch.service" >&2; exit 2; }
+# memex-watch's wait for quiet, in seconds; its scenarios are timed for 2.
+WATCH_DELAY=2
+WATCH_PIDS=()
 # The real git, for the wrappers some scenarios put in front of it.
 REAL_GIT=$(command -v git)
 
@@ -42,7 +50,14 @@ for status in 401 403 404; do
   python3 -I "$HERE/http_status_stub.py" "$status" "$ROOT/http$status.port" &
   STUB_PIDS+=($!)
 done
-trap 'kill $NTFY_PID "${STUB_PIDS[@]}" 2>/dev/null; rm -rf "$ROOT"' EXIT
+cleanup() {
+  local pid
+  kill "$NTFY_PID" "${STUB_PIDS[@]}" 2>/dev/null
+  # A memex-watch still running leads its own process group.
+  for pid in "${WATCH_PIDS[@]}"; do kill -- "-$pid" 2>/dev/null; done
+  rm -rf "$ROOT"
+}
+trap cleanup EXIT
 for port_file in ntfy.port http401.port http403.port http404.port; do
   for _ in $(seq 50); do [ -s "$ROOT/$port_file" ] && break; sleep 0.1; done
 done
@@ -762,6 +777,101 @@ s39_message_path_with_space() {
   expect_message $'deck: 2 files in my notes\n\nupdate my notes/a b.md\ncreate my notes/c d.md'
 }
 
+# --- memex-watch: starts the sync once the clone has been quiet. ---
+
+# start_watch: runs memex-watch in the background as its unit would, with a
+# systemctl first on its PATH that records each call in $T/starts, and waits
+# until inotifywait has set up its watches.
+start_watch() {
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "$*" >>"%s"\n' "$T/starts" >"$T/bin/systemctl"
+  chmod +x "$T/bin/systemctl"
+  : >"$T/starts"
+  # setsid: a process group of its own, so stop_watch ends inotifywait too.
+  env -i HOME="$T/home" PATH="$T/bin:$WATCH_PATH" \
+    MEMEX_DIR="${MEMEX_DIR_OVERRIDE:-$T/memex}" MEMEX_WATCH_DELAY="$WATCH_DELAY" \
+    setsid "$WATCH_SUT" >"$T/watch.out" 2>&1 &
+  WATCH_PID=$!
+  WATCH_PIDS+=("$WATCH_PID")
+  for _ in $(seq 50); do grep -q 'Watches established' "$T/watch.out" && break; sleep 0.1; done
+}
+stop_watch() {
+  kill -- "-$WATCH_PID" 2>/dev/null
+  wait "$WATCH_PID" 2>/dev/null
+  { echo "\$ memex-watch"; cat "$T/watch.out"; } >>"$T/transcript"
+}
+# wait_watch_exit: waits up to 10 s for memex-watch to end by itself; its exit
+# in $RC, $ENDED is 0 when it did end.
+wait_watch_exit() {
+  ENDED=0
+  timeout 10 tail --pid="$WATCH_PID" -f /dev/null || ENDED=$?
+  [ "$ENDED" = 0 ] || kill -- "-$WATCH_PID" 2>/dev/null
+  wait "$WATCH_PID"
+  RC=$?
+  { echo "\$ memex-watch -> exit $RC"; cat "$T/watch.out"; } >>"$T/transcript"
+}
+starts() { wc -l <"$T/starts"; }
+
+# Three writes a second apart, each within the delay of the one before: no
+# start until the delay has passed after the last one, then exactly one.
+s40_watch_debounce() {
+  start_watch
+  check "watches established" grep -q 'Watches established' "$T/watch.out"
+  local n
+  for n in 1 2 3; do
+    printf '%s\n' "$n" >"$T/memex/burst.md"
+    sleep 1
+  done
+  check "no start while the changes keep coming" eq "$(starts)" 0
+  sleep 2.5
+  check "one start once quiet" eq "$(starts)" 1
+  check "starts the sync service without waiting for it" eq "$(cat "$T/starts")" "--user start --no-block memex-sync.service"
+  printf 'later\n' >"$T/memex/later.md"
+  sleep 3
+  check "a later change starts it again" eq "$(starts)" 2
+  stop_watch
+}
+
+# Obsidian's state, git's own files and a commit are no change that counts;
+# a note afterwards still is.
+s41_watch_ignores_git_and_obsidian() {
+  mkdir -p "$T/memex/.obsidian" "$T/memex/daniel"
+  start_watch
+  printf '{}\n' >"$T/memex/.obsidian/workspace.json"
+  mkdir "$T/memex/daniel/.obsidian"
+  printf '{}\n' >"$T/memex/daniel/.obsidian/app.json"
+  printf 'x\n' >"$T/memex/.git/stray"
+  git -C "$T/memex" commit --quiet --allow-empty -m 'test: empty'
+  sleep 3
+  check "no start" eq "$(starts)" 0
+  printf 'note\n' >"$T/memex/daniel/note.md"
+  sleep 3
+  check "a note still starts it" eq "$(starts)" 1
+  stop_watch
+}
+
+s42_watch_no_clone() {
+  MEMEX_DIR_OVERRIDE=$T/no-such-clone start_watch
+  wait_watch_exit
+  check "ends by itself" eq "$ENDED" 0
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "says why" grep -qx "memex-watch: cannot watch $T/no-such-clone" "$T/watch.out"
+  check "no start" eq "$(starts)" 0
+}
+
+# inotifywait stops right after a change: the watch ends without a start. A
+# stand-in first on the PATH reports one change and exits.
+s43_watch_events_end() {
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "Watches established." >&2\necho ./note.md\nexit 1\n' >"$T/bin/inotifywait"
+  chmod +x "$T/bin/inotifywait"
+  start_watch
+  wait_watch_exit
+  check "ends by itself" eq "$ENDED" 0
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "no start" eq "$(starts)" 0
+}
+
 # git fails to list the staged files: the run fails instead of taking the
 # change for none. A git first on the script's PATH refuses every diff.
 s44_staged_list_fails() {
@@ -792,6 +902,7 @@ all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conf
   s30_writer_during_rebase s31_writer_origin_not_ahead s32_fetch_before_commit
   s33_merge_started_during_fetch s34_message_one_file s35_message_common_dir s36_message_no_common_dir
   s37_message_rename s38_message_delete s39_message_path_with_space
+  s40_watch_debounce s41_watch_ignores_git_and_obsidian s42_watch_no_clone s43_watch_events_end
   s44_staged_list_fails)
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do

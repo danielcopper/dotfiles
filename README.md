@@ -111,20 +111,26 @@ and it has three parts. Stow brings none of them:
 ## memex sync on the Steam Deck
 
 On the Deck, `~/Memory` is a symlink into `~/memex`, a git clone that
-`host-steamdeck` keeps in sync: it stows the script `~/.local/bin/memex-sync`
-and the user units `memex-sync.service` and `memex-sync.timer`. Every 15
-minutes the timer commits whatever changed in the clone, rebases onto
-`origin/main` and pushes. What a run does offline, in a rebase conflict, when
+`host-steamdeck` keeps in sync: it stows the scripts `~/.local/bin/memex-sync`
+and `~/.local/bin/memex-watch` and the user units `memex-sync.service`,
+`memex-sync.timer` and `memex-watch.service`. A sync run commits whatever
+changed in the clone, rebases onto `origin/main` and pushes. The timer starts
+one every 2 minutes, which also brings in what other devices pushed;
+`memex-watch.service` watches the clone with `inotifywait` (Homebrew's
+`inotify-tools`) and starts one 30 seconds after the last change, ignoring
+`.git/` and `.obsidian/`. What a run does offline, in a rebase conflict, when
 origin refuses a fetch or a push, or when a git operation was left unfinished
-in the clone is described at the top of the script; its output is in
-`journalctl --user -u memex-sync`.
+in the clone is described at the top of the script, together with how to
+resolve a conflict by hand. Its output is in `journalctl --user -u memex-sync`,
+the watcher's in `journalctl --user -u memex-watch`.
 
-`install-dotfiles.sh` does not enable the timer, because on a fresh Deck the
-clone does not exist yet. Once it does, enable it once:
+`install-dotfiles.sh` enables neither unit, because on a fresh Deck the clone
+does not exist yet. Once it does, enable both once:
 
 ```bash
 cd ~/dotfiles && stow -R host-steamdeck
 systemctl --user enable --now memex-sync.timer
+systemctl --user enable --now memex-watch.service
 ```
 
 Each of the failures that need a hand can also send one ntfy notification.
@@ -138,16 +144,18 @@ The sync goes through the global git hooks like any other commit and push.
 pre-commit hook lets it commit on `main`, and `memex-sync.service` puts
 Homebrew on its `PATH`, so the pre-push hook finds gitleaks.
 
-`tests/memex-sync/` holds the script's tests. That directory is not a stow
-package, so nothing of it lands in `$HOME`. `mise run memex-sync-test` runs
-the scenarios against `host-steamdeck/.local/bin/memex-sync`, each on a
-throwaway bare origin with the script's own unit `PATH`; name scenarios to run
-only those, and set `VERBOSE=1` to see every run's output.
-`mise run memex-sync-test --mutants` breaks each guard of the script in turn
-and fails unless its scenario catches it. Both need git, python3, curl and
-flock, and stay on localhost: ntfy and the refusing origins are small python
-servers there. Without mise, run `tests/memex-sync/scenarios.sh` and
-`python3 tests/memex-sync/mutants.py` from the repo.
+`tests/memex-sync/` holds the tests of both scripts. That directory is not a
+stow package, so nothing of it lands in `$HOME`. `mise run memex-sync-test`
+runs the scenarios against `host-steamdeck/.local/bin/memex-sync` and
+`memex-watch`, each on a throwaway bare origin with the script's own unit
+`PATH`; the watcher's wait is cut to 2 seconds and a stand-in `systemctl`
+records the starts. Name scenarios to run only those, and set `VERBOSE=1` to
+see every run's output. `mise run memex-sync-test --mutants` breaks each guard
+of both scripts in turn and fails unless its scenario catches it. Both need
+git, python3, curl, flock and inotifywait, and stay on localhost: ntfy and the
+refusing origins are small python servers there. Without mise, run
+`tests/memex-sync/scenarios.sh` and `python3 tests/memex-sync/mutants.py` from
+the repo.
 
 ## Recovery
 

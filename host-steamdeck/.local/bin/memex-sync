@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Commit, rebase and push the memex clone. memex-sync.timer runs this every
-# 15 minutes; setup steps are in the README, section "memex sync on the
-# Steam Deck".
+# 2 minutes, and memex-watch starts it 30 seconds after the last change in
+# the clone; setup steps are in the README, section "memex sync on the Steam
+# Deck".
 #
 # - A rebase, merge, cherry-pick or revert left in progress in the clone, or
 #   unmerged files, stop the run before it stages or commits anything: exit 1.

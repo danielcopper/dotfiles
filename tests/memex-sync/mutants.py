@@ -1,9 +1,10 @@
-"""Break one guard at a time on a copy of memex-sync and run the scenario that
-should catch it; every mutant must turn its scenario red.
+"""Break one guard at a time on a copy of memex-sync or memex-watch and run the
+scenario that should catch it; every mutant must turn its scenario red.
 
 usage: python3 -I mutants.py [memex-sync]
-The script defaults to the repo's host-steamdeck/.local/bin/memex-sync. The
-mutated copies live in a temporary directory that is removed at the end.
+The script defaults to the repo's host-steamdeck/.local/bin/memex-sync;
+memex-watch is always the repo's. The mutated copies live in a temporary
+directory that is removed at the end.
 """
 
 import os
@@ -14,9 +15,12 @@ import tempfile
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.realpath(os.path.join(HERE, "..", ".."))
 src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "host-steamdeck/.local/bin/memex-sync")
+watch_src = os.path.join(REPO, "host-steamdeck/.local/bin/memex-watch")
 runner = os.path.join(HERE, "scenarios.sh")
 with open(src) as f:
     text = f.read()
+with open(watch_src) as f:
+    watch_text = f.read()
 
 FETCH = "fetched=true\nfetch_origin || fetched=false\n"
 GUARD_COMMENT = ("# Checked after the fetch, right before the commit: an operation started\n"
@@ -168,18 +172,45 @@ MUTANTS = [
      "<(git diff --cached --name-status --no-renames -z)\n"),
 ]
 
+# memex-watch: (scenario, what, old, new), applied to memex-watch.
+WATCH_MUTANTS = [
+    ("s40_watch_debounce", "no debounce: start the sync a fixed delay after each change",
+     "  quiet_for_delay || break\n", '  sleep "$delay"\n'),
+    ("s40_watch_debounce", "wait for the sync service to finish",
+     "systemctl --user start --no-block memex-sync.service", "systemctl --user start memex-sync.service"),
+    ("s41_watch_ignores_git_and_obsidian", "no filter",
+     ' | grep --line-buffered -Ev "$ignored"', ""),
+    ("s41_watch_ignores_git_and_obsidian", ".git not ignored",
+     r"\.(git|obsidian)(/|$)", r"\.(obsidian)(/|$)"),
+    ("s41_watch_ignores_git_and_obsidian", ".obsidian not ignored",
+     r"\.(git|obsidian)(/|$)", r"\.(git)(/|$)"),
+    ("s41_watch_ignores_git_and_obsidian", ".obsidian ignored only at the top",
+     r"^\./(.*/)?\.(git", r"^\./\.(git"),
+    ("s42_watch_no_clone", "no clone ends the watch with exit 0",
+     '  log "cannot watch $repo" >&2\n  exit 1', '  log "cannot watch $repo" >&2\n  exit 0'),
+    ("s43_watch_events_end", "the end of the changes taken for quiet",
+     '  [ "$status" -gt 128 ]\n', "  true\n"),
+    ("s43_watch_events_end", "the end of the changes ends the watch with exit 0",
+     'log "inotifywait stopped watching $repo" >&2\nexit 1', 'log "inotifywait stopped watching $repo" >&2\nexit 0'),
+]
+
 ok = True
 outdir = tempfile.mkdtemp(prefix="memex-sync-mutants.")
-for i, (scenario, what, old, new) in enumerate(MUTANTS):
-    if text.count(old) != 1:
-        print(f"MUTANT {i} ({what}): pattern found {text.count(old)}x, not applied")
+runs = [("memex-sync", text, m) for m in MUTANTS] + [("memex-watch", watch_text, m) for m in WATCH_MUTANTS]
+for i, (target, source, (scenario, what, old, new)) in enumerate(runs):
+    if source.count(old) != 1:
+        print(f"MUTANT {i} ({what}): pattern found {source.count(old)}x in {target}, not applied")
         ok = False
         continue
-    path = os.path.join(outdir, f"memex-sync.mutant{i}")
+    path = os.path.join(outdir, f"{target}.mutant{i}")
     with open(path, "w") as f:
-        _ = f.write(text.replace(old, new))
+        _ = f.write(source.replace(old, new))
     os.chmod(path, 0o755)
-    r = subprocess.run([runner, path, scenario], capture_output=True, text=True)
+    if target == "memex-watch":
+        r = subprocess.run([runner, src, scenario], capture_output=True, text=True,
+                           env={**os.environ, "WATCH_SUT": path})
+    else:
+        r = subprocess.run([runner, path, scenario], capture_output=True, text=True)
     first_fail = next((l for l in r.stdout.splitlines() if l.startswith("FAIL")), "")
     verdict = "RED (caught)" if r.returncode != 0 else "GREEN (NOT caught)"
     ok &= r.returncode != 0
