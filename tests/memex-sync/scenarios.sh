@@ -648,7 +648,7 @@ s31_writer_origin_not_ahead() {
   check "exit 0 (got $RC)" eq "$RC" 0
   check "no rebase attempted" test ! -e "$T/wrote"
   check "pushed" eq "$(origin_sha main)" "$(local_sha)"
-  check "only commit and push logged" eq "$OUT" $'memex-sync: committed 1 Dateien\nmemex-sync: pushed 1 commits'
+  check "only commit and push logged" eq "$OUT" $'memex-sync: committed 1 files\nmemex-sync: pushed 1 commits'
   check "no ntfy request" eq "$(ntfy_count)" "$NTFY_BEFORE"
 }
 

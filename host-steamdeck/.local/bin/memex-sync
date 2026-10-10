@@ -252,7 +252,7 @@ wait $!
 staged=$((${#changes[@]} / 2))
 if [ "$staged" -gt 0 ]; then
   commit_message | git commit --quiet --file=-
-  log "committed $staged Dateien"
+  log "committed $staged files"
 fi
 
 if [ "$fetched" = false ]; then

@@ -39,7 +39,7 @@ COMMIT = ("git add --all\n"
           "staged=$((${#changes[@]} / 2))\n"
           'if [ "$staged" -gt 0 ]; then\n'
           "  commit_message | git commit --quiet --file=-\n"
-          '  log "committed $staged Dateien"\n'
+          '  log "committed $staged files"\n'
           "fi\n")
 
 MUTANTS = [
