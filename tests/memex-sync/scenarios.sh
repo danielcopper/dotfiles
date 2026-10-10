@@ -25,8 +25,8 @@ SERVICE_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/host-steamdeck/.config/sy
 WATCH_SUT=$(readlink -f "${WATCH_SUT:-$REPO/host-steamdeck/.local/bin/memex-watch}")
 WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/host-steamdeck/.config/systemd/user/memex-watch.service")
 [ -n "$WATCH_PATH" ] || { echo "no PATH found in memex-watch.service" >&2; exit 2; }
-# memex-watch's wait for quiet, in seconds; its scenarios are timed for 2.
-WATCH_DELAY=2
+# memex-watch's wait for quiet, in seconds.
+WATCH_DELAY=3
 WATCH_PIDS=()
 # The real git, for the wrappers some scenarios put in front of it.
 REAL_GIT=$(command -v git)
@@ -98,7 +98,7 @@ with_ntfy_files() {
   printf '%s\n' tok123 >"$T/home/.config/memex/ntfy_token"
 }
 
-# run_sut: runs the script as the timer would, output in $OUT, exit in $RC.
+# run_sut: runs the script as its unit would, output in $OUT, exit in $RC.
 run_sut() {
   OUT=$(env -i HOME="$T/home" PATH="$SERVICE_PATH" GIT_CONFIG_NOSYSTEM=1 \
     MEMEX_DIR="${MEMEX_DIR_OVERRIDE:-$T/memex}" \
@@ -119,11 +119,14 @@ peer_commit() { # peer_commit <file> <content> <message>
 origin_sha() { git -C "$T/origin.git" rev-parse --verify --quiet "$1"; }
 local_sha() { git -C "$T/memex" rev-parse HEAD; }
 count_commits() { git -C "$T/memex" rev-list --count HEAD; }
+# How many worktrees the clone has, itself included.
+worktrees() { git -C "$T/memex" worktree list --porcelain | grep -c '^worktree '; }
 # The full message of the clone's last commit, trailing newlines stripped.
 last_message() { git -C "$T/memex" log -1 --format=%B; }
 ntfy_count() { wc -l <"$NTFY_LOG"; }
 tree_hash() { (cd "$T/memex" && find . -path ./.git -prune -o -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum); }
 eq() { [ "$1" = "$2" ]; }
+not() { ! "$@"; }
 last_ntfy() { tail -n1 "$NTFY_LOG" | python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
 SUT_ENV=()
 today=$(date +%F)
@@ -175,6 +178,8 @@ s4_origin_ahead() {
   check "local commit sits on the peer commit" eq "$(git -C "$T/memex" rev-parse HEAD^)" "$peer_head"
   check "linear history" eq "$(git -C "$T/memex" rev-list --merges HEAD)" ""
   check "peer file present" test -f "$T/memex/b.md"
+  check "no rebase worktree left" eq "$(worktrees)" 1
+  check "its directory gone" test ! -e "$T/run/memex-sync-rebase"
 }
 
 # Both sides change shared.md: the rebase cannot go through.
@@ -204,6 +209,7 @@ s5_conflict() {
   check "title names the device" eq "$(last_ntfy title)" "memex-sync (Deck): conflict"
   check "request goes to the topic URL" eq "$(last_ntfy path)" /memex-test
   check "marker present" test -s "$T/state/memex-sync/conflict"
+  check "no rebase worktree left" eq "$(worktrees)" 1
 
   # Second run, still in conflict, with a new local change.
   printf 'more\n' >"$T/memex/later.md"
@@ -599,16 +605,19 @@ s29_fetch_ssh_unresolved() {
 
 # --- Something writes into the clone while a run is going on. ---
 
-# A git first on the script's PATH that, the first time the script starts a
-# rebase, changes a tracked file in the clone, as a concurrent writer would
-# between the commit and the rebase. $T/wrote records that it happened.
+# with_writer_before_rebase [<shell command>]: a git first on the script's
+# PATH that, the first time the script starts a rebase, runs the command,
+# as a concurrent writer in the clone would between the commit and the move
+# to the rebased commits. By default it appends a line to a.md. $T/wrote
+# records that it happened.
 with_writer_before_rebase() {
+  local command=${1:-"echo 'written during the run' >>'$T/memex/a.md'"}
   mkdir -p "$T/bin"
   cat >"$T/bin/git" <<EOF
 #!/bin/sh
-if [ "\$1" = rebase ] && [ "\$2" != --abort ] && [ ! -e "$T/wrote" ]; then
+if [ "\$1" = rebase ] && [ ! -e "$T/wrote" ]; then
   touch "$T/wrote"
-  echo 'written during the run' >>"$T/memex/a.md"
+  $command
 fi
 exec "$REAL_GIT" "\$@"
 EOF
@@ -616,23 +625,25 @@ EOF
   SUT_ENV+=(PATH="$T/bin:$SERVICE_PATH")
 }
 
+# The write touches a file the rebase leaves alone: the clone moves to the
+# rebased commits around it, and the next run commits it.
 s30_writer_during_rebase() {
   with_ntfy_files
   with_writer_before_rebase
   peer_commit b.md 'from peer' 'peer: add b'
-  local old_head
-  old_head=$(local_sha)
+  local peer_head
+  peer_head=$(origin_sha main)
   printf 'local\n' >"$T/memex/c.md"
   run_sut
   check "exit 0 (got $RC)" eq "$RC" 0
   check "the writer did write" test -e "$T/wrote"
-  check "refusal logged with git's reason" grep -qE "^memex-sync: working tree changed during the run; the next run retries \(.+\)$" <<<"$OUT"
+  check "pushed" eq "$(origin_sha main)" "$(local_sha)"
+  check "sync commit sits on the peer commit" eq "$(git -C "$T/memex" rev-parse HEAD^)" "$peer_head"
   check "no conflict branch" test -z "$(origin_sha "conflict/deck-$today")"
   check "no ntfy request" eq "$(ntfy_count)" "$NTFY_BEFORE"
   check "no marker" test -z "$(ls -A "$T/state/memex-sync" 2>/dev/null)"
-  check "no rebase left in progress" bash -c "! { [ -d '$T/memex/.git/rebase-merge' ] || [ -d '$T/memex/.git/rebase-apply' ]; }"
-  check "sync commit kept on the old HEAD" eq "$(git -C "$T/memex" rev-parse HEAD^)" "$old_head"
-  check "stray change left in the tree" eq "$(git -C "$T/memex" status --porcelain)" " M a.md"
+  check "the write survives, uncommitted" eq "$(git -C "$T/memex" status --porcelain)" " M a.md"
+  check "with its content" grep -q 'written during the run' "$T/memex/a.md"
   run_sut
   check "next run exit 0 (got $RC)" eq "$RC" 0
   check "next run pushed" eq "$(origin_sha main)" "$(local_sha)"
@@ -780,20 +791,39 @@ s39_message_path_with_space() {
 # --- memex-watch: starts the sync once the clone has been quiet. ---
 
 # start_watch: runs memex-watch in the background as its unit would, with a
-# systemctl first on its PATH that records each call in $T/starts, and waits
-# until inotifywait has set up its watches.
+# systemctl first on its PATH that records the time and arguments of each
+# call in $T/starts, and waits until inotifywait watches every directory of
+# the clone, counted from its inotify file descriptor in /proc.
 start_watch() {
   mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "$*" >>"%s"\n' "$T/starts" >"$T/bin/systemctl"
+  cat >"$T/bin/systemctl" <<EOF
+#!/bin/sh
+echo "\$(date +%s.%N) \$*" >>"$T/starts"
+EOF
   chmod +x "$T/bin/systemctl"
   : >"$T/starts"
-  # setsid: a process group of its own, so stop_watch ends inotifywait too.
+  # setsid: a session and process group of its own, so stop_watch ends
+  # inotifywait too.
   env -i HOME="$T/home" PATH="$T/bin:$WATCH_PATH" \
     MEMEX_DIR="${MEMEX_DIR_OVERRIDE:-$T/memex}" MEMEX_WATCH_DELAY="$WATCH_DELAY" \
     setsid "$WATCH_SUT" >"$T/watch.out" 2>&1 &
   WATCH_PID=$!
   WATCH_PIDS+=("$WATCH_PID")
-  for _ in $(seq 50); do grep -q 'Watches established' "$T/watch.out" && break; sleep 0.1; done
+  local dirs inotify watches
+  dirs=$(find "${MEMEX_DIR_OVERRIDE:-$T/memex}" -type d 2>/dev/null | wc -l)
+  WATCH_READY=false
+  for _ in $(seq 100); do
+    kill -0 "$WATCH_PID" 2>/dev/null || break
+    inotify=$(pgrep -s "$WATCH_PID" -x inotifywait)
+    if [ -n "$inotify" ]; then
+      watches=$(cat /proc/"$inotify"/fdinfo/* 2>/dev/null | grep -c '^inotify wd:')
+      if [ "$watches" -ge "$dirs" ]; then
+        WATCH_READY=true
+        break
+      fi
+    fi
+    sleep 0.1
+  done
 }
 stop_watch() {
   kill -- "-$WATCH_PID" 2>/dev/null
@@ -801,34 +831,56 @@ stop_watch() {
   { echo "\$ memex-watch"; cat "$T/watch.out"; } >>"$T/transcript"
 }
 # wait_watch_exit: waits up to 10 s for memex-watch to end by itself; its exit
-# in $RC, $ENDED is 0 when it did end.
+# in $RC, $ENDED is 0 when it did end. What is left of its process group goes.
 wait_watch_exit() {
   ENDED=0
   timeout 10 tail --pid="$WATCH_PID" -f /dev/null || ENDED=$?
-  [ "$ENDED" = 0 ] || kill -- "-$WATCH_PID" 2>/dev/null
+  kill -- "-$WATCH_PID" 2>/dev/null
   wait "$WATCH_PID"
   RC=$?
   { echo "\$ memex-watch -> exit $RC"; cat "$T/watch.out"; } >>"$T/transcript"
 }
 starts() { wc -l <"$T/starts"; }
+# wait_starts <n>: waits up to 15 s until memex-sync has been started n times.
+wait_starts() {
+  for _ in $(seq 150); do
+    [ "$(starts)" -ge "$1" ] && return
+    sleep 0.1
+  done
+}
+now() { date +%s.%N; }
+# at_least / less_than <a> <b> <seconds>: a lies at least / less than that
+# many seconds after b.
+at_least() { awk -v a="$1" -v b="$2" -v s="$3" 'BEGIN { exit !(a - b >= s) }'; }
+less_than() { awk -v a="$1" -v b="$2" -v s="$3" 'BEGIN { exit !(a - b < s) }'; }
 
-# Three writes a second apart, each within the delay of the one before: no
-# start until the delay has passed after the last one, then exactly one.
+# Three writes a second apart, each well within the delay of the one before:
+# one start, no earlier than the delay after the last write. The checks wait
+# for events and compare measured times, so a slow machine makes them
+# neither fail nor pass by chance.
 s40_watch_debounce() {
   start_watch
-  check "watches established" grep -q 'Watches established' "$T/watch.out"
-  local n
+  check "watches set up" eq "$WATCH_READY" true
+  local n written=() first
   for n in 1 2 3; do
+    [ "$n" = 1 ] || sleep 1
+    # Taken before the write: the watcher sees the write after this time.
+    written+=("$(now)")
     printf '%s\n' "$n" >"$T/memex/burst.md"
-    sleep 1
   done
-  check "no start while the changes keep coming" eq "$(starts)" 0
-  sleep 2.5
-  check "one start once quiet" eq "$(starts)" 1
-  check "starts the sync service without waiting for it" eq "$(cat "$T/starts")" "--user start --no-block memex-sync.service"
+  check "setup: second write within the delay" less_than "${written[1]}" "${written[0]}" "$WATCH_DELAY"
+  check "setup: third write within the delay" less_than "${written[2]}" "${written[1]}" "$WATCH_DELAY"
+  wait_starts 1
+  check "one start" eq "$(starts)" 1
+  first=$(head -n1 "$T/starts" | cut -d' ' -f1)
+  check "no earlier than the delay after the last write" at_least "${first:-0}" "${written[2]}" "$WATCH_DELAY"
+  check "starts the sync service without waiting for it" eq "$(head -n1 "$T/starts" | cut -d' ' -f2-)" "--user start --no-block memex-sync.service"
+  sleep "$((WATCH_DELAY + 2))"
+  check "no second start" eq "$(starts)" 1
   printf 'later\n' >"$T/memex/later.md"
-  sleep 3
+  wait_starts 2
   check "a later change starts it again" eq "$(starts)" 2
+  check "nothing but its own lines in the journal" not grep -qv '^memex-watch: ' "$T/watch.out"
   stop_watch
 }
 
@@ -837,16 +889,18 @@ s40_watch_debounce() {
 s41_watch_ignores_git_and_obsidian() {
   mkdir -p "$T/memex/.obsidian" "$T/memex/daniel"
   start_watch
+  check "watches set up" eq "$WATCH_READY" true
   printf '{}\n' >"$T/memex/.obsidian/workspace.json"
   mkdir "$T/memex/daniel/.obsidian"
   printf '{}\n' >"$T/memex/daniel/.obsidian/app.json"
   printf 'x\n' >"$T/memex/.git/stray"
   git -C "$T/memex" commit --quiet --allow-empty -m 'test: empty'
-  sleep 3
+  sleep "$((WATCH_DELAY + 2))"
   check "no start" eq "$(starts)" 0
   printf 'note\n' >"$T/memex/daniel/note.md"
-  sleep 3
+  wait_starts 1
   check "a note still starts it" eq "$(starts)" 1
+  check "no word about the new directories" not grep -q 'Watching new directory' "$T/watch.out"
   stop_watch
 }
 
@@ -855,7 +909,7 @@ s42_watch_no_clone() {
   wait_watch_exit
   check "ends by itself" eq "$ENDED" 0
   check "exit 1 (got $RC)" eq "$RC" 1
-  check "says why" grep -qx "memex-watch: cannot watch $T/no-such-clone" "$T/watch.out"
+  check "says why" grep -qx "memex-watch: cannot watch $T/no-such-clone: no such directory" "$T/watch.out"
   check "no start" eq "$(starts)" 0
 }
 
@@ -863,7 +917,11 @@ s42_watch_no_clone() {
 # stand-in first on the PATH reports one change and exits.
 s43_watch_events_end() {
   mkdir -p "$T/bin"
-  printf '#!/bin/sh\necho "Watches established." >&2\necho ./note.md\nexit 1\n' >"$T/bin/inotifywait"
+  cat >"$T/bin/inotifywait" <<EOF
+#!/bin/sh
+echo "CLOSE_WRITE,CLOSE $T/memex/note.md"
+exit 1
+EOF
   chmod +x "$T/bin/inotifywait"
   start_watch
   wait_watch_exit
@@ -893,6 +951,108 @@ EOF
   check "origin unchanged" eq "$(origin_sha main)" "$(local_sha)"
 }
 
+# --- The rebase runs in a worktree of its own, outside the clone. ---
+
+# A conflict writes nothing into the clone: no file outside .git/ newer than
+# the run, and memex-watch, watching alongside, starts no further run.
+s45_conflict_writes_nothing() {
+  make_conflict
+  start_watch
+  check "watches set up" eq "$WATCH_READY" true
+  touch "$T/before-run"
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "conflict branch on origin" eq "$(origin_sha "conflict/deck-$today")" "$(local_sha)"
+  check "no file in the clone written" eq \
+    "$(find "$T/memex" -path "$T/memex/.git" -prune -o -newer "$T/before-run" -print)" ""
+  sleep "$((WATCH_DELAY + 2))"
+  check "no start by memex-watch" eq "$(starts)" 0
+  check "no rebase worktree left" eq "$(worktrees)" 1
+  stop_watch
+}
+
+# A run killed during its rebase left the worktree behind, with the rebase
+# still in progress in it: the next run clears it away and syncs.
+s46_stale_rebase_worktree() {
+  local stale=$T/run/memex-sync-rebase
+  diverge
+  git -C "$T/memex" worktree add --quiet --detach "$stale" HEAD
+  git -C "$stale" rebase origin/main >/dev/null 2>&1
+  check "setup: a rebase stopped in the stale worktree" test -n "$(git -C "$stale" ls-files --unmerged)"
+  # Back to before the conflicting commit: the next sync has a clean rebase.
+  git -C "$T/memex" reset --quiet --hard HEAD~1
+  printf 'local\n' >"$T/memex/c.md"
+  run_sut
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "pushed" eq "$(origin_sha main)" "$(local_sha)"
+  check "no rebase worktree left" eq "$(worktrees)" 1
+  check "its directory gone" test ! -e "$stale"
+}
+
+# Someone commits in the clone while the rebase runs: the clone is not moved,
+# so that commit is not dropped, and the next run syncs it.
+s47_commit_during_rebase() {
+  with_writer_before_rebase "\"$REAL_GIT\" -C '$T/memex' commit --quiet --allow-empty -m 'user: during the run'"
+  peer_commit b.md 'from peer' 'peer: add b'
+  printf 'local\n' >"$T/memex/c.md"
+  run_sut
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the commit was made" test -e "$T/wrote"
+  check "logged" grep -qx 'memex-sync: HEAD moved during the run; the next run retries' <<<"$OUT"
+  check "the commit is still HEAD" eq "$(git -C "$T/memex" log -1 --format=%s)" "user: during the run"
+  check "no rebase worktree left" eq "$(worktrees)" 1
+  run_sut
+  check "next run exit 0 (got $RC)" eq "$RC" 0
+  check "next run pushed" eq "$(origin_sha main)" "$(local_sha)"
+  check "the commit on origin" eq "$(git -C "$T/origin.git" log -1 --format=%s main)" "user: during the run"
+}
+
+# The write touches a file the rebase changes: the clone stays where it is,
+# the write too, and the next run commits it and gets through.
+s48_write_in_the_way() {
+  with_ntfy_files
+  with_writer_before_rebase "echo 'from peer' >'$T/memex/a.md'"
+  peer_commit a.md 'from peer' 'peer: edit a'
+  printf 'local\n' >"$T/memex/c.md"
+  run_sut
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the writer did write" test -e "$T/wrote"
+  check "refusal logged with git's reason" grep -qE "^memex-sync: working tree changed during the run; the next run retries \(.+\)$" <<<"$OUT"
+  check "the clone not moved" eq "$(git -C "$T/memex" log -1 --format=%s)" "deck: create c.md"
+  check "the write left as it is" eq "$(git -C "$T/memex" status --porcelain)" " M a.md"
+  check "no conflict branch" test -z "$(origin_sha "conflict/deck-$today")"
+  check "no ntfy request" eq "$(ntfy_count)" "$NTFY_BEFORE"
+  check "no rebase worktree left" eq "$(worktrees)" 1
+  run_sut
+  check "next run exit 0 (got $RC)" eq "$RC" 0
+  check "next run pushed" eq "$(origin_sha main)" "$(local_sha)"
+  check "c.md on origin" eq "$(git -C "$T/origin.git" show main:c.md)" local
+}
+
+# The clone is deleted, or moved away: memex-watch ends with exit 1, for its
+# unit to start it again.
+s49_watch_clone_deleted() {
+  start_watch
+  check "watches set up" eq "$WATCH_READY" true
+  rm -rf "$T/memex"
+  wait_watch_exit
+  check "ends by itself" eq "$ENDED" 0
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "says why" grep -qx "memex-watch: $T/memex was deleted or moved" "$T/watch.out"
+  check "no start" eq "$(starts)" 0
+}
+
+s50_watch_clone_moved() {
+  start_watch
+  check "watches set up" eq "$WATCH_READY" true
+  mv "$T/memex" "$T/memex-moved"
+  wait_watch_exit
+  check "ends by itself" eq "$ENDED" 0
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "says why" grep -qx "memex-watch: $T/memex was deleted or moved" "$T/watch.out"
+  check "no start" eq "$(starts)" 0
+}
+
 all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
   s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
   s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
@@ -903,7 +1063,8 @@ all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conf
   s33_merge_started_during_fetch s34_message_one_file s35_message_common_dir s36_message_no_common_dir
   s37_message_rename s38_message_delete s39_message_path_with_space
   s40_watch_debounce s41_watch_ignores_git_and_obsidian s42_watch_no_clone s43_watch_events_end
-  s44_staged_list_fails)
+  s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
+  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved)
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do
   FAILED=0

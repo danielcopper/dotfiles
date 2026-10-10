@@ -1,49 +1,54 @@
 #!/usr/bin/env bash
-# Commit, rebase and push the memex clone. memex-sync.timer runs this every
-# 2 minutes, and memex-watch starts it 30 seconds after the last change in
-# the clone; setup steps are in the README, section "memex sync on the Steam
-# Deck".
+# Commit, rebase and push the memex clone. memex-sync.timer runs this at
+# regular times, and memex-watch.service after changes in the clone; setup
+# steps are in the README, section "memex sync on the Steam Deck".
 #
 # - A rebase, merge, cherry-pick or revert left in progress in the clone, or
 #   unmerged files, stop the run before it stages or commits anything: exit 1.
 # - Every change in the clone is committed in one commit. One file gives
-#   "deck: <action> <path>", e.g. "deck: update daniel/memory/MEMORY.md";
-#   several give "deck: N files in <dir>", <dir> the deepest directory that
-#   holds them all (left out when there is none), and one line "<action>
-#   <path>" per file in the body. The action is create, update or delete; a
-#   rename is a delete and a create, two files. The author is whatever
-#   user.name/user.email the clone's own config sets.
+#   "deck: <action> <path>", e.g.
+#   "deck: update daniel/memory/global/MEMORY.md"; several give
+#   "deck: N files in <dir>", <dir> the deepest directory that holds them all
+#   (left out when there is none), and one line "<action> <path>" per file in
+#   the body. The action is create, update or delete; a rename is a delete
+#   and a create, two files. The author is whatever user.name/user.email the
+#   clone's own config sets.
 # - Away from home the fetch fails: the run logs why, exits 0 and the commits
 #   wait. A fetch that origin refuses (authentication, repository not found)
 #   exits 1.
-# - Local commits are rebased onto origin/main and pushed. A push that lost a
+# - Local commits are rebased onto origin/main in a worktree of their own
+#   outside the clone ($XDG_RUNTIME_DIR/memex-sync-rebase), and the clone is
+#   moved to the result with git reset --keep, which keeps what was written
+#   into it after this run's commit. Then the run pushes. A push that lost a
 #   race (origin moved since the fetch) exits 0; the next run tries again.
 #   A push that is refused for any other reason, such as the pre-push secret
 #   scan, exits 1.
-# - A rebase that conflicts is aborted, which leaves the clone as it was. Its
-#   HEAD goes to the branch conflict/deck-<date> on origin and the run exits 1.
-#   Later runs keep that branch current until a sync gets through. The abort
-#   resets tracked files to their state before the rebase, so whatever another
-#   process writes into them between the conflict and the abort, a matter of
-#   milliseconds, is lost.
-# - A rebase that git refuses to start, typically because something wrote
-#   into the clone after this run's commit, is no conflict: the run logs git's
-#   reason and exits 0, and the next run commits that change and tries again.
+# - A rebase that conflicts leaves the clone untouched: not one file in it is
+#   written. Its HEAD goes to the branch conflict/deck-<date> on origin and
+#   the run exits 1. Later runs keep that branch current until a sync gets
+#   through.
+# - The clone stays where it is when the move would overwrite something
+#   written into it after this run's commit (git refuses it), or would drop a
+#   commit made in it during the rebase. The run logs why and exits 0; the
+#   next run commits what is new and tries again.
 #
 # Resolving a conflict by hand, in the clone:
-# 1. git fetch origin && git rebase origin/main, and resolve each conflicting
-#    file (in MEMORY.md, say, keep both lines, in the right order), git add
-#    it, git rebase --continue. A run during the rebase leaves the clone
-#    alone and reports the rebase in progress.
-# 2. git push origin HEAD:main.
-# 3. The next run finds nothing to rebase, gets through and removes the
-#    conflict marker, so the next conflict notifies again. The conflict branch
-#    stays on origin: git push origin --delete conflict/deck-<date>.
+# 1. systemctl --user stop memex-sync.timer memex-watch.service, so no run
+#    commits into the work below.
+# 2. git fetch origin && git rebase --autostash origin/main, and resolve each
+#    conflicting file (in MEMORY.md, say, keep both lines, in the right
+#    order), git add it, git rebase --continue.
+# 3. git push origin HEAD:main.
+# 4. systemctl --user start memex-sync.timer memex-watch.service. The next run
+#    finds nothing to rebase, gets through and removes the conflict marker,
+#    so the next conflict notifies again.
+# 5. The conflict branch stays on origin: git push origin --delete
+#    conflict/deck-<date>.
 #
 # Unfinished work, a refused fetch or push, and a conflict each send one ntfy
 # notification; it is not sent again until a sync gets through. Any other
-# failure (no clone, a commit that git refuses, a rebase that cannot be
-# aborted) ends the run with a non-zero exit and only a message in the
+# failure (no clone, a commit that git refuses, a worktree that cannot be
+# added) ends the run with a non-zero exit and only a message in the
 # journal. The notification needs ~/.config/memex/ntfy_url (the full topic
 # URL) and ~/.config/memex/ntfy_token; when either file is missing, none is
 # sent. MEMEX_DIR overrides the clone (default ~/memex).
@@ -198,10 +203,8 @@ on_push_failure() {
   report_refused main
 }
 
-# Prints the commit message for the staged changes in $changes: one file is
-# "deck: <action> <path>"; several are "deck: N files in <dir>", <dir> the
-# deepest directory that holds them all, followed by one "<action> <path>"
-# line per file.
+# Prints the commit message for the staged changes in $changes, in the form
+# the header describes.
 commit_message() {
   local i path dir common='' lines=()
   for ((i = 0; i < ${#changes[@]}; i += 2)); do
@@ -229,9 +232,9 @@ commit_message() {
 }
 
 # The fetch comes before the commit, so the network wait does not lie
-# between the commit and the rebase: a write into the clone in that window
-# makes git refuse the rebase. Its outcome is acted on after the commit, so
-# local commits pile up whether origin answers or not.
+# between the commit and the move to the rebased commits: a write into the
+# clone in that window can make git refuse the move. Its outcome is acted on
+# after the commit, so local commits pile up whether origin answers or not.
 fetched=true
 fetch_origin || fetched=false
 
@@ -266,26 +269,39 @@ if [ "$fetched" = false ]; then
   exit 0
 fi
 
-rebase_in_progress() {
-  [ -d "$(git rev-parse --git-path rebase-merge)" ] ||
-    [ -d "$(git rev-parse --git-path rebase-apply)" ]
+# The rebase runs in a worktree of its own outside the clone, so a conflict
+# writes nothing into the clone, and nothing there looks like a change to
+# memex-watch. A run killed during the rebase leaves that worktree behind;
+# the next rebase removes it first.
+rebase_tree=${XDG_RUNTIME_DIR:-/tmp}/memex-sync-rebase
+remove_rebase_tree() {
+  rm -rf "$rebase_tree"
+  git worktree prune
 }
 
 # Nothing to rebase onto when origin has no main yet (a fresh repo), and
 # nothing to rebase when HEAD already contains origin/main.
 if has_origin_main && ! git merge-base --is-ancestor origin/main HEAD; then
-  if ! rebase_output=$(git rebase --quiet origin/main 2>&1); then
-    # A rebase that never started is no conflict: git refused it, most often
-    # because the working tree changed after this run's commit.
-    if ! rebase_in_progress; then
-      log "working tree changed during the run; the next run retries ($(one_line <<<"$rebase_output"))"
-      exit 0
-    fi
+  head=$(git rev-parse HEAD)
+  remove_rebase_tree
+  trap remove_rebase_tree EXIT
+  git worktree add --quiet --detach "$rebase_tree" HEAD
+  if ! rebase_output=$(cd "$rebase_tree" && git rebase --quiet origin/main 2>&1); then
     printf '%s\n' "$rebase_output"
-    # This rebase is this run's own: one that was already in progress
-    # stopped the run before the commit.
-    git rebase --abort
     on_conflict
+  fi
+  rebased=$(git -C "$rebase_tree" rev-parse HEAD)
+  # The move below would drop a commit made in the clone during the rebase.
+  if [ "$(git rev-parse HEAD)" != "$head" ]; then
+    log "HEAD moved during the run; the next run retries"
+    exit 0
+  fi
+  # --keep moves the clone to the rebased commits and keeps what was written
+  # into it after this run's commit; it refuses when the move would
+  # overwrite such a write.
+  if ! reset_output=$(git reset --quiet --keep "$rebased" 2>&1); then
+    log "working tree changed during the run; the next run retries ($(one_line <<<"$reset_output"))"
+    exit 0
   fi
 fi
 

@@ -6,19 +6,22 @@
 #
 # Changes under .git/ and .obsidian/, at any depth, do not count: the first
 # are git's own, among them every commit of the sync, the second Obsidian's
-# workspace state. A pull by the sync changes files and so starts one more
-# run, which finds nothing to commit. Without a clone, or when the changes
-# end because inotifywait stopped, the script exits 1 and the unit restarts
-# it.
+# settings and workspace, which the clone's .gitignore keeps out of git. A
+# pull by the sync changes files and so starts one more run, which finds
+# nothing to commit. A change made while a sync runs may start none: systemd
+# merges the start into the running sync, and the change waits for the
+# timer's next run.
+#
+# Without a clone, when the clone is deleted or moved, or when inotifywait
+# stops, the script exits 1 and the unit starts it again.
 # MEMEX_DIR overrides the clone (default ~/memex), MEMEX_WATCH_DELAY the
 # 30 seconds.
 set -euo pipefail
 
 repo=${MEMEX_DIR:-$HOME/memex}
 delay=${MEMEX_WATCH_DELAY:-30}
-# Matched against paths relative to the clone, as inotifywait prints them
-# when it watches ".".
-ignored='^\./(.*/)?\.(git|obsidian)(/|$)'
+# Matched against paths relative to the clone, with a leading slash.
+ignored='^/(.*/)?\.(git|obsidian)(/|$)'
 
 log() { printf 'memex-watch: %s\n' "$*"; }
 
@@ -33,18 +36,42 @@ quiet_for_delay() {
   [ "$status" -gt 128 ]
 }
 
-if ! cd "$repo"; then
-  log "cannot watch $repo" >&2
+# Reads inotifywait's events and prints the path of each change that counts.
+# Returns when the clone itself is deleted or moved, which ends the changes.
+changes() {
+  local event path
+  while IFS=' ' read -r event path; do
+    path=${path#"$root"}
+    if [ "$path" = / ]; then
+      case $event in
+        DELETE_SELF* | MOVE_SELF*)
+          log "$root was deleted or moved" >&2
+          return
+          ;;
+      esac
+    fi
+    [[ $path =~ $ignored ]] || printf '%s\n' "$path"
+  done
+}
+
+if [ ! -d "$repo" ]; then
+  log "cannot watch $repo: no such directory" >&2
   exit 1
 fi
-# grep drops what does not count; inotifywait's --exclude would still
-# report a directory created inside an excluded one.
+# An absolute path, and no working directory inside the clone: while a
+# process has its working directory there, deleting the clone is not
+# reported.
+root=$(readlink -f -- "$repo")
+# changes reads inotifywait through a process substitution, not a pipe: the
+# shell running such a pipe would hold it open until inotifywait ends, even
+# after changes returned.
 while IFS= read -r _; do
   quiet_for_delay || break
   log "quiet for $delay s after a change; starting memex-sync"
   systemctl --user start --no-block memex-sync.service ||
     log "could not start memex-sync.service" >&2
-done < <(inotifywait --monitor --recursive --event close_write,create,delete,move \
-  --format '%w%f' . | grep --line-buffered -Ev "$ignored")
-log "inotifywait stopped watching $repo" >&2
+done < <(changes < <(inotifywait --quiet --monitor --recursive \
+  --event close_write,create,delete,move,delete_self,move_self \
+  --format '%e %w%f' "$root"))
+log "stopped watching $root" >&2
 exit 1

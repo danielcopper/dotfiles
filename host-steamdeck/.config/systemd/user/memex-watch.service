@@ -1,6 +1,7 @@
 # Watches the memex clone (~/memex) and starts memex-sync.service 30 seconds
 # after the last change in it. Runs as long as the session; when it stops
-# (no clone, no inotify watches left) it is restarted after 30 seconds.
+# (no clone, the clone deleted or moved, inotifywait gone) it is started
+# again after 30 seconds.
 # Enabled by hand once the clone exists: systemctl --user enable --now memex-watch.service
 [Unit]
 Description=Start a memex sync after changes in the clone

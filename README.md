@@ -133,6 +133,17 @@ systemctl --user enable --now memex-sync.timer
 systemctl --user enable --now memex-watch.service
 ```
 
+A Deck that synced before the watcher existed needs `inotify-tools` and the
+new schedule as well:
+
+```bash
+brew install inotify-tools
+cd ~/dotfiles && stow -R host-steamdeck
+systemctl --user daemon-reload
+systemctl --user restart memex-sync.timer
+systemctl --user enable --now memex-watch.service
+```
+
 Each of the failures that need a hand can also send one ntfy notification.
 Two files outside this repo switch that on; without them the script only logs:
 
@@ -148,14 +159,14 @@ Homebrew on its `PATH`, so the pre-push hook finds gitleaks.
 stow package, so nothing of it lands in `$HOME`. `mise run memex-sync-test`
 runs the scenarios against `host-steamdeck/.local/bin/memex-sync` and
 `memex-watch`, each on a throwaway bare origin with the script's own unit
-`PATH`; the watcher's wait is cut to 2 seconds and a stand-in `systemctl`
+`PATH`; the watcher's wait is cut to 3 seconds and a stand-in `systemctl`
 records the starts. Name scenarios to run only those, and set `VERBOSE=1` to
 see every run's output. `mise run memex-sync-test --mutants` breaks each guard
 of both scripts in turn and fails unless its scenario catches it. Both need
-git, python3, curl, flock and inotifywait, and stay on localhost: ntfy and the
-refusing origins are small python servers there. Without mise, run
-`tests/memex-sync/scenarios.sh` and `python3 tests/memex-sync/mutants.py` from
-the repo.
+git, python3, curl, flock, setsid, pgrep and inotifywait, and stay on
+localhost: ntfy and the refusing origins are small python servers there.
+Without mise, run `tests/memex-sync/scenarios.sh` and
+`python3 tests/memex-sync/mutants.py` from the repo.
 
 ## Recovery
 
