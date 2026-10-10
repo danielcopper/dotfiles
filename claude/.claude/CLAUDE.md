@@ -29,7 +29,22 @@ Composes with the worktree skill (one branch/worktree per cut) and the board ski
 **One report per agent, and it goes in the message.** The `implementer` and `reviewer` definitions carry this
 themselves. To the prompt of any agent without its own definition (general-purpose, Explore, a fork) add: *"Send your
 full report as a message. Your final answer is then a one-line summary — do not repeat the report in it."* Otherwise
-the report arrives twice, and the copy in the harness's idle notification is truncated when long.
+the report arrives twice, and the copy in the harness's idle notification is truncated when long. Start a one-shot
+agent (research, review) without a `name`: its report then arrives once, not again in its idle and shutdown notices.
+Name only an agent you will talk to while it works, such as an implementer that may stop to ask.
+
+## Task list
+
+- **Keep one as soon as there is more than one task** — in every session, not only for implementation work.
+- **Every open point is a task:** a decision, a question, a review finding (MEDIUM and LOW included — their severity is
+  my call, not the agent's), a follow-up. Ask them one at a time. The list carries the status, so a message that ends
+  the turn asks exactly one question and does not repeat the open points; only without task tools does it close with
+  all of them listed, one phrased as the question.
+- **Keep it current and in working order:** mark a task done the moment it is, update a description when a decision
+  lands, order the open ones as they will be worked (next step, queued PRs, findings to discuss, discussions, backlog,
+  parked). TaskList orders by ID, so when the order drifts, recreate the open tasks in order with their descriptions.
+- **Touch the in-progress task at every step change:** when the task tools go unused, the harness re-appends the whole
+  list as a reminder, about 2k tokens each time for a 50-item list.
 
 ## Environment
 

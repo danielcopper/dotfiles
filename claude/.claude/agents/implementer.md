@@ -95,4 +95,4 @@ The report is evidence. It carries, in this order:
 8. **Trees** — `git status --short` of the worktree and of the main checkout.
 9. **Concerns and notes** — open doubts, "noticed X" items outside the scope.
 
-Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. The lead saves it; you cannot write into `~/Memory`. Your final answer is then a one-line summary, without the report — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
+Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. The lead saves it; you cannot write into `~/Memory`. Your final answer is then one sentence of at most 25 words (status and head) — it is repeated in your idle notice, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
