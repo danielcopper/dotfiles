@@ -343,6 +343,7 @@
     "enabled": true
   },
   "autoMemoryEnabled": false,
+  "idleCompaction": false,
   "skipWorkflowUsageWarning": true,
   "editorMode": "vim",
   "agentPushNotifEnabled": true,
