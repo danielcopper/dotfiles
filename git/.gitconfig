@@ -13,5 +13,15 @@
 
 [include]
 	path = ~/.gitconfig.local
+
+# Every commit and tag is signed with an SSH key. Which key is host-specific:
+# user.signingkey lives in host-<class>/.gitconfig.local, and a host without one
+# cannot commit until it sets it.
+[gpg]
+	format = ssh
+[commit]
+	gpgsign = true
+[tag]
+	gpgsign = true
 [init]
 	defaultBranch = main
