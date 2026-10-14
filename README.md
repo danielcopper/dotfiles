@@ -145,6 +145,32 @@ systemctl --user restart memex-sync.timer
 systemctl --user enable --now memex-watch.service
 ```
 
+The clone pushes as a Forgejo user of its own, `memex-bot`, not as the
+owner's account: Forgejo credits a push to whoever pushes it, and the sync's
+pushes would otherwise fill the owner's activity (the full reason is in the
+homelab repo, ADR-0006, amendment "Schreiben über ein Bot-Konto"). The bot,
+its write access to the repository and its token for the Deck come from the
+one-time recipe in the homelab repo (README of the Forgejo role, section
+"memex-Bot"); that recipe hands the token to `git credential approve`, so it
+lands in the keyring without showing on screen. Git's libsecret helper keeps
+one entry per host and user, as `credential.useHttpPath` is unset, so the
+bot's token is a second entry next to the owner's, and a remote that names its
+user in the URL gets the entry of that user. Once the token is stored, switch the clone's remote
+to the bot (only the user part of the URL changes) and give its commits an
+identity of their own, in the clone's config only:
+
+```bash
+git -C ~/memex remote set-url origin \
+  "$(git -C ~/memex remote get-url origin | sed 's#//daniel@#//memex-bot@#')"
+git -C ~/memex config user.email deck@memex.invalid
+git -C ~/memex config commit.gpgsign false
+```
+
+`user.name` stays as it is, and signing stays on in the shared `.gitconfig`
+for every other repository. A missing, wrong or revoked token shows up as a
+fetch that origin refuses: the run exits 1 and sends one "memex-sync (Deck):
+fetch refused" notification.
+
 Each of the failures that need a hand can also send one ntfy notification.
 Two files outside this repo switch that on; without them the script only logs:
 
