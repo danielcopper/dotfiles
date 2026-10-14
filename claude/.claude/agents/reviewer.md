@@ -34,6 +34,7 @@ When the dispatch says **"This is a PR review."**, you are reviewing someone els
 - **Scratch outside the tree.** Mutation probes and any other scratch file go outside the worktree, in your scratchpad.
 - **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the repo's type checker and linter decide.
 - **Long runs** run in the foreground with a timeout. Every run has finished before you end a turn.
+- **Waiting is not a run.** A message from your lead reaches you only once your turn has ended, never during a tool call — a limitation of Claude Code. So never wait in a loop or a `sleep` for longer than a minute — not for the load to drop, not for another process. End your turn instead, saying in one line what you are waiting for; your lead's message starts you again.
 
 ## The diff is your object
 

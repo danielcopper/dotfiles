@@ -37,6 +37,7 @@ When the question is one this definition already forbids you to answer alone —
 - **Main moved.** Before the final gate, `git -C <wt> fetch origin` and check `git -C <wt> log --oneline HEAD..origin/main`. When it lists commits, run the trial merge `git -C <wt> merge-tree --write-tree origin/main HEAD` before rebasing and note any conflicts; then rebase onto `origin/main`, and in the rebased tree probe every rename, count or "nowhere else" claim your change makes. Report the trial merge, the rebase, the probes, and the new base SHA.
 - **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the repo's type checker and linter, run in the worktree, decide.
 - **Long runs** (tests, the gate) run in the foreground with a timeout. Every run has finished before you end a turn.
+- **Waiting is not a run.** A message from your lead reaches you only once your turn has ended, never during a tool call — a limitation of Claude Code, not a delay you can poll away. So never wait in a loop or a `sleep` for longer than a minute: not for the load to drop, not for another process to finish, not for an answer. End your turn instead, saying in one line what you are waiting for and what will show it is over; your lead's message starts you again.
 
 ## Scope
 
