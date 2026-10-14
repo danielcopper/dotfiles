@@ -7,6 +7,11 @@
 	name = Daniel Küppermann
 	email = daniel.kueppermann@l-p-a.com
 
+[commit]
+	gpgsign = false
+[tag]
+	gpgsign = false
+
 [includeIf "gitdir:~/Repos/personal/"]
 	path = ~/.gitconfig.personal
 

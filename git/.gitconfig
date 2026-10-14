@@ -8,15 +8,9 @@
 	# Project-local override: `git config core.hooksPath .git/hooks`.
 	hooksPath = ~/.githooks
 
-# [user] is host-specific (work-default on wsl, personal on arch/steamdeck).
-# Set in host-<class>/.gitconfig.local via [include] below.
-
-[include]
-	path = ~/.gitconfig.local
-
 # Every commit and tag is signed with an SSH key. Which key is host-specific:
 # user.signingkey lives in host-<class>/.gitconfig.local, and a host without one
-# cannot commit until it sets it.
+# cannot commit until it sets it or switches signing off there.
 [gpg]
 	format = ssh
 [commit]
@@ -25,3 +19,9 @@
 	gpgsign = true
 [init]
 	defaultBranch = main
+
+# [user] is host-specific (work-default on wsl, personal on arch/steamdeck).
+# Set in host-<class>/.gitconfig.local via [include] below. The include comes
+# last so a host can override anything above.
+[include]
+	path = ~/.gitconfig.local
