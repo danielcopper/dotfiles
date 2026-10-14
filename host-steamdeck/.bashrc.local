@@ -42,9 +42,13 @@ fi
 alias update='brew update && brew upgrade && flatpak update --user -y'
 
 # Start Claude Code inside claude.slice (~/.config/systemd/user/claude.slice),
-# which caps the CPU and memory of a session and everything it starts.
-# systemd-run execs the binary in place, so the process is still `claude` for
-# tmux's tab names and resurrect.
+# which lowers the CPU weight and throttles the memory of a session and
+# everything it starts. systemd-run execs the binary in place, so the process
+# is still `claude` for tmux's tab names and resurrect.
+# The two worker counts halve what one test run takes: with one worker per
+# thread, a single vitest run (8 workers, ~350M each) beside the other sessions
+# pushed the desktop into the disk swapfile on 2026-10-14.
 claude() {
-    systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
+    VITEST_MAX_WORKERS=4 PYTEST_XDIST_AUTO_NUM_WORKERS=4 \
+        systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
 }

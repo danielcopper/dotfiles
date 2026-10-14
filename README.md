@@ -172,6 +172,50 @@ localhost: ntfy and the refusing origins are small python servers there.
 Without mise, run `tests/memex-sync/scenarios.sh` and
 `python3 tests/memex-sync/mutants.py` from the repo.
 
+## Memory protection on the Steam Deck
+
+The Deck has 14 GB of RAM for the desktop, Steam, the browser and several
+Claude sessions with their test runs. `host-steamdeck` stows three user units
+that share it out:
+
+- `claude.slice` — every session the `claude` function in `.bashrc.local`
+  starts runs in it. It has half the CPU weight of the rest, and above its
+  `MemoryHigh` it is throttled instead of crowding out the desktop.
+- `session.slice.d/memory-low.conf` (Plasma, KWin) and
+  `app.slice.d/memory-low.conf` (browser, Steam, terminal) — memory below their
+  `MemoryLow` is swapped out only once nothing unprotected is left.
+
+The two `.d` directories must exist as real directories under
+`~/.config/systemd/user/` before `stow -R host-steamdeck` runs. Where they are
+missing, stow links the whole directory instead of the file in it, and the
+systemd user manager does not read a drop-in directory that is a symlink: the
+unit then shows `DropInPaths=` empty and its `MemoryLow` stays 0, with no
+error. A changed `MemoryLow` reaches a running slice only through
+`systemctl --user set-property --runtime <slice> MemoryLow=<value>`;
+`daemon-reload` loads the new value but leaves the cgroup's `memory.low`
+untouched.
+
+The `claude` function also sets `VITEST_MAX_WORKERS` and
+`PYTEST_XDIST_AUTO_NUM_WORKERS` to 4, so a test run in a session takes half the
+threads, and about half the memory, it would take with one worker per thread.
+That applies to sessions started from a new shell.
+
+A `MemoryLow` protects only as far as every ancestor cgroup carries one too:
+the kernel caps a cgroup's protection at its parent's. The three ancestors are
+system units, so their share is set once with root rather than stowed:
+
+```bash
+sudo systemctl set-property user.slice MemoryLow=4G
+sudo systemctl set-property user-1000.slice MemoryLow=4G
+sudo systemctl set-property user@1000.service MemoryLow=4G
+```
+
+4G is the sum of the two user drop-ins; raise all three together when either
+grows. `set-property` applies the value at once and writes it under
+`/etc/systemd/system.control/`, which lives in SteamOS's `/etc` overlay and
+survives OS updates. To check that the protection holds, read `memory.low` of
+`/sys/fs/cgroup/user.slice` and of each cgroup below it down to `app.slice`.
+
 ## Recovery
 
 - **Pre-stow conflict backups** are created at `~/.dotfiles-pre-stow.<timestamp>/` whenever `install-dotfiles.sh` finds existing `$HOME` files that would clash with the stow run.
