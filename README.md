@@ -186,6 +186,29 @@ attribution (`daniel/wiki/ai/claude-written-summaries.md`, say) and would then
 refuse on every run; the pre-commit hook only guards `main`, which `~/memex`
 may commit on anyway, being listed in `git/.githooks/commit-on-main-allowed`.
 
+The Deck writes to memex only through this clone. The memex MCP server can
+write too, but Claude Code on the Deck does not use its write tools, because
+both paths change the same files. When the server creates a note with
+`create`, it adds the note's line to its topic index (`MEMORY.md`), a file the
+memory skills on the Deck edit in the clone. The clone gets the server's
+commit only with its next fetch. If Claude Code has changed the same lines in
+the meantime, the sync's rebase fails and one side lands on a conflict branch.
+Searching and reading through the server stay. The rule is a hand step on
+each machine with a clone, today only the Deck: it goes into that machine's
+live `~/.claude/settings.json`, not into the reference copy here, which every
+host shares, while a machine without a clone writes through the server. It
+goes under `permissions.deny`:
+
+```json
+"mcp__memex__create",
+"mcp__memex__append",
+"mcp__memex__edit",
+"mcp__memex__delete"
+```
+
+The decision and its reasons are in the homelab repo, ADR-0006, amendment
+"Anbindung von Open WebUI und Schreibweg mit Klon".
+
 `tests/memex-sync/` holds the tests of both scripts. That directory is not a
 stow package, so nothing of it lands in `$HOME`. `mise run memex-sync-test`
 runs the scenarios against `host-steamdeck/.local/bin/memex-sync` and
