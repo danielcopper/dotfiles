@@ -340,7 +340,9 @@
   },
   "tui": "fullscreen",
   "voice": {
-    "enabled": true
+    "enabled": true,
+    "mode": "hold",
+    "autoSubmit": false
   },
   "autoMemoryEnabled": false,
   "idleCompaction": false,
