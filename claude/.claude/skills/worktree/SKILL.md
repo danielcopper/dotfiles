@@ -8,7 +8,7 @@ description: Worktree-based branching workflow. Use when creating a new branch o
 ## Naming and location
 
 - Branch: `<type>/<slug>`. Types: `feature`, `fix`, `refactor`, `chore`, `docs` (plus `test`, `ci` where the repo uses them). With a ticket number (Azure DevOps, GitHub issue), prefix the slug: `<type>/<ticket>-<slug>`.
-- Worktree: `<repo-parent>/<repo-name>.worktrees/<type>/<slug>` — a sibling directory of the main checkout, one subfolder per type. Example: branch `feature/123-oauth` in `~/Repos/decky-romm-sync` → `~/Repos/decky-romm-sync.worktrees/feature/123-oauth`.
+- Worktree: `<repo-parent>/<repo-name>.worktrees/<type>/<slug>` — a sibling directory of the main checkout, one subfolder per type. Example: branch `feature/123-oauth` in `~/Repos/romm-tender` → `~/Repos/romm-tender.worktrees/feature/123-oauth`.
 - Why outside the repo: a worktree nested in the main checkout also loads the main checkout's `mise.toml` (its `.venv/bin` lands on PATH as fallback), Claude pulls the worktree's copy of CLAUDE.md in on top of the main checkout's when it reads files there (two versions of the same instructions), and linters/watchers need per-repo excludes; a sibling has none of that.
 - Base branch is the current branch unless specified otherwise.
 - Worktrees Claude Code creates under an auto-generated name (`claude --worktree`, `isolation: "worktree"` agents) go through the same `WorktreeCreate` hook and land flat at `<repo-parent>/<repo-name>.worktrees/<name>`.

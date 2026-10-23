@@ -5,7 +5,7 @@
 	email = daniel.kueppermann@gmail.com
 
 [safe]
-	directory = /home/deck/Repos/decky-romm-sync
+	directory = /home/deck/Repos/romm-tender
 
 [credential]
 	# Forgejo-Token im Keyring statt Klartext
