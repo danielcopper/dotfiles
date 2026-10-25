@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """The text a Bash command would publish through gh or az, for the PreToolUse
-hooks that judge it (`block_ai_attribution.py`).
+hooks that judge it (`block_ai_attribution.py`, `lint_published_markdown.py`).
 
 This module says what text is published, not what is wrong with it: each hook
-brings its own rules. `publishing_sources` answers, as `(where, text)` pairs.
+brings its own rules. `publishing_sources` answers, as `(where, text)` pairs;
+its `counts` narrows the commands that count, and `pieces` hands over the
+pieces of text instead of the whole command string (below).
 
 **What is read, per command.**
 
@@ -29,6 +31,13 @@ brings its own rules. `publishing_sources` answers, as `(where, text)` pairs.
   `--body "$(cat body.md)"` and `cat body.md | gh … -F -` publish that file.
   Every such `cat` counts, whether or not its output reaches the published
   text: `cat notes.md; gh pr create --body 'plain'` is judged on `notes.md` too.
+
+With `pieces`, the whole command string is replaced by what it is built
+from, for a reader that judges the text's own lines: the values of `--body`/
+`-b` (`--comment`/`-c` for `close` and `reopen`, `--notes`/`-n` for a
+release) — unless the value holds `$(` or a backtick, whose text is read from
+the heredoc or the file itself — and every heredoc body in the command. az
+has no such pieces: its text options are read only in the whole string.
 
 Left out of the whole string: the pattern of a `grep`/`rg` in the same
 command. A check for a credit line (`grep -q`, `grep -v`) names the marker it
@@ -62,6 +71,7 @@ import re
 import shlex
 import stat
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import cast
 
 
@@ -87,6 +97,14 @@ GH_FILE_OPTIONS = {
     "pr": ("-F", "--body-file"),
     "issue": ("-F", "--body-file"),
     "release": ("-F", "--notes-file"),
+}
+# Options whose value is text a gh command publishes, as (short, long), by
+# command group and verb; `None` stands for every other verb of the group.
+# `gh pr review -c` is a flag, so a review publishes its `--body` alone.
+GH_TEXT_OPTIONS: dict[str, dict[str | None, tuple[str, str]]] = {
+    "pr": {"close": ("-c", "--comment"), "reopen": ("-c", "--comment"), None: ("-b", "--body")},
+    "issue": {"close": ("-c", "--comment"), "reopen": ("-c", "--comment"), None: ("-b", "--body")},
+    "release": {None: ("-n", "--notes")},
 }
 # gh api options this module reads, as (short, long, kind).
 GH_API_SENDING_OPTIONS = (
@@ -429,6 +447,19 @@ def az_text_values(args: list[str]) -> list[str]:
     return values
 
 
+def text_values(family: str, args: list[str]) -> list[str]:
+    """The text the gh command `family` publishes from its options, unless built by `$(…)` or backticks.
+
+    Nothing for az: its text options are read only in the whole command string.
+    """
+    if not family.startswith("gh "):
+        return []
+    _, group, verb = family.split()
+    options = GH_TEXT_OPTIONS[group]
+    short, long = options.get(verb) or options[None]
+    return [value for value in option_values(args, short, long) if "$(" not in value and "`" not in value]
+
+
 def body_files(family: str, args: list[str]) -> list[str]:
     """Paths whose text the gh/az command `family` publishes; stdin (`-`) is left out."""
     if family.startswith("az "):
@@ -616,8 +647,24 @@ def working_directories(commands: list[SimpleCommand], words: list[list[str]], c
     return directories
 
 
-def publishing_sources(command: str, cwd: str) -> list[tuple[str, str]]:
-    """(where, text) for every piece of text the gh/az commands in `command` publish."""
+def _every_command(_name: str) -> bool:
+    return True
+
+
+def publishing_sources(
+    command: str, cwd: str, counts: Callable[[str], bool] = _every_command, pieces: bool = False
+) -> list[tuple[str, str]]:
+    """(where, text) for every piece of text the gh/az commands in `command` publish.
+
+    `counts` picks the publishing commands that count, by name as written
+    (`gh pr create`, `gh pr new`, `gh api`, `az repos pr update`); every one
+    by default. `pieces` replaces the whole command string with the pieces it
+    is built from — the values of the text options (`GH_TEXT_OPTIONS`) and
+    every heredoc body — for a reader that needs the text's own lines: in the
+    whole string, a body's first line sits behind `gh … --body "`. A text
+    option whose value holds `$(` or a backtick is left out there, since what
+    it prints is read from the heredoc or the file itself.
+    """
     if not PUBLISH_HINT_RE.search(command):
         return []
     scanned = without_search_patterns(command, parse_commands(command))
@@ -627,16 +674,19 @@ def publishing_sources(command: str, cwd: str) -> list[tuple[str, str]]:
     heredocs = [body for simple in commands for body in simple.heredocs]
 
     sources: list[tuple[str, str]] = []
-    match = PUBLISH_RE.search(scanned)
-    family = " ".join(match.group(0).replace("\\\n", " ").split()) if match else None
-    if family:
+    names = (" ".join(match.group(0).replace("\\\n", " ").split()) for match in PUBLISH_RE.finditer(scanned))
+    family = next((name for name in names if counts(name)), None)
+    if family and not pieces:
         sources.append((f"the {family} command", scanned))
+    heredocs_read = False
     for dequoted, here in zip(words, directories):
         found = publisher(dequoted)
-        if not found:
+        if not found or not counts(found[0]):
             continue
         name, args = found
         if name != "gh api":
+            if pieces:
+                sources += [(f"a text option of the {name} command", value) for value in text_values(name, args)]
             for path in body_files(name, args):
                 text = read_text(resolve(path, here))
                 if text:
@@ -651,6 +701,7 @@ def publishing_sources(command: str, cwd: str) -> list[tuple[str, str]]:
         # Every heredoc, not only this command's: the body is often written to
         # a variable or file first, then handed to `gh api`.
         sent = [("a heredoc in the gh api command", body) for body in heredocs]
+        heredocs_read = True
         for path in files:
             text = read_text(resolve(path, here)) if path != "-" else None
             if text:
@@ -660,6 +711,8 @@ def publishing_sources(command: str, cwd: str) -> list[tuple[str, str]]:
             decoded = json_strings(text)
             if decoded:
                 sources.append((f"{where} (read as JSON)", decoded))
+    if family and pieces and not heredocs_read:
+        sources += [(f"a heredoc in the {family} command", body) for body in heredocs]
     if family:
         # Files `cat` prints into the command (`$(cat file)`, `cat file | gh … -F -`)
         # and `$(< file)`.
