@@ -28,10 +28,10 @@ carries `class="issue-link"`:
 before or after (`a#974`, `_#974`, `#974x`, `GH-974x`, `romm-tender#974`);
 `#0` and `GH-0`; `[#974]` with its definition, `[#974](url)`, `[#974][ref]`
 and any reference inside link text; a URL that only contains `#974`
-(`https://example.com/#974`); `http://`, `www.` and `/pull/N/files` URLs; a
-commit URL (it renders `class="commit-link"`); inline code, `<code>…</code>`
-and fenced code blocks (``` and ~~~); lines outside a list, top-level headings
-included. A list ends at a blank line followed by unindented text, and at an
+(`https://example.com/#974`) or an issue URL in its query; `http://`, `www.`
+and `/pull/N/files` URLs; a commit URL (it renders `class="commit-link"`);
+inline code, `<code>…</code>` and fenced code blocks (``` and ~~~); lines
+outside a list, top-level headings included. A list ends at a blank line followed by unindented text, and at an
 unindented heading, fence, quote or thematic break.
 
 **What is read.** The text `utils/published_text.py` finds for
@@ -98,26 +98,26 @@ def _blank(line: str, match: re.Match[str]) -> str:
 
 
 def references(line: str, defined: set[str]) -> list[str]:
-    """The references in `line` that GitHub links with the issue-link class, as written."""
-    found: list[str] = []
+    """The references in `line` that GitHub links with the issue-link class, as written, in line order."""
+    found: list[tuple[int, str]] = []
     for pattern in (CODE_SPAN_RE, HTML_CODE_RE, INLINE_LINK_RE, REFERENCE_LINK_RE):
-        for match in reversed(list(pattern.finditer(line))):
+        for match in list(pattern.finditer(line)):
             line = _blank(line, match)
-    for match in reversed(list(BRACKETED_RE.finditer(line))):
+    for match in list(BRACKETED_RE.finditer(line)):
         if match.group(1) in defined:
             line = _blank(line, match)
     for pattern in (AUTOLINK_RE, BARE_URL_RE):
-        for match in reversed(list(pattern.finditer(line))):
-            url = ISSUE_URL_RE.search(match.group(0))
+        for match in list(pattern.finditer(line)):
+            url = ISSUE_URL_RE.match(match.group(0).lstrip("<"))
             if url and int(url.group(1)) > 0:
-                found.append(match.group(0))
+                found.append((match.start(), match.group(0)))
             line = _blank(line, match)
     for pattern in REFERENCE_RES:
-        for match in reversed(list(pattern.finditer(line))):
+        for match in list(pattern.finditer(line)):
             if int(match.group(1)) > 0:
-                found.append(match.group(0))
+                found.append((match.start(), match.group(0)))
             line = _blank(line, match)
-    return found
+    return [text for _, text in sorted(found)]
 
 
 def fences(lines: list[str]) -> list[str | None]:

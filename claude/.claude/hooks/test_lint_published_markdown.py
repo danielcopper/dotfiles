@@ -96,6 +96,10 @@ class WhatRendersLarge(unittest.TestCase):
                 with self.subTest(text=text):
                     self.assertTrue(refused(text))
 
+    def test_a_line_s_references_are_named_in_line_order(self):
+        line = f"- a #1, then GH-2, then <{URL}> and danielcopper/romm-tender#3"
+        self.assertEqual(lint.list_lines(line)[0][1], ["#1", "GH-2", f"<{URL}>", "danielcopper/romm-tender#3"])
+
     def test_a_bracketed_reference_without_its_definition(self):
         self.assertTrue(refused("- a [#974] b"))
         self.assertTrue(refused("- a [#974] b\n\n[#975]: " + URL))
@@ -160,6 +164,7 @@ class WhatStaysSmall(unittest.TestCase):
             "- a www.github.com/danielcopper/romm-tender/issues/974 b",
             "- a https://github.com/danielcopper/romm-tender/pull/2563/files b",
             "- a https://github.com/danielcopper/romm-tender/commit/12d543d2 b",
+            "- a https://example.com/?u=https://github.com/danielcopper/romm-tender/issues/974 b",
         ):
             with self.subTest(text=text):
                 self.assertFalse(refused(text))
