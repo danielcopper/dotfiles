@@ -325,6 +325,9 @@ class CommitMsgHook(unittest.TestCase):
         self.guard_copy = Path(self.home) / ".claude" / "hooks" / "block_ai_attribution.py"
         self.guard_copy.parent.mkdir(parents=True)
         _ = shutil.copy(_HOOK, self.guard_copy)
+        # The module the guard imports, where stow puts it beside the guard.
+        (self.guard_copy.parent / "utils").mkdir()
+        _ = shutil.copy(_HOOK.with_name("utils") / "published_text.py", self.guard_copy.parent / "utils")
 
     def run_git_hook(self, text: str) -> subprocess.CompletedProcess[str]:
         message = Path(self.home) / "COMMIT_EDITMSG"
