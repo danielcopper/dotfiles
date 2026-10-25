@@ -104,6 +104,36 @@ class WhatRendersLarge(unittest.TestCase):
         self.assertTrue(refused("- a [#974] b"))
         self.assertTrue(refused("- a [#974] b\n\n[#975]: " + URL))
 
+    def test_a_collapsed_or_full_reference_link_without_its_definition(self):
+        for text in ("- a [#974][] b", "- a [#974][label] b", "- a [#974][label] b\n\n[other]: " + URL):
+            with self.subTest(text=text):
+                self.assertTrue(refused(text))
+
+    def test_a_definition_straight_below_a_list_or_paragraph_line_defines_nothing(self):
+        # It continues the line above: the item, its [#974] and the URL all render large.
+        below_item = f"- D1 ([#974])\n[#974]: {URL}"
+        self.assertEqual(lint.list_lines(below_item), [("- D1 ([#974])", ["#974"]), (f"[#974]: {URL}", ["#974", URL])])
+        self.assertTrue(refused(f"Para\n[#974]: {URL}\n\n- D1 ([#974])"))
+        self.assertTrue(refused(f"- a [#974][label] b\n[label]: {URL}"))
+
+    def test_emphasis_and_a_letter_outside_ascii_before_a_reference(self):
+        for text in (
+            "- a _#974_ b",
+            "- a __#974__ b",
+            "- _see #974_ b",
+            "- a _GH-974_ b",
+            "- a _danielcopper/romm-tender#974_ b",
+            "- a ä#974 b",
+            "- a äGH-974 b",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(refused(text))
+
+    def test_a_list_inside_a_quote(self):
+        for text in ("> - a #974", "> 1. a #974", "> > - a #974", ">- a #974", "> - a\n>   continued #974"):
+            with self.subTest(text=text):
+                self.assertTrue(refused(text))
+
     def test_every_kind_of_list_item(self):
         for text in (
             "* a #974",
@@ -143,6 +173,32 @@ class WhatStaysSmall(unittest.TestCase):
 
     def test_issue_zero(self):
         self.assertFalse(refused("- a #0 and GH-0 b"))
+
+    def test_an_issue_url_of_issue_zero(self):
+        self.assertFalse(refused("- a https://github.com/danielcopper/romm-tender/issues/0 b"))
+
+    def test_a_letter_after_or_a_non_ascii_owner(self):
+        for text in ("- a #974ä b", "- a GH-974ä b", "- a x_#974_ b", "- a ä/romm-tender#974 b"):
+            with self.subTest(text=text):
+                self.assertFalse(refused(text))
+
+    def test_a_definition_where_one_can_start(self):
+        for text in (
+            f"- D1 ([#974])\n\n[#974]: {URL}",
+            f"[#974]: {URL}\n\n- D1 ([#974])",
+            f"- D1 ([#974]) [#975]\n\n[#974]: {URL}\n[#975]: {URL}",
+            f"- D1 ([#974])\n\n## Refs\n[#974]: {URL}",
+            f"- a [#974][] b\n\n[#974]: {URL}",
+            f"- a [#974][Label] b\n\n[label]: {URL}",
+            f"- D1 ([#974])\n\n  [#974]: {URL}",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(refused(text))
+
+    def test_quotes_around_a_list(self):
+        for text in ("> - a\n> ```\n> #974\n> ```", "- a\n> b #974", "> - a\n\nafter #974"):
+            with self.subTest(text=text):
+                self.assertFalse(refused(text))
 
     def test_a_reference_style_link_with_its_definition(self):
         self.assertFalse(refused(f"- a [#974] b\n- c\n\n[#974]: {URL}"))
@@ -276,6 +332,10 @@ class WhereTheTextIsRead(unittest.TestCase):
         self.assertIn(f"renders large: {URL}", stderr)
         self.assertIn("[#N]: https://github.com/<owner>/<repo>/issues/N", stderr)
         self.assertIn("outside the list", stderr)
+
+    def test_the_fix_names_the_blank_line_before_the_definition(self):
+        stderr = run_hook("gh pr create --title x --body " + shlex.quote(DECISION), "/").stderr
+        self.assertIn("after a blank line at the end of the text, the definition line", stderr)
 
     def test_input_of_the_wrong_shape_is_let_through_quietly(self):
         for payload in ("[]", '"text"', "3", '{"tool_input": []}', '{"tool_input": {"command": 5}}', "not json"):
