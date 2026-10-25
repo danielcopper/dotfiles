@@ -25,7 +25,7 @@ pieces of text instead of the whole command string (below).
   endpoint path and not `--jq`/`--template`: those choose what is read and
   publish nothing, and a jq filter naming a bot beside `.created_at` would
   otherwise read as a credit. A GraphQL call is a POST with fields, so its
-  query is read even when it only reads.
+  query counts as published text even when it only fetches.
 - With any of these present, also every file a `cat` in the command prints,
   inside `$(…)`, backticks or a pipe, and every `$(< file)`:
   `--body "$(cat body.md)"` and `cat body.md | gh … -F -` publish that file.
@@ -35,23 +35,21 @@ pieces of text instead of the whole command string (below).
 With `pieces`, the whole command string is replaced by what it is built
 from, for a reader that judges the text's own lines: the values of `--body`/
 `-b` (`--comment`/`-c` for `close` and `reopen`, `--notes`/`-n` for a
-release) — unless the value holds `$(` or a backtick, whose text is read from
-the heredoc or the file itself — and every heredoc body in the command. az
-has no such pieces: its text options are read only in the whole string.
+release) — a value that holds `$(` or a backtick is left out whole, literal
+text beside the substitution included; what a heredoc or `cat` inside it
+prints is read from that heredoc or file — and every heredoc body in the
+command. az has no such pieces: its text options are read only in the whole
+string.
 
-Left out of the whole string: the pattern of a `grep`/`rg` in the same
-command. A check for a credit line (`grep -q`, `grep -v`) names the marker it
-looks for and publishes nothing; the text that would be published is still
-read, body files included.
+Left out: the pattern of a `grep`/`rg` in the same command; it names what to
+look for and publishes nothing.
 
 Relative paths resolve against the call's working directory, and follow a
 `cd <path>` earlier in the command — within its subshell only: a `cd` inside
 `( … )`, `$( … )` or backticks does not reach the commands after it. Files are
 read only when they are regular files, and only up to `MAX_READ` characters
 (about a megabyte). Input that does not parse is skipped rather than guessed
-at; a hook built on this lets such a call through, and lets an error inside
-itself through too: a guard that blocks a harmless command by accident gets
-switched off.
+at.
 
 **What is not seen.** Text typed into gh's prompts; a body on stdin that is
 neither a heredoc in the command nor a file `cat` prints (`make-notes |
@@ -62,7 +60,9 @@ reader (`$(sed … file)`, `$(head file)`) — those are skipped, not guessed at
 `cat` inside an unquoted heredoc body, which the shell expands and this module
 does not; a relative path after `cd -` or a `cd` to a `$`/backtick path, which
 resolves against the call's working directory; text past `MAX_READ` in a file;
-a `gh api` call hidden inside a `bash -c` or `eval` string.
+a `gh api` call hidden inside a `bash -c` or `eval` string; with `pieces`, the
+literal text of a `--body` value that also holds `$(` or a backtick, and text a
+substitution makes up (`$(printf …)`, `$(echo …)`).
 """
 
 import json
@@ -658,12 +658,9 @@ def publishing_sources(
 
     `counts` picks the publishing commands that count, by name as written
     (`gh pr create`, `gh pr new`, `gh api`, `az repos pr update`); every one
-    by default. `pieces` replaces the whole command string with the pieces it
-    is built from — the values of the text options (`GH_TEXT_OPTIONS`) and
-    every heredoc body — for a reader that needs the text's own lines: in the
-    whole string, a body's first line sits behind `gh … --body "`. A text
-    option whose value holds `$(` or a backtick is left out there, since what
-    it prints is read from the heredoc or the file itself.
+    by default. `pieces`: see the module docstring; it is for a reader that
+    needs the text's own lines, since in the whole string a body's first line
+    sits behind `gh … --body "`.
     """
     if not PUBLISH_HINT_RE.search(command):
         return []

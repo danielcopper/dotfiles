@@ -325,7 +325,8 @@ class CommitMsgHook(unittest.TestCase):
         self.guard_copy = Path(self.home) / ".claude" / "hooks" / "block_ai_attribution.py"
         self.guard_copy.parent.mkdir(parents=True)
         _ = shutil.copy(_HOOK, self.guard_copy)
-        # The module the guard imports, where stow puts it beside the guard.
+        # The guard imports `utils/published_text.py` from beside its resolved path;
+        # this copy is a plain file, so the module goes beside it.
         (self.guard_copy.parent / "utils").mkdir()
         _ = shutil.copy(_HOOK.with_name("utils") / "published_text.py", self.guard_copy.parent / "utils")
 
