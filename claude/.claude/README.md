@@ -83,6 +83,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | `session_start.py`      | SessionStart     | Load context on session init                        |
 | `pre_compact.py`        | PreCompact       | Backup transcript before compaction                 |
 | `block_ai_attribution.py` | PreToolUse (Bash) | Block commits, PR/issue/release text, `gh api` writes and `az repos pr` text carrying AI attribution markers |
+| `lint_published_markdown.py` | PreToolUse (Bash) | Block PR/issue/comment/release text and `gh api` writes whose markdown GitHub renders other than meant — so far an issue reference (`#N`, `owner/repo#N`, `GH-N`, an issue URL) inside a list item, which renders as a large title card. Reads the text through `hooks/utils/published_text.py`, which it shares with `block_ai_attribution.py` |
 | `block_commit_on_main.py` | PreToolUse (Bash) | Refuses commit/rebase/cherry-pick/revert on a protected branch (main/develop/release/*) unless the repo is listed in `~/.githooks/commit-on-main-allowed` |
 | `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's generic code-reviewer — routes to the custom `reviewer` agent |
 | `worktree_create.sh`    | WorktreeCreate   | Creates worktrees at `<repo-parent>/<repo>.worktrees/<name>` instead of `.claude/worktrees/`; a `<type>/<slug>` name runs the `worktree-new` task script (branch + setup) |

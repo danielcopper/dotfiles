@@ -166,6 +166,11 @@
           },
           {
             "type": "command",
+            "command": "python3 $HOME/.claude/hooks/lint_published_markdown.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "python3 $HOME/.claude/hooks/block_commit_on_main.py",
             "timeout": 10
           },
