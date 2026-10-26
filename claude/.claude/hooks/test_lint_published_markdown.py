@@ -147,6 +147,18 @@ class WhatRendersLarge(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(refused(text))
 
+    def test_a_quote_indented_under_the_item(self):
+        for text in (
+            "- a\n  > quoted #974",
+            "- a\n\n  > quoted #974",
+            "1. a\n   > b #974",
+            "- D2: the owner said\n  > take #974 first\n- D3: x",
+            "- a\n  >= 5 #974",
+            "- a\n\n  > quoted\n  more #974",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(refused(text))
+
     def test_a_heading_inside_a_list_item(self):
         self.assertTrue(refused("- ## head #974"))
 
@@ -192,6 +204,12 @@ class WhatStaysSmall(unittest.TestCase):
             f"- a [#974][Label] b\n\n[label]: {URL}",
             f"- D1 ([#974])\n\n  [#974]: {URL}",
         ):
+            with self.subTest(text=text):
+                self.assertFalse(refused(text))
+
+    def test_a_definition_after_a_thematic_break_or_an_html_comment(self):
+        for between in ("\n---", "\n\n---", "\n\n***", "\n\n___", "\n\n* * *", "\n\n<!-- refs -->", "\n<!-- refs -->"):
+            text = f"- D1 ([#974]){between}\n[#974]: {URL}"
             with self.subTest(text=text):
                 self.assertFalse(refused(text))
 

@@ -21,14 +21,16 @@ carries `class="issue-link"`:
   — bare or in `<…>`, also with a trailing `/`, a query or a `#issuecomment-…`
   anchor.
 - `[#974]`, `[#974][]` and `[#974][label]` without a definition of their label
-  in the same text. A definition counts only after a blank line, at the start
-  of the text, under a heading or below another definition: written straight
-  after a list item it is a lazy continuation of the item, and the item, the
-  `[#974]` in it and the definition's URL all render large.
+  in the same text. A definition written straight after a list item is a lazy
+  continuation of the item: the item, the `[#974]` in it and the definition's
+  URL all render large. This hook counts a definition only when it opens the
+  text or follows a blank line, a heading, a thematic break, an HTML comment
+  line or another definition.
 - All of these in a task-list item, an ordered item (`1.`, `1)`), a heading
   inside an item (`- ## …`), a lazy continuation line (unindented, no blank
-  line before it), an indented paragraph of the item, and a list inside a
-  quote (`> - …`, `> > 1. …`).
+  line before it), an indented paragraph of the item, a quote indented under
+  the item (`- a` then `  > b #974`, also after a blank line), and a list
+  inside a quote (`> - …`, `> > 1. …`).
 
 **What stays small or unlinked**, so it passes: an ASCII letter, digit or `_`
 directly before (`a#974`, `_#974`, `x_#974_`, `romm-tender#974`) or any letter,
@@ -40,9 +42,9 @@ digit or `_` directly after (`#974x`, `#974ä`, `GH-974x`); `#0` and `GH-0`;
 and `/pull/N/files` URLs; a commit URL (it renders `class="commit-link"`);
 inline code, `<code>…</code>` and fenced code blocks (``` and ~~~); lines
 outside a list, top-level headings included. A list ends at a blank line
-followed by unindented text, at the start or end of a quote, and at an
-unindented heading, fence, quote or thematic break written without spaces
-(`***`, `---`, `___`).
+followed by unindented text, at a quote that starts at the left margin or
+ends, and at an unindented heading, fence or thematic break written without
+spaces (`***`, `---`, `___`).
 
 **What is read.** The text `utils/published_text.py` finds, in pieces rather
 than as the whole command string (`pieces=True`); its docstring lists the
@@ -97,6 +99,10 @@ FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 LIST_ENDING_RE = re.compile(r"^(?:#{1,6}(?:\s|$)|>|`{3,}|~{3,}|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)")
 DEFINITION_RE = re.compile(r"^\s{0,3}\[([^\]]+)\]:\s*\S")
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
+# Lines a definition may follow directly: a thematic break, spaced or not, and
+# an HTML comment on a line of its own.
+THEMATIC_BREAK_RE = re.compile(r"^\s{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
+HTML_COMMENT_RE = re.compile(r"^\s{0,3}<!--.*-->\s*$")
 
 CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")
 HTML_CODE_RE = re.compile(r"<code>.*?</code>", re.IGNORECASE)
@@ -194,13 +200,20 @@ def definitions(lines: list[str], marks: list[str | None]) -> set[int]:
 
     A definition cannot interrupt a paragraph: one written straight below a
     paragraph or list line is a continuation of that line, and its label stays
-    undefined. It may follow a blank line, a heading, a code block or another
-    definition, or open the text.
+    undefined. Here it counts when it opens the text or follows a blank line, a
+    heading, a thematic break, an HTML comment line, a code block or another
+    definition.
     """
     found: set[int] = set()
     may_start = True
     for index, (line, mark) in enumerate(zip(lines, marks)):
-        if mark is not None or not line.strip() or HEADING_RE.match(line):
+        if (
+            mark is not None
+            or not line.strip()
+            or HEADING_RE.match(line)
+            or THEMATIC_BREAK_RE.match(line)
+            or HTML_COMMENT_RE.match(line)
+        ):
             may_start = True
         elif DEFINITION_RE.match(line) and may_start:
             found.add(index)
@@ -212,8 +225,9 @@ def definitions(lines: list[str], marks: list[str | None]) -> set[int]:
 def list_lines(text: str) -> list[tuple[str, list[str]]]:
     """(line, references) for every line of a list item in `text` that carries a reference GitHub renders large.
 
-    A quote's `>` markers are taken off first; a line in a quote of another
-    depth than the line before it starts afresh, outside any list.
+    A quote's `>` markers are taken off first. A quote indented under an open
+    list item belongs to that item, as on GitHub; any other change of quote
+    depth starts afresh, outside any list.
     """
     quoted = text.replace("\r\n", "\n").split("\n")
     prefixes = [match.group(0) if (match := QUOTE_RE.match(line)) else "" for line in quoted]
@@ -223,13 +237,23 @@ def list_lines(text: str) -> list[tuple[str, list[str]]]:
     definition_lines = definitions(lines, marks)
     defined = {label(match.group(1)) for index in definition_lines if (match := DEFINITION_RE.match(lines[index]))}
     offending: list[tuple[str, list[str]]] = []
-    in_list = after_blank = False
+    in_list = after_blank = nested = False
     depth = 0
     for index, (line, mark) in enumerate(zip(lines, marks)):
-        if depths[index] != depth:
+        if depths[index] > depth and in_list and (nested or quoted[index][:1].isspace()):
+            nested = True  # a quote inside the open item: checked as the item's text
+        elif depths[index] != depth:
             depth = depths[index]
-            in_list = after_blank = False
+            in_list = after_blank = nested = False
+        else:
+            nested = False
         if mark == "code":
+            continue
+        if nested:
+            if mark is None and index not in definition_lines:
+                found = references(line, defined)
+                if found:
+                    offending.append((quoted[index].strip(), found))
             continue
         if not line.strip():
             after_blank = True
