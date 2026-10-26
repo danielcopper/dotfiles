@@ -214,7 +214,13 @@ class WhatStaysSmall(unittest.TestCase):
                 self.assertFalse(refused(text))
 
     def test_quotes_around_a_list(self):
-        for text in ("> - a\n> ```\n> #974\n> ```", "- a\n> b #974", "> - a\n\nafter #974"):
+        for text in (
+            "> - a\n> ```\n> #974\n> ```",
+            "- a\n> b #974",
+            "> - a\n\nafter #974",
+            "- a\n  > q\n> r #974",
+            "- a\n  > q\n\npara #974",
+        ):
             with self.subTest(text=text):
                 self.assertFalse(refused(text))
 

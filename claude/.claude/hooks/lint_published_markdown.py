@@ -245,7 +245,7 @@ def list_lines(text: str) -> list[tuple[str, list[str]]]:
     in_list = after_blank = nested = False
     depth = 0
     for index, (line, mark) in enumerate(zip(lines, marks)):
-        if depths[index] > depth and in_list and (nested or quoted[index][:1].isspace()):
+        if depths[index] > depth and in_list and quoted[index][:1].isspace():
             nested = True  # a quote inside the open item: checked as the item's text
         elif depths[index] != depth:
             depth = depths[index]
