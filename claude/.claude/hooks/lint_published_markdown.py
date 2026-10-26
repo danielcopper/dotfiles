@@ -57,7 +57,9 @@ together in a variable from anything but a heredoc or `cat`
 (`B="- …"; gh … --body "$B"`); a reference spelled
 `github.com/<owner>/<repo>/issues/N` without a scheme, whose `/issues/N` tail
 GitHub renders large; a reference inside `_…_` emphasis that also holds a
-`_` of its own. A code span is found within one line only.
+`_` of its own; a lazy continuation that leaves a quote (`> - a` then
+`continued #974`), which GitHub renders large in the item. A code span is
+found within one line only.
 
 Refused although GitHub shows it small, each with the way around it:
 
@@ -69,12 +71,15 @@ Refused although GitHub shows it small, each with the way around it:
   `<a href="#974">`) in an item — move the comment out of the list, write the
   link in markdown;
 - a line `2. a #N` straight below a paragraph line, which an ordered marker
-  other than `1` cannot start a list from — put a blank line before it, or
-  write `2\\.`;
+  other than `1` cannot start a list from — write `2\\.`;
 - a line below a thematic break written with spaces (`* * *`, `- - -`), which
   reads as a list item here — write it `***` or `---`;
 - a shortcut reference link `[text #974]` with its definition — write
-  `[text #974][ref]`, or an inline link.
+  `[text #974][ref]`, or an inline link;
+- `[#974]` whose definition sits on a line that opens a quote
+  (`Para` then `> [#974]: …`), or whose URL sits on the line after
+  `[#974]:` — put a blank line before the definition, and the URL on its
+  line.
 
 Anything that does not parse lets the call through, and so does an error
 inside the hook: a guard that blocks a harmless command by accident gets
