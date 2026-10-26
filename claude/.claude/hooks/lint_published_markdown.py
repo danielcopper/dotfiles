@@ -24,8 +24,8 @@ carries `class="issue-link"`:
   in the same text. A definition written straight after a list item is a lazy
   continuation of the item: the item, the `[#974]` in it and the definition's
   URL all render large. This hook counts a definition only when it opens the
-  text or follows a blank line, a heading, a thematic break, an HTML comment
-  line or another definition.
+  text or follows a blank line, a heading, a thematic break, a fenced code
+  block, an HTML comment line or another definition.
 - All of these in a task-list item, an ordered item (`1.`, `1)`), a heading
   inside an item (`- ## …`), a lazy continuation line (unindented, no blank
   line before it), an indented paragraph of the item, a quote indented under
@@ -58,8 +58,9 @@ together in a variable from anything but a heredoc or `cat`
 `github.com/<owner>/<repo>/issues/N` without a scheme, whose `/issues/N` tail
 GitHub renders large; a reference inside `_…_` emphasis that also holds a
 `_` of its own; a lazy continuation that leaves a quote (`> - a` then
-`continued #974`), which GitHub renders large in the item. A code span is
-found within one line only.
+`continued #974`), which GitHub renders large in the item; a quote nested in
+an item that itself sits in a quote (`> - a` then `>   > b #974`), which
+renders large too. A code span is found within one line only.
 
 Refused although GitHub shows it small, each with the way around it:
 
@@ -79,7 +80,12 @@ Refused although GitHub shows it small, each with the way around it:
 - `[#974]` whose definition sits on a line that opens a quote
   (`Para` then `> [#974]: …`), or whose URL sits on the line after
   `[#974]:` — put a blank line before the definition, and the URL on its
-  line.
+  line;
+- `[#974]` whose definition follows an HTML comment with text after it on the
+  same line (`<!-- c --> x`) — put the comment on a line of its own;
+- a quote indented less than the item's text (`1. a` then `  > b #974` or
+  ` > b #974`, `- a` then ` > b #974`), which GitHub reads as a quote of its
+  own outside the list — indent the `>` to the item's text column.
 
 Anything that does not parse lets the call through, and so does an error
 inside the hook: a guard that blocks a harmless command by accident gets
