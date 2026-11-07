@@ -72,7 +72,7 @@ The `reviewer` prompt additionally opens with **"This is a PR review."** so it s
 
 The `architecture-reviewer` and `prose-reviewer` prompts additionally name the repo path (both read the tree at the range's head commit, so no worktree is needed) and pass the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so a deviation the change was told to make is cited instead of raised. The `architecture-reviewer` prompt also names, per decision, the old behaviour it replaces, for its sweep of sites still doing it.
 
-In a re-review, which agents run and on what range follow the fix-round rule in `review-agents.md`. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread - **addressed / not addressed / partially** - each with evidence (file:line in the delta, or the check it ran).
+In a re-review, which agents run and on what range follow the fix-round rule in `review-agents.md`. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread, in the shape `reviewer.md`'s "## Re-review" sets.
 
 Do **not** run `code-simplifier` - this skill posts comments on someone else's PR, not refactors our own code. Simplification reaches the PR as findings from `architecture-reviewer`.
 
