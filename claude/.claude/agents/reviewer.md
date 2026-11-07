@@ -64,7 +64,7 @@ In a convention repo, two more checks: every Decision (the issue's and the epic'
 
 Read the changed code line by line and judge it as a senior engineer:
 
-- **Design** — does each touched unit keep one clear responsibility? Are the abstractions right for what the task needed? Clean separation, DRY without premature abstraction?
+- **Design** — does each touched unit keep one clear responsibility? Are the abstractions right for what the task needed? Clean separation, DRY within the diff without premature abstraction? Whether the tree already holds this code, and whether the change follows its sibling files, is `architecture-reviewer`'s question.
 - **Correctness** — error handling, edge cases, concurrency and state hazards the diff introduces
 - **Conventions** — the project's CLAUDE.md and architecture rules, applied with high precision: an explicit rule violation is a top-severity finding; a style preference no guideline names is not a finding at all
 - **Tests** — do new and changed tests verify real behavior rather than mock choreography? Are the task's edge cases covered? Would the test still pass if the behavior broke?

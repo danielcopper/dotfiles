@@ -62,6 +62,7 @@ Always run `reviewer` (the custom agent in `~/.claude/agents/reviewer.md`, in it
 | Sub-agent | Run when | Why |
 |---|---|---|
 | `reviewer` | always | does the diff deliver what the spec asks and the PR claims, correctness, project-guideline violations |
+| `architecture-reviewer` | production code added or changed (a changed source file outside tests, docs and config) | does it fit the codebase: existing helpers reused, logic and facts kept in one home, sibling patterns and written architecture rules followed, the same behaviour with less code |
 | `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | are new tests pinning the claimed behaviour, or vacuous? |
 | `pr-review-toolkit:silent-failure-hunter` | error-handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches added in the diff) | swallowed exceptions, silent fallbacks, missing logs |
 | `pr-review-toolkit:type-design-analyzer` | new types added or existing types' shapes changed (records, classes, interfaces, type aliases) | encapsulation, invariants, useful vs anaemic types |
@@ -78,9 +79,11 @@ For each agent, the prompt must include:
 
 The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`.
 
+The `architecture-reviewer` prompt additionally names the repo path (the agent reads the tree at the range's head commit, so no worktree is needed) and passes the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so it cites a deviation the change was told to make instead of raising it.
+
 In a re-review, every agent reviews only the delta, and the specialist triggers apply to the delta's files. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread - **addressed / not addressed / partially** - each with evidence (file:line in the delta, or the check it ran).
 
-Do **not** run `code-simplifier` - this skill posts comments on someone else's PR, not refactors our own code.
+Do **not** run `code-simplifier` - this skill posts comments on someone else's PR, not refactors our own code. Simplification reaches the PR as findings from `architecture-reviewer`.
 
 When all agents return, merge their findings into a single severity-ordered list for Phase 3, tagging each finding with the agent that raised it (helps triage when two agents flag the same line).
 
@@ -89,7 +92,7 @@ When all agents return, merge their findings into a single severity-ordered list
 Use `TaskCreate` to register one task per finding, ordered **severity desc** (blocker -> major -> minor -> nit). Each task content should include:
 
 - The finding (file:line, claim, suggested fix)
-- The **agent** that raised it (`reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer` / `comment-analyzer`)
+- The **agent** that raised it (`reviewer` / `architecture-reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer` / `comment-analyzer`)
 - An **"Empirical check"** section - exactly what command/probe/source-read proves or refutes the claim
 - An **"Outcome"** section left blank until validated
 
