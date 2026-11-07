@@ -64,7 +64,7 @@ For each agent, the prompt must include:
 - The PR's intent (1-2 sentences from the PR description)
 - The diff range to review (`git diff <range>`) or the relevant slice for that specialist
 - Existing PR thread topics to **avoid duplicating** (Sonar warnings already posted, reviewer comments still open)
-- A request to return findings as a flat list with: **severity** (blocker / major / minor / nit), **file:line**, **claim**, **suggested fix**, **confidence**
+- A request to return findings as a flat list with: **file:line**, **claim**, **suggested fix**, and the rating the agent's own definition gives it: severity and score for our own agents, a specialist's as `review-agents.md`, "Routing the findings", lists it (`type-design-analyzer` rates none)
 - An instruction to skip cosmetic nits unless they actively harm reviewability
 - This line, verbatim: **"Do not spawn further agents and do not invoke any review skill."**
 
@@ -80,7 +80,7 @@ When all agents return, merge their findings into one list for Phase 3, as `revi
 
 ## Phase 3 - Build the task list
 
-Use `TaskCreate` to register one task per finding, ordered **severity desc** (blocker -> major -> minor -> nit). Each task content should include:
+Use `TaskCreate` to register one task per finding, ordered by severity: **Critical -> Important -> Minor**, a specialist's own scale read as `review-agents.md`, "Routing the findings", maps it, and the `pre-existing` findings after them. Each task content should include:
 
 - The finding (file:line, claim, suggested fix)
 - The **agent** that raised it (`reviewer` / `architecture-reviewer` / `prose-reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer`)

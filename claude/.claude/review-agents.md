@@ -1,8 +1,9 @@
 # Review agents
 
-Which review agents a change gets, how a fix round is reviewed, and where each finding goes. The table and the fix
-rounds hold wherever a review starts: `/implement`, `/pr-review`, or a plain session. The routing of findings, the
-by-catch classes included, is for a change of our own; someone else's PR goes by its last paragraph.
+Which review agents a change gets, how a fix round is reviewed, and where each finding goes. The table, the fix rounds,
+the merging of findings and the reading of each specialist's scale hold wherever a review starts: `/implement`,
+`/pr-review`, or a plain session. The routing list, by-catch classes included, is for a change of our own; someone
+else's PR goes by the last paragraph of "Routing the findings".
 
 ## Which agents run
 
@@ -51,20 +52,31 @@ place of the previous round's findings.
 
 ## Routing the findings
 
-Merge every agent's findings into one list, each tagged with the agent that raised it, and route each:
+Merge every agent's findings into one list, each tagged with the agent that raised it. A plugin specialist keeps its own
+scale, and no dispatch asks it for another; it reads as:
+
+- `silent-failure-hunter` — CRITICAL → Critical, HIGH → Important, MEDIUM → Minor.
+- `pr-test-analyzer` — 9–10 → Critical, 7–8 → Important, 5–6 → Minor; 1–4 is not reported.
+- `type-design-analyzer` — rates no finding: everything under Concerns and Recommended Improvements → Minor.
+
+For `pr-test-analyzer` the rating decides, not the section heading: a finding it lists without one, such as under "Test
+Quality Issues", is Minor.
+
+For a change of our own, each finding is routed:
 
 - **A Critical or Important finding on the change**, from any agent, goes to the implementer, and a fix round follows.
-- **A Minor finding on the change** goes on the user's list, one task each. The user rules on each: fix now, later, or
-  drop; a fix now goes to the implementer as an Important finding does.
+- **A Minor finding on the change** goes on the user's list: fix now, later, or drop.
 - **By-catch** — a review agent tags it `pre-existing`; the implementer lists it in its report — goes by its class, as
   [`agents/implementer.md`](agents/implementer.md), "## Scope", defines the classes and the cap:
   - **Small** → the implementer fixes it in this change, as its own commit; the PR body names it in one sentence.
   - **Changes behaviour** → ask the user, recommending a fix here; on yes it becomes a decision of the issue (in a
-    convention repo, a new D-line) and goes to the implementer as an Important finding does.
-  - **Large** → the user's list: fix here, open an issue, or drop. Nobody proposes an issue by default; a fix here goes
-    to the implementer as an Important finding does.
+    convention repo, a new D-line).
+  - **Large** → the user's list: fix here, open an issue, or drop. Nobody proposes an issue by default.
   - **Past the cap** → ask the user before more of it is fixed.
 
-**Someone else's PR** (`/pr-review`) has no implementer, so none of its findings goes to one: every finding,
-`pre-existing` included, is a task on the user's list, and a `pre-existing` finding's comment asks the contributor
-whether they fix it in their PR.
+A Minor finding ruled fix now, a behaviour change the user said yes to, and a large by-catch ruled fix here go to the
+implementer as an Important finding does.
+
+**Someone else's PR** (`/pr-review`) has no implementer, so the routing list above, by-catch classes included, does not
+hold there: every finding, `pre-existing` included, is a task on the user's list, and a `pre-existing` finding's comment
+asks the contributor whether they fix it in their PR.
