@@ -94,13 +94,13 @@ TTS calls are debounced (2s) to prevent overlapping announcements when multiple 
 
 ## Workflow system
 
-GitHub-issue work runs through skills (user-invoked, except where the table says otherwise) backed by two custom agents, a per-repo config file, and guard hooks. Everything global lives in this package (stowed); everything repo-specific lives in the repo.
+GitHub-issue work runs through skills (user-invoked, except where the table says otherwise) backed by custom agents, a per-repo config file, and guard hooks. Everything global lives in this package (stowed); everything repo-specific lives in the repo.
 
 ### Skills (`skills/`)
 
 | Skill                    | Invocation                     | Does                                                                                                                                              |
 | ------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **implement**            | `/implement <issue#> [--go]`   | One issue end-to-end: read → align (questions one at a time; `--go` skips when nothing is unclear) → worktree + board → implementer → reviewer loop → gate evidence → PR draft → watch CI to green → merge per policy → user gate if due |
+| **implement**            | `/implement <issue#> [--go]`   | One issue end-to-end: read → align (questions one at a time; `--go` skips when nothing is unclear) → worktree + board → implementer → review agents loop → gate evidence → PR draft → watch CI to green → merge per policy → user gate if due |
 | **epic**                 | `/epic <epic#>`                | Assembly line over an epic's native sub-issues: align once on all issues, then the implement pipeline per issue, merging between issues (fresh worktree from updated main) |
 | **plan-epic**            | `/plan-epic [topic\|issue#]`   | Planning only, never code: discuss → slice (tracer bullets, or expand→contract for wide refactors) → drafts for approval → epic + native sub-issues in Ready |
 | **writing-for-agents**   | model-invoked                  | Vendored from [mattpocock/skills](https://github.com/mattpocock/skills): how to write documents agents consume (skills, CLAUDE.md)                 |
@@ -115,8 +115,12 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 | --------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **implementer** | Opus  | Builds exactly the brief, asks before guessing, escalates via `DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT`, commits in its worktree, never pushes |
 | **reviewer**    | Opus  | Fresh-context, read-only. Spec compliance first, then quality; confidence-scored findings (reports ≥ 80 only; ≥ 50 in PR-review mode for `/pr-review`), hard `Approved / Needs fixes` verdict |
+| **architecture-reviewer** | Opus | Read-only fit review against the tree at head: existing helpers to reuse, logic or facts duplicated elsewhere, sibling patterns and written architecture rules, the same behaviour with less code |
+| **prose-reviewer** | Opus | Read-only prose review: every sentence the diff writes, and the comments already in the units it touches, judged for whether it is true at head and whether it belongs; corrects, moves or removes prose, never asks for more |
 
-Standing rules encoded in the skills/agents (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text (PRs, issues) is drafted for approval; review findings are presented, the user rules on Minors; the issue **and** its parent epic go to In Progress on the board; a Fable-model reviewer only on explicit confirmation. Tool names (linter, type checker) never live in the global agents — they come from the repo config via the dispatch.
+Which of them run on a change, and which `pr-review-toolkit` specialists beside them, is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
+
+Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text (PRs, issues) is drafted for approval; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board. Tool names (linter, type checker) never live in the global agents — they come from the repo config via the dispatch.
 
 ### Per-repo config (`<repo>/.claude/agents/workflow.md`)
 
@@ -140,7 +144,8 @@ Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-
 ├── requirements.txt              # Python dependencies
 ├── settings.json                 # Permissions, hooks, env vars
 ├── settings.local.json           # Machine-local overrides
-├── agents/                       # Custom subagents (implementer, reviewer)
+├── review-agents.md              # Which review agents run, fix rounds, finding routing
+├── agents/                       # Custom subagents (Workflow system → Agents)
 ├── skills/                       # User-invoked skills (implement, epic, plan-epic, …)
 ├── memory/                       # Global personal memory (see CLAUDE.md)
 └── hooks/

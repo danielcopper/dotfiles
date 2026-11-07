@@ -33,9 +33,8 @@ def main() -> int:
                         'here. Spawn the custom agent instead: subagent_type '
                         '"reviewer" (fresh-context spec+quality review, '
                         "confidence-scored findings, hard verdict). The "
-                        "plugin's specialists (silent-failure-hunter, "
-                        "type-design-analyzer, pr-test-analyzer, "
-                        "comment-analyzer) remain available."
+                        "plugin's specialists that "
+                        "~/.claude/review-agents.md names remain available."
                     ),
                 }
             }

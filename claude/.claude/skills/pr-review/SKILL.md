@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review an Azure DevOps or GitHub pull request together with the user, or re-review it after the author pushed fixes. Fetches the PR and its linked work items or issues, runs the reviewer agent plus matching specialists, turns findings into a severity-ordered task list, then validates each finding empirically with the user before deciding to drop it or post a comment on the PR. Use when the user says "review this PR", "lets do a review", "re-review", or sends a PR URL/number and wants to review.
+description: Review an Azure DevOps or GitHub pull request together with the user, or re-review it after the author pushed fixes. Fetches the PR and its linked work items or issues, runs the review agents the shared review table names, turns findings into a severity-ordered task list, then validates each finding empirically with the user before deciding to drop it or post a comment on the PR. Use when the user says "review this PR", "lets do a review", "re-review", or sends a PR URL/number and wants to review.
 ---
 
 # PR Review
@@ -57,16 +57,7 @@ Once the checks pass, summarise to the user in one short block: title, author, s
 
 ## Phase 2 - Run the reviewer agents
 
-Always run `reviewer` (the custom agent in `~/.claude/agents/reviewer.md`, in its PR-review mode). In addition, scan the changed files (`git diff --name-status <range>`) and run any specialist sub-agents whose triggers apply. **All applicable agents run in parallel** - single message, multiple `Agent` tool uses. Don't re-analyse the diff yourself.
-
-| Sub-agent | Run when | Why |
-|---|---|---|
-| `reviewer` | always | does the diff deliver what the spec asks and the PR claims, correctness, project-guideline violations |
-| `architecture-reviewer` | production code added or changed (a changed source file outside tests, docs and config) | does it fit the codebase: existing helpers reused, logic and facts kept in one home, sibling patterns and written architecture rules followed, the same behaviour with less code |
-| `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | are new tests pinning the claimed behaviour, or vacuous? |
-| `pr-review-toolkit:silent-failure-hunter` | error-handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches added in the diff) | swallowed exceptions, silent fallbacks, missing logs |
-| `pr-review-toolkit:type-design-analyzer` | new types added or existing types' shapes changed (records, classes, interfaces, type aliases) | encapsulation, invariants, useful vs anaemic types |
-| `pr-review-toolkit:comment-analyzer` | comments/docstrings added or changed | accuracy vs code, comment rot, refs to removed code |
+Run the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the range - its table decides which, and they run in parallel as it says; `reviewer` (the custom agent in `~/.claude/agents/reviewer.md`) runs in its PR-review mode. Don't re-analyse the diff yourself.
 
 For each agent, the prompt must include:
 
@@ -79,22 +70,24 @@ For each agent, the prompt must include:
 
 The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`.
 
-The `architecture-reviewer` prompt additionally names the repo path (the agent reads the tree at the range's head commit, so no worktree is needed) and passes the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so it cites a deviation the change was told to make instead of raising it.
+The `architecture-reviewer` and `prose-reviewer` prompts additionally name the repo path (both read the tree at the range's head commit, so no worktree is needed) and pass the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so a deviation the change was told to make is cited instead of raised. The `architecture-reviewer` prompt also names, per decision, the old behaviour it replaces, for its sweep of sites still doing it.
 
-In a re-review, every agent reviews only the delta, and the specialist triggers apply to the delta's files. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread - **addressed / not addressed / partially** - each with evidence (file:line in the delta, or the check it ran).
+In a re-review, which agents run and on what range follow the fix-round rule in `review-agents.md`. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread - **addressed / not addressed / partially** - each with evidence (file:line in the delta, or the check it ran).
 
 Do **not** run `code-simplifier` - this skill posts comments on someone else's PR, not refactors our own code. Simplification reaches the PR as findings from `architecture-reviewer`.
 
-When all agents return, merge their findings into a single severity-ordered list for Phase 3, tagging each finding with the agent that raised it (helps triage when two agents flag the same line).
+When all agents return, merge their findings into one list for Phase 3, as `review-agents.md` says.
 
 ## Phase 3 - Build the task list
 
 Use `TaskCreate` to register one task per finding, ordered **severity desc** (blocker -> major -> minor -> nit). Each task content should include:
 
 - The finding (file:line, claim, suggested fix)
-- The **agent** that raised it (`reviewer` / `architecture-reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer` / `comment-analyzer`)
+- The **agent** that raised it (`reviewer` / `architecture-reviewer` / `prose-reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer`)
 - An **"Empirical check"** section - exactly what command/probe/source-read proves or refutes the claim
 - An **"Outcome"** section left blank until validated
+
+A finding tagged `pre-existing` gets a task too, routed as `review-agents.md`, "Routing the findings", says for someone else's PR.
 
 In a re-review, the earlier threads come first: one task per thread with the reviewer's verdict and evidence, ahead of the new findings.
 
