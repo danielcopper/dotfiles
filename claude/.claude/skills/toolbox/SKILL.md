@@ -27,7 +27,7 @@ Match the current situation against this index and recommend the right skill(s).
 
 - `/diagnose` — disciplined loop for hard bugs and perf regressions: reproduce → minimise → hypothesise → instrument → fix
 - `/tdd` — red-green test-first development
-- `/pr-review` — collaborative Azure DevOps PR review with empirical finding validation
+- `/pr-review` — collaborative Azure DevOps or GitHub PR review with empirical finding validation
 - Bundled, worth remembering: `/code-review` (review the current diff), `/simplify` (cleanup pass on changed code), `/verify` (drive the change end-to-end in the real app)
 
 ## Memory
