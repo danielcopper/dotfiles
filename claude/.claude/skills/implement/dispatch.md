@@ -1,6 +1,6 @@
-# Dispatching the implementer and reviewer agents
+# Dispatching the implementer and the review agents
 
-Templates and routing rules for the pipeline's two agents. Both agent definitions (`~/.claude/agents/implementer.md`, `~/.claude/agents/reviewer.md`) carry the working rules, the test and commit discipline, escalation, the confidence rubric and the report contracts; a dispatch supplies only the task facts below and restates none of those rules, in the brief or in the prompt. Default models come from the agent definitions; a Fable override happens only after the user confirmed it.
+Templates and routing rules for the pipeline's agents. The agent definitions under `~/.claude/agents/` carry the working rules, the test and commit discipline, escalation, the confidence rubric and the report contracts; a dispatch supplies only the task facts below and restates none of those rules, in the brief or in the prompt. Default models come from the agent definitions; a pipeline agent runs on another model only on the user's yes.
 
 ## Brief file
 
@@ -18,13 +18,13 @@ In a convention repo the issue is the spec, so the brief holds nothing else: a d
 - **Goal** — the issue's intent in two or three sentences
 - **Done criteria** — the checkable outcomes, from the issue and the align step
 - **In scope** — the files/areas expected to change
-- **Out of scope** — what stays untouched (adjacent cleanups the user didn't ask for, known follow-ups)
+- **Out of scope** — what stays untouched; by-catch follows the implementer's own rule and is not listed here
 
 ## Implementer dispatch
 
 Spawn the `implementer` agent with the brief file path, and name any session-level constraint the user added on top (the project's CLAUDE.md loads automatically).
 
-Report delivery: each agent sends its full report as a message. Save it next to the brief — `~/Memory/<repo>/report-<N>.md` for the implementer, `review-<N>-<round>.md` for each review (agents cannot write into `~/Memory`) — so the reviewer and fix dispatches have a stable path.
+Report delivery: each agent sends its full report as a message. Save it next to the brief — `~/Memory/<repo>/report-<N>.md` for the implementer, `review-<N>-<round>-<agent>.md` for each review agent's (agents cannot write into `~/Memory`) — so the review and fix dispatches have a stable path.
 
 ### Status routing
 
@@ -36,7 +36,7 @@ Report delivery: each agent sends its full report as a message. Save it next to 
 
 Questions an agent asks mid-run are relayed to the user verbatim — the lead answers only what the issue text or config already answers.
 
-## Reviewer dispatch
+## Review dispatch
 
 First produce the diff artifact from the worktree, into the lead's scratchpad:
 
@@ -44,17 +44,21 @@ First produce the diff artifact from the worktree, into the lead's scratchpad:
 { git -C <wt> log --oneline <base>..HEAD; git -C <wt> diff --stat <base>...HEAD; git -C <wt> diff <base>...HEAD; } > <diff-file>
 ```
 
-`<base>` is the newest base SHA any implementer report names (it changes when the implementer rebased onto a moved main), else the brief's.
+`<base>` is the newest base SHA any implementer report names (it changes when the implementer rebased onto a moved main), else the brief's. In a fix round `<base>` is the last reviewed commit and the artifact is the tree diff `review-agents.md`, "Fix rounds", sets, without the log line:
 
-Spawn the `reviewer` agent with:
+```bash
+{ git -C <wt> diff --stat <base> HEAD; git -C <wt> diff <base> HEAD; } > <diff-file>
+```
 
-- The brief file path (same file the implementer worked from; it names the issue)
-- The saved implementer report path
-- The diff file path (and the base..HEAD range as fallback)
-- The repo's lint/type commands for changed files (from the workflow config)
+Start the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the diff. Each gets the diff file path (and the range as fallback), plus:
 
-Pass review findings and scope to the reviewer **unfiltered** — a dispatch that pre-judges ("don't flag X", "treat Y as minor") corrupts the review. The reviewer decides severity; the user decides what happens to Minor findings.
+- `reviewer` — the brief file path (it names the issue), the saved implementer report path, and the repo's lint/type commands for changed files (from the workflow config)
+- `architecture-reviewer` — the worktree path, the brief file path, and per decision the old behaviour it replaces, which the lead names
+- `prose-reviewer` — the worktree path and the brief file path
+- a specialist — the change's intent in one or two sentences
+
+Pass review findings and scope to every agent **unfiltered** — a dispatch that pre-judges ("don't flag X", "treat Y as minor") corrupts the review. The agents decide severity; the user decides what happens to every finding on their list.
 
 ## Fix dispatch
 
-After a **Needs fixes** verdict, dispatch the implementer again (same brief) with the reviewer's findings **verbatim** — severity, file:line, reasoning intact — and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report; append it to the saved report. Then re-review with a fresh reviewer: same dispatch shape, updated diff, previous round's findings listed as "addressed claims" for verification.
+Whenever the routing in `review-agents.md` sends findings to the implementer — small by-catch and the user's fix-now rulings included, after an Approved verdict too, and where no `reviewer` ran — dispatch the implementer again (same brief) with those findings **verbatim** (severity, file:line, reasoning intact) and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report; append it to the saved report. Then review the delta as a fix round, per `review-agents.md`, "Fix rounds": the `reviewer` prompt lists the previous round's findings for a verdict each.

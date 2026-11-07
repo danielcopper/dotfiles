@@ -20,13 +20,13 @@ For each task (and each cut):
 
 1. **Plan when needed; clarify open questions first.** If there are design or architecture choices, resolve them _with me_ before writing code — we make design/arch decisions together, I don't decide them unilaterally. No code until the open questions are closed. In a repo whose `CLAUDE.md` has `## Where decisions live`, the answers are recorded in the issue's `## Decisions`, as that section describes.
 2. **Implement via agent.**
-3. **Review via agent** — one or more code-review agents, scaled to the implementation's complexity.
+3. **Review via agent** — as `~/.claude/review-agents.md` says.
 4. **Push and open the PR** (per the repo's branch/merge model and work-item-linking rules).
 5. **I review the PR myself before we move to the next task** — wait for my go.
 
 Composes with the worktree skill (one branch/worktree per cut) and the board skills' rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
 
-**One report per agent, and it goes in the message.** The `implementer` and `reviewer` definitions carry this
+**One report per agent, and it goes in the message.** The definitions under `~/.claude/agents/` carry this
 themselves. To the prompt of any agent without its own definition (general-purpose, Explore, a fork) add: *"Send your
 full report as a message. Your final answer is then a one-line summary — do not repeat the report in it."* Otherwise
 the report arrives twice, and the copy in the harness's idle notification is truncated when long. Start a one-shot

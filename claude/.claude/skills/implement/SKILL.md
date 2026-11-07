@@ -1,10 +1,10 @@
 ---
 name: implement
-description: "Implement a GitHub issue end-to-end — align, worktree, board, implementer + reviewer agents, gates, PR. Argument: the issue number; append --go to skip the align gate when nothing is unclear."
+description: "Implement a GitHub issue end-to-end — align, worktree, board, implementer + review agents, gates, PR. Argument: the issue number; append --go to skip the align gate when nothing is unclear."
 disable-model-invocation: true
 ---
 
-Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → user handoff. You are the lead: you orchestrate, commit nothing an agent already committed, and own push and PR preparation. Merge remains the user's responsibility unless they explicitly grant full-auto for the current run. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue. This session stays in the main checkout; implementer and reviewer work in the issue's worktree by its absolute path.
+Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → user handoff. You are the lead: you orchestrate, commit nothing an agent already committed, and own push and PR preparation. Merge remains the user's responsibility unless they explicitly grant full-auto for the current run. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue. This session stays in the main checkout; implementer and review agents work in the issue's worktree by its absolute path.
 
 A **convention repo** is one whose `CLAUDE.md` has the section `## Where decisions live`; that section states the convention. Steps marked *(convention)* apply only there; in any other repo they are skipped and the rest runs as written.
 
@@ -46,15 +46,9 @@ Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer
 
 ## 6. Review
 
-Produce the diff artifact and dispatch the **reviewer** agent with the issue and the brief, per [`dispatch.md`](dispatch.md) — a fresh reviewer each round. When the change is unusually complex or critical, offer the user a Fable-model reviewer and spawn it only on their confirmation.
+Produce the diff artifact and start the review agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the change, per [`dispatch.md`](dispatch.md) — fresh agents each round. Route their findings as `review-agents.md`, "Routing the findings", says; every finding it sends to the implementer goes back as a fix dispatch, then a fix round, until none is left.
 
-Route the verdict:
-
-- **Needs fixes** → fix-dispatch to the implementer, then re-review. Repeat until **Approved**.
-- **Minor findings that remain** → present them all to the user; they decide fix-now, follow-up, or drop.
-- **Follow-up work discovered** → draft issues for the user's approval in the Planned change shape (`## Today`, `## Wanted`, `## To decide`, `## Done when`), with generic data shapes and glossary vocabulary; the workflow that produced them stays out of the text. The current PR keeps its scope.
-
-*Done when:* verdict is Approved and the user has ruled on every remaining finding.
+*Done when:* every finding the routing sent to the implementer has a fix round's verdict "addressed", and the user has ruled on every finding on their list.
 
 ## 7. Gate evidence, once
 
@@ -64,7 +58,7 @@ The battery runs once per code state. The implementer's final battery report is 
 
 ## 8. Pull request
 
-Draft the PR: conventional-commit title, body with `Closes #<N>`, docs handled per repo policy (updated in the same PR, or the repo's explicit opt-out with a one-line reason). Present the draft and wait for approval — skip the wait only when the user has waived drafts. Then push and open the PR.
+Draft the PR: conventional-commit title, body with `Closes #<N>` and one sentence per small by-catch fix (`review-agents.md`), docs handled per repo policy (updated in the same PR, or the repo's explicit opt-out with a one-line reason). Present the draft and wait for approval — skip the wait only when the user has waived drafts. Then push and open the PR.
 
 *(convention)* The body becomes the squash commit body, so it holds: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. A docs opt-out (the repo's docs-check marker) may also sit in the body. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
 
@@ -85,7 +79,7 @@ Green means the automated implementation work is complete; it is not merge autho
 - After a merge, verify that automation closed the issue and moved it to Done; the epic stays In Progress while siblings remain open. At user handoff before merge, leave the issue In Progress and state that automation will close it after the user's merge.
 - After the merge, clean up the worktree and branch per the `worktree` skill.
 - Once the merge is confirmed (the user says so, or `gh pr view <PR> --json state` shows `MERGED`), move the issue's working files in `~/Memory/<repo>/` (brief, report, findings, reviews, inventory, design, handoff) to `~/Memory/<repo>/archive/<N>-<slug>/`. Working files carry the issue number in their name — `<kind>-<N>[-<suffix>].md` — so this step finds them. Each gets this line as its first line after any YAML front matter: `Historical — working notes for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.` The repo's `MEMORY.md` lists `archive/` in one line only: historical working notes, not current.
-- File the approved follow-up issues.
+- File the issues the user chose for large by-catch, each drafted for their approval in the Planned change shape (`## Today`, `## Wanted`, `## To decide`, `## Done when`), with generic data shapes and glossary vocabulary; the workflow that produced them stays out of the text.
 - If context is running low, write `/handoff` (status and pointers: where we stopped, open PRs, pending tests, board state) and tell the user to compact.
 
-*Done when:* board consistent, any required user gate passed, follow-ups filed, and — once the merge is confirmed — working files archived. A run that ends at the handoff before the merge is complete without the archive step.
+*Done when:* board consistent, any required user gate passed, those issues filed, and — once the merge is confirmed — working files archived. A run that ends at the handoff before the merge is complete without the archive step.

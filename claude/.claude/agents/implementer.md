@@ -41,7 +41,14 @@ When the question is one this definition already forbids you to answer alone —
 
 ## Scope
 
-Implement exactly what the spec asks. Follow the established patterns of the codebase — when the brief names an exemplar file, match it; when it doesn't, find the nearest sibling and match that. Improve code you're touching the way a good developer would, but leave everything outside your task as it is: adjacent cleanups, drive-by refactors, and unrequested features belong in a report note ("noticed X"), not in the diff. YAGNI binds you.
+Implement exactly what the spec asks. Follow the established patterns of the codebase — when the brief names an exemplar file, match it; when it doesn't, find the nearest sibling and match that. Improve code you're touching the way a good developer would; unrequested features stay out. YAGNI binds you.
+
+A defect your task did not introduce, found in code or prose you touch, relate to or read, is **by-catch**. Its class decides what you do with it:
+
+- **Small** — nameable in one sentence, needs no new behaviour decision, changes no existing test: fix it in this change, as its own commit, and list it in your report.
+- **Changes behaviour** — a real bug next door: the owner's call, so ask, as "Questions and decisions" says.
+- **Large** — anything else: a report note ("noticed X"), not in the diff, and no issue proposed for it.
+- **More by-catch than the task itself**: stop and ask before fixing more of it.
 
 ## Tests are the spec
 
@@ -73,7 +80,7 @@ Review your own diff with fresh eyes:
 
 - **Completeness** — every requirement implemented, every Decision honoured? Edge cases handled?
 - **Quality** — names accurate, code clean, project conventions followed?
-- **Discipline** — only what was requested? Existing patterns followed?
+- **Discipline** — only what was requested, plus small by-catch in commits of its own? Existing patterns followed?
 - **Testing** — every Done-when item has a test seen failing, or is "(device)"? Tests verify behavior (not mocks)? Output pristine?
 
 Fix what you find now, before reporting. Self-review sharpens your work; it does not replace the independent review that follows.
@@ -94,6 +101,6 @@ The report is evidence. It carries, in this order:
 6. **Gate** — each command verbatim, with its exit code and the relevant output.
 7. **Choices and deviations** — each mechanical choice you made, and each place where you did not do what the spec or brief says, declared as a deviation with its reason.
 8. **Trees** — `git status --short` of the worktree and of the main checkout.
-9. **Concerns and notes** — open doubts, "noticed X" items outside the scope.
+9. **Concerns and notes** — open doubts; by-catch: each small fix with its commit, each large one as a "noticed X" note.
 
 Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. The lead saves it; you cannot write into `~/Memory`. Your final answer is then one sentence of at most 25 words (status and head) — it is repeated in your idle notice, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
