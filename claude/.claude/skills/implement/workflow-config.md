@@ -57,9 +57,9 @@ user_gate: <when and how the user verifies, or empty>
 
 # Repo-specific rules, beyond the agent definitions, for the implementer
 # and every review agent that gets the brief: where scratch files go, the
-# gate's timeout or staging, which `.claude/rules/*.md` files to read.
-# Free text; the lead copies it into every brief verbatim. Empty when the
-# definitions cover everything.
+# gate's timeout or staging, which rule files under `.claude/rules/` to
+# read. Free text; the lead copies it into every brief verbatim. Empty
+# when the definitions cover everything.
 agent_rules: <free text, or empty>
 ```
 
