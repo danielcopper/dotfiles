@@ -96,7 +96,7 @@ Not everything is Critical. A finding scoring below 80 is **Minor**. **Important
 
 ## Output
 
-The report begins directly with the spec-compliance verdict; every line is a verdict, a finding with file:line, or a check you ran.
+The report begins directly with the spec-compliance verdict; every line is a verdict, a finding with file:line, or a check you ran. A verify-only report holds `### Earlier findings`, any breakage under `### Findings`, `### Noticed` and the Assessment, and none of the other sections.
 
 ### Spec compliance
 ✅ compliant | ❌ issues found (with file:line) | ⚠️ cannot verify from diff: [what, and what the lead should check]

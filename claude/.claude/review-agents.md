@@ -111,10 +111,12 @@ implementer as an Important finding does.
 Findings become tasks in groups. The findings that go straight to the implementer are one task per fix round. Plain
 Minor findings go into one task per theme, deduplicated across agents, which the user rules on as a whole (fix now,
 later, or drop) or splits. Large, behaviour-changing and past-cap by-catch each go into groups of their own class, so a
-group's ruling offers that class's own choices above. Findings marked "not confirmed" go into a group of their own. Each
-group names each finding it holds in a line of its own, and every finding stays in its saved file: a review agent's in
-the form `skills/implement/dispatch.md`, "Report delivery", sets; a by-catch the implementer lists in its report. None
-is dropped.
+group's ruling offers that class's own choices above. Findings marked "not confirmed" go into a group of their own,
+which the user rules on: it holds, then fix now as an Important finding does, or later, or drop. The open findings the
+round cap leaves go into a group of their own as well. An agent's `### Noticed` items join the plain Minor findings by
+theme. Each group names each finding it holds in a line of its own, and every finding stays in its saved file: a review
+agent's in the form `skills/implement/dispatch.md`, "Report delivery", sets; a by-catch the implementer lists in its
+report. None is dropped.
 
 **Someone else's PR** (`/pr-review`) has no implementer: every finding, `pre-existing` included, is a task on the user's
 list, and a `pre-existing` finding's comment asks the contributor whether they fix it in their PR.

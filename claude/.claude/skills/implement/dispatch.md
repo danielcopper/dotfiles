@@ -45,7 +45,7 @@ Start the agents [`~/.claude/review-agents.md`](../../review-agents.md) names fo
 - `prose-reviewer` — the worktree path and the brief file path
 - a specialist — the change's intent in one or two sentences
 
-Give every agent the scope and the earlier findings without judging them first — a dispatch that pre-judges ("don't flag X", "treat Y as minor") corrupts the review. The agents decide severity and the user decides what happens to every finding on their list; the lead checks only whether a finding's facts hold, before it goes to a fix round (`review-agents.md`, "Routing the findings").
+Give every agent the scope and the earlier findings without judging them first — a dispatch that pre-judges ("don't flag X", "treat Y as minor") corrupts the review. The agents decide severity and the user decides what happens to every finding on their list; the lead checks only whether a Critical or Important finding's facts hold, before it goes to a fix round (`review-agents.md`, "Routing the findings").
 
 ## Fix dispatch
 
