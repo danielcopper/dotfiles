@@ -87,7 +87,9 @@ Quality Issues", is Minor.
 
 Each finding is routed:
 
-- **A Critical or Important finding on the change**, from any agent, goes to the implementer, and a fix round follows.
+- **A Critical or Important finding on the change**, from any agent, goes to the implementer, and a fix round follows,
+  once the lead has checked it at the artifact: the cited file:line, the quoted text, the named command. A finding that
+  does not hold there, or cannot be confirmed, goes on the user's list instead, marked "not confirmed".
 - **A Minor finding on the change** goes on the user's list: fix now, later, or drop.
 - **By-catch** — a review agent tags it `pre-existing`; the implementer lists it in its report — goes by its class, as
   [`agents/implementer.md`](agents/implementer.md), "## Scope", defines the classes and the cap:
@@ -103,9 +105,10 @@ implementer as an Important finding does.
 Findings become tasks in groups. The findings that go straight to the implementer are one task per fix round. Plain
 Minor findings go into one task per theme, deduplicated across agents, which the user rules on as a whole (fix now,
 later, or drop) or splits. Large, behaviour-changing and past-cap by-catch each go into groups of their own class, so a
-group's ruling offers that class's own choices above. Each group names each finding it holds in a line of its own, and
-every finding stays in its saved file: a review agent's in the form `skills/implement/dispatch.md`, "Report delivery",
-sets; a by-catch the implementer lists in its report. None is dropped.
+group's ruling offers that class's own choices above. Findings marked "not confirmed" go into a group of their own. Each
+group names each finding it holds in a line of its own, and every finding stays in its saved file: a review agent's in
+the form `skills/implement/dispatch.md`, "Report delivery", sets; a by-catch the implementer lists in its report. None
+is dropped.
 
 **Someone else's PR** (`/pr-review`) has no implementer: every finding, `pre-existing` included, is a task on the user's
 list, and a `pre-existing` finding's comment asks the contributor whether they fix it in their PR.

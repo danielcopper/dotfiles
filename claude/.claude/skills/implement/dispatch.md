@@ -45,8 +45,8 @@ Start the agents [`~/.claude/review-agents.md`](../../review-agents.md) names fo
 - `prose-reviewer` — the worktree path and the brief file path
 - a specialist — the change's intent in one or two sentences
 
-Pass review findings and scope to every agent **unfiltered** — a dispatch that pre-judges ("don't flag X", "treat Y as minor") corrupts the review. The agents decide severity; the user decides what happens to every finding on their list.
+Give every agent the scope and the earlier findings without judging them first — a dispatch that pre-judges ("don't flag X", "treat Y as minor") corrupts the review. The agents decide severity and the user decides what happens to every finding on their list; the lead checks only whether a finding's facts hold, before it goes to a fix round (`review-agents.md`, "Routing the findings").
 
 ## Fix dispatch
 
-Whenever the routing in `review-agents.md` sends findings to the implementer — small by-catch and the user's fix-now rulings included, after an Approved verdict too, and where no `reviewer` ran — dispatch the implementer again (same brief) with the paths of the saved review files and the saved report, the findings in them it is to fix (the fix-round task names them), and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report. Then review the delta as a fix round, per `review-agents.md`, "Fix rounds".
+Whenever the routing in `review-agents.md` sends findings to the implementer, after the check of facts it sets — small by-catch and the user's fix-now rulings included, after an Approved verdict too, and where no `reviewer` ran — dispatch the implementer again (same brief) with the paths of the saved review files and the saved report, the findings in them it is to fix (the fix-round task names them), and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report. Then review the delta as a fix round, per `review-agents.md`, "Fix rounds".
