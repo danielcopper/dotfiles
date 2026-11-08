@@ -116,7 +116,7 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 | **implementer** | Opus  | Builds exactly the brief, asks before guessing, escalates via `DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT`, commits in its worktree, never pushes |
 | **reviewer**    | Opus  | Fresh-context, read-only. Spec compliance first, then quality; confidence-scored findings, hard `Approved / Needs fixes` verdict |
 | **architecture-reviewer** | Opus | Read-only fit review against the tree at head: existing helpers to reuse, logic or facts duplicated elsewhere in code, sites still doing the behaviour a decision replaced, sibling patterns and written architecture rules, the same behaviour with less code |
-| **prose-reviewer** | Opus | Read-only prose review: every sentence the diff writes, and the comments already in the units it touches, judged for whether it is true at head and whether it belongs; corrects, moves or removes prose, never asks for more |
+| **prose-reviewer** | Opus | Read-only prose review: every sentence the diff writes, and in a change's first review the comments already in the units it touches, judged for whether it is true at head and whether it belongs; corrects, moves or removes prose, never asks for more |
 
 Which of them run on a change, and which `pr-review-toolkit` specialists beside them, is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
 

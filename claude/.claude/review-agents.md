@@ -21,7 +21,7 @@ message, several `Agent` calls. The table alone decides; there are no size tiers
 |---|---|---|
 | `reviewer` | code changed | does the diff deliver what the spec asks and a PR claims; correctness; project-guideline violations |
 | `architecture-reviewer` | production code changed | does it fit the tree: existing helpers reused, logic and facts in code kept in one home, sibling patterns and written architecture rules followed, the same behaviour with less code, no site left doing the old behaviour |
-| `prose-reviewer` | prose changed, or production code changed | is every sentence the diff writes true at head, and does it belong; are the comments already in the units it touches still true and still needed |
+| `prose-reviewer` | prose changed, or production code changed | is every sentence the diff writes true at head, and does it belong; in a change's first review, are the comments already in the units it touches still true and still needed |
 | `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | are new tests pinning the claimed behaviour, or vacuous? |
 | `pr-review-toolkit:silent-failure-hunter` | error handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches added in the diff) | swallowed exceptions, silent fallbacks, missing logs |
 | `pr-review-toolkit:type-design-analyzer` | new types added or existing types' shapes changed (records, classes, interfaces, type aliases) | encapsulation, invariants, useful vs anaemic types |

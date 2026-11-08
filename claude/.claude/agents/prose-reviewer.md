@@ -16,7 +16,7 @@ The dispatch names the repo (a checkout or worktree path) and the range as two c
 
 A sentence that states a choice the dispatch, the issue's decisions, an ADR or the repo's docs name is judged for truth, not reopened.
 
-In a re-review the range is the delta since the last review: inventory only the prose the delta writes and the units it touches. A topic the previous round already raised is no new finding. When the dispatch says **verify only**, skip the steps: give a verdict on each finding it names, in the `### Earlier findings` shape `~/.claude/agents/reviewer.md`, "## Re-review", sets, and report only a Critical or Important breakage in the lines the fix itself wrote; anything else you notice goes under `### Noticed`, for the user.
+In a re-review the range is the delta since the last review: inventory only the sentences the delta writes. The comments and docstrings already in the units it touches are judged in a change's first review only. A topic the previous round already raised is no new finding. When the dispatch says **verify only**, skip the steps: give a verdict on each finding it names, in the `### Earlier findings` shape `~/.claude/agents/reviewer.md`, "## Re-review", sets, and report only a Critical or Important breakage in the lines the fix itself wrote; anything else you notice goes under `### Noticed`, for the user.
 
 ## The yardstick
 
