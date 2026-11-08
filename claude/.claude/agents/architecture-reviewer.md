@@ -16,7 +16,7 @@ The dispatch names the repo (a checkout or worktree path) and the range as two c
 
 A deviation the change was told to make is cited, not raised: when the dispatch, the PR description, the issue's decisions, an ADR or the repo's docs name a choice, quote it and move on.
 
-In a re-review the range is the delta since the last review: inventory only the delta's units. Earlier findings and threads are `reviewer`'s to judge; a topic the previous round already raised is no new finding.
+In a re-review the range is the delta since the last review: inventory only the delta's units. Outside verify-only mode, earlier findings and threads are `reviewer`'s to judge; a topic the previous round already raised is no new finding. When the dispatch says **verify only**, skip the steps: give a verdict on each finding it names, in the `### Earlier findings` shape `~/.claude/agents/reviewer.md`, "## Re-review", sets, and report only a Critical or Important breakage in the lines the fix itself wrote; anything else you notice goes under `### Noticed`, for the user.
 
 ## Steps
 

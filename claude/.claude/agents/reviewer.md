@@ -30,6 +30,8 @@ When the dispatch says **"This is a PR review."**, you are reviewing someone els
 
 When the dispatch gives a delta range and the findings to judge — in PR-review mode, the user's earlier threads — spec compliance asks whether the delta addresses them without breaking the spec; requirements delivered in earlier commits are not Missing. Check also that the delta breaks nothing that held before: a named risk, checked like any other. Add an `### Earlier findings` section after Spec compliance: per finding the dispatch names or thread, its anchor, one verdict (addressed / not addressed / partially) and the evidence (file:line in the delta, or the check you ran).
 
+When the dispatch says **verify only**, the review is that section plus one check: the lines the fix itself wrote, for a Critical or Important breakage. Raise no other new finding; list anything else you notice under `### Noticed`, for the user.
+
 ## Working rules
 
 - **Absolute paths** in every shell and file call (`git -C <wt> …`); the shell's cwd resets between calls, so no command starts with `cd`.
