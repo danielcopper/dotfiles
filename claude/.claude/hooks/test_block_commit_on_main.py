@@ -62,7 +62,7 @@ class CommitDirs(unittest.TestCase):
 
 
 class TextIsNotACommand(unittest.TestCase):
-    """Quoted text and heredoc bodies are data: a git write named there runs nowhere."""
+    """Quoted text, heredoc bodies and comments are data, unless something runs them."""
 
     def test_double_quoted_text_is_not_a_write(self):
         command = 'gh issue create --title x --body "Run git rebase onto main first"'
@@ -150,8 +150,8 @@ class TheRunnerIsTheCommandWord(unittest.TestCase):
 
     def test_a_runner_behind_a_prefix_or_in_quotes_is_still_read(self):
         cases = {
-            "sudo -u root bash -c 'git commit -m x'": [("/cwd", "commit")],
-            "env -u X bash -c 'git commit -m x'": [("/cwd", "commit")],
+            "sudo -E bash -c 'git commit -m x'": [("/cwd", "commit")],
+            "env -i bash -c 'git commit -m x'": [("/cwd", "commit")],
             "command eval 'git rebase main'": [("/cwd", "rebase")],
             "nohup sh -c 'git revert HEAD'": [("/cwd", "revert")],
             "time builtin eval 'git cherry-pick abc'": [("/cwd", "cherry-pick")],
@@ -174,7 +174,7 @@ class TheRunnerIsTheCommandWord(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
 
-    def test_a_script_that_cannot_be_told_is_judged_a_write_here(self):
+    def test_a_script_that_cannot_be_told_is_reported_unread_here(self):
         for command in ("cd /two && bash -c", 'cd /two && bash -c "$CMD"', 'cd /two && eval "$(cat cmd)"'):
             with self.subTest(command=command):
                 self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", guard.UNREAD)])
@@ -182,6 +182,9 @@ class TheRunnerIsTheCommandWord(unittest.TestCase):
     def test_a_script_held_in_a_known_variable_is_read(self):
         command = "CMD='git rebase main'; bash -c \"$CMD\""
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "rebase")])
+
+    def test_eval_as_an_argument_runs_nothing(self):
+        self.assertEqual(guard.commit_dirs("echo eval cd /two; git commit -m x", "/cwd"), [("/cwd", "commit")])
 
     def test_an_empty_eval_finds_nothing(self):
         for command in ("eval", 'eval ""'):
@@ -203,17 +206,49 @@ class EvalRunsInTheSameShell(unittest.TestCase):
         command = "(eval 'cd /two'); git commit -m x"
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
 
-
-class NestingLimit(unittest.TestCase):
-    """Strings run inside strings are read to a fixed depth; past it the line is unreadable."""
-
-    def test_strings_nested_past_the_limit_are_unreadable(self):
-        with self.assertRaises(guard.Unreadable):
-            guard.commit_dirs("eval " * (guard.MAX_DEPTH + 2) + "git commit -m x", "/cwd")
-
-    def test_strings_nested_within_the_limit_are_read(self):
-        command = "eval " * (guard.MAX_DEPTH - 1) + "git commit -m x"
+    def test_a_subshell_inside_eval_stays_a_subshell(self):
+        command = 'eval "(cd /two)"; git commit -m x'
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_evals_nested_deep_are_still_read(self):
+        command = "eval " * 600 + "git commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+
+class ScriptsOnStdin(unittest.TestCase):
+    """A shell with no `-c` string runs what reaches its stdin."""
+
+    def test_a_heredoc_a_shell_reads_is_its_script(self):
+        cases = {
+            "bash <<'EOF'\ngit rebase main\nEOF": [("/cwd", "rebase")],
+            "bash <<EOF\ncd /two && git commit -m x\nEOF": [("/two", "commit")],
+            "sh -s <<-'EOF'\n\tgit revert HEAD\nEOF": [("/cwd", "revert")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_the_script_keeps_its_own_scope(self):
+        command = "bash <<'EOF'\ncd /two\nEOF\ngit commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_a_here_string_a_shell_reads_is_its_script(self):
+        self.assertEqual(guard.commit_dirs("bash <<< 'git commit -m x'", "/cwd"), [("/cwd", "commit")])
+
+    def test_a_c_string_leaves_the_heredoc_as_input(self):
+        command = "bash -c 'cat' <<'EOF'\ngit commit -m x\nEOF"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+    def test_a_shell_fed_by_a_pipe_or_a_file_is_reported_unread(self):
+        cases = {
+            "echo 'git commit -m x' | bash": [("/cwd", guard.UNREAD)],
+            "cd /two && cat run.sh | sh -s": [("/two", guard.UNREAD)],
+            "bash < run.sh # git commit": [("/cwd", guard.UNREAD)],
+            "bash <run.sh # git commit": [("/cwd", guard.UNREAD)],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
 
 
 class LeadingAssignments(unittest.TestCase):
@@ -290,7 +325,7 @@ class ReaderEdges(unittest.TestCase):
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/a", "commit")])
 
 
-    def test_a_substitution_inside_them_is_listed_once(self):
+    def test_a_substitution_inside_them_is_judged(self):
         command = "(($(git commit -m x)) && true)"
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
 
@@ -311,14 +346,44 @@ class FailClosed(unittest.TestCase):
 
     def test_nesting_too_deep_to_read_is_denied(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for command in ("$(" * 3000 + "git commit -m x" + ")" * 3000, "eval " * 600 + "git commit -m x"):
-                with self.subTest(command=command[:20]):
-                    decision = json.loads(self.run_hook(command, tmp))["hookSpecificOutput"]
-                    self.assertEqual(decision["permissionDecision"], "deny")
+            command = "$(" * 3000 + "git commit -m x" + ")" * 3000
+            decision = json.loads(self.run_hook(command, tmp))["hookSpecificOutput"]
+            self.assertEqual(decision["permissionDecision"], "deny")
 
     def test_a_readable_line_outside_a_repository_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(self.run_hook("git commit -m x", tmp), "")
+
+
+class DenyReasons(unittest.TestCase):
+    """What the refusal says, in a repository on main that the exemption list does not hold."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.join(self.tmp.name, "repo")
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def reason(self, command: str) -> str:
+        done = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("block_commit_on_main.py"))],
+            input=json.dumps({"tool_input": {"command": command}, "cwd": self.repo}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return json.loads(done.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_a_script_not_on_the_line_is_named_as_unknown(self):
+        reason = self.reason('bash -c "$CMD" # git commit')
+        self.assertIn("runs a script that is not on the line", reason)
+        self.assertIn("is unknown", reason)
+
+    def test_a_real_write_is_named_before_a_script_not_on_the_line(self):
+        reason = self.reason('eval "$(ssh-agent -s)" && git commit -m x')
+        self.assertTrue(reason.startswith("This commit writes to protected branch 'main'"), reason)
 
 
 class RepoRoot(unittest.TestCase):

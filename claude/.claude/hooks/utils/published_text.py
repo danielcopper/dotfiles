@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """The text a Bash command would publish through gh or az, for the PreToolUse
 hooks that judge it (`block_ai_attribution.py`, `lint_published_markdown.py`).
+Its shell reader (`parse_commands`, `expanded_commands`) also serves
+`block_commit_on_main.py`.
 
 This module says what text is published, not what is wrong with it: each hook
 brings its own rules. `publishing_sources` answers, as `(where, text)` pairs;
@@ -57,8 +59,8 @@ gh … -F -`, `gh … -F - < body.md`), and a body put together by any other
 reader (`$(sed … file)`, `$(head file)`) — those are skipped, not guessed at; a
 `cat` behind a prefix that takes options of its own (`env -i cat`,
 `sudo -u X cat`, `nice -n 5 cat`, `timeout 5 cat`); a `$(cat …)` or backtick
-`cat` inside an unquoted heredoc body, which the shell expands and this module
-does not; a relative path after `cd -` or a `cd` to a `$`/backtick path, which
+`cat` inside an unquoted heredoc body, which the shell expands and
+`publishing_sources` does not read; a relative path after `cd -` or a `cd` to a `$`/backtick path, which
 resolves against the call's working directory; text past `MAX_READ` in a file;
 a `gh api` call hidden inside a `bash -c` or `eval` string; with `pieces`, the
 literal text of a `--body` value that also holds `$(` or a backtick, and text a
@@ -146,7 +148,8 @@ _DELIMITER_END = " \t\n;&|()<>"
 class SimpleCommand:
     """One simple command: its words as written (quotes kept), where each word
     starts in the command string, the bodies of its heredocs, whether the shell
-    expands each body (its delimiter is unquoted), and its group.
+    expands each body (its delimiter is unquoted), whether its stdin is the
+    previous command's output (`a | b`, `a |& b`), and its group.
 
     `group` names the subshell the command runs in. `( … )`, `$( … )` and
     backticks each open a new group inside the enclosing one, so a `cd` reaches
@@ -157,6 +160,7 @@ class SimpleCommand:
     starts: list[int] = field(default_factory=list)
     heredocs: list[str] = field(default_factory=list)
     heredoc_expands: list[bool] = field(default_factory=list)
+    piped: bool = False
     group: tuple[int, ...] = ()
 
 
@@ -232,9 +236,11 @@ class _Reader:
 
         def finish_command() -> None:
             nonlocal current
+            # A pipe stays open across the blanks and `&` of `|&` behind it.
+            piped = current.piped and not current.words
             if current.words:
                 self.out.append(current)
-            current = SimpleCommand(group=groups[-1])
+            current = SimpleCommand(group=groups[-1], piped=piped)
 
         while i < n:
             char = text[i]
@@ -273,6 +279,8 @@ class _Reader:
                     groups.append(self._new_group(groups[-1]))
                 elif char == ")" and len(groups) > 1:
                     _ = groups.pop()
+                elif char == "|" and not text.startswith("||", i) and text[i - 1 : i] != "|":
+                    current.piped = True
                 current.group = groups[-1]
                 i += 1
                 continue
@@ -339,12 +347,10 @@ class _Reader:
 
         None when the parentheses close apart (`((cd x) && y)`): the shell then
         reads them as subshells, and so does the caller. Substitutions inside
-        still run; whatever they added is taken back on None, as the caller
-        reads them again.
+        still run, so a None reading lists them a second time.
         """
         text = self.text
         n = len(text)
-        found = len(self.out)
         depth = 2
         while i < n:
             if text[i] == "\\":
@@ -362,7 +368,6 @@ class _Reader:
                 i = substituted
                 continue
             i += 1
-        del self.out[found:]
         return None
 
 
