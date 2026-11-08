@@ -59,6 +59,41 @@ class CommitDirs(unittest.TestCase):
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/one", "commit"), ("/two", "commit")])
 
 
+class TextIsNotACommand(unittest.TestCase):
+    """Quoted text and heredoc bodies are data: a git write named there runs nowhere."""
+
+    def test_double_quoted_text_is_not_a_write(self):
+        command = 'gh issue create --title x --body "Run git rebase onto main first"'
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+    def test_single_quoted_text_is_not_a_write(self):
+        command = "gh pr comment 1 --body 'then git commit the fix; cd /elsewhere'"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+    def test_an_echoed_sentence_is_not_a_write(self):
+        self.assertEqual(guard.commit_dirs('echo "git cherry-pick is not needed"', "/cwd"), [])
+
+    def test_a_heredoc_body_is_not_a_write(self):
+        for opener in ("<<EOF", "<<'EOF'", '<<"EOF"', "<<-EOF"):
+            with self.subTest(opener=opener):
+                command = f"cat {opener} > notes.md\nthen git commit the fix\n\tgit revert it\nEOF"
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+    def test_a_comment_is_not_a_write(self):
+        self.assertEqual(guard.commit_dirs("git status  # then git commit", "/cwd"), [])
+
+    def test_a_commit_after_a_heredoc_is_still_seen(self):
+        command = "cat <<'EOF' > msg.txt\ngit rebase main\nEOF\ncd /two && git commit -F msg.txt"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
+
+    def test_a_command_substitution_inside_double_quotes_runs(self):
+        self.assertEqual(guard.commit_dirs('echo "$(git commit -m x)"', "/cwd"), [("/cwd", "commit")])
+
+    def test_a_cd_inside_a_command_substitution_stays_there(self):
+        command = "D=$(cd /elsewhere && pwd); git commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+
 class RepoRoot(unittest.TestCase):
     """The exemption keys on the repository, so it has to hold from a subdirectory too."""
 
