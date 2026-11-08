@@ -72,7 +72,7 @@ The `reviewer` prompt additionally opens with **"This is a PR review."** so it s
 
 The `reviewer`, `architecture-reviewer` and `prose-reviewer` prompts additionally name the repo path, which their `git -C` needs; `architecture-reviewer` and `prose-reviewer` read the tree at the range's head commit, so no worktree is needed. Those two prompts also pass the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so a deviation the change was told to make is cited instead of raised. The `architecture-reviewer` prompt also names, per decision, the old behaviour it replaces, for its sweep of sites still doing it.
 
-In a re-review, which agents run and on what range follow the fix-round rule in `review-agents.md`. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread, in the shape `reviewer.md`'s "## Re-review" sets.
+In a re-review, which agents run, on what range, whether their prompts say **verify only**, and which agent judges which earlier thread follow the fix-round rule in `review-agents.md`; before fix round 3 `reviewer` judges them all. Each judging agent's prompt carries its threads (anchor, text, replies, thread status) and asks for a verdict per thread, in the shape `reviewer.md`'s "## Re-review" sets.
 
 Do **not** run `code-simplifier` - this skill posts comments on someone else's PR, not refactors our own code. Simplification reaches the PR as findings from `architecture-reviewer`.
 
@@ -89,7 +89,7 @@ Use `TaskCreate` to register one task per finding, ordered by severity: **Critic
 
 A finding tagged `pre-existing` gets a task too, routed as `review-agents.md`, "Routing the findings", says for someone else's PR.
 
-In a re-review, the earlier threads come first: one task per thread with the reviewer's verdict and evidence, ahead of the new findings.
+In a re-review, the earlier threads come first: one task per thread with the verdict and evidence of the agent that judged it, ahead of the new findings.
 
 If you triage a finding as not worth a task (clear duplicate of an existing thread on the PR, obvious agent hallucination), say so explicitly in the summary message - don't silently drop it.
 

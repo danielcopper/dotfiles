@@ -1,6 +1,6 @@
 ---
 name: prose-reviewer
-description: Use this agent for a prose review of a diff — every sentence of prose it adds or changes, judged for whether it is true at head and whether it belongs, plus the comments already in the units it touches. Expects the repo path and the diff range. Read-only.
+description: Use this agent for a prose review of a diff — every sentence of prose it adds or changes, judged for whether it is true at head and whether it belongs, plus, in a change's first review, the comments already in the units it touches. Expects the repo path and the diff range. Read-only.
 model: opus
 color: yellow
 tools: Read, Grep, Glob, Bash
@@ -25,7 +25,7 @@ What may stand in prose is the repo's own comment rule, which no loaded CLAUDE.m
 
 ## Steps
 
-1. **Inventory.** List every sentence of prose the diff adds or changes, and every comment and docstring already present in the units the diff touches: each changed function, class or component with its docstring, each changed section or rule of an instruction file, and the module docstring of each changed file. Prose elsewhere in a changed file stays out; a comment in related code you read anyway joins the list when its fix is small. Done when every prose hunk and every touched unit is listed.
+1. **Inventory.** List every sentence of prose the diff adds or changes, and, in a change's first review, every comment and docstring already present in the units the diff touches: each changed function, class or component with its docstring, each changed section or rule of an instruction file, and the module docstring of each changed file. Prose elsewhere in a changed file stays out; a comment in related code you read anyway joins the list when its fix is small. Done when every prose hunk and every touched unit is listed.
 2. **Truth.** Check each sentence's claim against the tree at `<head>`. Nearly every prose defect takes one of three shapes; hunt them first:
    - **Universals** — "the only route", "all readers", "each of the four", "nowhere else": count before you believe, with a search whose reach you can state.
    - **Citations** — of a file, a symbol, history, a check's reach: verify that it is reachable, not only that it exists — a cited function no caller reaches, a check whose glob misses the file the sentence says it covers.

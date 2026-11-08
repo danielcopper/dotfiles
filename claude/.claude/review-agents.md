@@ -63,7 +63,9 @@ From fix round 3 on, a fix round only verifies, and each prompt says **verify on
 finding to judge that is its own to verify and reports any Critical or Important breakage in the lines the fix itself
 wrote. It raises no other new finding; whatever else it notices goes on the user's list.
 
-- `reviewer` — always; it verifies the findings it or a specialist raised.
+- `reviewer` — always; it verifies every finding to judge that `architecture-reviewer` or `prose-reviewer` did not
+  raise: its own, a specialist's, a Fable reviewer's, a by-catch the implementer listed, a fix-now ruling, a PR
+  thread.
 - `architecture-reviewer`, `prose-reviewer` — only when a finding to judge is one it raised; it verifies those.
 - Specialists do not run.
 
