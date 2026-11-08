@@ -135,6 +135,87 @@ class StringsAShellRuns(unittest.TestCase):
                 self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
 
 
+class TheRunnerIsTheCommandWord(unittest.TestCase):
+    """`eval` or a shell runs a string only where it is the command, behind known prefixes."""
+
+    def test_eval_or_a_shell_named_as_an_argument_leaves_the_write_judged(self):
+        cases = {
+            "git commit -m eval": [("/cwd", "commit")],
+            "git rebase main bash -c x": [("/cwd", "rebase")],
+            "git -C /two commit -m sh": [("/two", "commit")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_a_runner_behind_a_prefix_or_in_quotes_is_still_read(self):
+        cases = {
+            "sudo -u root bash -c 'git commit -m x'": [("/cwd", "commit")],
+            "env -u X bash -c 'git commit -m x'": [("/cwd", "commit")],
+            "command eval 'git rebase main'": [("/cwd", "rebase")],
+            "nohup sh -c 'git revert HEAD'": [("/cwd", "revert")],
+            "time builtin eval 'git cherry-pick abc'": [("/cwd", "cherry-pick")],
+            "\"bash\" -c 'git commit -m x'": [("/cwd", "commit")],
+            "'eval' 'git rebase main'": [("/cwd", "rebase")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_shell_options_around_c_are_skipped_to_the_script(self):
+        for command in (
+            "bash -o pipefail -c 'git commit -m x'",
+            "bash -c -o pipefail 'git commit -m x'",
+            "bash -c -l 'git commit -m x'",
+            "bash -c -- 'git commit -m x'",
+            "bash +o posix -c 'git commit -m x'",
+            "bash -ec 'git commit -m x'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_a_script_that_cannot_be_told_is_judged_a_write_here(self):
+        for command in ("cd /two && bash -c", 'cd /two && bash -c "$CMD"', 'cd /two && eval "$(cat cmd)"'):
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", guard.UNREAD)])
+
+    def test_a_script_held_in_a_known_variable_is_read(self):
+        command = "CMD='git rebase main'; bash -c \"$CMD\""
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "rebase")])
+
+    def test_an_empty_eval_finds_nothing(self):
+        for command in ("eval", 'eval ""'):
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+
+class EvalRunsInTheSameShell(unittest.TestCase):
+    """What `eval` runs changes this shell: its `cd` and assignments reach later commands."""
+
+    def test_a_cd_in_eval_moves_the_commands_after_it(self):
+        self.assertEqual(guard.commit_dirs("eval 'cd /two'; git commit -m x", "/cwd"), [("/two", "commit")])
+
+    def test_an_assignment_in_eval_reaches_the_commands_after_it(self):
+        command = 'eval "D=/two"; git -C $D commit -m x'
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
+
+    def test_a_cd_in_eval_inside_a_subshell_stays_in_it(self):
+        command = "(eval 'cd /two'); git commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+
+class NestingLimit(unittest.TestCase):
+    """Strings run inside strings are read to a fixed depth; past it the line is unreadable."""
+
+    def test_strings_nested_past_the_limit_are_unreadable(self):
+        with self.assertRaises(guard.Unreadable):
+            guard.commit_dirs("eval " * (guard.MAX_DEPTH + 2) + "git commit -m x", "/cwd")
+
+    def test_strings_nested_within_the_limit_are_read(self):
+        command = "eval " * (guard.MAX_DEPTH - 1) + "git commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+
 class LeadingAssignments(unittest.TestCase):
     """`NAME=value` before a command is that command's environment, not a line of its own."""
 
@@ -152,6 +233,17 @@ class LeadingAssignments(unittest.TestCase):
     def test_a_prefix_assignment_sets_no_variable_for_later_commands(self):
         command = "D=/two git status; git -C $D commit -m x"
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_prefix_assignments_reach_the_string_a_shell_runs(self):
+        cases = {
+            "D=/two bash -c 'cd $D && git commit -m x'": [("/two", "commit")],
+            "env D=/two sh -c 'git -C $D commit -m x'": [("/two", "commit")],
+            "D=/two bash -c 'git -C $E commit -m x'": [("/cwd", "commit")],
+            "D=/two bash -c 'true'; git -C $D commit -m x": [("/cwd", "commit")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
 
     def test_a_line_of_assignments_sets_every_variable(self):
         command = "A=/one B=/two; git -C $B commit -m x"

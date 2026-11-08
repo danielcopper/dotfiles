@@ -27,20 +27,30 @@ commands of its own subshell: one inside `( ... )`, `$( ... )` or backticks
 does not move the commands after it. A line that names a git write and
 cannot be read (nested too deep, say) is refused outright, in any repository.
 
-The string a `bash`, `sh`, `zsh` or `dash` `-c` runs (also `-lc`, `-ic`),
-and the arguments of `eval`, are read again as a command line of their own,
-starting in the directory of the command that runs them; a `cd` or an
-assignment inside them stays there. Assignments before a command
-(`FOO=1 git commit`) are skipped to reach it and set nothing for later
-commands; a command made only of assignments sets them all.
+Where the command word - after leading assignments and the prefixes `sudo`,
+`env`, `command`, `exec`, `builtin`, `nohup` and `time` - is `eval`, or
+`bash`, `sh`, `zsh` or `dash` with a `-c` among its options (`-lc`, `-ec`,
+`-o pipefail -c`, `-c --`), the string it runs is read again as a command
+line, starting in the directory of the command that runs it. The command's
+own words are judged as well. A shell's string keeps its own scope: a `cd` or
+an assignment in it stays there, and the assignments before the shell (or
+given to `env`) are visible in it. `eval` runs in the same shell, so its `cd`
+and assignments carry on to the commands after it. A string that is not on
+the line - a lone variable nobody assigned, a lone `$(...)`, a `-c` with no
+string - is judged as a write where it would run. Strings nested deeper
+than `MAX_DEPTH` make the line unreadable, which is refused. Assignments
+before a command (`FOO=1 git commit`) set nothing for later commands; a
+command made only of assignments sets them all. A `cd` or `-C` operand that
+stays unresolved, inside a string or not, is judged in the current
+directory.
 
 What it cannot judge: a write inside a string any other program runs
 (`su -c "..."`, `python -c "..."`, `ssh host "..."`), because that string is
-quoted text here; a shell's `-c` behind an option that takes a value
-(`bash -o pipefail -c "..."`); and a `-c` string written as `$'...'`, whose
-escapes are not decoded. Nor does it tell a command from an argument:
-an unquoted mention (`echo git commit`, `echo bash -c "git commit"`) still
-counts.
+quoted text here; `eval` or a shell behind any other prefix (`nice`,
+`timeout`, `xargs`); a `-c` string written as `$'...'`, whose escapes are not
+decoded; and assignments before `eval`, which its string does not see here.
+Nor does it tell a command from an argument: an unquoted mention
+(`echo git commit`) still counts.
 
 Repos whose work legitimately lives on main are read from the same list the
 git hook uses, so the exemption is stated once.
@@ -51,6 +61,8 @@ import os
 import re
 import subprocess
 import sys
+from collections import deque
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
@@ -86,10 +98,31 @@ CONTROL_FLAG = re.compile(r"--(abort|continue|skip|quit)\b")
 
 ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)=(.*)$", re.DOTALL)
 
-# Shells whose `-c` string is read as a command line of its own, and the
-# short option clusters that carry the `c` (`-c`, `-lc`, `-ic`).
+# Shells whose `-c` string is read as a command line of its own.
 SHELLS = {"bash", "sh", "zsh", "dash"}
-SHORT_OPTIONS = re.compile(r"-[A-Za-z]+$")
+# Shell options that take the next word as their value.
+SHELL_VALUE_OPTIONS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+# Words that run the command after them, and those of their options that take
+# the next word as a value.
+PREFIXES = {
+    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"},
+    "env": {"-u", "-C"},
+    "command": set(),
+    "exec": {"-a"},
+    "builtin": set(),
+    "nohup": set(),
+    "time": {"-f", "-o"},
+}
+
+# How deep strings run inside strings are read (`eval`, `bash -c`, a heredoc's
+# substitutions); past it the line counts as unreadable.
+MAX_DEPTH = 16
+
+# The operation reported for a string a shell or `eval` runs that cannot be
+# read, judged as a write where it runs.
+UNREAD = "string it could not read"
+
 VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 
 
@@ -164,20 +197,72 @@ def git_write(words: list[str]) -> tuple[str, str | None, list[str]] | None:
     return None
 
 
-def string_run(words: list[str]) -> str | None:
-    """The command line a `bash -c` or an `eval` in *words* runs, or None."""
-    for index, word in enumerate(words):
-        if word == "eval":
-            return " ".join(dequote(argument) for argument in words[index + 1 :])
-        if os.path.basename(word) not in SHELLS:
-            continue
-        for offset in range(index + 1, len(words)):
-            option = words[offset]
-            if not option.startswith("-"):
+class Unreadable(Exception):
+    """Strings run inside strings nest deeper than `MAX_DEPTH`."""
+
+
+def command_word(words: list[str]) -> tuple[int, dict[str, str]]:
+    """The index of the command *words* run behind the `PREFIXES`, and the
+    `NAME=value` words `env` gives it."""
+    given: dict[str, str] = {}
+    index = 0
+    while index < len(words):
+        prefix = os.path.basename(dequote(words[index]))
+        if prefix not in PREFIXES:
+            break
+        index += 1
+        while index < len(words):
+            word = words[index]
+            if word == "--":
+                index += 1
                 break
-            if SHORT_OPTIONS.match(option) and "c" in option:
-                return dequote(words[offset + 1]) if offset + 1 < len(words) else None
-    return None
+            if word.startswith("-"):
+                index += 2 if word in PREFIXES[prefix] else 1
+            elif prefix == "env" and (assigned := ASSIGNMENT.match(word)):
+                given[assigned.group(1)] = assigned.group(2)
+                index += 1
+            else:
+                break
+    return index, given
+
+
+def shell_script(words: list[str], index: int) -> tuple[bool, str | None]:
+    """Whether the shell at `words[index]` runs a `-c` string, and the word
+    that holds it (None when no word does)."""
+    runs = False
+    index += 1
+    while index < len(words):
+        word = dequote(words[index])
+        if word in ("--", "-"):
+            index += 1
+            break
+        if word in SHELL_VALUE_OPTIONS:
+            index += 2
+        elif word.startswith("--"):
+            index += 1
+        elif len(word) > 1 and word[0] in "-+":
+            runs = runs or (word[0] == "-" and "c" in word[1:])
+            index += 1
+        else:
+            break
+    if not runs:
+        return False, None
+    return True, words[index] if index < len(words) else None
+
+
+def script_text(text: str, variables: dict) -> str | None:
+    """*text* as the command line it is, or None when it is a single variable
+    nobody assigned or a single command substitution: then what runs is not on
+    the line."""
+    text = text.strip()
+    whole = VARIABLE.fullmatch(text)
+    if whole:
+        return variables.get(whole.group(1) or whole.group(2))
+    if (text.startswith("$(") and text.endswith(")")) or (
+        len(text) > 1 and text.startswith("`") and text.endswith("`")
+    ):
+        return None
+    return text
 
 
 def place(places: dict[tuple[int, ...], str], group: tuple[int, ...], cwd: str) -> str:
@@ -191,29 +276,46 @@ def place(places: dict[tuple[int, ...], str], group: tuple[int, ...], cwd: str) 
 def commit_dirs(
     command: str, cwd: str, variables: dict | None = None
 ) -> list[tuple[str, str]]:
-    """(directory, operation) for every commit this block writes, command by command.
+    """Every distinct (directory, operation) this block writes, in order.
 
     *variables* are the enclosing line's, for a string that line runs; what the
-    string assigns stays inside it. Raises `RecursionError` on nesting too deep
-    to read.
+    string assigns stays inside it. Raises `RecursionError` or `Unreadable` on
+    nesting too deep to read.
     """
-    return judge(parse_commands(command, strict=True), cwd, variables)
+    found: list[tuple[str, str]] = []
+    for target in judge(parse_commands(command, strict=True), cwd, variables, 0):
+        if target not in found:
+            found.append(target)
+    return found
+
+
+def evaluated(line: str, group: tuple[int, ...], tag: int):
+    """The commands an `eval` in *group* runs, placed in that group: they run
+    in the same shell, so a subshell of theirs is a subshell of *group*."""
+    for inner in parse_commands(line, strict=True):
+        nested = inner.group[1:]
+        yield replace(inner, group=group + (-tag,) + nested if nested else group)
 
 
 def judge(
-    commands: list[SimpleCommand], cwd: str, variables: dict | None
+    commands: list[SimpleCommand], cwd: str, variables: dict | None, depth: int
 ) -> list[tuple[str, str]]:
-    """`commit_dirs` over commands already read."""
+    """`commit_dirs` over commands already read, *depth* strings deep."""
     variables = {"HOME": HOME, "PWD": cwd} if variables is None else dict(variables)
     places: dict[tuple[int, ...], str] = {}
     targets = []
-    for simple in commands:
+    queue = deque((simple, depth) for simple in commands)
+    evals = 0
+    while queue:
+        simple, level = queue.popleft()
+        if level > MAX_DEPTH:
+            raise Unreadable
         group = simple.group
         current = place(places, group, cwd)
         for body, expands in zip(simple.heredocs, simple.heredoc_expands):
             if expands:
                 inside = expanded_commands(body, strict=True)
-                targets.extend(judge(inside, current, variables))
+                targets.extend(judge(inside, current, variables, level + 1))
         words = simple.words
         if words[0] in ("export", "local"):
             words = words[1:]
@@ -232,10 +334,31 @@ def judge(
         if words[0] == "cd" and len(words) > 1:
             current = resolve(words[1], current, variables) or current
             places[group] = current
-        inner = string_run(words)
-        if inner is not None:
-            targets.extend(commit_dirs(inner, current, variables))
-            continue
+        start, given = command_word(words)
+        runner = dequote(words[start]) if start < len(words) else ""
+        if runner == "eval":
+            arguments = [dequote(word) for word in words[start + 1 :]]
+            line = script_text(" ".join(arguments), variables)
+            if line is None:
+                targets.append((current, UNREAD))
+            else:
+                evals += 1
+                queue.extendleft(
+                    (inner, level + 1)
+                    for inner in reversed(list(evaluated(line, group, evals)))
+                )
+        elif os.path.basename(runner) in SHELLS:
+            runs, script = shell_script(words, start)
+            if runs:
+                scoped = dict(variables)
+                for name, value in [*assignments, *given.items()]:
+                    scoped[name] = unquote(substitute(value.strip(), variables))
+                line = None if script is None else script_text(dequote(script), scoped)
+                if line is None:
+                    targets.append((current, UNREAD))
+                else:
+                    inner = parse_commands(line, strict=True)
+                    targets.extend(judge(inner, current, scoped, level + 1))
         writing = git_write(words)
         if not writing:
             continue
