@@ -20,10 +20,12 @@ It reads the line with the shell reader the publishing hooks share
 (`utils/published_text.py`), so only what the shell would run counts: a git
 write named inside single or double quotes, in a heredoc body or in a
 comment is text and is not judged, unless a shell's `-c` or `eval` runs that
-text (below). A command substitution is run by the
-shell even inside double quotes (`"$(git commit ...)"`), so it counts. A `cd`
-reaches only the commands of its own subshell: one inside `( ... )`, `$( ... )`
-or backticks does not move the commands after it.
+text (below). A command substitution is run by the shell even inside double
+quotes (`"$(git commit ...)"`) and in a heredoc body whose delimiter is not
+quoted (`<<EOF`, not `<<'EOF'`), so there it counts. A `cd` reaches only the
+commands of its own subshell: one inside `( ... )`, `$( ... )` or backticks
+does not move the commands after it. A line that names a git write and
+cannot be read (nested too deep, say) is refused outright, in any repository.
 
 The string a `bash`, `sh`, `zsh` or `dash` `-c` runs (also `-lc`, `-ic`),
 and the arguments of `eval`, are read again as a command line of their own,
@@ -34,8 +36,9 @@ commands; a command made only of assignments sets them all.
 
 What it cannot judge: a write inside a string any other program runs
 (`su -c "..."`, `python -c "..."`, `ssh host "..."`), because that string is
-quoted text here, nor a shell's `-c` behind an option that takes a value
-(`bash -o pipefail -c "..."`). Nor does it tell a command from an argument:
+quoted text here; a shell's `-c` behind an option that takes a value
+(`bash -o pipefail -c "..."`); and a `-c` string written as `$'...'`, whose
+escapes are not decoded. Nor does it tell a command from an argument:
 an unquoted mention (`echo git commit`, `echo bash -c "git commit"`) still
 counts.
 
@@ -51,7 +54,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
-from published_text import dequote, parse_commands  # noqa: E402
+from published_text import (  # noqa: E402
+    SimpleCommand,
+    dequote,
+    expanded_commands,
+    parse_commands,
+)
 
 HOME = os.path.expanduser("~")
 ALLOWLIST = os.path.join(HOME, ".githooks", "commit-on-main-allowed")
@@ -186,14 +194,26 @@ def commit_dirs(
     """(directory, operation) for every commit this block writes, command by command.
 
     *variables* are the enclosing line's, for a string that line runs; what the
-    string assigns stays inside it.
+    string assigns stays inside it. Raises `RecursionError` on nesting too deep
+    to read.
     """
+    return judge(parse_commands(command, strict=True), cwd, variables)
+
+
+def judge(
+    commands: list[SimpleCommand], cwd: str, variables: dict | None
+) -> list[tuple[str, str]]:
+    """`commit_dirs` over commands already read."""
     variables = {"HOME": HOME, "PWD": cwd} if variables is None else dict(variables)
     places: dict[tuple[int, ...], str] = {}
     targets = []
-    for simple in parse_commands(command):
+    for simple in commands:
         group = simple.group
         current = place(places, group, cwd)
+        for body, expands in zip(simple.heredocs, simple.heredoc_expands):
+            if expands:
+                inside = expanded_commands(body, strict=True)
+                targets.extend(judge(inside, current, variables))
         words = simple.words
         if words[0] in ("export", "local"):
             words = words[1:]
@@ -227,35 +247,50 @@ def commit_dirs(
     return targets
 
 
+def deny(reason: str) -> None:
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
         return 0
     command = (data.get("tool_input") or {}).get("command") or ""
-    if not GIT_COMMIT_RE.search(command):
+    named = GIT_COMMIT_RE.search(command)
+    if not named:
+        return 0
+
+    try:
+        targets = commit_dirs(command, data.get("cwd") or ".")
+    except Exception as error:  # A write that could not be read is refused.
+        deny(
+            f"This command names a git {named.group(1)} and could not be read "
+            f"({type(error).__name__}), so where it writes is unknown. "
+            "Split it into simpler commands."
+        )
         return 0
 
     exempt = allowed_repos()
-    for directory, operation in commit_dirs(command, data.get("cwd") or "."):
+    for directory, operation in targets:
         if repo_root(directory) in exempt:
             continue
         branch = _git(directory, "branch", "--show-current")
         if branch is None or not PROTECTED.match(branch):
             continue
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": (
-                            f"This {operation} writes to protected branch '{branch}' "
-                            f"in {directory}. Work on a worktree branch instead."
-                        ),
-                    }
-                }
-            )
+        deny(
+            f"This {operation} writes to protected branch '{branch}' "
+            f"in {directory}. Work on a worktree branch instead."
         )
         return 0
     return 0

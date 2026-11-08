@@ -5,8 +5,10 @@ Run: python3 claude/.claude/hooks/test_block_commit_on_main.py
 """
 
 import importlib.util
+import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -154,6 +156,77 @@ class LeadingAssignments(unittest.TestCase):
     def test_a_line_of_assignments_sets_every_variable(self):
         command = "A=/one B=/two; git -C $B commit -m x"
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
+
+
+class HeredocExpansion(unittest.TestCase):
+    """The shell expands `$(…)` and backticks in a heredoc body unless its delimiter is quoted."""
+
+    def test_an_unquoted_heredoc_runs_its_substitutions(self):
+        cases = {
+            "cat <<EOF\n$(git rebase main)\nEOF": [("/cwd", "rebase")],
+            "cat <<-EOF\n\t`git commit -m x`\nEOF": [("/cwd", "commit")],
+            "cd /two && cat <<EOF > f\nsee $(git revert HEAD) here\nEOF": [("/two", "revert")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_a_quoted_heredoc_keeps_its_substitutions_as_text(self):
+        for opener in ("<<'EOF'", '<<"EOF"', "<<\\EOF", '<<E"O"F'):
+            with self.subTest(opener=opener):
+                command = f"cat {opener}\n$(git rebase main) and `git commit -m x`\nEOF"
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+
+class ReaderEdges(unittest.TestCase):
+    """Shell forms where a looser reading would hide the command after them."""
+
+    def test_an_ansi_c_string_ends_where_the_shell_ends_it(self):
+        command = "echo $'it\\'s' ; git commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_a_comment_inside_backticks_ends_at_the_backtick(self):
+        command = "echo `true # note` ; git commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_a_shift_in_arithmetic_is_not_a_heredoc(self):
+        command = "(( n = 1 << 2 ))\ngit commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_double_parentheses_that_are_no_arithmetic_are_read_as_commands(self):
+        command = "((git -C /a commit -m x) && true)"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/a", "commit")])
+
+
+    def test_a_substitution_inside_them_is_listed_once(self):
+        command = "(($(git commit -m x)) && true)"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+
+class FailClosed(unittest.TestCase):
+    """A line that names a git write and cannot be read is refused, wherever it runs."""
+
+    def run_hook(self, command: str, cwd: str) -> str:
+        done = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("block_commit_on_main.py"))],
+            input=json.dumps({"tool_input": {"command": command}, "cwd": cwd}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout
+
+    def test_nesting_too_deep_to_read_is_denied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for command in ("$(" * 3000 + "git commit -m x" + ")" * 3000, "eval " * 600 + "git commit -m x"):
+                with self.subTest(command=command[:20]):
+                    decision = json.loads(self.run_hook(command, tmp))["hookSpecificOutput"]
+                    self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_a_readable_line_outside_a_repository_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.run_hook("git commit -m x", tmp), "")
 
 
 class RepoRoot(unittest.TestCase):

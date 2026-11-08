@@ -145,7 +145,8 @@ _DELIMITER_END = " \t\n;&|()<>"
 @dataclass
 class SimpleCommand:
     """One simple command: its words as written (quotes kept), where each word
-    starts in the command string, the bodies of its heredocs, and its group.
+    starts in the command string, the bodies of its heredocs, whether the shell
+    expands each body (its delimiter is unquoted), and its group.
 
     `group` names the subshell the command runs in. `( … )`, `$( … )` and
     backticks each open a new group inside the enclosing one, so a `cd` reaches
@@ -155,26 +156,45 @@ class SimpleCommand:
     words: list[str] = field(default_factory=list)
     starts: list[int] = field(default_factory=list)
     heredocs: list[str] = field(default_factory=list)
+    heredoc_expands: list[bool] = field(default_factory=list)
     group: tuple[int, ...] = ()
 
 
-def parse_commands(command: str) -> list[SimpleCommand]:
+def parse_commands(command: str, strict: bool = False) -> list[SimpleCommand]:
     """The simple commands in `command`, those inside `$(…)` and backticks included.
 
     A small shell reader rather than `shlex`: an apostrophe in a heredoc body —
     "it's", "doesn't" — makes `shlex` give up on the whole command, and a PR body
     is exactly where such text lives. It knows quotes, escapes, line
-    continuations, `$(…)`, backticks, comments, heredocs and the separators `;`,
-    `&`, `|`, `&&`, `||`, parentheses and newlines. A command substitution comes
-    before the command it sits in. Never raises: input it cannot follow ends up
-    in fewer, longer words, and nesting too deep to follow ends the reading with
-    the commands found so far.
+    continuations, ANSI-C `$'…'` strings, `$(…)`, backticks, an arithmetic
+    `((…))` command (where `<<` is a shift), comments, heredocs and the
+    separators `;`, `&`, `|`, `&&`, `||`, parentheses and newlines. A command
+    substitution comes before the command it sits in. Input it cannot follow
+    ends up in fewer, longer words. Nesting too deep to follow ends the reading
+    with the commands found so far, or, with `strict`, raises `RecursionError`.
     """
     reader = _Reader(command)
     try:
         _ = reader.commands(0, None, (0,))
     except RecursionError:
-        pass
+        if strict:
+            raise
+    return reader.out
+
+
+def expanded_commands(body: str, strict: bool = False) -> list[SimpleCommand]:
+    """The commands in the `$(…)` and backticks of `body`, which the shell runs
+    while it expands an unquoted heredoc body (`SimpleCommand.heredoc_expands`).
+
+    Quotes in the body are literal text, as the shell reads them there. Nesting
+    as `parse_commands`, `strict` included.
+    """
+    reader = _Reader(body)
+    try:
+        _ = reader.double_quoted(0, (0,), closer=None)
+    except RecursionError:
+        if strict:
+            raise
     return reader.out
 
 
@@ -200,7 +220,7 @@ class _Reader:
         n = len(text)
         groups = [group]
         current = SimpleCommand(group=group)
-        pending: list[tuple[str, bool, SimpleCommand]] = []
+        pending: list[tuple[str, bool, bool, SimpleCommand]] = []
         word_start: int | None = None
 
         def finish_word(end: int) -> None:
@@ -231,9 +251,15 @@ class _Reader:
                 i += 2  # a line continuation between words
                 continue
             if char == "#" and word_start is None:
-                while i < n and text[i] != "\n":
+                # Inside backticks the closing backtick ends the comment too.
+                while i < n and text[i] != "\n" and not (closer == "`" and text[i] == "`"):
                     i += 1
                 continue
+            if text.startswith("((", i) and word_start is None:
+                end = self._arithmetic(i + 2, groups[-1])
+                if end is not None:
+                    i = end
+                    continue
             if char == closer and (closer == "`" or len(groups) == 1):
                 finish_word(i)
                 finish_command()
@@ -258,9 +284,9 @@ class _Reader:
                 continue
             elif text.startswith("<<", i):
                 finish_word(i)
-                i, delimiter, strip_tabs = _heredoc_operator(text, i + 2)
+                i, delimiter, strip_tabs, expands = _heredoc_operator(text, i + 2)
                 if delimiter:
-                    pending.append((delimiter, strip_tabs, current))
+                    pending.append((delimiter, strip_tabs, expands, current))
                 continue
             if word_start is None:
                 word_start = i
@@ -275,36 +301,88 @@ class _Reader:
         char = text[i]
         if char == "\\":
             return i + 2
+        if text.startswith("$'", i):
+            return _ansi_c_end(text, i + 2)
         if char == "'":
             close = text.find("'", i + 1)
             return len(text) if close < 0 else close + 1
         if char == '"':
-            return self._double_quoted(i + 1, group)
-        if char == "`":
-            return self.commands(i + 1, "`", self._new_group(group))
-        if text.startswith("$(", i):
-            return self.commands(i + 2, ")", self._new_group(group))
-        return i + 1
+            return self.double_quoted(i + 1, group)
+        substituted = self._substitution(i, group)
+        return i + 1 if substituted is None else substituted
 
-    def _double_quoted(self, i: int, group: tuple[int, ...]) -> int:
+    def double_quoted(self, i: int, group: tuple[int, ...], closer: str | None = '"') -> int:
+        """Step over text the shell expands but does not split, up to `closer` (the end for None)."""
         text = self.text
         n = len(text)
         while i < n:
             if text[i] == "\\":
                 i += 2
-            elif text[i] == '"':
+            elif closer is not None and text[i] == closer:
                 return i + 1
-            elif text[i] == "`":
-                i = self.commands(i + 1, "`", self._new_group(group))
-            elif text.startswith("$(", i):
-                i = self.commands(i + 2, ")", self._new_group(group))
             else:
-                i += 1
+                substituted = self._substitution(i, group)
+                i = i + 1 if substituted is None else substituted
         return n
 
+    def _substitution(self, i: int, group: tuple[int, ...]) -> int | None:
+        """Step over a `$(…)` or backtick part at `text[i]`; None when there is none."""
+        text = self.text
+        if text.startswith("$(", i):
+            return self.commands(i + 2, ")", self._new_group(group))
+        if text[i] == "`":
+            return self.commands(i + 1, "`", self._new_group(group))
+        return None
 
-def _heredoc_operator(text: str, i: int) -> tuple[int, str, bool]:
-    """Read what follows `<<`: return the index after it, the delimiter, and whether `<<-` strips tabs."""
+    def _arithmetic(self, i: int, group: tuple[int, ...]) -> int | None:
+        """Step over arithmetic from just inside `((` to just past `))`.
+
+        None when the parentheses close apart (`((cd x) && y)`): the shell then
+        reads them as subshells, and so does the caller. Substitutions inside
+        still run; whatever they added is taken back on None, as the caller
+        reads them again.
+        """
+        text = self.text
+        n = len(text)
+        found = len(self.out)
+        depth = 2
+        while i < n:
+            if text[i] == "\\":
+                i += 2
+                continue
+            if text[i] == ")":
+                depth -= 1
+                if depth == 1:
+                    if text.startswith(")", i + 1):
+                        return i + 2
+                    break
+            elif text[i] == "(":
+                depth += 1
+            elif (substituted := self._substitution(i, group)) is not None:
+                i = substituted
+                continue
+            i += 1
+        del self.out[found:]
+        return None
+
+
+def _ansi_c_end(text: str, i: int) -> int:
+    """The index past the `'` that closes a `$'…'` string whose text starts at `text[i]`."""
+    n = len(text)
+    while i < n:
+        if text[i] == "\\":
+            i += 2
+        elif text[i] == "'":
+            return i + 1
+        else:
+            i += 1
+    return n
+
+
+def _heredoc_operator(text: str, i: int) -> tuple[int, str, bool, bool]:
+    """Read what follows `<<`: return the index after it, the delimiter, whether
+    `<<-` strips tabs, and whether the body is expanded (no part of the delimiter
+    quoted)."""
     n = len(text)
     strip_tabs = text.startswith("-", i)
     if strip_tabs:
@@ -320,14 +398,16 @@ def _heredoc_operator(text: str, i: int) -> tuple[int, str, bool]:
             i += 2
         else:
             i += 1
-    delimiter = "".join(ch for ch in text[start:i] if ch not in "'\"\\")
-    return min(i, n), delimiter, strip_tabs
+    written = text[start:i]
+    delimiter = "".join(ch for ch in written if ch not in "'\"\\")
+    expands = not any(ch in "'\"\\" for ch in written)
+    return min(i, n), delimiter, strip_tabs, expands
 
 
-def _read_heredocs(text: str, i: int, pending: list[tuple[str, bool, SimpleCommand]], nested: bool) -> int:
+def _read_heredocs(text: str, i: int, pending: list[tuple[str, bool, bool, SimpleCommand]], nested: bool) -> int:
     """Consume the bodies of `pending` heredocs starting at `text[i]`; return the index after them."""
     n = len(text)
-    for delimiter, strip_tabs, owner in pending:
+    for delimiter, strip_tabs, expands, owner in pending:
         lines: list[str] = []
         while i < n:
             newline = text.find("\n", i)
@@ -344,6 +424,7 @@ def _read_heredocs(text: str, i: int, pending: list[tuple[str, bool, SimpleComma
             lines.append(line)
             i = line_end + 1
         owner.heredocs.append("\n".join(lines))
+        owner.heredoc_expands.append(expands)
     pending.clear()
     return min(i, n)
 
