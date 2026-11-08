@@ -2,8 +2,8 @@
 
 Which review agents a change gets, how a fix round is reviewed, and where each finding goes. The table, the fix rounds,
 the merging of findings and the reading of each specialist's scale hold wherever a review starts: `/implement`,
-`/pr-review`, or a plain session. The routing list, by-catch classes included, is for a change of our own; someone
-else's PR goes by the last paragraph of "Routing the findings".
+`/pr-review`, or a plain session. The routing list, by-catch classes included, and the grouping into tasks are for a
+change of our own; someone else's PR goes by the last paragraph of "Routing the findings".
 
 ## Which agents run
 
@@ -62,7 +62,7 @@ scale, and no dispatch asks it for another; it reads as:
 For `pr-test-analyzer` the rating decides, not the section heading: a finding it lists without one, such as under "Test
 Quality Issues", is Minor.
 
-For a change of our own, each finding is routed:
+Each finding is routed:
 
 - **A Critical or Important finding on the change**, from any agent, goes to the implementer, and a fix round follows.
 - **A Minor finding on the change** goes on the user's list: fix now, later, or drop.
@@ -77,6 +77,11 @@ For a change of our own, each finding is routed:
 A Minor finding ruled fix now, a behaviour change the user said yes to, and a large by-catch ruled fix here go to the
 implementer as an Important finding does.
 
-**Someone else's PR** (`/pr-review`) has no implementer, so the routing list above, by-catch classes included, does not
-hold there: every finding, `pre-existing` included, is a task on the user's list, and a `pre-existing` finding's comment
-asks the contributor whether they fix it in their PR.
+Findings become tasks in groups. The findings that go straight to the implementer are one task per fix round. Plain
+Minor findings go into one task per theme, deduplicated across agents, which the user rules on as a whole (fix now,
+later, or drop) or splits. Large, behaviour-changing and past-cap by-catch each go into groups of their own class, so a
+group's ruling offers that class's own choices above. Each group names every finding it holds in one line, and every finding stays in full in the
+saved review report; none is dropped.
+
+**Someone else's PR** (`/pr-review`) has no implementer: every finding, `pre-existing` included, is a task on the user's
+list, and a `pre-existing` finding's comment asks the contributor whether they fix it in their PR.

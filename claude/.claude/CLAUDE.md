@@ -36,10 +36,10 @@ Name only an agent you will talk to while it works, such as an implementer that 
 ## Task list
 
 - **Keep one as soon as there is more than one task** — in every session, not only for implementation work.
-- **Every open point is a task:** a decision, a question, a review finding (MEDIUM and LOW included — their severity is
-  my call, not the agent's), a follow-up. Ask them one at a time. The list carries the status, so a message that ends
-  the turn asks exactly one question and does not repeat the open points; only without task tools does it close with
-  all of them listed, one phrased as the question.
+- **Every open point is a task:** a decision, a question, a review finding (none is dropped; how findings are grouped
+  into tasks, and which go straight into a fix round, `~/.claude/review-agents.md` says), a follow-up. Ask them one at a
+  time. The list carries the status, so a message that ends the turn asks exactly one question and does not repeat the
+  open points; only without task tools does it close with all of them listed, one phrased as the question.
 - **Keep it current and in working order:** mark a task done the moment it is, update a description when a decision
   lands, order the open ones as they will be worked (next step, queued PRs, findings to discuss, discussions, backlog,
   parked). TaskList orders by ID, so when the order drifts, recreate the open tasks in order with their descriptions.
