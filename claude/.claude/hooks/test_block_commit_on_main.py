@@ -61,302 +61,8 @@ class CommitDirs(unittest.TestCase):
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/one", "commit"), ("/two", "commit")])
 
 
-class TextIsNotACommand(unittest.TestCase):
-    """Quoted text, heredoc bodies and comments are data, unless something runs them."""
-
-    def test_double_quoted_text_is_not_a_write(self):
-        command = 'gh issue create --title x --body "Run git rebase onto main first"'
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-    def test_single_quoted_text_is_not_a_write(self):
-        command = "gh pr comment 1 --body 'then git commit the fix; cd /elsewhere'"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-    def test_an_echoed_sentence_is_not_a_write(self):
-        self.assertEqual(guard.commit_dirs('echo "git cherry-pick is not needed"', "/cwd"), [])
-
-    def test_a_heredoc_body_is_not_a_write(self):
-        for opener in ("<<EOF", "<<'EOF'", '<<"EOF"', "<<-EOF"):
-            with self.subTest(opener=opener):
-                command = f"cat {opener} > notes.md\nthen git commit the fix\n\tgit revert it\nEOF"
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-    def test_a_comment_is_not_a_write(self):
-        self.assertEqual(guard.commit_dirs("git status  # then git commit", "/cwd"), [])
-
-    def test_a_commit_after_a_heredoc_is_still_seen(self):
-        command = "cat <<'EOF' > msg.txt\ngit rebase main\nEOF\ncd /two && git commit -F msg.txt"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
-
-    def test_a_command_substitution_inside_double_quotes_runs(self):
-        self.assertEqual(guard.commit_dirs('echo "$(git commit -m x)"', "/cwd"), [("/cwd", "commit")])
-
-    def test_a_cd_inside_a_command_substitution_stays_there(self):
-        command = "D=$(cd /elsewhere && pwd); git commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-
-class StringsAShellRuns(unittest.TestCase):
-    """The string `bash -c` or `eval` runs is a command line of its own."""
-
-    def test_a_shell_c_string_is_read_as_a_command_line(self):
-        cases = {
-            'bash -c "git rebase main"': [("/cwd", "rebase")],
-            "sh -c 'git commit -m x'": [("/cwd", "commit")],
-            'zsh -c "git revert HEAD"': [("/cwd", "revert")],
-            'dash -c "git cherry-pick abc"': [("/cwd", "cherry-pick")],
-            'bash -lc "git rebase main"': [("/cwd", "rebase")],
-            'bash -ic "git commit -m x"': [("/cwd", "commit")],
-            'bash -l -c "cd /two && git commit -m x"': [("/two", "commit")],
-            'sudo /usr/bin/bash -c "git commit -m x"': [("/cwd", "commit")],
-            "cd /one && bash -c 'git commit -m x'": [("/one", "commit")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_eval_reads_its_arguments_as_a_command_line(self):
-        cases = {
-            'eval "git rebase main"': [("/cwd", "rebase")],
-            "eval 'cd /two && git commit -m x'": [("/two", "commit")],
-            "eval git commit -m x": [("/cwd", "commit")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_a_cd_inside_the_string_stays_there(self):
-        command = 'bash -c "cd /two && make"; git commit -m x'
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_quoted_text_inside_the_string_is_still_text(self):
-        for command in ("bash -c 'echo \"git commit later\"'", "eval 'echo \"git rebase main\"'"):
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-
-class TheRunnerIsTheCommandWord(unittest.TestCase):
-    """`eval` or a shell runs a string only where it is the command, behind known prefixes."""
-
-    def test_eval_or_a_shell_named_as_an_argument_leaves_the_write_judged(self):
-        cases = {
-            "git commit -m eval": [("/cwd", "commit")],
-            "git rebase main bash -c x": [("/cwd", "rebase")],
-            "git -C /two commit -m sh": [("/two", "commit")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_a_runner_behind_a_prefix_or_in_quotes_is_still_read(self):
-        cases = {
-            "sudo -E bash -c 'git commit -m x'": [("/cwd", "commit")],
-            "env -i bash -c 'git commit -m x'": [("/cwd", "commit")],
-            "command eval 'git rebase main'": [("/cwd", "rebase")],
-            "nohup sh -c 'git revert HEAD'": [("/cwd", "revert")],
-            "time builtin eval 'git cherry-pick abc'": [("/cwd", "cherry-pick")],
-            "\"bash\" -c 'git commit -m x'": [("/cwd", "commit")],
-            "'eval' 'git rebase main'": [("/cwd", "rebase")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_shell_options_around_c_are_skipped_to_the_script(self):
-        for command in (
-            "bash -o pipefail -c 'git commit -m x'",
-            "bash -c -o pipefail 'git commit -m x'",
-            "bash -c -l 'git commit -m x'",
-            "bash -c -- 'git commit -m x'",
-            "bash +o posix -c 'git commit -m x'",
-            "bash -ec 'git commit -m x'",
-        ):
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_a_script_that_cannot_be_told_is_reported_unread_here(self):
-        for command in ("cd /two && bash -c", 'cd /two && bash -c "$CMD"', 'cd /two && eval "$(cat cmd)"'):
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", guard.UNREAD)])
-
-    def test_a_script_held_in_a_known_variable_is_read(self):
-        command = "CMD='git rebase main'; bash -c \"$CMD\""
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "rebase")])
-
-    def test_eval_as_an_argument_runs_nothing(self):
-        self.assertEqual(guard.commit_dirs("echo eval cd /two; git commit -m x", "/cwd"), [("/cwd", "commit")])
-
-    def test_an_empty_eval_finds_nothing(self):
-        for command in ("eval", 'eval ""'):
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-
-class EvalRunsInTheSameShell(unittest.TestCase):
-    """What `eval` runs changes this shell: its `cd` and assignments reach later commands."""
-
-    def test_a_cd_in_eval_moves_the_commands_after_it(self):
-        self.assertEqual(guard.commit_dirs("eval 'cd /two'; git commit -m x", "/cwd"), [("/two", "commit")])
-
-    def test_an_assignment_in_eval_reaches_the_commands_after_it(self):
-        command = 'eval "D=/two"; git -C $D commit -m x'
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
-
-    def test_a_cd_in_eval_inside_a_subshell_stays_in_it(self):
-        command = "(eval 'cd /two'); git commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_a_subshell_inside_eval_stays_a_subshell(self):
-        command = 'eval "(cd /two)"; git commit -m x'
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_evals_nested_deep_are_still_read(self):
-        command = "eval " * 600 + "git commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-
-class ScriptsOnStdin(unittest.TestCase):
-    """A shell with no `-c` string runs what reaches its stdin."""
-
-    def test_a_heredoc_a_shell_reads_is_its_script(self):
-        cases = {
-            "bash <<'EOF'\ngit rebase main\nEOF": [("/cwd", "rebase")],
-            "bash <<EOF\ncd /two && git commit -m x\nEOF": [("/two", "commit")],
-            "sh -s <<-'EOF'\n\tgit revert HEAD\nEOF": [("/cwd", "revert")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_the_script_keeps_its_own_scope(self):
-        command = "bash <<'EOF'\ncd /two\nEOF\ngit commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_a_here_string_a_shell_reads_is_its_script(self):
-        self.assertEqual(guard.commit_dirs("bash <<< 'git commit -m x'", "/cwd"), [("/cwd", "commit")])
-
-    def test_a_c_string_leaves_the_heredoc_as_input(self):
-        command = "bash -c 'cat' <<'EOF'\ngit commit -m x\nEOF"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-    def test_a_shell_fed_by_a_pipe_or_a_file_is_reported_unread(self):
-        cases = {
-            "echo 'git commit -m x' | bash": [("/cwd", guard.UNREAD)],
-            "cd /two && cat run.sh | sh -s": [("/two", guard.UNREAD)],
-            "bash < run.sh # git commit": [("/cwd", guard.UNREAD)],
-            "bash <run.sh # git commit": [("/cwd", guard.UNREAD)],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-
-class LeadingAssignments(unittest.TestCase):
-    """`NAME=value` before a command is that command's environment, not a line of its own."""
-
-    def test_leading_assignments_do_not_hide_the_write(self):
-        cases = {
-            "FOO=1 git commit -m x": [("/cwd", "commit")],
-            "GIT_SEQUENCE_EDITOR=true git rebase -i main": [("/cwd", "rebase")],
-            "A=1 B=2 git -C /two revert HEAD": [("/two", "revert")],
-            "env X=1 git commit -m x": [("/cwd", "commit")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_a_prefix_assignment_sets_no_variable_for_later_commands(self):
-        command = "D=/two git status; git -C $D commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_prefix_assignments_reach_the_string_a_shell_runs(self):
-        cases = {
-            "D=/two bash -c 'cd $D && git commit -m x'": [("/two", "commit")],
-            "env D=/two sh -c 'git -C $D commit -m x'": [("/two", "commit")],
-            "D=/two bash -c 'git -C $E commit -m x'": [("/cwd", "commit")],
-            "D=/two bash -c 'true'; git -C $D commit -m x": [("/cwd", "commit")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_a_line_of_assignments_sets_every_variable(self):
-        command = "A=/one B=/two; git -C $B commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
-
-
-class HeredocExpansion(unittest.TestCase):
-    """The shell expands `$(…)` and backticks in a heredoc body unless its delimiter is quoted."""
-
-    def test_an_unquoted_heredoc_runs_its_substitutions(self):
-        cases = {
-            "cat <<EOF\n$(git rebase main)\nEOF": [("/cwd", "rebase")],
-            "cat <<-EOF\n\t`git commit -m x`\nEOF": [("/cwd", "commit")],
-            "cd /two && cat <<EOF > f\nsee $(git revert HEAD) here\nEOF": [("/two", "revert")],
-        }
-        for command, expected in cases.items():
-            with self.subTest(command=command):
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
-
-    def test_a_quoted_heredoc_keeps_its_substitutions_as_text(self):
-        for opener in ("<<'EOF'", '<<"EOF"', "<<\\EOF", '<<E"O"F'):
-            with self.subTest(opener=opener):
-                command = f"cat {opener}\n$(git rebase main) and `git commit -m x`\nEOF"
-                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
-
-
-class ReaderEdges(unittest.TestCase):
-    """Shell forms where a looser reading would hide the command after them."""
-
-    def test_an_ansi_c_string_ends_where_the_shell_ends_it(self):
-        command = "echo $'it\\'s' ; git commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_a_comment_inside_backticks_ends_at_the_backtick(self):
-        command = "echo `true # note` ; git commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_a_shift_in_arithmetic_is_not_a_heredoc(self):
-        command = "(( n = 1 << 2 ))\ngit commit -m x"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-    def test_double_parentheses_that_are_no_arithmetic_are_read_as_commands(self):
-        command = "((git -C /a commit -m x) && true)"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/a", "commit")])
-
-
-    def test_a_substitution_inside_them_is_judged(self):
-        command = "(($(git commit -m x)) && true)"
-        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
-
-
-class FailClosed(unittest.TestCase):
-    """A line that names a git write and cannot be read is refused, wherever it runs."""
-
-    def run_hook(self, command: str, cwd: str) -> str:
-        done = subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("block_commit_on_main.py"))],
-            input=json.dumps({"tool_input": {"command": command}, "cwd": cwd}),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(done.returncode, 0, done.stderr)
-        return done.stdout
-
-    def test_nesting_too_deep_to_read_is_denied(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            command = "$(" * 3000 + "git commit -m x" + ")" * 3000
-            decision = json.loads(self.run_hook(command, tmp))["hookSpecificOutput"]
-            self.assertEqual(decision["permissionDecision"], "deny")
-
-    def test_a_readable_line_outside_a_repository_passes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(self.run_hook("git commit -m x", tmp), "")
-
-
-class DenyReasons(unittest.TestCase):
-    """What the refusal says, in a repository on main that the exemption list does not hold."""
+class OnMain(unittest.TestCase):
+    """The hook as the harness runs it, in a repository on main that no exemption list holds."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -366,24 +72,64 @@ class DenyReasons(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def reason(self, command: str) -> str:
+    def decision(self, command: str) -> str:
         done = subprocess.run(
             [sys.executable, str(Path(__file__).with_name("block_commit_on_main.py"))],
             input=json.dumps({"tool_input": {"command": command}, "cwd": self.repo}),
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
         )
-        return json.loads(done.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertEqual(done.returncode, 0, done.stderr)
+        if not done.stdout:
+            return "allow"
+        return json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"]
 
-    def test_a_script_not_on_the_line_is_named_as_unknown(self):
-        reason = self.reason('bash -c "$CMD" # git commit')
-        self.assertIn("runs a script that is not on the line", reason)
-        self.assertIn("is unknown", reason)
 
-    def test_a_real_write_is_named_before_a_script_not_on_the_line(self):
-        reason = self.reason('eval "$(ssh-agent -s)" && git commit -m x')
-        self.assertTrue(reason.startswith("This commit writes to protected branch 'main'"), reason)
+class TextThatOnlyNamesAWrite(OnMain):
+    """A line whose every mention of a git write is quoted text of gh, az, echo, printf or cat."""
+
+    def test_it_is_let_through(self):
+        for command in (
+            'gh issue create --title x --body "Run git rebase onto main first"',
+            "gh pr comment 1 --body 'then git commit the fix; cd /elsewhere'",
+            'echo "git cherry-pick is not needed"',
+            "printf '%s\\n' 'git revert it'",
+            "cat <<'EOF' > notes.md\nthen git commit the fix\nEOF",
+            "gh pr create --title x --body \"$(cat <<'EOF'\nRun git rebase main first.\nEOF\n)\"",
+            "az repos pr create --description 'git rebase main first'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "allow")
+
+
+class WritesStayRefused(OnMain):
+    """Anything else is judged on its raw text, as before."""
+
+    def test_they_are_denied(self):
+        for command in (
+            "git commit -m x",
+            "git rebase main",
+            "git cherry-pick abc",
+            "git revert HEAD",
+            'bash -c "git rebase main"',
+            'eval "git rebase main"',
+            "bash <<'EOF'\ngit rebase main\nEOF",
+            "echo 'git commit -m x' | bash",
+            'echo "$(git commit -m x)"',
+            "cat <<EOF\n$(git rebase main)\nEOF",
+            'echo "git rebase" ; git commit -m x',
+            'gh issue create --body "x" && git rebase main',
+            "bash -s -- a <<EOF\ngit commit -m x\nEOF",
+            'sudo -u root bash -c "git rebase main"',
+            "X='eval $X'; eval $X; echo \"git commit\"",
+            "echo 'git commit -m x' > run.sh; ./run.sh",
+            "git status # then git commit",
+            "$(" * 3000 + "echo 'git commit -m x'" + ")" * 3000,
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
 
 
 class RepoRoot(unittest.TestCase):

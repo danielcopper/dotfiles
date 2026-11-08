@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """The text a Bash command would publish through gh or az, for the PreToolUse
 hooks that judge it (`block_ai_attribution.py`, `lint_published_markdown.py`).
-Its shell reader (`parse_commands`, `expanded_commands`) also serves
-`block_commit_on_main.py`.
+Its shell reader (`parse_commands`) also serves `block_commit_on_main.py`.
 
 This module says what text is published, not what is wrong with it: each hook
 brings its own rules. `publishing_sources` answers, as `(where, text)` pairs;
@@ -59,8 +58,8 @@ gh … -F -`, `gh … -F - < body.md`), and a body put together by any other
 reader (`$(sed … file)`, `$(head file)`) — those are skipped, not guessed at; a
 `cat` behind a prefix that takes options of its own (`env -i cat`,
 `sudo -u X cat`, `nice -n 5 cat`, `timeout 5 cat`); a `$(cat …)` or backtick
-`cat` inside an unquoted heredoc body, which the shell expands and
-`publishing_sources` does not read; a relative path after `cd -` or a `cd` to a `$`/backtick path, which
+`cat` inside an unquoted heredoc body, which the shell expands and this module
+does not; a relative path after `cd -` or a `cd` to a `$`/backtick path, which
 resolves against the call's working directory; text past `MAX_READ` in a file;
 a `gh api` call hidden inside a `bash -c` or `eval` string; with `pieces`, the
 literal text of a `--body` value that also holds `$(` or a backtick, and text a
@@ -148,8 +147,7 @@ _DELIMITER_END = " \t\n;&|()<>"
 class SimpleCommand:
     """One simple command: its words as written (quotes kept), where each word
     starts in the command string, the bodies of its heredocs, whether the shell
-    expands each body (its delimiter is unquoted), whether its stdin is the
-    previous command's output (`a | b`, `a |& b`), and its group.
+    expands each body (its delimiter is unquoted), and its group.
 
     `group` names the subshell the command runs in. `( … )`, `$( … )` and
     backticks each open a new group inside the enclosing one, so a `cd` reaches
@@ -160,7 +158,6 @@ class SimpleCommand:
     starts: list[int] = field(default_factory=list)
     heredocs: list[str] = field(default_factory=list)
     heredoc_expands: list[bool] = field(default_factory=list)
-    piped: bool = False
     group: tuple[int, ...] = ()
 
 
@@ -180,22 +177,6 @@ def parse_commands(command: str, strict: bool = False) -> list[SimpleCommand]:
     reader = _Reader(command)
     try:
         _ = reader.commands(0, None, (0,))
-    except RecursionError:
-        if strict:
-            raise
-    return reader.out
-
-
-def expanded_commands(body: str, strict: bool = False) -> list[SimpleCommand]:
-    """The commands in the `$(…)` and backticks of `body`, which the shell runs
-    while it expands an unquoted heredoc body (`SimpleCommand.heredoc_expands`).
-
-    Quotes in the body are literal text, as the shell reads them there. Nesting
-    as `parse_commands`, `strict` included.
-    """
-    reader = _Reader(body)
-    try:
-        _ = reader.double_quoted(0, (0,), closer=None)
     except RecursionError:
         if strict:
             raise
@@ -236,11 +217,9 @@ class _Reader:
 
         def finish_command() -> None:
             nonlocal current
-            # A pipe stays open across the blanks and `&` of `|&` behind it.
-            piped = current.piped and not current.words
             if current.words:
                 self.out.append(current)
-            current = SimpleCommand(group=groups[-1], piped=piped)
+            current = SimpleCommand(group=groups[-1])
 
         while i < n:
             char = text[i]
@@ -279,8 +258,6 @@ class _Reader:
                     groups.append(self._new_group(groups[-1]))
                 elif char == ")" and len(groups) > 1:
                     _ = groups.pop()
-                elif char == "|" and not text.startswith("||", i) and text[i - 1 : i] != "|":
-                    current.piped = True
                 current.group = groups[-1]
                 i += 1
                 continue
@@ -315,18 +292,17 @@ class _Reader:
             close = text.find("'", i + 1)
             return len(text) if close < 0 else close + 1
         if char == '"':
-            return self.double_quoted(i + 1, group)
+            return self._double_quoted(i + 1, group)
         substituted = self._substitution(i, group)
         return i + 1 if substituted is None else substituted
 
-    def double_quoted(self, i: int, group: tuple[int, ...], closer: str | None = '"') -> int:
-        """Step over text the shell expands but does not split, up to `closer` (the end for None)."""
+    def _double_quoted(self, i: int, group: tuple[int, ...]) -> int:
         text = self.text
         n = len(text)
         while i < n:
             if text[i] == "\\":
                 i += 2
-            elif closer is not None and text[i] == closer:
+            elif text[i] == '"':
                 return i + 1
             else:
                 substituted = self._substitution(i, group)
