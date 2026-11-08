@@ -41,7 +41,7 @@ This means that the review agent should be responsible for imposing coding stand
 
 You have access to several files in the repo:
 
-- `CLAUDE.md` (`AGENTS.md` in other tools): these files are pushed to the context window of any agent working in this repo, except the review agents, which read the root `CLAUDE.md` and the matching rule files themselves. They should be used incredibly sparingly, usually only for **navigation pointers** to other files.
+- `CLAUDE.md` (`AGENTS.md` in other tools): these files are pushed to the context window of any agent working in this repo, except `reviewer`, `architecture-reviewer` and `prose-reviewer`, which read the repo's own `CLAUDE.md` and rule files themselves, as their definitions say. They should be used incredibly sparingly, usually only for **navigation pointers** to other files.
 - `CODING_STANDARDS.md`: this file is read during review, not implementation. Add **navigation pointers** to docs folders if the standards file gets more than 1,000 lines long. The `reviewer` agent (`~/.claude/agents/reviewer.md`) reads the repo's CLAUDE.md, not this file: the candidate that starts `CODING_STANDARDS.md` also proposes the pointer that makes the reviewer read it.
 - Docs: use docs as references files, pointed to by other files. Look for existing docs before writing new ones.
 - Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked commands. Follow the advice in the `writing-for-agents` skill.

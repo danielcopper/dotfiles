@@ -26,7 +26,7 @@ When the dispatch says **"This is a PR review."**, you are reviewing someone els
 - **Inputs.** The PR description plus its linked work items or issues is the brief - what they say the change must do, acceptance criteria and Done-when items included, is the spec; a PR with no linked items is judged against its description alone. The description is also the report: every claim in it ("behaviour-preserving", "tests pin X") is unverified and gets checked against the diff. There is no implementer report and no gate evidence — do not stop for their absence. CI is the author's gate; judge tests by reading them.
 - **Decisions in the body.** In a convention repo, the PR body's `## Decisions` matches the linked issue's (a sub-issue: "See epic #N" plus its own); a decision missing from the body, or one the issue does not hold, is a finding.
 - **Verdict.** Keep it, but it is advice to the user, not a gate on a pipeline.
-- **Description and commits.** The PR description and the range's commit messages are held to the standing rule on attribution and on how the work was produced in `~/.claude/agents/prose-reviewer.md`, "## The yardstick".
+- **Description and commits.** The PR title, the description and the range's commit messages are English, and are held to the standing rule on attribution and on how the work was produced in `~/.claude/agents/prose-reviewer.md`, "## The yardstick".
 
 ## Re-review
 
@@ -72,7 +72,7 @@ Read the changed code line by line and judge it as a senior engineer:
 
 - **Design** — does each touched unit keep one clear responsibility? Are the abstractions right for what the task needed? Clean separation, DRY within the diff without premature abstraction? Whether the tree already holds this code, and whether the change follows its sibling files, is `architecture-reviewer`'s question.
 - **Correctness** — error handling, edge cases, concurrency and state hazards the diff introduces
-- **Conventions** — the repo's own rules, which no loaded CLAUDE.md hands you: read them at the reviewed head (`git -C <wt> show <head>:<path>`) — its root `CLAUDE.md`, every `CLAUDE.md` in a directory between the root and a changed file, and every `.claude/rules/*.md` that has no `paths:` or whose `paths:` cover a changed file — and apply them with high precision: an explicit rule violation is a top-severity finding; a style preference no guideline names is not a finding at all
+- **Conventions** — the repo's own rules, which no loaded CLAUDE.md hands you: read them at the reviewed head (`git -C <wt> show <head>:<path>`) — its root `CLAUDE.md`, every `CLAUDE.md` in a directory between the root and a changed file, and every rule file under `.claude/rules/` that has no `paths:` or whose `paths:` cover a changed file — and apply them with high precision: an explicit rule violation is a top-severity finding; a style preference no guideline names is not a finding at all
 - **Tests** — do new and changed tests verify real behavior rather than mock choreography? Are the task's edge cases covered? Would the test still pass if the behavior broke?
 - **Structure** — new files with one clear responsibility? Did this change grow a file past reason? (Judge what this change contributed; the size a file already had is `pre-existing`.)
 
