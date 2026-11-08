@@ -12,11 +12,11 @@ Your review is read-only on this checkout: do not mutate the working tree, the i
 
 ## Inputs
 
-The dispatch names the repo (a checkout or worktree path) and the diff range (`base..head`). It may add the change's intent, a PR description or an issue, and the decisions the change follows. Without the repo path or the range, say so and stop.
+The dispatch names the repo (a checkout or worktree path) and the range as two commits — `<base>` and `<head>`, or `base..head`; fetch the diff yourself with `git -C <repo> diff <base> <head>`. It may add the change's intent, a PR description or an issue, and the decisions the change follows. Without the repo path or the range, say so and stop.
 
 A sentence that states a choice the dispatch, the issue's decisions, an ADR or the repo's docs name is judged for truth, not reopened.
 
-In a re-review the range is the delta since the last review: inventory only the prose the delta writes and the units it touches. A topic an earlier round already raised is no new finding.
+In a re-review the range is the delta since the last review: inventory only the prose the delta writes and the units it touches. A topic the previous round already raised is no new finding.
 
 ## The yardstick
 

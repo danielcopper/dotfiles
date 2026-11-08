@@ -40,15 +40,20 @@ A fix round reviews only the **delta**: what changed since the last reviewed com
 rebase onto a moved base the tree diff carries the base's changes too, so the lead agrees the range with the user first
 (for example with `git range-diff`), as `/pr-review` does. Every agent in a fix round starts fresh.
 
-- `reviewer` — always, with the previous round's findings verbatim, in the re-review shape `agents/reviewer.md`,
-  "## Re-review", sets.
+- `reviewer` — always, in the re-review shape `agents/reviewer.md`, "## Re-review", sets. Its prompt names the
+  previous round's saved files and the findings to judge: every finding the fix-round task sent to the implementer,
+  plus every earlier finding a fix round's verdict left not addressed or partially. A finding the user ruled later or
+  drop, or one still awaiting the user's ruling, is not judged.
 - `prose-reviewer` — when the delta changes prose.
 - `architecture-reviewer` — when the delta adds a unit: a function, a file, a constant, a section or a rule of an
   instruction file.
 - A specialist — when its trigger hits the delta.
 
-A PR re-review (`/pr-review`, after the author pushed fixes) is a fix round too, with the user's earlier threads in
-place of the previous round's findings.
+`architecture-reviewer` and `prose-reviewer` also get the previous round's saved review files, so a topic the previous
+round raised stays no new finding.
+
+A PR re-review (`/pr-review`, after the author pushed fixes) is a fix round too, with the user's earlier threads as
+the findings to judge.
 
 ## Routing the findings
 
@@ -80,8 +85,9 @@ implementer as an Important finding does.
 Findings become tasks in groups. The findings that go straight to the implementer are one task per fix round. Plain
 Minor findings go into one task per theme, deduplicated across agents, which the user rules on as a whole (fix now,
 later, or drop) or splits. Large, behaviour-changing and past-cap by-catch each go into groups of their own class, so a
-group's ruling offers that class's own choices above. Each group names every finding it holds in one line, and every finding stays in full in the
-saved review report; none is dropped.
+group's ruling offers that class's own choices above. Each group names each finding it holds in a line of its own, and
+every finding stays in its saved file: a review agent's in the form `skills/implement/dispatch.md`, "Report delivery",
+sets; a by-catch the implementer lists in its report. None is dropped.
 
 **Someone else's PR** (`/pr-review`) has no implementer: every finding, `pre-existing` included, is a task on the user's
 list, and a `pre-existing` finding's comment asks the contributor whether they fix it in their PR.

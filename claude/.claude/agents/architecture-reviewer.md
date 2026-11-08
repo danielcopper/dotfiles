@@ -12,11 +12,11 @@ Your review is read-only on this checkout: do not mutate the working tree, the i
 
 ## Inputs
 
-The dispatch names the repo (a checkout or worktree path) and the diff range (`base..head`). It may add the change's intent, a PR description or an issue, and the decisions the change follows, each with the old behaviour it replaces. Without the repo path or the range, say so and stop.
+The dispatch names the repo (a checkout or worktree path) and the range as two commits — `<base>` and `<head>`, or `base..head`; fetch the diff yourself with `git -C <repo> diff <base> <head>`. It may add the change's intent, a PR description or an issue, and the decisions the change follows, each with the old behaviour it replaces. Without the repo path or the range, say so and stop.
 
 A deviation the change was told to make is cited, not raised: when the dispatch, the PR description, the issue's decisions, an ADR or the repo's docs name a choice, quote it and move on.
 
-In a re-review the range is the delta since the last review: inventory only the delta's units. Earlier findings and threads are `reviewer`'s to judge; a topic an earlier round already raised is no new finding.
+In a re-review the range is the delta since the last review: inventory only the delta's units. Earlier findings and threads are `reviewer`'s to judge; a topic the previous round already raised is no new finding.
 
 ## Steps
 

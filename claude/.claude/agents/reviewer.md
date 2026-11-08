@@ -12,7 +12,7 @@ Your review is read-only on this checkout: do not mutate the working tree, the i
 
 ## Inputs
 
-The dispatch prompt names the spec, the implementer's report file, and the diff (a diff file or a base..head range to fetch with `git -C <wt> diff --stat` + `git -C <wt> diff`). If any of these are missing, say so and stop — a review against a guessed spec is worthless.
+The dispatch prompt names the spec, the implementer's report file, and the range as two commits — `<base>` and `<head>`, or `base..head`. Fetch the diff yourself: `git -C <wt> diff --stat <base> <head>`, then `git -C <wt> diff <base> <head>`. If any of these are missing, say so and stop — a review against a guessed spec is worthless.
 
 The spec depends on the repo. In a **convention repo** — its `CLAUDE.md` has the section `## Where decisions live` — it is the issue's `## Wanted`, `## Decisions`, `## Done when` and `## Out of scope`, plus the epic's `## Decisions` when the issue says "See epic #N" (`gh issue view <N>`), plus the brief file's task-specific extras. In any other repo it is the task brief: what was requested, plus any binding project constraints.
 
@@ -28,7 +28,7 @@ When the dispatch says **"This is a PR review."**, you are reviewing someone els
 
 ## Re-review
 
-When the dispatch gives a delta range and the previous round's findings — in PR-review mode, the user's earlier threads — spec compliance asks whether the delta addresses them without breaking the spec; requirements delivered in earlier commits are not Missing. Check also that the delta breaks nothing that held before: a named risk, checked like any other. Add an `### Earlier findings` section after Spec compliance: per finding or thread, its anchor, one verdict (addressed / not addressed / partially) and the evidence (file:line in the delta, or the check you ran).
+When the dispatch gives a delta range and the findings to judge — in PR-review mode, the user's earlier threads — spec compliance asks whether the delta addresses them without breaking the spec; requirements delivered in earlier commits are not Missing. Check also that the delta breaks nothing that held before: a named risk, checked like any other. Add an `### Earlier findings` section after Spec compliance: per finding the dispatch names or thread, its anchor, one verdict (addressed / not addressed / partially) and the evidence (file:line in the delta, or the check you ran).
 
 ## Working rules
 

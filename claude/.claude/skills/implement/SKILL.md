@@ -46,7 +46,7 @@ Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer
 
 ## 6. Review
 
-Produce the diff artifact and start the review agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the change, per [`dispatch.md`](dispatch.md) — fresh agents each round. Route their findings as `review-agents.md`, "Routing the findings", says; every finding it sends to the implementer goes back as a fix dispatch, then a fix round, until none is left.
+Start the review agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the change, per [`dispatch.md`](dispatch.md). Route their findings as `review-agents.md`, "Routing the findings", says; every finding it sends to the implementer goes back as a fix dispatch, then a fix round, until none is left.
 
 *Done when:* every finding the routing sent to the implementer has a fix round's verdict "addressed", and the user has ruled on every finding on their list.
 

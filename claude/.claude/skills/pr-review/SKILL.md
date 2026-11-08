@@ -62,7 +62,7 @@ Run the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for 
 For each agent, the prompt must include:
 
 - The PR's intent (1-2 sentences from the PR description)
-- The diff range to review (`git diff <range>`) or the relevant slice for that specialist
+- The range as two commit SHAs — `$MB` and `$HEAD_SHA`, in a re-review `$LAST_SHA` and `$HEAD_SHA`; the agent fetches the diff itself
 - Existing PR thread topics to **avoid duplicating** (Sonar warnings already posted, reviewer comments still open)
 - A request to return findings as a flat list with: **file:line**, **claim**, **suggested fix**, and the rating the agent's own definition gives it: severity and score for our own agents, a specialist's as `review-agents.md`, "Routing the findings", lists it (`type-design-analyzer` rates none)
 - An instruction to skip cosmetic nits unless they actively harm reviewability
@@ -70,7 +70,7 @@ For each agent, the prompt must include:
 
 The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`.
 
-The `architecture-reviewer` and `prose-reviewer` prompts additionally name the repo path (both read the tree at the range's head commit, so no worktree is needed) and pass the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so a deviation the change was told to make is cited instead of raised. The `architecture-reviewer` prompt also names, per decision, the old behaviour it replaces, for its sweep of sites still doing it.
+The `reviewer`, `architecture-reviewer` and `prose-reviewer` prompts additionally name the repo path, which their `git -C` needs; `architecture-reviewer` and `prose-reviewer` read the tree at the range's head commit, so no worktree is needed. Those two prompts also pass the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so a deviation the change was told to make is cited instead of raised. The `architecture-reviewer` prompt also names, per decision, the old behaviour it replaces, for its sweep of sites still doing it.
 
 In a re-review, which agents run and on what range follow the fix-round rule in `review-agents.md`. The `reviewer` prompt also carries the user's earlier threads (anchor, text, replies, thread status) and asks for a verdict per thread, in the shape `reviewer.md`'s "## Re-review" sets.
 

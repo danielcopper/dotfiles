@@ -24,7 +24,7 @@ In a convention repo the issue is the spec, so the brief holds nothing else: a d
 
 Spawn the `implementer` agent with the brief file path, and name any session-level constraint the user added on top (the project's CLAUDE.md loads automatically).
 
-Report delivery: each agent sends its full report as a message. Save it next to the brief — `~/Memory/<repo>/report-<N>.md` for the implementer, `review-<N>-<round>-<agent>.md` for each review agent's (agents cannot write into `~/Memory`) — so the review and fix dispatches have a stable path.
+Report delivery: each agent sends its full report as a message, and the lead saves it next to the brief in `~/Memory/<repo>/`, because the harness has a subagent return its report as text rather than write a report file. The implementer's report is saved whole to `report-<N>.md`, a fix round's appended to it; it is also the saved file of the by-catch it lists. A review agent's is saved as an extract to `review-<N>-<round>-<agent>.md`: per finding its file:line, severity, score (where the agent gives one), what is wrong, the **evidence** (the quoted text, the contradicting site as file:line, or the command that showed it) and the suggested fix; from every `reviewer` report also its ⚠️ items, and from a fix-round one each verdict on an earlier finding that is not "addressed", with its anchor and evidence. The fix dispatch works from these files, and so does the next round's review as `review-agents.md`, "Fix rounds", sets.
 
 ### Status routing
 
@@ -38,21 +38,9 @@ Questions an agent asks mid-run are relayed to the user verbatim — the lead an
 
 ## Review dispatch
 
-First produce the diff artifact from the worktree, into the lead's scratchpad:
+Start the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the diff. Each gets the range as two commit SHAs, `<base>` and the head commit, and fetches the diff itself. `<base>` is the newest base SHA any implementer report names (it changes when the implementer rebased onto a moved main), else the brief's; in a fix round it is the last reviewed commit, and the diff is the tree diff `review-agents.md`, "Fix rounds", sets, which also says what each agent gets from the previous round. Beyond that:
 
-```bash
-{ git -C <wt> log --oneline <base>..HEAD; git -C <wt> diff --stat <base>...HEAD; git -C <wt> diff <base>...HEAD; } > <diff-file>
-```
-
-`<base>` is the newest base SHA any implementer report names (it changes when the implementer rebased onto a moved main), else the brief's. In a fix round `<base>` is the last reviewed commit and the artifact is the tree diff `review-agents.md`, "Fix rounds", sets, without the log line:
-
-```bash
-{ git -C <wt> diff --stat <base> HEAD; git -C <wt> diff <base> HEAD; } > <diff-file>
-```
-
-Start the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the diff. Each gets the diff file path (and the range as fallback), plus:
-
-- `reviewer` — the brief file path (it names the issue), the saved implementer report path, and the repo's lint/type commands for changed files (from the workflow config)
+- `reviewer` — the brief file path (it names the issue and the worktree), the saved implementer report path, and the repo's lint/type commands for changed files (from the workflow config)
 - `architecture-reviewer` — the worktree path, the brief file path, and per decision the old behaviour it replaces, which the lead names
 - `prose-reviewer` — the worktree path and the brief file path
 - a specialist — the change's intent in one or two sentences
@@ -61,4 +49,4 @@ Pass review findings and scope to every agent **unfiltered** — a dispatch that
 
 ## Fix dispatch
 
-Whenever the routing in `review-agents.md` sends findings to the implementer — small by-catch and the user's fix-now rulings included, after an Approved verdict too, and where no `reviewer` ran — dispatch the implementer again (same brief) with those findings **verbatim** (severity, file:line, reasoning intact) and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report; append it to the saved report. Then review the delta as a fix round, per `review-agents.md`, "Fix rounds": the `reviewer` prompt lists the previous round's findings for a verdict each.
+Whenever the routing in `review-agents.md` sends findings to the implementer — small by-catch and the user's fix-now rulings included, after an Approved verdict too, and where no `reviewer` ran — dispatch the implementer again (same brief) with the paths of the saved review files and the saved report, the findings in them it is to fix (the fix-round task names them), and the branch tip it should find as HEAD. The implementer fixes, re-runs the focused tests for the amended code, and sends a new report. Then review the delta as a fix round, per `review-agents.md`, "Fix rounds".
