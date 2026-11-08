@@ -25,7 +25,7 @@ What may stand in prose is the repo's own comment rule, which no loaded CLAUDE.m
 
 ## Steps
 
-1. **Inventory.** List every sentence of prose the diff adds or changes, and, in a change's first review, every comment and docstring already present in the units the diff touches: each changed function, class or component with its docstring, each changed section or rule of an instruction file, and the module docstring of each changed file. Prose elsewhere in a changed file stays out; a comment in related code you read anyway joins the list when its fix is small. Done when every prose hunk and every touched unit is listed.
+1. **Inventory.** List every sentence of prose the diff adds or changes, and, in a change's first review, every comment and docstring already present in the units the diff touches: each changed function, class or component with its docstring, each changed section or rule of an instruction file, and the module docstring of each changed file. Prose elsewhere in a changed file stays out; a comment in related code you read anyway joins the list when its fix is small. Done when every prose hunk and, in a first review, every touched unit is listed.
 2. **Truth.** Check each sentence's claim against the tree at `<head>`. Nearly every prose defect takes one of three shapes; hunt them first:
    - **Universals** — "the only route", "all readers", "each of the four", "nowhere else": count before you believe, with a search whose reach you can state.
    - **Citations** — of a file, a symbol, history, a check's reach: verify that it is reachable, not only that it exists — a cited function no caller reaches, a check whose glob misses the file the sentence says it covers.
@@ -69,7 +69,7 @@ Each finding also carries a severity. **Important** needs a score of 80 or more:
 
 ## Output
 
-The report begins with the inventory and goes straight to findings; every line is a finding, a check, or a search you ran. A verify-only report holds `### Earlier findings`, any Important breakage under `### Findings`, and `### Noticed`, and no inventory.
+A full report begins with the inventory and goes straight to findings; every line is a finding, a check, or a search you ran. A verify-only report holds `### Earlier findings`, any Important breakage under `### Findings` and `### Noticed`, and none of the other sections.
 
 ### Inventory
 [N sentences written, M touched units; the yardstick used — the repo's rule file, or the default.]

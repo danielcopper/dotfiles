@@ -65,7 +65,7 @@ Each finding also carries a severity. **Important** needs a score of 80 or more:
 
 ## Output
 
-The report begins with the inventory and goes straight to findings; every line is a finding, a precedent, or a search you ran. A verify-only report holds `### Earlier findings`, any Important breakage under `### Findings`, and `### Noticed`, and no inventory.
+A full report begins with the inventory and goes straight to findings; every line is a finding, a precedent, or a search you ran. A verify-only report holds `### Earlier findings`, any Important breakage under `### Findings` and `### Noticed`, and none of the other sections.
 
 ### Inventory
 [N units; per unit: the precedent found (`file:line`) or "none found" with the patterns searched.]
