@@ -68,10 +68,14 @@ wrote. It raises no other new finding; whatever else it notices goes on the user
 - Specialists do not run.
 
 After fix round 5's review the lead stops the loop: every finding still open goes on the user's list, one line each,
-for the user to rule on.
+with the lead's recommendation. A finding the user then rules fix now gets one fix dispatch and exactly one verify-only
+pass by `reviewer`; whatever that pass leaves not addressed goes back on the user's list, and no further round follows.
 
-A PR re-review (`/pr-review`, after the author pushed fixes) is a fix round too, its N-th re-review fix round N, with
-the user's earlier threads as the findings to judge.
+A PR re-review (`/pr-review`, after the author pushed fixes) is a fix round too, with the user's earlier threads as the
+findings to judge. Its N-th re-review is fix round N, N counting the user's earlier review rounds on the PR; when that
+count is unclear, the lead asks the user. With no fix dispatch there, the cap means: after re-review 5 every open thread
+is a task on the user's list with the lead's recommendation, and no further re-review runs unless the user asks for
+one.
 
 ## Routing the findings
 
