@@ -94,6 +94,68 @@ class TextIsNotACommand(unittest.TestCase):
         self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
 
 
+class StringsAShellRuns(unittest.TestCase):
+    """The string `bash -c` or `eval` runs is a command line of its own."""
+
+    def test_a_shell_c_string_is_read_as_a_command_line(self):
+        cases = {
+            'bash -c "git rebase main"': [("/cwd", "rebase")],
+            "sh -c 'git commit -m x'": [("/cwd", "commit")],
+            'zsh -c "git revert HEAD"': [("/cwd", "revert")],
+            'dash -c "git cherry-pick abc"': [("/cwd", "cherry-pick")],
+            'bash -lc "git rebase main"': [("/cwd", "rebase")],
+            'bash -ic "git commit -m x"': [("/cwd", "commit")],
+            'bash -l -c "cd /two && git commit -m x"': [("/two", "commit")],
+            'sudo /usr/bin/bash -c "git commit -m x"': [("/cwd", "commit")],
+            "cd /one && bash -c 'git commit -m x'": [("/one", "commit")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_eval_reads_its_arguments_as_a_command_line(self):
+        cases = {
+            'eval "git rebase main"': [("/cwd", "rebase")],
+            "eval 'cd /two && git commit -m x'": [("/two", "commit")],
+            "eval git commit -m x": [("/cwd", "commit")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_a_cd_inside_the_string_stays_there(self):
+        command = 'bash -c "cd /two && make"; git commit -m x'
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_quoted_text_inside_the_string_is_still_text(self):
+        for command in ("bash -c 'echo \"git commit later\"'", "eval 'echo \"git rebase main\"'"):
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), [])
+
+
+class LeadingAssignments(unittest.TestCase):
+    """`NAME=value` before a command is that command's environment, not a line of its own."""
+
+    def test_leading_assignments_do_not_hide_the_write(self):
+        cases = {
+            "FOO=1 git commit -m x": [("/cwd", "commit")],
+            "GIT_SEQUENCE_EDITOR=true git rebase -i main": [("/cwd", "rebase")],
+            "A=1 B=2 git -C /two revert HEAD": [("/two", "revert")],
+            "env X=1 git commit -m x": [("/cwd", "commit")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(guard.commit_dirs(command, "/cwd"), expected)
+
+    def test_a_prefix_assignment_sets_no_variable_for_later_commands(self):
+        command = "D=/two git status; git -C $D commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/cwd", "commit")])
+
+    def test_a_line_of_assignments_sets_every_variable(self):
+        command = "A=/one B=/two; git -C $B commit -m x"
+        self.assertEqual(guard.commit_dirs(command, "/cwd"), [("/two", "commit")])
+
+
 class RepoRoot(unittest.TestCase):
     """The exemption keys on the repository, so it has to hold from a subdirectory too."""
 

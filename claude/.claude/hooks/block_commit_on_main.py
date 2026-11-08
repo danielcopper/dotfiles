@@ -19,15 +19,25 @@ directory, which is most of them; the git hook covers it instead.
 It reads the line with the shell reader the publishing hooks share
 (`utils/published_text.py`), so only what the shell would run counts: a git
 write named inside single or double quotes, in a heredoc body or in a
-comment is text and is not judged. A command substitution is run by the
+comment is text and is not judged, unless a shell's `-c` or `eval` runs that
+text (below). A command substitution is run by the
 shell even inside double quotes (`"$(git commit ...)"`), so it counts. A `cd`
 reaches only the commands of its own subshell: one inside `( ... )`, `$( ... )`
 or backticks does not move the commands after it.
 
-What it cannot judge: a write inside a string another program runs
-(`bash -c "git rebase main"`, `eval "..."`), because that string is quoted
-text here. Nor does it tell a command from an argument: an unquoted mention
-(`echo git commit`) still counts.
+The string a `bash`, `sh`, `zsh` or `dash` `-c` runs (also `-lc`, `-ic`),
+and the arguments of `eval`, are read again as a command line of their own,
+starting in the directory of the command that runs them; a `cd` or an
+assignment inside them stays there. Assignments before a command
+(`FOO=1 git commit`) are skipped to reach it and set nothing for later
+commands; a command made only of assignments sets them all.
+
+What it cannot judge: a write inside a string any other program runs
+(`su -c "..."`, `python -c "..."`, `ssh host "..."`), because that string is
+quoted text here, nor a shell's `-c` behind an option that takes a value
+(`bash -o pipefail -c "..."`). Nor does it tell a command from an argument:
+an unquoted mention (`echo git commit`, `echo bash -c "git commit"`) still
+counts.
 
 Repos whose work legitimately lives on main are read from the same list the
 git hook uses, so the exemption is stated once.
@@ -41,7 +51,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
-from published_text import parse_commands  # noqa: E402
+from published_text import dequote, parse_commands  # noqa: E402
 
 HOME = os.path.expanduser("~")
 ALLOWLIST = os.path.join(HOME, ".githooks", "commit-on-main-allowed")
@@ -67,6 +77,11 @@ OPERATION = re.compile(r"(commit|rebase|cherry-pick|revert)\b")
 CONTROL_FLAG = re.compile(r"--(abort|continue|skip|quit)\b")
 
 ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)=(.*)$", re.DOTALL)
+
+# Shells whose `-c` string is read as a command line of its own, and the
+# short option clusters that carry the `c` (`-c`, `-lc`, `-ic`).
+SHELLS = {"bash", "sh", "zsh", "dash"}
+SHORT_OPTIONS = re.compile(r"-[A-Za-z]+$")
 VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 
 
@@ -141,6 +156,22 @@ def git_write(words: list[str]) -> tuple[str, str | None, list[str]] | None:
     return None
 
 
+def string_run(words: list[str]) -> str | None:
+    """The command line a `bash -c` or an `eval` in *words* runs, or None."""
+    for index, word in enumerate(words):
+        if word == "eval":
+            return " ".join(dequote(argument) for argument in words[index + 1 :])
+        if os.path.basename(word) not in SHELLS:
+            continue
+        for offset in range(index + 1, len(words)):
+            option = words[offset]
+            if not option.startswith("-"):
+                break
+            if SHORT_OPTIONS.match(option) and "c" in option:
+                return dequote(words[offset + 1]) if offset + 1 < len(words) else None
+    return None
+
+
 def place(places: dict[tuple[int, ...], str], group: tuple[int, ...], cwd: str) -> str:
     """Where a command in *group* runs: the last `cd` of its own or an enclosing subshell."""
     for depth in range(len(group), 0, -1):
@@ -149,9 +180,15 @@ def place(places: dict[tuple[int, ...], str], group: tuple[int, ...], cwd: str) 
     return cwd
 
 
-def commit_dirs(command: str, cwd: str) -> list[tuple[str, str]]:
-    """(directory, operation) for every commit this block writes, command by command."""
-    variables = {"HOME": HOME, "PWD": cwd}
+def commit_dirs(
+    command: str, cwd: str, variables: dict | None = None
+) -> list[tuple[str, str]]:
+    """(directory, operation) for every commit this block writes, command by command.
+
+    *variables* are the enclosing line's, for a string that line runs; what the
+    string assigns stays inside it.
+    """
+    variables = {"HOME": HOME, "PWD": cwd} if variables is None else dict(variables)
     places: dict[tuple[int, ...], str] = {}
     targets = []
     for simple in parse_commands(command):
@@ -160,16 +197,25 @@ def commit_dirs(command: str, cwd: str) -> list[tuple[str, str]]:
         words = simple.words
         if words[0] in ("export", "local"):
             words = words[1:]
-        if not words:
+        assignments = []
+        for word in words:
+            assigned = ASSIGNMENT.match(word)
+            if not assigned:
+                break
+            assignments.append(assigned.groups())
+        if len(assignments) == len(words):
+            for name, value in assignments:
+                variables[name] = unquote(substitute(value.strip(), variables))
             continue
-        assigned = ASSIGNMENT.match(words[0])
-        if assigned:
-            name, value = assigned.groups()
-            variables[name] = unquote(substitute(value.strip(), variables))
-            continue
+        # Assignments before a command are that command's environment only.
+        words = words[len(assignments) :]
         if words[0] == "cd" and len(words) > 1:
             current = resolve(words[1], current, variables) or current
             places[group] = current
+        inner = string_run(words)
+        if inner is not None:
+            targets.extend(commit_dirs(inner, current, variables))
+            continue
         writing = git_write(words)
         if not writing:
             continue
