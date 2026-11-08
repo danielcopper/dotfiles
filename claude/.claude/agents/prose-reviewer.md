@@ -57,7 +57,7 @@ Before reporting a finding, try to refute it: reread the sentence assuming its a
 
 ## Severity
 
-Each finding also carries a severity: **Important** for a wrong sentence a reader would act on — above all one about a check's reach — and for a second home of a fact that will drift; **Minor** for everything else.
+Each finding also carries a severity. **Important** needs a score of 80 or more: a wrong sentence a reader would act on — above all one about a check's reach — or a second home of a fact that will drift. **Minor** is everything else, every finding below 80 included.
 
 ## Working rules
 

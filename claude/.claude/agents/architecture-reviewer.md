@@ -53,7 +53,7 @@ A finding the diff neither adds nor extends — duplication that was there befor
 
 ## Severity
 
-Each finding also carries a severity: **Important** for a broken written rule, a site still doing the old behaviour, or duplicated logic (not just a literal) that will drift; **Minor** for everything else.
+Each finding also carries a severity. **Important** needs a score of 80 or more: a broken written rule, a site still doing the old behaviour, or duplicated logic (not just a literal) that will drift. **Minor** is everything else, every finding below 80 included.
 
 ## Working rules
 
