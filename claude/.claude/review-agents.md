@@ -36,7 +36,7 @@ yes.
 ## Fix rounds
 
 A change's first review is no fix round. Fix round N is the review after the implementer's N-th fix dispatch, and a
-change gets at most five; the single pass after the cap, at the end of this section, is no fix round either.
+change gets at most five; the single pass after the cap is no fix round either.
 
 A fix round reviews only the **delta**: what changed since the last reviewed commit, as a tree diff
 (`git diff <last-reviewed> HEAD`). That holds across a history rewrite on the same base, such as an autosquash. After a
@@ -93,10 +93,10 @@ Quality Issues", is Minor.
 
 Each finding is routed:
 
-- **A Critical or Important finding on the change**, from any agent, goes to the implementer, and a fix round follows up
-  to the cap "Fix rounds" sets, once the lead has checked it at the artifact: the cited file:line, the quoted text, the
-  named command. A finding that does not hold there, or cannot be confirmed, goes on the user's list instead, marked
-  "not confirmed".
+- **A Critical or Important finding on the change**, from any agent, goes to the implementer, and a fix round follows
+  (after the cap it goes on the user's list as "Fix rounds" sets), once the lead has checked it at the artifact: the
+  cited file:line, the quoted text, the named command. A finding that does not hold there, or cannot be confirmed, goes
+  on the user's list instead, marked "not confirmed".
 - **A Minor finding on the change** goes on the user's list: fix now, later, or drop.
 - **By-catch** — a review agent tags it `pre-existing`; the implementer lists it in its report — goes by its class, as
   [`agents/implementer.md`](agents/implementer.md), "## Scope", defines the classes and the cap:
@@ -106,8 +106,9 @@ Each finding is routed:
   - **Large** → the user's list: fix here, open an issue, or drop. Nobody proposes an issue by default.
   - **Past the cap** → ask the user before more of it is fixed.
 
-A Minor finding ruled fix now, a not-confirmed finding ruled fix now, a behaviour change the user said yes to, and a
-large by-catch ruled fix here go to the implementer as an Important finding does.
+A Minor finding ruled fix now, a not-confirmed finding ruled fix now (the user's ruling stands in for the check of
+facts), a behaviour change the user said yes to, and a large by-catch ruled fix here go to the implementer as an
+Important finding does.
 
 Findings become tasks in groups. The findings that go straight to the implementer are one task per fix round. Plain
 Minor findings go into one task per theme, deduplicated across agents, which the user rules on as a whole (fix now,

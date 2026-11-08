@@ -46,9 +46,9 @@ Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer
 
 ## 6. Review
 
-Start the review agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the change, per [`dispatch.md`](dispatch.md). Route their findings as `review-agents.md`, "Routing the findings", says, the check of each Critical or Important finding at its artifact included; every finding it sends to the implementer goes back as a fix dispatch, then a fix round, until none is left or the round cap in `review-agents.md`, "Fix rounds", stops the loop.
+Start the review agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the change, per [`dispatch.md`](dispatch.md). Route their findings as `review-agents.md`, "Routing the findings", says, the check of each Critical or Important finding at its artifact included; every finding it sends to the implementer goes back as a fix dispatch, then the review `review-agents.md`, "Fix rounds", sets for it — a fix round, or after the round cap its single verify-only pass — until none is left or the cap stops the loop.
 
-*Done when:* every finding the routing sent to the implementer has a fix round's verdict "addressed" or, once the round cap stopped the loop, stands on the user's list, and the user has ruled on every finding on their list.
+*Done when:* every finding the routing sent to the implementer has the verdict "addressed" from a fix round or the post-cap pass, or stands on the user's list, and the user has ruled on every finding on their list.
 
 ## 7. Gate evidence, once
 
