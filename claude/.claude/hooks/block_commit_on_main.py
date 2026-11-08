@@ -27,9 +27,10 @@ every match lies in text that `gh`, `az`, `echo`, `printf` or `cat` is
 handed and does not run - a word that is wholly single-quoted, a wholly
 double-quoted word with no `$` or backtick in it, or the body of a heredoc
 whose delimiter is quoted - as the shell reader in `utils/published_text.py`
-reads the line. A line that could run text gets no exception: one with a
-word from `RUNNERS` anywhere, a command word that starts with `$` or names a
-path, or one the reader cannot read. A comment is not such text.
+reads the line. Every other command on the line must be `cd`, so a line
+with any other command (`make`, `./run.sh`, `bash`, `eval`, `sudo`, a `$`
+word), or one the reader cannot read, gets no exception. A comment is not
+such text.
 """
 
 import json
@@ -70,20 +71,14 @@ VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 
 # Commands that print or publish the words they are handed and run none.
 DATA_COMMANDS = {"gh", "az", "echo", "printf", "cat"}
-# Words that run other text as commands; one anywhere on the line ends the
-# exception.
-RUNNERS = {
-    "bash", "sh", "zsh", "dash", "ksh", "eval", "source", ".", "xargs", "env",
-    "su", "sudo", "ssh", "nohup", "exec", "time", "command", "builtin",
-    "timeout", "nice", "watch", "parallel", "trap", "alias",
-}  # fmt: skip
 SINGLE_QUOTED = re.compile(r"'[^']*'")
 DOUBLE_QUOTED = re.compile(r'"(?:[^"\\$`]|\\.)*"', re.DOTALL)
 
 
 def only_named_in_text(command: str) -> bool:
     """Whether every git write the raw *command* names lies in text a
-    `DATA_COMMANDS` command is handed (the exception in the module docstring)."""
+    `DATA_COMMANDS` command is handed, on a line that runs nothing else but
+    `cd` (the exception in the module docstring)."""
     named = [match.span() for match in GIT_COMMIT_RE.finditer(command)]
     try:
         commands = parse_commands(command, strict=True)
@@ -92,17 +87,16 @@ def only_named_in_text(command: str) -> bool:
     text: list[tuple[int, int]] = []
     for simple in commands:
         words = simple.words
-        if any(os.path.basename(dequote(word)) in RUNNERS for word in words):
-            return False
         lead = 0
         while lead < len(words) and ASSIGNMENT.match(words[lead]):
             lead += 1
         if lead == len(words):
             continue
-        if words[lead].startswith("$") or "/" in words[lead]:
-            return False
-        if words[lead] not in DATA_COMMANDS:
+        name = dequote(words[lead])
+        if name == "cd":
             continue
+        if name not in DATA_COMMANDS:
+            return False
         for word, start in zip(words, simple.starts):
             if SINGLE_QUOTED.fullmatch(word) or DOUBLE_QUOTED.fullmatch(word):
                 text.append((start, start + len(word)))

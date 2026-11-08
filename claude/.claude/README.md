@@ -131,7 +131,7 @@ Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-
 | Hook                      | Scope                                             | Blocks                                                            |
 | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
 | `block_ai_attribution.py` | global (`settings.json`)                          | `git commit`, `gh pr`/`issue`/`release`, `gh api` and `az repos pr` commands whose message or published text carries AI attribution markers |
-| `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` onto a protected branch (main/master, develop, release/*), unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `gh`, `az`, `echo`, `printf` or `cat` passes |
+| `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` onto a protected branch (main/master, develop, release/*), unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `gh`, `az`, `echo`, `printf` or `cat`, and runs nothing else but `cd`, passes |
 | `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's generic code-reviewer — denied with a redirect to the custom `reviewer` agent |
 
 ## Directory Structure

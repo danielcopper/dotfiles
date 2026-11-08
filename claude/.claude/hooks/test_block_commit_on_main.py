@@ -99,6 +99,7 @@ class TextThatOnlyNamesAWrite(OnMain):
             "cat <<'EOF' > notes.md\nthen git commit the fix\nEOF",
             "gh pr create --title x --body \"$(cat <<'EOF'\nRun git rebase main first.\nEOF\n)\"",
             "az repos pr create --description 'git rebase main first'",
+            'cd repo && gh pr create --title x --body "Run git rebase main first"',
         ):
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), "allow")
@@ -125,6 +126,7 @@ class WritesStayRefused(OnMain):
             'sudo -u root bash -c "git rebase main"',
             "X='eval $X'; eval $X; echo \"git commit\"",
             "echo 'git commit -m x' > run.sh; ./run.sh",
+            "echo 'git rebase main' > Makefile; make",
             "git status # then git commit",
             "$(" * 3000 + "echo 'git commit -m x'" + ")" * 3000,
         ):
