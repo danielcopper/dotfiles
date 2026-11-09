@@ -182,7 +182,7 @@ The sync's push goes through the global git hooks like any other push:
 `memex-sync.service` puts Homebrew on its `PATH`, so the pre-push hook finds
 gitleaks. Its commit skips them with `--no-verify`. The message is made of
 file paths, which the commit-msg hook's AI-attribution guard can take for an
-attribution (`daniel/wiki/ai/claude-written-summaries.md`, say) and would then
+attribution (`daniel/wiki/ai/what claude made.md`, say) and would then
 refuse on every run; the pre-commit hook only guards `main`, which `~/memex`
 may commit on anyway, being listed in `git/.githooks/commit-on-main-allowed`.
 

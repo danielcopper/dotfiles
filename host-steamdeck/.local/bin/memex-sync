@@ -261,7 +261,7 @@ staged=$((${#changes[@]} / 2))
 if [ "$staged" -gt 0 ]; then
   # --no-verify skips the global commit hooks. The message is made of file
   # paths, which the commit-msg hook's AI-attribution guard can take for an
-  # attribution (daniel/wiki/ai/claude-written-summaries.md, say) and would
+  # attribution (daniel/wiki/ai/what claude made.md, say) and would
   # then refuse on every run; the pre-commit hook only guards main, which the
   # clone may commit on anyway. The push still runs the pre-push hook.
   commit_message | git commit --quiet --no-verify --file=-
