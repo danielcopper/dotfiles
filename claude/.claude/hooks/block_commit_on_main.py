@@ -11,33 +11,39 @@ command line, so it can only judge what that line says.
 Where the line pins its directory - `git -C <path>`, or a `cd` in an
 earlier segment, including through a variable assigned in the same block -
 the write is judged there. Where a `cd` may not have moved the shell (one
-inside `( ... )`, `cd -`, a `cd` to an unresolved path, `pushd`/`popd`),
+while a `(` is open, `cd -`, a `cd` to an unresolved path, `pushd`/`popd`),
 every directory the line has named so far, the harness cwd included, is
-judged, and one protected branch among them refuses. Where it pins nothing,
-the fallback is the cwd the harness reports, and that value can lag the shell: a command that commits
-in a directory the harness has not noticed yet is judged against the old
-one. Closing that would mean refusing every commit that does not name its
-directory, which is most of them; the git hook covers it instead.
+judged, and one protected branch among them refuses. That reading is raw
+too, so such a line inside a commit message or heredoc body (`cd -` at a
+line start) refuses a later write in another repository as well. Where the
+line pins nothing, the fallback is the cwd the harness reports, and that
+value can lag the shell: a command that commits in a directory the harness
+has not noticed yet is judged against the old one. Closing that would mean
+refusing every commit that does not name its directory, which is most of
+them; the git hook covers it instead.
 
 Repos whose work legitimately lives on main are read from the same list the
 git hook uses, so the exemption is stated once.
 
 The judgement is on raw text: every match of `GIT_COMMIT_RE` counts, quoted
 or not, also after assignments at the start of a segment
-(`FOO=1 git commit`), with the limits that brings (a `-C` path with a space,
-a write split by a `\\` line break, git options other than one `-C` and
-`-c` pairs). Steering a running operation (`git rebase --continue`) is let
-through only with the flag right after the operation. One exception, for
-text that only names a write: a line is let through when every match lies
-in text handed to `echo`, `printf`, `cat`, `gh pr|issue|release <verb>` or
-`az repos pr create|update`, which run none of it - a word that is wholly
-single-quoted, a wholly double-quoted word with no unescaped `$` or
-backtick, or the body of a heredoc whose delimiter is quoted - as the shell
-reader in `utils/published_text.py` reads the line. Every other command on
-the line must be `cd` or a bare assignment, so a line with any other
-command (`make`, `./run.sh`, `bash`, `eval`, `sudo`, `gh alias`, a `$`
-word), or one the reader cannot read, gets no exception. A comment is not
-such text.
+(`FOO=1 git commit`) and in an assigned `$(...)` or backtick substitution,
+with the limits that brings (a `-C` path with a space, a write split by a
+`\\` line break, git options other than one `-C` and `-c` pairs). Steering
+a running operation (`git rebase --continue`) is let through only with the
+flag right after the operation. One exception, for text that only names a
+write: a line is let through when every match lies in text handed to
+`echo`, `cat`, `gh pr|issue|release <verb>` or `az repos pr create|update`,
+which run none of it - a word that is wholly single-quoted, a wholly
+double-quoted word with no unescaped `$` or backtick, or the body of a
+heredoc whose delimiter is quoted - as the shell reader in
+`utils/published_text.py` reads the line. Every other command on the line
+must be `cd` or a bare assignment, so a line with any other command
+(`make`, `./run.sh`, `bash`, `eval`, `sudo`, `printf`, `gh alias`, a `$`
+word), or one the reader cannot read, gets no exception. Nor does a line
+with a backtick, `${`, `$$` or `$'` outside its single-quoted words and
+quoted heredoc bodies: the reader may end those forms elsewhere than the
+shell does. A comment is not such text.
 """
 
 import json
@@ -70,21 +76,23 @@ GIT_COMMIT_RE = re.compile(
 STEERING = re.compile(r"\s+--(abort|continue|skip|quit)\b")
 GIT_DASH_C = re.compile(r"\bgit\s+-C\s+(\S+)")
 CD = re.compile(r"^\s*\(*\s*cd\s+([^\s;&|]+)")
-PUSHD = re.compile(r"^\s*\(*\s*(?:pushd|popd)\b")
+PUSHD = re.compile(r"^\s*\(*\s*(pushd|popd)\b(?:\s+([^\s;&|]+))?")
 
 # Shell block anatomy: segments, assignments, variables.
-SEGMENT = re.compile(r"[|;&\r\n]+")
+SEGMENT = re.compile(r"[^|;&\r\n]+")
 ASSIGNMENT = re.compile(r"^\s*(?:export\s+|local\s+)?([A-Za-z_]\w*)=(.*)$")
 VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 # The first word of an assignment's value: what follows it is a command.
 VALUE_WORD = re.compile(r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\])*""")
 
 
-# Commands that print the words they are handed and run none; `gh` and `az`
-# count only where `publishes` says.
-DATA_COMMANDS = {"gh", "az", "echo", "printf", "cat"}
+# Commands that print or publish the text they are handed and run none of it;
+# `gh` and `az` count only where `publishes` says.
+DATA_COMMANDS = {"gh", "az", "echo", "cat"}
 SINGLE_QUOTED = re.compile(r"'[^']*'")
 DOUBLE_QUOTED = re.compile(r'"(?:[^"\\$`]|\\.)*"', re.DOTALL)
+# Shell forms the reader may end elsewhere than the shell does.
+UNSURE = re.compile(r"`|\$\{|\$\$|\$'")
 
 
 def publishes(words: list[str]) -> bool:
@@ -97,15 +105,14 @@ def publishes(words: list[str]) -> bool:
 
 
 def only_named_in_text(command: str) -> bool:
-    """Whether every git write the raw *command* names lies in text a
-    `DATA_COMMANDS` command is handed, on a line that runs nothing else but
-    `cd` (the exception in the module docstring)."""
+    """Whether *command* gets the module docstring's one exception."""
     named = [match.span() for match in GIT_COMMIT_RE.finditer(command)]
     try:
         commands = parse_commands(command, strict=True)
     except Exception:  # Unread means no exception: the raw judgement stands.
         return False
     text: list[tuple[int, int]] = []
+    single: list[tuple[int, int]] = []
     for simple in commands:
         words = simple.words
         lead = 0
@@ -121,15 +128,23 @@ def only_named_in_text(command: str) -> bool:
         if name in ("gh", "az") and not publishes(words[lead:]):
             return False
         for word, start in zip(words, simple.starts):
+            if SINGLE_QUOTED.fullmatch(word):
+                single.append((start, start + len(word)))
             if SINGLE_QUOTED.fullmatch(word) or DOUBLE_QUOTED.fullmatch(word):
                 text.append((start, start + len(word)))
         for body, expands in zip(simple.heredocs, simple.heredoc_expands):
             # A body is placed where its text first stands. Should that be
-            # elsewhere, the body itself stays uncovered, so a wrong place can
-            # only refuse.
+            # elsewhere, the body itself stays uncovered and unmasked, so a
+            # wrong place can only refuse.
             at = command.find(body)
             if body and not expands and at >= 0:
                 text.append((at, at + len(body)))
+                single.append((at, at + len(body)))
+    masked = list(command)
+    for start, stop in single:
+        masked[start:stop] = " " * (stop - start)
+    if UNSURE.search("".join(masked)):
+        return False
     return bool(named) and all(
         any(start <= begin and end <= stop for start, stop in text)
         for begin, end in named
@@ -182,7 +197,7 @@ def repo_root(directory: str) -> str | None:
     return os.path.realpath(top) if top else None
 
 
-def resolve(token: str, current: str, variables: dict) -> str | None:
+def resolve(token: str, current: str, variables: dict[str, str]) -> str | None:
     """A cd or -C operand as a path, or None when it stays unresolved."""
     target = unquote(substitute(token, variables))
     if not target or "$" in target or "`" in target:
@@ -198,23 +213,35 @@ def commit_dirs(command: str, cwd: str) -> list[tuple[str, str]]:
     visited = [cwd]
     doubt = False
     targets = []
-    for segment in SEGMENT.split(command):
+    for found in SEGMENT.finditer(command):
+        segment = found.group()
+        before = command[: found.start()]
+        in_parentheses = before.count("(") > before.count(")")
         assigned = ASSIGNMENT.match(segment)
         if assigned:
             name, value = assigned.groups()
-            if not value[VALUE_WORD.match(value).end() :].strip():
+            word = VALUE_WORD.match(value)
+            if not value[word.end() if word else 0 :].strip():
                 variables[name] = unquote(substitute(value.strip(), variables))
-                continue
+                # A substitution in the value runs; its write is judged below.
+                if "$(" not in value and "`" not in value:
+                    continue
         moved = CD.match(segment)
+        stacked = PUSHD.match(segment)
+        operand = None
         if moved:
-            target = resolve(moved.group(1), current, variables)
-            if target is None or moved.group(1) == "-" or "(" in moved.group(0):
+            operand = moved.group(1)
+            doubt = doubt or in_parentheses or "(" in moved.group(0)
+        elif stacked:
+            operand = stacked.group(2)
+            doubt = True
+        if operand:
+            target = resolve(operand, current, variables)
+            if target is None or operand == "-":
                 doubt = True
             current = target or current
             if current not in visited:
                 visited.append(current)
-        if PUSHD.match(segment):
-            doubt = True
         resolved = substitute(segment, variables)
         writing = GIT_COMMIT_RE.search(resolved)
         if not writing:

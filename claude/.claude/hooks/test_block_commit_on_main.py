@@ -89,15 +89,15 @@ class OnMain(unittest.TestCase):
 
 
 class TextThatOnlyNamesAWrite(OnMain):
-    """A line whose every mention of a git write is quoted text of gh, az, echo, printf or cat."""
+    """A line whose every mention of a git write is quoted text it hands echo, cat, a gh publishing verb or az repos pr."""
 
     def test_it_is_let_through(self):
         for command in (
             'gh issue create --title x --body "Run git rebase onto main first"',
             "gh pr comment 1 --body 'then git commit the fix; cd /elsewhere'",
             'echo "git cherry-pick is not needed"',
-            "printf '%s\\n' 'git revert it'",
             "cat <<'EOF' > notes.md\nthen git commit the fix\nEOF",
+            "gh pr create --title x --body \"$(cat <<'EOF'\nUse `git rebase main` first.\nEOF\n)\"",
             "gh pr create --title x --body \"$(cat <<'EOF'\nRun git rebase main first.\nEOF\n)\"",
             "az repos pr create --description 'git rebase main first'",
             'cd repo && gh pr create --title x --body "Run git rebase main first"',
@@ -135,17 +135,32 @@ class WritesStayRefused(OnMain):
             "gh config set editor 'git rebase main'",
             "gh extension exec x 'git commit -m x'",
             "az devops invoke --route-parameters 'git rebase main'",
+            r"""echo $$'\' x' y '; git commit -m x; echo ' z'""",
+            r"""echo `echo "\`git commit -m x\`"`""",
+            "echo `cat <<'EOF'\nx`; git commit -m x; echo `\nEOF\n`",
+            r"""echo "${x:-" '"}"; git commit -m x; echo "' "}""",
+            "printf -v 'a[$(git commit -m x)]' '%s' y",
+            "printf '%s\\n' 'git revert it'",
         ):
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), "deny")
 
 
-
 class GapsOfTheRawReading(OnMain):
-    """Lines the raw reading used to let through, each now refused."""
+    """A write behind assignments, a subshell `cd` or a later steering flag is refused."""
 
     def test_assignments_before_a_write_do_not_hide_it(self):
         for command in ("FOO=1 git commit -m x", "GIT_SEQUENCE_EDITOR=true git rebase -i main"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
+    def test_a_write_in_an_assigned_substitution_is_judged(self):
+        for command in (
+            'X="$(git commit -m x)"',
+            'export X="$(git rebase main)"',
+            'OUT="$(git rebase main 2>&1)"',
+            "X=`git commit -m x`",
+        ):
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), "deny")
 
@@ -160,7 +175,15 @@ class GapsOfTheRawReading(OnMain):
 
 
 class InDoubt(unittest.TestCase):
-    """Where the directory may have moved, every place it may be is judged."""
+    """Where the directory may have moved, every directory the line has named, the harness cwd included, is judged."""
+
+    def test_a_cd_anywhere_inside_open_parentheses_raises_doubt(self):
+        command = "(true; cd /feat); git commit -m x"
+        self.assertEqual(sorted(guard.commit_dirs(command, "/cwd")), [("/cwd", "commit"), ("/feat", "commit")])
+
+    def test_pushd_names_its_directory(self):
+        command = "pushd /two && git commit -m x"
+        self.assertEqual(sorted(guard.commit_dirs(command, "/cwd")), [("/cwd", "commit"), ("/two", "commit")])
 
     def test_a_subshell_cd_keeps_every_place_the_line_has_been(self):
         cases = {

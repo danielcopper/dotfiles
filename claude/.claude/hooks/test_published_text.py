@@ -101,7 +101,8 @@ class CountsAndPieces(unittest.TestCase):
 
 
 class ShellForms(unittest.TestCase):
-    """Shell forms the reader ends where the shell ends them, so no command after them is hidden."""
+    """Shell forms the reader reads as the shell does: where a quoted or arithmetic form ends, and which heredoc
+    bodies the shell expands."""
 
     def words(self, command: str) -> list[list[str]]:
         return [simple.words for simple in published_text.parse_commands(command)]

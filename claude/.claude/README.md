@@ -131,7 +131,7 @@ Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-
 | Hook                      | Scope                                             | Blocks                                                            |
 | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
 | `block_ai_attribution.py` | global (`settings.json`)                          | `git commit`, `gh pr`/`issue`/`release`, `gh api` and `az repos pr` commands whose message or published text carries AI attribution markers |
-| `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` while a protected branch (main/master, develop, release/*) is checked out, unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `echo`, `printf`, `cat`, `gh pr`/`issue`/`release` or `az repos pr`, and runs nothing else but `cd`, passes |
+| `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` while a protected branch (main/master, develop, release/*) is checked out, unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `echo`, `cat`, a `gh pr`/`issue`/`release` publishing verb or `az repos pr create`/`update`, and runs nothing else but `cd` or a bare assignment, passes |
 | `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's generic code-reviewer — denied with a redirect to the custom `reviewer` agent |
 
 ## Directory Structure
