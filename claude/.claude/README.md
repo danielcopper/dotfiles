@@ -94,7 +94,7 @@ TTS calls are debounced (2s) to prevent overlapping announcements when multiple 
 
 ## Workflow system
 
-GitHub-issue work runs through skills (user-invoked, except where the table says otherwise) backed by custom agents, a per-repo config file, and guard hooks. Everything global lives in this package (stowed); everything repo-specific lives in the repo.
+GitHub-issue work runs through skills (user-invoked, except where the table says otherwise) backed by custom agents, per-repo config, and guard hooks. Everything global lives in this package (stowed); the per-repo facts live where "Per-repo config" below says.
 
 ### Skills (`skills/`)
 
@@ -105,6 +105,7 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 | **plan-epic**            | `/plan-epic [topic\|issue#]`   | Planning only, never code: discuss → slice (tracer bullets, or expand→contract for wide refactors) → drafts for approval → epic + native sub-issues in Ready |
 | **writing-for-agents**   | model-invoked                  | Vendored from [mattpocock/skills](https://github.com/mattpocock/skills): how to write documents agents consume (skills, CLAUDE.md)                 |
 | **toolbox**              | `/toolbox`                     | Router: names every skill and when to reach for it — the entry point when unsure which skill fits                                                  |
+| **setup-repo**           | `/setup-repo`                  | Decides own or foreign repo, detects gate, worktree task and board, asks the rest; drafts the `CLAUDE.md` `## Pipeline` section (own repo) and writes `~/Memory/<repo>/repo-profile.md`; safe to run again |
 | **next**                 | `/next [hint]`                 | Board picker: reads Ready + In Progress, open PRs, and recent commits, then commits to one recommendation for what to work on next                 |
 | **deps-triage**          | `/deps-triage [merge]`         | Classify open dependency/chore PRs (SAFE / LOOK / STUCK) with reasoning; merges the safe bucket on OK                                              |
 | **find-session**         | `/find-session <term>`         | Find past sessions by issue number or topic across all project dirs (incl. worktrees), with resume commands                                        |
@@ -120,11 +121,11 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 
 Which of them run on a change, and which `pr-review-toolkit` specialists beside them, is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
 
-Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text (PRs, issues) is drafted for approval; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board. Tool names (linter, type checker) never live in the global agents — they come from the repo config via the dispatch.
+Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text (PRs, issues) is drafted for approval; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board. Tool names (linter, type checker) never live in the global agents — they come from the repo's `## Pipeline` section, or a foreign repo's profile, via the dispatch.
 
-### Per-repo config (`<repo>/.claude/agents/workflow.md`)
+### Per-repo config
 
-Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-config.md`: `gate` (the battery — prefer mise tasks mirroring CI), `review_checks` (changed-files linter/typecheck for the reviewer), `board` (GraphQL IDs), `worktree_task`, `merge_policy`, `green_definition`, `public_text_drafts`, `user_gate` (what only the user can verify — e.g. an on-device pass). `/implement` bootstraps the file when missing.
+Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next` and `/plan-epic` stop and ask for `/setup-repo` when the profile is missing. `/to-issues` and `/to-prd` still keep their own board IDs in `<repo>/.claude/agents/github.md`.
 
 ### Guard hooks
 

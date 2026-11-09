@@ -8,14 +8,14 @@ Answer one question — "what do we work on next?" — with a single, reasoned r
 
 ## 1. Read the state
 
-Board config from `.claude/agents/workflow.md` (or `github.md`). Then gather:
+The board from the repo's profile ([`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md)); if the profile is missing, stop and ask the user to run `/setup-repo`. Then gather:
 
-- Board items in **In Progress** and **Ready**, with priority and parent epic (`gh project item-list <n> --owner <owner> --format json`, filter by status)
+- Board items in **In Progress** and **Ready**, with priority and parent epic — on a `github` board as `repo-config.md`, "GitHub commands", reads them; on an `azure-devops` board the items in the profile's `in_progress_state` and `ready_state`, read as `repo-config.md`, "Board", says
 - The body of each Ready issue (`gh issue view <N> --json body`)
 - Open PRs and their check states (`gh pr list --json number,title,statusCheckRollup`)
 - The last ~15 commits on main (what momentum exists, what just shipped)
 
-*Done when:* every In Progress and Ready item has been seen with its priority — not just the first page.
+*Done when:* every In Progress and Ready item has been seen with its priority — not just the first page — or, with no board, that is said in one line.
 
 ## 2. Flag inconsistencies first
 

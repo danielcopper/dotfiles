@@ -8,6 +8,7 @@ Match the current situation against this index and recommend the right skill(s).
 
 ## Issue & epic pipeline (user-invoked)
 
+- `/setup-repo` — set a repo up for the pipeline: own or foreign, the `CLAUDE.md` `## Pipeline` draft and `~/Memory/<repo>/repo-profile.md`; `/implement`, `/epic`, `/next` and `/plan-epic` ask for it when the profile is missing
 - `/next [hint]` — what to work on next: reads board + PRs + commits, commits to one recommendation
 - `/implement <N> [--go]` — one GitHub issue end-to-end: align → worktree + board → implementer → review agents → PR → watch to green → merge per policy
 - `/epic <N>` — assembly line over an epic's native sub-issues; merge between issues, fresh worktree from updated main

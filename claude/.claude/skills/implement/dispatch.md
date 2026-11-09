@@ -9,8 +9,8 @@ The lead writes the brief to `~/Memory/<repo>/brief-<N>.md` before dispatching (
 - **Issue** — `#<N>`, plus the epic `#<E>` when the issue says "See epic #E"
 - **Worktree** — the absolute path
 - **Base SHA** — the commit the branch starts from
-- **Gate** — the battery commands from the workflow config, verbatim
-- **Agent rules** — the config's `agent_rules`, verbatim, when set
+- **Gate** — the repo's gate commands ([`repo-config.md`](repo-config.md)), verbatim
+- **Agent rules** — verbatim, when set: in the owner's repos from the `CLAUDE.md`'s `## Pipeline` section, in a foreign repo from the profile ([`repo-config.md`](repo-config.md))
 - **Extras** — task-specific only: files to read first, an exemplar file whose patterns to match, verification specifics, an ADR to write
 
 In a convention repo the issue is the spec, so the brief holds nothing else: a decision lives in the issue's `## Decisions`, never in the brief. In any other repo the brief also names the spec the issue does not settle:
@@ -36,13 +36,13 @@ Report delivery: each agent sends its full report as a message, and the lead sav
 | `DONE_WITH_CONCERNS` | Read the concerns; resolve with the user before review when they touch correctness or scope, otherwise pass them to the reviewer as named risks |
 | `BLOCKED` / `NEEDS_CONTEXT` | Take the specifics to the user. A decision goes into the issue's `## Decisions` (convention repo) or the brief (any other repo); then re-dispatch |
 
-Questions an agent asks mid-run are relayed to the user verbatim — the lead answers only what the issue text or config already answers.
+Questions an agent asks mid-run are relayed to the user verbatim — the lead answers only what the issue text or the repo's facts ([`repo-config.md`](repo-config.md)) already answer.
 
 ## Review dispatch
 
 Start the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the diff. Each gets the range as two commit SHAs, `<base>` and the head commit, and fetches the diff itself. `<base>` is the newest base SHA any implementer report names (it changes when the implementer rebased onto a moved main), else the brief's; in a fix round it is the last reviewed commit, and the diff is the tree diff `review-agents.md`, "Fix rounds", sets, which also says what each agent gets from the previous round. Beyond that:
 
-- `reviewer` — the brief file path (it names the issue and the worktree), the saved implementer report path, and the repo's lint/type commands for changed files (from the workflow config)
+- `reviewer` — the brief file path (it names the issue and the worktree), the saved implementer report path, and the repo's review checks ([`repo-config.md`](repo-config.md))
 - `architecture-reviewer` — the worktree path, the brief file path, and per decision the old behaviour it replaces, which the lead names
 - `prose-reviewer` — the worktree path and the brief file path
 - a specialist — the change's intent in one or two sentences

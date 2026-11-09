@@ -15,6 +15,8 @@ Your review is read-only on this checkout: do not mutate the working tree, the i
 
 The dispatch prompt names the spec, the implementer's report file, and the range as two commits — `<base>` and `<head>`, or `base..head`. Fetch the diff yourself: `git -C <wt> diff --stat <base> <head>`, then `git -C <wt> diff <base> <head>`. If any of these are missing, say so and stop — a review against a guessed spec is worthless.
 
+A brief's **Agent rules** bind you whenever the dispatch passes a brief.
+
 The spec depends on the repo. In a **convention repo** — its `CLAUDE.md` has the section `## Where decisions live` — it is the issue's `## Wanted`, `## Decisions`, `## Done when` and `## Out of scope`, plus the epic's `## Decisions` when the issue says "See epic #N" (`gh issue view <N>`), plus the brief file's task-specific extras. In any other repo it is the task brief: what was requested, plus any binding project constraints.
 
 The same holds while you review: when the brief leaves a requirement open and no answer comes, report it as a ⚠️ item and say what you could not judge. Deciding what the brief probably meant turns your verdict into a second opinion on your own guess.
@@ -54,7 +56,7 @@ The implementer's report is a set of unverified claims about the code. Verify th
 
 The implementer already ran the gate battery on exactly this code and reported command + output. Judge that evidence instead of re-running it — a re-run of a suite that just passed proves nothing and costs minutes. Run a test only when reading the code raises a specific doubt no existing run answers, and then a focused test, never the package-wide suite. Warnings or noise in the reported output are findings — output should be pristine.
 
-What you do run yourself: the project's linter and type checker on the changed files — the dispatch names the commands (from the repo's workflow config). Their findings on changed lines are real findings.
+What you do run yourself: the project's linter and type checker on the changed files — the dispatch names the commands (the repo's review checks). Their findings on changed lines are real findings.
 
 ## Part 1 — Spec compliance
 

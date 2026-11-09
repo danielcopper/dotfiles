@@ -8,7 +8,7 @@ Turn an idea into an epic with grabbable sub-issues. This skill ends in issues o
 
 ## 1. Gather
 
-Whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, `GLOSSARY.md` and the ADRs it touches.
+The repo's profile ([`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md)) for its board — if the profile is missing, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Then whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, `GLOSSARY.md` and the ADRs it touches.
 
 *Done when:* you know the goal, the constraints, and the affected architecture well enough to challenge the plan, not just transcribe it.
 
@@ -37,6 +37,6 @@ Present the epic body and every sub-issue draft to the user, with a proposed ord
 
 ## 5. Publish
 
-On approval: create the epic and the sub-issues, link them **natively** — parent via GitHub's Sub-issues API (`gh api graphql`), blocked-by via the issue-dependency API (command in the `to-issues` skill, Publish step); body-text lists are not the mechanism — put everything in the board's **Ready** column with priority and assignee set (board config: the `board` block in `.claude/agents/workflow.md`, or `.claude/agents/github.md` where that's the file the repo has).
+On approval: create the epic and the sub-issues, link them **natively** — parent via GitHub's Sub-issues API (`gh api graphql`), blocked-by via the issue-dependency API (command in the `to-issues` skill, Publish step); body-text lists are not the mechanism — on a `github` board, put everything in the board's **Ready** column (`repo-config.md`, "GitHub commands") with priority and assignee set.
 
-*Done when:* the board shows the epic with all sub-issues in Ready, natively linked as sub-issues and by blocked-by, and the user has the recommended starting order — typically as a `/epic <N>` away.
+*Done when:* the epic and all sub-issues exist — in Ready, where there is a board — natively linked as sub-issues and by blocked-by, and the user has the recommended starting order — typically as a `/epic <N>` away.
