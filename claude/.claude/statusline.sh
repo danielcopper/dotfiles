@@ -30,10 +30,11 @@ data=$(printf '%s' "$input" | jq -r '
     ((.rate_limits.five_hour.used_percentage // 0) | floor),
     ((.rate_limits.seven_day.used_percentage // 0) | floor),
     (.rate_limits.five_hour.resets_at // 0),
-    (.rate_limits.seven_day.resets_at // 0)
+    (.rate_limits.seven_day.resets_at // 0),
+    (.session_id // "")
   ] | join("\u0001")
 ')
-IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D <<< "$data"
+IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D SESSION_ID <<< "$data"
 
 ##### Terminal width detection (no JSON field exposes this) ###################
 # Anthropic's statusline JSON omits terminal dimensions, so derive it here. In
@@ -303,6 +304,20 @@ elif [ -f "$CACHE_FILE" ]; then
     IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE WT_BRANCH WT_MORE < "$CACHE_FILE"
 fi
 
+# The worktree this session created replaces the repo-wide newest one, without
+# a +N count. hooks/session_worktree.py writes its path and branch per session
+# after a `mise run worktree-new`, into the same per-user directory resolved
+# here; it is read on every render, after the per-cwd cache, so sessions
+# sharing a checkout never see each other's. A worktree that has since been
+# removed falls back to the repo-wide one.
+SESSION_WT_FILE="${XDG_RUNTIME_DIR:-$HOME/.cache/claude}/statusline-session-wt/$SESSION_ID"
+if [ "$IS_WORKTREE" = "0" ] && [ -n "$SESSION_ID" ] && [ -f "$SESSION_WT_FILE" ]; then
+    { read -r SESSION_WT_PATH; read -r SESSION_WT_BRANCH; } < "$SESSION_WT_FILE"
+    if [ -d "$SESSION_WT_PATH" ]; then
+        WT_BRANCH="$SESSION_WT_BRANCH" WT_MORE=0
+    fi
+fi
+
 ##### Build progress bars #####################################################
 # Width is label + 2 cells of padding. Labels vary with model and reset time.
 # Built up here (before the dir/branch blocks) because the content-aware
@@ -469,10 +484,10 @@ build_branch_block() {
     printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
 }
 
-# Build the worktree branch block: the arrow and the sibling worktree branch
-# with the newest commit, plus a +N count of the others, truncated in the
-# wttrunc variant. Empty when there is no such branch, always so when the
-# session itself sits in a worktree.
+# Build the worktree branch block: the arrow and the worktree branch this
+# session created, else the sibling worktree branch with the newest commit plus
+# a +N count of the others, truncated in the wttrunc variant. Empty when there
+# is no such branch, always so when the session itself sits in a worktree.
 build_worktree_block() {
     local wv="$1"
     [ -z "$WT_BRANCH" ] && return
