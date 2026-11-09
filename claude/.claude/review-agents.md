@@ -84,7 +84,8 @@ one.
 Merge every agent's findings into one list, each tagged with the agent that raised it. A plugin specialist keeps its own
 scale, and no dispatch asks it for another; it reads as:
 
-- `silent-failure-hunter` — CRITICAL → Critical, HIGH → Important, MEDIUM → Minor.
+- `silent-failure-hunter` — CRITICAL → Important, or Critical when it names what `reviewer` calls Critical (lost data,
+  a security hole, a path users take that does not work); HIGH → Important; MEDIUM → Minor.
 - `pr-test-analyzer` — 9–10 → Critical, 7–8 → Important, 5–6 → Minor; 1–4 is not reported.
 - `type-design-analyzer` — rates no finding: everything under Concerns and Recommended Improvements → Minor.
 
