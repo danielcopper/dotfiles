@@ -302,7 +302,8 @@
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh",
-    "padding": 1
+    "padding": 1,
+    "refreshInterval": 10
   },
   "enabledPlugins": {
     "claude-md-management@claude-plugins-official": true,
