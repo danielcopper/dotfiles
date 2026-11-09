@@ -83,7 +83,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | `session_start.py`      | SessionStart     | Load context on session init                        |
 | `pre_compact.py`        | PreCompact       | Backup transcript before compaction                 |
 | `block_ai_attribution.py` | PreToolUse (Bash) | Block commits, PR/issue/release text, `gh api` writes and `az repos pr` text carrying AI attribution markers |
-| `lint_published_markdown.py` | PreToolUse (Bash) | Block PR/issue/comment/release text and `gh api` writes whose markdown GitHub would render differently than intended — so far an issue reference (`#N`, `owner/repo#N`, `GH-N`, an issue, PR or discussion URL) inside a list item, which renders as a large title card. Reads the text through `hooks/utils/published_text.py`, which it shares with `block_ai_attribution.py`; `block_commit_on_main.py` uses its shell reader |
+| `lint_published_markdown.py` | PreToolUse (Bash) | Block PR/issue/comment/release text and `gh api` writes whose markdown GitHub would render differently than intended — so far an issue reference (`#N`, `owner/repo#N`, `GH-N`, an issue, PR or discussion URL) inside a list item, which renders as a large title card. Reads the text through `hooks/utils/published_text.py` |
 | `block_commit_on_main.py` | PreToolUse (Bash) | Refuses writes to a protected branch — see [Guard hooks](#guard-hooks) |
 | `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's generic code-reviewer — routes to the custom `reviewer` agent |
 | `worktree_create.sh`    | WorktreeCreate   | Creates worktrees at `<repo-parent>/<repo>.worktrees/<name>` instead of `.claude/worktrees/`; a `<type>/<slug>` name runs the `worktree-new` task script (branch + setup) |
@@ -131,7 +131,7 @@ Machine-readable facts the pipeline needs, schema in `skills/implement/workflow-
 | Hook                      | Scope                                             | Blocks                                                            |
 | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
 | `block_ai_attribution.py` | global (`settings.json`)                          | `git commit`, `gh pr`/`issue`/`release`, `gh api` and `az repos pr` commands whose message or published text carries AI attribution markers |
-| `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` onto a protected branch (main/master, develop, release/*), unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `gh`, `az`, `echo`, `printf` or `cat`, and runs nothing else but `cd`, passes |
+| `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` while a protected branch (main/master, develop, release/*) is checked out, unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `echo`, `printf`, `cat`, `gh pr`/`issue`/`release` or `az repos pr`, and runs nothing else but `cd`, passes |
 | `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's generic code-reviewer — denied with a redirect to the custom `reviewer` agent |
 
 ## Directory Structure

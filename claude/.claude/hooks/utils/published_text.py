@@ -322,8 +322,8 @@ class _Reader:
         """Step over arithmetic from just inside `((` to just past `))`.
 
         None when the parentheses close apart (`((cd x) && y)`): the shell then
-        reads them as subshells, and so does the caller. Substitutions inside
-        still run, so a None reading lists them a second time.
+        reads them as subshells, and so does the caller. Substitutions met on
+        the way are already listed, so a None reading lists them a second time.
         """
         text = self.text
         n = len(text)

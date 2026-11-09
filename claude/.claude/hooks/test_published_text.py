@@ -100,5 +100,31 @@ class CountsAndPieces(unittest.TestCase):
         self.assertEqual(published_text.publishing_sources("az repos pr create -d 'x'", "/", pieces=True), [])
 
 
+class ShellForms(unittest.TestCase):
+    """Shell forms the reader ends where the shell ends them, so no command after them is hidden."""
+
+    def words(self, command: str) -> list[list[str]]:
+        return [simple.words for simple in published_text.parse_commands(command)]
+
+    def test_an_ansi_c_string_ends_at_its_unescaped_quote(self):
+        self.assertEqual(self.words("echo $'a\\'b' ; ls"), [["echo", "$'a\\'b'"], ["ls"]])
+
+    def test_a_shift_in_arithmetic_is_not_a_heredoc(self):
+        (simple,) = published_text.parse_commands("(( x << 2 ))\nls")
+        self.assertEqual((simple.words, simple.heredocs), (["ls"], []))
+
+    def test_double_parentheses_that_close_apart_are_subshells(self):
+        self.assertEqual(self.words("((cd x) && y)"), [["cd", "x"], ["y"]])
+
+    def test_a_comment_inside_backticks_ends_at_the_backtick(self):
+        self.assertEqual(self.words("echo `true # note` ; ls"), [["true"], ["echo", "`true # note`"], ["ls"]])
+
+    def test_a_heredoc_is_expanded_only_behind_an_unquoted_delimiter(self):
+        for opener, expands in (("<<'EOF'", False), ('<<"EOF"', False), ("<<\\EOF", False), ("<<EOF", True)):
+            with self.subTest(opener=opener):
+                (simple,) = published_text.parse_commands(f"cat {opener}\nbody\nEOF")
+                self.assertEqual((simple.heredocs, simple.heredoc_expands), (["body"], [expands]))
+
+
 if __name__ == "__main__":
     unittest.main()
