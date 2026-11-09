@@ -33,7 +33,7 @@ For architecture, plugin overview, and setup, see [README.md](README.md).
 ### Formatting
 
 - `<leader>cf` — format the current buffer (conform.nvim, LSP fallback)
-- Lua files are formatted with `stylua` (defaults; no project-level config)
+- Lua files are formatted with `stylua --indent-type Spaces --indent-width 2` (set in `plugin/conform.lua`; no project-level config)
 - `<leader>cf` formats Kotlin with `ktlint`, never with the LSP; ktlint reads the project's `.editorconfig`
 
 ## Common commands
