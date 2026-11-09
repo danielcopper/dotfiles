@@ -71,7 +71,12 @@ the text below it committed but not read.
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
 — a commit that should obviously go through. A name only counts when it stands
 with an attribution word on the same line, which is what an attribution looks
-like and what a filename never does.
+like. And it only counts as a word of its own: inside a path or a file name —
+`.claude/rules`, `~/.claude/hooks`, `CLAUDE.md`, `docs/claude-code/`,
+`foo-claude` — it is a name for a place, so `.claude/rules made it clearer`
+goes through. A `.`, `/`, `-` or word character before the name, or a `/`, a
+word character or a `.` followed by a letter or digit after it, makes it part
+of such a name; a full stop, a comma or a bracket does not.
 """
 
 import json
@@ -104,16 +109,24 @@ TRAILER_RE = re.compile(rf"^\s*(?:{TRAILER_KEYS})\s*:", re.IGNORECASE | re.MULTI
 # refuse honest commits on this codebase. A guard that blocks real work gets
 # switched off, and the trailer rule above already catches the shapes those
 # tools actually emit.
+#
+# A GPT model is named whole — `gpt-4`, `gpt-4o`, `gpt-4.1` — so the boundary
+# below sits after its version, not inside it.
 TOOL_NAMES = (
-    r"claude|anthropic|chatgpt|openai|gpt-\d|copilot|codeium|windsurf|"
+    r"claude|anthropic|chatgpt|openai|gpt-\d+(?:\.\d+)*[a-z]?|copilot|codeium|windsurf|"
     r"gemini|llama|mistral|aider|opencode|codex|devin"
 )
+# A name standing as a word, not a piece of a path or a file name: nothing
+# before it that joins it to a path or a longer name (`.claude`, `/claude`,
+# `foo-claude`), and nothing after it that does (`claude/`, `CLAUDE.md`).
+# A `.` followed by a blank or the end of the text is a sentence's full stop.
+TOOL_NAME = rf"(?<![\w./-])(?:{TOOL_NAMES})(?![\w/]|\.[a-z0-9])"
 ATTRIBUTION_WORDS = r"generated|authored|assisted|co-?written|written|created|produced|powered|made"
 # Either order — "generated with Claude" and "Claude generated this" both count —
 # and within one line: `.` does not cross a newline, so a tool named in one
 # paragraph cannot be paired with a verb three lines away.
 NAME_WITH_WORD_RE = re.compile(
-    rf"(?:{ATTRIBUTION_WORDS}).{{0,25}}(?:{TOOL_NAMES})|(?:{TOOL_NAMES}).{{0,25}}(?:{ATTRIBUTION_WORDS})",
+    rf"(?:{ATTRIBUTION_WORDS}).{{0,25}}{TOOL_NAME}|{TOOL_NAME}.{{0,25}}(?:{ATTRIBUTION_WORDS})",
     re.IGNORECASE,
 )
 

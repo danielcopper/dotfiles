@@ -102,6 +102,21 @@ class WhatCounts(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertIsNotNone(guard.offence("feat: x\n\n" + line))
 
+    def test_a_tool_name_standing_as_a_word_counts_beside_punctuation(self):
+        for line in (
+            "Generated " + "with Claude Code",
+            "written " + "by Claude.",
+            "made " + "by Claude, then reviewed",
+            "made " + "with (Claude)",
+            "Claude " + "generated this",
+            "generated " + "by gpt-4",
+            "generated " + "by gpt-4o",
+            "written " + "with GPT-4.1",
+            TRAILER,
+        ):
+            with self.subTest(line=line):
+                self.assertIsNotNone(guard.offence("feat: x\n\n" + line))
+
 
 class WhatMustStillPass(unittest.TestCase):
     """A guard that refuses honest commits gets turned off, so these matter as much."""
@@ -115,6 +130,20 @@ class WhatMustStillPass(unittest.TestCase):
             "docs(claude): describe the hooks under ~/.claude",
             # `cursor` and `cody` are out of the name list for exactly this.
             "fix(ui): move the cursor to the first row when the list is written",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(guard.offence(message))
+
+    def test_a_tool_name_inside_a_path_or_file_name_is_not_attribution(self):
+        for message in (
+            "the rule lives in .claude/rules/endpoints.md, written for agents",
+            "move .claude/rules made it clearer",
+            "path .claude/agents created by the owner",
+            "docs: update CLAUDE.md written in English",
+            "~/.claude/hooks made executable",
+            "docs/claude-code/ written for agents",
+            "the foo-claude package made it simpler",
+            "notes in gpt-4.md written by hand",
         ):
             with self.subTest(message=message):
                 self.assertIsNone(guard.offence(message))
@@ -698,7 +727,7 @@ class GhApi(unittest.TestCase):
         self.assertIsNone(guard.publish_block(f"gh api repos/anthropics/claude-code/issues -f title=Bug --jq {jq}", self.dir))
 
     def test_an_explicit_get_sends_nothing_to_publish(self):
-        query = shlex.quote("author:app/" + "copilot created:>2024-01-01")
+        query = shlex.quote("Generated " + "with Copilot")
         self.assertIsNone(guard.publish_block(f"gh api -X GET search/issues -f q={query}", self.dir))
         # Without `-X GET` the same fields make gh send a POST.
         self.assertIsNotNone(guard.publish_block(f"gh api search/issues -f q={query}", self.dir))
