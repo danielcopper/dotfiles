@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -146,6 +147,12 @@ class WhatCounts(unittest.TestCase):
             "made with claude-4.x-preview",
         ))
 
+    def test_a_dotted_version_after_a_name_is_no_file_extension(self):
+        self.assert_named_as_author((
+            "made with Claude.3",
+            "Generated with gemini.2",
+        ))
+
     def test_a_domain_after_a_name_is_no_file_extension(self):
         self.assert_named_as_author((
             "made with claude.ai",
@@ -155,11 +162,12 @@ class WhatCounts(unittest.TestCase):
             "made with codeium.io",
         ))
 
-    def test_a_name_inside_a_domain_counts(self):
+    def test_an_assistant_chat_host_counts(self):
         self.assert_named_as_author((
             "made with chat.openai.com",
             "made with gemini.google.com",
             "made with copilot.github.com",
+            "made with copilot.microsoft.com",
         ))
 
     def test_a_slash_between_two_tool_names_does_not_join_them(self):
@@ -200,7 +208,7 @@ class WhatMustStillPass(unittest.TestCase):
     """A guard that refuses honest commits gets turned off, so these matter as much."""
 
     def test_a_tool_name_on_its_own_is_not_attribution(self):
-        for message in (
+        self.assert_passes((
             "docs: update CLAUDE.md",
             "feat(api): call the Anthropic messages endpoint",
             "fix: handle a gpt-4 response with no choices",
@@ -208,9 +216,7 @@ class WhatMustStillPass(unittest.TestCase):
             "docs(claude): describe the hooks under ~/.claude",
             # `cursor` and `cody` are out of the name list for exactly this.
             "fix(ui): move the cursor to the first row when the list is written",
-        ):
-            with self.subTest(message=message):
-                self.assertIsNone(guard.offence(message))
+        ))
 
     def test_a_tool_name_inside_a_path_or_file_name_is_not_attribution(self):
         self.assert_passes((
@@ -248,6 +254,19 @@ class WhatMustStillPass(unittest.TestCase):
             "claude-notes.md written in English",
             "gpt-4-turbo.md written by hand",
             "claude-code-notes.md written for agents",
+            "claude-3.5.md written by hand",
+            "notes for claude-4.1.json written by hand",
+            "gpt-4.1.md written by hand",
+        ))
+
+    def test_a_documentation_or_api_host_is_not_attribution(self):
+        self.assert_passes((
+            "Hook input format: https://code.claude.com/docs/en/hooks - made the parser follow it.",
+            "The schema is written up at docs.anthropic.com",
+            "follows platform.openai.com/docs, written for the API",
+            "made with api.openai.com",
+            "made with x.claude.ai",
+            "made with api.codeium.io",
         ))
 
     def test_a_commit_scope_is_not_a_name(self):
@@ -266,6 +285,58 @@ class WhatMustStillPass(unittest.TestCase):
 
     def test_a_signed_off_by_trailer_is_not_attribution(self):
         self.assertIsNone(guard.offence("feat: x\n\nSigned-off-by: A Person <a@b.c>"))
+
+
+class KnownLimits(unittest.TestCase):
+    """The limits the module docstring accepts, each held to the side it names."""
+
+    def test_the_accepted_refusals_are_refused(self):
+        for line in (
+            "fix(claude-code): made x",
+            "fix(claude,codex): made x",
+            "fix(hooks,claude): made x",
+            "opencode/opencode.jsonc made executable",
+            "update claude/copilot-instructions.md written for agents",
+            "migration and made 'stow -R claude' abort",
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(guard.offence(line), "an AI tool named as an author")
+
+    def test_the_accepted_refusals_of_an_inline_message_are_refused(self):
+        directory = temp_dir(self)
+        for command in (
+            'git commit -m"fix(claude): made x"',
+            "git commit -m fix\\(claude\\): made x",
+            "git commit -m $'Summary\\n\\nfix(claude): made x'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run_hook(command, directory), 2)
+
+    def test_the_accepted_passes_pass(self):
+        for line in (
+            "_Claude_ made it",
+            "claude_code made it",
+            "made by Llama3",
+            "made by ClaudeAI",
+            "made by GitHub-Copilot",
+            "made by GPT4",
+            "made with claude-4.x",
+            "made with gpt-4.x",
+            "made with claude.v2",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNone(guard.offence(line))
+
+    def test_a_long_run_of_dots_after_a_name_is_read_in_bounded_time(self):
+        for label, text in (
+            ("dotted names", "claude." * 4000),
+            ("a dotted version", "made by claude" + ".1" * 8000 + "_"),
+            ("a hyphenated dotted version", "made by claude-a" + ".1a" * 8000 + "_"),
+        ):
+            with self.subTest(label=label):
+                started = time.perf_counter()
+                guard.offence(text)
+                self.assertLess(time.perf_counter() - started, 0.5)
 
 
 class MessageFiles(unittest.TestCase):
@@ -700,13 +771,23 @@ class PublishedText(unittest.TestCase):
         for command in (
             'gh pr create --title "fix(claude): made the hook quieter" --body "A plain body."',
             "gh issue create --title='feat(claude)!: made the hook quieter' --body 'A plain body.'",
+            'gh pr create -t "fix(claude): made the hook quieter" -b "A plain body."',
+            'gh pr merge 5 --squash --subject "fix(claude): made it quieter"',
+            'gh pr merge 5 --squash -t "fix(claude): made it quieter"',
+            "az repos pr create --title 'fix(claude): made the hook quieter' --description 'A plain body.'",
         ):
             with self.subTest(command=command):
                 self.assertIsNone(guard.publish_block(command, self.dir))
 
     def test_a_name_in_brackets_inside_a_title_still_counts(self):
-        command = 'gh pr create --title "made with (Claude)" --body "A plain body."'
-        self.assertIsNotNone(guard.publish_block(command, self.dir))
+        for command in (
+            'gh pr create --title "made with (Claude)" --body "A plain body."',
+            'gh pr create -t "made with (Claude)" -b "A plain body."',
+            'gh pr merge 5 --squash --subject "feat(claude): made with Claude"',
+            "az repos pr create --title 'made with (Claude)' --description 'A plain body.'",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNotNone(guard.publish_block(command, self.dir))
 
     def test_a_name_behind_a_shell_escape_in_the_body_is_caught(self):
         command = "gh pr create --title x --body $'Summary\\n\\nClaude generated this PR'"

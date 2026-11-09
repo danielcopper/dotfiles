@@ -75,34 +75,43 @@ like. And it only counts as a word of its own, not as a piece of a path, a
 file name or a longer word: `.claude/rules made it clearer` goes through.
 
 - Before the name, a `.`, `/`, `-` or word character joins it (`.claude`,
-  `~/.claude/hooks`, `docs/claude-code/`, `foo-claude`). A shell escape —
-  `\\n`, `\\r` or `\\t`, as in `$'Summary\\n\\nClaude generated this'` — does
-  not: it stands for a blank.
+  `~/.claude/hooks`, `docs/claude-code/`, `foo-claude`), and so a name inside
+  a host is a name for a place: `docs.anthropic.com`, `code.claude.com`,
+  `api.openai.com`, `x.claude.ai` pass. Two exceptions: a shell escape —
+  `\\n`, `\\r` or `\\t`, as in `$'Summary\\n\\nClaude generated this'` —
+  stands for a blank, and the `.` of an assistant's chat host does not join
+  (`chat.openai.com` counts).
 - After the name, a word character joins it, and so does a `/` unless another
   tool name follows (`claude/` does, `Claude/Copilot` does not), and a file
-  extension: a `.` followed by a letter (`CLAUDE.md`). A dotted version is no
-  extension (`claude.3`). A domain is none either: a name followed by `.ai`,
-  `.com` or `.io`, directly or behind further labels, counts
-  (`made with claude.ai`, `gemini.google.com`), and so does a name inside one,
-  where the `.` before it does not join it (`chat.openai.com`).
+  extension: a `.` followed by a letter, behind any dotted version
+  (`CLAUDE.md`, `gpt-4.1.md`). A dotted version alone is no extension
+  (`Claude.3`). A domain is none either: a name that starts a host ending in
+  `.ai`, `.com` or `.io`, directly or behind up to three more labels, counts
+  (`claude.ai`, `gemini.google.com`, `copilot.microsoft.com`).
 - A `-` after the name does not join it (`Claude-generated`, `claude-code`
   count), unless the word it starts ends in a file extension:
-  `copilot-instructions.md` and `claude-notes.md` are file names, while
-  `claude-3.5` and `claude-sonnet-4.5` are model names and count.
+  `copilot-instructions.md`, `claude-notes.md` and `claude-3.5.md` are file
+  names, while `claude-3.5`, `claude-sonnet-4.5` and `claude-4.x-preview` are
+  model names and count.
 - A full stop, a comma or a bracket joins nothing: `written by Claude.` and
   `made with (Claude)` count.
 - A Conventional-Commit scope — `fix(claude):`, `feat(claude)!:` — is a
   scope, not a name, where a subject starts: at the start of a line, or right
-  after the opening quote (`"`, `'`, `$'`) of a `-m`, `--message` or
-  `--title` value, `-am` included. Elsewhere a name in brackets counts, and so
-  does a credit on the scope's own line (`feat(claude): made with Claude`).
+  after the opening quote (`"`, `'`, `$'`) of a `-m`, `--message`, `-t`,
+  `--title` or `--subject` value: a commit message (`-am` included), a gh or
+  az title, and `gh pr merge`'s subject. Elsewhere a name in brackets counts,
+  and so does a credit on the scope's own line
+  (`feat(claude): made with Claude`).
 
 Known limits, accepted. These pass though a tool is named: an underscore is a
 word character, so `_Claude_` and `claude_code` pass; joined spellings —
 `Llama3`, `ClaudeAI`, `GitHub-Copilot` — pass, and `GPT4` without its hyphen
-is no name. These are refused though nothing is credited: a scope of another
-shape (`fix(claude-code):`, `fix(claude,codex):`); a path whose pieces are two
-tool names, which the `/` rule splits (`opencode/opencode.jsonc`); a scope
+is no name; a dotted piece that starts with a letter reads as a file
+extension, so `claude-4.x`, `gpt-4.x` and `claude.v2` pass. These are refused
+though nothing is credited: a scope of another shape (`fix(claude-code):`,
+`fix(claude,codex):`); a path whose next piece starts with a tool name, which
+the `/` rule splits (`opencode/opencode.jsonc`,
+`claude/copilot-instructions.md`); a scope
 behind a value with no blank after `-m` (`-m"fix(claude): …"`), with no quote
 (`-m fix\\(claude\\):…`), or behind a `\\n` escape in a `$'…'` value; and a
 tool name used as a command argument (`made 'stow -R claude' abort`).
@@ -147,12 +156,18 @@ TOOL_NAMES = (
 )
 # A name standing as a word of its own — when one counts as that is the module
 # docstring's, under "Why tool names are not matched on their own".
-DOMAIN = r"(?:\.[a-z0-9-]+)*\.(?:ai|com|io)\b"
+# The labels are bounded, so the check stays short on a long run of dots.
+DOMAIN = r"(?:\.[a-z0-9-]+){0,3}\.(?:ai|com|io)\b"
 FILE_EXTENSION = rf"(?!{DOMAIN})\.[a-z]"
+# Each dotted version is read whole (`\d+` then a tail that starts with a
+# letter), so the pieces cannot be split two ways and backtrack.
+VERSIONS = r"(?:\.\d+(?:[a-z_-][\w-]*)?)*"
+# The assistants' chat hosts with the name inside: the `.` before it does not join.
+INSIDE_CHAT_HOST = r"(?<=\bchat\.)(?=openai\.com\b)"
 TOOL_NAME = (
-    rf"(?:(?<![\w./-])|(?<=\\[nrt])|(?<=\.)(?=(?:{TOOL_NAMES}){DOMAIN}))"
+    rf"(?:(?<![\w./-])|(?<=\\[nrt])|{INSIDE_CHAT_HOST})"
     rf"(?:{TOOL_NAMES})"
-    rf"(?!\w|/(?!(?:{TOOL_NAMES})\b)|{FILE_EXTENSION}|-[\w-]*{FILE_EXTENSION}[a-z0-9]*(?![\w-]))"
+    rf"(?!\w|/(?!(?:{TOOL_NAMES})\b)|(?:\.\d+)*{FILE_EXTENSION}|-[\w-]*{VERSIONS}{FILE_EXTENSION}[a-z0-9]*(?![\w-]))"
 )
 ATTRIBUTION_WORDS = r"generated|authored|assisted|co-?written|written|created|produced|powered|made"
 # Either order — "generated with Claude" and "Claude generated this" both count —
@@ -164,7 +179,7 @@ NAME_WITH_WORD_RE = re.compile(
 )
 # A commit scope where a subject starts — see the module docstring. Both starts
 # are anchored, so `\w+\(` is only tried there.
-SUBJECT_START = r"""^|(?<![\w-])(?:-[a-z]*m|--message|--title)(?:\s+|=)\$?["']"""
+SUBJECT_START = r"""^|(?<![\w-])(?:-[a-z]*m|--message|-t|--title|--subject)(?:\s+|=)\$?["']"""
 SCOPE_NAME_RE = re.compile(
     rf"({SUBJECT_START})(\w+\()({TOOL_NAMES})(?=\)!?:)", re.IGNORECASE | re.MULTILINE
 )
@@ -225,7 +240,7 @@ def read_message_files(command: str, cwd: str) -> str:
 
 
 def offence(text: str) -> str | None:
-    """What attribution `text` carries, or None. A commit scope is not read as a name."""
+    """What attribution `text` carries, or None. A commit scope where a subject starts is not read as a name."""
     text = _without_scope_names(text)
     for pattern, label in PATTERNS:
         if pattern.search(text):
