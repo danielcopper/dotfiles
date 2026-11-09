@@ -469,9 +469,10 @@ build_branch_block() {
     printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
 }
 
-# Build the worktree branch block: the arrow and the newest sibling worktree's
-# branch, truncated in the wttrunc variant. Empty when no sibling worktree has
-# a branch.
+# Build the worktree branch block: the arrow and the sibling worktree branch
+# with the newest commit, plus a +N count of the others, truncated in the
+# wttrunc variant. Empty when there is no such branch, always so when the
+# session itself sits in a worktree.
 build_worktree_block() {
     local wv="$1"
     [ -z "$WT_BRANCH" ] && return
