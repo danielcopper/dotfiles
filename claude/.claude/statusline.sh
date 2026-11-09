@@ -99,7 +99,7 @@ FILL_5H_LOW=$'\e[48;2;249;226;175;38;2;17;17;27m' # 5h low — yellow (#f9e2af)
 FILL_7D_LOW=$'\e[48;2;180;190;254;38;2;17;17;27m' # 7d low — lavender (#b4befe)
 
 R=$'\e[0m'
-# Foreground-only overlay0, for the bare arrow between the branch chips.
+# Foreground-only overlay0, for the bare arrow before the worktree branch chip.
 FG_OV0=$'\e[38;2;108;112;134m'
 
 ##### Progress bar — BG-fill on dark with centered label ######################
@@ -211,8 +211,9 @@ WT_BRANCH="" WT_MORE=0
 # Consolidated git query: one `git status --porcelain=v2 --branch` covers
 # branch, upstream, ahead/behind, and all file counts. Worktree detection
 # still needs rev-parse (not exposed by porcelain); in-progress state lives
-# in the per-worktree git dir. The status exit code doubles as "is this a
-# git repo?" — replaces the prior standalone rev-parse existence check.
+# in the per-worktree git dir; sibling worktree branches need for-each-ref.
+# The status exit code doubles as "is this a git repo?" — replaces the prior
+# standalone rev-parse existence check.
 if cache_is_stale; then
     if STATUS=$(git -C "$DIR" status --porcelain=v2 --branch 2>/dev/null); then
         # Single-pass awk parse of porcelain v2. SOH-delimited (\x01) for
@@ -498,8 +499,10 @@ visible_width() {
 # Tiers (info loss grows down the list):
 #   1. wide   / full  / full-bars  — full path (parent/leaf), full branch
 #   1a. (worktree branch shown)    — drop the session's own branch
-#   1b. (worktree branch shown)    — also truncate the worktree branch, and
-#                                    keep it truncated in every later tier
+#   1b. (worktree branch shown)    — also truncate the worktree branch; in
+#                                    every later tier the session branch stays
+#                                    dropped and the worktree branch truncated,
+#                                    so tier 2 would equal tier 3 and is skipped
 #   2. narrow / full  / full-bars  — drop parent, keep leaf
 #   3. narrow / trunc / full-bars  — drop parent + truncate branch
 #   4. vnarrow/ trunc / full-bars  — also truncate leaf
@@ -517,9 +520,10 @@ WT_TAIL="main"
 if [ -n "$WT_BRANCH" ]; then
     COMBOS+=("wide full full-bars wt" "wide full full-bars wttrunc")
     WT_TAIL="wttrunc"
+else
+    COMBOS+=("narrow full full-bars main")
 fi
 COMBOS+=(
-    "narrow full full-bars $WT_TAIL"
     "narrow trunc full-bars $WT_TAIL"
     "vnarrow trunc full-bars $WT_TAIL"
     "vnarrow trunc mini-bars $WT_TAIL"
