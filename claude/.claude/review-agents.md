@@ -13,7 +13,7 @@ message, several `Agent` calls. The table alone decides; there are no size tiers
 
 - **Code** — production code or a changed test file.
 - **Production code** — a changed source file outside tests, docs and config, and every changed instruction file: an
-  agent definition, a skill, a `CLAUDE.md`, a rule file (every rule file under `.claude/rules/`), this file.
+  agent definition, a skill, a `CLAUDE.md`, a file under `.claude/rules/`, this file.
 - **Prose** — a comment, docstring, doc page, README, ADR, instruction file, or invariant register the diff adds or
   changes. Docs written for humans (READMEs, `docs/`, ADRs) are prose only.
 
