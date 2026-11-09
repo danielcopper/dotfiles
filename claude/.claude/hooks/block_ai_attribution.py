@@ -79,23 +79,33 @@ file name or a longer word: `.claude/rules made it clearer` goes through.
   `\\n`, `\\r` or `\\t`, as in `$'Summary\\n\\nClaude generated this'` — does
   not: it stands for a blank.
 - After the name, a word character joins it, and so does a `/` unless another
-  tool name follows (`claude/` does, `Claude/Copilot` does not), and a `.`
-  followed by a letter or digit, a file extension (`CLAUDE.md`). `.ai`,
-  `.com` and `.io` are no extension but a domain: `made with claude.ai`
-  counts. A `-` does not join (`Claude-generated`, `claude-code` count),
-  unless the word it starts ends in a file extension: `copilot-instructions.md`
-  and `claude-notes.md` are file names.
+  tool name follows (`claude/` does, `Claude/Copilot` does not), and a file
+  extension: a `.` followed by a letter (`CLAUDE.md`). A dotted version is no
+  extension (`claude.3`). A domain is none either: a name followed by `.ai`,
+  `.com` or `.io`, directly or behind further labels, counts
+  (`made with claude.ai`, `gemini.google.com`), and so does a name inside one,
+  where the `.` before it does not join it (`chat.openai.com`).
+- A `-` after the name does not join it (`Claude-generated`, `claude-code`
+  count), unless the word it starts ends in a file extension:
+  `copilot-instructions.md` and `claude-notes.md` are file names, while
+  `claude-3.5` and `claude-sonnet-4.5` are model names and count.
 - A full stop, a comma or a bracket joins nothing: `written by Claude.` and
   `made with (Claude)` count.
 - A Conventional-Commit scope — `fix(claude):`, `feat(claude)!:` — is a
   scope, not a name, where a subject starts: at the start of a line, or right
-  after the opening quote (`"`, `'`, `$'`) of a `-m` or `--message` value,
-  `-am` included. Elsewhere a name in brackets counts.
+  after the opening quote (`"`, `'`, `$'`) of a `-m`, `--message` or
+  `--title` value, `-am` included. Elsewhere a name in brackets counts, and so
+  does a credit on the scope's own line (`feat(claude): made with Claude`).
 
-Known limits, accepted: an underscore is a word character, so `_Claude_` and
-`claude_code` pass; joined spellings — `Llama3`, `ClaudeAI`, `GitHub-Copilot`
-— pass, and `GPT4` without its hyphen is no name. A `-m` value written
-without a quote (`-m fix\\(claude\\):…`) is not read as a subject.
+Known limits, accepted. These pass though a tool is named: an underscore is a
+word character, so `_Claude_` and `claude_code` pass; joined spellings —
+`Llama3`, `ClaudeAI`, `GitHub-Copilot` — pass, and `GPT4` without its hyphen
+is no name. These are refused though nothing is credited: a scope of another
+shape (`fix(claude-code):`, `fix(claude,codex):`); a path whose pieces are two
+tool names, which the `/` rule splits (`opencode/opencode.jsonc`); a scope
+behind a value with no blank after `-m` (`-m"fix(claude): …"`), with no quote
+(`-m fix\\(claude\\):…`), or behind a `\\n` escape in a `$'…'` value; and a
+tool name used as a command argument (`made 'stow -R claude' abort`).
 """
 
 import json
@@ -103,7 +113,6 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -138,9 +147,10 @@ TOOL_NAMES = (
 )
 # A name standing as a word of its own — when one counts as that is the module
 # docstring's, under "Why tool names are not matched on their own".
-FILE_EXTENSION = r"\.(?!(?:ai|com|io)\b)[a-z0-9]"
+DOMAIN = r"(?:\.[a-z0-9-]+)*\.(?:ai|com|io)\b"
+FILE_EXTENSION = rf"(?!{DOMAIN})\.[a-z]"
 TOOL_NAME = (
-    rf"(?:(?<![\w./-])|(?<=\\[nrt]))"
+    rf"(?:(?<![\w./-])|(?<=\\[nrt])|(?<=\.)(?=(?:{TOOL_NAMES}){DOMAIN}))"
     rf"(?:{TOOL_NAMES})"
     rf"(?!\w|/(?!(?:{TOOL_NAMES})\b)|{FILE_EXTENSION}|-[\w-]*{FILE_EXTENSION}[a-z0-9]*(?![\w-]))"
 )
@@ -152,37 +162,28 @@ NAME_WITH_WORD_RE = re.compile(
     rf"(?:{ATTRIBUTION_WORDS}).{{0,25}}{TOOL_NAME}|{TOOL_NAME}.{{0,25}}(?:{ATTRIBUTION_WORDS})",
     re.IGNORECASE,
 )
-# A Conventional-Commit scope where a subject starts: at the start of a line, or
-# right after the opening quote of a `-m`/`--message` value. Both starts are
-# anchored, so `\w+\(` is only tried there.
-SUBJECT_START = r"""^|(?<![\w-])(?:-[a-z]*m|--message)(?:\s+|=)\$?["']"""
+# A commit scope where a subject starts — see the module docstring. Both starts
+# are anchored, so `\w+\(` is only tried there.
+SUBJECT_START = r"""^|(?<![\w-])(?:-[a-z]*m|--message|--title)(?:\s+|=)\$?["']"""
 SCOPE_NAME_RE = re.compile(
-    rf"({SUBJECT_START})(\w+\()(?:{TOOL_NAMES})(?=\)!?:)", re.IGNORECASE | re.MULTILINE
+    rf"({SUBJECT_START})(\w+\()({TOOL_NAMES})(?=\)!?:)", re.IGNORECASE | re.MULTILINE
 )
 
 
 def _without_scope_names(text: str) -> str:
-    """`text` with every tool name used as a commit scope blanked out, at its length."""
-    return SCOPE_NAME_RE.sub(lambda match: match.group(1) + match.group(2) + "_" * (match.end() - match.end(2)), text)
+    """`text` with every tool name used as a commit scope where a subject starts blanked out, at its length."""
+    return SCOPE_NAME_RE.sub(lambda match: match.group(1) + match.group(2) + " " * len(match.group(3)), text)
 
 
-def name_with_word(text: str) -> re.Match[str] | None:
-    """A tool name beside an attribution word in `text`, a commit scope not counted."""
-    return NAME_WITH_WORD_RE.search(_without_scope_names(text))
-
-
-PATTERNS: list[tuple[Callable[[str], object], str]] = [
-    (TRAILER_RE.search, "an attribution trailer"),
-    (name_with_word, "an AI tool named as an author"),
-    (re.compile(r"\U0001F916").search, "the robot emoji"),
-    (re.compile(r"noreply@(?:anthropic|openai)\.com", re.IGNORECASE).search, "a vendor noreply address"),
-    (
-        re.compile(r"https?://(?:claude\.ai|chatgpt\.com|chat\.openai\.com)/\S*", re.IGNORECASE).search,
-        "an assistant session link",
-    ),
+PATTERNS = [
+    (TRAILER_RE, "an attribution trailer"),
+    (NAME_WITH_WORD_RE, "an AI tool named as an author"),
+    (re.compile(r"\U0001F916"), "the robot emoji"),
+    (re.compile(r"noreply@(?:anthropic|openai)\.com", re.IGNORECASE), "a vendor noreply address"),
+    (re.compile(r"https?://(?:claude\.ai|chatgpt\.com|chat\.openai\.com)/\S*", re.IGNORECASE), "an assistant session link"),
     # The page a tool credit links to. Prose naming the tool passes; the link is
     # what a credit line carries, whatever verb stands before it.
-    (re.compile(r"https?://(?:www\.)?claude\.com/claude-code", re.IGNORECASE).search, "a link to an AI tool's page"),
+    (re.compile(r"https?://(?:www\.)?claude\.com/claude-code", re.IGNORECASE), "a link to an AI tool's page"),
 ]
 
 # Options whose value is a path holding the message text.
@@ -224,9 +225,10 @@ def read_message_files(command: str, cwd: str) -> str:
 
 
 def offence(text: str) -> str | None:
-    """What attribution `text` carries, or None."""
-    for search, label in PATTERNS:
-        if search(text):
+    """What attribution `text` carries, or None. A commit scope is not read as a name."""
+    text = _without_scope_names(text)
+    for pattern, label in PATTERNS:
+        if pattern.search(text):
             return label
     return None
 
