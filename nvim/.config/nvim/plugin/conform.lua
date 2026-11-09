@@ -33,7 +33,7 @@ require("conform").setup({
     -- --stdin-path lets ktlint find the project's .editorconfig, whatever
     -- Neovim's cwd is.
     ktlint = {
-      args = { "--format", "--stdin", "--stdin-path", "$FILENAME", "--log-level=none" },
+      append_args = { "--stdin-path", "$FILENAME" },
     },
     sqlfluff = {
       require_cwd = false,
