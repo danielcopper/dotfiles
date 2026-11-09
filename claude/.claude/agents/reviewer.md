@@ -72,7 +72,7 @@ Read the changed code line by line and judge it as a senior engineer:
 
 - **Design** — does each touched unit keep one clear responsibility? Are the abstractions right for what the task needed? Clean separation, DRY within the diff without premature abstraction? Whether the tree already holds this code, and whether the change follows its sibling files, is `architecture-reviewer`'s question.
 - **Correctness** — error handling, edge cases, concurrency and state hazards the diff introduces
-- **Conventions** — the repo's own rules, which no loaded CLAUDE.md hands you: read them at the reviewed head (`git -C <wt> show <head>:<path>`) — its root `CLAUDE.md`, every `CLAUDE.md` in a directory between the root and a changed file, and every rule file under `.claude/rules/` that has no `paths:` or whose `paths:` cover a changed file — and apply them with high precision, together with one rule every repo shares, that code identifiers are English: an explicit rule violation is a top-severity finding; a style preference no guideline names is not a finding at all
+- **Conventions** — the repo's own rules, which no loaded CLAUDE.md hands you: read them at the reviewed head (`git -C <wt> show <head>:<path>`) — its root `CLAUDE.md`, every `CLAUDE.md` in a directory between the root and a changed file, and every rule file under `.claude/rules/` that has no `paths:` or whose `paths:` cover a changed file — and apply them with high precision, together with one rule every repo shares, that code identifiers are English: an explicit rule violation is at least Important; a style preference no guideline names is not a finding at all
 - **Tests** — do new and changed tests verify real behavior rather than mock choreography? Are the task's edge cases covered? Would the test still pass if the behavior broke?
 - **Structure** — new files with one clear responsibility? Did this change grow a file past reason? (Judge what this change contributed; the size a file already had is `pre-existing`.)
 
@@ -93,7 +93,7 @@ A defect the diff did not introduce, seen in its context lines or in a check you
 
 ## Severity calibration
 
-Not everything is Critical. A finding scoring below 80 is **Minor**. **Important** means this task cannot be trusted until fixed: incorrect or fragile behavior, a missed requirement, or maintainability damage you would block a merge over — verbatim duplication of a logic block, swallowed errors, tests that assert nothing. "Coverage could be broader" and polish suggestions are **Minor**. Acknowledge what was done well before listing issues — accurate praise helps the implementer trust the rest.
+Not everything is Critical. **Critical** means data is lost, a security hole opens, or a path users take does not work. A finding scoring below 80 is **Minor**. **Important** means this task cannot be trusted until fixed: incorrect or fragile behavior, a missed requirement, a broken written repo rule, or maintainability damage you would block a merge over — verbatim duplication of a logic block, swallowed errors, tests that assert nothing. "Coverage could be broader" and polish suggestions are **Minor**. Acknowledge what was done well before listing issues — accurate praise helps the implementer trust the rest.
 
 ## Output
 
