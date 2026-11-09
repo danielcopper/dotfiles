@@ -8,15 +8,18 @@ rebase, cherry-pick and revert there is no lock — git runs no pre-commit
 hook for them, measured — so on those this is the only guard. It reads a
 command line, so it can only judge what that line says.
 
-Where the line pins its directory - `git -C <path>`, or a `cd` in an
-earlier segment, including through a variable assigned in the same block -
-the write is judged there. Where a `cd` may not have moved the shell (one
-while a `(` is open, `cd -`, a `cd` to an unresolved path, `pushd`/`popd`),
-every directory the line has named so far, the harness cwd included, is
-judged, and one protected branch among them refuses. That reading is raw
-too, so such a line inside a commit message or heredoc body (`cd -` at a
-line start) refuses a later write in another repository as well. Where the
-line pins nothing, the fallback is the cwd the harness reports, and that
+Where the line pins its directory - `git -C <path>`, or a `cd` that opens
+an earlier segment (after any `(`), including through a variable assigned
+in the same block - the write is judged there. A `cd` behind `$(`, `{`,
+`if` or `then` is not seen: the write is judged where the line stood before
+it. Where a `cd` that opens a segment may not have moved the shell (one
+while a `(` is open, `cd -`, a `cd` to an unresolved path), or the line
+uses `pushd`/`popd`, every directory a `cd` or `pushd` on the line has
+named so far, the harness cwd included, is judged, and one protected branch
+among them refuses. That reading is raw too: a `(` left open in quoted
+text, or such a `cd` at a line start inside a commit message or heredoc
+body, refuses a later write in another repository as well. Where the line
+pins nothing, the fallback is the cwd the harness reports, and that
 value can lag the shell: a command that commits in a directory the harness
 has not noticed yet is judged against the old one. Closing that would mean
 refusing every commit that does not name its directory, which is most of
@@ -25,10 +28,12 @@ them; the git hook covers it instead.
 Repos whose work legitimately lives on main are read from the same list the
 git hook uses, so the exemption is stated once.
 
-The judgement is on raw text: every match of `GIT_COMMIT_RE` counts, quoted
-or not, also after assignments at the start of a segment
-(`FOO=1 git commit`) and in an assigned `$(...)` or backtick substitution,
-with the limits that brings (a `-C` path with a space, a write split by a
+The judgement is on raw text: the first match of `GIT_COMMIT_RE` in each
+segment counts, quoted or not, also after assignments at the start of a
+segment (`FOO=1 git commit`) and in an assigned `$(...)` or backtick
+substitution, with the limits that brings (a second write in the same
+segment, e.g. in a `$(...)` argument, is not seen; nor is a `cd` behind
+`$(`, `{`, `if` or `then`; a `-C` path with a space, a write split by a
 `\\` line break, git options other than one `-C` and `-c` pairs). Steering
 a running operation (`git rebase --continue`) is let through only with the
 flag right after the operation. One exception, for text that only names a

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The text a Bash command would publish through gh or az, for the PreToolUse
 hooks that judge it (`block_ai_attribution.py`, `lint_published_markdown.py`).
-Its shell reader (`parse_commands`) and verb sets (`GH_VERBS`, `AZ_VERBS`) also
-serve `block_commit_on_main.py`.
+Its shell reader (`parse_commands`, `dequote`) and verb sets (`GH_VERBS`,
+`AZ_VERBS`) also serve `block_commit_on_main.py`.
 
 This module says what text is published, not what is wrong with it: each hook
 brings its own rules. `publishing_sources` answers, as `(where, text)` pairs;

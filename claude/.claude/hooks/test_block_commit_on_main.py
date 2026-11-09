@@ -147,7 +147,7 @@ class WritesStayRefused(OnMain):
 
 
 class GapsOfTheRawReading(OnMain):
-    """A write behind assignments, a subshell `cd` or a later steering flag is refused."""
+    """A write behind or inside an assignment, a subshell `cd` or a later steering flag is refused."""
 
     def test_assignments_before_a_write_do_not_hide_it(self):
         for command in ("FOO=1 git commit -m x", "GIT_SEQUENCE_EDITOR=true git rebase -i main"):
@@ -175,7 +175,7 @@ class GapsOfTheRawReading(OnMain):
 
 
 class InDoubt(unittest.TestCase):
-    """Where the directory may have moved, every directory the line has named, the harness cwd included, is judged."""
+    """Where the directory may have moved, every place the line has been before the write is judged."""
 
     def test_a_cd_anywhere_inside_open_parentheses_raises_doubt(self):
         command = "(true; cd /feat); git commit -m x"
