@@ -18,7 +18,7 @@ cp ~/.config/nvim/.env.example ~/.config/nvim/.env  # fill in your tokens
 nvim                                                # bootstraps vim.pack + Mason
 ```
 
-First launch clones all plugins via `vim.pack.add()`, then `mason-tool-installer` installs ~25 packages (LSP servers, formatters, linters, DAP adapters) with a 3s delay. Run `:checkhealth` afterwards to flag any missing externals.
+First launch clones all plugins via `vim.pack.add()`, then `mason-tool-installer` installs ~35 packages (LSP servers, formatters, linters, DAP adapters). Run `:checkhealth` afterwards to flag any missing externals.
 
 ## Architecture
 
@@ -105,5 +105,5 @@ Press `<leader>?` for buffer-local keymap overview (which-key).
 - Neovim options: `lua/config/options.lua`
 - Plugin config: `plugin/<name>.lua`
 - Filetype-specific: `ftplugin/<ft>.lua`
-- New LSP server: add to `plugin/mason-packages.lua`, optionally `lsp/<name>.lua`, then add to `vim.lsp.enable({...})` in `plugin/lsp.lua`
-- New plugin: add URL to `vim.pack.add({...})` in `init.lua`, optionally create `plugin/<name>.lua` for setup
+- New LSP server: add to `plugin/mason.lua`, optionally `lsp/<name>.lua`, then add to `vim.lsp.enable({...})` in `plugin/lsp.lua`
+- New plugin: create `plugin/<name>.lua` that calls `vim.pack.add({...})` and then sets the plugin up
