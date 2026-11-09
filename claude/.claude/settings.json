@@ -111,6 +111,16 @@
             "timeout": 25
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/session_worktree.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreCompact": [

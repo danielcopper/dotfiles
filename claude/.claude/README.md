@@ -76,6 +76,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | ----------------------- | ---------------- | --------------------------------------------------- |
 | `block_disk_wipe.py`    | PreToolUse (Bash) | Denies mkfs, wipefs, dd onto a device node and redirects onto a block device — the one destruction the auto-mode classifier does not name. Every other deletion (`rm`, `git reset --hard`, `checkout -- path`, `branch -D`, force push) is the classifier's call |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
+| `session_worktree.py`   | PostToolUse (Bash) | Records the worktree a `mise run worktree-new` call in this session reported ready in `/tmp/statusline-session-wt/<session_id>`, so `statusline.sh` shows that branch instead of the repo-wide newest worktree branch |
 | `stop.py`               | Stop             | TTS on task completion                              |
 | `notification.py`       | Notification     | TTS when user input needed                          |
 | `subagent_stop.py`      | SubagentStop     | TTS on subagent completion                          |
@@ -157,6 +158,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
     ├── block_plugin_code_reviewer.py  # Agent guard: route review to custom reviewer
     ├── pre_tool_use.py           # Security guard (fail-closed)
     ├── post_tool_use.py          # Error detection
+    ├── session_worktree.py       # Statusline: the worktree this session created
     ├── stop.py                   # Completion TTS
     ├── notification.py           # Input-needed TTS
     ├── subagent_stop.py          # Subagent TTS
