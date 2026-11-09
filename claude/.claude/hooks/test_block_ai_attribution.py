@@ -299,6 +299,25 @@ class EndToEnd(unittest.TestCase):
         command = "git commit -m $'Summary\\n\\nClaude generated this PR'"
         self.assertEqual(run_hook(command, self.dir), 2)
 
+    def test_a_commit_scope_at_the_start_of_an_inline_message_is_not_a_name(self):
+        for command in (
+            'git commit -m "fix(claude): made the hook quieter"',
+            "git commit -m 'feat(claude)!: made the hook quieter'",
+            "git commit -m $'fix(claude): made the hook quieter\\n\\nA plain body.'",
+            'git commit --message="fix(claude): made the hook quieter"',
+            'git commit -am "fix(claude): made the hook quieter"',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run_hook(command, self.dir), 0)
+
+    def test_a_name_in_brackets_inside_an_inline_message_still_counts(self):
+        for command in (
+            'git commit -m "made with (Claude)"',
+            'git commit -m "see fix(claude): made it"',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run_hook(command, self.dir), 2)
+
     def test_an_unreadable_message_file_does_not_break_the_commit(self):
         self.assertEqual(run_hook(f"git commit -F {self.dir}/missing.txt", self.dir), 0)
 

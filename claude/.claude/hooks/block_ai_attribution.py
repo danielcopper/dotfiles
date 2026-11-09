@@ -87,15 +87,15 @@ file name or a longer word: `.claude/rules made it clearer` goes through.
   and `claude-notes.md` are file names.
 - A full stop, a comma or a bracket joins nothing: `written by Claude.` and
   `made with (Claude)` count.
-- A Conventional-Commit scope at the start of a line — `fix(claude):`,
-  `feat(claude)!:` — is a scope, not a name.
+- A Conventional-Commit scope — `fix(claude):`, `feat(claude)!:` — is a
+  scope, not a name, where a subject starts: at the start of a line, or right
+  after the opening quote (`"`, `'`, `$'`) of a `-m` or `--message` value,
+  `-am` included. Elsewhere a name in brackets counts.
 
 Known limits, accepted: an underscore is a word character, so `_Claude_` and
 `claude_code` pass; joined spellings — `Llama3`, `ClaudeAI`, `GitHub-Copilot`
-— pass, and `GPT4` without its hyphen is no name. A scope inside a
-`git commit -m "fix(claude): …"` stands after the quote, not at the start of
-a line, so the command string is refused while the same message from a file
-goes through.
+— pass, and `GPT4` without its hyphen is no name. A `-m` value written
+without a quote (`-m fix\\(claude\\):…`) is not read as a subject.
 """
 
 import json
@@ -152,13 +152,18 @@ NAME_WITH_WORD_RE = re.compile(
     rf"(?:{ATTRIBUTION_WORDS}).{{0,25}}{TOOL_NAME}|{TOOL_NAME}.{{0,25}}(?:{ATTRIBUTION_WORDS})",
     re.IGNORECASE,
 )
-# A Conventional-Commit scope at the start of a line: `fix(claude):`, `feat(claude)!:`.
-SCOPE_NAME_RE = re.compile(rf"^(\w+\()(?:{TOOL_NAMES})(?=\)!?:)", re.IGNORECASE | re.MULTILINE)
+# A Conventional-Commit scope where a subject starts: at the start of a line, or
+# right after the opening quote of a `-m`/`--message` value. Both starts are
+# anchored, so `\w+\(` is only tried there.
+SUBJECT_START = r"""^|(?<![\w-])(?:-[a-z]*m|--message)(?:\s+|=)\$?["']"""
+SCOPE_NAME_RE = re.compile(
+    rf"({SUBJECT_START})(\w+\()(?:{TOOL_NAMES})(?=\)!?:)", re.IGNORECASE | re.MULTILINE
+)
 
 
 def _without_scope_names(text: str) -> str:
     """`text` with every tool name used as a commit scope blanked out, at its length."""
-    return SCOPE_NAME_RE.sub(lambda match: match.group(1) + "_" * (match.end() - match.end(1)), text)
+    return SCOPE_NAME_RE.sub(lambda match: match.group(1) + match.group(2) + "_" * (match.end() - match.end(2)), text)
 
 
 def name_with_word(text: str) -> re.Match[str] | None:
