@@ -362,7 +362,8 @@ REL=""
 [[ "$DIR" == "$PROJECT_DIR"/* ]] && REL="${DIR#"$PROJECT_DIR"/}"
 
 # Static (non-truncatable) blocks: in-progress state, ahead/behind, dirty.
-# Computed once; appended after the dir+branch in every variant.
+# Computed once; placed after the dir+branch in every variant, before the
+# worktree branch block, so they stay with the session's own checkout.
 STATIC_BLK=""
 if [ -n "$BRANCH" ]; then
     [ -n "$GIT_STATE" ] && STATIC_BLK+=" $B_RED_B $GIT_STATE $R"
@@ -454,19 +455,24 @@ middle_truncate() {
     printf '%s…%s' "${s:0:front}" "${s: -back}"
 }
 
-# Build the branch block. $1 is the session branch's variant (full | trunc),
-# $2 the worktree part's (main = session branch + full worktree branch,
-# wt = worktree branch only, wttrunc = truncated worktree branch only). Empty
-# when there is neither a branch nor a worktree branch.
+# Build the session's branch block. $1 is its variant (full | trunc), $2 the
+# worktree variant (main = shown, wt | wttrunc = dropped for the worktree
+# branch). Empty when there is no branch or it is dropped.
 build_branch_block() {
     local v="$1" wv="$2"
-    if [ -n "$BRANCH" ] && { [ -z "$WT_BRANCH" ] || [ "$wv" = "main" ]; }; then
-        local br="$BRANCH"
-        if [ "$v" = "trunc" ] && [ "${#br}" -gt "$MAX_BRANCH_CHARS" ]; then
-            br=$(middle_truncate "$br" "$MAX_BRANCH_CHARS")
-        fi
-        printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
+    { [ -z "$BRANCH" ] || [ "$wv" != "main" ]; } && return
+    local br="$BRANCH"
+    if [ "$v" = "trunc" ] && [ "${#br}" -gt "$MAX_BRANCH_CHARS" ]; then
+        br=$(middle_truncate "$br" "$MAX_BRANCH_CHARS")
     fi
+    printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
+}
+
+# Build the worktree branch block: the arrow and the newest sibling worktree's
+# branch, truncated in the wttrunc variant. Empty when no sibling worktree has
+# a branch.
+build_worktree_block() {
+    local wv="$1"
     [ -z "$WT_BRANCH" ] && return
     local wt="$WT_BRANCH" more=""
     if [ "$wv" = "wttrunc" ] && [ "${#wt}" -gt "$MAX_BRANCH_CHARS" ]; then
@@ -524,7 +530,8 @@ for combo in "${COMBOS[@]}"; do
     read -r pv bv bm wv <<< "$combo"
     dir_blk=$(build_dir_block "$pv")
     br_blk=$(build_branch_block "$bv" "$wv")
-    LINE1="$dir_blk$br_blk$STATIC_BLK"
+    wt_blk=$(build_worktree_block "$wv")
+    LINE1="$dir_blk$br_blk$STATIC_BLK$wt_blk"
     # 1 literal space between every chip-like block. Each chip has its own
     # bg colour, so what the eye reads as "the gap" is the terminal-bg
     # region between two coloured chip regions — equal to the literal-space
