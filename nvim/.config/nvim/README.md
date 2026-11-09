@@ -66,6 +66,8 @@ Lockfile: `nvim-pack-lock.json` (auto-managed, check into version control).
 | Notebooks            | molten-nvim                                                  |
 | UI                   | noice · nvim-notify · catppuccin                             |
 
+In Android projects, kotlin-lsp resolves the generated `R` class only after one Gradle build of the project.
+
 ## Worktree workflow
 
 Branches live as git worktrees in a sibling directory of the repo,
