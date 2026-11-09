@@ -72,7 +72,7 @@ GIT_DASH_C = re.compile(r"\bgit\s+-C\s+(\S+)")
 CD = re.compile(r"^\s*\(*\s*cd\s+([^\s;&|]+)")
 PUSHD = re.compile(r"^\s*\(*\s*(?:pushd|popd)\b")
 
-# Shell block anatomy, read the same way block_dangerous_bash.py reads it.
+# Shell block anatomy: segments, assignments, variables.
 SEGMENT = re.compile(r"[|;&\r\n]+")
 ASSIGNMENT = re.compile(r"^\s*(?:export\s+|local\s+)?([A-Za-z_]\w*)=(.*)$")
 VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
