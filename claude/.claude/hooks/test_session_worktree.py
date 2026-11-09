@@ -6,11 +6,12 @@ Run: python3 claude/.claude/hooks/test_session_worktree.py
 
 import importlib.util
 import io
+import json
 import os
 import stat
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -106,11 +107,13 @@ class Directory(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def refused(self, out):
-        err = io.StringIO()
-        with redirect_stderr(err):
+    def notice(self, out):
+        """The systemMessage record() prints for the user; nothing may go to stderr, which nobody sees."""
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
             hook.record(self.data, out)
-        return err.getvalue()
+        self.assertEqual(stderr.getvalue(), "")
+        return json.loads(stdout.getvalue())["systemMessage"]
 
     def test_xdg_runtime_dir_holds_the_session_files_when_set(self):
         with patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.root)}):
@@ -138,7 +141,7 @@ class Directory(unittest.TestCase):
             with self.subTest(name=name):
                 out = self.root / name
                 out.symlink_to(points_to)
-                self.assertIn(f"refusing {out}", self.refused(out))
+                self.assertIn(f"refusing {out}", self.notice(out))
                 self.assertEqual(os.listdir(target), [])
                 self.assertFalse((self.root / "missing").exists())
 
@@ -146,7 +149,7 @@ class Directory(unittest.TestCase):
         out = self.root / "statusline-session-wt"
         out.mkdir(mode=0o700)
         with patch.object(hook.os, "getuid", return_value=os.getuid() + 1):
-            self.assertIn(f"refusing {out}", self.refused(out))
+            self.assertIn(f"refusing {out}", self.notice(out))
         self.assertEqual(os.listdir(out), [])
 
 

@@ -11,6 +11,8 @@ session creates wins; anything else writes nothing.
 
 The directory is per user and private (0700): one that is a symlink or owned
 by someone else is refused, so nobody else can plant or redirect the file.
+A refusal is shown to the user as a systemMessage: stderr of an exit-0 hook
+reaches nobody.
 """
 
 import json
@@ -42,6 +44,11 @@ def private_dir(path):
     return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
 
 
+def warn(message):
+    """Show message to the user as the hook's systemMessage."""
+    print(json.dumps({"systemMessage": f"session_worktree: {message}"}))
+
+
 def created_worktree(data):
     """(path, branch) of the last worktree a `mise run worktree-new` call reports ready, else None."""
     command = (data.get("tool_input") or {}).get("command") or ""
@@ -61,7 +68,7 @@ def record(data, out_dir=None):
         return
     out_dir = out_dir or session_wt_dir()
     if not private_dir(out_dir):
-        print(f"session_worktree: refusing {out_dir}: a symlink, not a directory, or not owned by this user", file=sys.stderr)
+        warn(f"refusing {out_dir}: a symlink, not a directory, or not owned by this user")
         return
     path, branch = created
     fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=f".{session}.")
