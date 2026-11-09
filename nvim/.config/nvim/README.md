@@ -62,6 +62,7 @@ Lockfile: `nvim-pack-lock.json` (auto-managed, check into version control).
 | Debug                | nvim-dap + dap-ui                                            |
 | AI                   | claude-code.nvim                                             |
 | SQL (T-SQL)          | mssql.nvim · sqlfluff                                        |
+| Kotlin               | kotlin-lsp · ktlint (format + lint)                          |
 | Notebooks            | molten-nvim                                                  |
 | UI                   | noice · nvim-notify · catppuccin                             |
 

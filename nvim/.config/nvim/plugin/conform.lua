@@ -17,7 +17,11 @@ require("conform").setup({
     bash = { "shfmt" },
     sh = { "shfmt" },
     sql = { "sqlfluff" },
+    -- No LSP fallback: Kotlin projects gate on ktlint's format, not kotlin-lsp's.
+    kotlin = { "ktlint", lsp_format = "never" },
   },
+  -- Set here, not in the format() call, so a filetype's own lsp_format wins.
+  default_format_opts = { lsp_format = "fallback" },
   format_on_save = nil,
   formatters = {
     stylua = {
@@ -25,6 +29,11 @@ require("conform").setup({
     },
     shfmt = {
       prepend_args = { "-i", "2" },
+    },
+    -- --stdin-path lets ktlint find the project's .editorconfig, whatever
+    -- Neovim's cwd is.
+    ktlint = {
+      args = { "--format", "--stdin", "--stdin-path", "$FILENAME", "--log-level=none" },
     },
     sqlfluff = {
       require_cwd = false,
@@ -43,8 +52,5 @@ require("conform").setup({
 })
 
 vim.keymap.set({ "n", "v" }, "<leader>cf", function()
-  require("conform").format({
-    lsp_format = "fallback",
-    async = true,
-  })
+  require("conform").format({ async = true })
 end, { desc = "Format buffer" })

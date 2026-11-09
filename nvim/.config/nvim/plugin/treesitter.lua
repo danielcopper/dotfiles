@@ -22,6 +22,7 @@ local parsers = {
   "javascript",
   "jsdoc",
   "json",
+  "kotlin",
   "luadoc",
   "python",
   "regex",

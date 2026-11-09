@@ -11,6 +11,7 @@ lint.linters_by_ft = {
   bash = { "shellcheck" },
   dockerfile = { "hadolint" },
   sql = { "sqlfluff" },
+  kotlin = { "ktlint" },
 }
 
 local sqlfluff_default = { "lint", "--format=json", "--dialect=sqlite", "-" }
@@ -32,6 +33,16 @@ local md_default = vim.fn.filereadable(md_global) == 1
     and { "--stdin", "--config", md_global }
     or md_stdin_only
 lint.linters.markdownlint.args = md_default
+
+-- --stdin-path lets ktlint find the project's .editorconfig, whatever
+-- Neovim's cwd is.
+lint.linters.ktlint.args = {
+  "--reporter=json",
+  "--stdin",
+  function()
+    return "--stdin-path=" .. vim.api.nvim_buf_get_name(0)
+  end,
+}
 
 local lint_augroup = vim.api.nvim_create_augroup("nvim_lint", { clear = true })
 
@@ -66,12 +77,20 @@ end
 local timer = assert(vim.uv.new_timer())
 local DEBOUNCE_MS = 300
 
+-- ktlint starts a JVM per run, too heavy for every edit: Kotlin is linted on
+-- reading and writing only.
+local read_write_only = { kotlin = true }
+local read_write_events = { BufReadPost = true, BufWritePost = true }
+
 vim.api.nvim_create_autocmd({
   "BufWritePost", "BufReadPost", "BufEnter", "TextChanged", "TextChangedI",
 }, {
   group = lint_augroup,
   callback = function(ev)
     local buf = ev.buf
+    if read_write_only[vim.bo[buf].filetype] and not read_write_events[ev.event] then
+      return
+    end
     timer:stop()
     timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
       run_lint(buf)

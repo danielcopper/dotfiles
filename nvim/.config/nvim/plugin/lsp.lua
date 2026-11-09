@@ -64,6 +64,7 @@ vim.lsp.enable({
   "eslint",
   "html",
   "jsonls",
+  "kotlin_lsp",
   "lemminx",
   "lua_ls",
   "markdown_oxide",

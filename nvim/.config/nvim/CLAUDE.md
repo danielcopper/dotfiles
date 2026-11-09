@@ -34,6 +34,7 @@ For architecture, plugin overview, and setup, see [README.md](README.md).
 
 - `<leader>cf` — format the current buffer (conform.nvim, LSP fallback)
 - Lua files are formatted with `stylua` (defaults; no project-level config)
+- Kotlin files are formatted with `ktlint` and never by the LSP; ktlint reads the project's `.editorconfig`
 
 ## Common commands
 

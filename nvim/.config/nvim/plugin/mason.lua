@@ -82,6 +82,10 @@ require("mason-tool-installer").setup({
     -- Java
     "jdtls",
 
+    -- Kotlin
+    "kotlin-lsp",
+    "ktlint",
+
     -- DAP Adapters
     "netcoredbg",
 
