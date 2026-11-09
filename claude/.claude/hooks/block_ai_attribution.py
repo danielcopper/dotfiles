@@ -77,9 +77,11 @@ file name or a longer word: `.claude/rules made it clearer` goes through.
 - Before the name, a `.`, `/`, `-` or word character joins it (`.claude`,
   `~/.claude/hooks`, `docs/claude-code/`, `foo-claude`), and so a name inside
   a host is a name for a place: `docs.anthropic.com`, `code.claude.com`,
-  `api.openai.com`, `x.claude.ai` pass. Two exceptions: a shell escape —
+  `api.openai.com`, `x.claude.ai` pass. Three exceptions: a shell escape —
   `\\n`, `\\r` or `\\t`, as in `$'Summary\\n\\nClaude generated this'` —
-  stands for a blank, and the `.` of an assistant's chat host does not join
+  stands for a blank; a `www.` or a URL's `://` (with or without `www.`)
+  stands for no prefix, so `www.claude.ai` and `https://claude.ai` count as
+  `claude.ai` does; and the `.` of an assistant's chat host does not join
   (`chat.openai.com` counts).
 - After the name, a word character joins it, and so does a `/` unless another
   tool name follows (`claude/` does, `Claude/Copilot` does not), and a file
@@ -164,8 +166,10 @@ FILE_EXTENSION = rf"(?!{DOMAIN})\.[a-z]"
 VERSIONS = r"(?:\.\d+(?:[a-z_-][\w-]*)?)*"
 # The assistants' chat hosts with the name inside: the `.` before it does not join.
 INSIDE_CHAT_HOST = r"(?<=\bchat\.)(?=openai\.com\b)"
+# A `www.` (not itself inside a host or path) or a URL's `://` before the name.
+HOST_START = r"(?<=://)|(?<=://www\.)|(?<=www\.)(?<![\w./-]www\.)"
 TOOL_NAME = (
-    rf"(?:(?<![\w./-])|(?<=\\[nrt])|{INSIDE_CHAT_HOST})"
+    rf"(?:(?<![\w./-])|(?<=\\[nrt])|{HOST_START}|{INSIDE_CHAT_HOST})"
     rf"(?:{TOOL_NAMES})"
     rf"(?!\w|/(?!(?:{TOOL_NAMES})\b)|(?:\.\d+)*{FILE_EXTENSION}|-[\w-]*{VERSIONS}{FILE_EXTENSION}[a-z0-9]*(?![\w-]))"
 )
