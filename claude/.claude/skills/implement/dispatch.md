@@ -1,6 +1,6 @@
 # Dispatching the implementer and the review agents
 
-Templates and routing rules for the pipeline's agents. The agent definitions under `~/.claude/agents/` carry the working rules, the test and commit discipline, escalation, the confidence rubric and the report contracts; a dispatch supplies only the task facts below and restates none of those rules, in the brief or in the prompt. Default models come from the agent definitions; a pipeline agent runs on another model only on the user's yes.
+Templates and routing rules for the pipeline's agents. The agent definitions under `~/.claude/agents/` carry the working rules, the test and commit discipline, escalation, the confidence rubric and the report contracts; a dispatch supplies only the task facts below and restates none of those rules, in the brief or in the prompt, but the one "Implementer dispatch" names. Default models come from the agent definitions; a pipeline agent runs on another model only on the user's yes.
 
 ## Brief file
 
@@ -23,6 +23,8 @@ In a convention repo the issue is the spec, so the brief holds nothing else: a d
 ## Implementer dispatch
 
 Spawn the `implementer` agent with the brief file path, and name any session-level constraint the user added on top (the project's CLAUDE.md loads automatically).
+
+End every implementer prompt, the first and each fix dispatch, with: *"Send your full report as a message. Your final answer is then one sentence: status and head."* It is the one rule a dispatch restates: the definition carries it too, but without the reminder the implementer's idle notice repeats the whole report, cut off where it is long.
 
 Report delivery: each agent sends its full report as a message, and the lead saves it next to the brief in `~/Memory/<repo>/`, because the harness has a subagent return its report as text rather than write a report file. The implementer's report is saved whole to `report-<N>.md`, a fix round's appended to it; it is also the saved file of the by-catch it lists. A review agent's is saved as an extract to `review-<N>-<round>-<agent>.md`: per finding its file:line, severity, score (where the agent gives one), what is wrong, the **evidence** (the quoted text, the contradicting site as file:line, or the command that showed it) and the suggested fix; from every `reviewer` report also its ⚠️ items; from every fix-round report, whichever agent wrote it, and from the post-cap pass, each verdict on an earlier finding that is not "addressed", with its anchor and evidence; and from a verify-only report its `### Noticed` items. The single verify-only pass after the round cap is saved as `review-<N>-post-cap-reviewer.md`. The fix dispatch works from these files, and so does the next round's review as `review-agents.md`, "Fix rounds", sets.
 
