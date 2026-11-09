@@ -5,9 +5,14 @@ Run: python3 claude/.claude/hooks/test_session_worktree.py
 """
 
 import importlib.util
+import io
+import os
+import stat
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 
 _spec = importlib.util.spec_from_file_location(
     "session_worktree", Path(__file__).with_name("session_worktree.py")
@@ -90,6 +95,59 @@ class Record(unittest.TestCase):
             with self.subTest(session=session):
                 hook.record(payload("mise run worktree-new feat session-chip", READY, session), self.dir)
                 self.assertFalse(self.dir.exists())
+
+
+class Directory(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.data = payload("mise run worktree-new feat session-chip", READY)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def refused(self, out):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            hook.record(self.data, out)
+        return err.getvalue()
+
+    def test_xdg_runtime_dir_holds_the_session_files_when_set(self):
+        with patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.root)}):
+            hook.record(self.data)
+        self.assertEqual((self.root / "statusline-session-wt" / SESSION).read_text(), f"{WT}\nfeat/session-chip\n")
+
+    def test_home_cache_holds_them_without_xdg_runtime_dir(self):
+        for runtime in ({}, {"XDG_RUNTIME_DIR": ""}):
+            with self.subTest(runtime=runtime):
+                env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"} | runtime | {"HOME": str(self.root)}
+                with patch.dict(os.environ, env, clear=True):
+                    self.assertEqual(hook.session_wt_dir(), self.root / ".cache" / "claude" / "statusline-session-wt")
+
+    def test_directory_and_file_are_private(self):
+        out = self.root / "statusline-session-wt"
+        hook.record(self.data, out)
+        self.assertEqual(stat.S_IMODE(os.stat(out).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.stat(out / SESSION).st_mode), 0o600)
+        self.assertEqual(os.listdir(out), [SESSION])
+
+    def test_symlinked_directory_is_refused(self):
+        target = self.root / "elsewhere"
+        target.mkdir()
+        for name, points_to in (("linked", target), ("dangling", self.root / "missing")):
+            with self.subTest(name=name):
+                out = self.root / name
+                out.symlink_to(points_to)
+                self.assertIn(f"refusing {out}", self.refused(out))
+                self.assertEqual(os.listdir(target), [])
+                self.assertFalse((self.root / "missing").exists())
+
+    def test_directory_owned_by_someone_else_is_refused(self):
+        out = self.root / "statusline-session-wt"
+        out.mkdir(mode=0o700)
+        with patch.object(hook.os, "getuid", return_value=os.getuid() + 1):
+            self.assertIn(f"refusing {out}", self.refused(out))
+        self.assertEqual(os.listdir(out), [])
 
 
 if __name__ == "__main__":
