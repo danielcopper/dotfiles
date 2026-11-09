@@ -100,6 +100,8 @@ FILL_5H_LOW=$'\e[48;2;249;226;175;38;2;17;17;27m' # 5h low — yellow (#f9e2af)
 FILL_7D_LOW=$'\e[48;2;180;190;254;38;2;17;17;27m' # 7d low — lavender (#b4befe)
 
 R=$'\e[0m'
+# Foreground-only overlay0, for the bare arrow between the branch chips.
+FG_OV0=$'\e[38;2;108;112;134m'
 
 ##### Progress bar — BG-fill on dark with centered label ######################
 # Args: width pct label [low [mid [high]]]
@@ -205,6 +207,7 @@ cache_is_stale() {
 
 BRANCH="" HAS_UPSTREAM=0 AHEAD=0 BEHIND=0
 STAGED=0 MODIFIED=0 UNTRACKED=0 IS_WORKTREE=0 GIT_STATE=""
+WT_BRANCH="" WT_MORE=0
 
 # Consolidated git query: one `git status --porcelain=v2 --branch` covers
 # branch, upstream, ahead/behind, and all file counts. Worktree detection
@@ -245,8 +248,9 @@ if cache_is_stale; then
         # plain main checkout. `*/.git/worktrees/*` is the canonical layout
         # of every git-managed worktree dir, so it's a stable marker.
         # Absolute form also makes the in-progress state file checks below
-        # work regardless of where cwd lands.
-        GIT_DIR=$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)
+        # work regardless of where cwd lands. The toplevel rides along in the
+        # same call for the worktree listing below.
+        { read -r GIT_DIR; read -r TOPLEVEL; } < <(git -C "$DIR" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
         # Prefer Anthropic's official workspace.git_worktree signal when
         # present; fall back to the path-pattern check for older Claude
         # Code versions or any case where the JSON field is absent.
@@ -275,12 +279,28 @@ if cache_is_stale; then
         elif [ -f "$GIT_DIR/BISECT_LOG" ]; then
             GIT_STATE="BISECT"
         fi
-        printf '%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\n' \
+
+        # Branches checked out in sibling worktrees, newest commit first. The
+        # main session stays in the main checkout while agents work in
+        # worktrees, so this shows where the work is happening. Skipped when
+        # the session itself sits in a worktree: its own chip already says so.
+        # Detached worktrees carry no ref and are not listed.
+        if [ "$IS_WORKTREE" = "0" ]; then
+            IFS=$'\1' read -r WT_BRANCH WT_MORE < <(
+                git -C "$DIR" for-each-ref --sort=-committerdate \
+                    --format='%(refname:short)%01%(worktreepath)' refs/heads 2>/dev/null |
+                awk -F'\1' -v top="$TOPLEVEL" '
+                    $2 != "" && $2 != top { if (n++ == 0) first = $1 }
+                    END { printf "%s\1%d\n", first, (n > 0 ? n - 1 : 0) }
+                ')
+        fi
+        printf '%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\n' \
             "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$IS_WORKTREE" "$GIT_STATE" \
+            "$WT_BRANCH" "$WT_MORE" \
             > "$CACHE_FILE"
     fi
 elif [ -f "$CACHE_FILE" ]; then
-    IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE < "$CACHE_FILE"
+    IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE WT_BRANCH WT_MORE < "$CACHE_FILE"
 fi
 
 ##### Build progress bars #####################################################
@@ -371,7 +391,8 @@ fi
 
 # Pick the branch icon once. Worktree gets the fork-style glyph; main
 # checkout gets the regular branch glyph.
-if [ "$IS_WORKTREE" = "1" ]; then BR_ICON_GLYPH=""; else BR_ICON_GLYPH=""; fi
+WORKTREE_GLYPH=""
+if [ "$IS_WORKTREE" = "1" ]; then BR_ICON_GLYPH="$WORKTREE_GLYPH"; else BR_ICON_GLYPH=""; fi
 
 # Build the dir block for a given variant: wide | narrow | vnarrow.
 # When PROJECT_DIR == DIR there is no parent/leaf — all variants return
@@ -434,15 +455,27 @@ middle_truncate() {
     printf '%s…%s' "${s:0:front}" "${s: -back}"
 }
 
-# Build the branch block (full | trunc). Empty when no branch info available.
+# Build the branch block. $1 is the session branch's variant (full | trunc),
+# $2 the worktree part's (main = session branch + full worktree branch,
+# wt = worktree branch only, wttrunc = truncated worktree branch only). Empty
+# when there is neither a branch nor a worktree branch.
 build_branch_block() {
-    [ -z "$BRANCH" ] && return
-    local v="$1"
-    local br="$BRANCH"
-    if [ "$v" = "trunc" ] && [ "${#br}" -gt "$MAX_BRANCH_CHARS" ]; then
-        br=$(middle_truncate "$br" "$MAX_BRANCH_CHARS")
+    local v="$1" wv="$2"
+    if [ -n "$BRANCH" ] && { [ -z "$WT_BRANCH" ] || [ "$wv" = "main" ]; }; then
+        local br="$BRANCH"
+        if [ "$v" = "trunc" ] && [ "${#br}" -gt "$MAX_BRANCH_CHARS" ]; then
+            br=$(middle_truncate "$br" "$MAX_BRANCH_CHARS")
+        fi
+        printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
     fi
-    printf ' %s %s %s%s %s' "$B_SAP" "$BR_ICON_GLYPH" "$B_GR_B" "$br" "$R"
+    [ -z "$WT_BRANCH" ] && return
+    local wt="$WT_BRANCH" more=""
+    if [ "$wv" = "wttrunc" ] && [ "${#wt}" -gt "$MAX_BRANCH_CHARS" ]; then
+        wt=$(middle_truncate "$wt" "$MAX_BRANCH_CHARS")
+    fi
+    [ "${WT_MORE:-0}" -gt 0 ] && more="$B_OV0 +$WT_MORE"
+    printf ' %s→%s %s %s %s%s%s %s' \
+        "$FG_OV0" "$R" "$B_SAP" "$WORKTREE_GLYPH" "$B_GR_B" "$wt" "$more" "$R"
 }
 
 # Visible width of an ANSI-laden string (strip escape codes, count chars).
@@ -454,10 +487,14 @@ visible_width() {
 
 ##### Greedy shrink + output ##################################################
 # Try variants from most-info to least, pick the first that fits within the
-# budget. Combo format: "<path-variant> <branch-variant> <bars-mode>".
+# budget. Combo format:
+# "<path-variant> <branch-variant> <bars-mode> <worktree-variant>".
 #
 # Tiers (info loss grows down the list):
 #   1. wide   / full  / full-bars  — full path (parent/leaf), full branch
+#   1a. (worktree branch shown)    — drop the session's own branch
+#   1b. (worktree branch shown)    — also truncate the worktree branch, and
+#                                    keep it truncated in every later tier
 #   2. narrow / full  / full-bars  — drop parent, keep leaf
 #   3. narrow / trunc / full-bars  — drop parent + truncate branch
 #   4. vnarrow/ trunc / full-bars  — also truncate leaf
@@ -470,16 +507,24 @@ visible_width() {
 SAFETY_MARGIN=4
 BUDGET=$((COLS - SAFETY_MARGIN))
 
+COMBOS=("wide full full-bars main")
+WT_TAIL="main"
+if [ -n "$WT_BRANCH" ]; then
+    COMBOS+=("wide full full-bars wt" "wide full full-bars wttrunc")
+    WT_TAIL="wttrunc"
+fi
+COMBOS+=(
+    "narrow full full-bars $WT_TAIL"
+    "narrow trunc full-bars $WT_TAIL"
+    "vnarrow trunc full-bars $WT_TAIL"
+    "vnarrow trunc mini-bars $WT_TAIL"
+)
+
 FULL_LINE=""
-for combo in \
-    "wide full full-bars" \
-    "narrow full full-bars" \
-    "narrow trunc full-bars" \
-    "vnarrow trunc full-bars" \
-    "vnarrow trunc mini-bars"; do
-    read -r pv bv bm <<< "$combo"
+for combo in "${COMBOS[@]}"; do
+    read -r pv bv bm wv <<< "$combo"
     dir_blk=$(build_dir_block "$pv")
-    br_blk=$(build_branch_block "$bv")
+    br_blk=$(build_branch_block "$bv" "$wv")
     LINE1="$dir_blk$br_blk$STATIC_BLK"
     # 1 literal space between every chip-like block. Each chip has its own
     # bg colour, so what the eye reads as "the gap" is the terminal-bg
