@@ -17,7 +17,7 @@ require("conform").setup({
     bash = { "shfmt" },
     sh = { "shfmt" },
     sql = { "sqlfluff" },
-    -- No LSP fallback: Kotlin projects gate on ktlint's format, not kotlin-lsp's.
+    -- No LSP fallback: a ktlintCheck gate accepts ktlint's format only.
     kotlin = { "ktlint", lsp_format = "never" },
   },
   -- Set here, not in the format() call, so a filetype's own lsp_format wins.
