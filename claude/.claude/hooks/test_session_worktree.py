@@ -4,20 +4,22 @@
 Run: python3 claude/.claude/hooks/test_session_worktree.py
 """
 
+import errno
 import importlib.util
 import io
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-_spec = importlib.util.spec_from_file_location(
-    "session_worktree", Path(__file__).with_name("session_worktree.py")
-)
+HOOK = Path(__file__).with_name("session_worktree.py")
+_spec = importlib.util.spec_from_file_location("session_worktree", HOOK)
 assert _spec and _spec.loader
 hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)
@@ -151,6 +153,49 @@ class Directory(unittest.TestCase):
         with patch.object(hook.os, "getuid", return_value=os.getuid() + 1):
             self.assertIn(f"refusing {out}", self.notice(out))
         self.assertEqual(os.listdir(out), [])
+
+    def test_directory_that_cannot_be_created_is_reported(self):
+        blocker = self.root / "a-file"
+        blocker.write_text("")
+        for name, base in (("unwritable base", self.root / "locked"), ("base is a file", blocker)):
+            with self.subTest(name=name):
+                if name == "unwritable base":
+                    base.mkdir(mode=0o500)
+                out = base / "missing" / "statusline-session-wt"
+                self.assertIn(f"could not record the worktree in {out}", self.notice(out))
+                self.assertFalse(out.exists())
+
+    def test_failed_write_is_reported_and_leaves_no_temp_file(self):
+        out = self.root / "statusline-session-wt"
+        real_fdopen = os.fdopen
+
+        def disk_full(fd, mode):
+            os.close(fd)
+            return real_fdopen(os.open("/dev/full", os.O_WRONLY), mode)
+
+        full = OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        failures = {
+            "temp file not created": patch.object(hook.tempfile, "mkstemp", side_effect=full),
+            "write hits a full disk": patch.object(hook.os, "fdopen", side_effect=disk_full),
+            "replace fails": patch.object(hook.os, "replace", side_effect=full),
+        }
+        for name, failure in failures.items():
+            with self.subTest(name=name):
+                with failure:
+                    self.assertIn(f"could not record the worktree in {out}", self.notice(out))
+                self.assertEqual(os.listdir(out), [])
+
+
+class Process(unittest.TestCase):
+    def test_failure_exits_zero_with_the_notice_on_stdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "locked"
+            base.mkdir(mode=0o500)
+            env = os.environ | {"XDG_RUNTIME_DIR": str(base / "missing")}
+            data = payload("mise run worktree-new feat session-chip", READY)
+            proc = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(data), capture_output=True, text=True, env=env)
+        self.assertEqual((proc.returncode, proc.stderr), (0, ""))
+        self.assertIn("could not record the worktree", json.loads(proc.stdout)["systemMessage"])
 
 
 if __name__ == "__main__":

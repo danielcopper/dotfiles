@@ -11,10 +11,12 @@ session creates wins; anything else writes nothing.
 
 The directory is per user and private (0700): one that is a symlink or owned
 by someone else is refused, so nobody else can plant or redirect the file.
-A refusal is shown to the user as a systemMessage: stderr of an exit-0 hook
-reaches nobody.
+A refusal or a failed write is shown to the user as a systemMessage and the
+hook still exits 0: stderr of an exit-0 hook reaches nobody, and a missing
+statusline chip is no reason to fail the Bash call.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -49,6 +51,19 @@ def warn(message):
     print(json.dumps({"systemMessage": f"session_worktree: {message}"}))
 
 
+def replace_file(target, text):
+    """Write text to target through a temp file beside it; the temp file is gone on failure."""
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def created_worktree(data):
     """(path, branch) of the last worktree a `mise run worktree-new` call reports ready, else None."""
     command = (data.get("tool_input") or {}).get("command") or ""
@@ -67,14 +82,14 @@ def record(data, out_dir=None):
     if not created or not SESSION_ID.fullmatch(session):
         return
     out_dir = out_dir or session_wt_dir()
-    if not private_dir(out_dir):
-        warn(f"refusing {out_dir}: a symlink, not a directory, or not owned by this user")
-        return
     path, branch = created
-    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=f".{session}.")
-    with os.fdopen(fd, "w") as f:
-        f.write(f"{path}\n{branch}\n")
-    os.replace(tmp, out_dir / session)
+    try:
+        if not private_dir(out_dir):
+            warn(f"refusing {out_dir}: a symlink, not a directory, or not owned by this user")
+            return
+        replace_file(out_dir / session, f"{path}\n{branch}\n")
+    except OSError as e:
+        warn(f"could not record the worktree in {out_dir}: {e}")
 
 
 def main():
