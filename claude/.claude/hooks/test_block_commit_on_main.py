@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -106,7 +107,7 @@ class TextThatOnlyNamesAWrite(OnMain):
 
 
 class WritesStayRefused(OnMain):
-    """Anything else is judged on its raw text, as before."""
+    """Anything else is judged on its raw text."""
 
     def test_they_are_denied(self):
         for command in (
@@ -129,9 +130,60 @@ class WritesStayRefused(OnMain):
             "echo 'git rebase main' > Makefile; make",
             "git status # then git commit",
             "$(" * 3000 + "echo 'git commit -m x'" + ")" * 3000,
+            "gh alias set cm '!git commit -m x' && gh cm",
+            "gh alias set --shell x 'git rebase main' && gh x",
+            "gh config set editor 'git rebase main'",
+            "gh extension exec x 'git commit -m x'",
+            "az devops invoke --route-parameters 'git rebase main'",
         ):
             with self.subTest(command=command):
                 self.assertEqual(self.decision(command), "deny")
+
+
+
+class GapsOfTheRawReading(OnMain):
+    """Lines the raw reading used to let through, each now refused."""
+
+    def test_assignments_before_a_write_do_not_hide_it(self):
+        for command in ("FOO=1 git commit -m x", "GIT_SEQUENCE_EDITOR=true git rebase -i main"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
+    def test_a_cd_in_a_subshell_leaves_the_directory_in_doubt(self):
+        with tempfile.TemporaryDirectory() as elsewhere:
+            self.assertEqual(self.decision(f"(cd {elsewhere}); git commit -m x"), "deny")
+
+    def test_a_steering_flag_counts_only_right_after_the_operation(self):
+        for command in ("git rebase main # --continue", 'git rebase main -x "echo --skip"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.decision(command), "deny")
+
+
+class InDoubt(unittest.TestCase):
+    """Where the directory may have moved, every place it may be is judged."""
+
+    def test_a_subshell_cd_keeps_every_place_the_line_has_been(self):
+        cases = {
+            "(cd /elsewhere); git commit -m x": [("/cwd", "commit"), ("/elsewhere", "commit")],
+            "cd /one && (cd /two) && git -C sub commit": [
+                ("/cwd/sub", "commit"),
+                ("/one/sub", "commit"),
+                ("/two/sub", "commit"),
+            ],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(sorted(guard.commit_dirs(command, "/cwd")), expected)
+
+
+class TheHookLoads(unittest.TestCase):
+    """A warning while compiling the hook is a future error that would stop it loading."""
+
+    def test_it_compiles_without_a_warning(self):
+        path = Path(__file__).with_name("block_commit_on_main.py")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(path.read_text(), str(path), "exec")
 
 
 class RepoRoot(unittest.TestCase):

@@ -10,8 +10,11 @@ command line, so it can only judge what that line says.
 
 Where the line pins its directory - `git -C <path>`, or a `cd` in an
 earlier segment, including through a variable assigned in the same block -
-the verdict is exact. Where it pins nothing, the fallback is the cwd the
-harness reports, and that value can lag the shell: a command that commits
+the write is judged there. Where a `cd` may not have moved the shell (one
+inside `( ... )`, `cd -`, a `cd` to an unresolved path, `pushd`/`popd`),
+every directory the line has named so far, the harness cwd included, is
+judged, and one protected branch among them refuses. Where it pins nothing,
+the fallback is the cwd the harness reports, and that value can lag the shell: a command that commits
 in a directory the harness has not noticed yet is judged against the old
 one. Closing that would mean refusing every commit that does not name its
 directory, which is most of them; the git hook covers it instead.
@@ -20,15 +23,19 @@ Repos whose work legitimately lives on main are read from the same list the
 git hook uses, so the exemption is stated once.
 
 The judgement is on raw text: every match of `GIT_COMMIT_RE` counts, quoted
-or not, with the limits that brings (a `-C` path with a space, a write split
-by a `\` line break, git options other than one `-C` and `-c` pairs). One
-exception, for text that only names a write: a line is let through when
-every match lies in text that `gh`, `az`, `echo`, `printf` or `cat` is
-handed and does not run - a word that is wholly single-quoted, a wholly
-double-quoted word with no `$` or backtick in it, or the body of a heredoc
-whose delimiter is quoted - as the shell reader in `utils/published_text.py`
-reads the line. Every other command on the line must be `cd`, so a line
-with any other command (`make`, `./run.sh`, `bash`, `eval`, `sudo`, a `$`
+or not, also after assignments at the start of a segment
+(`FOO=1 git commit`), with the limits that brings (a `-C` path with a space,
+a write split by a `\\` line break, git options other than one `-C` and
+`-c` pairs). Steering a running operation (`git rebase --continue`) is let
+through only with the flag right after the operation. One exception, for
+text that only names a write: a line is let through when every match lies
+in text handed to `echo`, `printf`, `cat`, `gh pr|issue|release <verb>` or
+`az repos pr create|update`, which run none of it - a word that is wholly
+single-quoted, a wholly double-quoted word with no unescaped `$` or
+backtick, or the body of a heredoc whose delimiter is quoted - as the shell
+reader in `utils/published_text.py` reads the line. Every other command on
+the line must be `cd` or a bare assignment, so a line with any other
+command (`make`, `./run.sh`, `bash`, `eval`, `sudo`, `gh alias`, a `$`
 word), or one the reader cannot read, gets no exception. A comment is not
 such text.
 """
@@ -41,7 +48,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
-from published_text import dequote, parse_commands  # noqa: E402
+from published_text import AZ_VERBS, GH_VERBS, dequote, parse_commands  # noqa: E402
 
 HOME = os.path.expanduser("~")
 ALLOWLIST = os.path.join(HOME, ".githooks", "commit-on-main-allowed")
@@ -58,21 +65,35 @@ GIT_COMMIT_RE = re.compile(
     r"\bgit(?:\s+-C\s+\S+)?(?:\s+-c\s+\S+)*\s+(commit|rebase|cherry-pick|revert)\b"
 )
 
-# Steering an operation that is already running creates nothing.
-CONTROL_FLAG = re.compile(r"--(abort|continue|skip|quit)\b")
+# Steering an operation that is already running creates nothing; the flag
+# stands right after the operation.
+STEERING = re.compile(r"\s+--(abort|continue|skip|quit)\b")
 GIT_DASH_C = re.compile(r"\bgit\s+-C\s+(\S+)")
 CD = re.compile(r"^\s*\(*\s*cd\s+([^\s;&|]+)")
+PUSHD = re.compile(r"^\s*\(*\s*(?:pushd|popd)\b")
 
 # Shell block anatomy, read the same way block_dangerous_bash.py reads it.
 SEGMENT = re.compile(r"[|;&\r\n]+")
 ASSIGNMENT = re.compile(r"^\s*(?:export\s+|local\s+)?([A-Za-z_]\w*)=(.*)$")
 VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+# The first word of an assignment's value: what follows it is a command.
+VALUE_WORD = re.compile(r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\])*""")
 
 
-# Commands that print or publish the words they are handed and run none.
+# Commands that print the words they are handed and run none; `gh` and `az`
+# count only where `publishes` says.
 DATA_COMMANDS = {"gh", "az", "echo", "printf", "cat"}
 SINGLE_QUOTED = re.compile(r"'[^']*'")
 DOUBLE_QUOTED = re.compile(r'"(?:[^"\\$`]|\\.)*"', re.DOTALL)
+
+
+def publishes(words: list[str]) -> bool:
+    """Whether the gh or az command *words* names in its first words is one
+    that publishes text: `gh pr|issue|release <verb>`, `az repos pr create|update`."""
+    name, rest = dequote(words[0]), [dequote(word) for word in words[1:4]]
+    if name == "gh":
+        return len(rest) > 1 and rest[1] in GH_VERBS.get(rest[0], ())
+    return rest[:2] == ["repos", "pr"] and len(rest) > 2 and rest[2] in AZ_VERBS
 
 
 def only_named_in_text(command: str) -> bool:
@@ -97,12 +118,15 @@ def only_named_in_text(command: str) -> bool:
             continue
         if name not in DATA_COMMANDS:
             return False
+        if name in ("gh", "az") and not publishes(words[lead:]):
+            return False
         for word, start in zip(words, simple.starts):
             if SINGLE_QUOTED.fullmatch(word) or DOUBLE_QUOTED.fullmatch(word):
                 text.append((start, start + len(word)))
         for body, expands in zip(simple.heredocs, simple.heredoc_expands):
-            # The first place the body's text stands: a wrong one leaves a
-            # match uncovered, never one covered that is not text.
+            # A body is placed where its text first stands. Should that be
+            # elsewhere, the body itself stays uncovered, so a wrong place can
+            # only refuse.
             at = command.find(body)
             if body and not expands and at >= 0:
                 text.append((at, at + len(body)))
@@ -167,29 +191,41 @@ def resolve(token: str, current: str, variables: dict) -> str | None:
 
 
 def commit_dirs(command: str, cwd: str) -> list[tuple[str, str]]:
-    """(directory, operation) for every commit this block writes, segment by segment."""
+    """(directory, operation) for every commit this block writes, segment by
+    segment, in every directory it may run in."""
     variables = {"HOME": HOME, "PWD": cwd}
     current = cwd
+    visited = [cwd]
+    doubt = False
     targets = []
     for segment in SEGMENT.split(command):
         assigned = ASSIGNMENT.match(segment)
         if assigned:
             name, value = assigned.groups()
-            variables[name] = unquote(substitute(value.strip(), variables))
-            continue
+            if not value[VALUE_WORD.match(value).end() :].strip():
+                variables[name] = unquote(substitute(value.strip(), variables))
+                continue
         moved = CD.match(segment)
         if moved:
-            current = resolve(moved.group(1), current, variables) or current
+            target = resolve(moved.group(1), current, variables)
+            if target is None or moved.group(1) == "-" or "(" in moved.group(0):
+                doubt = True
+            current = target or current
+            if current not in visited:
+                visited.append(current)
+        if PUSHD.match(segment):
+            doubt = True
         resolved = substitute(segment, variables)
         writing = GIT_COMMIT_RE.search(resolved)
         if not writing:
             continue
         operation = writing.group(1)
-        if operation != "commit" and CONTROL_FLAG.search(resolved):
+        if operation != "commit" and STEERING.match(resolved, writing.end()):
             continue
         pinned = GIT_DASH_C.search(resolved)
-        here = resolve(pinned.group(1), current, variables) if pinned else current
-        targets.append((here or current, operation))
+        for base in visited if doubt else [current]:
+            here = resolve(pinned.group(1), base, variables) if pinned else base
+            targets.append((here or base, operation))
     return targets
 
 
