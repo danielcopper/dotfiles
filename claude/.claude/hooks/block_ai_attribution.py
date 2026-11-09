@@ -71,12 +71,31 @@ the text below it committed but not read.
 several of these repos, so a bare /claude/ would refuse `docs: update CLAUDE.md`
 — a commit that should obviously go through. A name only counts when it stands
 with an attribution word on the same line, which is what an attribution looks
-like. And it only counts as a word of its own: inside a path or a file name —
-`.claude/rules`, `~/.claude/hooks`, `CLAUDE.md`, `docs/claude-code/`,
-`foo-claude` — it is a name for a place, so `.claude/rules made it clearer`
-goes through. A `.`, `/`, `-` or word character before the name, or a `/`, a
-word character or a `.` followed by a letter or digit after it, makes it part
-of such a name; a full stop, a comma or a bracket does not.
+like. And it only counts as a word of its own, not as a piece of a path, a
+file name or a longer word: `.claude/rules made it clearer` goes through.
+
+- Before the name, a `.`, `/`, `-` or word character joins it (`.claude`,
+  `~/.claude/hooks`, `docs/claude-code/`, `foo-claude`). A shell escape —
+  `\\n`, `\\r` or `\\t`, as in `$'Summary\\n\\nClaude generated this'` — does
+  not: it stands for a blank.
+- After the name, a word character joins it, and so does a `/` unless another
+  tool name follows (`claude/` does, `Claude/Copilot` does not), and a `.`
+  followed by a letter or digit, a file extension (`CLAUDE.md`). `.ai`,
+  `.com` and `.io` are no extension but a domain: `made with claude.ai`
+  counts. A `-` does not join (`Claude-generated`, `claude-code` count),
+  unless the word it starts ends in a file extension: `copilot-instructions.md`
+  and `claude-notes.md` are file names.
+- A full stop, a comma or a bracket joins nothing: `written by Claude.` and
+  `made with (Claude)` count.
+- A Conventional-Commit scope at the start of a line — `fix(claude):`,
+  `feat(claude)!:` — is a scope, not a name.
+
+Known limits, accepted: an underscore is a word character, so `_Claude_` and
+`claude_code` pass; joined spellings — `Llama3`, `ClaudeAI`, `GitHub-Copilot`
+— pass, and `GPT4` without its hyphen is no name. A scope inside a
+`git commit -m "fix(claude): …"` stands after the quote, not at the start of
+a line, so the command string is refused while the same message from a file
+goes through.
 """
 
 import json
@@ -84,6 +103,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -116,11 +136,14 @@ TOOL_NAMES = (
     r"claude|anthropic|chatgpt|openai|gpt-\d+(?:\.\d+)*[a-z]?|copilot|codeium|windsurf|"
     r"gemini|llama|mistral|aider|opencode|codex|devin"
 )
-# A name standing as a word, not a piece of a path or a file name: nothing
-# before it that joins it to a path or a longer name (`.claude`, `/claude`,
-# `foo-claude`), and nothing after it that does (`claude/`, `CLAUDE.md`).
-# A `.` followed by a blank or the end of the text is a sentence's full stop.
-TOOL_NAME = rf"(?<![\w./-])(?:{TOOL_NAMES})(?![\w/]|\.[a-z0-9])"
+# A name standing as a word of its own — when one counts as that is the module
+# docstring's, under "Why tool names are not matched on their own".
+FILE_EXTENSION = r"\.(?!(?:ai|com|io)\b)[a-z0-9]"
+TOOL_NAME = (
+    rf"(?:(?<![\w./-])|(?<=\\[nrt]))"
+    rf"(?:{TOOL_NAMES})"
+    rf"(?!\w|/(?!(?:{TOOL_NAMES})\b)|{FILE_EXTENSION}|-[\w-]*{FILE_EXTENSION}[a-z0-9]*(?![\w-]))"
+)
 ATTRIBUTION_WORDS = r"generated|authored|assisted|co-?written|written|created|produced|powered|made"
 # Either order — "generated with Claude" and "Claude generated this" both count —
 # and within one line: `.` does not cross a newline, so a tool named in one
@@ -129,16 +152,32 @@ NAME_WITH_WORD_RE = re.compile(
     rf"(?:{ATTRIBUTION_WORDS}).{{0,25}}{TOOL_NAME}|{TOOL_NAME}.{{0,25}}(?:{ATTRIBUTION_WORDS})",
     re.IGNORECASE,
 )
+# A Conventional-Commit scope at the start of a line: `fix(claude):`, `feat(claude)!:`.
+SCOPE_NAME_RE = re.compile(rf"^(\w+\()(?:{TOOL_NAMES})(?=\)!?:)", re.IGNORECASE | re.MULTILINE)
 
-PATTERNS = [
-    (TRAILER_RE, "an attribution trailer"),
-    (NAME_WITH_WORD_RE, "an AI tool named as an author"),
-    (re.compile(r"\U0001F916"), "the robot emoji"),
-    (re.compile(r"noreply@(?:anthropic|openai)\.com", re.IGNORECASE), "a vendor noreply address"),
-    (re.compile(r"https?://(?:claude\.ai|chatgpt\.com|chat\.openai\.com)/\S*", re.IGNORECASE), "an assistant session link"),
+
+def _without_scope_names(text: str) -> str:
+    """`text` with every tool name used as a commit scope blanked out, at its length."""
+    return SCOPE_NAME_RE.sub(lambda match: match.group(1) + "_" * (match.end() - match.end(1)), text)
+
+
+def name_with_word(text: str) -> re.Match[str] | None:
+    """A tool name beside an attribution word in `text`, a commit scope not counted."""
+    return NAME_WITH_WORD_RE.search(_without_scope_names(text))
+
+
+PATTERNS: list[tuple[Callable[[str], object], str]] = [
+    (TRAILER_RE.search, "an attribution trailer"),
+    (name_with_word, "an AI tool named as an author"),
+    (re.compile(r"\U0001F916").search, "the robot emoji"),
+    (re.compile(r"noreply@(?:anthropic|openai)\.com", re.IGNORECASE).search, "a vendor noreply address"),
+    (
+        re.compile(r"https?://(?:claude\.ai|chatgpt\.com|chat\.openai\.com)/\S*", re.IGNORECASE).search,
+        "an assistant session link",
+    ),
     # The page a tool credit links to. Prose naming the tool passes; the link is
     # what a credit line carries, whatever verb stands before it.
-    (re.compile(r"https?://(?:www\.)?claude\.com/claude-code", re.IGNORECASE), "a link to an AI tool's page"),
+    (re.compile(r"https?://(?:www\.)?claude\.com/claude-code", re.IGNORECASE).search, "a link to an AI tool's page"),
 ]
 
 # Options whose value is a path holding the message text.
@@ -181,8 +220,8 @@ def read_message_files(command: str, cwd: str) -> str:
 
 def offence(text: str) -> str | None:
     """What attribution `text` carries, or None."""
-    for pattern, label in PATTERNS:
-        if pattern.search(text):
+    for search, label in PATTERNS:
+        if search(text):
             return label
     return None
 
