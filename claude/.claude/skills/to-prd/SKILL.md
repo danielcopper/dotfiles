@@ -11,7 +11,7 @@ The skill publishes the PRD as a GitHub issue and puts it on the repo's board, w
 
 ### 1. Read the board
 
-Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`. Its `board` decides the board step in Publish, as `repo-config.md`, "Board", says for each kind and for a profile without one.
+Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Otherwise its `board` decides the board step in Publish, as `repo-config.md`, "Board", says.
 
 ### 2. Explore and synthesize
 
