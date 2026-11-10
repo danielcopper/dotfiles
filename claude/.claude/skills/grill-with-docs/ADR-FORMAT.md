@@ -1,6 +1,6 @@
 # ADR Format
 
-ADRs live in `docs/adr/` — in a foreign repo in the directory the global `CLAUDE.md`, "Project documentation discovery", names — and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
+ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc. In a foreign repo they live in the directory the global `CLAUDE.md`, "Project documentation discovery", names, and carry an `M-` prefix so their numbers never collide with the repo's: `M-0001-slug.md`, `M-0002-slug.md`, always cited with the prefix ("M-0003").
 
 Create the directory lazily — only when the first ADR is needed.
 
@@ -10,7 +10,7 @@ Front matter, the body, optional sections, amendments and the issue link follow 
 
 ## Numbering
 
-Scan that directory for the highest existing number and increment by one.
+Scan the directory the ADR goes to for the highest existing number and increment by one.
 
 ## When to offer an ADR
 

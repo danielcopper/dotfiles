@@ -85,6 +85,6 @@ In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when 
 
 ### Offer ADRs sparingly
 
-Only offer to create an ADR for a decision meeting the three ADR criteria in the global `CLAUDE.md`. If any of the three is missing, skip the ADR: if a decision is easy to reverse, you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing." Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md). When the decision belongs to an issue, its line under `## Decisions` links the ADR.
+Only offer to create an ADR for a decision meeting the three ADR criteria in the global `CLAUDE.md`. If any of the three is missing, skip the ADR: if a decision is easy to reverse, you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing." Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md). When the decision belongs to an issue, its line under `## Decisions` links the ADR where the global `CLAUDE.md`, "Where they are written", allows it.
 
 </supporting-info>
