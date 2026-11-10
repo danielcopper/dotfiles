@@ -4,7 +4,7 @@ description: "Set up a repository for the issue pipeline — decide own or forei
 disable-model-invocation: true
 ---
 
-Give a repository what `/implement`, `/epic`, `/next`, `/plan-epic` and `/retro` read about it. Where each fact lives, the `## Pipeline` section's shape and the profile's schema are in [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md); read it first.
+Give a repository what `/implement`, `/epic`, `/next`, `/plan-epic`, `/to-prd`, `/to-issues` and `/retro` read about it. Where each fact lives, the `## Pipeline` section's shape and the profile's schema are in [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md); read it first.
 
 ## 1. Locate
 
@@ -26,7 +26,7 @@ State the verdict before writing anything, as `repo-config.md`, "Own or foreign"
 
 Read what is already there, then look for the rest:
 
-- **Existing facts**: the profile, when step 1 found one; the root's `CLAUDE.md` — a `## Pipeline` section, or a gate, review command or worktree task stated in another section; board IDs in `<root>/.claude/agents/github.md`.
+- **Existing facts**: the profile, when step 1 found one; the root's `CLAUDE.md` — a `## Pipeline` section, or a gate, review command or worktree task stated in another section.
 - **Gate**: the task runner (`mise tasks ls`, `package.json` scripts, a `Makefile` or `justfile`) and its task that mirrors CI (`gate`, `ci`, `check`), held against `.github/workflows/` or the CI file the repo has, so the gate covers what CI enforces.
 - **Review checks**: the linters and type checkers the repo configures (`pyproject.toml`, `eslint.config.*`, `deno.json`, …), as their changed-files commands.
 - **Worktree task**: a task that creates a worktree (`worktree-new`).

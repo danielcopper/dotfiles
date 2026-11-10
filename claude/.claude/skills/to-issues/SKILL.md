@@ -1,30 +1,19 @@
 ---
 name: to-issues
-description: Break a plan, spec, or PRD into independently-grabbable GitHub issues using tracer-bullet vertical slices, and publish them to the repo's GitHub Project board. Use when user wants to convert a plan into issues, create implementation tickets, or break down work into issues.
+description: Break a plan, spec, or PRD into independently-grabbable GitHub issues using tracer-bullet vertical slices, and publish them on the repo's board. Use when user wants to convert a plan into issues, create implementation tickets, or break down work into issues.
 ---
 
 # To Issues
 
 Break a plan into independently-grabbable GitHub issues using vertical slices (tracer bullets).
 
-Publishes to the GitHub Project board configured per-repo at `.claude/agents/github.md`. Same config is used by `to-prd`.
+Publishes the issues on GitHub and puts them on the repo's board, where it has one.
 
 ## Process
 
-### 1. Ensure GitHub Project config
+### 1. Read the board
 
-Check `<repo>/.claude/agents/github.md` exists. If missing, bootstrap it:
-
-1. Verify `gh` is installed and authenticated (`gh auth status`). If not, tell the user and stop.
-2. Ask the user for the project board URL (e.g. `https://github.com/users/<owner>/projects/<n>` or `https://github.com/orgs/<org>/projects/<n>`).
-3. Parse `project_owner` and `project_number` from the URL.
-4. Resolve the GraphQL IDs once via `gh project field-list <number> --owner <owner> --format json`:
-   - `project_id` (top-level `id`)
-   - `status_field_id` (the field whose `name` is `Status`)
-   - `ready_option_id` (within Status field options, the option whose `name` is `Ready`)
-5. Write `.claude/agents/github.md` with a fenced yaml block containing those values (see `to-prd` SKILL.md for the exact file shape).
-
-If the file exists, parse the yaml block and use those values directly.
+Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`. Its `board` decides the board step in Publish, as `repo-config.md`, "Board", says for each kind and for a profile without one.
 
 ### 2. Gather context
 
@@ -81,22 +70,14 @@ For each approved slice, in dependency order (blockers first) so each blocker ex
    gh issue create -R <owner>/<name> --title "<slice title>" --body-file <tmpfile>
    ```
    Capture the returned issue URL and number.
-2. Add the issue to the project:
-   ```
-   gh project item-add <project_number> --owner <project_owner> --url <issue-url> --format json
-   ```
-   Capture the returned item `id`.
-3. Set Status to Ready:
-   ```
-   gh project item-edit --id <item-id> --project-id <project_id> --field-id <status_field_id> --single-select-option-id <ready_option_id>
-   ```
-4. Record each blocking edge natively. For every issue this slice is **blocked by**, create the dependency through GitHub's issue-dependency API rather than relying on body text alone — same native-first stance as the project relationships above:
+2. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands".
+3. Record each blocking edge natively. For every issue this slice is **blocked by**, create the dependency through GitHub's issue-dependency API rather than relying on body text alone:
    ```
    gh api repos/<owner>/<name>/issues/<this-issue-number>/dependencies/blocked_by \
      --method POST -F issue_id=<blocker-issue-id>
    ```
    `issue_id` is the blocker's **internal id**, not its issue number — resolve it with `gh api repos/<owner>/<name>/issues/<blocker-number> --jq .id`. Publishing blockers first (above) guarantees the blocker exists before this call. If the endpoint is unavailable (older GitHub Enterprise, missing scope), fall back to a `Blocked by #<n>` line under the `Type:` line.
-5. When the source was an existing issue (an epic or a PRD), link this issue to it natively as a sub-issue — `sub_issue_id` is this issue's internal id, resolved the same way:
+4. When the source was an existing issue (an epic or a PRD), link this issue to it natively as a sub-issue — `sub_issue_id` is this issue's internal id, resolved the same way:
    ```
    gh api repos/<owner>/<name>/issues/<parent-number>/sub_issues \
      --method POST -F sub_issue_id=<this-issue-id>

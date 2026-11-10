@@ -12,7 +12,7 @@ The facts the pipeline needs about a repository have three homes, by kind:
 
 ## Own or foreign
 
-The profile's `ownership` is `/setup-repo`'s verdict, by the rule in `setup-repo/SKILL.md`, step 2. Any skill that would write about the repo states that verdict before it writes: **"own repo"**, or **"foreign repo, writing only to ~/Memory/<repo>/"**.
+The profile's `ownership` is `/setup-repo`'s verdict, by the rule in `setup-repo/SKILL.md`, step 2. A skill that needs only the verdict and finds no profile runs `~/.claude/skills/setup-repo/ownership.sh <root>` and reads its answer strictly as that step says; where it gives no verdict, the skill asks the owner. Any skill that would write about the repo states that verdict before it writes: **"own repo"**, or **"foreign repo, writing only to ~/Memory/<repo>/"**.
 
 ## Global defaults
 
@@ -127,7 +127,7 @@ gh api graphql -f query="mutation { updateProjectV2ItemFieldValue(input: { proje
 
 Run it for the issue and for its parent epic (the epic move is idempotent — once per epic is enough).
 
-Putting a new issue on the board in Ready (`/plan-epic`) adds it to the project, then sets Status:
+Putting a new issue on the board in Ready (`/plan-epic`, `/to-prd`, `/to-issues`) adds it to the project, then sets Status:
 
 ```bash
 item_id=$(gh project item-add <n> --owner <owner> --url <issue-url> --format json --jq .id)

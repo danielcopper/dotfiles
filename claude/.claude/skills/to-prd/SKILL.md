@@ -1,46 +1,17 @@
 ---
 name: to-prd
-description: Turn the current conversation context into a PRD and publish it to the repo's GitHub Project board. Use when user wants to create a PRD from the current context.
+description: Turn the current conversation context into a PRD and publish it as an issue on the repo's board. Use when user wants to create a PRD from the current context.
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a PRD. Do NOT interview the user — just synthesize what you already know.
 
-The skill publishes to a GitHub Project board configured per-repo at `.claude/agents/github.md`. Same config is used by `to-issues`.
+The skill publishes the PRD as a GitHub issue and puts it on the repo's board, where it has one.
 
 ## Process
 
-### 1. Ensure GitHub Project config
+### 1. Read the board
 
-Check `<repo>/.claude/agents/github.md` exists. If missing, bootstrap it:
-
-1. Verify `gh` is installed and authenticated (`gh auth status`). If not, tell the user and stop.
-2. Ask the user: "Welches Project board für dieses Repo? URL bitte (z.B. `https://github.com/users/<owner>/projects/<n>` oder `https://github.com/orgs/<org>/projects/<n>`)."
-3. Parse `project_owner` and `project_number` from the URL.
-4. Resolve the GraphQL IDs once via `gh project field-list <number> --owner <owner> --format json`:
-   - `project_id` (top-level `id`)
-   - `status_field_id` (the field whose `name` is `Status`)
-   - `ready_option_id` (within Status field options, the option whose `name` is `Ready`)
-   - If `Status` or `Ready` don't exist on the board, ask the user for the correct field/option name and re-resolve.
-5. Write `.claude/agents/github.md`:
-
-   ````markdown
-   # GitHub Project config
-
-   Used by `to-prd` and `to-issues`. Re-run either skill if you rename the Status field or Ready option to refresh cached IDs.
-
-   ```yaml
-   project_url: https://github.com/users/<owner>/projects/<n>
-   project_owner: <owner>
-   project_number: <n>
-   project_id: PVT_...
-   status_field: Status
-   status_field_id: PVTSSF_...
-   ready_value: Ready
-   ready_option_id: ...
-   ```
-   ````
-
-If the file exists, parse the yaml block and use those values directly.
+Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`. Its `board` decides the board step in Publish, as `repo-config.md`, "Board", says for each kind and for a profile without one.
 
 ### 2. Explore and synthesize
 
@@ -122,13 +93,5 @@ Any further notes about the feature.
    gh issue create -R <owner>/<name> --title "<PRD title>" --body-file <tmpfile>
    ```
    Capture the returned issue URL.
-3. Add the issue to the project:
-   ```
-   gh project item-add <project_number> --owner <project_owner> --url <issue-url> --format json
-   ```
-   Capture the returned item `id`.
-4. Set Status to Ready:
-   ```
-   gh project item-edit --id <item-id> --project-id <project_id> --field-id <status_field_id> --single-select-option-id <ready_option_id>
-   ```
-5. Report the issue URL to the user.
+3. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands".
+4. Report the issue URL to the user.

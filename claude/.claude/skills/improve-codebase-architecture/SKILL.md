@@ -37,7 +37,7 @@ This skill is _informed_ by the project's domain model. The domain language give
 - If the user named a direction — a module, a subsystem, a pain point — take it, and skip the inference below.
 - Otherwise, walk back a good stretch of the commit history (`git log --oneline`) to find the codebase's hot spots — the files and areas that keep coming up — and let those paths pull your attention first. If the changes are scattered with no clear hot spot, widen the net.
 
-Read the project's domain glossary and any ADRs in the area you're touching first.
+Read the project's domain glossary and any ADRs in the area you're touching first — where they are read, and later written, is the global `CLAUDE.md`'s "Project documentation discovery", by the repo's verdict, own or foreign, taken as `~/.claude/skills/implement/repo-config.md`, "Own or foreign", says.
 
 Then use the Agent tool with `subagent_type=Explore` to walk the codebase. Don't follow rigid heuristics — explore organically and note where you experience friction:
 
@@ -78,9 +78,9 @@ Do NOT propose interfaces yet. After the file is written, ask the user: "Which o
 
 Once the user picks a candidate, drop into a grilling conversation. Walk the design tree with them — constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.
 
-Side effects happen inline as decisions crystallize:
+Side effects happen inline as decisions crystallize, into the glossary and ADR directory the verdict from step 1 picks; state the verdict before the first write:
 
-- **Naming a deepened module after a concept not in `GLOSSARY.md`?** Add the term to `GLOSSARY.md` — same discipline as `/grill-with-docs` (see [GLOSSARY-FORMAT.md](../grill-with-docs/GLOSSARY-FORMAT.md)). Create the file lazily if it doesn't exist.
-- **Sharpening a fuzzy term during the conversation?** Update `GLOSSARY.md` right there.
+- **Naming a deepened module after a concept not in the glossary?** Add the term to the glossary — same discipline as `/grill-with-docs` (see [GLOSSARY-FORMAT.md](../grill-with-docs/GLOSSARY-FORMAT.md)). Create the file lazily if it doesn't exist.
+- **Sharpening a fuzzy term during the conversation?** Update the glossary right there.
 - **User rejects the candidate with a load-bearing reason?** Offer an ADR, framed as: _"Want me to record this as an ADR so future architecture reviews don't re-suggest it?"_ Only offer when the reason would actually be needed by a future explorer to avoid re-suggesting the same thing — skip ephemeral reasons ("not worth it right now") and self-evident ones. See [ADR-FORMAT.md](../grill-with-docs/ADR-FORMAT.md).
 - **Want to explore alternative interfaces for the deepened module?** See [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md).

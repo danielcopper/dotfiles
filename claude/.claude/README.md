@@ -126,7 +126,7 @@ Standing rules encoded in the skills, the agents and `review-agents.md` (not in 
 
 ### Per-repo config
 
-Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next` and `/plan-epic` stop and ask for `/setup-repo` when the profile is missing. `/to-issues` and `/to-prd` still keep their own board IDs in `<repo>/.claude/agents/github.md`.
+Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next`, `/plan-epic`, `/to-prd` and `/to-issues` stop and ask for `/setup-repo` when the profile is missing. Where `/grill-with-docs` and `/improve-codebase-architecture` write glossary terms and ADRs follows the repo's own-or-foreign verdict, as `CLAUDE.md`, "Project documentation discovery", says.
 
 ### Guard hooks
 

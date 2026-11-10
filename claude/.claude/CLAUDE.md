@@ -100,11 +100,13 @@ Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
 
 If the current repo has any of the following at its root, treat them as canonical and consult them before designing or naming things:
 
-- **`GLOSSARY.md`** — the project's domain glossary. Defines what terms mean *here*. When a term gets resolved during conversation, update `GLOSSARY.md` inline — don't batch. It is a glossary, **not** a spec or implementation doc.
+- **`GLOSSARY.md`** — the project's domain glossary. Defines what terms mean *here*. When a term gets resolved during conversation, update the glossary inline — don't batch. It is a glossary, **not** a spec or implementation doc.
 - **`GLOSSARY-MAP.md`** — present in multi-context monorepos. Points to per-context `GLOSSARY.md` files under each module.
 - **`docs/adr/`** — Architectural Decision Records, numbered sequentially (`0001-slug.md`, …). Each records why a decision was made and what alternatives were rejected. Read before redesigning in a settled area.
 
 When these files exist: use the glossary's vocabulary in outputs (don't drift to synonyms it explicitly avoids); flag ADR conflicts out loud (*"Contradicts ADR-0007 — but worth reopening because…"*) rather than silently overriding; propose a new ADR only when all three apply — hard-to-reverse, surprising-without-context, **and** a real trade-off. If these files don't exist, proceed silently — don't flag their absence or suggest creating them upfront. They get created lazily during planning sessions (e.g. `/grill-with-docs`) when terms or decisions actually resolve.
+
+**Where they are written.** The repo's own glossary and ADRs are read in every repo and written only in an own repo, by the verdict `~/.claude/skills/implement/repo-config.md`, "Own or foreign", sets out. In a foreign repo a term goes to `~/Memory/<repo>/GLOSSARY.md` and an ADR to `~/Memory/<repo>/adr/`, in the same formats, and both places are read: the repo's and these.
 
 In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decisions` is the home of each change's decisions, and an ADR is linked from that issue.
 

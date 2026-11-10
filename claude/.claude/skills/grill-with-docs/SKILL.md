@@ -19,6 +19,8 @@ Do not act on the plan until I confirm we have reached a shared understanding.
 
 ## Domain awareness
 
+Take the repo's verdict first, own or foreign, as `~/.claude/skills/implement/repo-config.md`, "Own or foreign", says, and state it before the first write: by it, the global `CLAUDE.md`, "Project documentation discovery", says where glossary terms and ADRs are read and written.
+
 During codebase exploration, also look for existing documentation:
 
 ### File structure
@@ -51,7 +53,7 @@ If a `GLOSSARY-MAP.md` exists at the root, the repo has multiple contexts. The m
 │       └── docs/adr/
 ```
 
-Create files lazily — only when you have something to write. If no `GLOSSARY.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
+Create files lazily, where the verdict puts them — only when you have something to write: the glossary when the first term is resolved, the ADR directory when the first ADR is needed.
 
 ## During the session
 
@@ -71,9 +73,9 @@ When domain relationships are being discussed, stress-test them with specific sc
 
 When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
 
-### Update GLOSSARY.md inline
+### Update the glossary inline
 
-When a term is resolved, update `GLOSSARY.md` right there. Don't batch these up — capture them as they happen. Use the format in [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md).
+When a term is resolved, update the glossary right there. Don't batch these up — capture them as they happen. Use the format in [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md).
 
 `GLOSSARY.md` should be totally devoid of implementation details. Do not treat `GLOSSARY.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
 
