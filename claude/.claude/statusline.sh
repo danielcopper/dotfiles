@@ -2,10 +2,8 @@
 # Claude Code statusline.
 #
 # Colour strategy: truecolor bg + truecolor fg throughout, so every chip and bar
-# uses exact Catppuccin Mocha tones. This file previously used a 256-palette bg
-# to dodge a Claude Code truecolor-wash bug (v2.1.78+ inverted 24-bit RGB
-# backgrounds — dark crust rendered as warm peach; issue #35806). That bug was
-# verified fixed on Linux / CC 2.1.206, so the 256-bg workaround is gone.
+# uses exact Catppuccin Mocha tones. Truecolor backgrounds are safe since
+# CC 2.1.206 (issue #35806).
 #
 # One rule kept from issue #6466: bg+fg are always combined into a single escape
 # (\e[48;…;38;…m), never two consecutive ones — separate consecutive escapes
@@ -212,7 +210,7 @@ STAGED=0 MODIFIED=0 UNTRACKED=0 IS_WORKTREE=0 GIT_STATE=""
 # branch, upstream, ahead/behind, and all file counts. Worktree detection
 # still needs rev-parse (not exposed by porcelain); in-progress state lives
 # in the per-worktree git dir. The status exit code doubles as "is this a
-# git repo?" — replaces the prior standalone rev-parse existence check.
+# git repo?".
 if cache_is_stale; then
     if STATUS=$(git -C "$DIR" status --porcelain=v2 --branch 2>/dev/null); then
         # Single-pass awk parse of porcelain v2. SOH-delimited (\x01) for
@@ -283,8 +281,7 @@ if cache_is_stale; then
             > "$CACHE_FILE"
     fi
 elif [ -f "$CACHE_FILE" ]; then
-    # Trailing fields, as in a line an earlier version of this script cached,
-    # land in _ instead of being appended to GIT_STATE.
+    # `_` takes any trailing fields, so they never append to GIT_STATE.
     IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE _ < "$CACHE_FILE"
 fi
 

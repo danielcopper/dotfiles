@@ -76,7 +76,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | ----------------------- | ---------------- | --------------------------------------------------- |
 | `block_disk_wipe.py`    | PreToolUse (Bash) | Denies mkfs, wipefs, dd onto a device node and redirects onto a block device — the one destruction the auto-mode classifier does not name. Every other deletion (`rm`, `git reset --hard`, `checkout -- path`, `branch -D`, force push) is the classifier's call |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
-| `session_worktree.py`   | PostToolUse (Bash) | Records the worktree a `mise run worktree-new` call in this session reported ready in `$XDG_RUNTIME_DIR/statusline-session-wt/<session_id>` (else under `~/.cache/claude/`; a private directory, refused when a symlink or owned by someone else), so `statusline.sh` shows that branch; a session without one shows no worktree branch |
+| `session_worktree.py`   | PostToolUse (Bash) | Records the worktree a `mise run worktree-new` call in this session reported ready in `$XDG_RUNTIME_DIR/statusline-session-wt/<session_id>` (else under `~/.cache/claude/`; a private directory, refused when a symlink or owned by someone else), so `statusline.sh` shows that branch |
 | `stop.py`               | Stop             | TTS on task completion                              |
 | `notification.py`       | Notification     | TTS when user input needed                          |
 | `subagent_stop.py`      | SubagentStop     | TTS on subagent completion                          |
