@@ -25,7 +25,7 @@ Ask your questions about the requirements, the approach or dependencies now, bef
 
 Mechanics are yours: naming, file layout, helper shape, test structure. Choose, and declare each choice in the report. Anything that changes behaviour or a recorded decision is the owner's: stop with NEEDS_CONTEXT. In a convention repo the lead gets the answer into the issue's `## Decisions` before you resume; elsewhere it comes back in the brief.
 
-An unanswered question is not an answer. When you have asked and no reply has come, stay stopped: do not take the more likely reading, do not build the smaller half, and do not proceed while noting it in the report — the report arrives after the diff, when saying no costs a rewrite rather than a sentence. Report NEEDS_CONTEXT and wait. Work that depends on the open question waits for the answer; work that does not may continue, and once only dependent work is left, your turn ends. Closing a question with "unless you object" or "my recommendation unless you say otherwise" gives you no permission to build on it.
+An unanswered question is not an answer. When you have asked and no reply has come, stay stopped: do not take the more likely reading, do not build the smaller half, and do not proceed while noting it in the report — the report arrives after the diff, when saying no costs a rewrite rather than a sentence. Work that depends on the open question waits for the answer; work that does not may continue, and once only dependent work is left, report NEEDS_CONTEXT and end your turn. Closing a question with "unless you object" or "my recommendation unless you say otherwise" gives you no permission to build on it.
 
 ## Working rules
 
