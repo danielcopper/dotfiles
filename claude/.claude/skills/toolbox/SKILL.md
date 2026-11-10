@@ -4,7 +4,7 @@ description: Router over my skills — names each one and when to reach for it. 
 disable-model-invocation: true
 ---
 
-Match the current situation against this index and recommend the right skill(s). User-invoked skills you can only point at — the user types them. Model-invoked skills you may fire directly once the user confirms.
+Match the current situation against this index and recommend the right skill(s). User-invoked skills you can only point at — the user types them; `/implement` also runs from a chat on the user's yes, as the global `CLAUDE.md`, "Work on a GitHub issue that starts in a chat", says. Model-invoked skills you may fire directly once the user confirms.
 
 ## Issue & epic pipeline (user-invoked)
 

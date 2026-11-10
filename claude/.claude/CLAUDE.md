@@ -26,9 +26,10 @@ For each task (and each cut):
 
 Composes with the worktree skill (one branch/worktree per cut) and the board skills' rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
 
-**Work on an issue that starts in a chat.** When a conversation turns into implementation work on an issue without
-`/implement` typed, ask once whether to follow the implement skill; on a yes, read `~/.claude/skills/implement/SKILL.md`
-and follow its steps as if it had been invoked.
+**Work on a GitHub issue that starts in a chat.** When I give the go for implementation work on a GitHub issue without
+having typed `/implement`, ask me once whether to follow the implement skill; on my yes, read
+`~/.claude/skills/implement/SKILL.md` and follow its steps as if it had been invoked — my go is its green light — and
+re-read it after a compaction.
 
 **One report per agent, and it goes in the message.** The definitions under `~/.claude/agents/` carry this themselves;
 the implementer's prompt restates it anyway, as `~/.claude/skills/implement/dispatch.md`, "Implementer dispatch", says.
