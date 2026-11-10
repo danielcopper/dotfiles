@@ -56,8 +56,7 @@
       "WebFetch(domain:deepwiki.com)",
       "Read(~/Repos/**)",
       "Read(~/repos/**)",
-      "Read(/tmp/**)",
-      "Read(~/.claude/feature-progress/**)"
+      "Read(/tmp/**)"
     ],
     "deny": [
       "Bash(*cat */srv/matrix/*)",
