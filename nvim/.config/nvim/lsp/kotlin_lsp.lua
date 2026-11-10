@@ -1,12 +1,12 @@
--- The Gradle import ignores JAVA_HOME and runs on the newest JDK it finds;
--- when that is not the JDK the project builds with, it starts a second
--- Gradle daemon. Point it at JAVA_HOME when that is set, and say so once
--- when it is not.
+-- The Gradle import ignores JAVA_HOME and runs on the newest JDK it finds
+-- that the project's Gradle version supports; when that is not the JDK the
+-- project builds with, it starts a second Gradle daemon. Point it at
+-- JAVA_HOME when that is set, and say so once when it is not.
 local java_home = vim.env.JAVA_HOME
 
 local function warn_without_java_home()
   vim.notify_once(
-    "kotlin-lsp: JAVA_HOME is not set, so the Gradle import uses the newest JDK it finds and starts its own Gradle daemon",
+    "kotlin-lsp: JAVA_HOME is not set, so a Gradle import runs on the newest JDK it finds and may start a second Gradle daemon",
     vim.log.levels.WARN
   )
 end
