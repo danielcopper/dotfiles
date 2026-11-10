@@ -5,8 +5,8 @@ A `mise run worktree-new` call (also `mise -C <dir> run worktree-new`) whose
 stdout carries the task's success line `✓ worktree ready: <path>  (branch
 <branch>, base <base>)` writes `<path>\\n<branch>\\n` to
 <dir>/statusline-session-wt/<session_id>, where <dir> is $XDG_RUNTIME_DIR, or
-~/.cache/claude without it. statusline.sh shows that branch instead of the
-repo-wide newest worktree branch while the path exists. The last worktree a
+~/.cache/claude without it. statusline.sh shows that branch while the path
+exists, and no worktree branch for a session without one. The last worktree a
 session creates wins; anything else writes nothing.
 
 The directory is per user and private (0700): one that is a symlink or owned

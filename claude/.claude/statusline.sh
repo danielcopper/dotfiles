@@ -207,14 +207,12 @@ cache_is_stale() {
 
 BRANCH="" HAS_UPSTREAM=0 AHEAD=0 BEHIND=0
 STAGED=0 MODIFIED=0 UNTRACKED=0 IS_WORKTREE=0 GIT_STATE=""
-WT_BRANCH="" WT_MORE=0
 
 # Consolidated git query: one `git status --porcelain=v2 --branch` covers
 # branch, upstream, ahead/behind, and all file counts. Worktree detection
 # still needs rev-parse (not exposed by porcelain); in-progress state lives
-# in the per-worktree git dir; sibling worktree branches need for-each-ref.
-# The status exit code doubles as "is this a git repo?" — replaces the prior
-# standalone rev-parse existence check.
+# in the per-worktree git dir. The status exit code doubles as "is this a
+# git repo?" — replaces the prior standalone rev-parse existence check.
 if cache_is_stale; then
     if STATUS=$(git -C "$DIR" status --porcelain=v2 --branch 2>/dev/null); then
         # Single-pass awk parse of porcelain v2. SOH-delimited (\x01) for
@@ -249,9 +247,8 @@ if cache_is_stale; then
         # plain main checkout. `*/.git/worktrees/*` is the canonical layout
         # of every git-managed worktree dir, so it's a stable marker.
         # Absolute form also makes the in-progress state file checks below
-        # work regardless of where cwd lands. The toplevel rides along in the
-        # same call for the worktree listing below.
-        { read -r GIT_DIR; read -r TOPLEVEL; } < <(git -C "$DIR" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
+        # work regardless of where cwd lands.
+        GIT_DIR=$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)
         # Prefer Anthropic's official workspace.git_worktree signal when
         # present; fall back to the path-pattern check for older Claude
         # Code versions or any case where the JSON field is absent.
@@ -281,40 +278,28 @@ if cache_is_stale; then
             GIT_STATE="BISECT"
         fi
 
-        # Branches checked out in sibling worktrees, newest commit first. The
-        # main session stays in the main checkout while agents work in
-        # worktrees, so this shows where the work is happening. Skipped when
-        # the session itself sits in a worktree: its own chip already says so.
-        # Detached worktrees carry no ref and are not listed.
-        if [ "$IS_WORKTREE" = "0" ]; then
-            IFS=$'\1' read -r WT_BRANCH WT_MORE < <(
-                git -C "$DIR" for-each-ref --sort=-committerdate \
-                    --format='%(refname:short)%01%(worktreepath)' refs/heads 2>/dev/null |
-                awk -F'\1' -v top="$TOPLEVEL" '
-                    $2 != "" && $2 != top { if (n++ == 0) first = $1 }
-                    END { printf "%s\1%d\n", first, (n > 0 ? n - 1 : 0) }
-                ')
-        fi
-        printf '%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\n' \
+        printf '%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\1%s\n' \
             "$BRANCH" "$HAS_UPSTREAM" "$AHEAD" "$BEHIND" "$STAGED" "$MODIFIED" "$UNTRACKED" "$IS_WORKTREE" "$GIT_STATE" \
-            "$WT_BRANCH" "$WT_MORE" \
             > "$CACHE_FILE"
     fi
 elif [ -f "$CACHE_FILE" ]; then
-    IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE WT_BRANCH WT_MORE < "$CACHE_FILE"
+    # Trailing fields, as in a line an earlier version of this script cached,
+    # land in _ instead of being appended to GIT_STATE.
+    IFS=$'\1' read -r BRANCH HAS_UPSTREAM AHEAD BEHIND STAGED MODIFIED UNTRACKED IS_WORKTREE GIT_STATE _ < "$CACHE_FILE"
 fi
 
-# The worktree this session created replaces the repo-wide newest one, without
-# a +N count. hooks/session_worktree.py writes its path and branch per session
+# The worktree this session created, for the chip after the session's own
+# branch. hooks/session_worktree.py writes its path and branch per session
 # after a `mise run worktree-new`, into the same per-user directory resolved
-# here; it is read on every render, after the per-cwd cache, so sessions
-# sharing a checkout never see each other's. A worktree that has since been
-# removed falls back to the repo-wide one.
+# here; it is read on every render, outside the per-cwd cache, so sessions
+# sharing a checkout never see each other's. Without such a record, or once
+# its worktree has been removed, there is no worktree chip.
+WT_BRANCH=""
 SESSION_WT_FILE="${XDG_RUNTIME_DIR:-$HOME/.cache/claude}/statusline-session-wt/$SESSION_ID"
 if [ "$IS_WORKTREE" = "0" ] && [ -n "$SESSION_ID" ] && [ -f "$SESSION_WT_FILE" ]; then
     { read -r SESSION_WT_PATH; read -r SESSION_WT_BRANCH; } < "$SESSION_WT_FILE"
     if [ -d "$SESSION_WT_PATH" ]; then
-        WT_BRANCH="$SESSION_WT_BRANCH" WT_MORE=0
+        WT_BRANCH="$SESSION_WT_BRANCH"
     fi
 fi
 
@@ -485,19 +470,17 @@ build_branch_block() {
 }
 
 # Build the worktree branch block: the arrow and the worktree branch this
-# session created, else the sibling worktree branch with the newest commit plus
-# a +N count of the others, truncated in the wttrunc variant. Empty when there
-# is no such branch, always so when the session itself sits in a worktree.
+# session created, truncated in the wttrunc variant. Empty when there is no
+# such branch, always so when the session itself sits in a worktree.
 build_worktree_block() {
     local wv="$1"
     [ -z "$WT_BRANCH" ] && return
-    local wt="$WT_BRANCH" more=""
+    local wt="$WT_BRANCH"
     if [ "$wv" = "wttrunc" ] && [ "${#wt}" -gt "$MAX_BRANCH_CHARS" ]; then
         wt=$(middle_truncate "$wt" "$MAX_BRANCH_CHARS")
     fi
-    [ "${WT_MORE:-0}" -gt 0 ] && more="$B_OV0 +$WT_MORE"
-    printf ' %s→%s %s %s %s%s%s %s' \
-        "$FG_OV0" "$R" "$B_SAP" "$WORKTREE_GLYPH" "$B_GR_B" "$wt" "$more" "$R"
+    printf ' %s→%s %s %s %s%s %s' \
+        "$FG_OV0" "$R" "$B_SAP" "$WORKTREE_GLYPH" "$B_GR_B" "$wt" "$R"
 }
 
 # Visible width of an ANSI-laden string (strip escape codes, count chars).
