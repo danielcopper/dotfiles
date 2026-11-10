@@ -33,10 +33,12 @@ Failure mode: catch everything, exit 0, never block tool execution.
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
+from repo import main_repo_root  # noqa: E402
 
 MAX_INJECTION_CHARS = 9_500  # hard cap (see the docstring)
 
@@ -88,26 +90,6 @@ def read_file(path, max_lines=None):
     return text
 
 
-def get_git_root(cwd):
-    """Absolute path to the MAIN repository root for cwd, or None.
-
-    Uses --git-common-dir rather than --show-toplevel so a worktree resolves
-    to the main repo root — its basename keys the ~/Memory/<repo-name>/ tier.
-    """
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            capture_output=True, text=True, timeout=2,
-        )
-        if result.returncode == 0:
-            common_dir = result.stdout.strip()
-            if common_dir:
-                return str(Path(common_dir).parent)
-    except Exception:
-        pass
-    return None
-
-
 def entry_headings(text):
     """The `## HH:MM — slug` headings of a daily, one per line."""
     return "\n".join(line[3:] for line in text.splitlines() if line.startswith("## "))
@@ -119,9 +101,9 @@ def collect_sections(cwd):
     memory_dir = home / "Memory" / "global"
     sections = []
 
-    git_root = get_git_root(cwd)
+    git_root = main_repo_root(cwd)
     if git_root:
-        repo_tier = home / "Memory" / Path(git_root).name
+        repo_tier = home / "Memory" / git_root.name
         repo_mem = read_file(repo_tier / "MEMORY.md")
         if repo_mem:
             path = f"{repo_tier}/MEMORY.md"

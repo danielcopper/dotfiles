@@ -12,7 +12,8 @@ from pathlib import Path
 from datetime import datetime
 
 # Add utils to path
-sys.path.insert(0, str(Path(__file__).parent / "utils"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
+from repo import main_repo_root  # noqa: E402
 
 def load_config():
     """Load hook configuration."""
@@ -61,18 +62,6 @@ def get_git_info():
     except Exception:
         return None, 0
 
-def main_repo_name(cwd):
-    """Basename of the main checkout's root, also from a linked worktree; None outside a repository."""
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            capture_output=True, text=True, timeout=5
-        )
-    except Exception:
-        return None
-    common_dir = result.stdout.strip()
-    return Path(common_dir).parent.name if result.returncode == 0 and common_dir else None
-
 def get_context_files():
     """Load context from standard files."""
     context_parts = []
@@ -83,10 +72,10 @@ def get_context_files():
         ("GLOSSARY.md", cwd / ".claude" / "GLOSSARY.md"),
         ("GLOSSARY.md", cwd / "GLOSSARY.md"),
     ]
-    repo = main_repo_name(cwd)
-    if repo:
+    root = main_repo_root(cwd)
+    if root:
         # The owner's glossary for a foreign repo, kept outside its tree.
-        context_files.append((f"~/Memory/{repo}/GLOSSARY.md", Path.home() / "Memory" / repo / "GLOSSARY.md"))
+        context_files.append((f"~/Memory/{root.name}/GLOSSARY.md", Path.home() / "Memory" / root.name / "GLOSSARY.md"))
     context_files.append(("TODO.md", cwd / "TODO.md"))
 
     for heading, ctx_file in context_files:

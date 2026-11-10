@@ -74,6 +74,9 @@ class OwnersGlossary(unittest.TestCase):
     def test_outside_a_repository_nothing_is_loaded(self):
         outside = Path(self.tmp.name) / "plain"
         outside.mkdir()
+        glossary = self.home / "Memory" / "plain" / "GLOSSARY.md"
+        glossary.parent.mkdir(parents=True)
+        _ = glossary.write_text("**Slot**: one save location")
         self.assertEqual(self.context_in(outside), "")
 
 
