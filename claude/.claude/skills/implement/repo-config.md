@@ -34,7 +34,7 @@ In the owner's repos the repository facts live in the repo's `CLAUDE.md`; the le
 - **Worktree task**: `mise run worktree-new`
 - **Agent rules**:
   - Scratch files go in the agent's scratchpad, never inside the worktree.
-  - Run the gate once, in the foreground, with a timeout of 1500 s.
+  - Run the gate once; never start a second run while one is still going.
 ```
 
 - **Gate** — the battery: every command passes before a PR, run from the worktree root. Prefer the repo's task runner (mise) over naming tools directly, so the task definitions stay the single source of truth. It covers what CI enforces: a gate that checks less than CI breaks the trust model.

@@ -41,7 +41,7 @@ When the dispatch says **verify only**, the review is that section plus one chec
 - **Absolute paths** in every shell and file call (`git -C <wt> …`); the shell's cwd resets between calls, so no command starts with `cd`.
 - **Scratch outside the tree.** Mutation probes and any other scratch file go outside the worktree, in your scratchpad.
 - **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the repo's type checker and linter decide.
-- **Long runs** run in the foreground with a timeout. Every run has finished before you end a turn.
+- **Long runs** run with the Bash tool's longest timeout (`timeout: 600000`); one that may outlast it runs in the background and is waited for by its pid, as `~/.claude/agents/implementer.md`, "Long runs", says, which is no waiting the next rule forbids. Every run has finished before you end a turn.
 - **Waiting is not a run.** A message from your lead reaches you only once your turn has ended, never during a tool call — a limitation of Claude Code. So never wait in a loop or a `sleep` for longer than a minute — not for the load to drop, not for another process. End your turn instead, saying in one line what you are waiting for; your lead's message starts you again.
 
 ## The diff is your object
