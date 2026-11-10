@@ -35,7 +35,7 @@ re-read it after a compaction.
 the implementer's prompt restates it anyway, as `~/.claude/skills/implement/dispatch.md`, "Implementer dispatch", says.
 To the prompt of any agent without its own definition (general-purpose, Explore, a fork) add: *"Send your full report as
 a message. Your final answer is then a one-line summary — do not repeat the report in it."* Otherwise the report arrives
-twice, and the copy in the harness's idle notification is truncated when long. Start every agent without a `name`, an
+twice, as the message and again as the final answer. Start every agent without a `name`, an
 implementer included: a named agent is a teammate and receives a message only after its turn ends. A running agent is
 reached by the agent id its spawn result returns, and that id also resumes it after it has finished.
 

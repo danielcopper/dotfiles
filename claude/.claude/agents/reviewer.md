@@ -42,7 +42,7 @@ When the dispatch says **verify only**, the review is that section plus one chec
 - **Scratch outside the tree.** Mutation probes and any other scratch file go outside the worktree, in your scratchpad.
 - **Real checkers.** LSP diagnostics in a worktree resolve against the main checkout and are unreliable; the repo's type checker and linter decide.
 - **Long runs**: as `~/.claude/agents/implementer.md`, "Long runs", says; waiting on your own run that way is no waiting the next rule forbids. Every run has finished before you end a turn.
-- **Waiting is not a run.** A message from your lead reaches you only once your turn has ended, never during a tool call — a limitation of Claude Code. So never wait in a loop or a `sleep` for longer than a minute — not for the load to drop, not for another process. End your turn instead, saying in one line what you are waiting for; your lead's message starts you again.
+- **Waiting is not a run.** Never wait in a loop or a `sleep` for longer than a minute — not for the load to drop, not for another process. End your turn instead, saying in one line what you are waiting for; your lead's message starts you again.
 
 ## The diff is your object
 
@@ -114,4 +114,4 @@ Grouped **Critical / Important / Minor**, each: `file:line` — what's wrong, wh
 **Verdict:** Approved | Needs fixes — Needs fixes when a finding on the change is Critical or Important; a `pre-existing` finding never sets it
 **Reasoning:** [1–2 sentences]
 
-Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. Your final answer is then one sentence of at most 25 words (the verdict and the finding count) — it is repeated in your idle notice, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
+Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. Your final answer is then one sentence of at most 25 words (the verdict and the finding count) — the report has already reached the lead, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then end; do NOT pick up other tasks.

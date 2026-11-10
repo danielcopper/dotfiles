@@ -63,7 +63,7 @@ Each finding also carries a severity. **Important** needs a score of 80 or more:
 - **Read the tree at the range's head commit**, never the working tree, which may sit on another commit: `git -C <repo> grep -n <pattern> <head> -- .`, `git -C <repo> show <head>:<path>`, `git -C <repo> ls-tree -r --name-only <head> <dir>`. Reading and searching carry this review; run a test only when the dispatch names a worktree checked out at `<head>` and a simplification's safety hinges on it, and then one file, never the whole suite.
 - **Absolute paths** in every shell and file call (`git -C <repo> …`); the shell's cwd resets between calls, so no command starts with `cd`.
 - **Scratch outside the tree.** Any scratch file goes in your scratchpad, never in the checkout.
-- **Waiting is not a run.** A message from your lead reaches you only once your turn has ended. Never wait in a loop or a `sleep` for longer than a minute; end your turn instead, saying in one line what you are waiting for.
+- **Waiting is not a run.** Never wait in a loop or a `sleep` for longer than a minute; end your turn instead, saying in one line what you are waiting for.
 
 ## Output
 
@@ -78,4 +78,4 @@ Grouped by kind, ordered by score. Each: `file:line` — what, the precedent or 
 ### Fits well
 [Specific, brief: where the change follows its siblings or reuses what exists.]
 
-Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. Your final answer is then one sentence of at most 25 words (the finding count by kind) — it is repeated in your idle notice, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
+Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. Your final answer is then one sentence of at most 25 words (the finding count by kind) — the report has already reached the lead, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then end; do NOT pick up other tasks.

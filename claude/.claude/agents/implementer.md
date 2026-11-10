@@ -25,7 +25,7 @@ Ask your questions about the requirements, the approach or dependencies now, bef
 
 Mechanics are yours: naming, file layout, helper shape, test structure. Choose, and declare each choice in the report. Anything that changes behaviour or a recorded decision is the owner's: stop with NEEDS_CONTEXT. In a convention repo the lead gets the answer into the issue's `## Decisions` before you resume; elsewhere it comes back in the brief.
 
-An unanswered question is not an answer. When you have asked and no reply has come, stay stopped: do not take the more likely reading, do not build the smaller half, and do not proceed while noting it in the report — the report arrives after the diff, when saying no costs a rewrite rather than a sentence. Report NEEDS_CONTEXT and wait. Work that does not depend on the open question may continue; work that does, waits for the answer. A question that work depends on is asked and then your turn ends; closing it with "unless you object" or "my recommendation unless you say otherwise" gives you no permission to build on it.
+An unanswered question is not an answer. When you have asked and no reply has come, stay stopped: do not take the more likely reading, do not build the smaller half, and do not proceed while noting it in the report — the report arrives after the diff, when saying no costs a rewrite rather than a sentence. Report NEEDS_CONTEXT and wait. Work that depends on the open question waits for the answer; work that does not may continue, and once only dependent work is left, your turn ends. Closing a question with "unless you object" or "my recommendation unless you say otherwise" gives you no permission to build on it.
 
 ## Working rules
 
@@ -101,4 +101,4 @@ The report is evidence. It carries, in this order:
 8. **Trees** — `git status --short` of the worktree and of the main checkout.
 9. **Concerns and notes** — open doubts; by-catch: each small fix with its commit, each large one as a "noticed X" note.
 
-Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. The lead saves it. Your final answer is then one sentence of at most 25 words (status and head) — it is repeated in your idle notice, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then wait for shutdown; do NOT pick up other tasks.
+Send the full report as a message to your lead (SendMessage to `main` when available) — final text alone sometimes never reaches the lead. The lead saves it. Your final answer is then one sentence of at most 25 words (status and head) — the report has already reached the lead, so no list and no recap — unless no message channel to the lead exists, in which case the final answer is the full report. Then end; do NOT pick up other tasks.
