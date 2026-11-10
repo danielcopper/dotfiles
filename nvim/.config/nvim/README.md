@@ -36,7 +36,7 @@ lua/worktree.lua              git worktree switcher (<leader>gw)
 
 All plugins are managed by `vim.pack` (Nvim 0.12+ built-in). Each plugin is self-contained in `plugin/<name>.lua` — the file calls `vim.pack.add({...})` to install and then sets up the plugin. Nvim auto-sources all `plugin/*.lua` files alphabetically after `init.lua`.
 
-**Dependency rule:** `vim.pack.add` array order determines load order. Dependencies must come **before** the plugin that needs them in the array. This ensures the dependency is on `runtimepath` before `require()` is called. Plugins that depend on each other belong in the **same file**.
+Load order and dependencies between plugins follow the rules in [CLAUDE.md](CLAUDE.md).
 
 | Command                       | Description                               |
 | ----------------------------- | ----------------------------------------- |
