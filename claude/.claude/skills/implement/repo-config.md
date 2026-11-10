@@ -40,7 +40,7 @@ In the owner's repos the repository facts live in the repo's `CLAUDE.md`; the le
 - **Gate** — the battery: every command passes before a PR, run from the worktree root. Prefer the repo's task runner (mise) over naming tools directly, so the task definitions stay the single source of truth. It covers what CI enforces: a gate that checks less than CI breaks the trust model.
 - **Review checks** — the lint and type commands the reviewer runs on changed files only, e.g. `ruff check <files>` (Python), `dotnet format --verify-no-changes` (C#).
 - **Worktree task** — optional: a repo task that creates and sets up a worktree at the convention path (type, slug, base). Without it, `git worktree add` at the convention path from the `worktree` skill.
-- **Agent rules** — rules beyond the agent definitions, such as where scratch files go, the gate's timeout or staging, which rule files to read, for the agents that get the brief: the implementer, `reviewer`, `architecture-reviewer` and `prose-reviewer`. Left out when the definitions cover everything.
+- **Agent rules** — rules beyond the agent definitions, such as where scratch files go, how long the gate takes and that it runs once, its staging, which rule files to read, for the agents that get the brief: the implementer, `reviewer`, `architecture-reviewer` and `prose-reviewer`. Left out when the definitions cover everything.
 
 Where the `CLAUDE.md` already states one of these facts in another section, the `## Pipeline` entry points there instead of repeating it.
 
