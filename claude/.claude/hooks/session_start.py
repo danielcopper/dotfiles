@@ -61,22 +61,39 @@ def get_git_info():
     except Exception:
         return None, 0
 
+def main_repo_name(cwd):
+    """Basename of the main checkout's root, also from a linked worktree; None outside a repository."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, timeout=5
+        )
+    except Exception:
+        return None
+    common_dir = result.stdout.strip()
+    return Path(common_dir).parent.name if result.returncode == 0 and common_dir else None
+
 def get_context_files():
     """Load context from standard files."""
     context_parts = []
+    cwd = Path.cwd()
 
-    # Check for context files in priority order
+    # Check for context files in priority order, each with the heading it is loaded under
     context_files = [
-        Path.cwd() / ".claude" / "GLOSSARY.md",
-        Path.cwd() / "GLOSSARY.md",
-        Path.cwd() / "TODO.md",
+        ("GLOSSARY.md", cwd / ".claude" / "GLOSSARY.md"),
+        ("GLOSSARY.md", cwd / "GLOSSARY.md"),
     ]
+    repo = main_repo_name(cwd)
+    if repo:
+        # The owner's glossary for a foreign repo, kept outside its tree.
+        context_files.append((f"~/Memory/{repo}/GLOSSARY.md", Path.home() / "Memory" / repo / "GLOSSARY.md"))
+    context_files.append(("TODO.md", cwd / "TODO.md"))
 
-    for ctx_file in context_files:
+    for heading, ctx_file in context_files:
         if ctx_file.exists():
             try:
                 content = ctx_file.read_text()[:1000]  # Limit to 1000 chars
-                context_parts.append(f"## {ctx_file.name}\n{content}")
+                context_parts.append(f"## {heading}\n{content}")
             except Exception:
                 pass
 

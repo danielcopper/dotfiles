@@ -8,7 +8,7 @@ Turn an idea into an epic with grabbable sub-issues. This skill ends in issues o
 
 ## 1. Gather
 
-The repo's profile ([`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md)) for its board — if the profile is missing, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Then whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, `GLOSSARY.md` and the ADRs it touches.
+The repo's profile ([`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md)) for its board — if the profile is missing, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Then whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, the glossary and the ADRs it touches.
 
 *Done when:* you know the goal, the constraints, and the affected architecture well enough to challenge the plan, not just transcribe it.
 

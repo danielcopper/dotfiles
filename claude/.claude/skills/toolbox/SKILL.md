@@ -8,7 +8,7 @@ Match the current situation against this index and recommend the right skill(s).
 
 ## Issue & epic pipeline (user-invoked)
 
-- `/setup-repo` — set a repo up for the pipeline: own or foreign, the `CLAUDE.md` `## Pipeline` draft and `~/Memory/<repo>/repo-profile.md`; `/implement`, `/epic`, `/next` and `/plan-epic` ask for it when the profile is missing
+- `/setup-repo` — set a repo up for the pipeline: own or foreign, the `CLAUDE.md` `## Pipeline` draft and `~/Memory/<repo>/repo-profile.md`; a skill that needs the profile asks for it when it is missing (`~/.claude/skills/implement/repo-config.md`)
 - `/next [hint]` — what to work on next: reads board + PRs + commits, commits to one recommendation
 - `/implement <N> [--go]` — one GitHub issue end-to-end: align → worktree + board → implementer → review agents → PR → watch to green → merge per policy
 - `/epic <N>` — assembly line over an epic's native sub-issues; merge between issues, fresh worktree from updated main
@@ -18,7 +18,7 @@ Match the current situation against this index and recommend the right skill(s).
 ## Planning & design
 
 - `/grill-me` — stress-test a plan by relentless interview, one question at a time
-- `/grill-with-docs` — the same, challenged against GLOSSARY.md and ADRs, updating them inline as decisions crystallise
+- `/grill-with-docs` — the same, challenged against the glossary and ADRs, updating them where the repo's own-or-foreign verdict puts them as decisions crystallise
 - `/to-prd` — turn the current conversation into a PRD on the project board
 - `/to-issues` — break a plan/PRD into tracer-bullet issues on the board
 - `/improve-codebase-architecture` — find deepening and consolidation opportunities in a codebase

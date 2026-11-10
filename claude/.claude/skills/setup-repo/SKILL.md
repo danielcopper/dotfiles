@@ -4,7 +4,7 @@ description: "Set up a repository for the issue pipeline — decide own or forei
 disable-model-invocation: true
 ---
 
-Give a repository what `/implement`, `/epic`, `/next`, `/plan-epic`, `/to-prd`, `/to-issues` and `/retro` read about it. Where each fact lives, the `## Pipeline` section's shape and the profile's schema are in [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md); read it first.
+Give a repository what `/implement`, `/epic`, `/next`, `/plan-epic`, `/to-prd`, `/to-issues`, `/grill-with-docs`, `/improve-codebase-architecture` and `/retro` read about it. Where each fact lives, the `## Pipeline` section's shape and the profile's schema are in [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md); read it first.
 
 ## 1. Locate
 
