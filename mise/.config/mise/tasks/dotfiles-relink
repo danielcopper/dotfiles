@@ -5,9 +5,12 @@
 # New files in a package have no symlink yet, and for claude/.claude/hooks/ that
 # is not cosmetic: settings.json wires a hook the moment its entry lands, while
 # the script it names is still only in the repo, and every Bash call then fails
-# with "can't open file" - including the stow that would fix it.
+# with "can't open file" - including the stow that would fix it. A hook script
+# the pull deleted breaks things the same way while the live settings.json still
+# names it, and blocks Edit and Write too, so after the stow every script the
+# live hooks name is checked and the missing ones are reported.
 #
-# ~/.claude/settings.json is NOT stowed and is not touched here. It is the live
+# ~/.claude/settings.json is NOT stowed and is not changed here. It is the live
 # file Claude Code writes model, effort and the auto-mode environment into; the
 # repo keeps a reference copy under claude/.claude/settings.json to diff against.
 #
@@ -23,3 +26,21 @@ packages=("$@")
 
 stow -R "${packages[@]}"
 echo "✓ relinked: ${packages[*]}"
+
+settings="$HOME/.claude/settings.json"
+[ -f "$settings" ] || exit 0
+
+missing=()
+while IFS= read -r script; do
+  path="${script/#\$HOME/$HOME}"
+  path="${path/#\~/$HOME}"
+  [ -e "$path" ] || missing+=("$script")
+done < <(jq -r '.hooks // {} | .[][].hooks[].command' "$settings" | grep -oE '(\$HOME|~)/[^[:space:]]+' | sort -u)
+
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "✗ $settings names hook scripts that do not exist:" >&2
+  printf '    %s\n' "${missing[@]}" >&2
+  echo "  Remove their entries from the live file (compare: diff $settings $dotfiles/claude/.claude/settings.json)." >&2
+  exit 1
+fi
+echo "✓ every hook script in $settings exists"
