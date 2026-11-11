@@ -20,7 +20,7 @@ Each holds in every repo unless its profile departs from it under `defaults` (sc
 
 - **`merge_policy: user`** — green completes the implementation work; the lead reports and waits for the owner to merge. Full-auto is never stored, in a profile or anywhere else: it is a per-run override only when the owner explicitly grants it, so this policy has no departure.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes and it reports 0 unresolved issues introduced by the PR. Green does not authorize a merge.
-- **`public_text_drafts: always`** — PR bodies and new issues are drafted for the owner's approval before posting. The other value, `waived`, posts directly, concise and clean.
+- **`public_text_drafts: always`** — every public text — a new issue, an issue comment, a PR body, and any other — is drafted for the owner's approval before posting. The exception is the issue edit that records a decision the owner made, written directly as the global `CLAUDE.md`, "Questions and decisions in such an issue", says. The other value, `waived`, posts directly, concise and clean.
 
 ## The `## Pipeline` section of the repo's `CLAUDE.md`
 

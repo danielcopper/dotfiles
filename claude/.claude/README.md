@@ -122,7 +122,7 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 
 Which of them run on a change, and which `pr-review-toolkit` specialists beside them, is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
 
-Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text (PRs, new issues) is drafted for approval; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board. Tool names (linter, type checker) never live in the global agents — they come from the repo's `## Pipeline` section, or a foreign repo's profile, via the dispatch.
+Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text is drafted as `public_text_drafts` in `skills/implement/repo-config.md` says; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board. Tool names (linter, type checker) never live in the global agents — they come from the repo's `## Pipeline` section, or a foreign repo's profile, via the dispatch.
 
 ### Per-repo config
 

@@ -24,7 +24,7 @@ Read the repo's profile and the main checkout's `CLAUDE.md`, as [`repo-config.md
 
 Present a compact readiness statement: intended approach, scope, what you'll leave untouched. Ask your open questions **one at a time**, waiting for each answer. Implementation starts on the user's green light.
 
-*(convention)* The answers go into the issue before step 4, written directly as the global `CLAUDE.md`, "Questions and decisions in such an issue", says — each answer a new entry under `## Decisions`, its question checked off under `## To decide`, `## Out of scope` when anything was ruled out (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the edit is `## Decisions` with "None.". A decision meeting the three ADR criteria in the global `CLAUDE.md` also gets an ADR where that file's "Where they are written" puts it. In the repo, the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it; outside the repo, you write it from the same decisions, and the issue does not link it.
+*(convention)* The answers go into the issue before step 4, written directly as the global `CLAUDE.md`, "Questions and decisions in such an issue", says, plus `## Out of scope` when anything was ruled out (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the edit is `## Decisions` with "None.". A decision meeting the three ADR criteria in the global `CLAUDE.md` also gets an ADR where that file's "Where they are written" puts it. In the repo, the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it; outside the repo, you write it from the same decisions, and the issue does not link it.
 
 With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode. *(convention)* `--go` also needs a ready issue: no open question under `## To decide`, and a `## Decisions` (a "See epic #N" pointer counts).
 
@@ -40,7 +40,7 @@ With `--go` (or a standing automode grant from the user) and zero open questions
 
 ## 5. Implement
 
-Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer** agent per [`dispatch.md`](dispatch.md). Route its four-state status as dispatch.md describes; questions and BLOCKED/NEEDS_CONTEXT go to the user, not to your own judgment. *(convention)* An answer that is a decision goes into the issue's `## Decisions` as the global `CLAUDE.md` gives it — a new entry, or a changed decision struck through and re-added with its date — written directly before the agent resumes.
+Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer** agent per [`dispatch.md`](dispatch.md). Route its four-state status as dispatch.md describes; questions and BLOCKED/NEEDS_CONTEXT go to the user, not to your own judgment. *(convention)* An answer that is a decision goes into the issue's `## Decisions`, written directly as the global `CLAUDE.md` says, before the agent resumes.
 
 *Done when:* status DONE, or DONE_WITH_CONCERNS with every concern resolved with the user.
 

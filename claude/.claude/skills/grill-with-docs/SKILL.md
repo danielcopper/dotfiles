@@ -81,7 +81,7 @@ When a term is resolved, update the glossary right there. Don't batch these up â
 
 ### Record decisions in the issue
 
-In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Write the edit as each decision lands, directly, as the global `CLAUDE.md`, "Questions and decisions in such an issue", says â€” the decision a new entry under `## Decisions`, its question checked off under `## To decide`; a decision that changes is struck through and re-added with its date (`gh issue edit <N> --body-file <file>`).
+In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Write the edit as each decision lands, directly, as the global `CLAUDE.md`, "Questions and decisions in such an issue", says (`gh issue edit <N> --body-file <file>`).
 
 ### Offer ADRs sparingly
 
