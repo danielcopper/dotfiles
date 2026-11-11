@@ -19,7 +19,7 @@ Do not act on the plan until I confirm we have reached a shared understanding.
 
 ## Domain awareness
 
-Take the repo's verdict first, own or foreign, as `~/.claude/skills/implement/repo-config.md`, "Own or foreign", says, and state it before the first write: by it, the global `CLAUDE.md`, "Project documentation discovery", says where glossary terms and ADRs are read and written.
+Take the repo's verdict first, own or foreign, as `~/.claude/skills/implement/repo-config.md`, "Own or foreign", says, and state it before the first write: by it, "Where they are written" below says where glossary terms and ADRs are read and written.
 
 During codebase exploration, also look for existing documentation:
 
@@ -55,6 +55,10 @@ If a `GLOSSARY-MAP.md` exists at the root, the repo has multiple contexts. The m
 
 Create files lazily, where the verdict puts them â€” only when you have something to write: the glossary when the first term is resolved, the ADR directory when the first ADR is needed.
 
+### Where they are written
+
+The repo's own glossary and ADRs are read in every repo and written only in an own repo, by the verdict `~/.claude/skills/implement/repo-config.md`, "Own or foreign", sets out. In a foreign repo a term goes to `~/Memory/<repo>/GLOSSARY.md` and an ADR to `~/Memory/<repo>/adr/`, in the same formats (an ADR there numbered as `~/.claude/skills/grill-with-docs/ADR-FORMAT.md` says), and both places are read: the repo's and these. An ADR under `~/Memory/` is linked from no issue, since the issue's readers cannot reach private notes; where the issue has `## Decisions`, the decision stands there.
+
 ## During the session
 
 ### Challenge against the glossary
@@ -81,10 +85,10 @@ When a term is resolved, update the glossary right there. Don't batch these up â
 
 ### Record decisions in the issue
 
-In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Write the edit as each decision lands, directly, as the global `CLAUDE.md`, "Questions and decisions in such an issue", says (`gh issue edit <N> --body-file <file>`).
+In a repo whose `CLAUDE.md` has the section `## Where decisions live`, and when the plan belongs to an issue, that issue's `## Decisions` is where each resolved decision goes. Write the edit as each decision lands, directly, as `public_text_drafts` in `~/.claude/skills/implement/repo-config.md` says (`gh issue edit <N> --body-file <file>`).
 
 ### Offer ADRs sparingly
 
-Only offer to create an ADR for a decision meeting the three ADR criteria in the global `CLAUDE.md`. If any of the three is missing, skip the ADR: if a decision is easy to reverse, you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing." Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md). When the decision belongs to an issue, its line under `## Decisions` links the ADR where the global `CLAUDE.md`, "Where they are written", allows it.
+Only offer to create an ADR for a decision meeting the three ADR criteria in the global `CLAUDE.md`. If any of the three is missing, skip the ADR: if a decision is easy to reverse, you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing." Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md). When the decision belongs to an issue, its line under `## Decisions` links the ADR where "Where they are written" above allows it.
 
 </supporting-info>

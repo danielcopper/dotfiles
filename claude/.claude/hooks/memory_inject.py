@@ -4,9 +4,9 @@ PreToolUse Memory Injection Hook
 
 Injects the time- and place-bound memory slices into Claude's context on the
 first tool call of a session. The always-true slices no longer live here:
-the routing rules and the global index load natively via ~/.claude/CLAUDE.md
-(inline section + @import), which also reaches subagents — something this
-hook never could.
+the global index loads natively via ~/.claude/CLAUDE.md (@import), which
+also reaches subagents — something this hook never could — and the routing
+rules are read on demand from ~/Memory/global/README.md.
 
 Sections, in order:
   1. ~/Memory/<repo-name>/MEMORY.md        per-repo index, in full (repo-name =

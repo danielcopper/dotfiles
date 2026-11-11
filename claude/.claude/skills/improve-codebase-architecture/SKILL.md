@@ -37,7 +37,7 @@ This skill is _informed_ by the project's domain model. The domain language give
 - If the user named a direction — a module, a subsystem, a pain point — take it, and skip the inference below.
 - Otherwise, walk back a good stretch of the commit history (`git log --oneline`) to find the codebase's hot spots — the files and areas that keep coming up — and let those paths pull your attention first. If the changes are scattered with no clear hot spot, widen the net.
 
-Read the project's domain glossary and any ADRs in the area you're touching first — where they are read, and later written, is the global `CLAUDE.md`'s "Project documentation discovery", by the repo's verdict, own or foreign, taken as `~/.claude/skills/implement/repo-config.md`, "Own or foreign", says.
+Read the project's domain glossary and any ADRs in the area you're touching first — where they are read, and later written, is `~/.claude/skills/grill-with-docs/SKILL.md`'s "Where they are written", by the repo's verdict, own or foreign, taken as `~/.claude/skills/implement/repo-config.md`, "Own or foreign", says.
 
 Then use the Agent tool with `subagent_type=Explore` to walk the codebase. Don't follow rigid heuristics — explore organically and note where you experience friction:
 

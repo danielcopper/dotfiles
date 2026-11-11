@@ -122,11 +122,11 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 
 Which of them run on a change, and which `pr-review-toolkit` specialists beside them, is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
 
-Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text is drafted as `public_text_drafts` in `skills/implement/repo-config.md` says; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board. Tool names (linter, type checker) never live in the global agents — they come from the repo's `## Pipeline` section, or a foreign repo's profile, via the dispatch.
+Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text is drafted as `public_text_drafts` in `skills/implement/repo-config.md` says; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board; the issue's `## To decide` and `## Decisions` format is in `skills/implement/repo-config.md`, the ADR format in `skills/grill-with-docs/ADR-FORMAT.md`. Tool names (linter, type checker) never live in the global agents — they come from the repo's `## Pipeline` section, or a foreign repo's profile, via the dispatch.
 
 ### Per-repo config
 
-Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next`, `/plan-epic`, `/to-prd` and `/to-issues` stop and ask for `/setup-repo` when the profile is missing. Where `/grill-with-docs` and `/improve-codebase-architecture` write glossary terms and ADRs follows the repo's own-or-foreign verdict, as `CLAUDE.md`, "Project documentation discovery", says.
+Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next`, `/plan-epic`, `/to-prd` and `/to-issues` stop and ask for `/setup-repo` when the profile is missing. Where `/grill-with-docs` and `/improve-codebase-architecture` write glossary terms and ADRs follows the repo's own-or-foreign verdict, as `skills/grill-with-docs/SKILL.md`, "Where they are written", says.
 
 ### Guard hooks
 
@@ -149,7 +149,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
 ├── review-agents.md              # Which review agents run, fix rounds, finding routing
 ├── agents/                       # Custom subagents (Workflow system → Agents)
 ├── skills/                       # User-invoked skills (implement, epic, plan-epic, …)
-├── memory/                       # Global personal memory (see CLAUDE.md)
+├── memory/                       # Global personal memory (see ~/Memory/global/README.md)
 └── hooks/
     ├── config.toml               # Hook toggles, TTS config, security
     ├── block_ai_attribution.py   # Commit guard: no AI attribution

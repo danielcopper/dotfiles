@@ -20,7 +20,15 @@ Each holds in every repo unless its profile departs from it under `defaults` (sc
 
 - **`merge_policy: user`** — green completes the implementation work; the lead reports and waits for the owner to merge. Full-auto is never stored, in a profile or anywhere else: it is a per-run override only when the owner explicitly grants it, so this policy has no departure.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes and it reports 0 unresolved issues introduced by the PR. Green does not authorize a merge.
-- **`public_text_drafts: always`** — every public text (a new issue, an issue comment, a PR body, any other) is drafted for the owner's approval before posting. The exception is the issue edit that records a decision the owner made, written directly as the global `CLAUDE.md`, "Questions and decisions in such an issue", says. The other value, `waived`, posts directly, concise and clean.
+- **`public_text_drafts: always`** — every public text (a new issue, an issue comment, a PR body, any other) is drafted for the owner's approval before posting. The exception is the issue edit that records a decision the owner made: once the owner has decided a question, write that edit directly, in the format "Questions and decisions in an issue" below sets and in the substance the owner agreed, and tell the owner in one line what was written where. Ask first only when the wording would add something the owner did not decide. The other value, `waived`, posts directly, concise and clean.
+
+## Questions and decisions in an issue
+
+In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decisions` is the home of each change's decisions, and an ADR in the repo is linked from that issue.
+
+- **`## To decide` is a checkbox list, one question each.** An answered question is checked off and points to its decision (`- [x] … → D1`); the question stays.
+- **An open question is an unchecked item or any other text.** Checked items with their indented continuation lines, blank lines and `_No response_` are not open.
+- **Decisions are numbered and appended** (`- D1: …`). A decision that changes is struck through, and the new one follows with its date (`- ~~D2: …~~`, then `- D2 (changed YYYY-MM-DD): …`).
 
 ## The `## Pipeline` section of the repo's `CLAUDE.md`
 

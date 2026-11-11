@@ -59,4 +59,4 @@ The skill infers which structure applies:
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
 
-In a foreign repo the repo's own map and glossaries are only read: every term goes to the glossary the global `CLAUDE.md`, "Project documentation discovery", names.
+In a foreign repo the repo's own map and glossaries are only read: every term goes to the glossary [SKILL.md](./SKILL.md), "Where they are written", names.

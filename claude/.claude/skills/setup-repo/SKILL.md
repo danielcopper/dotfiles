@@ -46,6 +46,6 @@ Ask the owner only what step 3 left open, one question at a time: typically the 
 - **Own repo**: draft the `## Pipeline` section — or, where one exists, the change to it — and show it to the owner. `CLAUDE.md` changes only when the owner asks, through the repo's own process (in a repo that takes changes by pull request, a worktree branch). Then write the profile without the repository facts.
 - **Foreign repo**: write the profile with the repository facts too; nothing is written into the repo's tree.
 
-The profile: a new one is written; an existing one is shown as the change this run would make and rewritten on the owner's OK; with no change, say so and write nothing. Give a new profile its entry in `~/Memory/<repo>/MEMORY.md`, and refresh that entry when a run rewrites the profile, as the global `CLAUDE.md`'s memory rules say.
+The profile: a new one is written; an existing one is shown as the change this run would make and rewritten on the owner's OK; with no change, say so and write nothing. Give a new profile its entry in `~/Memory/<repo>/MEMORY.md`, and refresh that entry when a run rewrites the profile, as `~/Memory/global/README.md` says.
 
 *Done when:* the profile holds this run's facts, or the owner kept the existing one, and in an own repo the `## Pipeline` draft has been shown.

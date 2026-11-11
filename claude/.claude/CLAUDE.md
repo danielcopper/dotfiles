@@ -1,127 +1,17 @@
 # Global Claude Configuration
 
-## Behavior
-
-- When **the user** rejects or cancels a tool call, **stop immediately**. Do not retry the same or similar command. Wait for the user to tell you how to proceed. Automated policy denials (permission deny rules, hook blocks) are different: never retry the blocked call, but switch to the alternative named in the denial message (or an obvious equivalent) and keep working.
-
-- **Don't be hyper-proactive.** Do exactly what was asked — no more. Don't invent couplings between independent tools ("tool A could read tool B's config"), don't add auto-detection layers, don't stack smart fallbacks on smart fallbacks. Prefer a dumb default + simple override file over clever runtime logic. If you catch yourself writing a "detects X and automatically does Y" hook, stop and ask whether the user actually wanted that.
-
-- **Planning vs. implementation — scope is the user's decision, not mine.** During planning/ideation stay in discussion mode: don't start implementing just because turns have passed, don't declare things "explicitly not in scope" / "separate refactor" (scope is the user's call), don't skip research or user instructions to save effort, and don't enforce production-code discipline (minimal diffs, tight scope) on personal configs the user hasn't asked to tighten. Move to implementation only on an explicit green-light verb ("leg los", "mach", "implementier", "schreib", "go"). Treat open questions about the user's own project ("is X inconsistent?", "why is Y like this?") as invitations to discuss options and tradeoffs, not requests for guardrails. Even a short "ok" after a question needs a check — does it mean "ok implementiere" or "ok verstanden, weiter diskutieren"?
-
-- **Don't ask about stopping.** Never ask "willst du weitermachen?", "genug für heute?", "Pause?" or similar. Just keep working. The user will say when to stop.
-
-- **Don't expose the agentic process in published artifacts.** How the work was produced — subagents, multi-agent workflows, "architect → implement → review", adversarial-verification / "capstone" passes — must never appear in PR or issue descriptions, commit messages, code comments, or any committed/published text. State the results, decisions, and rationale, not the orchestration used to reach them.
-
-## Task delivery workflow (default for all implementation work)
-
-The default loop for any non-trivial implementation work, unless I say otherwise. Group work into **functional cuts** and ship **one PR per cut** — a cut is the smallest independently reviewable/deployable unit (e.g. "the DB exists and can be deployed"). Keep a task list that mirrors the work-item/story tasks; when tasks are missing, add them **both** to the local list and to the board the repo uses (Azure DevOps, GitHub Projects).
-
-For each task (and each cut):
-
-1. **Plan when needed; clarify open questions first.** If there are design or architecture choices, resolve them _with me_ before writing code — we make design/arch decisions together, I don't decide them unilaterally. No code until the open questions are closed. In a repo whose `CLAUDE.md` has `## Where decisions live`, the answers are recorded in the issue's `## Decisions`, as that section describes.
-2. **Implement via agent.**
-3. **Review via agent** — as `~/.claude/review-agents.md` says.
-4. **Push and open the PR** (per the repo's branch/merge model and work-item-linking rules).
-5. **I review the PR myself before we move to the next task** — wait for my go.
-
-Composes with the worktree skill (one branch/worktree per cut) and the board skills' rules (→ In Progress when starting is pre-authorized; → Done only on my explicit confirmation).
-
-**Work on a GitHub issue that starts in a chat.** When I give the go for implementation work on a GitHub issue without
-having typed `/implement`, ask me once whether to follow the implement skill; on my yes, read
-`~/.claude/skills/implement/SKILL.md` and follow its steps as if it had been invoked — my go is its green light — and
-re-read it after a compaction.
-
-**One report per agent, and it goes in the message.** The definitions under `~/.claude/agents/` carry this themselves;
-the implementer's prompt restates it anyway, as `~/.claude/skills/implement/dispatch.md`, "Implementer dispatch", says.
-To the prompt of any agent without its own definition (general-purpose, Explore, a fork) add: *"Send your full report as
-a message. Your final answer is then a one-line summary — do not repeat the report in it."* Otherwise the report arrives
-twice, as the message and again as the final answer. Start every agent without a `name`, an
-implementer included: a named agent is a teammate and receives a message only after its turn ends. A running agent is
-reached by the agent id its spawn result returns, and that id also resumes it after it has finished.
-
-## Task list
-
-- **Keep one as soon as there is more than one task** — in every session, not only for implementation work.
-- **Every open point is a task:** a decision, a question, a review finding (none is dropped; how findings are grouped
-  into tasks, and which go straight into a fix round, `~/.claude/review-agents.md` says), a follow-up. Ask them one at a
-  time. The list carries the status, so a message that ends the turn asks exactly one question and does not repeat the
-  open points; only without task tools does it close with all of them listed, one phrased as the question.
-- **Keep it current and in working order:** mark a task done the moment it is, update a description when a decision
-  lands, order the open ones as they will be worked (next step, queued PRs, findings to discuss, discussions, backlog,
-  parked). TaskList orders by ID, so when the order drifts, recreate the open tasks in order with their descriptions.
-- **Touch the in-progress task at every step change:** when the task tools go unused, the harness re-appends the whole
-  list as a reminder, about 2k tokens each time for a 50-item list.
-
-## Environment
-
-- **Line endings:** New files use LF. In my own repos on Linux (dotfiles, homelab, personal projects) everything is LF — convert stray CRLF when touching a file. In work/third-party repos keep existing line endings (CRLF or LF) — never bulk-convert.
-
-## Code Navigation
-
-- **Prefer LSP over Grep/Glob/Read for symbol queries** in LSP-covered languages (TS, Python, C#, …) — definitions, references, hover, `documentSymbol`, call hierarchy. Precise, no whole-file reads. Run `LSP findReferences` before renaming or changing a signature. Use Grep/Glob only for text LSP can't reach: comments, string literals, config values, non-LSP languages.
-- **`LSP workspaceSymbol` always takes an explicit `query`** — with one it is the fastest repo-wide symbol lookup; an empty query returns nothing from most servers. Reach for `documentSymbol` instead once you already know the file.
-- After writing or editing code, check `LSP` diagnostics on the touched files and fix type errors / missing imports before reporting the task done. In a worktree those diagnostics are unreliable; the repo's real type checker and linter, run there, decide.
-
-## Git
-
-- **Conventional Commits** — `<type>(<scope>): <description>` (`feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `ci`, `build`, `perf`, `style`). Scope optional but preferred; description lowercase, imperative, no period.
-- Never include "Co-authored-by", "Generated with", or any similar AI/Claude mention in commit messages.
-- **`git add .` is forbidden by default** — stage files individually. A repo may override this in its own CLAUDE.md when its `.gitignore` is known-clean.
+- Build what was asked. Suggest anything beyond it instead of building it.
+- **Scope is my call.** While we plan, stay in discussion: implement only on an explicit go ("leg los", "mach", "go"), and treat a question about my project as an invitation to discuss options, not a request to fix. Don't cut scope or skip research to save effort.
+- **Implementation work on a GitHub issue follows the `implement` skill.** When I give the go without having typed `/implement`, ask once whether to follow it; on my yes, read `~/.claude/skills/implement/SKILL.md` and follow it (my go is its green light), and re-read it after a compaction.
+- **Agents:** start every agent without a `name` (a named one gets my messages only after its turn ends) and reach it by its agent id. An agent without its own definition gets in its prompt: *"Send your full report as a message. Your final answer is then a one-line summary — do not repeat the report in it."*
+- **Task list:** keep one once there is more than one task. Every open point is a task (a decision, a question, a finding, a follow-up), kept current: done when done, description updated when a decision lands. Ask open points one at a time — a message ends with exactly one question.
+- **Glossary and ADRs:** where a repo has `GLOSSARY.md` (or `GLOSSARY-MAP.md`) or `docs/adr/`, read them before designing or naming, use the glossary's terms, and say so out loud when a plan contradicts an ADR. A new ADR only when a decision is hard to reverse, surprising without context and a real trade-off.
+- **Git:** Conventional Commits (`type(scope): description`, lowercase, imperative). Stage files by name, never `git add .` unless the repo's CLAUDE.md allows it.
+- **Published text** (commits, PRs, issues, code comments) states results, decisions and reasons — never how the work was produced, and no AI or Claude attribution.
+- **Line endings:** new files LF. In my own repos everything is LF (convert stray CRLF in a file you touch); in others keep what is there, never bulk-convert.
 
 ## Memory
 
-Anthropic's auto memory is deliberately **disabled** (`autoMemoryEnabled: false`) — all memory flows through the file-based system under `~/Memory/` (on the Steam Deck a symlink to `~/memex/daniel/memory` in the `memex` git clone, synced by `memex-sync` in the dotfiles' `host-steamdeck` (see the dotfiles README, "memex sync on the Steam Deck"); on other machines a plain local folder; `~/.claude/memory` remains a compat symlink to `~/Memory/global`). The old store under `~/.claude/projects/<cwd>/memory/` is a merged, read-only archive; never write there. Full structure and slash-command docs: `~/Memory/global/README.md` (read on demand). The per-repo index and the entry headings of today's and yesterday's dailies are injected by `~/.claude/hooks/memory_inject.py` at the first tool call (read a daily's file for an entry); the global index loads below.
+All memory lives under `~/Memory/` (auto memory is off); how it is laid out, where a note goes and its format: `~/Memory/global/README.md` — read it before writing a note. Never write to `~/.claude/projects/*/memory/` or `~/Notes/`. Before researching from scratch, search memex (or `~/memex/daniel/wiki/_master-index.md`).
 
-Memory is the **working set** — provisional knowledge that still has to prove itself. The canon is the Obsidian wiki at `~/memex/daniel/wiki/` (maintained per `~/memex/daniel/wiki/CLAUDE.md`): reference knowledge that has proven durable gets **promoted** there via the memory skills, translated into the wiki's format. Before researching something from scratch, read `~/memex/daniel/wiki/_master-index.md` and the matching folder's `_index.md` — knowledge promoted out of memory lives only there.
-
-When the `memex` MCP server is connected, its `search` replaces that index step and covers memory as well — above all when searching by topic rather than by a known file name: while its embedding service answers, the meaning-based ranking finds notes grep misses; otherwise it searches by keyword only and says so (`semantic: false`). A result path `X` (`daniel/wiki/…`, `household/…`) is the local file `~/memex/X`, so `daniel/memory/…` is also `~/Memory/…` through the symlink above. Read in full and write through those local files: they are the source of truth, and the server can lag them by minutes. Its write tools are for machines without a clone and are denied on machines that have one. Without memex (other machines, offline), the index step stays, plus grep.
-
-`~/memex/daniel/wiki/` is yours to maintain; `~/Notes/` (including `~/Notes/personal/`) is the user's and is never touched. When you learn something worth recording, pick the destination:
-
-1. True/useful across projects? → `~/Memory/global/<rule-name>.md` (one rule per file)
-2. Tool-specific quirk? → `~/Memory/global/tools/<tool>.md`
-3. Cross-tool conceptual knowledge? → `~/Memory/global/domain/<topic>.md` — and once proven durable, promote to `~/memex/daniel/wiki/`
-4. Repo-specific? → `~/Memory/<repo-name>/<file>.md` (repo-name = basename of the main repo root; private, outside the repo, never committed to it). Working notes there (briefs, reports, reviews) never hold the only copy of a decision, and move to `archive/` once their work is merged — the rule lives in the `implement` skill, step "Close the loop".
-5. Private/WIP or just-noted-today? → `~/Memory/global/daily/<YYYY-MM-DD>.md` (`## HH:MM — slug` + 3–5 bullets, append-only)
-
-Provenance rules: promote only what the user confirmed or was observed repeatedly — a single observation stays in the daily. On conflict, an explicit user statement beats an observation, and newer evidence beats older. Time-bound facts get a `TIME-BOUND, delete when <condition>` marker in their index entry.
-
-Entry format for feedback/project memories: lead with the rule/fact, then `**Why:**` and `**How to apply:**`. Kebab-case filenames; top-level `type:` frontmatter; `name:` equals the filename slug (`[[wiki-links]]` resolve against it). After creating or modifying a topic file, update its entry in the owning `MEMORY.md` index — new files get a keyword-dense description so future sessions can match prompts to the right file.
-
-Global memory index (topic files load on demand, never eagerly): @~/Memory/global/MEMORY.md
-
-Slash commands: `/memory-dream`, `/memory-consolidate`, `/memory-promote`.
-
-## Worktrees & branching
-
-**Never use `git checkout -b` in place — always work in a worktree** at `<repo-parent>/<repo-name>.worktrees/<type>/<slug>`, next to the main checkout; subagents work in it by absolute path, the main session stays in the main checkout. The full procedure (`mise run worktree-new`, subagents, `EnterWorktree`, cleanup, rules) lives in the **`worktree` skill** — load it when starting any new branch / feature / task / fix.
-
-## Project documentation discovery
-
-If the current repo has any of the following at its root, treat them as canonical and consult them before designing or naming things:
-
-- **`GLOSSARY.md`** — the project's domain glossary. Defines what terms mean *here*. When a term gets resolved during conversation, update the glossary inline — don't batch. It is a glossary, **not** a spec or implementation doc.
-- **`GLOSSARY-MAP.md`** — present in multi-context monorepos. Points to per-context `GLOSSARY.md` files under each module.
-- **`docs/adr/`** — Architectural Decision Records, numbered sequentially (`0001-slug.md`, …). Each records why a decision was made and what alternatives were rejected. Read before redesigning in a settled area.
-
-When these files exist: use the glossary's vocabulary in outputs (don't drift to synonyms it explicitly avoids); flag ADR conflicts out loud (*"Contradicts ADR-0007 — but worth reopening because…"*) rather than silently overriding; propose a new ADR only when all three apply — hard-to-reverse, surprising-without-context, **and** a real trade-off. If these files don't exist, proceed silently — don't flag their absence or suggest creating them upfront. They get created lazily during planning sessions (e.g. `/grill-with-docs`) when terms or decisions actually resolve.
-
-**Where they are written.** The repo's own glossary and ADRs are read in every repo and written only in an own repo, by the verdict `~/.claude/skills/implement/repo-config.md`, "Own or foreign", sets out. In a foreign repo a term goes to `~/Memory/<repo>/GLOSSARY.md` and an ADR to `~/Memory/<repo>/adr/`, in the same formats (an ADR there numbered as `~/.claude/skills/grill-with-docs/ADR-FORMAT.md` says), and both places are read: the repo's and these. An ADR under `~/Memory/` is linked from no issue, since the issue's readers cannot reach private notes; where the issue has `## Decisions`, the decision stands there.
-
-In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decisions` is the home of each change's decisions, and an ADR in the repo is linked from that issue.
-
-**Questions and decisions in such an issue:**
-
-- **`## To decide` is a checkbox list, one question each.** An answered question is checked off and points to its decision (`- [x] … → D1`); the question stays.
-- **An open question is an unchecked item or any other text.** Checked items with their indented continuation lines, blank lines and `_No response_` are not open.
-- **Decisions are numbered and appended** (`- D1: …`). A decision that changes is struck through, and the new one follows with its date (`- ~~D2: …~~`, then `- D2 (changed YYYY-MM-DD): …`).
-- **A decision I made is recorded directly.** Once I have decided a question, write the issue edit that records it in the format above, in the substance I agreed, and tell me in one line what was written where. Ask first only when the wording would add something I did not decide. Every other public text is drafted as `public_text_drafts` (`~/.claude/skills/implement/repo-config.md`, "Global defaults") says.
-
-**ADR format and lifecycle** (default when writing or changing an ADR; a repo's own ADR convention or tooling wins):
-
-- **Front matter carries the lifecycle.** Three required keys: `status` (`proposed` / `accepted` / `rejected` / `deprecated` / `superseded`), `decided` and `updated` (ISO dates — when it was decided, when the record last changed). Plus the relation keys that apply, each a list: `supersedes`, `superseded-by`, `amends`, `amended-by`, whose values are ADR numbers written as four digits (`[0020]`), an `M-` ADR's with its prefix (`[M-0003]`; the prefix is `~/.claude/skills/grill-with-docs/ADR-FORMAT.md`'s). Nothing else goes there, so a mistyped key is an error, not a silently missing relation.
-- **Then the H1 and the decision with its reasons, naming the alternative it was chosen over.** Status lives only in the front matter. An ADR can be a single paragraph; add Considered Options / Consequences only when they add real value. Later changes go into amendment sections (below).
-- **The ADR links the issue it came from**, in its text.
-- **Relations are declared from both ends** — if 0029 `amends: [0020]`, then 0020 carries `amended-by: [0029]`. A relation between an `M-` ADR and one of the repo's own is declared only on the `M-` side, and nothing in this block writes into a foreign repo's `docs/adr/`: its ADRs get no relation key, front matter or amendment.
-- **A decided ADR is amended, never quietly rewritten.** Append `## Amendment — <what changed>` and bump `updated`; the decision text above stays as it was decided. Amending never changes `status` — only a replacement does, and then `superseded` and `superseded-by` appear together. If the change is itself a decision worth its own record, write a new ADR and declare the relation on both sides.
-- **Older ADRs without front matter are not a repo convention** — only a written one is. They stay as they are, unretrofitted unless asked — or until a new ADR supersedes or amends one: then the older one gets its front matter in the same change, so the relation stands on both ends. New ADRs follow this block; in a repo that calls the shared `decisions` check, the check enforces its front matter and relations, and a new ADR without front matter fails.
+Global memory index: @~/Memory/global/MEMORY.md
