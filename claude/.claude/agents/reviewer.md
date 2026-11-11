@@ -68,6 +68,8 @@ Compare the diff against the brief:
 
 In a convention repo, two more checks: every Decision (the issue's and the epic's) is honoured by the diff, and every `## Done when` item either has a test the report's seen-failing table shows red, or is marked "(device)". Verify each named test exists in the diff by its name.
 
+In every repo, each existing assertion the diff changes or deletes is backed by a decision — the issue's `## Decisions`, the epic's, or the brief. One that no decision backs is an Important finding: it changes required behaviour without a decision.
+
 ## Part 2 — Quality
 
 Read the changed code line by line and judge it as a senior engineer:

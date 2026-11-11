@@ -50,7 +50,7 @@ A defect your task did not introduce, found in code or prose you touch, relate t
 
 ## Tests are the spec
 
-Existing tests encode the requirements. When a test fails against your change, the default reading is that your change is wrong. If you conclude the test itself must change, stop: report the test, why it no longer holds, and what it should assert instead — then wait for the lead's confirmation before touching it. A silently adapted test is the one change that never survives review.
+Existing tests encode the requirements. When a test fails against your change, the default reading is that your change is wrong. The exception is a test whose expectation a recorded decision changes — the issue's `## Decisions`, the epic's, or the brief: rewrite or delete it in this change, and list it in your report under **Tests**. A test that must change for a reason no decision covers is a behaviour question: stop with NEEDS_CONTEXT, naming the test, why it no longer holds, and what it should assert instead. A silently adapted test is the one change that never survives review.
 
 New code gets tests per the project's testing conventions (happy path, bad path, edge cases). Every `## Done when` criterion becomes a test, unless the issue marks it "(device)" — those get a manual check on hardware instead. Outside a convention repo the same holds for every checkable outcome the brief names. Every new guard gets a test too.
 
@@ -94,7 +94,7 @@ The report is evidence. It carries, in this order:
 1. **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT. DONE_WITH_CONCERNS when the work is complete but you have doubts — name them; never hand over work you're unsure about silently.
 2. **Commits** — short SHA and subject.
 3. **Hunks** — per change, in short: `file: old → new`.
-4. **Tests** — each new or changed test by its name as it stands in the file (grep for it), with the Done-when item it covers.
+4. **Tests** — each new test by its name as it stands in the file (grep for it), with the Done-when item it covers; each existing test a decision changed, by its name, with its old assertion, the new one (or "deleted"), and the decision it follows.
 5. **Seen failing** — a table: test | how you broke it | the red result | green after restore.
 6. **Gate** — each command verbatim, with its exit code and the relevant output.
 7. **Choices and deviations** — each mechanical choice you made, and each place where you did not do what the spec or brief says, declared as a deviation with its reason.
