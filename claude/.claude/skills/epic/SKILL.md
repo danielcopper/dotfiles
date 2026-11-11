@@ -20,7 +20,7 @@ Present to the user:
 - The split into **runs autonomously** vs **needs the user** — a verification the profile's `user_gate` names, a decision only they can make, or a step only they can perform
 - Your questions about any issue — asked **one at a time**, before any work starts
 
-In a convention repo (see `implement`), epic-level answers go into the epic body's `## Decisions` — drafted, approved, posted — and each sub-issue's `## Decisions` reads "See epic #N", plus its own answers.
+In a convention repo (see `implement`), epic-level answers go into the epic body's `## Decisions`, written directly as the global `CLAUDE.md` says, and each sub-issue's `## Decisions` reads "See epic #N", plus its own answers.
 
 The line starts on the user's green light. Questions that surface later stop the line at that issue, in every mode.
 
