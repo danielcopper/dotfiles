@@ -11,7 +11,7 @@ The skill publishes the PRD as a GitHub issue and puts it on the repo's board, w
 
 ### 1. Read the board
 
-Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Otherwise its `board` decides the board step in Publish, as `repo-config.md`, "Board", says.
+Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Otherwise its `board` decides the board step in Publish, as `repo-config.md`, "Board", says; on a `github` board, also read the board's `Priority` options, as `repo-config.md`, "GitHub commands", reads them.
 
 ### 2. Explore and synthesize
 
@@ -21,7 +21,7 @@ Explore the repo to understand the current state of the codebase, if you haven't
 
 Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
 
-Check with the user that these seams match their expectations.
+Check with the user that these seams match their expectations, and, where the board has a `Priority` field, that the priority you propose for the PRD issue, one of its option names, is right.
 
 ### 4. Write the PRD
 
@@ -90,8 +90,8 @@ Any further notes about the feature.
 1. Detect the target repo from `git remote get-url origin` (parse `owner/name`).
 2. Create the issue:
    ```
-   gh issue create -R <owner>/<name> --title "<PRD title>" --body-file <tmpfile>
+   gh issue create -R <owner>/<name> --title "<PRD title>" --body-file <tmpfile> --assignee @me
    ```
    Capture the returned issue URL.
-3. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands".
+3. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands", which also set its approved priority.
 4. Report the issue URL to the user.

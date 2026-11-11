@@ -8,7 +8,7 @@ Turn an idea into an epic with grabbable sub-issues. This skill ends in issues o
 
 ## 1. Gather
 
-The repo's profile ([`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md)) for its board — if the profile is missing, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Then whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, the glossary and the ADRs it touches.
+The repo's profile ([`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md)) for its board — if the profile is missing, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Then whatever exists: the conversation so far, the referenced issue (`gh issue view <N> --comments`), the code area, the glossary and the ADRs it touches. On a `github` board, also the board's `Priority` options, as `repo-config.md`, "GitHub commands", reads them.
 
 *Done when:* you know the goal, the constraints, and the affected architecture well enough to challenge the plan, not just transcribe it.
 
@@ -33,10 +33,10 @@ Each sub-issue must be self-contained for a cold agent. Its body has the heading
 
 ## 4. Draft for approval
 
-Present the epic body and every sub-issue draft to the user, with a proposed order (dependencies first, risk early). Rework until approved.
+Present the epic body and every sub-issue draft to the user, with a proposed order (dependencies first, risk early) and, where the board has a `Priority` field, a proposed priority per issue, the epic included, from its option names. Rework until approved.
 
 ## 5. Publish
 
-On approval: create the epic and the sub-issues, link them **natively** — parent via GitHub's Sub-issues API (`gh api graphql`), blocked-by via the issue-dependency API (command in the `to-issues` skill, Publish step); body-text lists are not the mechanism — on a `github` board, put everything in the board's **Ready** column (`repo-config.md`, "GitHub commands") with priority and assignee set.
+On approval: create the epic and the sub-issues with `gh issue create --assignee @me`, link them **natively** — parent via GitHub's Sub-issues API (`gh api graphql`), blocked-by via the issue-dependency API (command in the `to-issues` skill, Publish step); body-text lists are not the mechanism — on a `github` board, put everything in the board's **Ready** column and set each issue's approved priority (`repo-config.md`, "GitHub commands").
 
-*Done when:* the epic and all sub-issues exist — in Ready, where there is a board — natively linked as sub-issues and by blocked-by, and the user has the recommended starting order — typically as a `/epic <N>` away.
+*Done when:* the epic and all sub-issues exist, assigned to the user — in Ready where there is a board, with the approved priority where the board has a `Priority` field — natively linked as sub-issues and by blocked-by, and the user has the recommended starting order — typically as a `/epic <N>` away.

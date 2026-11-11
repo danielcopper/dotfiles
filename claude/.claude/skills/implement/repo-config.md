@@ -134,3 +134,17 @@ item_id=$(gh project item-add <n> --owner <owner> --url <issue-url> --format jso
 
 gh project item-edit --id "$item_id" --project-id <project_id> --field-id <status_field_id> --single-select-option-id <ready_option_id>
 ```
+
+Setting a new item's priority (`/plan-epic`, `/to-prd`, `/to-issues`) uses the board's single-select field named `Priority`, looked up when the skill reads the board — its option names are what the skill's plan proposes from:
+
+```bash
+gh project field-list <n> --owner <owner> --format json --jq '.fields[] | select(.name == "Priority")'
+```
+
+The answer carries the field's `id` and its `options` (`id`, `name`). After the item is in Ready, set the option the owner approved:
+
+```bash
+gh project item-edit --id "$item_id" --project-id <project_id> --field-id <priority_field_id> --single-select-option-id <option_id>
+```
+
+A board without a field named `Priority` has no priority step: the plan proposes none, and Publish says so in one line.

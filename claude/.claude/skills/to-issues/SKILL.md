@@ -13,7 +13,7 @@ Publishes the issues on GitHub and puts them on the repo's board, where it has o
 
 ### 1. Read the board
 
-Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Otherwise its `board` decides the board step in Publish, as `repo-config.md`, "Board", says.
+Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skills/implement/repo-config.md`](../implement/repo-config.md) gives its path and schema. Without a profile, stop and ask the user to run `/setup-repo`; on an `azure-devops` board, stop with one line: this skill publishes GitHub issues only. Otherwise its `board` decides the board step in Publish, as `repo-config.md`, "Board", says; on a `github` board, also read the board's `Priority` options, as `repo-config.md`, "GitHub commands", reads them.
 
 ### 2. Gather context
 
@@ -49,6 +49,7 @@ Present the proposed breakdown as a numbered list. For each slice, show:
 - **Type**: HITL / AFK
 - **Blocked by**: which other slices (if any) must complete first
 - **User stories covered**: which user stories this addresses (if the source material has them)
+- **Priority**: one of the board's `Priority` options, where it has that field
 
 Ask the user:
 
@@ -56,6 +57,7 @@ Ask the user:
 - Are the dependency relationships correct?
 - Should any slices be merged or split further?
 - Are the correct slices marked as HITL and AFK?
+- Are the priorities right?
 
 Iterate until the user approves the breakdown.
 
@@ -67,10 +69,10 @@ For each approved slice, in dependency order (blockers first) so each blocker ex
 
 1. Create the issue:
    ```
-   gh issue create -R <owner>/<name> --title "<slice title>" --body-file <tmpfile>
+   gh issue create -R <owner>/<name> --title "<slice title>" --body-file <tmpfile> --assignee @me
    ```
    Capture the returned issue URL and number.
-2. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands".
+2. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands", which also set its approved priority.
 3. Record each blocking edge natively. For every issue this slice is **blocked by**, create the dependency through GitHub's issue-dependency API rather than relying on body text alone:
    ```
    gh api repos/<owner>/<name>/issues/<this-issue-number>/dependencies/blocked_by \
