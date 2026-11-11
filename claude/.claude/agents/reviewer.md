@@ -68,7 +68,7 @@ Compare the diff against the brief:
 
 In a convention repo, two more checks: every Decision (the issue's and the epic's) is honoured by the diff, and every `## Done when` item either has a test the report's seen-failing table shows red, or is marked "(device)". Verify each named test exists in the diff by its name.
 
-In every repo, each existing assertion the diff changes or deletes is backed by a decision — the issue's `## Decisions`, the epic's, or the brief. One that no decision backs is an Important finding: it changes required behaviour without a decision.
+In every repo, each existing assertion whose expectation the diff changes or deletes is backed by a decision — the issue's or the epic's `## Decisions` in a convention repo, the brief in any other — and listed with that decision in the report's **Tests** item. One that no decision backs, or that the report does not list, is an Important finding: it changes required behaviour without a decision, or without saying so. In PR-review mode, with no implementer report, the check is the decision backing alone.
 
 ## Part 2 — Quality
 
