@@ -8,8 +8,11 @@
 # with "can't open file" - including the stow that would fix it. A hook script
 # the pull deleted breaks things the same way while the live settings.json still
 # names it, and blocks Edit and Write too. So after the stow, every hook entry in
-# the live settings.json whose script no longer exists is removed, and each
-# removal is printed.
+# the live settings.json whose script the repo once tracked under
+# claude/.claude/hooks/ and has since deleted is removed, with a backup and a
+# printout. Any other missing path in a hook command - a script another tool
+# installed into ~/.claude/hooks/ (sonar-secrets), an argument - is only
+# reported, and the task fails.
 #
 # ~/.claude/settings.json is NOT stowed. It is the live file Claude Code writes
 # model, effort and the auto-mode environment into; the repo keeps a reference
@@ -32,34 +35,57 @@ echo "✓ relinked: ${packages[*]}"
 settings="$HOME/.claude/settings.json"
 [ -f "$settings" ] || exit 0
 
-python3 - "$settings" <<'PY'
+python3 - "$settings" "$dotfiles" <<'PY'
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 settings = Path(sys.argv[1])
+repo_hooks = Path(sys.argv[2]) / "claude/.claude/hooks"
+live_hooks = Path.home() / ".claude/hooks"
 data = json.loads(settings.read_text())
-script_ref = re.compile(r"(?:\$HOME|~)/\S+")
+path_ref = re.compile(r"(?:\$HOME|~)/\S+")
 
 
-def missing_scripts(command):
-    return [ref for ref in script_ref.findall(command) if not Path(os.path.expandvars(os.path.expanduser(ref))).exists()]
+def missing_paths(command):
+    paths = (Path(os.path.expandvars(os.path.expanduser(ref))) for ref in path_ref.findall(command))
+    return [path for path in paths if not path.exists()]
+
+
+def deleted_from_repo(path):
+    if not path.is_relative_to(live_hooks):
+        return False
+    repo_path = repo_hooks / path.relative_to(live_hooks)
+    if repo_path.exists():
+        return False
+    history = subprocess.run(
+        ["git", "-C", str(repo_hooks), "log", "-1", "--format=%H", "--", str(repo_path)],
+        capture_output=True, text=True, check=True,
+    )
+    return bool(history.stdout.strip())
 
 
 removed = []
+unresolved = []
 events = data.get("hooks", {})
 for event, groups in list(events.items()):
     kept_groups = []
     for group in groups:
         kept = []
         for hook in group.get("hooks", []):
-            gone = missing_scripts(hook.get("command", ""))
-            if gone:
-                removed.append(f"{event} [{group.get('matcher', '')}]: {hook['command']}")
-            else:
-                kept.append(hook)
+            entry = f"{event} [{group.get('matcher', '')}]: {hook.get('command', '')}"
+            missing = missing_paths(hook.get("command", ""))
+            if missing and all(deleted_from_repo(path) for path in missing):
+                removed.append(entry)
+                continue
+            if missing:
+                unresolved.append(entry)
+            kept.append(hook)
         if kept:
             kept_groups.append({**group, "hooks": kept})
     if kept_groups:
@@ -67,12 +93,22 @@ for event, groups in list(events.items()):
     else:
         del events[event]
 
+if removed:
+    shutil.copy2(settings, settings.with_name(settings.name + ".bak"))
+    with tempfile.NamedTemporaryFile("w", dir=settings.parent, delete=False) as tmp:
+        tmp.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    shutil.copymode(settings, tmp.name)
+    os.replace(tmp.name, settings)
+    print(f"✓ removed hook entries whose script the dotfiles repo no longer has from {settings} (backup: {settings.name}.bak):")
+    for entry in removed:
+        print(f"    {entry}")
+
+if unresolved:
+    print(f"✗ {settings} names paths that do not exist and are not dotfiles hook scripts; fix by hand:", file=sys.stderr)
+    for entry in unresolved:
+        print(f"    {entry}", file=sys.stderr)
+    sys.exit(1)
+
 if not removed:
     print(f"✓ every hook script in {settings} exists")
-    sys.exit(0)
-
-settings.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-print(f"✓ removed hook entries whose script no longer exists from {settings}:")
-for entry in removed:
-    print(f"    {entry}")
 PY
