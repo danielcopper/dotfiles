@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Global mise task: pull the dotfiles repo and re-link in the same command.
+#
+# Claude Code checks its hooks before each tool call. When a pull adds or
+# deletes a hook script, the live ~/.claude/settings.json and the linked scripts
+# disagree until dotfiles-relink has run, and the next Bash, Edit or Write call
+# fails. Pulling and re-linking in one command leaves no call in between.
+#
+# Usage: mise run dotfiles-pull [package...]   (packages go to dotfiles-relink;
+#                                               defaults to claude)
+set -euo pipefail
+
+dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
+[ -d "$dotfiles" ] || { echo "dotfiles-pull: no such directory: $dotfiles" >&2; exit 1; }
+
+git -C "$dotfiles" pull --ff-only
+exec "$(dirname "$(readlink -f "$0")")/dotfiles-relink" "$@"

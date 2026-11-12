@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Global mise task: re-link stow packages after a pull that touched the dotfiles
-# repo.
+# repo. `mise run dotfiles-pull` pulls and then runs this in the same command.
 #
 # New files in a package have no symlink yet, and for claude/.claude/hooks/ that
 # is not cosmetic: settings.json wires a hook the moment its entry lands, while
 # the script it names is still only in the repo, and every Bash call then fails
 # with "can't open file" - including the stow that would fix it. A hook script
 # the pull deleted breaks things the same way while the live settings.json still
-# names it, and blocks Edit and Write too, so after the stow every script the
-# live hooks name is checked and the missing ones are reported.
+# names it, and blocks Edit and Write too. So after the stow, every hook entry in
+# the live settings.json whose script no longer exists is removed, and each
+# removal is printed.
 #
-# ~/.claude/settings.json is NOT stowed and is not changed here. It is the live
-# file Claude Code writes model, effort and the auto-mode environment into; the
-# repo keeps a reference copy under claude/.claude/settings.json to diff against.
+# ~/.claude/settings.json is NOT stowed. It is the live file Claude Code writes
+# model, effort and the auto-mode environment into; the repo keeps a reference
+# copy under claude/.claude/settings.json to diff against. Only entries for
+# missing hook scripts are taken out of it here.
 #
 # Usage: mise run dotfiles-relink [package...]   (defaults to claude)
 set -euo pipefail
@@ -30,17 +32,47 @@ echo "✓ relinked: ${packages[*]}"
 settings="$HOME/.claude/settings.json"
 [ -f "$settings" ] || exit 0
 
-missing=()
-while IFS= read -r script; do
-  path="${script/#\$HOME/$HOME}"
-  path="${path/#\~/$HOME}"
-  [ -e "$path" ] || missing+=("$script")
-done < <(jq -r '.hooks // {} | .[][].hooks[].command' "$settings" | grep -oE '(\$HOME|~)/[^[:space:]]+' | sort -u)
+python3 - "$settings" <<'PY'
+import json
+import os
+import re
+import sys
+from pathlib import Path
 
-if [ ${#missing[@]} -gt 0 ]; then
-  echo "✗ $settings names hook scripts that do not exist:" >&2
-  printf '    %s\n' "${missing[@]}" >&2
-  echo "  Remove their entries from the live file (compare: diff $settings $dotfiles/claude/.claude/settings.json)." >&2
-  exit 1
-fi
-echo "✓ every hook script in $settings exists"
+settings = Path(sys.argv[1])
+data = json.loads(settings.read_text())
+script_ref = re.compile(r"(?:\$HOME|~)/\S+")
+
+
+def missing_scripts(command):
+    return [ref for ref in script_ref.findall(command) if not Path(os.path.expandvars(os.path.expanduser(ref))).exists()]
+
+
+removed = []
+events = data.get("hooks", {})
+for event, groups in list(events.items()):
+    kept_groups = []
+    for group in groups:
+        kept = []
+        for hook in group.get("hooks", []):
+            gone = missing_scripts(hook.get("command", ""))
+            if gone:
+                removed.append(f"{event} [{group.get('matcher', '')}]: {hook['command']}")
+            else:
+                kept.append(hook)
+        if kept:
+            kept_groups.append({**group, "hooks": kept})
+    if kept_groups:
+        events[event] = kept_groups
+    else:
+        del events[event]
+
+if not removed:
+    print(f"✓ every hook script in {settings} exists")
+    sys.exit(0)
+
+settings.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+print(f"✓ removed hook entries whose script no longer exists from {settings}:")
+for entry in removed:
+    print(f"    {entry}")
+PY
