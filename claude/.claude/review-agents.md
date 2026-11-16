@@ -21,7 +21,7 @@ message, several `Agent` calls. The table alone decides; there are no size tiers
 |---|---|---|
 | `reviewer` | code changed | does the diff deliver what the spec asks and a PR claims; correctness; project-guideline violations |
 | `architecture-reviewer` | production code changed | does it fit the tree: existing helpers reused, logic and facts in code kept in one home, sibling patterns and written architecture rules followed, the same behaviour with less code, no site left doing the old behaviour |
-| `prose-reviewer` | prose changed, or production code changed | is every sentence the diff writes true at head, and does it belong; in a change's first review, are the comments already in the units it touches still true and still needed |
+| `prose-reviewer` | prose changed, or production code changed | is every sentence the diff writes true at head, and does it need to stand there at all; in a change's first review, are the comments already in the units it touches still true and still needed |
 | `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | are new tests pinning the claimed behaviour, or vacuous? |
 | `pr-review-toolkit:silent-failure-hunter` | error handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches added in the diff) | swallowed exceptions, silent fallbacks, missing logs |
 | `pr-review-toolkit:type-design-analyzer` | new types added or existing types' shapes changed (records, classes, interfaces, type aliases) | encapsulation, invariants, useful vs anaemic types |
@@ -83,7 +83,7 @@ one.
 
 Merge every agent's findings into one list, each tagged with the agent that raised it. A plugin specialist keeps its own
 scale, and no dispatch asks it for another. Its top grade is Critical only when the finding names what `reviewer`'s
-"Severity calibration" calls Critical, and Important otherwise; the scales read as:
+"## Findings" calls Critical, and Important otherwise; the scales read as:
 
 - `silent-failure-hunter` — CRITICAL → Critical or Important by the rule above, HIGH → Important, MEDIUM → Minor.
 - `pr-test-analyzer` — 9–10 → Critical or Important by the rule above, 7–8 → Important, 5–6 → Minor; 1–4 is not reported.
@@ -99,8 +99,8 @@ Each finding is routed:
   cited file:line, the quoted text, the named command. A finding that does not hold there, or cannot be confirmed, goes
   on the user's list instead, marked "not confirmed".
 - **A Minor finding on the change** goes on the user's list: fix now, later, or drop.
-- **By-catch** — a review agent tags it `pre-existing`; the implementer lists it in its report — goes by its class, as
-  [`agents/implementer.md`](agents/implementer.md), "## Scope", defines the classes and the cap:
+- **By-catch** — a review agent tags it `pre-existing`; the implementer lists it in its report — goes by its class
+  ([`agents/implementer.md`](agents/implementer.md), "## Scope", defines what is small):
   - **Small** → the implementer fixes it in this change, as its own commit; the PR body names it in one sentence.
   - **Changes behaviour** → ask the user, recommending a fix here; on yes it becomes a decision of the issue (in a
     convention repo, a new D-line).

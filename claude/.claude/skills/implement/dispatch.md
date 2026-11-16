@@ -1,6 +1,6 @@
 # Dispatching the implementer and the review agents
 
-Templates and routing rules for the pipeline's agents. The agent definitions under `~/.claude/agents/` carry the working rules, the test and commit discipline, escalation, the confidence rubric and the report contracts; a dispatch supplies only the task facts below and restates none of those rules, in the brief or in the prompt, but the one "Implementer dispatch" names. Default models come from the agent definitions; a pipeline agent runs on another model only on the user's yes.
+Templates and routing rules for the pipeline's agents. The agent definitions under `~/.claude/agents/` carry the working rules, the test and commit discipline, escalation, how findings are scored and the report contracts; a dispatch supplies only the task facts below and restates none of those rules, in the brief or in the prompt, but the one "Implementer dispatch" names. Default models come from the agent definitions; a pipeline agent runs on another model only on the user's yes.
 
 ## Brief file
 
