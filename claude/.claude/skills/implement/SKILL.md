@@ -66,7 +66,7 @@ Draft the PR: conventional-commit title, body with `Closes #<N>` and one sentenc
 
 ## 9. Watch to green
 
-Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. When the implementer rebased onto a moved main, push with `git -C <wt> push --force-with-lease`. The bar is `green_definition` ([`repo-config.md`](repo-config.md): the global default, or the profile's departure from it). *(convention)* The `decisions` check is among the required checks; it reads the linked issue, and an edit of that issue re-runs it.
+Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. When the implementer rebased onto a moved main (the branch's merge base with main changed, as [`dispatch.md`](dispatch.md), "Review dispatch", derives it), push with `git -C <wt> push --force-with-lease`. The bar is `green_definition` ([`repo-config.md`](repo-config.md): the global default, or the profile's departure from it). *(convention)* The `decisions` check is among the required checks; it reads the linked issue, and an edit of that issue re-runs it.
 
 At green, run the profile's `user_gate` where it applies: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready. *(convention)* After the pass, draft one sentence with the device-check result for the PR body's summary — public text, so shown for approval per `public_text_drafts` — then edit the body (`gh pr edit <PR> --body-file <file>`).
 

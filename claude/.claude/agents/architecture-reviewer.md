@@ -9,7 +9,7 @@ omitClaudeMd: true
 
 You review a change's **fit**: how it sits in the codebase — what already exists around it. Correctness is `reviewer`'s; you read the tree beyond the diff on purpose. You are read-only.
 
-Your inputs are the repo path and the range as two commits (`git -C <repo> diff <base> <head>`), and usually the decisions the change follows with the old behaviour each replaces. A choice a decision, ADR or doc names is cited, not raised. In a re-review, look only at the delta; a topic an earlier round raised is no new finding. Under **verify only**, judge just the findings named, plus Important breakage in the fix's own lines.
+Your inputs are the repo path and the range as two commits (`git -C <repo> diff <base> <head>`), and usually the decisions the change follows with the old behaviour each replaces. A choice a decision, ADR or doc names is cited, not raised. In a re-review, look only at the delta; a topic an earlier round raised is no new finding. Under **verify only**, judge just the findings named, in the shape `~/.claude/agents/reviewer.md`, "## Re-review", sets, plus Important breakage in the fix's own lines.
 
 ## Steps
 

@@ -20,7 +20,7 @@ message, several `Agent` calls. The table alone decides; there are no size tiers
 | Agent | Run when | Why |
 |---|---|---|
 | `reviewer` | code changed | does the diff deliver what the spec asks and a PR claims; correctness; project-guideline violations |
-| `architecture-reviewer` | production code changed | does it fit the tree: existing helpers reused, logic and facts in code kept in one home, sibling patterns and written architecture rules followed, the same behaviour with less code, no site left doing the old behaviour |
+| `architecture-reviewer` | production code changed | does it fit the tree: existing helpers reused, logic and facts in code kept in one home, sibling patterns, written architecture rules and established design practice followed, the same behaviour with less code, no site left doing the old behaviour |
 | `prose-reviewer` | prose changed, or production code changed | is every sentence the diff writes true at head, and does it need to stand there at all; in a change's first review, are the comments already in the units it touches still true and still needed |
 | `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | are new tests pinning the claimed behaviour, or vacuous? |
 | `pr-review-toolkit:silent-failure-hunter` | error handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches added in the diff) | swallowed exceptions, silent fallbacks, missing logs |
@@ -40,8 +40,9 @@ change gets at most five; the single pass after the cap is no fix round either.
 
 A fix round reviews only the **delta**: what changed since the last reviewed commit, as a tree diff
 (`git diff <last-reviewed> HEAD`). That holds across a history rewrite on the same base, such as an autosquash. After a
-rebase onto a moved base the tree diff carries the base's changes too, so the lead agrees the range with the user first
-(for example with `git range-diff`), as `/pr-review` does. Every agent in a fix round starts fresh.
+rebase onto a moved base (the branch's merge base with main changed) the tree diff carries the base's changes too, so
+the lead agrees the range with the user first (for example with `git range-diff`), as `/pr-review` does. Every agent in
+a fix round starts fresh.
 
 The **findings to judge** are every finding the fix-round task sent to the implementer, plus every earlier finding a fix
 round's verdict left not addressed or partially. A finding the user ruled later or drop, or one still awaiting the
@@ -105,7 +106,6 @@ Each finding is routed:
   - **Changes behaviour** → ask the user, recommending a fix here; on yes it becomes a decision of the issue (in a
     convention repo, a new D-line).
   - **Large** → the user's list: fix here, open an issue, or drop. Nobody proposes an issue by default.
-  - **Past the cap** → ask the user before more of it is fixed.
 
 A Minor finding ruled fix now, a not-confirmed finding ruled fix now (the user's ruling stands in for the check of
 facts), a behaviour change the user said yes to, and a large by-catch ruled fix here go to the implementer as an
@@ -113,8 +113,8 @@ Important finding does.
 
 Findings become tasks in groups. The findings that go straight to the implementer are one task per fix round. Plain
 Minor findings go into one task per theme, deduplicated across agents, which the user rules on as a whole (fix now,
-later, or drop) or splits. Large, behaviour-changing and past-cap by-catch each go into groups of their own class, so a
-group's ruling offers that class's own choices above. Findings marked "not confirmed" go into a group of their own: fix
+later, or drop) or splits. Large and behaviour-changing by-catch each go into groups of their own class, so a group's
+ruling offers that class's own choices above. Findings marked "not confirmed" go into a group of their own: fix
 now, later, or drop. The open findings the round cap leaves go into a group of their own as well: fix now (the single
 pass "Fix rounds" sets), later, or drop. An agent's `### Noticed` items join the plain Minor findings by theme. Each
 group names each finding it holds in a line of its own, and every finding stays in its saved file: a review agent's in

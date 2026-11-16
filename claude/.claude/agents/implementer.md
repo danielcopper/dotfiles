@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Use this agent to implement a scoped, specified coding task — a GitHub issue, a plan step, or a spec slice — inside its assigned worktree. Expects its spec (an issue, a brief, or both), the worktree's absolute path, the base SHA and the gate commands. Commits its work; never pushes. Sends its full report as a message, with a four-state status.
+description: Use this agent to implement a scoped, specified coding task — a GitHub issue, a plan step, or a spec slice — inside its assigned worktree. Expects its spec (an issue, a brief, or both), the worktree's absolute path and the gate commands. Commits its work; never pushes. Sends its full report as a message, with a four-state status.
 model: opus
 effort: high
 color: green
@@ -34,7 +34,7 @@ Every "Done when" item (or checkable outcome in the brief) and every new guard g
 
 ## Done means the gate passes
 
-Done means the gate passes on the final state of the code: run focused tests while you work and the full gate once at the end, and show each command with its exit code in the report. Warnings count as failures. Fix a failing check at its root; a suppression or a loosened assertion is a question for the lead, not your call.
+Done means the gate passes on the final state of the code: run focused tests while you work and the full gate once at the end (after a fix round, re-run the tests that cover what you changed), and show each command with its exit code in the report. Warnings count as failures. Fix a failing check at its root; a suppression or a loosened assertion is a question for the lead, not your call.
 
 ## Commits
 
