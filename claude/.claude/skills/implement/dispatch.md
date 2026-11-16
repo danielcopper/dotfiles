@@ -13,7 +13,9 @@ The lead writes the brief to `~/Memory/<repo>/brief-<N>.md` before dispatching (
 - **Agent rules** — verbatim, when set: in the owner's repos from the `CLAUDE.md`'s `## Pipeline` section, in a foreign repo from the profile ([`repo-config.md`](repo-config.md))
 - **Extras** — task-specific only: files to read first, an exemplar file whose patterns to match, verification specifics, an ADR to write
 
-In a convention repo the issue is the spec, so the brief holds nothing else: a decision lives in the issue's `## Decisions`, never in the brief. In any other repo the brief also names the spec the issue does not settle:
+In a convention repo the issue is the spec, so the brief holds nothing else: the issue's `## Wanted`, `## Decisions`, `## Done when` and `## Out of scope`, plus the epic's `## Decisions` when the issue says "See epic #E" (headings count at level 2 or 3). A decision lives in the issue's `## Decisions`, never in the brief. An issue with an open question under `## To decide`, or without `## Decisions`, is not ready: an agent handed it reports NEEDS_CONTEXT.
+
+In any other repo the brief also names the spec the issue does not settle:
 
 - **Goal** — the issue's intent in two or three sentences
 - **Done criteria** — the checkable outcomes, from the issue and the align step
