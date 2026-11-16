@@ -16,7 +16,7 @@ Read the repo's profile and the main checkout's `CLAUDE.md`, as [`repo-config.md
 
 ## 2. Understand the issue
 
-`gh issue view <N> --comments`, plus its parent epic if it is a sub-issue. *(convention)* Read its `## To decide`, `## Decisions` and `## Done when`, and the epic's `## Decisions` when the issue says "See epic #N". Read the ADRs, docs, and glossary entries the issue area touches, then explore the code far enough to know the blast radius.
+`gh issue view <N> --comments`, plus its parent epic if it is a sub-issue. *(convention)* Read its `## To decide`, `## Decisions` and `## Done when`, and the epic's `## Decisions` when the issue says "See epic #N". When someone else opened #N, open the work's own issue first, as [`repo-config.md`](repo-config.md), "Questions and decisions in an issue", says; it is `<N>` from then on. Read the ADRs, docs, and glossary entries the issue area touches, then explore the code far enough to know the blast radius.
 
 *Done when:* you can state the change, its done criteria, and every file area it will touch in your own words.
 
@@ -60,7 +60,7 @@ The battery runs once per code state. The implementer's final battery report is 
 
 Draft the PR: conventional-commit title, body with `Closes #<N>` and one sentence per small by-catch fix (`review-agents.md`), docs handled per repo policy (updated in the same PR, or the repo's explicit opt-out with a one-line reason). Present the draft and wait for approval — skip the wait only where `public_text_drafts` is `waived` ([`repo-config.md`](repo-config.md)). Then push and open the PR.
 
-*(convention)* The body becomes the squash commit body, so it holds: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. A docs opt-out (the repo's docs-check marker) may also sit in the body. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
+*(convention)* The body becomes the squash commit body, so it holds: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. A docs opt-out (the repo's docs-check marker) may also sit in the body. Every PR closes exactly one own issue, plus the issue someone else opened that it links. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
 
 *Done when:* the PR is open with approved text.
 
