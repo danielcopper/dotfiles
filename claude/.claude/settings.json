@@ -79,7 +79,9 @@
       "Bash(*xxd */mnt/cache/appdata/matrix/*)",
       "Bash(*scp */srv/matrix/*)",
       "Bash(*scp */srv/secrets/*)",
-      "Bash(*scp */mnt/cache/appdata/matrix/*)"
+      "Bash(*scp */mnt/cache/appdata/matrix/*)",
+      "ScheduleWakeup",
+      "ReportFindings"
     ],
     "defaultMode": "auto",
     "ask": [
@@ -295,8 +297,8 @@
     "refreshInterval": 10
   },
   "enabledPlugins": {
-    "claude-md-management@claude-plugins-official": true,
-    "commit-commands@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": false,
+    "commit-commands@claude-plugins-official": false,
     "context7@claude-plugins-official": true,
     "csharp-lsp@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": false,
@@ -346,5 +348,18 @@
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "askUserQuestionTimeout": "never",
-  "dialogExpiry": "never"
+  "dialogExpiry": "never",
+  "enableWorkflows": false,
+  "disableClaudeAiConnectors": true,
+  "skillOverrides": {
+    "simplify": "off",
+    "loop": "off",
+    "schedule": "off",
+    "init": "off",
+    "security-review": "off",
+    "keybindings-help": "off",
+    "fewer-permission-prompts": "off",
+    "run": "off",
+    "claude-in-chrome": "off"
+  }
 }
