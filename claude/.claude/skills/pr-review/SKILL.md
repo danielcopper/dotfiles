@@ -76,11 +76,15 @@ Merge the findings as `review-agents.md` says and register one task per finding 
 first in a re-review, each with its judging agent's verdict and evidence, then Critical → Important → Minor, `pre-existing` last. Each task holds the finding, the agent,
 an **Empirical check** (the command, probe or source read that proves or refutes it) and an empty **Outcome**. A
 finding you drop as a clear duplicate of an existing thread or an agent hallucination is named in the summary, never
-dropped silently. Present the list and **stop**: the user picks where to start.
+dropped silently. Present the list and **stop**, offering both ways through Phase 4: **one at a time** (the user picks
+where to start) or **batch** (you validate every task, then hand over one list). The user picks.
 
-## Phase 4 - Validate, one task at a time
+## Phase 4 - Validate
 
-In the user's order (or one after another when they say so):
+**One at a time** runs steps 1–4 per task, in the user's order (or one after another when they say so). **Batch** runs
+steps 1–2 for every task without waiting, records each Outcome with your lean, then presents one list: every
+recommended comment as a draft with its anchor, and every finding you recommend dropping with its reason. The user's
+ruling on that list replaces step 3 for all tasks.
 
 1. Running PR code needs the review worktree: create it once from the head commit, detached —
    `git worktree add --detach <repo-parent>/<repo>.worktrees/review/<PR#>-<short-slug> "$HEAD_SHA"` — and install
