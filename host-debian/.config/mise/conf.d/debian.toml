@@ -1,0 +1,8 @@
+# Tools mise installs only on debian hosts, on top of the shared
+# ~/.config/mise/config.toml. Debian's own packages are too old for the nvim
+# config: it needs Neovim 0.12+ (vim.pack), and nvim-treesitter's main branch
+# needs the tree-sitter CLI 0.26.1+. Debian 13 ships Neovim 0.10.4 and
+# tree-sitter 0.22.6; the other hosts get both from pacman or Homebrew.
+[tools]
+neovim = "latest"
+tree-sitter = "latest"

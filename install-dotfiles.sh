@@ -2,7 +2,7 @@
 # Symlink dotfiles for the given class via GNU Stow.
 set -euo pipefail
 
-CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
+CLASS=${1:?usage: $0 <arch|debian|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 cd "$DIR"
 
@@ -17,25 +17,33 @@ common_pkgs=(
   starship
   systemd
   tmux
-  wezterm
   lazygit
   opencode
+)
+
+# Config of GUI apps: the wezterm terminal and the herdr desktop app. A
+# headless class leaves them out.
+desktop_pkgs=(
+  wezterm
   herdr-app
 )
 
 case "$CLASS" in
   arch)
-    class_pkgs=(host-arch)
+    class_pkgs=("${desktop_pkgs[@]}" host-arch)
+    ;;
+  debian)
+    class_pkgs=(host-debian)
     ;;
   steamdeck)
-    class_pkgs=(host-steamdeck)
+    class_pkgs=("${desktop_pkgs[@]}" host-steamdeck)
     ;;
   wsl-arch)
-    class_pkgs=(host-wsl-arch)
+    class_pkgs=("${desktop_pkgs[@]}" host-wsl-arch)
     ;;
   *)
     echo "unknown class: $CLASS" >&2
-    echo "supported: arch, steamdeck, wsl-arch" >&2
+    echo "supported: arch, debian, steamdeck, wsl-arch" >&2
     exit 1
     ;;
 esac
@@ -195,9 +203,11 @@ fi
 
 # herdr's settings.json is a reference copy too (README, "herdr app"). The
 # stow above has made ~/.config/herdr-app a real directory, so the seed lands
-# there and not in the repo.
+# there and not in the repo. A class without the package has no such
+# directory and no herdr app to read the file.
 live_herdr_settings="$HOME/.config/herdr-app/settings.json"
-if [ ! -e "$live_herdr_settings" ] && [ ! -L "$live_herdr_settings" ]; then
+if [[ " ${all_pkgs[*]} " == *" herdr-app "* ]] &&
+  [ ! -e "$live_herdr_settings" ] && [ ! -L "$live_herdr_settings" ]; then
   cp "$DIR/herdr-app/.config/herdr-app/settings.json" "$live_herdr_settings"
   echo "seeded ~/.config/herdr-app/settings.json from the repo reference"
 fi
@@ -272,8 +282,9 @@ for pkg in "${all_pkgs[@]}"; do
 done
 
 # Materialize mise-managed tools (runtimes + LSPs) declared in the
-# just-stowed ~/.config/mise/config.toml. mise itself is installed
-# by install-packages.sh via packages/common.pkglist.
+# just-stowed ~/.config/mise/config.toml, and on debian in
+# ~/.config/mise/conf.d/debian.toml. mise itself is installed by
+# install-packages.sh from the class's package list.
 if command -v mise >/dev/null 2>&1; then
   echo
   echo "running mise install"

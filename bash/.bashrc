@@ -73,7 +73,7 @@ unset -f prepend_path
 # those entries already in $PATH.
 [ -f ~/.bashrc.local ] && . ~/.bashrc.local
 
-# Bash completion. Distro path on arch/wsl-arch, brew path on steamdeck.
+# Bash completion. Distro path on arch, wsl-arch and debian, brew path on steamdeck.
 for f in /usr/share/bash-completion/bash_completion \
          "${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}/etc/profile.d/bash_completion.sh"; do
   [ -r "$f" ] && . "$f" && break

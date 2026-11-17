@@ -10,11 +10,11 @@ cd ~/dotfiles
 ./bootstrap.sh <class>
 ```
 
-Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
+Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
 The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink` and `memex-sync-test` use it unless `DOTFILES_DIR` is set.
 
-`bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
+`bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
 
 ## Layout
 
@@ -22,10 +22,11 @@ The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githo
 |---|---|
 | `bash/`, `git/`, `nvim/`, `tmux/`, `wezterm/`, … | Stow packages — one per app. Each mirrors the target tree under `$HOME`. |
 | `host-<class>/` | Per-host packages holding `.local` addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. the NVIDIA wireplumber tweak on arch). Claude Code's `settings.json` is not among them: the `claude` package keeps a reference copy that `install-dotfiles.sh` seeds into `~/.claude/settings.json` once, and that live file then drifts per machine (`CLAUDE.md`, "Claude config lives here"). |
-| `packages/common.pkglist`, `packages/<class>.pkglist` | Pacman lists for the arch and wsl-arch classes. Blank lines and `#` comments ignored. |
+| `packages/common.pkglist`, `packages/arch.pkglist`, `packages/wsl-arch.pkglist` | Pacman lists: `common.pkglist` plus the class's own, for the arch and wsl-arch classes. Blank lines and `#` comments ignored. |
+| `packages/debian.pkglist` | Apt list for the debian class, used instead of `common.pkglist`, whose names are Arch's. |
 | `packages/steamdeck.brewlist` | Linuxbrew list — SteamOS root is read-only, so steamdeck uses brew instead of pacman. `install-packages.sh` bootstraps brew if missing. |
 | `packages/steamdeck.flatpaklist` | Flatpak app list for steamdeck — for apps that ship as macOS-only Homebrew Casks (wezterm) and need a Linux install path. Installed user-scope from flathub. |
-| `install-packages.sh <class>` | Install / update OS packages (pacman on arch / wsl-arch, brew + flatpak on steamdeck). |
+| `install-packages.sh <class>` | Install / update OS packages (pacman on arch / wsl-arch, apt on debian, brew + flatpak on steamdeck). |
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. Worktree-aware; backs up real conflicts. |
 | `stow-packages.sh <pkg>…` | Stows the given packages; `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
@@ -45,7 +46,7 @@ mise run dotfiles-relink <app>
 **New stow package:**
 
 1. Create the package directory at repo root, mirroring the target path: `<pkg>/.config/<pkg>/…` (or `<pkg>/.<file>` for `$HOME`-level dotfiles).
-2. Add `<pkg>` to `install-dotfiles.sh`'s `common_pkgs` array, or to a class-specific `class_pkgs` if it should only land on certain hosts.
+2. Add `<pkg>` to `install-dotfiles.sh`'s `common_pkgs` array, to `desktop_pkgs` if it configures a GUI app (every class but the headless `debian`), or to a class-specific `class_pkgs` if it should only land on certain hosts.
 3. `mise run dotfiles-relink <pkg>` to symlink it immediately.
 
 **Class-specific tweak to a mostly-shared file:**
@@ -53,6 +54,63 @@ mise run dotfiles-relink <app>
 ```bash
 printf '\nexport PATH="$HOME/extra:$PATH"\n' >> host-arch/.bashrc.local
 stow -R host-arch
+```
+
+## Debian server
+
+The `debian` class is for a headless Debian 13 server: a shell, git, mise and
+the terminal tools, without the GUI packages `wezterm` and `herdr-app`. Its
+packages come from apt (`packages/debian.pkglist`), mise from mise's own apt
+repository, which `install-packages.sh` enables. Neovim and the tree-sitter
+CLI come from mise, as Debian ships both too old for the nvim config;
+`host-debian/.config/mise/conf.d/debian.toml` says which versions.
+
+The host needs git and gh, gh logged in with HTTPS as its git protocol and
+`gh auth setup-git` run; the repo is cloned over HTTPS:
+
+```bash
+gh repo clone danielcopper/dotfiles ~/dotfiles
+cd ~/dotfiles
+./bootstrap.sh debian
+exec bash -l
+```
+
+`bootstrap.sh` asks for the sudo password once. `gh auth setup-git` has written
+`~/.gitconfig` with gh's credential helper, and Debian puts its own `~/.bashrc`
+into a new home; the stow run moves both into `~/.dotfiles-pre-stow.<ts>/` and
+says so. `host-debian/.gitconfig.local` carries the same credential sections
+for github.com and gist.github.com, so check the backed-up `.gitconfig` for
+anything else and carry that over by hand.
+
+**Commit signing.** The shared `.gitconfig` signs every commit and tag, and
+`host-debian/.gitconfig.local` points it at `~/.ssh/id_ed25519_signing.pub`;
+until that key exists, every commit fails. Create it without a passphrase:
+the coding agents on this host commit unattended, and nobody is there to type
+one.
+
+```bash
+ssh-keygen -t ed25519 -N '' -C "daniel@$(hostname) signing" -f ~/.ssh/id_ed25519_signing
+cat ~/.ssh/id_ed25519_signing.pub
+```
+
+GitHub shows such commits as verified once the public key is added to the
+account as a signing key, in GitHub's web settings as
+[Adding a new SSH key to your GitHub account](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)
+describes, with the key type for signing. Not with `gh ssh-key add`: that
+needs a token with the `admin:ssh_signing_key` scope, and the gh login on the
+server has no admin scopes. To commit unsigned instead, swap the two lines
+`host-debian/.gitconfig.local` names.
+
+**Forgejo.** git takes the credentials for `https://git.kueppermann.com` from
+`~/.git-credentials`. git's store helper fills it the first time the token is
+entered, or it is written directly when the token is set up; this repo does
+not write it.
+
+**Claude Code** is installed by hand, as on every host, with its native
+installer into `~/.local/bin/claude`; `claude` then signs in.
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
 ## herdr app

@@ -1,0 +1,27 @@
+# Debian-specific git config. Included by shared .gitconfig via [include] path.
+
+[user]
+	name = danielcopper
+	email = daniel.kueppermann@gmail.com
+
+# Signing is switched on in the shared .gitconfig. The key has no passphrase;
+# why, and how to create it, is in the README ("Debian server").
+[user]
+	signingkey = ~/.ssh/id_ed25519_signing.pub
+# To commit unsigned instead, replace the two lines above with:
+#   [commit] gpgsign = false
+#   [tag] gpgsign = false
+
+# GitHub over HTTPS through gh, as `gh auth setup-git` writes it. The empty
+# helper drops any helper set before this one.
+[credential "https://github.com"]
+	helper =
+	helper = !/usr/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !/usr/bin/gh auth git-credential
+
+# The Forgejo on this host: a headless server has no keyring, so git's store
+# helper keeps the token in its default file, ~/.git-credentials.
+[credential "https://git.kueppermann.com"]
+	helper = store

@@ -6,9 +6,10 @@
 #                       reads packages/steamdeck.brewlist
 #                       plus flatpak for apps unavailable as Linux brew formulae,
 #                       reads packages/steamdeck.flatpaklist
+#   debian           -> apt, reads packages/debian.pkglist
 set -euo pipefail
 
-CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
+CLASS=${1:?usage: $0 <arch|debian|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 
 # Read the names in the list file $1 into $entries, one per line, without
@@ -98,12 +99,43 @@ install_flatpak() {
   fi
 }
 
+install_apt() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get not found; cannot install packages on this system" >&2
+    exit 1
+  fi
+
+  local list="$DIR/packages/${CLASS}.pkglist"
+  read_list "$list" || return 0
+
+  # Nothing may wait for an answer in an unattended run. DEBIAN_FRONTEND
+  # takes debconf's default for a package's configuration questions; the two
+  # dpkg options answer dpkg's own prompt for a config file changed both
+  # locally and in the package: dpkg's default action where there is one,
+  # else the local file stays.
+  local apt=(sudo env DEBIAN_FRONTEND=noninteractive apt-get
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+
+  # mise is not in Debian. For Debian 11+ mise's docs add its apt repository
+  # through extrepo, Debian's tool for external repositories with a pinned
+  # signing key: https://mise.jdx.dev/installing-mise.html#apt
+  # `extrepo enable` leaves an enabled repository as it is.
+  "${apt[@]}" update
+  "${apt[@]}" install -y extrepo
+  sudo extrepo enable mise
+  "${apt[@]}" update
+
+  echo "installing from $list"
+  echo "$entries" | xargs -r "${apt[@]}" install -y
+}
+
 case "$CLASS" in
   arch|wsl-arch)  install_pacman ;;
+  debian)         install_apt ;;
   steamdeck)      install_brew; install_flatpak ;;
   *)
     echo "unknown class: $CLASS" >&2
-    echo "supported: arch, steamdeck, wsl-arch" >&2
+    echo "supported: arch, debian, steamdeck, wsl-arch" >&2
     exit 1
     ;;
 esac

@@ -2,7 +2,7 @@
 # Wrapper: install OS packages, then symlink dotfiles for the given class.
 set -euo pipefail
 
-CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
+CLASS=${1:?usage: $0 <arch|debian|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 
 # Prompt for sudo upfront so the script doesn't pause mid-run waiting for a

@@ -1,0 +1,42 @@
+# Apt packages installed on debian hosts (headless servers).
+# Used instead of common.pkglist, which holds Arch package names.
+# One name per line. Blank lines and lines starting with `#` are ignored.
+#
+# Each tool comes from one source, python3 being the exception (below). A
+# tool is listed here when the Debian release's version is good enough for
+# the configs in this repo; otherwise mise supplies it: the shared
+# mise/.config/mise/config.toml (node, python, java, ...) or
+# host-debian/.config/mise/conf.d/debian.toml (neovim and tree-sitter). gh is
+# no entry: it is a prerequisite of the setup (README, "Debian server").
+
+bash-completion
+# C compiler for the parsers nvim-treesitter builds.
+build-essential
+ca-certificates
+curl
+fastfetch
+# Debian names the binary fdfind; neo-tree's filter and roslyn-filewatch look
+# for it under that name too.
+fd-find
+fzf
+git
+# Called by the pre-push hook in git/.githooks.
+gitleaks
+jq
+lazygit
+lsd
+# From mise's own apt repository, which install-packages.sh enables.
+mise
+openssh-client
+# The system interpreter, for the commit-msg hook (git/.githooks) and the
+# Claude Code hooks, which run outside a mise-activated shell too. The python
+# mise installs stays the development runtime.
+python3
+ripgrep
+starship
+stow
+tmux
+# mason.nvim unpacks the zip archives some tools ship, e.g. clangd, lemminx,
+# roslyn and stylua.
+unzip
+zoxide
