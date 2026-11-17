@@ -210,6 +210,15 @@ MUTANTS = [
      "  machine=$(uname -n)\n", "  machine=deck\n"),
     ("s56_machine_from_host_name", "the full host name, domain and all",
      "  machine=${machine%%.*}\n", ""),
+    # A commit that git refuses.
+    ("s57_commit_refused", "a refused commit carries on",
+     '    exit 1\n  fi\n  log "committed', '  fi\n  log "committed'),
+    ("s57_commit_refused", "a refused commit not notified",
+     '    notify_once "$commit_marker"', '    : notify_once "$commit_marker"'),
+    ("s57_commit_refused", "notify_once notifies every time",
+     '  [ ! -e "$1" ] || return 0\n', ""),
+    ("s57_commit_refused", "keep the commit marker after a good sync",
+     ' "$commit_marker" "$conflict_marker"', ' "$conflict_marker"'),
 ]
 
 # memex-watch: (scenario, what, old, new), applied to memex-watch.

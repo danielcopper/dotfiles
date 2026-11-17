@@ -1,15 +1,28 @@
 # Commits, rebases and pushes the memex clone (~/memex). Started by
 # memex-sync.timer and memex-watch.service; a run that needs a hand (a rebase
-# conflict, a refused fetch or push, an unfinished git operation in the
-# clone) exits 1 and shows up as failed in `systemctl --user status
+# conflict, a refused fetch, commit or push, an unfinished git operation in
+# the clone) exits 1 and shows up as failed in `systemctl --user status
 # memex-sync`.
 [Unit]
 Description=Sync the memex clone with its origin
 
 [Service]
 Type=oneshot
-# The user manager's PATH has no Homebrew. The global pre-push hook needs
-# gitleaks from there and refuses every push without it; system tools still
-# come first.
+# On the Deck the user manager's PATH has no Homebrew. The global pre-push
+# hook needs gitleaks from there and refuses every push without it; system
+# tools still come first. A host without Homebrew, such as the Debian server,
+# has gitleaks in /usr/bin.
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/home/linuxbrew/.linuxbrew/bin
+# Before it reads the signing key file, ssh-keygen asks the agent at
+# SSH_AUTH_SOCK for the key; a socket nobody answers makes that question wait
+# forever. This is the systemd package's agent, which the user manager already
+# names where the class sets it up (environment.d on Debian, README "Debian
+# server"). The line covers a manager that still names another one, such as
+# Debian's openssh_agent until the manager's next start after the stow.
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
 ExecStart=%h/.local/bin/memex-sync
+# A oneshot waits for its run without a limit by default, and a run that hangs
+# keeps the service activating, so neither the timer nor memex-watch starts
+# another one. A run takes seconds, and each network step in it ends after
+# 30; this limit fails a hung run, and the next start tries again.
+TimeoutStartSec=5min

@@ -12,7 +12,7 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
-The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink` and `memex-sync-test` use it unless `DOTFILES_DIR` is set.
+The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `memex-sync-test` and `install-dotfiles-test` use it unless `DOTFILES_DIR` is set.
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
 
@@ -31,7 +31,7 @@ The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githo
 | `stow-packages.sh <pkg>…` | Stows the given packages; `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`) and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`) and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -125,6 +125,9 @@ systemctl --user set-environment SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socke
 `~/.git-credentials`. git's store helper fills it the first time the token is
 entered, or it is written directly when the token is set up; this repo does
 not write it.
+
+**memex.** The class stows the memex sync; the clone, the `~/Memory` link
+and the two units to enable are in "memex sync", "On the Debian server".
 
 **Claude Code** is installed by hand, as on every host, with its native
 installer into `~/.local/bin/claude`; `claude` then signs in.
@@ -230,74 +233,46 @@ and it has three parts. Stow brings none of them:
 
 ## memex sync
 
-On the Deck, `~/Memory` is a symlink into `~/memex`, a git clone that the
-`memex` package keeps in sync: it stows the scripts `~/.local/bin/memex-sync`
-and `~/.local/bin/memex-watch` and the user units `memex-sync.service`,
-`memex-sync.timer` and `memex-watch.service`. A sync run commits whatever
-changed in the clone, rebases onto `origin/main` and pushes. The timer starts
-one every 2 minutes, which also brings in what other devices pushed;
-`memex-watch.service` watches the clone with `inotifywait` (Homebrew's
-`inotify-tools`) and starts one 30 seconds after the last change, ignoring
-`.git/` and `.obsidian/`. What a run does offline, in a rebase conflict, when
-origin refuses a fetch or a push, or when a git operation was left unfinished
-in the clone is described at the top of the script, together with how to
-resolve a conflict by hand. Its output is in `journalctl --user -u memex-sync`,
-the watcher's in `journalctl --user -u memex-watch`.
+`~/Memory` is a symlink into `~/memex`, a git clone of the memex repository
+that the `memex` package keeps in sync. The `steamdeck` and `debian` classes
+stow it, for the Steam Deck and the Debian server: the scripts
+`~/.local/bin/memex-sync` and `~/.local/bin/memex-watch` and the user units
+`memex-sync.service`, `memex-sync.timer` and `memex-watch.service`. A sync run
+commits whatever changed in the clone, rebases onto `origin/main` and pushes.
+The timer starts one every 2 minutes, which also brings in what other devices
+pushed; `memex-watch.service` watches the clone with `inotifywait` and starts
+one 30 seconds after the last change, ignoring `.git/` and `.obsidian/`. What
+a run does offline, in a rebase conflict, when origin refuses a fetch or a
+push, when git refuses the commit, or when a git operation was left
+unfinished in the clone is described at the top of the script, together
+with how to resolve a conflict by hand. Its output is in `journalctl --user -u memex-sync`, the watcher's in
+`journalctl --user -u memex-watch`.
 
-The machine's name stands in the sync's commit subjects
-(`deck: update daniel/memory/…`), its conflict branches
-(`conflict/deck-<date>`) and its notifications (`memex-sync (Deck): …`, with
-a capital). It is the part before the `@` of the clone's `user.email` when
-that is a machine address `<name>@memex.invalid`, as each clone gets below,
-and otherwise the host name up to its first dot.
+The sync's commit subjects, conflict branches and notifications name the
+machine (`deck: …`, `conflict/deck-<date>`, `memex-sync (Deck): …`); the
+script's header says where the name comes from.
 
-`install-dotfiles.sh` enables neither unit, because on a fresh Deck the clone
-does not exist yet. Once it does, enable both once:
+`install-dotfiles.sh` links `~/Memory` to `memex/daniel/memory` for both
+classes, once the clone is there; before that it only says that it made no
+link. When `~/Memory` already exists and is not that link, a directory with
+notes of its own say, the run leaves it as it is and, once everything else is
+done, ends with exit 1 and says why: move what it holds into the clone,
+remove it and run the script again. The script enables neither unit, because
+on a fresh machine the clone does not exist yet; each host's section below
+does.
 
-```bash
-cd ~/dotfiles && stow -R memex
-systemctl --user enable --now memex-sync.timer
-systemctl --user enable --now memex-watch.service
-```
-
-On a Deck where the timer already runs, these steps take the place of the
-ones above: they install `inotify-tools`, load the timer's 2-minute schedule
-and enable the watcher.
-
-```bash
-brew install inotify-tools
-cd ~/dotfiles && stow -R memex
-systemctl --user daemon-reload
-systemctl --user restart memex-sync.timer
-systemctl --user enable --now memex-watch.service
-```
-
-Once switched, the clone pushes as `memex-bot`, the Forgejo user that every
-memex writer shares, each machine with a token or key of its own, instead of
-the owner's account: Forgejo credits a push to whoever pushes it, and the
-sync's pushes would otherwise fill the owner's activity (the full reason is in
-the homelab repo, ADR-0006, amendment "Schreiben über ein Bot-Konto"). The
-bot, its write access to the repository and the Deck's token come from the
-one-time recipe in the homelab repo (README of the Forgejo role, section
-"memex-Bot"), which stores the token in the keyring. Git's libsecret helper
-keeps one entry per host and user, as `credential.useHttpPath` is unset, so
-the bot's token is a second entry next to the owner's: a remote that names its
-user in the URL gets that user's entry, one without a user may get either.
-Once the token is stored, switch the clone's remote to the bot (only the user
-part of the URL changes) and give its commits a machine address, in the
-clone's config only:
-
-```bash
-git -C ~/memex remote set-url origin \
-  "$(git -C ~/memex remote get-url origin \
-    | sed 's#//daniel@#//memex-bot@#')"
-git -C ~/memex config user.email deck@memex.invalid
-```
-
-`user.name` and commit signing stay as they are. A missing, wrong or revoked
-token shows up as a fetch that origin refuses: the run exits 1 and, with the
-ntfy files below in place, sends one "memex-sync (Deck): fetch refused"
-notification.
+Each clone pushes as `memex-bot`, the Forgejo user that every memex writer
+shares, each machine with a token or key of its own, instead of the owner's
+account: Forgejo credits a push to whoever pushes it, and the sync's pushes
+would otherwise fill the owner's activity (the full reason is in the homelab
+repo, ADR-0006, amendment "Schreiben über ein Bot-Konto"). The bot and its
+write access to the repository come from the one-time recipe in the homelab
+repo (README of the Forgejo role, section "memex-Bot"); where each machine
+keeps its token is in its own section below. Each clone's commits get a
+machine address in the clone's config only; `user.name` and commit signing
+stay as they are. A missing, wrong or revoked token shows up as a fetch that
+origin refuses: the run exits 1 and, with the ntfy files below in place, sends
+one `memex-sync (<Machine>): fetch refused` notification.
 
 Each of the failures that need a hand can also send one ntfy notification.
 Two files outside this repo switch that on; without them the script only logs:
@@ -305,26 +280,26 @@ Two files outside this repo switch that on; without them the script only logs:
 - `~/.config/memex/ntfy_url` — the full topic URL
 - `~/.config/memex/ntfy_token` — an access token, sent as a Bearer header
 
-The sync's push goes through the global git hooks like any other push:
-`memex-sync.service` puts Homebrew on its `PATH`, so the pre-push hook finds
-gitleaks. Its commit skips them with `--no-verify`. The message is made of
-file paths, which the commit-msg hook's AI-attribution guard can take for an
-attribution (`daniel/wiki/ai/what claude made.md`, say) and would then
-refuse on every run; the pre-commit hook only guards `main`, which `~/memex`
-may commit on anyway, being listed in `git/.githooks/commit-on-main-allowed`.
+The sync's push goes through the global git hooks like any other push, so the
+pre-push hook scans it with gitleaks. Its commit skips them with
+`--no-verify`. The message is made of file paths, which the commit-msg hook's
+AI-attribution guard can take for an attribution
+(`daniel/wiki/ai/what claude made.md`, say) and would then refuse on every
+run; the pre-commit hook only guards `main`, which `~/memex` may commit on
+anyway, being listed in `git/.githooks/commit-on-main-allowed`.
 
-The Deck writes to memex only through this clone. The memex MCP server can
-write too, but Claude Code on the Deck does not use its write tools, because
-both paths change the same files. When the server creates a note with
+A machine with a clone writes to memex only through it. The memex MCP server
+can write too, but Claude Code on such a machine does not use its write tools,
+because both paths change the same files. When the server creates a note with
 `create`, it adds the note's line to its topic index (`MEMORY.md`), a file the
-memory skills on the Deck edit in the clone. The clone gets the server's
-commit only with its next fetch. If Claude Code has changed the same lines in
-the meantime, the sync's rebase fails and one side lands on a conflict branch.
-Searching and reading through the server stay. The rule is a hand step on
-each machine with a clone, today only the Deck: it goes into that machine's
-live `~/.claude/settings.json`, not into the reference copy here, which every
-host shares, while a machine without a clone writes through the server. It
-goes under `permissions.deny`:
+memory skills edit in the clone. The clone gets the server's commit only with
+its next fetch. If Claude Code has changed the same lines in the meantime, the
+sync's rebase fails and one side lands on a conflict branch. Searching and
+reading through the server stay. The rule is a hand step on each machine with
+a clone, the Deck and the Debian server: it goes into that machine's live
+`~/.claude/settings.json`, not into the reference copy here, which every host
+shares, while a machine without a clone writes through the server. It goes
+under `permissions.deny`:
 
 ```json
 "mcp__memex__create",
@@ -335,6 +310,71 @@ goes under `permissions.deny`:
 
 The decision and its reasons are in the homelab repo, ADR-0006, amendment
 "Anbindung von Open WebUI und Schreibweg mit Klon".
+
+`systemctl --user enable` links each unit by its full path in this repo. When
+a pull moves a unit file to another package, relink the package it moved to
+and enable the units again, which replaces those links, here for the `memex`
+package. Not `reenable`: its disable step also removes the stowed link to the
+unit file.
+
+```bash
+mise run dotfiles-pull claude memex
+systemctl --user daemon-reload
+systemctl --user enable memex-sync.timer memex-watch.service
+```
+
+### On the Steam Deck
+
+The Deck's token comes from the homelab recipe, which stores it in the
+keyring. Git's libsecret helper keeps one entry per host and user, as
+`credential.useHttpPath` is unset, so the bot's token is a second entry next
+to the owner's: a remote that names its user in the URL gets that user's
+entry, one without a user may get either. Once the token is stored, switch the
+clone's remote to the bot (only the user part of the URL changes), give its
+commits the Deck's machine address, link `~/Memory` and enable both units:
+
+```bash
+git -C ~/memex remote set-url origin \
+  "$(git -C ~/memex remote get-url origin \
+    | sed 's#//daniel@#//memex-bot@#')"
+git -C ~/memex config user.email deck@memex.invalid
+cd ~/dotfiles && ./install-dotfiles.sh steamdeck
+systemctl --user enable --now memex-sync.timer memex-watch.service
+```
+
+### On the Debian server
+
+The server runs both units without a desktop and without a login, in the user
+manager that lingering starts at boot. The homelab repo's Ansible playbook
+enables lingering for the Minisforum; on another server:
+`sudo loginctl enable-linger "$USER"`. The watcher runs there too, as Claude
+Code sessions on the server write notes into the clone: it pushes them 30
+seconds after the last write, not at the next timer run, which keeps the
+window for a conflict with another machine's writes as short as on the Deck.
+
+The clone fetches and pushes over HTTPS as the bot, with its token in
+`~/.git-credentials`, which git's store helper reads ("Forgejo" under "Debian
+server" above). Its commits are signed like every commit on the server, so
+the signing key from "Commit signing" there has to exist first; without it,
+git refuses every sync commit. Before ssh-keygen reads that key file, it asks
+the agent at `SSH_AUTH_SOCK` for the key; `memex-sync.service` names the
+repo's agent, which answers ("ssh-agent" there).
+
+With the token in `~/.git-credentials`, the clone, its machine address (the
+host name here), the link, the two units, the ntfy files and the rule against
+the MCP write tools are:
+
+```bash
+git clone https://memex-bot@git.kueppermann.com/daniel/memex.git ~/memex
+git -C ~/memex config user.email "$(hostname -s)@memex.invalid"
+cd ~/dotfiles && ./install-dotfiles.sh debian
+systemctl --user enable --now memex-sync.timer memex-watch.service
+mkdir -p ~/.config/memex
+nvim ~/.config/memex/ntfy_url ~/.config/memex/ntfy_token
+nvim ~/.claude/settings.json    # the four mcp__memex__ entries above, under permissions.deny
+```
+
+### Tests
 
 `tests/memex-sync/` holds the tests of both scripts. That directory is not a
 stow package, so nothing of it lands in `$HOME`. `mise run memex-sync-test`
@@ -348,6 +388,11 @@ git, python3, curl, flock, setsid, pgrep and inotifywait, and stay on
 localhost: ntfy and the refusing origins are small python servers there.
 Without mise, run `tests/memex-sync/scenarios.sh` and
 `python3 tests/memex-sync/mutants.py` from the repo.
+
+`mise run install-dotfiles-test` (without mise,
+`tests/install-dotfiles/memory-link.sh`) checks the `memex` package and the
+`~/Memory` link that `install-dotfiles.sh` makes, in throwaway homes; its
+header lists the cases. It needs stow and git.
 
 ## Memory protection on the Steam Deck
 

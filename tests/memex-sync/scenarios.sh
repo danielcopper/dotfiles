@@ -1162,6 +1162,37 @@ EOF
   check "title names the host" eq "$(last_ntfy title)" "memex-sync (Box): conflict"
 }
 
+# git refuses the commit, here for a signing key that does not exist: one
+# notification, quiet while it stays refused, cleared by a good sync.
+s57_commit_refused() {
+  with_ntfy_files
+  git -C "$T/memex" config gpg.format ssh
+  git -C "$T/memex" config user.signingkey "$T/no-such-key.pub"
+  git -C "$T/memex" config commit.gpgsign true
+  printf 'x\n' >"$T/memex/unsigned.md"
+  local before main_before
+  before=$(count_commits)
+  main_before=$(origin_sha main)
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "no commit" eq "$(count_commits)" "$before"
+  check "origin unchanged" eq "$(origin_sha main)" "$main_before"
+  check "git's reason logged" grep -qE '^memex-sync: git refused the commit: .+' <<<"$OUT"
+  check "one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  check "title names the device" eq "$(last_ntfy title)" "memex-sync (Deck): commit refused"
+  check "message carries the reason and points at the journal" grep -qE \
+    '^The Deck could not commit in .+: .+\. Check journalctl --user -u memex-sync\.$' <(last_ntfy body)
+  check "marker present" test -e "$T/state/memex-sync/commit-refused"
+  run_sut
+  check "second run exit 1 (got $RC)" eq "$RC" 1
+  check "still one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  git -C "$T/memex" config --unset commit.gpgsign
+  run_sut
+  check "exit 0 once git commits (got $RC)" eq "$RC" 0
+  check "the change on origin" eq "$(git -C "$T/origin.git" show main:unsigned.md)" x
+  check "marker gone" test ! -e "$T/state/memex-sync/commit-refused"
+}
+
 all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
   s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
   s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
@@ -1175,7 +1206,7 @@ all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conf
   s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
   s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped
   s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
-  s55_machine_in_operation_in_progress s56_machine_from_host_name)
+  s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused)
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do
   FAILED=0

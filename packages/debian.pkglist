@@ -22,6 +22,8 @@ fzf
 git
 # Called by the pre-push hook in git/.githooks.
 gitleaks
+# inotifywait, for memex-watch (README, "memex sync").
+inotify-tools
 jq
 lazygit
 lsd

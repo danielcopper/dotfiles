@@ -35,7 +35,7 @@ case "$CLASS" in
     class_pkgs=("${desktop_pkgs[@]}" host-arch)
     ;;
   debian)
-    class_pkgs=(host-debian)
+    class_pkgs=(memex host-debian)
     ;;
   steamdeck)
     class_pkgs=("${desktop_pkgs[@]}" memex host-steamdeck)
@@ -291,4 +291,25 @@ if command -v mise >/dev/null 2>&1; then
   echo
   echo "running mise install"
   (cd "$HOME" && mise install)
+fi
+
+# A class that stows the memex package gets ~/Memory as a link into the memex
+# clone (README, "memex sync"), once the clone is there. Anything else already
+# at ~/Memory, a directory with notes of its own say, is left alone and fails
+# the run, last, so everything above is done.
+if [[ " ${all_pkgs[*]} " == *" memex "* ]]; then
+  memory_link=memex/daniel/memory
+  if [ "$(readlink -m -- "$HOME/Memory")" = "$(readlink -m -- "$HOME/$memory_link")" ]; then
+    :
+  elif [ -e "$HOME/Memory" ] || [ -L "$HOME/Memory" ]; then
+    echo >&2
+    echo "$HOME/Memory exists and is not the link to $HOME/$memory_link; left as it is." >&2
+    echo "Move what it holds into $HOME/$memory_link, remove it and run this again." >&2
+    exit 1
+  elif [ -d "$HOME/$memory_link" ]; then
+    ln -s "$memory_link" "$HOME/Memory"
+    echo "linked $HOME/Memory to $memory_link"
+  else
+    echo "no $HOME/$memory_link yet: clone memex and run this again for the $HOME/Memory link"
+  fi
 fi

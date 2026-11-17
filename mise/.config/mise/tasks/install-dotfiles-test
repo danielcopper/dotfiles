@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Global mise task: run the install-dotfiles.sh tests from the dotfiles repo;
+# what they check is in the header of tests/install-dotfiles/memory-link.sh.
+#
+# Usage: mise run install-dotfiles-test [case...]   (defaults to all)
+set -euo pipefail
+
+dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
+tests="$dotfiles/tests/install-dotfiles"
+[ -d "$tests" ] || { echo "install-dotfiles-test: no such directory: $tests" >&2; exit 1; }
+
+exec "$tests/memory-link.sh" "$@"

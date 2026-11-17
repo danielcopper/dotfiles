@@ -1,13 +1,14 @@
 # Watches the memex clone (~/memex) and starts memex-sync.service 30 seconds
-# after the last change in it. Runs as long as the session; when it stops
-# (no clone, the clone deleted or moved, inotifywait gone) it is started
+# after the last change in it. Runs as long as the user manager; when it
+# stops (no clone, the clone deleted or moved, inotifywait gone) it is started
 # again after 30 seconds.
 # Enabled by hand once the clone exists: systemctl --user enable --now memex-watch.service
 [Unit]
 Description=Start a memex sync after changes in the clone
 
 [Service]
-# inotifywait comes from Homebrew, which the user manager's PATH lacks.
+# On the Deck inotifywait comes from Homebrew, which the user manager's PATH
+# lacks; a host without Homebrew has it in /usr/bin.
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/home/linuxbrew/.linuxbrew/bin
 ExecStart=%h/.local/bin/memex-watch
 Restart=on-failure
