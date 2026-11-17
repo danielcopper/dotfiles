@@ -6,11 +6,12 @@
 // another key, Esc or a short pause ends it. A key that ends the repeat is
 // dropped, not passed to the terminal. A key can open a second level of keys,
 // like a which-key group in nvim; it closes the same way, and shows its list
-// at once when the first level's list is already up.
+// at once when the first level's list is already up. A second ctrl-space
+// sends ctrl-space on to the focused terminal, like tmux's send-prefix.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, shared, panes, notify, layout } from "herdr";
+import { run, hc, props, closeOverlay, openOverlay, nextCommand, checking, theme, shared, panes, focused, notify, layout } from "herdr";
 
 const HINT_MS = 1000;
 const REPEAT_MS = 700;
@@ -28,6 +29,29 @@ function focusPrevious() {
   const pane = shared("focus.history")?.previous;
   if (pane && panes().some((p) => p.pane === pane)) run("pane.focus", { pane });
   else notify({ title: "No previous pane", level: "info" });
+}
+
+// Sends ctrl-space to the program in the focused pane's terminal (the one a
+// terminal.show put in its place, if any). run() has no command that types a
+// key, so herdr-core's `hc keys` does. It runs here with the terminal's
+// address as the app gives it, machine-qualified for another machine
+// (`minisforum/t3`): this computer's core reaches the other machines' cores
+// itself, so the other machine needs no hc on its PATH. hc reports a failure
+// as JSON on stderr; the toast shows its message.
+async function sendPrefix() {
+  const f = focused();
+  const terminal = f?.shown ?? f?.terminal;
+  if (!terminal) {
+    notify({ title: "No terminal to send ctrl-space to", level: "info" });
+    return;
+  }
+  const r = await hc(["keys", terminal, "ctrl+space"]).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
+  if (r.code === 0) return;
+  let body = r.stderr.trim();
+  try {
+    body = JSON.parse(body).error?.message ?? body;
+  } catch {}
+  notify({ title: "Could not send ctrl-space", body, level: "error" });
 }
 
 // Opens the file popup at the top, where herdr's terminals-bar opens the
@@ -124,6 +148,8 @@ const ACTIONS = [
   ["l", "go right", "Panes", "pane.go", { direction: "right" }, true],
   ["z", "zoom", "Panes", "pane.zoom", {}],
   ["x", "close pane", "Panes", "pane.close", {}],
+  // Pressed as ctrl-space: keys.json's "mod:leader" sends leader.send_prefix.
+  ["C-Space", "send prefix", "Panes", sendPrefix, {}],
   ["t", "new tab", "Tabs", "tab.new", {}],
   ["c", "new tab", "Tabs", "tab.new", {}],
   ["n", "next tab", "Tabs", "tab.next", {}],
@@ -150,7 +176,31 @@ export default class Leader extends View {
     this.repeating = null;
     this.generation = 0;
     this.hints = 0;
+    // Set while hc sends ctrl-space; keys pressed meanwhile are dropped.
+    this.sending = false;
     this.hintLater(cx);
+    // A second ctrl-space never reaches on_key_down: keys.json binds it, in
+    // its "mod:leader" section, to leader.send_prefix, which arrives here.
+    if (checking()) return;
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const command = await nextCommand();
+        if (command === "send_prefix") this.sendPrefixKey(cx);
+      }
+    });
+  }
+
+  // The second ctrl-space: at the first level and not while repeating, sends
+  // ctrl-space on and closes once hc has answered (closing first would cancel
+  // the call); anywhere else it closes the leader.
+  sendPrefixKey(cx) {
+    if (this.sending) return;
+    if (this.level !== LEADER || this.repeating) return this.close();
+    this.sending = true;
+    cx.spawn(async () => {
+      await sendPrefix();
+      this.close();
+    });
   }
 
   // The badge first, the level's keys after HINT_MS.
@@ -169,6 +219,7 @@ export default class Leader extends View {
   }
 
   press(e, cx) {
+    if (this.sending) return;
     if (e.key === "escape") return this.close();
     if (e.modifiers?.control || e.modifiers?.alt || e.modifiers?.platform) return this.close();
     const key = e.key === "tab" && !e.modifiers?.shift ? "Tab" : (e.key_char ?? e.key);
@@ -236,7 +287,7 @@ export default class Leader extends View {
         .gap(8)
         .items_center()
         .text_color(this.repeating && command !== this.repeating ? t.dim : t.foreground)
-        .child(div().w(26).font_semibold().text_color(t.accent).child(key))
+        .child(div().min_w(26).font_semibold().text_color(t.accent).child(key))
         .child(div().text_color(t.muted).child(label));
     const column = (group) =>
       v_flex()

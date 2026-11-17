@@ -28,7 +28,7 @@ Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 | `stow-packages.sh <pkg>…` | Stows the given packages; `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`) and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -58,12 +58,15 @@ stow -R host-arch
 The herdr desktop app comes from its official installer script into
 `~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
 package carries the config that is mine: `keys.json` (the shipped defaults plus
-`ctrl-space` for the leader mod), the mods `mods/leader/` (its `f` opens a
+`ctrl-space` for the leader mod and, in a `mod:leader` section, the second
+`ctrl-space` the leader sends on), the mods `mods/leader/` (its `f` opens a
 second level for files: `f f` and `f g`, the keys of nvim's `<leader>ff` and
 `<leader>fg`, open the file popup, `f e` and `f G` show the right panel on
 Files or Changes; `Z` switches that panel between its normal width and about
-two thirds of the space beside the sidebar), `mods/focus-history/` (it
-remembers the previously focused pane for the leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
+two thirds of the space beside the sidebar; a second `ctrl-space` sends
+ctrl-space on to the focused terminal, so a tmux inside herdr keeps the same
+prefix), `mods/focus-history/` (it remembers the previously focused pane for the
+leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
 focused pane's repo or folder, or with the repo's changed files, that opens
 the picked one in nvim in a new pane on the right), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
@@ -106,6 +109,13 @@ herdr-app`. Which files of the package git tracks is set in the root
   is a link out of the mod folder, which every stowed file is. So
   `mods/file-popup/` keeps its listers in `main.js` rather than in a
   `./list.js`.
+- **herdr's `run` answers ok for a command it does not know,** so a mod
+  that runs a misspelt one fails without a word. `mise run herdr-app-check`
+  checks the commands this package's mods use against the ones herdr
+  documents, and the mods they open against the ones that exist; run it after
+  changing a mod. It needs python3 and a herdr app that has started once,
+  since herdr writes the files it reads into `~/.config/herdr-app`. The
+  header of `tests/herdr-app/check-commands.py` says what it checks in detail.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
