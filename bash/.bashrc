@@ -3,8 +3,7 @@
 #
 # Ordering matters: host-local runs *early* so each host can drop into
 # PATH/env (e.g. linuxbrew shellenv on steamdeck) before the
-# tool-presence checks below. Greeter runs late and is gated to avoid
-# noise in tmux panes and subshells.
+# tool-presence checks below. Greeter runs late.
 #
 # shellcheck shell=bash
 
