@@ -111,9 +111,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   `./list.js`.
 - **herdr's `run` answers ok for a command it does not know,** so a mod
   that runs a misspelt one fails without a word. `mise run herdr-app-check`
-  checks the commands this package's mods use against the ones herdr
-  documents, and the mods they open against the ones that exist; run it after
-  changing a mod. It needs python3 and a herdr app that has started once,
+  checks the commands this package's mods and `keys.json` use against the
+  ones herdr documents, and the mods they open against the ones that exist;
+  run it after changing a mod or a key. It needs python3 and a herdr app that has started once,
   since herdr writes the files it reads into `~/.config/herdr-app`. The
   header of `tests/herdr-app/check-commands.py` says what it checks in detail.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the

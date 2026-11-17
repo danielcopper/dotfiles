@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Global mise task: check that the dotfiles repo's herdr app mods name only
+# commands and mods herdr has. What it reads is in the script's header,
+# tests/herdr-app/check-commands.py.
+#
+# Usage: mise run herdr-app-check [herdr-app home]   (defaults to ~/.config/herdr-app)
+set -euo pipefail
+
+dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
+script="$dotfiles/tests/herdr-app/check-commands.py"
+[ -f "$script" ] || { echo "herdr-app-check: no such file: $script" >&2; exit 1; }
+
+exec python3 -I "$script" "$@"
