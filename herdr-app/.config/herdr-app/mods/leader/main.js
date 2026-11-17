@@ -1,10 +1,10 @@
 // A tmux-style prefix key. keys.json binds ctrl-space to "mod.open:leader";
 // the next key runs one action. At first only a small badge shows that the
 // prefix is active; the full list of keys appears after HINT_MS, like
-// which-key in nvim, so a known key never shows it. Movement and resize keys
-// repeat like tmux's `bind -r`: the overlay stays open for the same kind of
-// key until another key, Esc or a short pause ends it. A key that ends the
-// repeat is dropped, not passed to the terminal.
+// which-key in nvim, so a known key never shows it. Movement keys repeat like
+// tmux's `bind -r`: the overlay stays open for the same kind of key until
+// another key, Esc or a short pause ends it. A key that ends the repeat is
+// dropped, not passed to the terminal.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -35,10 +35,6 @@ const ACTIONS = [
   ["l", "go right", "Panes", "pane.go", { direction: "right" }, true],
   ["z", "zoom", "Panes", "pane.zoom", {}],
   ["x", "close pane", "Panes", "pane.close", {}],
-  ["H", "resize left", "Resize", "pane.resize", { direction: "left" }, true],
-  ["J", "resize down", "Resize", "pane.resize", { direction: "down" }, true],
-  ["K", "resize up", "Resize", "pane.resize", { direction: "up" }, true],
-  ["L", "resize right", "Resize", "pane.resize", { direction: "right" }, true],
   ["t", "new tab", "Tabs", "tab.new", {}],
   ["c", "new tab", "Tabs", "tab.new", {}],
   ["n", "next tab", "Tabs", "tab.next", {}],
@@ -53,7 +49,7 @@ const ACTIONS = [
 // S and c are aliases of s and t; the list shows each action once.
 const ALIASES = new Set(["S", "c"]);
 const BY_KEY = new Map(ACTIONS.map((a) => [a[0], a]));
-const GROUPS = ["Panes", "Resize", "Tabs", "Spaces", "View"];
+const GROUPS = ["Panes", "Tabs", "Spaces", "View"];
 
 export default class Leader extends View {
   init(_props, cx) {
