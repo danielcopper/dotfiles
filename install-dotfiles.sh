@@ -28,6 +28,8 @@ desktop_pkgs=(
   herdr-app
 )
 
+# The memex package syncs the memex clone (README, "memex sync"); only the
+# classes whose host keeps a clone stow it.
 case "$CLASS" in
   arch)
     class_pkgs=("${desktop_pkgs[@]}" host-arch)
@@ -36,7 +38,7 @@ case "$CLASS" in
     class_pkgs=(host-debian)
     ;;
   steamdeck)
-    class_pkgs=("${desktop_pkgs[@]}" host-steamdeck)
+    class_pkgs=("${desktop_pkgs[@]}" memex host-steamdeck)
     ;;
   wsl-arch)
     class_pkgs=("${desktop_pkgs[@]}" host-wsl-arch)

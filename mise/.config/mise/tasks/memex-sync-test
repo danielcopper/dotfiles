@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Global mise task: run the memex-sync scenario tests from the dotfiles repo
-# against the repo's host-steamdeck/.local/bin/memex-sync and memex-watch.
+# against the repo's memex/.local/bin/memex-sync and memex-watch.
 # What they need is listed in the repo's README, section "memex sync on the
 # Steam Deck".
 #

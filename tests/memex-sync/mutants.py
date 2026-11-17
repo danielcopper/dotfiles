@@ -2,7 +2,7 @@
 scenario that should catch it; every mutant must turn its scenario red.
 
 usage: python3 -I mutants.py [memex-sync]
-The script defaults to the repo's host-steamdeck/.local/bin/memex-sync;
+The script defaults to the repo's memex/.local/bin/memex-sync;
 memex-watch is always the repo's. The mutated copies live in a temporary
 directory that is removed at the end.
 """
@@ -14,8 +14,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.realpath(os.path.join(HERE, "..", ".."))
-src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "host-steamdeck/.local/bin/memex-sync")
-watch_src = os.path.join(REPO, "host-steamdeck/.local/bin/memex-watch")
+src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "memex/.local/bin/memex-sync")
+watch_src = os.path.join(REPO, "memex/.local/bin/memex-watch")
 runner = os.path.join(HERE, "scenarios.sh")
 with open(src) as f:
     text = f.read()

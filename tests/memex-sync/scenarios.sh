@@ -3,9 +3,9 @@
 # stand-ins on localhost for ntfy and for origins that refuse; nothing goes to
 # the network.
 # usage: scenarios.sh [script-under-test] [scenario ...]
-#   The script defaults to the repo's host-steamdeck/.local/bin/memex-sync, the
+#   The script defaults to the repo's memex/.local/bin/memex-sync, the
 #   scenarios to all of them. WATCH_SUT overrides the memex-watch under test
-#   (default host-steamdeck/.local/bin/memex-watch).
+#   (default memex/.local/bin/memex-watch).
 # Prints "PASS <scenario>" or "FAIL <scenario>: <check>" per scenario; exits 1
 # when any scenario failed. VERBOSE=1 prints every run's output. All state
 # lives in a temporary directory that is removed at the end.
@@ -13,17 +13,17 @@ set -uo pipefail
 
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
-SUT=$REPO/host-steamdeck/.local/bin/memex-sync
+SUT=$REPO/memex/.local/bin/memex-sync
 if [ $# -gt 0 ] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
 fi
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/memex-sync-test.XXXXXX")
 # The script runs with the PATH its unit sets.
-SERVICE_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/host-steamdeck/.config/systemd/user/memex-sync.service")
+SERVICE_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/memex/.config/systemd/user/memex-sync.service")
 [ -n "$SERVICE_PATH" ] || { echo "no PATH found in memex-sync.service" >&2; exit 2; }
-WATCH_SUT=$(readlink -f "${WATCH_SUT:-$REPO/host-steamdeck/.local/bin/memex-watch}")
-WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/host-steamdeck/.config/systemd/user/memex-watch.service")
+WATCH_SUT=$(readlink -f "${WATCH_SUT:-$REPO/memex/.local/bin/memex-watch}")
+WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/memex/.config/systemd/user/memex-watch.service")
 [ -n "$WATCH_PATH" ] || { echo "no PATH found in memex-watch.service" >&2; exit 2; }
 # memex-watch's wait for quiet, in seconds.
 WATCH_DELAY=3
