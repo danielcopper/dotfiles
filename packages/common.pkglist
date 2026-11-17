@@ -21,6 +21,7 @@ starship
 stow
 tmux
 tree-sitter
+tree-sitter-cli
 ttf-jetbrains-mono-nerd
 wezterm
 zoxide

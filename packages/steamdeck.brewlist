@@ -21,6 +21,7 @@ starship
 stow
 tmux
 tree-sitter
+tree-sitter-cli
 zoxide
 
 # Language runtimes — required by Mason-installed LSPs/tools in nvim.
