@@ -1,5 +1,6 @@
-// A tmux-style prefix key. keys.json binds ctrl-space to "mod.open:leader";
-// the next key runs one action. At first only a small badge shows that the
+// A tmux-style prefix key. keys.json binds ctrl-space to "mod.open:leader"
+// (in the personal layout through focus-history, see init); the next key
+// runs one action. At first only a small badge shows that the
 // prefix is active; the full list of keys appears after HINT_MS, like
 // which-key in nvim, so a known key never shows it. Movement keys repeat like
 // tmux's `bind -r`: the overlay stays open for the same kind of key until
@@ -12,7 +13,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, exec, hc, props, closeOverlay, openOverlay, nextCommand, checking, theme, shared, panes, focused, notify, layout } from "herdr";
+import { run, exec, hc, props, closeOverlay, openOverlay, nextCommand, checking, theme, shared, setShared, panes, focused, notify, layout } from "herdr";
 
 const HINT_MS = 500;
 const REPEAT_MS = 700;
@@ -251,8 +252,9 @@ export default class Leader extends View {
     this.hints = 0;
     this.hintLater(cx);
     // A second ctrl-space and Esc normally don't reach on_key_down: keys.json's
-    // "mod:leader" section, which wins while the leader has the keyboard, binds
-    // them to leader.send_prefix and leader.escape, which arrive here.
+    // "mod:leader" section binds them to leader.send_prefix and leader.escape,
+    // which arrive here (in the personal layout a ctrl-space may come through
+    // focus-history instead, the same command).
     //
     // ctrl-space ctrl-space <key> is for a tmux in the focused terminal, whose
     // prefix is ctrl-space too: the leader takes <key> itself, since the
@@ -267,6 +269,13 @@ export default class Leader extends View {
     // run of repeat keys can reach tmux after its window has closed.
     this.passing = null;
     if (checking()) return;
+    // ctrl-space presses that came before the leader had the keyboard are
+    // counted in shared("leader.state").pending (focus-history's header has
+    // the protocol): the first of them is the second ctrl-space, which starts
+    // passing; a second one is the third, which cancels it; more do nothing.
+    const pending = shared("leader.state")?.pending ?? 0;
+    setShared("leader.state", { at: Date.now(), ready: true });
+    for (let i = 0; i < Math.min(pending, 2); i++) this.prefixAgain(cx);
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
@@ -383,7 +392,9 @@ export default class Leader extends View {
     });
   }
 
+  // Also what herdr calls when the overlay goes, however it was closed.
   close() {
+    if (shared("leader.state")) setShared("leader.state", null);
     closeOverlay(props().overlay);
   }
 

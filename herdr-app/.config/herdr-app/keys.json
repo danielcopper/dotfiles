@@ -72,6 +72,9 @@
     "ctrl-insert": "terminal.copy",
     "shift-insert": "terminal.paste"
   },
+  "layout:personal": {
+    "ctrl-space": "focus-history.leader"
+  },
   "mod:leader": {
     "ctrl-space": "leader.send_prefix",
     "escape": "leader.escape"

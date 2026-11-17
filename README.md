@@ -208,7 +208,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   not one behind ssh, and only a tmux server whose socket is in the user's
   socket folder (`$TMUX_TMPDIR` as herdr-core sees it, or `/tmp`); it needs
   tmux 3.4 or newer and Linux (`/proc`) on the terminal's machine. Otherwise
-  the leader shows a note.
+  the leader shows a note. In the personal layout `ctrl-space` goes through
+  focus-history, so a fast second `ctrl-space` still reaches the leader; in
+  other layouts it can close the leader again.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
