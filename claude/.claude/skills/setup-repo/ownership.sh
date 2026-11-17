@@ -66,7 +66,7 @@ owner=${repo_path%%/*}
 name=${repo_path#*/}
 
 if [[ $host == "$GITHUB_HOST" && $owner == "$GITHUB_OWNER" ]]; then
-  answer=$(timeout 30 gh repo view "$GITHUB_HOST/$repo_path" --json isFork,isMirror,owner \
+  answer=$(timeout --foreground 30 gh repo view "$GITHUB_HOST/$repo_path" --json isFork,isMirror,owner \
     --jq '"\(.isFork) \(.isMirror) \(.owner.login)"' 2>"$errors") || {
     (($? == 124)) && undecided "origin $norm, and gh did not answer within 30 s"
     undecided "origin $norm, and gh could not say whether it is a fork or a mirror: $(<"$errors")"
@@ -105,8 +105,8 @@ if [[ $listed == false ]]; then
 fi
 
 # The forge's API answers on an https origin's own port. An http origin on its
-# own port gives no verdict; any other origin (ssh, or http or https without a
-# port) uses the default https port.
+# own port gives no verdict; any other origin (ssh, git://, or http or https
+# without a port) uses the default https port.
 api_host=$host
 if [[ $url =~ ^https://([^@/]+@)?[^/:]+:([0-9]+)/ ]]; then
   api_host=$host:${BASH_REMATCH[2]}
@@ -123,7 +123,7 @@ fi
 [[ $FORGEJO_TOKEN != *[$'\r\n']* ]] \
   || undecided "FORGEJO_TOKEN holds a line break"
 response=$(printf 'Authorization: token %s\n' "$FORGEJO_TOKEN" \
-  | curl -q --silent --show-error --max-time 15 --header @- --write-out '\n%{http_code}' \
+  | env -u SSLKEYLOGFILE curl -q --silent --show-error --max-time 15 --header @- --write-out '\n%{http_code}' \
     "https://$api_host/api/v1/repos/$owner/$name" 2>"$errors") \
   || undecided "origin $norm, and the forge could not be asked whether it is a fork or a mirror: $(<"$errors")"
 status=${response##*$'\n'}
