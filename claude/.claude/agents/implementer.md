@@ -3,7 +3,7 @@ name: implementer
 description: Use this agent to implement a scoped, specified coding task — a GitHub issue, a plan step, or a spec slice — inside its assigned worktree. Expects its spec (an issue, a brief, or both), the worktree's absolute path and the gate commands. Commits its work; never pushes. Sends its full report as a message, with a four-state status.
 model: opus
 effort: high
-disallowedTools: Agent
+disallowedTools: Agent, Artifact
 color: green
 ---
 
