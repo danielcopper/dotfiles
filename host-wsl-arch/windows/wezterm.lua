@@ -34,8 +34,8 @@ return {
   window_background_opacity = 0.95,
   -- Deliberately NOT enabling the kitty keyboard protocol: wezterm's
   -- implementation sends Esc incorrectly (wezterm#3621), which breaks the
-  -- Escape key in TUIs run directly in wezterm -- telescope pickers and
-  -- herdr overlays then won't close on Esc. The shared config disables it
+  -- Escape key in TUIs running in wezterm -- telescope pickers then won't
+  -- close on Esc. The shared config disables it
   -- for the same reason; this fallback must not be worse than the config it
   -- stands in for, or a cold launch silently breaks Esc until a reload.
   keys = {
