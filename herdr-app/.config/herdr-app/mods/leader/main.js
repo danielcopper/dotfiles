@@ -94,8 +94,8 @@ function togglePanelTab(child, label) {
 
 // Toggles the right panel between its normal PANEL_PX and wide: weight 2
 // against the main block's 1, so about two thirds of the space beside the
-// sidebar (herdr tells a mod no window width); personal.json gives the
-// panel no max, which would cap it short of that.
+// sidebar (herdr tells a mod no window width); personal.json's panel has no
+// max, since one would cap it short of that.
 // Whether it is wide is read from the shown layout (a weight is wide, a px
 // width is not), so the toggle stays right after the panel is hidden and
 // shown again or dragged by hand. A hidden panel is shown wide.

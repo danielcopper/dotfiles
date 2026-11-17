@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that the herdr app commands and mods this repo's mods name exist.
+"""Check the herdr commands and mods that this repo's mods and keys.json name.
 
 Reads the commands herdr documents, in the run() comment of herdr.d.ts
 and the "## Commands" section of AGENTS.md, and checks every .js file of

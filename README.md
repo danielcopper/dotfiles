@@ -153,8 +153,8 @@ leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
 focused pane's repo or folder, or with the repo's changed files, that opens
 the picked one in nvim in a new pane on the right), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
-keeps focus-history running; its right panel has no maximum width, so `Z`
-widens it all the way) and the theme `themes/catppuccin-mocha.json`.
+keeps focus-history running; its right panel has no maximum width) and the
+theme `themes/catppuccin-mocha.json`.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its header), so relink it
 with `mise run dotfiles-relink herdr-app` rather than a bare `stow -R
@@ -196,9 +196,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   that runs a misspelt one fails without a word. `mise run herdr-app-check`
   checks the commands this package's mods and `keys.json` use against the
   ones herdr documents, and the mods they open against the ones that exist;
-  run it after changing a mod or a key. It needs python3 and a herdr app that has started once,
-  since herdr writes the files it reads into `~/.config/herdr-app`. The
-  header of `tests/herdr-app/check-commands.py` says what it checks in detail.
+  run it after changing a mod or a key. It needs python3 and a herdr app
+  that has started once, since herdr writes the files it reads into
+  `~/.config/herdr-app`. The header of `tests/herdr-app/check-commands.py`
+  says what it checks in detail.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in

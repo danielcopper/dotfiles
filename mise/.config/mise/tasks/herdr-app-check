@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Global mise task: check that the dotfiles repo's herdr app mods name only
-# commands and mods herdr has. What it reads is in the script's header,
-# tests/herdr-app/check-commands.py.
+# Global mise task: check that the dotfiles repo's herdr app mods and its
+# keys.json name only commands and mods herdr has. What it reads is in the
+# script's header, tests/herdr-app/check-commands.py.
 #
 # Usage: mise run herdr-app-check [herdr-app home]   (defaults to ~/.config/herdr-app)
 set -euo pipefail
