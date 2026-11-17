@@ -11,6 +11,22 @@ set -euo pipefail
 CLASS=${1:?usage: $0 <arch|steamdeck|wsl-arch>}
 DIR="$(dirname "$(readlink -f "$0")")"
 
+# Read the names in the list file $1 into $entries, one per line, without
+# blank lines and `#` comments. Returns 1, saying why, when the file is missing
+# or lists nothing.
+read_list() {
+  local list=$1
+  if [[ ! -f "$list" ]]; then
+    echo "skipping (not found): $list"
+    return 1
+  fi
+  entries=$(grep -vE '^(#|$)' "$list" || true)
+  if [ -z "$entries" ]; then
+    echo "no entries in $list"
+    return 1
+  fi
+}
+
 install_pacman() {
   if ! command -v pacman >/dev/null 2>&1; then
     echo "pacman not found; cannot install packages on this system" >&2
@@ -25,18 +41,9 @@ install_pacman() {
   fi
 
   for list in "$DIR/packages/common.pkglist" "$DIR/packages/${CLASS}.pkglist"; do
-    if [[ ! -f "$list" ]]; then
-      echo "skipping (not found): $list"
-      continue
-    fi
-    local pkgs
-    pkgs=$(grep -vE '^(#|$)' "$list" || true)
-    if [ -z "$pkgs" ]; then
-      echo "no packages in $list"
-      continue
-    fi
+    read_list "$list" || continue
     echo "installing from $list"
-    echo "$pkgs" | sudo pacman -S --needed --noconfirm -
+    echo "$entries" | sudo pacman -S --needed --noconfirm -
   done
 }
 
@@ -54,21 +61,12 @@ install_brew() {
   fi
 
   local list="$DIR/packages/steamdeck.brewlist"
-  if [[ ! -f "$list" ]]; then
-    echo "skipping (not found): $list"
-    return 0
-  fi
-  local pkgs
-  pkgs=$(grep -vE '^(#|$)' "$list" || true)
-  if [ -z "$pkgs" ]; then
-    echo "no packages in $list"
-    return 0
-  fi
+  read_list "$list" || return 0
   echo "installing/upgrading from $list"
   # `brew install` is idempotent on already-installed packages (warns + exit 0).
   # `brew upgrade` then catches new versions of installed packages.
-  echo "$pkgs" | xargs -r brew install
-  echo "$pkgs" | xargs -r brew upgrade || true
+  echo "$entries" | xargs -r brew install
+  echo "$entries" | xargs -r brew upgrade || true
 }
 
 install_flatpak() {
@@ -78,20 +76,11 @@ install_flatpak() {
   fi
 
   local list="$DIR/packages/${CLASS}.flatpaklist"
-  if [[ ! -f "$list" ]]; then
-    echo "skipping (not found): $list"
-    return 0
-  fi
-  local apps
-  apps=$(grep -vE '^(#|$)' "$list" || true)
-  if [ -z "$apps" ]; then
-    echo "no flatpak apps in $list"
-    return 0
-  fi
+  read_list "$list" || return 0
   echo "installing flatpaks from $list"
   # `flatpak install --noninteractive` is idempotent: already-installed apps
   # exit 0 with a "is already installed" message.
-  echo "$apps" | xargs -r flatpak install --user -y --noninteractive flathub
+  echo "$entries" | xargs -r flatpak install --user -y --noninteractive flathub
 
   # Flatpaks read config from their sandbox XDG_CONFIG_HOME
   # (~/.var/app/<id>/config), not from ~/.config. For wezterm two pieces
@@ -101,7 +90,7 @@ install_flatpak() {
   # wezterm still searches its own sandbox XDG_CONFIG_HOME by default.
   # `flatpak override` rewrites the per-app override file each call, so
   # this is idempotent.
-  if printf '%s\n' "$apps" | grep -qx 'org.wezfurlong.wezterm'; then
+  if printf '%s\n' "$entries" | grep -qx 'org.wezfurlong.wezterm'; then
     flatpak override --user \
       --filesystem=xdg-config/wezterm:ro \
       --env=WEZTERM_CONFIG_FILE="$HOME/.config/wezterm/wezterm.lua" \
