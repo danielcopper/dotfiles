@@ -208,7 +208,7 @@ and it has three parts. Stow brings none of them:
    package stows a wrapper `~/.local/bin/tmux-agent-sidebar` that execs the TPM
    copy under `~/.config/tmux/plugins`.
 
-## memex sync on the Steam Deck
+## memex sync
 
 On the Deck, `~/Memory` is a symlink into `~/memex`, a git clone that the
 `memex` package keeps in sync: it stows the scripts `~/.local/bin/memex-sync`
@@ -223,6 +223,13 @@ origin refuses a fetch or a push, or when a git operation was left unfinished
 in the clone is described at the top of the script, together with how to
 resolve a conflict by hand. Its output is in `journalctl --user -u memex-sync`,
 the watcher's in `journalctl --user -u memex-watch`.
+
+The machine's name stands in the sync's commit subjects
+(`deck: update daniel/memory/…`), its conflict branches
+(`conflict/deck-<date>`) and its notifications (`memex-sync (Deck): …`, with
+a capital). It is the part before the `@` of the clone's `user.email` when
+that is a machine address `<name>@memex.invalid`, as each clone gets below,
+and otherwise the host name up to its first dot.
 
 `install-dotfiles.sh` enables neither unit, because on a fresh Deck the clone
 does not exist yet. Once it does, enable both once:

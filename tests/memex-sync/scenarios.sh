@@ -28,8 +28,9 @@ WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/memex/.config/systemd/user/
 # memex-watch's wait for quiet, in seconds.
 WATCH_DELAY=3
 WATCH_PIDS=()
-# The real git, for the wrappers some scenarios put in front of it.
+# The real git and uname, for the wrappers some scenarios put in front of them.
 REAL_GIT=$(command -v git)
+REAL_UNAME=$(command -v uname)
 
 # Isolate git from the real user: no global config, no global hooks.
 export GIT_CONFIG_NOSYSTEM=1
@@ -73,7 +74,8 @@ check() { # check <description> <command...>
 }
 
 # Fresh world per scenario: bare origin with one commit on main, the clone
-# under test ($T/memex) and a second clone ($T/peer) that plays the other side.
+# under test ($T/memex) with the Deck's machine address, and a second clone
+# ($T/peer) that plays the other side.
 new_world() {
   T=$ROOT/$SCENARIO
   mkdir -p "$T/home" "$T/state" "$T/run"
@@ -87,10 +89,13 @@ new_world() {
   git -C "$T/seed" push --quiet origin main
   git clone --quiet "$T/origin.git" "$T/memex"
   idn "$T/memex"
+  machine_address deck
   git clone --quiet "$T/origin.git" "$T/peer"
   idn "$T/peer"
 }
 idn() { git -C "$1" config user.name test && git -C "$1" config user.email test@example.invalid; }
+# machine_address <machine>: the clone's user.email, which names the machine.
+machine_address() { git -C "$T/memex" config user.email "$1@memex.invalid"; }
 
 with_ntfy_files() {
   mkdir -p "$T/home/.config/memex"
@@ -265,6 +270,7 @@ s8_origin_without_main() {
   git init --quiet --bare -b main "$T/origin.git"
   git init --quiet -b main "$T/memex"
   idn "$T/memex"
+  machine_address deck
   git -C "$T/memex" remote add origin "$T/origin.git"
   printf 'first\n' >"$T/memex/first.md"
   run_sut
@@ -1084,6 +1090,78 @@ s51_commit_hooks_skipped() {
   check "origin main unchanged" eq "$(origin_sha main)" "$main_before"
 }
 
+# --- The machine's name, from the clone's address or the host name. ---
+
+s52_machine_from_address() {
+  with_ntfy_files
+  machine_address minisforum
+  make_conflict
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "commit subject names the machine" eq "$(last_message)" "minisforum: update shared.md"
+  check "conflict branch named for the machine" eq "$(origin_sha "conflict/minisforum-$today")" "$(local_sha)"
+  check "no branch named for the Deck" test -z "$(origin_sha "conflict/deck-$today")"
+  check "title names the machine" eq "$(last_ntfy title)" "memex-sync (Minisforum): conflict"
+  check "message names the machine and the branch" eq "$(last_ntfy body)" \
+    "The Minisforum could not rebase onto origin/main. Its state is on the branch conflict/minisforum-$today."
+}
+
+s53_machine_in_push_refused() {
+  with_ntfy_files
+  machine_address minisforum
+  printf '#!/bin/sh\nexit 1\n' >"$T/memex/.git/hooks/pre-push"
+  chmod +x "$T/memex/.git/hooks/pre-push"
+  printf 'x\n' >"$T/memex/secret.md"
+  printf 'y\n' >"$T/memex/other.md"
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "several-files subject names the machine" eq "$(git -C "$T/memex" log -1 --format=%s)" "minisforum: 2 files"
+  check "title names the machine" eq "$(last_ntfy title)" "memex-sync (Minisforum): push refused"
+  check "message names the machine" eq "$(last_ntfy body)" \
+    "The Minisforum's push to main was refused. Check journalctl --user -u memex-sync."
+}
+
+s54_machine_in_fetch_refused() {
+  with_ntfy_files
+  machine_address minisforum
+  git -C "$T/memex" remote set-url origin "$(http_origin 403)"
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "title names the machine" eq "$(last_ntfy title)" "memex-sync (Minisforum): fetch refused"
+  check "message names the machine" grep -q "^Origin refused the Minisforum's fetch: " <(last_ntfy body)
+}
+
+s55_machine_in_operation_in_progress() {
+  with_ntfy_files
+  machine_address minisforum
+  diverge
+  git -C "$T/memex" merge origin/main >/dev/null 2>&1
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "title names the machine" eq "$(last_ntfy title)" "memex-sync (Minisforum): git operation in progress"
+}
+
+# Without a machine address the host name names the machine, up to its first
+# dot. An uname first on the script's PATH stands in for the host's.
+s56_machine_from_host_name() {
+  with_ntfy_files
+  git -C "$T/memex" config user.email test@example.invalid
+  mkdir -p "$T/bin"
+  cat >"$T/bin/uname" <<EOF
+#!/bin/sh
+[ "\$1" = -n ] && { echo box.example.lan; exit 0; }
+exec "$REAL_UNAME" "\$@"
+EOF
+  chmod +x "$T/bin/uname"
+  SUT_ENV+=(PATH="$T/bin:$SERVICE_PATH")
+  make_conflict
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "commit subject names the host" eq "$(last_message)" "box: update shared.md"
+  check "conflict branch named for the host" eq "$(origin_sha "conflict/box-$today")" "$(local_sha)"
+  check "title names the host" eq "$(last_ntfy title)" "memex-sync (Box): conflict"
+}
+
 all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
   s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
   s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
@@ -1095,7 +1173,9 @@ all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conf
   s37_message_rename s38_message_delete s39_message_path_with_space
   s40_watch_debounce s41_watch_ignores_git_and_obsidian s42_watch_no_clone s43_watch_events_end
   s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
-  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped)
+  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped
+  s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
+  s55_machine_in_operation_in_progress s56_machine_from_host_name)
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do
   FAILED=0

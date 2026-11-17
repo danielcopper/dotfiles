@@ -2,7 +2,7 @@
 # Start memex-sync.service once the memex clone has been quiet for 30 seconds
 # after a change: every further change starts the wait again.
 # memex-watch.service runs this; setup steps are in the README, section
-# "memex sync on the Steam Deck".
+# "memex sync".
 #
 # Changes under .git/ and .obsidian/, at any depth, do not count: the first
 # are git's own, among them every commit of the sync, the second Obsidian's

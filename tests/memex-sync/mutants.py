@@ -27,7 +27,7 @@ GUARD_COMMENT = ("# Checked after the fetch, right before the commit: an operati
                  "# while the fetch waited on the network is caught too.\n")
 GUARD = ('if unfinished=$(unfinished_work); then\n'
          '  log "found $unfinished in $repo; nothing done" >&2\n'
-         '  notify_once "$busy_marker" "memex-sync (Deck): git operation in progress" \\\n'
+         '  notify_once "$busy_marker" "memex-sync ($Machine): git operation in progress" \\\n'
          '    "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."\n'
          '  exit 1\n'
          'fi\n')
@@ -141,7 +141,7 @@ MUTANTS = [
      FETCH + "\n" + GUARD_COMMENT + GUARD, GUARD + "\n" + FETCH),
     ("s25_fetch_403", "a refused fetch exits before the commit",
      "fetched=true\nfetch_origin || fetched=false\n",
-     "fetched=true\nfetch_origin || fetched=false\nif [ \"$fetched\" = false ] && fetch_refused; then\n  log \"origin refused the fetch: $fetch_error\" >&2\n  notify_once \"$fetch_marker\" \"memex-sync (Deck): fetch refused\" \"Origin refused the Deck's fetch: $fetch_error.\"\n  exit 1\nfi\n"),
+     "fetched=true\nfetch_origin || fetched=false\nif [ \"$fetched\" = false ] && fetch_refused; then\n  log \"origin refused the fetch: $fetch_error\" >&2\n  notify_once \"$fetch_marker\" \"memex-sync ($Machine): fetch refused\" \"Origin refused the $Machine's fetch: $fetch_error.\"\n  exit 1\nfi\n"),
     # Commit messages.
     ("s34_message_one_file", "an added file is taken for an update",
      '      A) lines+=("create $path") ;;\n', ""),
@@ -185,6 +185,31 @@ MUTANTS = [
     ("s44_staged_list_fails", "a failed listing taken for no change",
      "<(git diff --cached --name-status --no-renames -z)\nwait $!\n",
      "<(git diff --cached --name-status --no-renames -z)\n"),
+    # The machine's name.
+    ("s52_machine_from_address", "the machine hard-coded as the Deck",
+     "  machine=${machine%@memex.invalid}\n", "  machine=deck\n"),
+    ("s52_machine_from_address", "the Deck in the notifications",
+     "Machine=${machine^}\n", "Machine=Deck\n"),
+    ("s52_machine_from_address", "the Deck in the conflict branch",
+     "branch=conflict/$machine-$(date +%F)", "branch=conflict/deck-$(date +%F)"),
+    ("s52_machine_from_address", "the Deck in a one-file subject",
+     "printf '%s: %s\\n' \"$machine\" \"${lines[0]}\"", "printf 'deck: %s\\n' \"${lines[0]}\""),
+    ("s53_machine_in_push_refused", "the Deck in a several-files subject",
+     "printf '%s: %s files%s\\n\\n' \"$machine\" ", "printf 'deck: %s files%s\\n\\n' "),
+    ("s53_machine_in_push_refused", "the Deck in the push-refused notification",
+     '"memex-sync ($Machine): push refused" \\\n    "The $Machine\'s push',
+     '"memex-sync (Deck): push refused" \\\n    "The Deck\'s push'),
+    ("s54_machine_in_fetch_refused", "the Deck in the fetch-refused notification",
+     '"memex-sync ($Machine): fetch refused" \\\n      "Origin refused the $Machine\'s fetch',
+     '"memex-sync (Deck): fetch refused" \\\n      "Origin refused the Deck\'s fetch'),
+    ("s55_machine_in_operation_in_progress", "the Deck in the in-progress notification",
+     '"memex-sync ($Machine): git operation in progress"', '"memex-sync (Deck): git operation in progress"'),
+    ("s56_machine_from_host_name", "any address names the machine",
+     "if [[ $machine == *@memex.invalid ]]; then", "if [ -n \"$machine\" ]; then"),
+    ("s56_machine_from_host_name", "no host name: the Deck",
+     "  machine=$(uname -n)\n", "  machine=deck\n"),
+    ("s56_machine_from_host_name", "the full host name, domain and all",
+     "  machine=${machine%%.*}\n", ""),
 ]
 
 # memex-watch: (scenario, what, old, new), applied to memex-watch.
