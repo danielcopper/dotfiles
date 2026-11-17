@@ -9,16 +9,20 @@
 **/.claude/settings.local.json
 
 # Under herdr-app/.config/herdr-app git tracks only what is whitelisted here; a
-# new mod or theme needs its own `!` line.
+# new mod, theme or layout needs its own `!` line.
 /herdr-app/.config/herdr-app/*
 !/herdr-app/.config/herdr-app/keys.json
 !/herdr-app/.config/herdr-app/settings.json
 !/herdr-app/.config/herdr-app/mods/
 /herdr-app/.config/herdr-app/mods/*
 !/herdr-app/.config/herdr-app/mods/leader/
+!/herdr-app/.config/herdr-app/mods/focus-history/
 /herdr-app/.config/herdr-app/mods/*/gpui-kit.d.ts
 /herdr-app/.config/herdr-app/mods/*/jsconfig.json
 /herdr-app/.config/herdr-app/mods/*/.*
 !/herdr-app/.config/herdr-app/themes/
 /herdr-app/.config/herdr-app/themes/*
 !/herdr-app/.config/herdr-app/themes/catppuccin-mocha.json
+!/herdr-app/.config/herdr-app/layouts/
+/herdr-app/.config/herdr-app/layouts/*
+!/herdr-app/.config/herdr-app/layouts/personal.json

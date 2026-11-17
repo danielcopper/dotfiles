@@ -58,7 +58,10 @@ stow -R host-arch
 The herdr desktop app comes from its official installer script into
 `~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
 package carries the config that is mine: `keys.json` (the shipped defaults plus
-`ctrl-space` for the leader mod), the mod `mods/leader/` and the theme
+`ctrl-space` for the leader mod), the mods `mods/leader/` and
+`mods/focus-history/` (it remembers the previously focused pane for the leader's
+`Tab`), the layout `layouts/personal.json` (herdr's `main`, cloned, plus an
+empty block that keeps focus-history running) and the theme
 `themes/catppuccin-mocha.json`. Everything else in `~/.config/herdr-app` is
 herdr's own. `stow-packages.sh` stows the package without folding (the reason
 is in its header), so relink it with `mise run dotfiles-relink herdr-app` rather than a bare
@@ -82,6 +85,19 @@ is in its header), so relink it with `mise run dotfiles-relink herdr-app` rather
 - **`keys.json` is edited, so it stays mine.** herdr refreshes only an
   untouched keys file on upgrade; new default shortcuts have to be added by
   hand.
+- **herdr reloads only what changes in `~/.config/herdr-app` itself.** An
+  edit to a linked file, in this repo or through its link there, changes the
+  file in this repo, which herdr does not watch, so the running app keeps the
+  old version. After such an edit, `touch -h` the link in
+  `~/.config/herdr-app` (e.g. `touch -h
+  ~/.config/herdr-app/mods/leader/main.js`) and herdr reloads it.
+- **A fresh machine has to pick the layout once.** Which layout is shown
+  lives in herdr's own `shared.json`: `herdr-app do layout.switch
+  '{"name":"personal"}'`, or the palette.
+- **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
+  whole tree, in herdr's key order, through the link into this repo, so such
+  a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
+  herdr's `layouts/.state/`.
 
 ## tmux agent sidebar
 

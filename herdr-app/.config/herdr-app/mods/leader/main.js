@@ -8,13 +8,25 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, theme } from "herdr";
+import { run, props, closeOverlay, theme, shared, panes, notify } from "herdr";
 
 const HINT_MS = 1000;
 const REPEAT_MS = 700;
 
-// [key, label, group, command, args, repeats]
+// Focuses the pane focus-history saw before the current one; pane.focus also
+// shows its space and tab, so focus changes once. Pressed again (ctrl-space
+// Tab), it jumps back. With no previous pane, or one that is gone, it shows
+// "No previous pane".
+function focusPrevious() {
+  const pane = shared("focus.history")?.previous;
+  if (pane && panes().some((p) => p.pane === pane)) run("pane.focus", { pane });
+  else notify({ title: "No previous pane", level: "info" });
+}
+
+// [key, label, group, command, args, repeats]; a function as command (only
+// for an action that doesn't repeat) runs itself instead of an app command.
 const ACTIONS = [
+  ["Tab", "last pane", "Panes", focusPrevious, {}],
   ["|", "split right", "Panes", "pane.split", { direction: "right" }],
   ["-", "split down", "Panes", "pane.split", { direction: "down" }],
   ["h", "go left", "Panes", "pane.go", { direction: "left" }, true],
@@ -65,7 +77,7 @@ export default class Leader extends View {
   press(e, cx) {
     if (e.key === "escape") return this.close();
     if (e.modifiers?.control || e.modifiers?.alt || e.modifiers?.platform) return this.close();
-    const key = e.key_char ?? e.key;
+    const key = e.key === "tab" && !e.modifiers?.shift ? "Tab" : (e.key_char ?? e.key);
     if (/^[1-9]$/.test(key) && !this.repeating) {
       this.close();
       run("tab.select", { index: Number(key) });
@@ -76,7 +88,8 @@ export default class Leader extends View {
     const [, , , command, args, repeats] = action;
     if (!repeats) {
       this.close();
-      run(command, args);
+      if (typeof command === "function") command();
+      else run(command, args);
       return;
     }
     run(command, args);
@@ -121,7 +134,7 @@ export default class Leader extends View {
         .gap(8)
         .items_center()
         .text_color(this.repeating && command !== this.repeating ? t.dim : t.foreground)
-        .child(div().w(18).font_semibold().text_color(t.accent).child(key))
+        .child(div().w(26).font_semibold().text_color(t.accent).child(key))
         .child(div().text_color(t.muted).child(label));
     const column = (group) =>
       v_flex()

@@ -2,9 +2,9 @@
 # Stow the given packages into $HOME.
 #
 # The herdr app writes its own files into every directory of the herdr-app
-# package: ~/.config/herdr-app, each mod folder and themes. Stow folds a
-# directory that is missing in $HOME into a single link to this repo, and
-# everything herdr writes there, into the tracked settings.json reference
+# package: ~/.config/herdr-app, each mod folder, themes and layouts. Stow
+# folds a directory that is missing in $HOME into a single link to this repo,
+# and everything herdr writes there, into the tracked settings.json reference
 # too, would then land in the repo. So herdr-app is stowed with --no-folding,
 # and when one of its directories is already a link in $HOME, nothing is
 # stowed: the script names the link and stops.

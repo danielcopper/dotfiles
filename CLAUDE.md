@@ -8,7 +8,7 @@ Personal dotfiles, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 - **Single-branch workflow** — commit directly on `main`; per-host differences live in `host-<class>/` packages. (This is the one repo where the `worktree` skill's "always create a worktree" rule does not apply.)
 - Top-level dirs are stow packages, one per app: `bash/`, `git/`, `tmux/`, `claude/`, `nvim/`, `starship/`, … .
 - `host-<class>/` packages carry per-host addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible. Claude `settings.json` is not one of them: it is seeded once from a reference copy and then drifts per machine ("Claude config lives here" below).
-- Files in `$HOME` are symlinks into the repo — edit anywhere; `cd ~/dotfiles && git diff` surfaces the change.
+- Files in `$HOME` are symlinks into the repo — edit anywhere; `cd ~/dotfiles && git diff` surfaces the change. Exception `herdr-app`: the running app only reloads after `touch -h` on the link (README, "herdr app").
 - Re-link after structural changes: `mise run dotfiles-relink <pkg>`.
 - Bootstrap a fresh machine: `cd ~/dotfiles && ./bootstrap.sh <arch|steamdeck|wsl-arch>` (installs OS packages from `packages/<class>.pkglist`, then stows the right set).
 
