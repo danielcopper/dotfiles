@@ -40,24 +40,10 @@ IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_
 # controlling tty — `tput cols` and `stty size` (with or without `</dev/tty`)
 # fail or return terminfo defaults (typically 80) and ignore real resize events.
 #
-# Inside a herdr pane ($HERDR_PANE_ID set), ask the herdr server for this pane's
-# live width every render — reactive to splits, resizes, and zooms, ~5ms per
-# call over the local socket. `pane current` omits width, so use `pane layout`
-# and pick this pane's rect out of its tab's layout.
-#
-# Order: herdr pane width (live, reactive) → $COLUMNS env (rarely set in render
-# context but cheap to check) → conservative default. `/dev/tty` probes were
-# tried; they fail in piped subprocesses on this setup.
-HERDR_PANE_W=""
-if [ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null 2>&1; then
-    HERDR_PANE_W=$(herdr pane layout --pane "$HERDR_PANE_ID" 2>/dev/null | jq -r \
-        --arg pid "$HERDR_PANE_ID" \
-        '.result.layout.panes[]? | select(.pane_id == $pid) | .rect.width // empty')
-fi
-COLS="$HERDR_PANE_W"
-if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
-    COLS=${COLUMNS:-}
-fi
+# Order: $COLUMNS env (rarely set in render context but cheap to check) →
+# conservative default. `/dev/tty` probes were tried; they fail in piped
+# subprocesses on this setup.
+COLS=${COLUMNS:-}
 if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
     COLS=140
 fi
@@ -554,9 +540,9 @@ printf '%s\n' "$FULL_LINE"
 # the prior render in the same pane. Remove once the rerender bug is
 # understood.
 if [ -n "${STATUSLINE_DEBUG:-}" ]; then
-    printf '%s | HERDR_PANE_ID=%s herdr_w=%s COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
+    printf '%s | COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
         "$(date '+%H:%M:%S.%3N')" \
-        "${HERDR_PANE_ID:-unset}" "${HERDR_PANE_W:-empty}" "${COLUMNS:-unset}" \
+        "${COLUMNS:-unset}" \
         "$COLS" "$BUDGET" "$combo" "$(visible_width "$FULL_LINE")" \
         >> /tmp/statusline-debug.log
 fi

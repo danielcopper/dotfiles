@@ -91,10 +91,8 @@ command -v ng >/dev/null && source <(ng completion script)
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
 # Greeter — fastfetch on a fresh top-level shell, never as repeated noise.
-# Skipped inside herdr panes (HERDR_PANE_ID, herdr's own pane marker): those are
-# working panes, so a greeter in every one is just noise. SHLVL=1 keeps it to
-# the outermost shell, not subshells.
-if command -v fastfetch >/dev/null && [ -z "${HERDR_PANE_ID:-}" ]; then
+# SHLVL=1 keeps it to the outermost shell, not subshells.
+if command -v fastfetch >/dev/null; then
   [ "${SHLVL:-1}" = "1" ] && fastfetch
 fi
 
