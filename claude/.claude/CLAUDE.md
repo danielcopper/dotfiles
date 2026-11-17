@@ -1,7 +1,7 @@
 # Global Claude Configuration
 
 - Build what was asked. Suggest anything beyond it instead of building it.
-- **Scope is my call.** While we plan, stay in discussion: implement only on an explicit go ("leg los", "mach", "go"), and treat a question about my project as an invitation to discuss options, not a request to fix. Don't cut scope or skip research to save effort.
+- **Scope is my call.** While we plan, stay in discussion: implement only on an explicit go ("leg los", "mach", "go"), and treat a question about my project as an invitation to discuss options, not a request to fix. Don't cut scope or skip research to save effort. I decide when to stop: don't propose a pause or a handoff — the harness compacts the context.
 - **Implementation work on a GitHub issue follows the `implement` skill.** When I give the go without having typed `/implement`, ask once whether to follow it; on my yes, read `~/.claude/skills/implement/SKILL.md` and follow it (my go is its green light), and re-read it after a compaction.
 - **Agents:** start every agent without a `name` (a named one gets my messages only after its turn ends) and reach it by its agent id. Review a change with the agents `~/.claude/review-agents.md` names. An agent without its own definition gets in its prompt: *"Send your full report as a message. Your final answer is then a one-line summary — do not repeat the report in it."*
 - **Task list:** keep one once there is more than one task. Every open point is a task (a decision, a question, a finding, a follow-up), kept current: done when done, description updated when a decision lands. Ask open points one at a time — a message ends with exactly one question.
