@@ -13,7 +13,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, hc, props, closeOverlay, openOverlay, nextCommand, checking, theme, shared, panes, focused, notify, layout } from "herdr";
 
-const HINT_MS = 1000;
+const HINT_MS = 500;
 const REPEAT_MS = 700;
 // The personal layout's right panel, the stack of its Files and Changes, and
 // its normal width, which must match the panel's px in layouts/personal.json.
