@@ -58,14 +58,19 @@ stow -R host-arch
 The herdr desktop app comes from its official installer script into
 `~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
 package carries the config that is mine: `keys.json` (the shipped defaults plus
-`ctrl-space` for the leader mod), the mods `mods/leader/` and
-`mods/focus-history/` (it remembers the previously focused pane for the leader's
-`Tab`), the layout `layouts/personal.json` (herdr's `main`, cloned, plus an
-empty block that keeps focus-history running) and the theme
-`themes/catppuccin-mocha.json`. Everything else in `~/.config/herdr-app` is
-herdr's own. `stow-packages.sh` stows the package without folding (the reason
-is in its header), so relink it with `mise run dotfiles-relink herdr-app` rather than a bare
-`stow -R herdr-app`. Which files of the package git tracks is set in the root
+`ctrl-space` for the leader mod), the mods `mods/leader/` (its `f` opens a
+second level for files: `f f` and `f g`, the keys of nvim's `<leader>ff` and
+`<leader>fg`, open the file popup, `f e` and `f G` show the right panel on
+Files or Changes), `mods/focus-history/` (it remembers the previously focused
+pane for the leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
+focused pane's repo or folder, or with the repo's changed files, that opens
+the picked one in nvim in a new pane on the right), the layout
+`layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
+keeps focus-history running) and the theme `themes/catppuccin-mocha.json`.
+Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
+stows the package without folding (the reason is in its header), so relink it
+with `mise run dotfiles-relink herdr-app` rather than a bare `stow -R
+herdr-app`. Which files of the package git tracks is set in the root
 `.gitignore`.
 
 - **`settings.json` is a reference copy, not stowed.** herdr replaces
@@ -94,6 +99,11 @@ is in its header), so relink it with `mise run dotfiles-relink herdr-app` rather
 - **A fresh machine has to pick the layout once.** Which layout is shown
   lives in herdr's own `shared.json`: `herdr-app do layout.switch
   '{"name":"personal"}'`, or the palette.
+- **A mod here is one `main.js`.** herdr loads a mod's `main.js` through
+  stow's link, but refuses a module that `main.js` imports when that module
+  is a link out of the mod folder, which every stowed file is. So
+  `mods/file-popup/` keeps its listers in `main.js` rather than in a
+  `./list.js`.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
