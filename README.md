@@ -204,13 +204,23 @@ herdr-app`. Which files of the package git tracks is set in the root
   ctrl-space <key>` gives `<key>` to the tmux in the focused terminal as if
   typed after tmux's prefix, so a tmux inside herdr needs no second prefix;
   repeatable keys such as `H` keep working, and a third `ctrl-space` before
-  `<key>` cancels. It reaches only a tmux running in that terminal itself,
-  not one behind ssh, and only a tmux server whose socket is in the user's
-  socket folder (`$TMUX_TMPDIR` as herdr-core sees it, or `/tmp`); it needs
-  tmux 3.4 or newer and Linux (`/proc`) on the terminal's machine. Otherwise
-  the leader shows a note. In the personal layout `ctrl-space` goes through
-  focus-history, so a fast second `ctrl-space` still reaches the leader; in
-  other layouts it can close the leader again.
+  `<key>` cancels. The tmux can run in the terminal itself, on this computer
+  or in a space on another machine, or behind an ssh login in it; mosh is
+  not reached. Behind ssh the leader runs its own `ssh` with the same login
+  options from the terminal's machine, so the host must accept a login
+  without a prompt (key or agent). It uses only a tmux client whose ssh
+  session came from that ssh's connection: the same source port, and the
+  connection's local address (from `ss` on the terminal's machine) or,
+  through a NAT that keeps the source port, the address the host sees for
+  the leader's own login; when
+  more than one client matches, it sends nothing and says so. Not through a
+  jump host, a ProxyCommand or another ssh's ControlMaster connection
+  (there is no connection of its own to find, and the leader says so).
+  Only tmux servers in the user's socket folder (`$TMUX_TMPDIR` or `/tmp`)
+  count; it needs tmux 3.4 or newer and Linux (`/proc`) where tmux runs. In
+  the personal layout `ctrl-space` goes through focus-history, so a fast
+  second `ctrl-space` still reaches the leader; in other layouts it can
+  close the leader again.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in

@@ -33,29 +33,49 @@ function focusPrevious() {
   else notify({ title: "No previous pane", level: "info" });
 }
 
-// Finds the tmux attached to a terminal on its machine: the terminal's tty
-// (from the pid herdr-core reports) among the clients of each tmux server in
-// that user's socket folder ($TMUX_TMPDIR as herdr-core sees it, or /tmp). Prints the server's
-// socket, the client's tty, the prefix of the client's session, tmux's
-// repeat-time and initial-repeat-time (empty before tmux 3.5), and the keys
-// bound with -r in its prefix table. Exit 3: no tty under /proc; exit 4: no
-// tmux client there, with any version mismatch tmux reported on stderr.
+// Finds a tmux client among the tmux servers in the user's socket folder
+// ($TMUX_TMPDIR as the shell running this sees it, or /tmp) and prints its
+// server's socket, its tty, the prefix of its session, tmux's repeat-time and
+// initial-repeat-time (empty before tmux 3.5), and the keys bound with -r in
+// the prefix table. "pid <pid>": the client on that process's tty. "ssh
+// <address> <port>": the client whose ssh session came from that local
+// connection: its SSH_CONNECTION has that port, and as address either that
+// one or, through a NAT that keeps the source port, the one the host sees for this very ssh call
+// (${SSH_CONNECTION%% *}, same route). No other client counts, so keys reach
+// no tmux whose connection differs in port or address. When the terminal's
+// ssh is the master of the user's own ControlMaster, the sessions
+// multiplexed over it share its SSH_CONNECTION: their clients all match
+// (exit 5), or the wrong one is used when only another of them runs tmux.
+// Exit 3: no tty under /proc; 4: no such client, with any version mismatch
+// tmux reported on stderr; 5: more than one client matches this connection.
 const FIND_TMUX = [
-  'tty=$(readlink "/proc/$1/fd/0") || exit 3',
-  "why=",
+  'mode=$1; want=; addr=; port=',
+  'if [ "$mode" = pid ]; then want=$(readlink "/proc/$2/fd/0") || exit 3; else addr=$2; port=$3; fi',
+  'why=; pick_s=; pick_t=; found=0; self=${SSH_CONNECTION%% *}',
   'for s in "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"/*; do',
   '  [ -S "$s" ] || continue',
-  '  clients=$(tmux -S "$s" list-clients -F "#{client_tty}" 2>&1) || { case $clients in *version*) why="$clients";; esac; continue; }',
-  '  printf "%s\\n" "$clients" | grep -qxF "$tty" || continue',
-  '  echo "$s"; echo "$tty"',
-  '  session=$(tmux -S "$s" display -p -c "$tty" "#{session_id}")',
-  '  tmux -S "$s" show -Av -t "$session" prefix 2>/dev/null || tmux -S "$s" show -gv prefix',
-  '  tmux -S "$s" show -gv repeat-time; tmux -S "$s" show -gv initial-repeat-time 2>/dev/null || echo',
-  '  tmux -S "$s" list-keys -T prefix | awk \'{ r = 0; for (i = 2; i <= NF; i++) { if ($i == "-r") r = 1; if ($i == "-T") { if (r) printf "%s ", $(i + 2); break } } }\'',
-  "  echo; exit 0",
-  "done",
-  '[ -n "$why" ] && echo "$why" >&2',
-  "exit 4",
+  '  clients=$(tmux -S "$s" list-clients -F "#{client_tty} #{client_pid}" 2>&1) || { case $clients in *version*) why=$clients;; esac; continue; }',
+  '  while read -r tty pid; do',
+  '    [ -n "$tty" ] || continue',
+  '    if [ -n "$want" ]; then [ "$tty" = "$want" ] && { pick_s=$s; pick_t=$tty; }; continue; fi',
+  '    conn=$(tr "\\0" "\\n" < "/proc/$pid/environ" 2>/dev/null | sed -n "s/^SSH_CONNECTION=//p")',
+  '    from=${conn%% *}; rest=${conn#* }; from_port=${rest%% *}',
+  '    [ -n "$conn" ] && [ "$from_port" = "$port" ] || continue',
+  '    [ "$from" = "$addr" ] || { [ -n "$self" ] && [ "$from" = "$self" ]; } || continue',
+  '    found=$((found + 1)); pick_s=$s; pick_t=$tty',
+  '  done <<EOF',
+  '$clients',
+  'EOF',
+  '  [ -n "$want" ] && [ -n "$pick_t" ] && break',
+  'done',
+  '[ "$found" -gt 1 ] && exit 5',
+  'if [ -z "$pick_t" ]; then [ -n "$why" ] && echo "$why" >&2; exit 4; fi',
+  'echo "$pick_s"; echo "$pick_t"',
+  'session=$(tmux -S "$pick_s" display -p -c "$pick_t" "#{session_id}")',
+  'tmux -S "$pick_s" show -Av -t "$session" prefix 2>/dev/null || tmux -S "$pick_s" show -gv prefix',
+  'tmux -S "$pick_s" show -gv repeat-time; tmux -S "$pick_s" show -gv initial-repeat-time 2>/dev/null || echo',
+  'tmux -S "$pick_s" list-keys -T prefix | awk \'{ r = 0; for (i = 2; i <= NF; i++) { if ($i == "-r") r = 1; if ($i == "-T") { if (r) printf "%s ", $(i + 2); break } } }\'',
+  "echo",
 ].join("\n");
 
 // hc reports a failure as JSON on stderr; this is its message.
@@ -69,35 +89,159 @@ function hcError(stderr) {
 
 const number = (text, fallback) => (text?.trim() !== "" && Number.isFinite(Number(text)) ? Number(text) : fallback);
 
+// One argument for sh, single-quoted.
+const shQuote = (text) => `'${String(text).replace(/'/g, "'\\''")}'`;
+
+// Base64 of a string's UTF-8 bytes (the mod runtime has no btoa or Buffer
+// to rely on).
+function base64(text) {
+  const bytes = [];
+  for (const ch of text) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else bytes.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    out += abc[n >> 18] + abc[(n >> 12) & 63] + (i + 1 < bytes.length ? abc[(n >> 6) & 63] : "=") + (i + 2 < bytes.length ? abc[n & 63] : "=");
+  }
+  return out;
+}
+
+// ssh's options that take a value, those left out of the leader's own ssh
+// calls (agent and X11 forwards, which as flags would beat the leading -o
+// settings; port and tunnel forwards, which ClearAllForwardings and Tunnel=no
+// stop anyway; tty, background, master), and those that make ssh do
+// something other than a shell login, where there is no tmux to reach.
+const SSH_VALUE = "BbcDEeFIiJLlmOoPpQRSWw";
+const SSH_DROP = "LRDwAXYtTfMn";
+const SSH_NOT_LOGIN = "WOGVQNs";
+
+// The login options and destination of an ssh command line. OpenSSH takes
+// options after the destination too; what follows them is a remote command
+// (`ssh -t host tmux new -A`), which the leader's own ssh calls leave out.
+function sshTarget(argv) {
+  const options = [];
+  let destination = null;
+  let i = 1;
+  for (; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--") {
+      if (!destination) destination = argv[++i];
+      break;
+    }
+    if (!arg.startsWith("-") || arg === "-") {
+      if (destination) break;
+      destination = arg;
+      continue;
+    }
+    for (let j = 1; j < arg.length; j++) {
+      const c = arg[j];
+      if (SSH_NOT_LOGIN.includes(c)) return { error: `ssh -${c} is no shell login` };
+      if (SSH_VALUE.includes(c)) {
+        const value = j + 1 < arg.length ? arg.slice(j + 1) : argv[++i];
+        if (value === undefined) return { error: `ssh -${c} has no value` };
+        if (!SSH_DROP.includes(c)) options.push(`-${c}`, value);
+        break;
+      }
+      if (!SSH_DROP.includes(c)) options.push(`-${c}`);
+    }
+  }
+  if (!destination) return { error: "ssh has no destination" };
+  return { options, destination };
+}
+
+// The leader's own ssh to that host, running a sh script there. Its -o
+// settings come first, since ssh keeps the first value it gets: never ask
+// (BatchMode); no remote command or tty; no port forwards, agent, X11 or
+// tunnel forwarding; and a ControlMaster connection kept for a minute for
+// the sends that follow, unless the user's command line sets ControlPath
+// (-S) or ControlMaster. ssh
+// hands the remote login shell one string; the script travels
+// base64-encoded, so no quoting of that shell (bash, zsh, fish) is involved.
+function sshArgv(target, script) {
+  const opts = target.options;
+  const ownControl = opts.some((o, k) => o === "-S" || (o === "-o" && /^control(path|master)\b/i.test(opts[k + 1] ?? "")));
+  const control = ownControl ? [] : ["-o", "ControlMaster=auto", "-o", "ControlPersist=60", "-o", "ControlPath=~/.ssh/herdr-leader-%C"];
+  return [
+    "-o", "BatchMode=yes", "-o", "RemoteCommand=none", "-o", "RequestTTY=no", "-o", "ClearAllForwardings=yes",
+    "-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "Tunnel=no", ...control,
+    ...opts, "--", target.destination, `echo ${base64(script)} | base64 -d | sh`,
+  ];
+}
+
+// The local address and port of the user's ssh connection to the host: among
+// that ssh process's established sockets (ss), the one to the host's ssh
+// port as `ssh -G` resolves it (-p, -o Port, the user's ssh config). Sockets
+// to a loopback address are forwards and don't count, unless the host itself
+// is a loopback address. Through a jump host ssh has no such socket of its
+// own (a second ssh carries it), so there is none: null.
+async function sshConnection(target, pid, on) {
+  const config = await exec("ssh", ["-G", ...target.options, "--", target.destination], { on }).catch(() => null);
+  const port = config?.stdout.match(/^port (\d+)$/m)?.[1] ?? "22";
+  const hostname = config?.stdout.match(/^hostname (\S+)$/m)?.[1] ?? target.destination;
+  const r = await exec("ss", ["-Htnp"], { on }).catch(() => null);
+  if (r?.code !== 0) return null;
+  // ss writes IPv6 as [addr]; SSH_CONNECTION, as the host sees it, without.
+  const split = (address) => [address.slice(0, address.lastIndexOf(":")).replace(/^\[(.*)\]$/, "$1"), address.slice(address.lastIndexOf(":") + 1)];
+  const sockets = r.stdout
+    .split("\n")
+    .filter((l) => l.includes(`pid=${pid},`))
+    .map((l) => l.trim().split(/\s+/))
+    .map(([, , , local, peer]) => ({ local: split(local ?? ""), peer: split(peer ?? "") }))
+    .filter((x) => x.peer[1] === port);
+  const loopback = (host) => /^(::1$|127\.|::ffff:127\.|localhost$)/.test(host);
+  const found = sockets.find((x) => loopback(hostname) || !loopback(x.peer[0]));
+  return found ? { address: found.local[0].replace(/^::ffff:/, ""), port: found.local[1] } : null;
+}
+
 async function findTmux(terminal) {
   const on = terminal.includes("/") ? terminal.slice(0, terminal.lastIndexOf("/")) : null;
   const info = await hc(["get", terminal, "--json"]);
   if (info.code !== 0) throw new Error(hcError(info.stderr));
   const facts = JSON.parse(info.stdout);
-  // A tmux on the far side of ssh runs on another machine, out of reach here.
-  const program = (facts.foreground?.argv?.[0] ?? "").split("/").pop();
-  if (/^(ssh|mosh|mosh-client)$/.test(program)) {
-    throw new Error("tmux behind ssh can't be reached — open a space on that machine instead");
+  const argv = facts.foreground?.argv ?? [];
+  const program = (argv[0] ?? "").split("/").pop();
+  if (/^mosh/.test(program)) throw new Error("tmux behind mosh can't be reached");
+  let r, ssh = null;
+  if (program === "ssh") {
+    ssh = sshTarget(argv);
+    if (ssh.error) throw new Error(ssh.error);
+    const local = await sshConnection(ssh, facts.foreground.pid, on);
+    if (!local) throw new Error(`Can't find this terminal's ssh connection to ${ssh.destination}`);
+    r = await exec("ssh", sshArgv(ssh, `set -- ssh ${shQuote(local.address)} ${shQuote(local.port)}\n${FIND_TMUX}`), { on, timeout: 15000 });
+    if (r.code === 255) throw new Error(`ssh to ${ssh.destination} failed: ${r.stderr.trim()}`);
+  } else {
+    r = await exec("sh", ["-c", FIND_TMUX, "leader", "pid", String(facts.pid)], { on });
   }
-  const r = await exec("sh", ["-c", FIND_TMUX, "leader", String(facts.pid)], { on });
+  const why = (text) => [text, r.stderr.trim()].filter(Boolean).join(": ");
   if (r.code === 3) throw new Error("Can't read the terminal's tty (needs Linux /proc)");
-  if (r.code === 4) throw new Error(["No tmux in the user's socket folder has this terminal as a client", r.stderr.trim()].filter(Boolean).join(": "));
+  if (r.code === 4 && ssh) throw new Error(why(`No tmux on ${ssh.destination} has a client from this ssh connection`));
+  if (r.code === 5) throw new Error(`More than one tmux client on ${ssh?.destination} matches this ssh connection`);
+  if (r.code === 4) throw new Error(why("No tmux in the user's socket folder has this terminal as a client"));
   if (r.code !== 0) throw new Error(r.stderr.trim() || `Looking for tmux failed with ${r.code}`);
   const [socket, tty, prefix, repeatTime, initialRepeatTime, repeatable = ""] = r.stdout.split("\n");
   const repeatMs = number(repeatTime, 500);
   // initial-repeat-time 0 (or before tmux 3.5, none) means repeat-time.
   const initialMs = number(initialRepeatTime, 0) || repeatMs;
-  return { on, socket, tty, prefix, repeatMs, initialMs, repeatable: new Set(repeatable.split(" ").filter(Boolean)) };
+  return { on, ssh, socket, tty, prefix, repeatMs, initialMs, repeatable: new Set(repeatable.split(" ").filter(Boolean)) };
 }
 
 // Gives keys to that tmux client as if typed there (send-keys -K), so tmux
 // runs its own bindings for them; they never pass through the terminal, so
 // nothing the terminal receives meanwhile (the focus-in when the leader
-// closes, or keys typed fast) can come between the prefix and the key.
+// closes, or keys typed fast) can come between the prefix and the key. Behind
+// ssh the same command runs on the far host.
 async function sendToTmux(tmux, keys) {
-  const r = await exec("tmux", ["-S", tmux.socket, "send-keys", "-K", "-c", tmux.tty, ...keys], { on: tmux.on }).catch(
-    (e) => ({ code: 1, stderr: String(e?.message ?? e) }),
-  );
+  const args = ["-S", tmux.socket, "send-keys", "-K", "-c", tmux.tty, ...keys];
+  const call = tmux.ssh
+    ? exec("ssh", sshArgv(tmux.ssh, `exec tmux ${args.map(shQuote).join(" ")}`), { on: tmux.on, timeout: 15000 })
+    : exec("tmux", args, { on: tmux.on });
+  const r = await call.catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
   if (r.code !== 0) notify({ title: "tmux did not take the key", body: r.stderr.trim(), level: "error" });
 }
 
@@ -257,16 +401,16 @@ export default class Leader extends View {
     // focus-history instead, the same command).
     //
     // ctrl-space ctrl-space <key> is for a tmux in the focused terminal, whose
-    // prefix is ctrl-space too: the leader takes <key> itself, since the
-    // overlay has the keyboard however fast it is typed, and gives tmux its
-    // prefix and <key> in one send (sendToTmux). When <key> is bound with -r
-    // there, further such keys go on without the prefix until tmux's repeat
-    // window (initial-repeat-time, then repeat-time) passes without one. Any
-    // other key, and every key after that, goes on bare, as typed into the
-    // pane, until the leader has sent all it took and closes. A third
-    // ctrl-space before <key> cancels; later it ends the passing, sending
-    // nothing. On another machine each send takes a round trip, so a long
-    // run of repeat keys can reach tmux after its window has closed.
+    // prefix is ctrl-space too: the leader takes <key> itself once the
+    // overlay has the keyboard, and gives tmux its prefix and <key> in one
+    // send (sendToTmux). When <key> is bound with -r there, further such keys
+    // go on without the prefix until tmux's repeat window (initial-repeat-time,
+    // then repeat-time) passes without one. Any other key, and every key after
+    // that, goes on bare, as typed into the pane, until the leader has sent
+    // all it took and closes. A third ctrl-space before <key> cancels; later
+    // it ends the passing, sending nothing. On another machine, or behind
+    // ssh, each send takes a round trip, so a long run of repeat keys can
+    // reach tmux after its window has closed.
     this.passing = null;
     if (checking()) return;
     // ctrl-space presses that came before the leader had the keyboard are
