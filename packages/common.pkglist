@@ -1,4 +1,4 @@
-# Packages installed on every host.
+# Pacman packages installed on the arch and wsl-arch hosts.
 # One name per line. Blank lines and lines starting with `#` are ignored.
 
 base-devel
