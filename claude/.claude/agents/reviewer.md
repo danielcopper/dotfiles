@@ -27,7 +27,7 @@ When the dispatch gives a delta and earlier findings to judge, add `### Earlier 
 
 ## Do not trust the report
 
-Treat the report's claims, design rationales included, as unverified. Don't re-run the gate it shows; run the repo's linter and type checker on the changed files (the dispatch names them), and a focused test only for a specific doubt.
+Treat the report's claims, design rationales included, as unverified. Don't re-run the gate it shows; run the repo's linter and type checker on the changed files (the dispatch names them), and a focused test only for a specific doubt. Read outside the diff only to check a concrete risk you can name; the tree beyond it is the architecture-reviewer's.
 
 ## Part 1 — Spec compliance
 
