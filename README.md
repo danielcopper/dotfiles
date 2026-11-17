@@ -25,6 +25,7 @@ Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 | `packages/steamdeck.flatpaklist` | Flatpak app list for steamdeck — for apps that ship as macOS-only Homebrew Casks (wezterm) and need a Linux install path. Installed user-scope from flathub. |
 | `install-packages.sh <class>` | Install / update OS packages (pacman on arch / wsl-arch, brew + flatpak on steamdeck). |
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. Worktree-aware; backs up real conflicts. |
+| `stow-packages.sh <pkg>…` | Stows the given packages; `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
 | `tests/` | Tests for scripts in this repo (`tests/memex-sync/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
@@ -36,14 +37,14 @@ Where `<class>` is one of `arch`, `steamdeck`, `wsl-arch`.
 
 ```bash
 mv ~/.config/<app>/<file> <app>/.config/<app>/<file>
-cd ~/dotfiles && stow -R <app>
+mise run dotfiles-relink <app>
 ```
 
 **New stow package:**
 
 1. Create the package directory at repo root, mirroring the target path: `<pkg>/.config/<pkg>/…` (or `<pkg>/.<file>` for `$HOME`-level dotfiles).
 2. Add `<pkg>` to `install-dotfiles.sh`'s `common_pkgs` array, or to a class-specific `class_pkgs` if it should only land on certain hosts.
-3. `cd ~/dotfiles && stow -R <pkg>` to symlink it immediately.
+3. `mise run dotfiles-relink <pkg>` to symlink it immediately.
 
 **Class-specific tweak to a mostly-shared file:**
 
@@ -51,6 +52,30 @@ cd ~/dotfiles && stow -R <app>
 printf '\nexport PATH="$HOME/extra:$PATH"\n' >> host-arch/.bashrc.local
 stow -R host-arch
 ```
+
+## herdr app
+
+The herdr desktop app comes from its official installer script into
+`~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
+package carries the config that is mine: `keys.json` (the shipped defaults plus
+`ctrl-space` for the leader mod), the mod `mods/leader/` and the theme
+`themes/catppuccin-mocha.json`. Everything else in `~/.config/herdr-app` is
+herdr's own. `stow-packages.sh` stows the package without folding (the reason
+is in its header), so relink it with `mise run dotfiles-relink herdr-app` rather than a bare
+`stow -R herdr-app`. Which files of the package git tracks is set in the root
+`.gitignore`.
+
+- **`settings.json` is a reference copy, not stowed.** herdr replaces
+  `~/.config/herdr-app/settings.json` whenever it saves zoom or a Settings
+  page, so a stow link there would become a local file. The reference keeps
+  only `telemetry` and `theme`; zoom, font sizes and sounds are per device.
+  `install-dotfiles.sh` seeds the live file from it when none exists, and
+  after that the two drift: `diff ~/.config/herdr-app/settings.json
+  herdr-app/.config/herdr-app/settings.json` shows what each has; copy across
+  by hand and commit the reference when you want to keep a change.
+- **`keys.json` is edited, so it stays mine.** herdr refreshes only an
+  untouched keys file on upgrade; new default shortcuts have to be added by
+  hand.
 
 ## tmux agent sidebar
 

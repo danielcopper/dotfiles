@@ -20,6 +20,7 @@ common_pkgs=(
   wezterm
   lazygit
   opencode
+  herdr-app
 )
 
 case "$CLASS" in
@@ -106,12 +107,14 @@ for pkg in "${all_pkgs[@]}"; do
   while IFS= read -r src; do
     rel="${src#"$pkg"/}"
     target="$HOME/$rel"
-    # The Claude settings are a reference copy, not a stow source (see
-    # claude/.stow-local-ignore). The file at the target belongs to the user
-    # and to Claude Code, which writes model, effort and the auto-mode
-    # environment into it; moving it aside as a "conflict" would take the
-    # live configuration with it.
-    [ "$src" = "claude/.claude/settings.json" ] && continue
+    # The Claude and herdr settings are reference copies, not stow sources
+    # (see each package's .stow-local-ignore). The app writes into the live
+    # file (CLAUDE.md, "Claude config lives here"; README, "herdr app"), so
+    # moving it aside as a "conflict" would take the live configuration with
+    # it.
+    case "$src" in
+      claude/.claude/settings.json | herdr-app/.config/herdr-app/settings.json) continue ;;
+    esac
     if [ ! -e "$target" ] && [ ! -L "$target" ]; then
       continue
     fi
@@ -149,7 +152,7 @@ mkdir -p "$HOME/.claude"
 if [ "$CLASS" = steamdeck ]; then
   mkdir -p "$HOME/.config/systemd/user/session.slice.d"
 fi
-stow -R "${all_pkgs[@]}"
+"$DIR/stow-packages.sh" "${all_pkgs[@]}"
 
 # The user's tmpfiles timer is what applies ~/.config/user-tmpfiles.d/claude.conf;
 # it is not enabled by default on SteamOS or WSL. Without a user bus (no login
@@ -175,6 +178,15 @@ elif [ ! -e "$live_settings" ] && [ ! -L "$live_settings" ]; then
   mkdir -p "$HOME/.claude"
   cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
   echo "seeded ~/.claude/settings.json from the repo reference"
+fi
+
+# herdr's settings.json is a reference copy too (README, "herdr app"). The
+# stow above has made ~/.config/herdr-app a real directory, so the seed lands
+# there and not in the repo.
+live_herdr_settings="$HOME/.config/herdr-app/settings.json"
+if [ ! -e "$live_herdr_settings" ] && [ ! -L "$live_herdr_settings" ]; then
+  cp "$DIR/herdr-app/.config/herdr-app/settings.json" "$live_herdr_settings"
+  echo "seeded ~/.config/herdr-app/settings.json from the repo reference"
 fi
 
 # OpenCode reports its panes to the tmux agent sidebar through a plugin file that
