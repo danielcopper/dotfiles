@@ -67,7 +67,7 @@ If you catch yourself reading code to build a theory before this command exists,
 
 ## Phase 2: Reproduce + minimise
 
-Run the loop. Watch it go red as the bug appears.
+Run the loop. Watch it go red as the bug appears. If you forced the red by mutating code or a fixture, `diff` against a pristine copy to prove the mutation landed before you trust it.
 
 Confirm:
 

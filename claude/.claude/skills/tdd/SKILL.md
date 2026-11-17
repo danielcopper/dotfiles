@@ -25,6 +25,7 @@ A **seam** is the public boundary you test at: the interface where you observe b
 - Use the highest seam that covers the behavior. A test there exercises the most real code and survives the most internal change.
 - Keep the number small. The ideal is one seam per feature.
 - If no existing seam fits, propose a new one at the highest point you can, and say that it is new.
+- Give each proposed seam a one-line note on what it catches and what it misses.
 
 **You can't test everything.** Agreeing the seams up front is how testing effort lands on critical paths and complex logic instead of every possible edge case.
 
