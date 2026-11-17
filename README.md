@@ -61,12 +61,14 @@ package carries the config that is mine: `keys.json` (the shipped defaults plus
 `ctrl-space` for the leader mod), the mods `mods/leader/` (its `f` opens a
 second level for files: `f f` and `f g`, the keys of nvim's `<leader>ff` and
 `<leader>fg`, open the file popup, `f e` and `f G` show the right panel on
-Files or Changes), `mods/focus-history/` (it remembers the previously focused
-pane for the leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
+Files or Changes; `Z` switches that panel between its normal width and about
+two thirds of the space beside the sidebar), `mods/focus-history/` (it
+remembers the previously focused pane for the leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
 focused pane's repo or folder, or with the repo's changed files, that opens
 the picked one in nvim in a new pane on the right), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
-keeps focus-history running) and the theme `themes/catppuccin-mocha.json`.
+keeps focus-history running; its right panel has no maximum width, so `Z`
+widens it all the way) and the theme `themes/catppuccin-mocha.json`.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its header), so relink it
 with `mise run dotfiles-relink herdr-app` rather than a bare `stow -R

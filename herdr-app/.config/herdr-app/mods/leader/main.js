@@ -14,9 +14,11 @@ import { run, props, closeOverlay, openOverlay, theme, shared, panes, notify, la
 
 const HINT_MS = 1000;
 const REPEAT_MS = 700;
-// The personal layout's right panel and the stack of its Files and Changes.
+// The personal layout's right panel, the stack of its Files and Changes, and
+// its normal width, which must match the panel's px in layouts/personal.json.
 const PANEL = "panel";
 const PANEL_BODY = "panel-body";
+const PANEL_PX = 368;
 
 // Focuses the pane focus-history saw before the current one; pane.focus also
 // shows its space and tab, so focus changes once. Pressed again (ctrl-space
@@ -66,6 +68,26 @@ function togglePanelTab(child, label) {
   }
 }
 
+// Toggles the right panel between its normal PANEL_PX and wide: weight 2
+// against the main block's 1, so about two thirds of the space beside the
+// sidebar (herdr tells a mod no window width); personal.json gives the
+// panel no max, which would cap it short of that.
+// Whether it is wide is read from the shown layout (a weight is wide, a px
+// width is not), so the toggle stays right after the panel is hidden and
+// shown again or dragged by hand. A hidden panel is shown wide.
+function togglePanelWidth() {
+  const panel = findNode(layout(), PANEL);
+  if (!panel) {
+    notify({ title: "This layout has no panel", level: "info" });
+    return;
+  }
+  if (panel.hidden) {
+    run("layout.resize", { id: PANEL, weight: 2 });
+    run("layout.show", { id: PANEL });
+  } else if (panel.size?.weight) run("layout.resize", { id: PANEL, px: PANEL_PX });
+  else run("layout.resize", { id: PANEL, weight: 2 });
+}
+
 // A level of keys: its title, its rows (below), the keys the list leaves out
 // as aliases, and the hint in its corner.
 function level(title, actions, aliases = [], hint = "Esc") {
@@ -112,6 +134,7 @@ const ACTIONS = [
   ["s", "pick", "Spaces", "mod.open", { name: "picker" }],
   ["S", "pick", "Spaces", "mod.open", { name: "picker" }],
   ["a", "sidebar", "View", "layout.toggle", { id: "sidebar" }],
+  ["Z", "wide panel", "View", togglePanelWidth, {}],
   ["f", "+files", "View", FILES, {}],
 ];
 // S and c are aliases of s and t; the list shows each action once.
