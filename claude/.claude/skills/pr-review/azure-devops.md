@@ -1,6 +1,6 @@
 # Azure DevOps
 
-Phase 1, re-review lookups and Phase 5 of [`SKILL.md`](SKILL.md) for Azure DevOps. More REST quirks: `~/.claude/memory/tools/azure-devops.md`.
+Phase 1, re-review lookups and Phase 5 of [`SKILL.md`](SKILL.md) for Azure DevOps.
 
 PR URLs: `https://dev.azure.com/<org>/<project>/_git/<repo>/pullrequest/<id>` or `https://<org>.visualstudio.com/<project>/_git/<repo>/pullrequest/<id>` - same org either way. REST base used below:
 
