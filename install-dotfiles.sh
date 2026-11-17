@@ -142,11 +142,25 @@ if [ "$backed_up_count" -gt 0 ]; then
   echo
 fi
 
-# ~/.claude must be a real directory before stow runs. On a fresh machine it
-# does not exist yet, and stow would fold the whole directory into one link to
-# this repo: the live settings.json would be the public reference, and every
-# file Claude Code writes there would land in the repo.
-mkdir -p "$HOME/.claude"
+# A directory that only one shared package fills must be a real directory
+# before stow runs. On a fresh machine it does not exist yet, stow would fold
+# it into one link to this repo, and everything a program writes there would
+# land in the repo:
+# - ~/.claude: Claude Code's own files, and the live settings.json would be
+#   the public reference.
+# - ~/.config/opencode: OpenCode's node_modules and package files, and the
+#   sidebar plugin linked into plugins/ below.
+# - ~/.config/tmux: the plugins TPM clones into plugins/.
+# - ~/.config/systemd/user and its default.target.wants: the links
+#   `systemctl --user enable` writes, such as timers.target.wants for the
+#   tmpfiles timer below. The systemd package ships default.target.wants, so
+#   it would fold on its own.
+# On a home where one of them is already such a link, mkdir -p finds the
+# directory in the repo and creates nothing.
+mkdir -p "$HOME/.claude" \
+  "$HOME/.config/opencode" \
+  "$HOME/.config/tmux" \
+  "$HOME/.config/systemd/user/default.target.wants"
 # systemd skips a drop-in directory that is a symlink, so a folded
 # session.slice.d would leave the desktop's memory protection unloaded.
 if [ "$CLASS" = steamdeck ]; then
@@ -175,7 +189,6 @@ if [ -L "$live_settings" ] && into_our_repo "$(readlink -f -- "$live_settings")"
   cp --remove-destination -- "$settings_src" "$live_settings"
   echo "replaced the ~/.claude/settings.json link into the repo with a local copy"
 elif [ ! -e "$live_settings" ] && [ ! -L "$live_settings" ]; then
-  mkdir -p "$HOME/.claude"
   cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
   echo "seeded ~/.claude/settings.json from the repo reference"
 fi
