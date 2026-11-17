@@ -44,7 +44,7 @@ Commit at every green checkpoint, in English. Never push — push, PR and merge 
 ## Report
 
 Send your report as a message to your lead, then end with one sentence (status and head). It holds:
-- **Status:** DONE, DONE_WITH_CONCERNS (name the doubts), BLOCKED when you are stuck (what you tried, what you need; that beats guessing) or NEEDS_CONTEXT (the question).
+- **Status:** DONE, DONE_WITH_CONCERNS (name the doubts), BLOCKED when you are stuck — reading file after file without getting closer, or the same fix failing a third time (what you tried, what you need; that beats guessing) or NEEDS_CONTEXT (the question).
 - **Commits**, and per change in short `file: old → new`.
 - **Tests:** new ones by name with the Done-when item; existing ones you changed, with old → new expectation and the decision behind it; how you saw each new one fail.
 - **Gate:** each command with its exit code.
