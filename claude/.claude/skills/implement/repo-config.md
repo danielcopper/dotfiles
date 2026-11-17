@@ -8,19 +8,30 @@ The facts the pipeline needs about a repository have three homes, by kind:
 | Facts about the repository | the repo's own `CLAUDE.md`, section `## Pipeline` | gate, review checks, worktree task, agent rules |
 | The owner's own facts per repo | `~/Memory/<repo>/repo-profile.md` | ownership, board, user gate, departures from a global default — and, for a foreign repo, the repository facts too |
 
-`<repo>` is the basename of the main checkout's root, `basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`, the name the memory tier already uses; the `CLAUDE.md` read is the one in that root. `/setup-repo` writes the profile and drafts the `## Pipeline` section. A skill that needs the profile and finds none stops and asks the owner to run `/setup-repo`.
+`<repo>` is the basename of the main checkout's root
+(`basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`), the name the memory tier uses.
+`/setup-repo` writes the profile and drafts `## Pipeline`; a skill that needs the profile and finds none asks the owner
+to run it.
 
 ## Own or foreign
 
-The profile's `ownership` is `/setup-repo`'s verdict, by the rule in `setup-repo/SKILL.md`, step 2. A skill that needs only the verdict and finds no profile runs `~/.claude/skills/setup-repo/ownership.sh <root>` and reads its answer strictly as that step says; where it gives no verdict, the skill asks the owner. Any skill that would write about the repo states that verdict before it writes: **"own repo"**, or **"foreign repo, writing only to ~/Memory/<repo>/"**.
+The profile's `ownership` is `/setup-repo`'s verdict. Without a profile, a skill that needs only the verdict runs
+`~/.claude/skills/setup-repo/ownership.sh <root>` and reads it as `setup-repo`, step 2, says; no verdict → ask the
+owner. Before a skill writes about a repo, it states **"own repo"** or **"foreign repo, writing only to
+~/Memory/<repo>/"**.
 
 ## Global defaults
 
-Each holds in every repo unless its profile departs from it under `defaults` (schema below).
+Each holds in every repo unless its profile departs from it under `defaults`.
 
-- **`merge_policy: user`** — green completes the implementation work; the lead reports and waits for the owner to merge. Full-auto is never stored, in a profile or anywhere else: it is a per-run override only when the owner explicitly grants it, so this policy has no departure.
-- **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes and it reports 0 unresolved issues introduced by the PR. Green does not authorize a merge.
-- **`public_text_drafts: always`** — every public text (a new issue, an issue comment, a PR body, any other) is drafted for the owner's approval before posting. The exception is the issue edit that records a decision the owner made, in the owner's own issue or the maintainer section of someone else's: once the owner has decided a question, write that edit directly, in the format "Questions and decisions in an issue" below sets and in the substance the owner agreed, and tell the owner in one line what was written where. Ask first only when the wording would add something the owner did not decide. The other value, `waived`, posts directly, concise and clean.
+- **`merge_policy: user`** — the owner merges. Full-auto is only an explicit grant for one run, never stored, so this
+  policy has no departure.
+- **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
+  0 unresolved issues the PR introduced. Green is not a merge go.
+- **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Exception:
+  an issue edit that records a decision the owner made — in their own issue or the maintainer section of someone
+  else's — is written directly in the format below and named to the owner in one line; ask first only when the wording
+  would add something undecided. The other value, `waived`, posts directly.
 
 ## Questions and decisions in an issue
 
@@ -33,7 +44,8 @@ In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decis
 
 ## The `## Pipeline` section of the repo's `CLAUDE.md`
 
-In the owner's repos the repository facts live in the repo's `CLAUDE.md`; the lead copies the gate and the agent rules from there into every brief ([`dispatch.md`](dispatch.md)).
+In the owner's repos the repository facts live there; the lead copies the gate and the agent rules into every brief
+([`dispatch.md`](dispatch.md)). Where another section of the `CLAUDE.md` already states a fact, the entry points there.
 
 ```markdown
 ## Pipeline
@@ -46,12 +58,13 @@ In the owner's repos the repository facts live in the repo's `CLAUDE.md`; the le
   - Run the gate once; never start a second run while one is still going.
 ```
 
-- **Gate** — the battery: every command passes before a PR, run from the worktree root. Prefer the repo's task runner (mise) over naming tools directly, so the task definitions stay the single source of truth. It covers what CI enforces: a gate that checks less than CI breaks the trust model.
-- **Review checks** — the lint and type commands the reviewer runs on changed files only, e.g. `ruff check <files>` (Python), `dotnet format --verify-no-changes` (C#).
-- **Worktree task** — optional: a repo task that creates and sets up a worktree at the convention path (type, slug, base). Without it, `git worktree add` at the convention path from the `worktree` skill.
-- **Agent rules** — rules beyond the agent definitions, such as where scratch files go, how long the gate takes and that it runs once, its staging, which rule files to read, for the implementer. Left out when the definitions cover everything.
-
-Where the `CLAUDE.md` already states one of these facts in another section, the `## Pipeline` entry points there instead of repeating it.
+- **Gate** — the battery, run from the worktree root before a PR; it covers at least what CI enforces. Prefer the repo's
+  task runner over naming tools directly.
+- **Review checks** — the lint and type commands the reviewer runs on changed files only.
+- **Worktree task** — optional: creates a worktree at the convention path (type, slug, base); without it,
+  `git worktree add` as the `worktree` skill says.
+- **Agent rules** — rules for the implementer beyond its definition (scratch files, gate duration, rule files to read);
+  left out when there are none.
 
 ## `repo-profile.md`
 
@@ -88,11 +101,10 @@ board:
 #   ready_state: <the state name for "ready", e.g. To Do>
 #   in_progress_state: <the state name for "in progress", e.g. In Progress>
 
-# What needs the owner's own hands or eyes before a change counts as done —
-# a verification only they can run (target hardware, an environment only
-# they control), beyond decisions and approvals the skills already route
-# to them. Empty if the repo has none. In a convention repo, an issue's
-# user-gate items are its `## Done when` criteria marked "(device)".
+# What only the owner can verify before a change counts as done (target
+# hardware, an environment they control); empty if none. In a convention
+# repo, an issue's user-gate items are its `## Done when` criteria marked
+# "(device)".
 user_gate: <when and how the owner verifies, or empty>
 
 # Optional: departures from the global defaults, each with its reason.
@@ -112,13 +124,10 @@ agent_rules: |                 # optional
 
 ## Board
 
-The profile's `board` has a kind, and every board step follows it:
-
-- **`github`** — a GitHub Project; the commands are below.
-- **`azure-devops`** — an Azure DevOps project. Reads and moves go through the `azure-devops-boards` skill, under the profile's `ready_state` and `in_progress_state`.
-- **No board** (`board` left out) — every board step is skipped, and the skill says so in one line.
-
-Only GitHub's automation moves an item to Done. On an `azure-devops` board a skill asks the owner and moves the item only on their confirmation, as the `azure-devops-boards` skill says; no skill moves one to Done on its own.
+The profile's `board` kind decides every board step: `github` uses the commands below; `azure-devops` goes through the
+`azure-devops-boards` skill, under the profile's `ready_state` and `in_progress_state`; no board skips every board step
+and says so in one line. Only GitHub's automation moves an item to Done; on `azure-devops` the owner confirms first, and
+no skill moves one to Done on its own.
 
 ### GitHub commands
 
@@ -144,16 +153,17 @@ item_id=$(gh project item-add <n> --owner <owner> --url <issue-url> --format jso
 gh project item-edit --id "$item_id" --project-id <project_id> --field-id <status_field_id> --single-select-option-id <ready_option_id>
 ```
 
-Setting a new item's priority (`/plan-epic`, `/to-prd`, `/to-issues`) uses the board's single-select field named `Priority`, looked up when the skill reads the board — its option names are what the skill's plan proposes from:
+Priority (`/plan-epic`, `/to-prd`, `/to-issues`): the board's single-select field named `Priority`, read when the skill
+reads the board; its option names are what the plan proposes from:
 
 ```bash
 gh project field-list <n> --owner <owner> --format json --jq '.fields[] | select(.name == "Priority")'
 ```
 
-The answer carries the field's `id` and its `options` (`id`, `name`). After the item is in Ready, set the option the owner approved:
+Once the item is in Ready, set the approved option:
 
 ```bash
 gh project item-edit --id "$item_id" --project-id <project_id> --field-id <priority_field_id> --single-select-option-id <option_id>
 ```
 
-A board without a field named `Priority` has no priority step: the plan proposes none, and Publish says so in one line.
+A board without that field has no priority step, and Publish says so in one line.

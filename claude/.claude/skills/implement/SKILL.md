@@ -4,82 +4,110 @@ description: "Implement a GitHub issue end-to-end — align, worktree, board, im
 disable-model-invocation: true
 ---
 
-Run one GitHub issue through the full pipeline: understand → align → implement → review → PR → green → user handoff. You are the lead: you orchestrate, commit nothing an agent already committed, and own push and PR preparation. Merge remains the user's responsibility unless they explicitly grant full-auto for the current run. Work step by step and keep momentum — the user decides when to stop, so between steps simply continue. This session stays in the main checkout; implementer and review agents work in the issue's worktree by its absolute path.
+Run one GitHub issue through the pipeline: understand → align → implement → review → PR → green → handoff. You are the
+lead: you orchestrate and own push and PR; agents work in the issue's worktree by its absolute path while you stay in
+the main checkout. Keep going between steps. Merging is the user's, unless they grant full-auto for this run.
 
-A **convention repo** is one whose `CLAUDE.md` has the section `## Where decisions live`; that section states the convention. Steps marked *(convention)* apply only there; in any other repo they are skipped and the rest runs as written.
+A **convention repo** has `## Where decisions live` in its `CLAUDE.md`; steps marked *(convention)* apply only there.
 
 ## 1. Load the repo's facts
 
-Read the repo's profile and the main checkout's `CLAUDE.md`, as [`repo-config.md`](repo-config.md) says where each fact lives; the global defaults stand there too. If the profile is missing, or no gate stands in the `CLAUDE.md`'s `## Pipeline` section (in a foreign repo, the profile), stop and ask the user to run `/setup-repo` and land what it drafts. Check the main checkout's `CLAUDE.md` for `## Where decisions live`.
+Load them as [`repo-config.md`](repo-config.md) says. No profile, or no gate → stop and ask the user to run
+`/setup-repo`.
 
-*Done when:* the gate, the review checks, the worktree task, the board or its absence, the user gate and every departure from a global default are loaded, and you know whether this is a convention repo.
+*Done when:* gate, review checks, worktree task, board, user gate and every departure from a default are known, and
+whether this is a convention repo.
 
 ## 2. Understand the issue
 
-`gh issue view <N> --comments`, plus its parent epic if it is a sub-issue. *(convention)* Read its `## To decide`, `## Decisions` and `## Done when`, and the epic's `## Decisions` when the issue says "See epic #N". Read the ADRs, docs, and glossary entries the issue area touches, then explore the code far enough to know the blast radius.
+`gh issue view <N> --comments`, plus its parent epic. *(convention)* Read its `## To decide`, `## Decisions` and
+`## Done when`, and the epic's `## Decisions` when it says "See epic #N". Read the area's docs, ADRs and glossary, and
+explore the code far enough to know the blast radius.
 
-*Done when:* you can state the change, its done criteria, and every file area it will touch in your own words.
+*Done when:* you can state the change, its done criteria and every area it touches.
 
 ## 3. Align
 
-Present a compact readiness statement: intended approach, scope, what you'll leave untouched. Ask your open questions **one at a time**, waiting for each answer. Implementation starts on the user's green light.
+State approach, scope and what stays untouched; ask open questions one at a time; start on the user's go. With `--go`
+(or a standing grant) and no open question, go straight on — open questions always stop.
 
-*(convention)* The answers go into the issue before step 4, written directly as `public_text_drafts` in [`repo-config.md`](repo-config.md) says, plus `## Out of scope` when anything was ruled out (`gh issue edit <N> --body-file <file>`). When it turns out there is nothing to decide, the edit is `## Decisions` with "None.". A decision meeting the three ADR criteria in the global `CLAUDE.md` also gets an ADR where `~/.claude/skills/grill-with-docs/SKILL.md`, "Where they are written", puts it. In the repo, the implementer writes it in the same PR from the issue's `## Decisions` (name it in the brief's extras), and the issue links it; outside the repo, you write it from the same decisions, and the issue does not link it.
+*(convention)* The answers go into the issue before step 4, as `repo-config.md`, "Questions and decisions in an issue",
+says (`## Decisions` with "None." when nothing was to decide); `--go` also needs an issue with no open question. A
+decision meeting the ADR criteria gets an ADR where `grill-with-docs`, "Where they are written", puts it — in the repo
+the implementer writes it in the PR and the issue links it, outside the repo you write it unlinked.
 
-With `--go` (or a standing automode grant from the user) and zero open questions, proceed directly — open questions always stop, in every mode. *(convention)* `--go` also needs a ready issue: no open question under `## To decide`, and a `## Decisions` (a "See epic #N" pointer counts).
-
-*Done when:* green light received *(convention)* and the posted issue holds every answer under `## Decisions`, its question checked off under `## To decide`.
+*Done when:* the user's go *(convention)* and every answer in the issue.
 
 ## 4. Stage the work
 
-- Update main first: `git pull --ff-only` in the main checkout — PRs are merged on the remote, so local main lags behind. If the pull fails (main diverged, or local changes it would overwrite), stop and tell the user.
-- Create the worktree for branch `<type>/<N>-<slug>` from main via the repo's worktree task (`<worktree task> <type> <N>-<slug> main`), else with `git worktree add` at the convention path from the `worktree` skill. This session stays in the main checkout. Note the base SHA (`git -C <wt> rev-parse HEAD`).
-- Move the issue **and** its parent epic to **In Progress** on the board, as its kind says ([`repo-config.md`](repo-config.md), "Board").
+`git pull --ff-only` in the main checkout (stop and tell the user if it fails). Create the worktree for
+`<type>/<N>-<slug>` from main with the repo's worktree task, else at the path the `worktree` skill gives, and note its
+base SHA (`git -C <wt> rev-parse HEAD`). Move the issue and its parent epic to In Progress as
+[`repo-config.md`](repo-config.md), "Board", says.
 
-*Done when:* the worktree exists, its base SHA is noted, and the board, where there is one, shows both items In Progress.
+*Done when:* the worktree exists, its base SHA is noted, and the board, where there is one, shows both items In
+Progress.
 
 ## 5. Implement
 
-Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the **implementer** agent per [`dispatch.md`](dispatch.md). Route its four-state status as dispatch.md describes; questions and BLOCKED/NEEDS_CONTEXT go to the user, not to your own judgment. *(convention)* An answer that is a decision goes into the issue's `## Decisions`, written directly as `public_text_drafts` in [`repo-config.md`](repo-config.md) says, before the agent resumes.
+Write the brief to `~/Memory/<repo>/brief-<N>.md` and dispatch the implementer per [`dispatch.md`](dispatch.md), which
+routes its status. Questions, BLOCKED and NEEDS_CONTEXT go to the user. *(convention)* An answer that is a decision goes
+into the issue as `repo-config.md`, "Questions and decisions in an issue", says, before the agent resumes.
 
-*Done when:* status DONE, or DONE_WITH_CONCERNS with every concern resolved with the user.
+*Done when:* DONE, or DONE_WITH_CONCERNS routed as `dispatch.md` says.
 
 ## 6. Review
 
-Start the review agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the change, per [`dispatch.md`](dispatch.md). Route their findings as `review-agents.md`, "Routing the findings", says, the check of each Critical or Important finding at its artifact included; every finding it sends to the implementer goes back as a fix dispatch, then a fix round as `review-agents.md`, "Fix rounds", sets it, until none is left or the round cap stops the loop; what a fix-now ruling gets after the cap, that section says.
+Run the review agents [`review-agents.md`](../../review-agents.md) names, per `dispatch.md`. Re-read `review-agents.md`
+before each round: it routes the findings — each Critical or Important one checked at its artifact before it goes back
+— and sets the fix rounds and their cap.
 
-*Done when:* every finding the routing sent to the implementer has the verdict "addressed" from a fix round or the post-cap pass, or, once the round cap stopped the loop, stands on the user's list, and the user has ruled on every finding on their list.
+*Done when:* every finding sent to the implementer is addressed or, after the round cap, on the user's list, and the
+user has ruled on that list.
 
 ## 7. Gate evidence, once
 
-The battery runs once per code state. The implementer's final battery report is the evidence — judge it, don't repeat it. Only code that changed after that report (a lead-side fix, a review amendment the implementer didn't re-verify) gets its affected commands re-run, by whoever changed it.
+The implementer's final battery report is the evidence; judge it, don't repeat it. Only code changed after it gets its
+affected commands re-run, by whoever changed it.
 
-*Done when:* battery evidence exists for the exact final state of the branch.
+*Done when:* evidence exists for the exact final state of the branch.
 
 ## 8. Pull request
 
-Draft the PR: conventional-commit title, body with `Closes #<N>` and one sentence per small by-catch fix (`review-agents.md`), docs handled per repo policy (updated in the same PR, or the repo's explicit opt-out with a one-line reason). Present the draft and wait for approval — skip the wait only where `public_text_drafts` is `waived` ([`repo-config.md`](repo-config.md)). Then push and open the PR.
+Draft the PR — conventional-commit title, `Closes #<N>`, one sentence per small by-catch fix, docs per the repo's policy
+(updated in the PR, or its opt-out with a reason) — post it as `public_text_drafts` in
+[`repo-config.md`](repo-config.md) says, then push and open it.
 
-*(convention)* The body becomes the squash commit body, so it holds: a prose summary, `## Decisions` with the final decisions one line each (a sub-issue: "See epic #N" plus its own), and `Closes #<N>`. A docs opt-out (the repo's docs-check marker) may also sit in the body. Every PR closes exactly one issue. A small fix without decisions opts out with the label `no-decisions` and keeps `## Decisions` with "None."; the text `decisions: none` is for outside contributors, who cannot set labels — the owner uses the label so the opt-out stays out of the squash commit.
+*(convention)* The body becomes the squash commit: a prose summary, `## Decisions` one line each (a sub-issue: "See epic
+#N" plus its own), and `Closes #<N>`; one issue per PR. A fix without decisions takes the label `no-decisions` and keeps
+`## Decisions` with "None." — the text `decisions: none` is for outside contributors, who cannot set labels.
 
 *Done when:* the PR is open with approved text.
 
 ## 9. Watch to green
 
-Poll `gh pr checks`. Failures get a fix loop: dispatch back to the implementer (or fix directly when trivial), commit, focused re-verify. When the implementer rebased onto a moved main (the branch's merge base with main changed, as [`dispatch.md`](dispatch.md), "Review dispatch", derives it), push with `git -C <wt> push --force-with-lease`. The bar is `green_definition` ([`repo-config.md`](repo-config.md): the global default, or the profile's departure from it). *(convention)* The `decisions` check is among the required checks; it reads the linked issue, and an edit of that issue re-runs it.
+Poll `gh pr checks` until `green_definition` (`repo-config.md`) holds. A failure goes back to the implementer, or you fix
+it when trivial; a fix that changes behaviour gets a delta review by the reviewer. After a rebase onto a moved main, `git -C <wt> push --force-with-lease`. *(convention)* A red
+`decisions` check is fixed in the linked issue; editing it re-runs the check.
 
-At green, run the profile's `user_gate` where it applies: prepare it fully (state prep done, exact steps, expected result) and stop for the user's verdict. The pass is required before the PR is merge-ready. *(convention)* After the pass, draft one sentence with the device-check result for the PR body's summary — public text, so shown for approval per `public_text_drafts` — then edit the body (`gh pr edit <PR> --body-file <file>`).
+At green, run the profile's `user_gate` where it applies: prepare it fully (state, exact steps, expected result) and stop
+for the user's verdict. *(convention)* Then add one sentence with the result to the PR body, drafted as
+`public_text_drafts` says.
 
-Green means the automated implementation work is complete; it is not merge authorization. With the default `user` policy, report the evidence and wait for the user to merge. Merge only when the user explicitly asks for this merge, or grants full-auto for the current run, and the user gate has passed; the merge goes through a permission prompt. Do not infer full-auto from an earlier issue or session.
+Green is not a merge go: merge only when the user asks for this merge, or under a full-auto grant for this run, and
+only after the user gate.
 
-*Done when:* the PR is green, any user gate has passed *(convention)* and its result stands in the PR body, and the PR is handed to the user or merged under an explicit current-run full-auto grant.
+*Done when:* green, the user gate passed *(convention)* with its result in the PR body, and the PR handed over or merged
+under that grant.
 
 ## 10. Close the loop
 
-- After a merge, verify that automation closed the issue and, on a board, that the issue reached Done as its kind says ([`repo-config.md`](repo-config.md), "Board"); the epic stays In Progress while siblings remain open. At user handoff before merge, leave the issue In Progress and state that automation will close it after the user's merge.
-- After the merge, clean up the worktree and branch per the `worktree` skill.
-- Once the merge is confirmed (the user says so, or `gh pr view <PR> --json state` shows `MERGED`), move the issue's working files in `~/Memory/<repo>/` (brief, report, findings, reviews, inventory, design, handoff) to `~/Memory/<repo>/archive/<N>-<slug>/`. Working files carry the issue number in their name — `<kind>-<N>[-<suffix>].md` — so this step finds them. Each gets this line as its first line after any YAML front matter: `Historical — working notes for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.` The repo's `MEMORY.md` lists `archive/` in one line only: historical working notes, not current.
-- File the issues the user chose for large by-catch, each drafted as `public_text_drafts` ([`repo-config.md`](repo-config.md)) says, in the Planned change shape (`## Today`, `## Wanted`, `## To decide`, `## Done when`), with generic data shapes and glossary vocabulary; the workflow that produced them stays out of the text.
-- If context is running low, write `/handoff` (status and pointers: where we stopped, open PRs, pending tests, board state where there is a board) and tell the user to compact.
+After the merge: check the issue closed and, where there is a board, reached Done (the epic stays In Progress while
+siblings are open); remove worktree and branch per the `worktree` skill; move the issue's working files
+(`~/Memory/<repo>/<kind>-<N>[-<suffix>].md`) to `archive/<N>-<slug>/`, each opening with `Historical — working notes
+for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.` File the issues the user
+chose for large by-catch as `public_text_drafts` says, in the Planned change shape (`## Today`, `## Wanted`,
+`## To decide`, `## Done when`), with generic data shapes and glossary terms.
 
-*Done when:* the board, where there is one, consistent, any required user gate passed, those issues filed, and — once the merge is confirmed — working files archived. A run that ends at the handoff before the merge is complete without the archive step.
+*Done when:* the board is consistent, those issues are filed, and the working files are archived (a run that ends
+before the merge skips this).
