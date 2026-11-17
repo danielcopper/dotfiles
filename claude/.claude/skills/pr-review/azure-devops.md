@@ -51,7 +51,7 @@ git fetch origin refs/heads/<target>:refs/remotes/origin/<target> refs/heads/<so
 ## Re-review lookups
 
 - **`LAST_SHA`:** take the highest `pullRequestThreadContext.iterationContext.secondComparingIteration` across the user's threads, and use that iteration's `sourceRefCommit.commitId`. The user may have reviewed a later iteration without commenting - that is why SKILL.md has you confirm it.
-- **Per earlier thread**, pass the reviewer the anchor, the comment text, the author's replies (`comments[1..]`) and `status` - a `fixed` status is the author's claim, not evidence.
+- **Per earlier thread**, the fields SKILL.md names come from here: the anchor, the comment text, the author's replies (`comments[1..]`) and `status` - a `fixed` status is the author's claim, not evidence.
 
 ## Phase 5 - Posting comments
 

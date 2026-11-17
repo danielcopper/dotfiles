@@ -2,11 +2,11 @@
 
 Phase 1, re-review lookups and Phase 5 of [`SKILL.md`](SKILL.md) for GitHub.
 
-PR URL: `https://github.com/<owner>/<repo>/pull/<n>`. Everything runs through `gh`, which must be installed and authenticated - check `gh auth status` first; if it fails, stop and ask the user to set it up (`gh auth login`). The `{owner}/{repo}` placeholders in `gh api` paths resolve from the current checkout, so the repo check below runs before any of them.
+PR URL: `https://github.com/<owner>/<repo>/pull/<n>`. Everything runs through `gh`, which must be installed and authenticated - check `gh auth status` first; if it fails, stop and ask the user to set it up (`gh auth login`). Write the `<owner>/<repo>` the repo check below takes from `origin` into every `gh api` path (for `{owner}` and `{repo}`) and pass `-R <owner>/<repo>` to `gh pr` and `gh issue`: gh's own placeholders resolve to its base repo, which in a fork checkout is `upstream`, not `origin`.
 
 ## Phase 1 - Fetch the PR
 
-**Repo check first:** `gh repo view --json nameWithOwner -q .nameWithOwner` must equal the `<owner>/<repo>` of the PR URL (case-insensitive). On mismatch, stop. For a bare number the PR resolves against this checkout, so the check holds by construction.
+**Repo check first:** take `<owner>/<repo>` from `git remote get-url origin` (ssh or https form). For a PR URL it must equal the URL's `<owner>/<repo>`, case-insensitively; on mismatch, stop. For a bare number it is the PR's repo by construction.
 
 Then run these in parallel:
 

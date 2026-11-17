@@ -19,7 +19,7 @@ it carries Phase 1 (fetch), Phase 5 (posting) and the re-review lookups.
 
 The platform file's Phase 1 leaves you with: the PR metadata (title, author, source → target, status); **the spec** —
 the description plus the linked work items or issues (title, description, acceptance criteria), and in a convention
-repo each issue's `## Decisions` and `## Done when` plus the epic's `## Decisions` when it says "See epic #N"; the
+repo the issue and epic sections the platform file names; the
 existing threads and which are the user's; `BASE` and `HEAD_SHA`; and a passed check that `origin` is the PR's repo.
 
 **Re-review.** When the user asks for one, or the threads include the user's earlier ones, ask whether this is a round
@@ -54,7 +54,7 @@ author, source → target, status, file count (`git diff --shortstat <range>`), 
 ## Phase 2 - Run the review agents
 
 Run the agents [`review-agents.md`](../../review-agents.md) names for the range; a re-review follows its fix-round rule
-(which agents, which range, **verify only**, who judges which thread — before round 3 `reviewer` judges them all). Each
+(which agents, which range, **verify only**, who judges which thread). Each
 prompt carries:
 
 - the PR's intent in one or two sentences, and the range as two SHAs (the agent fetches the diff)
@@ -73,7 +73,7 @@ reaches the PR as `architecture-reviewer` findings.
 ## Phase 3 - Build the task list
 
 Merge the findings as `review-agents.md` says and register one task per finding with `TaskCreate`: earlier threads
-first in a re-review, then Critical → Important → Minor, `pre-existing` last. Each task holds the finding, the agent,
+first in a re-review, each with its judging agent's verdict and evidence, then Critical → Important → Minor, `pre-existing` last. Each task holds the finding, the agent,
 an **Empirical check** (the command, probe or source read that proves or refutes it) and an empty **Outcome**. A
 finding you drop as a clear duplicate of an existing thread or an agent hallucination is named in the summary, never
 dropped silently. Present the list and **stop**: the user picks where to start.
