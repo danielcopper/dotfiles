@@ -69,8 +69,8 @@ Rewrite the `MEMORY.md` index in each scope touched by Phase 2 to reflect curren
 - `~/Memory/<repo-name>/MEMORY.md` for each in-scope repo tier
 
 For each `MEMORY.md`:
-- One line per topic file (~200 bytes): link, keyword-dense description, type, last-updated date — dense enough to
-  match how the user phrases topics. Detail that only the index carried moves into the topic file first.
+- One entry per topic file in the shape "Index size" in the README sets, including which notes the canon covers and
+  so leave the index. Detail that only the index carried moves into the topic file first.
 - Daily files are not indexed.
 - Note last-consolidated date at the top.
 - Measure each index against its limit (global under 25 KB, repo tier under 7.5 KB — see "Index size" in the README) and
