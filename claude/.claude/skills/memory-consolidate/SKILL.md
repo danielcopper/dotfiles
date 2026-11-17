@@ -26,7 +26,7 @@ Do everything `/memory-dream` does — see the `memory-dream` skill for full beh
 - Read dailies as source; read durables (global + repo) as reference.
 - Plan: promote recurring/durable bullets, archive old dailies (>30d default), skip not-yet-durable.
 - **Wait for approval.**
-- Apply (promote, archive, refresh `MEMORY.md` daily summary).
+- Apply (promote, archive, refresh the `MEMORY.md` index).
 
 ## Phase 2 — Durable sweep
 
@@ -69,11 +69,11 @@ Rewrite the `MEMORY.md` index in each scope touched by Phase 2 to reflect curren
 - `~/Memory/<repo-name>/MEMORY.md` for each in-scope repo tier
 
 For each `MEMORY.md`:
-- One entry per topic file in the shape "Index size" in the README sets, including which notes the canon covers and
-  so leave the index. Detail that only the index carried moves into the topic file first.
+- One entry per topic file whose rule the agent rules under `~/.claude/` don't state in full, in the shape "Index
+  size" in the README sets; the others go on its "Provenance only" list. Detail that only the index carried moves into the topic file first.
 - Daily files are not indexed.
 - Note last-consolidated date at the top.
-- Measure each index against its limit (global under 25 KB, repo tier under 7.5 KB — see "Index size" in the README) and
+- Measure each index against its limit ("Index size" in the README) and
   report the sizes with the proposal. Over the limit: apply the README's order (consolidate, move location-bound
   entries, promote to the wiki, and only then a two-level index).
 

@@ -9,7 +9,7 @@ You are running the `/memory-dream` command. Three things happen, all gated by u
 1. Recurring or important themes from dailies are proposed for promotion to durable memory — or, for proven reference
    knowledge, to the wiki canon (`~/memex/daniel/wiki/`).
 2. Older dailies that aren't worth promoting are proposed for archival under `daily/archive/<year>/`.
-3. Daily index in `MEMORY.md` is refreshed, and `TIME-BOUND` index markers are checked against their conditions.
+3. The `MEMORY.md` index is refreshed for touched topic files, and `TIME-BOUND` index markers are checked against their conditions.
 
 Read the routing rules at `~/Memory/global/README.md` first if not already in context.
 
@@ -50,7 +50,7 @@ For each approved item:
 
 - **Promote**: append/merge into the destination file. Don't blindly duplicate — check for existing entries first. **Then remove the source entry from the daily** (the whole `## HH:MM — topic` section). Content now lives in the topic file; leaving it in the daily is duplication. Skipped (not-promoted) entries stay in the daily for pattern detection over time.
 - **Archive**: `mkdir -p ~/Memory/global/daily/archive/<year>/` and `mv` the daily file there. Plain `mv` — no git involved.
-- **Refresh `~/Memory/global/MEMORY.md`** index: a new file gets its entry, a touched file whose hook no longer fits gets a new hook (see "Index size" in `~/Memory/global/README.md`). Daily files are not indexed; promoted bullets land in topic files which already have their own index entries. Then measure every index you wrote to against its limit (global under 25 KB, repo tier under 7.5 KB) and say so when it is near or over.
+- **Refresh `~/Memory/global/MEMORY.md`** index as "Updating the index" in `~/Memory/global/README.md` says. Daily files are not indexed; promoted bullets land in topic files which already have their own index entries. Then measure every index you wrote to against its limit ("Index size" in the README) and say so when it is near or over.
 - **TTL check**: for every index entry marked `TIME-BOUND, delete when <condition>`, check the condition (e.g. via `gh`); if met, propose deleting file + entry.
 
 ## Constraints
