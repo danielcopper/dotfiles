@@ -148,16 +148,6 @@
         ]
       },
       {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/sonar-secrets/build-scripts/pretool-secrets.sh",
-            "timeout": 60
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -264,16 +254,6 @@
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/user_prompt_submit.py",
             "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/sonar-secrets/build-scripts/prompt-secrets.sh",
-            "timeout": 60
           }
         ]
       }
