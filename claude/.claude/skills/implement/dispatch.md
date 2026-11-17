@@ -15,9 +15,9 @@ The lead writes `~/Memory/<repo>/brief-<N>.md` before dispatching — paste noth
 - **Extras** — task-specific only: files to read first, an exemplar to match, verification specifics, an ADR to write
 
 In a convention repo the issue is the spec (`## Wanted`, `## Decisions`, `## Done when`, `## Out of scope`, and the
-epic's `## Decisions`), so the brief holds nothing else and a decision never lives in the brief. An issue that is not
-ready (`SKILL.md`, step 3) is not dispatched. In any other repo the brief adds **Goal** (two or three sentences),
-**Done criteria**, **In scope** and **Out of scope**.
+epic's `## Decisions`), so the brief holds nothing else and a decision never lives in the brief. An issue with an open
+question or without `## Decisions` is not dispatched. In any other repo the brief adds **Goal** (two or three
+sentences), **Done criteria**, **In scope** and **Out of scope**.
 
 ## Implementer dispatch
 
@@ -53,11 +53,10 @@ reviewed commit as `review-agents.md`, "Fix rounds", sets. Beyond that:
 - a specialist — the change's intent in one or two sentences
 
 Pass the scope and earlier findings without judging them — "don't flag X" or "treat Y as minor" corrupts the review.
-The lead checks only whether a Critical or Important finding's facts hold before it goes to a fix round.
+The lead checks only a finding's facts, as `review-agents.md`, "Routing the findings", says.
 
 ## Fix dispatch
 
-When the routing in `review-agents.md` sends findings to the implementer — small by-catch and the user's fix-now
-rulings included — re-dispatch it with the same brief, the saved report and review files, and the findings to fix,
-ending the prompt as above. It fixes, re-runs the tests covering its changes and reports; then the delta is reviewed
-as a fix round, or after the round cap as the single verify-only pass.
+When the routing in `review-agents.md` sends findings to the implementer, re-dispatch it with the same brief, the saved
+report and review files, and the findings to fix, ending the prompt as above. It fixes and reports; then the delta is
+reviewed as a fix round, or after the round cap as the single verify-only pass.

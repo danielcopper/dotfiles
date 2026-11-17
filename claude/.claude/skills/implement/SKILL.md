@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 Run one GitHub issue through the pipeline: understand → align → implement → review → PR → green → handoff. You are the
 lead: you orchestrate and own push and PR; agents work in the issue's worktree by its absolute path while you stay in
-the main checkout. Keep going between steps. Merging is the user's, unless they grant full-auto for this run.
+the main checkout. Keep going between steps.
 
 A **convention repo** has `## Where decisions live` in its `CLAUDE.md`; steps marked *(convention)* apply only there.
 
@@ -32,9 +32,10 @@ State approach, scope and what stays untouched; ask open questions one at a time
 (or a standing grant) and no open question, go straight on — open questions always stop.
 
 *(convention)* The answers go into the issue before step 4, as `repo-config.md`, "Questions and decisions in an issue",
-says (`## Decisions` with "None." when nothing was to decide); `--go` also needs an issue with no open question. A
-decision meeting the ADR criteria gets an ADR where `grill-with-docs`, "Where they are written", puts it — in the repo
-the implementer writes it in the PR and the issue links it, outside the repo you write it unlinked.
+says, plus `## Out of scope` when anything was ruled out (`## Decisions` with "None." when nothing was to decide);
+`--go` also needs an issue with no open question. A decision meeting the ADR criteria gets an ADR where
+`grill-with-docs`, "Where they are written", puts it — in the repo the implementer writes it in the PR and the issue
+links it, outside the repo you write it unlinked.
 
 *Done when:* the user's go *(convention)* and every answer in the issue.
 
@@ -59,8 +60,8 @@ into the issue as `repo-config.md`, "Questions and decisions in an issue", says,
 ## 6. Review
 
 Run the review agents [`review-agents.md`](../../review-agents.md) names, per `dispatch.md`. Re-read `review-agents.md`
-before each round: it routes the findings — each Critical or Important one checked at its artifact before it goes back
-— and sets the fix rounds and their cap.
+before each round: it routes the findings, including the check of each Critical or Important one at its artifact, and
+sets the fix rounds and their cap.
 
 *Done when:* every finding sent to the implementer is addressed or, after the round cap, on the user's list, and the
 user has ruled on that list.
@@ -87,15 +88,16 @@ Draft the PR — conventional-commit title, `Closes #<N>`, one sentence per smal
 ## 9. Watch to green
 
 Poll `gh pr checks` until `green_definition` (`repo-config.md`) holds. A failure goes back to the implementer, or you fix
-it when trivial; a fix that changes behaviour gets a delta review by the reviewer. After a rebase onto a moved main, `git -C <wt> push --force-with-lease`. *(convention)* A red
-`decisions` check is fixed in the linked issue; editing it re-runs the check.
+it when trivial; a fix that changes behaviour gets its delta reviewed as a fix round (`review-agents.md`). After a
+rebase onto a moved main, `git -C <wt> push --force-with-lease`. *(convention)* A red `decisions` check names its rule:
+a missing `## Decisions` or an open question is fixed in the linked issue, and editing it re-runs the check; the other
+rules are fixed in the PR.
 
 At green, run the profile's `user_gate` where it applies: prepare it fully (state, exact steps, expected result) and stop
 for the user's verdict. *(convention)* Then add one sentence with the result to the PR body, drafted as
 `public_text_drafts` says.
 
-Green is not a merge go: merge only when the user asks for this merge, or under a full-auto grant for this run, and
-only after the user gate.
+Merging follows `merge_policy` (`repo-config.md`), and only after the user gate.
 
 *Done when:* green, the user gate passed *(convention)* with its result in the PR body, and the PR handed over or merged
 under that grant.
@@ -104,10 +106,10 @@ under that grant.
 
 After the merge: check the issue closed and, where there is a board, reached Done (the epic stays In Progress while
 siblings are open); remove worktree and branch per the `worktree` skill; move the issue's working files
-(`~/Memory/<repo>/<kind>-<N>[-<suffix>].md`) to `archive/<N>-<slug>/`, each opening with `Historical — working notes
-for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.` File the issues the user
-chose for large by-catch as `public_text_drafts` says, in the Planned change shape (`## Today`, `## Wanted`,
-`## To decide`, `## Done when`), with generic data shapes and glossary terms.
+(`~/Memory/<repo>/<kind>-<N>[-<suffix>].md`) to `archive/<N>-<slug>/`, each with this line first after its front matter:
+`Historical — working notes for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.`
+File the issues the user chose for large by-catch as `public_text_drafts` says, in the Planned change shape (`## Today`,
+`## Wanted`, `## To decide`, `## Done when`), with generic data shapes and glossary terms.
 
 *Done when:* the board is consistent, those issues are filed, and the working files are archived (a run that ends
 before the merge skips this).

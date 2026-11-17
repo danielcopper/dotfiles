@@ -1,8 +1,8 @@
 # Review agents
 
-Which agents review a change, how a fix round is reviewed, and where each finding goes — for `/implement`,
-`/pr-review` and a plain session alike. Routing and grouping are for a change of our own; someone else's PR goes by the
-last paragraph.
+Which agents review a change, how a fix round is reviewed, and where each finding goes — for `/implement`, `/pr-review`
+and a plain session alike. The specialists' scales hold everywhere; routing and grouping are for a change of our own,
+and someone else's PR goes by the last paragraph.
 
 ## Which agents run
 
@@ -30,9 +30,10 @@ lead offers the user a Fable-model reviewer and starts it only on their yes.
 
 ## Fix rounds
 
-The first review is no fix round. Fix round N is the review after the implementer's N-th fix dispatch; a change gets at
-most five. A fix round reviews only the delta, `git diff <last-reviewed> HEAD`, also across an autosquash; after a
-rebase onto a moved base the lead agrees the range with the user first (`git range-diff`). Every agent starts fresh.
+The first review is no fix round, nor is the single pass after the cap. Fix round N is the review after the
+implementer's N-th fix dispatch; a change gets at most five. A fix round reviews only the delta,
+`git diff <last-reviewed> HEAD`, also across an autosquash; after a rebase onto a moved base the lead agrees the range
+with the user first (`git range-diff`). Every agent starts fresh.
 
 The **findings to judge** are those the fix-round task sent to the implementer, plus earlier ones a verdict left not or
 partially addressed — not those the user ruled later or drop, or has not ruled yet.
@@ -66,14 +67,14 @@ Critical when the finding names what `reviewer` calls Critical, else Important:
 
 - `silent-failure-hunter` — CRITICAL → by that rule, HIGH → Important, MEDIUM → Minor.
 - `pr-test-analyzer` — 9–10 → by that rule, 7–8 → Important, 5–6 → Minor, 1–4 not reported; the rating decides, not
-  the section heading.
+  the section heading, and a finding without one is Minor.
 - `type-design-analyzer` — everything under Concerns and Recommended Improvements → Minor.
 
 Each finding is routed:
 
 - **Critical or Important on the change** → the implementer and a fix round (after the cap, the user's list), once the
-  lead has checked it at the artifact — the cited file:line, quoted text or command. One that does not hold there goes
-  on the user's list, marked "not confirmed".
+  lead has checked it at the artifact — the cited file:line, quoted text or command. One that does not hold there, or
+  cannot be confirmed, goes on the user's list, marked "not confirmed".
 - **Minor on the change** → the user's list: fix now, later, or drop.
 - **By-catch** (tagged `pre-existing`, or listed by the implementer) goes by its class, as
   [`agents/implementer.md`](agents/implementer.md), "## Scope", defines small:

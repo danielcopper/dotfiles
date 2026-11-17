@@ -62,8 +62,8 @@ In the owner's repos the repository facts live there; the lead copies the gate a
   task runner over naming tools directly.
 - **Review checks** — the lint and type commands the reviewer runs on changed files only.
 - **Worktree task** — optional: creates a worktree at the convention path (type, slug, base); without it,
-  `git worktree add` as the `worktree` skill says.
-- **Agent rules** — rules for the implementer beyond its definition (scratch files, gate duration, rule files to read);
+  `git worktree add` at the path the `worktree` skill gives.
+- **Agent rules** — rules for the implementer beyond its definition (gate duration, staging, rule files to read);
   left out when there are none.
 
 ## `repo-profile.md`
