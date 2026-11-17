@@ -5,36 +5,32 @@ description: Review an Azure DevOps or GitHub pull request together with the use
 
 # PR Review
 
-Collaborative review workflow. **You do the legwork (fetch, validate empirically, draft). The user decides what gets posted.**
+Collaborative review of someone else's pull request. **You do the legwork — fetch, validate empirically, draft; the
+user decides what gets posted.** Comments only: no votes, approvals, status checks or merges.
 
 ## Platform
 
-The platform comes from the input, nothing else:
-
-- A URL: host `dev.azure.com` or `*.visualstudio.com` -> Azure DevOps; `github.com` -> GitHub.
-- A bare PR number: the host in `git remote get-url origin` of the current repo, same mapping - plus `ssh.dev.azure.com` (Azure DevOps SSH remotes such as `git@ssh.dev.azure.com:v3/<org>/<project>/<repo>`) -> Azure DevOps.
-- Neither matches: ask the user.
-
-Then read the platform file - [`azure-devops.md`](azure-devops.md) or [`github.md`](github.md). It carries Phase 1 (fetch) and Phase 5 (posting), plus the re-review lookups; everything else is here.
+From the input alone: a URL on `dev.azure.com` or `*.visualstudio.com` → Azure DevOps, on `github.com` → GitHub; a bare
+PR number → the host of `git remote get-url origin`, the same mapping plus `ssh.dev.azure.com` → Azure DevOps; neither
+→ ask. No input → ask for the URL or number. Then read [`azure-devops.md`](azure-devops.md) or [`github.md`](github.md):
+it carries Phase 1 (fetch), Phase 5 (posting) and the re-review lookups.
 
 ## Phase 1 - Fetch the PR
 
-Follow the platform file's Phase 1. It must leave you with:
+The platform file's Phase 1 leaves you with: the PR metadata (title, author, source → target, status); **the spec** —
+the description plus the linked work items or issues (title, description, acceptance criteria), and in a convention
+repo each issue's `## Decisions` and `## Done when` plus the epic's `## Decisions` when it says "See epic #N"; the
+existing threads and which are the user's; `BASE` and `HEAD_SHA`; and a passed check that `origin` is the PR's repo.
 
-- PR metadata: title, author, source -> target, status
-- **The spec**: the PR description plus the linked work items (Azure DevOps) or linked issues (GitHub) - title, description, acceptance criteria. In a convention repo (GitHub; the platform file says how to tell) it also includes each linked issue's `## Decisions` and `## Done when`, and the epic's `## Decisions` when an issue says "See epic #N"
-- Existing threads/comments, so nobody duplicates what is already on the PR
-- The user's identity, and which of those threads are theirs
-- `BASE` (the fetched target ref) and `HEAD_SHA` (the PR head commit)
-- A passed repo check: the current checkout's `origin` is the PR's repository
+**Re-review.** When the user asks for one, or the threads include the user's earlier ones, ask whether this is a round
+after the author pushed fixes; if so, the platform file derives `LAST_SHA` and the per-thread details — confirm
+`LAST_SHA` with the user.
 
-**Re-review.** When the user asks for a re-review, or the existing threads include the user's own earlier ones, ask whether this is a second round after the author pushed fixes. If yes, the platform file's re-review section derives `LAST_SHA` (the last reviewed commit) and the per-thread details; confirm `LAST_SHA` with the user.
-
-Do **not** fetch the diff yourself, slice it, or skim it - the agents in Phase 2 read it. **Do not create a review worktree yet.** Defer until a task actually needs to run PR code.
+Don't read the diff yourself — the agents do — and create no worktree until a task needs to run PR code.
 
 ### Fail fast
 
-Before any agent starts, all of these hold - otherwise stop and tell the user what failed. First, the platform file's repo check passed. Then:
+Before any agent starts, the repo check passed and all of these hold; otherwise stop and tell the user:
 
 ```bash
 git rev-parse --verify "$BASE"                       # target ref fetched
@@ -43,7 +39,8 @@ MB=$(git merge-base "$BASE" "$HEAD_SHA")             # merge-base found
 ! git diff --quiet "$MB" "$HEAD_SHA"                 # diff non-empty
 ```
 
-The review range is `$MB..$HEAD_SHA`. In a re-review it is `$LAST_SHA..$HEAD_SHA`, and additionally `LAST_SHA` exists locally and that delta is non-empty. The delta must also be the author's fixes alone:
+The range is `$MB..$HEAD_SHA`; in a re-review `$LAST_SHA..$HEAD_SHA`, with `LAST_SHA` present locally, a non-empty
+delta, and the delta the author's fixes alone:
 
 ```bash
 git merge-base --is-ancestor "$LAST_SHA" "$HEAD_SHA"                            # no rebase / force-push
@@ -51,95 +48,61 @@ git merge-base --is-ancestor "$LAST_SHA" "$HEAD_SHA"                            
 [ -z "$(git rev-list --merges "$LAST_SHA..$HEAD_SHA")" ]                        # target not merged in
 ```
 
-If any of these fails - or `LAST_SHA` is missing - the author rebased, force-pushed or merged the target in, and the delta would mix in target-branch changes. Stop and agree the range with the user (e.g. `git range-diff`) before going on.
+If one fails, agree the range with the user (e.g. `git range-diff`) first. Then summarise in one short block: title,
+author, source → target, status, file count (`git diff --shortstat <range>`), linked items, what it does.
 
-Once the checks pass, summarise to the user in one short block: title, author, source -> target, status, file count (`git diff --shortstat <range>`), linked items, what it does. Keep it tight.
+## Phase 2 - Run the review agents
 
-## Phase 2 - Run the reviewer agents
+Run the agents [`review-agents.md`](../../review-agents.md) names for the range; a re-review follows its fix-round rule
+(which agents, which range, **verify only**, who judges which thread — before round 3 `reviewer` judges them all). Each
+prompt carries:
 
-Run the agents [`~/.claude/review-agents.md`](../../review-agents.md) names for the range - its table decides which, and they run in parallel as it says; `reviewer` (the custom agent in `~/.claude/agents/reviewer.md`) runs in its PR-review mode. Don't re-analyse the diff yourself.
+- the PR's intent in one or two sentences, and the range as two SHAs (the agent fetches the diff)
+- the existing thread topics, so nothing is raised twice
+- findings as a flat list — file:line, claim, suggested fix, and the agent's own rating (`review-agents.md`, "Routing
+  the findings")
+- no cosmetic nits unless they harm reviewability, and verbatim: **"Do not spawn further agents and do not invoke any
+  review skill."**
 
-For each agent, the prompt must include:
-
-- The PR's intent (1-2 sentences from the PR description)
-- The range as two commit SHAs — `$MB` and `$HEAD_SHA`, in a re-review `$LAST_SHA` and `$HEAD_SHA`; the agent fetches the diff itself
-- Existing PR thread topics to **avoid duplicating** (Sonar warnings already posted, reviewer comments still open)
-- A request to return findings as a flat list with: **file:line**, **claim**, **suggested fix**, and the rating the agent's own definition gives it: severity and score for our own agents, a specialist's as `review-agents.md`, "Routing the findings", lists it (`type-design-analyzer` rates none)
-- An instruction to skip cosmetic nits unless they actively harm reviewability
-- This line, verbatim: **"Do not spawn further agents and do not invoke any review skill."**
-
-The `reviewer` prompt additionally opens with **"This is a PR review."** so it switches to its PR-review mode, and passes the full spec: the PR description plus each linked work item or issue (title, description, acceptance criteria). Together they are the brief, and the description's claims are what the reviewer verifies. In a convention repo the prompt also carries the issues' and the epic's `## Decisions` and `## Done when`.
-
-The `reviewer`, `architecture-reviewer` and `prose-reviewer` prompts additionally name the repo path, which their `git -C` needs; `architecture-reviewer` and `prose-reviewer` read the tree at the range's head commit, so no worktree is needed. Those two prompts also pass the decisions in the spec (the issues' and the epic's `## Decisions`, or the PR description's), so a deviation the change was told to make is cited instead of raised. The `architecture-reviewer` prompt also names, per decision, the old behaviour it replaces, for its sweep of sites still doing it.
-
-In a re-review, which agents run, on what range, whether their prompts say **verify only**, and which agent judges which earlier thread follow the fix-round rule in `review-agents.md`; before fix round 3 `reviewer` judges them all. Each judging agent's prompt carries its threads (anchor, text, replies, thread status) and asks for a verdict per thread, in the shape `reviewer.md`'s "## Re-review" sets.
-
-Do **not** run `code-simplifier` - this skill posts comments on someone else's PR, not refactors our own code. Simplification reaches the PR as findings from `architecture-reviewer`.
-
-When all agents return, merge their findings into one list for Phase 3, as `review-agents.md` says.
+`reviewer`'s prompt opens with **"This is a PR review."** and carries the full spec. `reviewer`, `architecture-reviewer`
+and `prose-reviewer` get the repo path; the latter two also get the spec's decisions, and `architecture-reviewer` per
+decision the old behaviour it replaces. A judging agent gets its threads (anchor, text, replies, status) and gives a
+verdict per thread in the shape of `reviewer.md`, "## Re-review". `code-simplifier` does not run: simplification
+reaches the PR as `architecture-reviewer` findings.
 
 ## Phase 3 - Build the task list
 
-Use `TaskCreate` to register one task per finding, ordered by severity: **Critical -> Important -> Minor**, a specialist's own scale read as `review-agents.md`, "Routing the findings", maps it, and the `pre-existing` findings after them. Each task content should include:
+Merge the findings as `review-agents.md` says and register one task per finding with `TaskCreate`: earlier threads
+first in a re-review, then Critical → Important → Minor, `pre-existing` last. Each task holds the finding, the agent,
+an **Empirical check** (the command, probe or source read that proves or refutes it) and an empty **Outcome**. A
+finding you drop as a clear duplicate of an existing thread or an agent hallucination is named in the summary, never
+dropped silently. Present the list and **stop**: the user picks where to start.
 
-- The finding (file:line, claim, suggested fix)
-- The **agent** that raised it (`reviewer` / `architecture-reviewer` / `prose-reviewer` / `pr-test-analyzer` / `silent-failure-hunter` / `type-design-analyzer`)
-- An **"Empirical check"** section - exactly what command/probe/source-read proves or refutes the claim
-- An **"Outcome"** section left blank until validated
+## Phase 4 - Validate, one task at a time
 
-A finding tagged `pre-existing` gets a task too, routed as `review-agents.md`, "Routing the findings", says for someone else's PR.
+In the user's order (or one after another when they say so):
 
-In a re-review, the earlier threads come first: one task per thread with the verdict and evidence of the agent that judged it, ahead of the new findings.
+1. Running PR code needs the review worktree: create it once from the head commit, detached —
+   `git worktree add --detach <repo-parent>/<repo>.worktrees/review/<PR#>-<short-slug> "$HEAD_SHA"` — and install
+   dependencies once.
+2. **Validate empirically**: run, mutate, probe, cite source lines and exit codes; read the installed library source
+   rather than trusting memory. `cmd | tail` returns `tail`'s exit code (use `${PIPESTATUS[0]}`); force flaky failures
+   to repeat (e.g. `--testTimeout=1`). A real code path is not a reachable one
+   (`~/.claude/memory/verification-reachability.md`).
+3. Report the evidence with your lean (post / skip), then wait: post, skip, shorter, more proof, or a draft to show
+   first.
+4. Post or drop per the platform file's Phase 5, and record the outcome.
 
-If you triage a finding as not worth a task (clear duplicate of an existing thread on the PR, obvious agent hallucination), say so explicitly in the summary message - don't silently drop it.
-
-Then present the task list summary and **stop**. Ask the user where to start.
-
-## Phase 4 - Per-task validation loop
-
-For each task, **in the order the user picks** (or sequential if they say "go from one to the next"):
-
-1. **Set up what you need.** If validating requires running PR code and the review worktree doesn't exist yet, create it now from the PR head commit, detached: `git worktree add --detach <repo-parent>/<repo>.worktrees/review/<PR#>-<short-slug> "$HEAD_SHA"`. Run `npm ci` / `dotnet restore` / etc. once, reuse across tasks.
-2. **Validate empirically.** Don't argue from training-data knowledge - run, mutate, probe. Cite source lines or capture exit codes. Watch for traps:
-   - `cmd | tail` returns `tail`'s exit code, not `cmd`'s. Capture `${PIPESTATUS[0]}` or redirect to a file.
-   - Flaky tests aren't deterministic - use forced timeouts (`--testTimeout=1`) for repeatable failures.
-   - Training cutoff matters: spy-library behaviour, ESM internals, framework defaults all drift. Read the installed source.
-   - See `~/.claude/memory/verification-reachability.md`.
-3. **Report findings** to the user with the empirical evidence. State your lean (post / skip), but **the user decides**.
-4. **Wait for the user's call.** "Post" / "skip" / "shorter" / "more proof" / "draft it differently". If they want a draft, write the comment text and show it before posting.
-5. **Post or drop** based on their decision, per the platform file's Phase 5 - it says whether an approved comment goes out now or with the final batch. Update the task with the outcome.
-
-### Hard rules
-
-- **You never decide to close a task.** Only the user does. If a finding looks resolved to you, say so and wait.
-- **You never auto-post** even when the user said "go one to the next". That phrase means *validate* one after the other, not *post* one after the other.
-- **You never decide what to skip** beyond clear agent hallucinations / duplicates flagged in Phase 3. Marginal nits go in the task list; the user calls skip.
-- **No `git add .`**, no `--no-verify`, no destructive commands without explicit OK (per global rules).
-- If the user pushes back on a claim, **don't capitulate** - re-verify and either correct yourself or hold the line with evidence.
+The user alone closes a task and decides what is skipped beyond Phase 3's duplicates and hallucinations. "Go one to the
+next" means validate in turn, never post in turn. When the user pushes back, re-verify and correct yourself or hold the
+line with evidence.
 
 ## Phase 5 - Posting comments
 
-Follow the platform file's Phase 5. Comment style, on both platforms:
-
-- Short. The user often reduces a long draft to one sentence ("please align the versions of X and Y so the peer requirement matches").
-- One concrete ask per comment. Don't bundle.
-- One line of empirical evidence ("verified locally: `npm ls` errors with ELSPROBLEMS") helps the author trust the fix without being preachy.
-- No "thanks for the PR" / "consider perhaps" filler.
-- No AI mentions, no Co-authored-by.
+Per the platform file. Short, one concrete ask per comment, one line of evidence ("verified locally: `npm ls` errors
+with ELSPROBLEMS"), no filler, no AI mention.
 
 ## Phase 6 - Wrap up
 
-When all tasks are closed by the user (and, on GitHub, the batch from Phase 5 is submitted), print a final summary table: `# | outcome | comment link (if posted)`. Don't tear down the review worktree - the user may want to revisit. Mention that it lives at `<repo-parent>/<repo>.worktrees/review/<PR#>-<short-slug>`.
-
-## Inputs
-
-The user may invoke this skill with:
-- Full PR URL (Azure DevOps `.../_git/<repo>/pullrequest/<id>`, GitHub `github.com/<owner>/<repo>/pull/<n>`)
-- Bare PR number (`76600`) - current repo
-- Either of these plus "re-review" / "second round"
-- Nothing - ask for the URL or number
-
-## What this skill is NOT
-
-- Not an autonomous reviewer - the user is the second pair of eyes, not a rubber-stamp.
-- Not for voting, approving, requesting changes, status checks, or merging - comments only.
+Once the user has closed every task (on GitHub, with the batch submitted), print `# | outcome | comment link`. Leave
+the review worktree in place and name its path.
