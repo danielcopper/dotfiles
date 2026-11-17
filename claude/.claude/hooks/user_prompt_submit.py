@@ -63,7 +63,7 @@ def validate_prompt(prompt):
 
     for pattern in blocked_patterns:
         if re.search(pattern, prompt_lower):
-            return False, f"Blocked pattern detected"
+            return False, "Blocked pattern detected"
 
     return True, None
 

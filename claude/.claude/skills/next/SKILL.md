@@ -21,7 +21,7 @@ The board from the repo's profile ([`~/.claude/skills/implement/repo-config.md`]
 
 Before recommending: In Progress items with no matching open PR or recent commits are possibly stalled or forgotten — name them. Open PRs sitting green and unmerged — name them. These often ARE the real next action.
 
-A Ready issue with an open question under `## To decide` (or `### To decide`) is not startable — name it with its open questions. It can be the pick only as "decide these first", never as a straight `/implement`.
+A Ready issue with an open question under `## To decide` (or `### To decide`; what counts as open: `~/.claude/skills/implement/repo-config.md`, "Questions and decisions in an issue") is not startable — name it with its open questions. It can be the pick only as "decide these first", never as a straight `/implement`.
 
 ## 3. Recommend
 
