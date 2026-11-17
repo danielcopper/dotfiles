@@ -26,7 +26,7 @@ Each holds in every repo unless its profile departs from it under `defaults` (sc
 
 In a repo whose `CLAUDE.md` has `## Where decisions live`, the issue's `## Decisions` is the home of each change's decisions, and an ADR in the repo is linked from that issue.
 
-- **An issue someone else opened stays as they wrote it.** The work gets its own issue — a new issue, posted as `public_text_drafts` says and put on the board in In Progress — that links theirs and carries the decisions; from then on it is the run's issue. The PR closes both: the decisions check reads `## Decisions` only in issues a maintainer opened.
+- **In an issue someone else opened, their text stays as they wrote it.** The questions and decisions go into a section appended below it: a `---` line, then `> [!NOTE]` / `> Added by the maintainer.`, then the sections. Checking off their own `## To decide` items is the only change to their text.
 - **`## To decide` is a checkbox list, one question each.** An answered question is checked off and points to its decision (`- [x] … → D1`); the question stays.
 - **An open question is an unchecked item or any other text.** Checked items with their indented continuation lines, blank lines and `_No response_` are not open.
 - **Decisions are numbered and appended** (`- D1: …`). A decision that changes is struck through, and the new one follows with its date (`- ~~D2: …~~`, then `- D2 (changed YYYY-MM-DD): …`).
