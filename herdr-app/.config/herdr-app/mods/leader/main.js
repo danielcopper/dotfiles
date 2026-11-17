@@ -7,11 +7,12 @@
 // dropped, not passed to the terminal. A key can open a second level of keys,
 // like a which-key group in nvim; it closes the same way, and shows its list
 // at once when the first level's list is already up. A second ctrl-space
-// sends ctrl-space on to the focused terminal, like tmux's send-prefix.
+// waits for one more key and gives it to the tmux in the focused terminal as
+// if typed after tmux's own prefix (see init).
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, hc, props, closeOverlay, openOverlay, nextCommand, checking, theme, shared, panes, focused, notify, layout } from "herdr";
+import { run, exec, hc, props, closeOverlay, openOverlay, nextCommand, checking, theme, shared, panes, focused, notify, layout } from "herdr";
 
 const HINT_MS = 500;
 const REPEAT_MS = 700;
@@ -31,27 +32,99 @@ function focusPrevious() {
   else notify({ title: "No previous pane", level: "info" });
 }
 
-// Sends ctrl-space to the program in the focused pane's terminal (the one a
-// terminal.show put in its place, if any). run() has no command that types a
-// key, so herdr-core's `hc keys` does. It runs here with the terminal's
-// address as the app gives it, machine-qualified for another machine
-// (`minisforum/t3`): this computer's core reaches the other machines' cores
-// itself, so the other machine needs no hc on its PATH. hc reports a failure
-// as JSON on stderr; the toast shows its message.
-async function sendPrefix() {
-  const f = focused();
-  const terminal = f?.shown ?? f?.terminal;
-  if (!terminal) {
-    notify({ title: "No terminal to send ctrl-space to", level: "info" });
-    return;
-  }
-  const r = await hc(["keys", terminal, "ctrl+space"]).catch((e) => ({ code: 1, stderr: String(e?.message ?? e) }));
-  if (r.code === 0) return;
-  let body = r.stderr.trim();
+// Finds the tmux attached to a terminal on its machine: the terminal's tty
+// (from the pid herdr-core reports) among the clients of each tmux server in
+// that user's socket folder ($TMUX_TMPDIR as herdr-core sees it, or /tmp). Prints the server's
+// socket, the client's tty, the prefix of the client's session, tmux's
+// repeat-time and initial-repeat-time (empty before tmux 3.5), and the keys
+// bound with -r in its prefix table. Exit 3: no tty under /proc; exit 4: no
+// tmux client there, with any version mismatch tmux reported on stderr.
+const FIND_TMUX = [
+  'tty=$(readlink "/proc/$1/fd/0") || exit 3',
+  "why=",
+  'for s in "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"/*; do',
+  '  [ -S "$s" ] || continue',
+  '  clients=$(tmux -S "$s" list-clients -F "#{client_tty}" 2>&1) || { case $clients in *version*) why="$clients";; esac; continue; }',
+  '  printf "%s\\n" "$clients" | grep -qxF "$tty" || continue',
+  '  echo "$s"; echo "$tty"',
+  '  session=$(tmux -S "$s" display -p -c "$tty" "#{session_id}")',
+  '  tmux -S "$s" show -Av -t "$session" prefix 2>/dev/null || tmux -S "$s" show -gv prefix',
+  '  tmux -S "$s" show -gv repeat-time; tmux -S "$s" show -gv initial-repeat-time 2>/dev/null || echo',
+  '  tmux -S "$s" list-keys -T prefix | awk \'{ r = 0; for (i = 2; i <= NF; i++) { if ($i == "-r") r = 1; if ($i == "-T") { if (r) printf "%s ", $(i + 2); break } } }\'',
+  "  echo; exit 0",
+  "done",
+  '[ -n "$why" ] && echo "$why" >&2',
+  "exit 4",
+].join("\n");
+
+// hc reports a failure as JSON on stderr; this is its message.
+function hcError(stderr) {
   try {
-    body = JSON.parse(body).error?.message ?? body;
-  } catch {}
-  notify({ title: "Could not send ctrl-space", body, level: "error" });
+    return JSON.parse(stderr).error?.message ?? stderr.trim();
+  } catch {
+    return stderr.trim();
+  }
+}
+
+const number = (text, fallback) => (text?.trim() !== "" && Number.isFinite(Number(text)) ? Number(text) : fallback);
+
+async function findTmux(terminal) {
+  const on = terminal.includes("/") ? terminal.slice(0, terminal.lastIndexOf("/")) : null;
+  const info = await hc(["get", terminal, "--json"]);
+  if (info.code !== 0) throw new Error(hcError(info.stderr));
+  const facts = JSON.parse(info.stdout);
+  // A tmux on the far side of ssh runs on another machine, out of reach here.
+  const program = (facts.foreground?.argv?.[0] ?? "").split("/").pop();
+  if (/^(ssh|mosh|mosh-client)$/.test(program)) {
+    throw new Error("tmux behind ssh can't be reached — open a space on that machine instead");
+  }
+  const r = await exec("sh", ["-c", FIND_TMUX, "leader", String(facts.pid)], { on });
+  if (r.code === 3) throw new Error("Can't read the terminal's tty (needs Linux /proc)");
+  if (r.code === 4) throw new Error(["No tmux in the user's socket folder has this terminal as a client", r.stderr.trim()].filter(Boolean).join(": "));
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `Looking for tmux failed with ${r.code}`);
+  const [socket, tty, prefix, repeatTime, initialRepeatTime, repeatable = ""] = r.stdout.split("\n");
+  const repeatMs = number(repeatTime, 500);
+  // initial-repeat-time 0 (or before tmux 3.5, none) means repeat-time.
+  const initialMs = number(initialRepeatTime, 0) || repeatMs;
+  return { on, socket, tty, prefix, repeatMs, initialMs, repeatable: new Set(repeatable.split(" ").filter(Boolean)) };
+}
+
+// Gives keys to that tmux client as if typed there (send-keys -K), so tmux
+// runs its own bindings for them; they never pass through the terminal, so
+// nothing the terminal receives meanwhile (the focus-in when the leader
+// closes, or keys typed fast) can come between the prefix and the key.
+async function sendToTmux(tmux, keys) {
+  const r = await exec("tmux", ["-S", tmux.socket, "send-keys", "-K", "-c", tmux.tty, ...keys], { on: tmux.on }).catch(
+    (e) => ({ code: 1, stderr: String(e?.message ?? e) }),
+  );
+  if (r.code !== 0) notify({ title: "tmux did not take the key", body: r.stderr.trim(), level: "error" });
+}
+
+// tmux's names for keys GPUI names differently.
+const TMUX_NAMED = {
+  enter: "Enter", tab: "Tab", escape: "Escape", space: "Space", backspace: "BSpace", delete: "DC", insert: "IC",
+  up: "Up", down: "Down", left: "Left", right: "Right", home: "Home", end: "End", pageup: "PPage", pagedown: "NPage",
+};
+
+// The tmux name of a key event (`|`, `H`, `$`, `Escape`, `C-a`, `M-x`, `S-Up`),
+// or null for one tmux has no name for. A printable key is what it types, so
+// a shifted `|` or `$` is itself.
+function tmuxKey(e) {
+  const m = e.modifiers ?? {};
+  if (m.platform || m.function) return null;
+  if (e.key === "tab" && m.shift && !m.control && !m.alt) return "BTab";
+  let base = TMUX_NAMED[e.key] ?? (/^f([1-9]|1[0-2])$/.test(e.key) ? e.key.toUpperCase() : null);
+  let typed = false;
+  if (!base) {
+    const ch = m.control || m.alt ? e.key : (e.key_char ?? e.key);
+    if (typeof ch !== "string" || [...ch].length !== 1 || ch < " ") return null;
+    base = (m.control || m.alt) && m.shift && /^[a-z]$/.test(ch) ? ch.toUpperCase() : ch;
+    typed = true;
+  }
+  const key = (m.control ? "C-" : "") + (m.alt ? "M-" : "") + (m.shift && !typed ? "S-" : "") + base;
+  // tmux reads an argument that ends in ; as the end of its command and drops
+  // that ;, so a key ending in ; goes with a second one.
+  return key.endsWith(";") ? `${key};` : key;
 }
 
 // Opens the file popup at the top, where herdr's terminals-bar opens the
@@ -148,8 +221,8 @@ const ACTIONS = [
   ["l", "go right", "Panes", "pane.go", { direction: "right" }, true],
   ["z", "zoom", "Panes", "pane.zoom", {}],
   ["x", "close pane", "Panes", "pane.close", {}],
-  // Pressed as ctrl-space: keys.json's "mod:leader" sends leader.send_prefix.
-  ["C-Space", "send prefix", "Panes", sendPrefix, {}],
+  // Pressed as ctrl-space; init takes it.
+  ["C-Space", "tmux prefix", "Panes", null, {}],
   ["t", "new tab", "Tabs", "tab.new", {}],
   ["c", "new tab", "Tabs", "tab.new", {}],
   ["n", "next tab", "Tabs", "tab.next", {}],
@@ -176,29 +249,125 @@ export default class Leader extends View {
     this.repeating = null;
     this.generation = 0;
     this.hints = 0;
-    // Set while hc sends ctrl-space; keys pressed meanwhile are dropped.
-    this.sending = false;
     this.hintLater(cx);
-    // A second ctrl-space never reaches on_key_down: keys.json binds it, in
-    // its "mod:leader" section, to leader.send_prefix, which arrives here.
+    // A second ctrl-space and Esc normally don't reach on_key_down: keys.json's
+    // "mod:leader" section, which wins while the leader has the keyboard, binds
+    // them to leader.send_prefix and leader.escape, which arrive here.
+    //
+    // ctrl-space ctrl-space <key> is for a tmux in the focused terminal, whose
+    // prefix is ctrl-space too: the leader takes <key> itself, since the
+    // overlay has the keyboard however fast it is typed, and gives tmux its
+    // prefix and <key> in one send (sendToTmux). When <key> is bound with -r
+    // there, further such keys go on without the prefix until tmux's repeat
+    // window (initial-repeat-time, then repeat-time) passes without one. Any
+    // other key, and every key after that, goes on bare, as typed into the
+    // pane, until the leader has sent all it took and closes. A third
+    // ctrl-space before <key> cancels; later it ends the passing, sending
+    // nothing. On another machine each send takes a round trip, so a long
+    // run of repeat keys can reach tmux after its window has closed.
+    this.passing = null;
     if (checking()) return;
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
-        if (command === "send_prefix") this.sendPrefixKey(cx);
+        if (command === "send_prefix") this.prefixAgain(cx);
+        else if (command === "escape") this.escape(cx);
       }
     });
   }
 
-  // The second ctrl-space: at the first level and not while repeating, sends
-  // ctrl-space on and closes once hc has answered (closing first would cancel
-  // the call); anywhere else it closes the leader.
-  sendPrefixKey(cx) {
-    if (this.sending) return;
+  prefixAgain(cx) {
+    const p = this.passing;
+    if (p) {
+      if (p.phase !== "first") return this.stopPassing(cx);
+      p.cancelled = true;
+      return this.close();
+    }
     if (this.level !== LEADER || this.repeating) return this.close();
-    this.sending = true;
+    const f = focused();
+    const terminal = f?.shown ?? f?.terminal;
+    if (!terminal) {
+      notify({ title: "No terminal to pass keys to", level: "info" });
+      return this.close();
+    }
+    // phase: "first" (the next key goes with the prefix), "repeat" (-r keys go
+    // on bare) or "bare" (keys go on as typed until the leader closes).
+    const passing = { tmux: null, queue: [], phase: "first", timer: 0, sent: Promise.resolve(), cancelled: false };
+    this.passing = passing;
+    cx.spawn(async (cx) => {
+      try {
+        passing.tmux = await findTmux(terminal);
+      } catch (e) {
+        if (passing.cancelled) return;
+        passing.cancelled = true;
+        notify({ title: "Can't pass keys to tmux", body: String(e?.message ?? e), level: "info" });
+        return this.close();
+      }
+      this.flush(cx);
+    });
+    cx.notify();
+  }
+
+  escape(cx) {
+    if (this.passing) this.passKey("Escape", cx);
+    else this.close();
+  }
+
+  passKey(key, cx) {
+    if (this.passing.cancelled) return;
+    this.passing.queue.push(key);
+    this.flush(cx);
+  }
+
+  // Sends the keys taken so far, in order, once tmux is found: the first with
+  // the prefix, -r keys bare while the repeat lasts, and any other key bare,
+  // after which the leader closes once everything has gone out.
+  flush(cx) {
+    const p = this.passing;
+    if (!p?.tmux || p.cancelled) return;
+    const { tmux } = p;
+    while (p.queue.length) {
+      const key = p.queue.shift();
+      const first = p.phase === "first";
+      p.sent = p.sent.then(() => sendToTmux(tmux, first ? [tmux.prefix, key] : [key]));
+      const repeats = tmux.repeatable.has(key) && (first || p.phase === "repeat");
+      p.phase = repeats ? "repeat" : "bare";
+      if (repeats) this.repeatLater(first ? tmux.initialMs : tmux.repeatMs, cx);
+    }
+    if (p.phase === "bare") this.closeWhenSent(cx);
+    cx.notify();
+  }
+
+  // Ends the repeat once its window passes without another -r key; a window of
+  // 0 ends it at once.
+  repeatLater(ms, cx) {
+    const p = this.passing;
+    const timer = ++p.timer;
+    if (ms <= 0) return this.stopPassing(cx);
+    cx.timer.after(ms, (cx) => {
+      if (p.timer !== timer || p.phase !== "repeat" || p.cancelled) return;
+      this.stopPassing(cx);
+    });
+  }
+
+  // No more prefix or repeat: what is still to come goes on bare.
+  stopPassing(cx) {
+    this.passing.phase = "bare";
+    this.closeWhenSent(cx);
+    cx.notify();
+  }
+
+  // Closes once every key taken has gone out and none is waiting (closing
+  // would cancel the sends still running), once.
+  closeWhenSent(cx) {
+    const p = this.passing;
+    const sent = p.sent;
+    if (p.waiting === sent) return;
+    p.waiting = sent;
     cx.spawn(async () => {
-      await sendPrefix();
+      await sent;
+      if (p.sent !== sent || p.queue.length || p.cancelled || p.closed) return;
+      p.closed = true;
       this.close();
     });
   }
@@ -219,8 +388,19 @@ export default class Leader extends View {
   }
 
   press(e, cx) {
-    if (this.sending) return;
-    if (e.key === "escape") return this.close();
+    const p = this.passing;
+    if (p) {
+      if (p.cancelled) return;
+      const key = tmuxKey(e);
+      if (key) return this.passKey(key, cx);
+      notify({ title: `Can't pass ${e.key_char ?? e.keystroke} to tmux`, level: "info" });
+      if (p.phase !== "first") return this.stopPassing(cx);
+      p.cancelled = true;
+      return this.close();
+    }
+    // Esc arrives as leader.escape (init); this is in case herdr hands it to
+    // the overlay instead.
+    if (e.key === "escape") return this.escape(cx);
     if (e.modifiers?.control || e.modifiers?.alt || e.modifiers?.platform) return this.close();
     const key = e.key === "tab" && !e.modifiers?.shift ? "Tab" : (e.key_char ?? e.key);
     if (/^[1-9]$/.test(key) && !this.repeating && this.level === LEADER) {
@@ -256,7 +436,16 @@ export default class Leader extends View {
   render(cx) {
     const t = theme();
     const { title: name, actions, aliases, hint, groups } = this.level;
-    const title = this.repeating ? `${name} (repeat)` : name;
+    const phase = this.passing?.phase;
+    const title = phase
+      ? phase === "first"
+        ? "Leader → tmux: next key · C-Space cancels"
+        : phase === "repeat"
+          ? "Leader → tmux (repeat)"
+          : "Leader → tmux"
+      : this.repeating
+        ? `${name} (repeat)`
+        : name;
     const root = h_flex()
       .id("leader")
       .track_focus(this.handle)
@@ -266,7 +455,7 @@ export default class Leader extends View {
       })
       .w_full()
       .justify_center();
-    if (!this.expanded) {
+    if (!this.expanded || this.passing) {
       return root.child(
         div()
           .px(12)

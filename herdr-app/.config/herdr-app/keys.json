@@ -73,6 +73,7 @@
     "shift-insert": "terminal.paste"
   },
   "mod:leader": {
-    "ctrl-space": "leader.send_prefix"
+    "ctrl-space": "leader.send_prefix",
+    "escape": "leader.escape"
   }
 }

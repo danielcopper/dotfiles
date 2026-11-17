@@ -141,17 +141,17 @@ curl -fsSL https://claude.ai/install.sh | bash
 The herdr desktop app comes from its official installer script into
 `~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
 package carries the config that is mine: `keys.json` (the shipped defaults plus
-`ctrl-space` for the leader mod and, in a `mod:leader` section, the second
-`ctrl-space` the leader sends on), the mods `mods/leader/` (its `f` opens a
-second level for files: `f f` and `f g`, the keys of nvim's `<leader>ff` and
-`<leader>fg`, open the file popup, `f e` and `f G` show the right panel on
-Files or Changes; `Z` switches that panel between its normal width and about
-two thirds of the space beside the sidebar; a second `ctrl-space` sends
-ctrl-space on to the focused terminal, so a tmux inside herdr keeps the same
-prefix), `mods/focus-history/` (it remembers the previously focused pane for the
-leader's `Tab`) and `mods/file-popup/` (a popup with the files of the
-focused pane's repo or folder, or with the repo's changed files, that opens
-the picked one in nvim in a new pane on the right), the layout
+`ctrl-space` for the leader mod, and a `mod:leader` section that hands the
+leader a second `ctrl-space` and `Esc`), the mods `mods/leader/` (its `f`
+opens a second level for files: `f f` and `f g`, the keys of nvim's
+`<leader>ff` and `<leader>fg`, open the file popup, `f e` and `f G` show the
+right panel on Files or Changes; `Z` switches that panel between its normal
+width and about two thirds of the space beside the sidebar; `ctrl-space
+ctrl-space <key>` is for a tmux in the focused terminal, see below),
+`mods/focus-history/` (it remembers the previously focused pane for the
+leader's `Tab`) and `mods/file-popup/` (a popup with the files of the focused
+pane's repo or folder, or with the repo's changed files, that opens the
+picked one in nvim in a new pane on the right), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
 keeps focus-history running; its right panel has no maximum width) and the
 theme `themes/catppuccin-mocha.json`.
@@ -200,6 +200,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   that has started once, since herdr writes the files it reads into
   `~/.config/herdr-app`. The header of `tests/herdr-app/check-commands.py`
   says what it checks in detail.
+- **tmux inside herdr keeps `ctrl-space` as its prefix.** `ctrl-space
+  ctrl-space <key>` gives `<key>` to the tmux in the focused terminal as if
+  typed after tmux's prefix, so a tmux inside herdr needs no second prefix;
+  repeatable keys such as `H` keep working, and a third `ctrl-space` before
+  `<key>` cancels. It reaches only a tmux running in that terminal itself,
+  not one behind ssh, and only a tmux server whose socket is in the user's
+  socket folder (`$TMUX_TMPDIR` as herdr-core sees it, or `/tmp`); it needs
+  tmux 3.4 or newer and Linux (`/proc`) on the terminal's machine. Otherwise
+  the leader shows a note.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
