@@ -73,6 +73,12 @@ is in its header), so relink it with `mise run dotfiles-relink herdr-app` rather
   after that the two drift: `diff ~/.config/herdr-app/settings.json
   herdr-app/.config/herdr-app/settings.json` shows what each has; copy across
   by hand and commit the reference when you want to keep a change.
+- **On WSL, Windows needs a system-wide entry.** WSLg reads the Start menu and
+  taskbar icon only from desktop entries under `/usr/share` or `/usr/local/share`,
+  not from the installer's `~/.local/share/applications`. `install-dotfiles.sh
+  wsl-arch` installs one under `/usr/local/share` with a PNG icon rendered from
+  the app's SVG; run it again after the app's installer, and once more `wsl
+  --shutdown` if `/usr/local/share/applications` did not exist before.
 - **`keys.json` is edited, so it stays mine.** herdr refreshes only an
   untouched keys file on upgrade; new default shortcuts have to be added by
   hand.

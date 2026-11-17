@@ -1,3 +1,4 @@
 # Packages installed on wsl hosts.
 
 gnome-keyring
+librsvg

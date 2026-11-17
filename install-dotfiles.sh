@@ -189,6 +189,42 @@ if [ ! -e "$live_herdr_settings" ] && [ ! -L "$live_herdr_settings" ]; then
   echo "seeded ~/.config/herdr-app/settings.json from the repo reference"
 fi
 
+# WSLg puts Linux GUI apps into the Windows Start menu and gives their windows
+# a taskbar icon only from desktop entries under /usr/share/applications,
+# /usr/local/share/applications and Flatpak's exports; the herdr installer
+# writes its entry to ~/.local/share/applications, so Windows finds no Herdr
+# and shows its windows with the Tux fallback. The entry is copied to
+# /usr/local/share with a PNG icon rendered from the app's SVG, as the other
+# entries WSLg loads use PNG icons. WSLg matches the window's app id herdr-app
+# to the entry through Exec. A /usr/local/share/applications it found missing
+# at start is picked up only after the next `wsl --shutdown`. The app is
+# installed by its own installer (README, "herdr app"); before that, this step
+# is skipped, so run this script again after it.
+if [ "$CLASS" = wsl-arch ]; then
+  herdr_svg="${XDG_DATA_HOME:-$HOME/.local/share}/herdr-app/herdr-app.svg"
+  if [ -f "$herdr_svg" ]; then
+    wslg_tmp="$(mktemp -d)"
+    rsvg-convert -w 256 -h 256 "$herdr_svg" -o "$wslg_tmp/herdr-app.png"
+    cat >"$wslg_tmp/herdr-app.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Herdr
+Comment=Terminals and coding agents that keep running
+Exec=$HOME/.local/bin/herdr-app
+Icon=/usr/local/share/icons/hicolor/256x256/apps/herdr-app.png
+Terminal=false
+Categories=Development;
+StartupWMClass=herdr-app
+EOF
+    sudo install -Dm644 "$wslg_tmp/herdr-app.png" /usr/local/share/icons/hicolor/256x256/apps/herdr-app.png
+    sudo install -Dm644 "$wslg_tmp/herdr-app.desktop" /usr/local/share/applications/herdr-app.desktop
+    rm -rf "$wslg_tmp"
+    echo "installed the herdr Start menu entry for WSLg"
+  else
+    echo "herdr app not installed; run this script again after its installer for the WSLg Start menu entry"
+  fi
+fi
+
 # OpenCode reports its panes to the tmux agent sidebar through a plugin file that
 # ships with the sidebar (installed by TPM). OpenCode loads every file in its
 # plugins directory, so the file is linked in by name rather than stowed. On a
