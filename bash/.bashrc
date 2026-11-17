@@ -11,6 +11,14 @@
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
+# A herdr terminal (HC_TERMINAL_ID) is not a tmux pane, but herdr-core passes on
+# the environment it was started with. Started from a tmux pane, it hands TMUX
+# and TMUX_PANE to every terminal, and the agent sidebar's Claude Code hook then
+# reports every herdr session as that foreign pane.
+if [ -n "${HC_TERMINAL_ID:-}" ]; then
+  unset TMUX TMUX_PANE
+fi
+
 # Aliases
 command -v lsd >/dev/null && alias ls='lsd'
 alias grep='grep --color=auto'
