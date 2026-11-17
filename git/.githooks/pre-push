@@ -7,7 +7,7 @@ set -euo pipefail
 
 if ! command -v gitleaks >/dev/null 2>&1; then
   echo "pre-push: gitleaks is not installed but required by this hook." >&2
-  echo "          install via: sudo pacman -S gitleaks" >&2
+  echo "          install gitleaks (bootstrap.sh installs it on every class)" >&2
   echo "          bypass with: git push --no-verify" >&2
   exit 1
 fi
