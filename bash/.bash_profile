@@ -1,6 +1,7 @@
 #
 # ~/.bash_profile
 #
+# shellcheck shell=bash
 
 # A login shell that is not interactive (`bash -lc`, or herdr-core loading the
 # login environment of a host it was started on over SSH) gets nothing from
@@ -21,4 +22,6 @@ case ":$PATH:" in
 esac
 export PATH
 
+# The link to bash/.bashrc in this repo, which shellcheck checks on its own.
+# shellcheck source=/dev/null
 [[ -f ~/.bashrc ]] && . ~/.bashrc
