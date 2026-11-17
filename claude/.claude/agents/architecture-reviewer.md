@@ -23,7 +23,7 @@ For each unit the diff adds or changes (in an instruction file: each section or 
 - **Simplification** — is there the same behaviour with less code?
 - **Smells** — in code, check the diff against the baseline below (Fowler, *Refactoring*, ch. 3). Each is a judgement
   call, reported as Minor ("possible Feature Envy"), and a written repo rule that endorses the shape wins: Mysterious
-  Name, Duplicated Code, Feature Envy, Data Clumps, Primitive Obsession, Repeated Switches, Shotgun Surgery, Divergent
+  Name, Feature Envy, Data Clumps, Primitive Obsession, Repeated Switches, Shotgun Surgery, Divergent
   Change, Speculative Generality, Message Chains, Middle Man, Refused Bequest.
 
 List every unit with what you found or the searches that came up empty.

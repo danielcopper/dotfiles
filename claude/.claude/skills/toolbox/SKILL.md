@@ -47,4 +47,6 @@ Match the current situation against this index and recommend the right skill(s).
 - `/writing-for-agents` - how to write what agents read: skills, CLAUDE.md, docs reached by a pointer; model-invoked, so it also fires on its own
 - `/retro` - after a session, propose improvements to the environment: checks, pointers, standards, CLAUDE.md, memory
 - `/loop <interval> <prompt|skill>` — run something on a recurring interval (e.g. `/loop 1h /deps-triage`)
+- `/research <question>` — a background agent researches primary sources and writes a cited note to memory; model-invoked, so it also fires when you ask for research
+- `/wait-what` — re-pitch the last message in plain German with the glossary's terms
 - `/deep-research <question>` — multi-source, fact-checked research report
