@@ -7,7 +7,6 @@ Backs up the current transcript for audit/analysis.
 
 import json
 import sys
-import shutil
 from pathlib import Path
 from datetime import datetime
 
