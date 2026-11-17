@@ -26,8 +26,8 @@ full report as a message. Your final answer is then one sentence: status and hea
 
 Save every report next to the brief: the implementer's whole to `report-<N>.md`, a fix round's appended; a review
 agent's as an extract to `review-<N>-<round>-<agent>.md` — per finding its file:line, severity, score, what is wrong,
-the evidence and the suggested fix, plus the `reviewer`'s ⚠️ items, a fix round's verdicts that are not "addressed",
-and a verify-only pass's `### Noticed` items (the post-cap pass: `review-<N>-post-cap-reviewer.md`). Fix dispatches and
+the evidence and the suggested fix, plus the `reviewer`'s ⚠️ items, a fix round's or the post-cap pass's verdicts that
+are not "addressed", and a verify-only pass's `### Noticed` items (the post-cap pass: `review-<N>-post-cap-reviewer.md`). Fix dispatches and
 later rounds work from these files.
 
 ### Status routing

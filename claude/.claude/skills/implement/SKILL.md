@@ -100,7 +100,7 @@ for the user's verdict. *(convention)* Then add one sentence with the result to 
 Merging follows `merge_policy` (`repo-config.md`), and only after the user gate.
 
 *Done when:* green, the user gate passed *(convention)* with its result in the PR body, and the PR handed over or merged
-under that grant.
+as `merge_policy` allows.
 
 ## 10. Close the loop
 
