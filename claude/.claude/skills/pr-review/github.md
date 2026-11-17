@@ -2,7 +2,7 @@
 
 Phase 1, re-review lookups and Phase 5 of [`SKILL.md`](SKILL.md) for GitHub.
 
-PR URL: `https://github.com/<owner>/<repo>/pull/<n>`. Everything runs through `gh`, which must be installed and authenticated - check `gh auth status` first; if it fails, stop and ask the user to set it up (`gh auth login`). Write the `<owner>/<repo>` the repo check below takes from `origin` into every `gh api` path (for `{owner}` and `{repo}`) and pass `-R <owner>/<repo>` to `gh pr` and `gh issue`: gh's own placeholders resolve to its base repo, which in a fork checkout is `upstream`, not `origin`.
+PR URL: `https://github.com/<owner>/<repo>/pull/<n>`. Everything runs through `gh`, which must be installed and authenticated - check `gh auth status` first; if it fails, stop and ask the user to set it up (`gh auth login`). Run every `gh` call with `GH_REPO=<owner>/<repo>`, the repo the check below takes from `origin`: without it, `gh pr`, `gh issue` and the `{owner}`/`{repo}` placeholders in `gh api` resolve to gh's base repo, which in a fork checkout is `upstream`, not `origin`.
 
 ## Phase 1 - Fetch the PR
 
