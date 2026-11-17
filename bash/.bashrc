@@ -108,4 +108,4 @@ command -v starship >/dev/null && eval "$(starship init bash)"
 command -v zoxide >/dev/null && eval "$(zoxide init bash --cmd cd)"
 
 # opencode
-export PATH=/home/deck/.opencode/bin:$PATH
+export PATH=$HOME/.opencode/bin:$PATH
