@@ -2,6 +2,7 @@
 name: prose-reviewer
 description: Use this agent for a prose review of a diff — every sentence of prose it adds or changes, judged for whether it is true at head and whether it needs to stand there at all, plus, in a change's first review, the comments already in the units it touches. Expects the repo path and the diff range. Read-only.
 model: opus
+effort: high
 color: yellow
 tools: Read, Grep, Glob, Bash
 omitClaudeMd: true

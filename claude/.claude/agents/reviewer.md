@@ -2,6 +2,7 @@
 name: reviewer
 description: Use this agent for a fresh-context review of a completed task's diff — spec compliance first, then code quality. Expects the spec (an issue, a brief, or both), the implementer's report, and the diff range; for someone else's pull request, open the prompt with "This is a PR review." and pass the PR description, its linked work items or issues, and the diff range. Read-only on the checkout; returns confidence-scored findings and a hard Approved / Needs fixes verdict.
 model: opus
+effort: high
 color: blue
 tools: Read, Grep, Glob, Bash
 omitClaudeMd: true

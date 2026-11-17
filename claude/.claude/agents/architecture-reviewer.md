@@ -2,6 +2,7 @@
 name: architecture-reviewer
 description: Use this agent for a fit review of a diff against the tree it lands in — existing helpers it should reuse, logic or facts it duplicates elsewhere in code, sibling patterns, written architecture rules and established design practice it departs from, sites still doing the behaviour a decision replaced, the same behaviour with less code. Complements `reviewer`, which judges correctness; this one reads the tree beyond the diff on purpose. Expects the repo path, the diff range, and the decisions the change follows with the old behaviour each replaces. Read-only.
 model: opus
+effort: high
 color: purple
 tools: Read, Grep, Glob, Bash
 omitClaudeMd: true
