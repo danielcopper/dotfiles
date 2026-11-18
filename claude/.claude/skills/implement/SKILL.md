@@ -68,8 +68,9 @@ user has ruled on that list.
 
 ## 7. Gate evidence, once
 
-The implementer's final battery report is the evidence; judge it, don't repeat it. Only code changed after it gets its
-affected commands re-run, by whoever changed it.
+The lead runs the full gate once, on the final state of the branch after the review rounds, when no other heavy run is
+going on the machine; the implementer reports only the checks for what it changed and "gate owed". Only code changed
+after the gate gets its affected commands re-run, by whoever changed it.
 
 *Done when:* evidence exists for the exact final state of the branch.
 
