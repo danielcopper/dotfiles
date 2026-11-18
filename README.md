@@ -65,7 +65,7 @@ mise run dotfiles-relink <app>
 
 ```bash
 printf '\nexport PATH="$HOME/extra:$PATH"\n' >> host-arch/.bashrc.local
-stow -R host-arch
+mise run dotfiles-relink host-arch
 ```
 
 ## Debian server
@@ -168,7 +168,8 @@ picked one in nvim in a new pane on the right), the layout
 keeps focus-history running; its right panel has no maximum width) and the
 theme `themes/catppuccin-mocha.json`.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
-stows the package without folding (the reason is in its header), so relink it
+stows the package without folding (the reason is in its comment on
+`no_folding_pkgs`), so relink it
 with `mise run dotfiles-relink herdr-app` rather than a bare `stow -R
 herdr-app`. Which files of the package git tracks is set in the root
 `.gitignore`.
