@@ -42,6 +42,18 @@ if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   shift
 fi
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/memex-sync-test.XXXXXX")
+# The stand-ins started below; cleanup stops those that run by then.
+NTFY_PID=
+STUB_PIDS=()
+WATCH_PIDS=()
+cleanup() {
+  local pid
+  for pid in ${NTFY_PID:+"$NTFY_PID"} "${STUB_PIDS[@]}"; do kill "$pid" 2>/dev/null; done
+  # A memex-watch still running leads its own process group.
+  for pid in "${WATCH_PIDS[@]}"; do kill -- "-$pid" 2>/dev/null; done
+  rm -rf "$ROOT"
+}
+trap cleanup EXIT
 # The script runs with the PATH its unit sets.
 SERVICE_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/memex/.config/systemd/user/memex-sync.service")
 [ -n "$SERVICE_PATH" ] || { echo "no PATH found in memex-sync.service" >&2; exit 2; }
@@ -50,7 +62,6 @@ WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/memex/.config/systemd/user/
 [ -n "$WATCH_PATH" ] || { echo "no PATH found in memex-watch.service" >&2; exit 2; }
 # memex-watch's wait for quiet, in seconds.
 WATCH_DELAY=3
-WATCH_PIDS=()
 # The real git and uname, for the wrappers some scenarios put in front of them.
 REAL_GIT=$(command -v git)
 REAL_UNAME=$(command -v uname)
@@ -69,19 +80,10 @@ NTFY_LOG=$ROOT/ntfy.jsonl
 python3 -I "$HERE/ntfy_stub.py" "$NTFY_LOG" "$ROOT/ntfy.port" &
 NTFY_PID=$!
 # Origins that answer every request with one HTTP status.
-STUB_PIDS=()
 for status in 401 403 404; do
   python3 -I "$HERE/http_status_stub.py" "$status" "$ROOT/http$status.port" &
   STUB_PIDS+=($!)
 done
-cleanup() {
-  local pid
-  kill "$NTFY_PID" "${STUB_PIDS[@]}" 2>/dev/null
-  # A memex-watch still running leads its own process group.
-  for pid in "${WATCH_PIDS[@]}"; do kill -- "-$pid" 2>/dev/null; done
-  rm -rf "$ROOT"
-}
-trap cleanup EXIT
 for port_file in ntfy.port http401.port http403.port http404.port; do
   for _ in $(seq 50); do [ -s "$ROOT/$port_file" ] && break; sleep 0.1; done
 done
