@@ -428,9 +428,9 @@ Without mise, run `tests/memex-sync/scenarios.sh` and
 
 ## Tests
 
-The test runners are mise tasks that read the clone at `~/dotfiles`, or at
-`DOTFILES_DIR` ("Install / update" above). `mise run memex-sync-test` is
-described under "memex sync", in its "Tests" part.
+Two runners are described beside what they check: `mise run memex-sync-test`
+under "memex sync", in its "Tests" part, and `mise run herdr-app-check` under
+"herdr app".
 
 `mise run install-dotfiles-test` (without mise,
 `tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the
@@ -443,10 +443,12 @@ tar.
 `tests/bash/startup.sh`) checks how the Claude Code status line finds the
 terminal's width, and the startup of an interactive bash: the greeter, the
 TMUX variables a herdr terminal drops and, on wsl-arch, how a shell finds or
-starts the keyring daemon. Stand-ins take the place of hc, tmux, fastfetch,
-flock and gnome-keyring-daemon, so no herdr or tmux server is asked and no
-daemon starts; each file's header lists its cases, and naming cases runs only
-those. It needs jq, timeout, flock and python3.
+starts the keyring daemon. Stand-ins take the place of hc, tmux, fastfetch
+and gnome-keyring-daemon, and flock and mkdir run through logging wrappers
+that refuse any path outside the test's directory, so no herdr or tmux server
+is asked and no real keyring daemon starts. Each file's header lists its
+cases, and naming cases runs only those. It needs jq, timeout, flock and
+python3.
 
 ## Memory protection on the Steam Deck
 
