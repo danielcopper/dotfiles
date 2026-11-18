@@ -1,15 +1,17 @@
 // A square button at the start of the tab row that shows the board
 // (mods/board/), as the leader's `b` does. layouts/personal.json puts it in a
-// block of its own left of the tabs block; it is drawn like the tab bar
-// (mods/tabs/, Herdr's): its background and bottom border, and a button like
-// its Files and Changes buttons.
+// block of its own left of the tabs block, which moves the window like the
+// tab bar. It is drawn like the tab bar (mods/tabs/, Herdr's): its background
+// and bottom border, and a square button like its window buttons (minimize,
+// maximize, close), in the muted colour and with the 14 px icon of its Files
+// and Changes buttons.
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { panes, run, theme } from "herdr";
 
 // ---- openBoard: the same in leader/main.js and board-button/main.js ----
-// (herdr loads no module from outside a mod's folder; board.test.mjs checks
+// (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that both copies match.)
 // Shows the board's tab ("Board", the board mod as its only pane) wherever
 // it is, found by its pane, so a renamed tab is found too; or opens one in
@@ -52,6 +54,8 @@ export default class BoardButton extends View {
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
           .tooltip("Board")
           .accessibility_label("Board")
+          // The press is the button's, not the start of a window drag.
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click(() => openBoard())
           .child(svg("mods/board-button/board.svg").size(14)),
       );

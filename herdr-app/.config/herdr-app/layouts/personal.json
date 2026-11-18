@@ -87,7 +87,8 @@
               },
               "size": {
                 "px": 36
-              }
+              },
+              "window_drag": true
             },
             {
               "id": "tabs",

@@ -1986,7 +1986,17 @@ test("the board is named Board: its mod, the tab the leader opens and its header
 // How an element lines up its children across its axis: its last items_*,
 // else h_flex's own items_center (gpui-base), else stretched.
 const crossAlign = (el) => el.styles.filter((s) => s.startsWith("items_")).at(-1) ?? (el.kind === "h_flex" ? "items_center" : "items_stretch");
-const centring = (chain) => chain.filter((el) => crossAlign(el) === "items_center").map((el) => el.kind);
+// A row: an h_flex, or a div made flex without flex_col.
+const isRow = (el) => el.kind === "h_flex" || (el.kind === "div" && el.styles.includes("flex") && !el.styles.includes("flex_col"));
+// Whether `parent` centres `child` in the height: a row whose items line up
+// in the centre, unless the child takes the full height; a v_flex that
+// justifies its children to the centre; or a child that centres itself.
+const centres = (parent, child) =>
+  (isRow(parent) && crossAlign(parent) === "items_center" && !child.styles.includes("h_full")) ||
+  (parent.kind === "v_flex" && parent.styles.includes("justify_center")) ||
+  child.styles.includes("self_center");
+// The elements of a chain (root first) that centre the next one in it.
+const centring = (chain) => chain.slice(0, -1).filter((el, i) => centres(el, chain[i + 1])).map((el) => el.kind);
 
 test("UI: the views sidebar fills the height; the content and its error start at the top", async () => {
   const { b, st } = await bootBoard({ which: (tool) => (tool === "gh" ? "" : "/opt/fake/bin/az") });
@@ -2001,7 +2011,7 @@ test("UI: the views sidebar fills the height; the content and its error start at
   assert.equal(crossAlign(row), "items_stretch", "the sidebar's row stretches it to the full height");
 });
 
-test("UI: the board and the detail beside it start at the top", async () => {
+test("UI: the board and the detail beside it start at the top; a column spans the board's height", async () => {
   const { b, cx } = await openBoard();
   await press(b, cx, "enter");
   assert.equal(b.views.mine.detail, true);
@@ -2014,6 +2024,12 @@ test("UI: the board and the detail beside it start at the top", async () => {
   const column = pathTo(root, (s) => s === name);
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
+  // The row lines its columns up at the top; a shown column takes the row's
+  // full height, so its cards get a height to scroll in (a stub keeps its own).
+  assert.ok(column.at(-3).styles.includes("h_full"), "a shown column spans the row's height");
+  const stub = pathTo(root, (s) => s === b.views.mine.data.columns.find((c) => c.hidden).name);
+  assert.equal(stub.at(-3).styles.includes("h_full"), false, "a stub does not");
+  assert.deepEqual(centring(stub.slice(0, -2)), [], "no row centres a stub");
 });
 
 // ---- The board button (mods/board-button/) ----
@@ -2065,13 +2081,17 @@ test("UI: a click on the board button shows the board's tab wherever it is, else
   assert.deepEqual(host.runs.splice(0), [["pane.zoom", { pane: "p2" }], ["pane.focus", { pane: "p1" }]]);
 });
 
-test("UI: the board button is an icon, named Board for the pointer and screen readers", async () => {
+test("UI: the board button is an icon, named Board for the pointer and screen readers, that keeps its press", async () => {
   const { default: BoardButton } = await import(pathToFileURL(join(buttonDir, "main.js")).href);
   globalThis.__boardHost = fakeHost();
   const view = new BoardButton();
   view.init({}, fakeCx());
   const el = byId(view.render(), "board-open");
   assert.deepEqual([el.with.tooltip, el.with.accessibility_label], [["Board"], ["Board"]]);
+  let stopped = 0;
+  assert.equal(el.with.on_mouse_down[0], "left");
+  el.with.on_mouse_down[1]({}, { stop_propagation: () => stopped++ });
+  assert.equal(stopped, 1, "a press on the button starts no window drag");
   assert.deepEqual(el.kids.map((k) => k.with.path?.[0]), ["mods/board-button/board.svg"]);
   assert.match(readFileSync(join(buttonDir, "board.svg"), "utf8"), /^<svg [^>]*stroke="currentColor"/, "tinted with the text color");
 });
@@ -2082,7 +2102,9 @@ test("the personal layout puts the board button left of the tabs, in a row as hi
   const row = find(layout, "tab-row");
   assert.ok(row, "a tab-row");
   assert.deepEqual([row.type, row.size, row.resizable], ["row", { px: 42 }, false]);
-  assert.deepEqual(row.children.map((c) => [c.id, c.content?.mod, c.size]), [["board-button", "board-button", { px: 36 }], ["tabs", "tabs", { weight: 1 }]]);
-  assert.equal(row.children[1].window_drag, true, "the tab bar still moves the window");
+  assert.deepEqual(row.children.map((c) => [c.id, c.content?.mod, c.size, c.window_drag]), [
+    ["board-button", "board-button", { px: 36 }, true],
+    ["tabs", "tabs", { weight: 1 }, true],
+  ], "both move the window, as the tab bar did");
   assert.equal(find(layout, "work").children[0], row, "first in the work column");
 });

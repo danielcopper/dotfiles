@@ -279,7 +279,7 @@ function openFilePopup(mode) {
 }
 
 // ---- openBoard: the same in leader/main.js and board-button/main.js ----
-// (herdr loads no module from outside a mod's folder; board.test.mjs checks
+// (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that both copies match.)
 // Shows the board's tab ("Board", the board mod as its only pane) wherever
 // it is, found by its pane, so a renamed tab is found too; or opens one in

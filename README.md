@@ -227,9 +227,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   '{"name":"personal"}'`, or the palette.
 - **A mod here is one `main.js`.** herdr loads a mod's `main.js` through
   stow's link, but refuses a module that `main.js` imports when that module
-  is a link out of the mod folder, which every stowed file is. So
-  `mods/file-popup/` keeps its listers in `main.js` rather than in a
-  `./list.js`.
+  is a link out of the mod folder, which every stowed file is, as it refuses
+  one from another mod's folder. So `mods/file-popup/` keeps its listers in
+  `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
+  own marked copy of the leader's `openBoard` (the board tests check that
+  the two match). An icon is no module: `mods/board-button/board.svg` draws
+  through its link.
 - **herdr's `run` answers ok for a command it does not know,** so a mod
   that runs a misspelt one fails without a word. `mise run herdr-app-check`
   checks the commands this package's mods and `keys.json` use against the

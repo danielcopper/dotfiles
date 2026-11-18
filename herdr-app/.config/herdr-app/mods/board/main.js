@@ -2095,7 +2095,9 @@ export default class Board extends View {
           .child(head)
           .child(div().text_size(12).text_color(t.muted).child(col.count === null ? "x zeigt" : `${col.count} · x zeigt`));
       }
-      return base(v_flex().flex_1().min_w(0).min_h(0).gap(8))
+      // The row's full height (the row lines its columns up at the top, so
+      // a stub keeps its own), in which a long column scrolls its cards.
+      return base(v_flex().flex_1().min_w(0).min_h(0).h_full().gap(8))
         .child(head.child(div().text_size(12).text_color(t.muted).child(String(col.count ?? col.shown.length))))
         .child(
           v_flex()
