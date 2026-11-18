@@ -115,6 +115,26 @@ needs a token with the `admin:ssh_signing_key` scope, and the gh login on the
 server has no admin scopes. To commit unsigned instead, swap the two lines
 `host-debian/.gitconfig.local` names.
 
+**GitHub over SSH.** After the bootstrap, switch git to SSH for GitHub, as
+on the Deck; gh keeps its token for the API. The token has no `workflow` scope,
+so over HTTPS a push that touches `.github/workflows/` is refused. On the
+Minisforum the homelab playbook pins GitHub's host keys in
+`/etc/ssh/ssh_known_hosts`; on another server the first connection asks to
+accept them (check them against GitHub's published fingerprints). The login
+key, again without a passphrase, and its entry are made by hand:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C "daniel@$(hostname) github" -f ~/.ssh/id_ed25519_github
+printf 'Host github.com\n    IdentityFile ~/.ssh/id_ed25519_github\n    IdentitiesOnly yes\n' >> ~/.ssh/config
+gh config set -h github.com git_protocol ssh
+cat ~/.ssh/id_ed25519_github.pub
+```
+
+Add the public key on GitHub as an authentication key (same page as above,
+key type "Authentication Key"); `ssh -T git@github.com` then greets you by
+name. Clones made over HTTPS before, this one included, switch with
+`git remote set-url origin git@github.com:<owner>/<repo>.git`.
+
 **ssh-agent.** Debian's `openssh-client` ships a user `ssh-agent.socket`,
 enabled for every user, that points the user manager's `SSH_AUTH_SOCK` at
 `$XDG_RUNTIME_DIR/openssh_agent` and starts `ssh-agent.service` on the first
