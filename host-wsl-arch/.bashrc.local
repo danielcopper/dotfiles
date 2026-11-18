@@ -22,24 +22,25 @@ command -v carapace >/dev/null && source <(carapace _carapace)
   . /usr/share/doc/pkgfile/command-not-found.bash
 
 # Auto-start gnome-keyring for MSAL token storage (WSL needs this manually).
-# A shell that did not inherit GNOME_KEYRING_CONTROL decides on the daemon's
-# control socket, not on which shell it is: herdr started from the Start menu
-# hands its terminals no GNOME_KEYRING_CONTROL, so any of them may be the
-# first. The daemon keeps the socket in $XDG_RUNTIME_DIR/keyring. With the
-# socket there, the shell takes that daemon; without it, it starts one. The
-# lock makes shells that start at once, such as several herdr panes, take
-# turns, and --start in the later ones attaches to the daemon already running.
-if [ -z "${GNOME_KEYRING_CONTROL:-}" ]; then
-    keyring_run=${XDG_RUNTIME_DIR:-/run/user/$UID}
-    if [ -S "$keyring_run/keyring/control" ]; then
-        GNOME_KEYRING_CONTROL=$keyring_run/keyring
-    else
-        mkdir -p "$keyring_run/keyring" 2>/dev/null
-        eval "$(flock "$keyring_run/keyring.lock" \
-            gnome-keyring-daemon --start --components=secrets 2>/dev/null)"
+# Every shell that inherited no GNOME_KEYRING_CONTROL asks the daemon, whichever
+# shell it is: herdr started from the Start menu hands its terminals none.
+# `--start` attaches to the daemon whose control socket is in
+# $XDG_RUNTIME_DIR/keyring; when none answers there (no socket, or one a dead
+# daemon left), it starts a new one, which creates that directory at 0700
+# itself. It prints GNOME_KEYRING_CONTROL only for another directory, so the
+# variable is otherwise taken from the socket. The lock makes shells that start
+# at once, such as several herdr panes, take turns: the first starts the
+# daemon, the later ones attach to it. -o keeps the lock out of the daemon,
+# which would otherwise hold it for its whole life; -w 5 bounds the wait.
+# Without XDG_RUNTIME_DIR the daemon has no fixed directory a later shell could
+# find, so the block leaves it alone.
+if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    eval "$(flock -o -w 5 "$XDG_RUNTIME_DIR/keyring.lock" \
+        gnome-keyring-daemon --start --components=secrets 2>/dev/null)"
+    if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -S "$XDG_RUNTIME_DIR/keyring/control" ]; then
+        GNOME_KEYRING_CONTROL=$XDG_RUNTIME_DIR/keyring
     fi
     [ -n "${GNOME_KEYRING_CONTROL:-}" ] && export GNOME_KEYRING_CONTROL
-    unset keyring_run
 fi
 
 # Force Azure Artifacts Credential Provider to use device-code flow instead
