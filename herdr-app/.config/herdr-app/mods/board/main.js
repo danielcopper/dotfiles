@@ -812,6 +812,11 @@ export function rollback(board, move) {
   return findCard(board, move.key)?.column.id === move.to ? moveCard(board, move.key, move.from) : board;
 }
 
+// Whether an open outcome is due for a refresh that started at `started`: it
+// came before that refresh started, and its card has no write under way
+// (that write decides first).
+export const isDue = (st, started) => (u) => u.at <= started && !st.pending[u.key];
+
 // Moves laid over every refresh: those still being written, and confirmed
 // ones until a refresh that started after the confirmation shows them.
 export function pendingMoves(moves, started) {
@@ -1253,7 +1258,7 @@ export default class Board extends View {
       } catch (e) {
         if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
         else st.error = report(e);
-        const open = st.unclear.filter((u) => u.at <= started);
+        const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
           this.say(`${open.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
         }
@@ -1290,10 +1295,9 @@ export default class Board extends View {
   // board (warning).
   settleUnclear(view, started, data, cx) {
     const st = this.state(view.id);
-    const isDue = (u) => u.at <= started && !st.pending[u.key];
-    const due = st.unclear.filter(isDue);
+    const due = st.unclear.filter(isDue(st, started));
     if (!due.length) return;
-    st.unclear = st.unclear.filter((u) => !isDue(u));
+    st.unclear = st.unclear.filter((u) => !due.includes(u));
     // A view that is no board any more has no columns to tell.
     if (data?.kind !== "board") return;
     const lines = due.map((u) => {
@@ -1367,11 +1371,14 @@ export default class Board extends View {
           if (followed && current) this.refresh(current, cx);
         } else {
           st.data = rollback(st.data, move);
-          this.say(`${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
+          // With an earlier outcome of the card open, where it is now is for
+          // the refresh to say.
+          const open = st.unclear.some((u) => u.key === key);
+          this.say(open ? `${label} → ${to.name} nicht gespeichert: ${why}` : `${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
           notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
           // An earlier unclear write of the card waited for this one; the
           // server's answer tells it now.
-          if (followed && current && st.unclear.some((u) => u.key === key)) this.refresh(current, cx);
+          if (followed && current && open) this.refresh(current, cx);
         }
       } finally {
         delete st.pending[key];

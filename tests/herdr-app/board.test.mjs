@@ -1106,6 +1106,7 @@ test("UI: a second move of a card is refused while the first is written; a refus
   assert.match(b.notice.text, /wird noch gespeichert/);
   const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
   await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" });
+  assert.equal(host.open("gh").length, 0, "a plain refusal asks GitHub nothing more");
   assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "Ready");
   assert.equal(st().pending.PVTI_rec4, undefined);
   assert.equal(b.notice.text, "tender#3004 bleibt in „Ready“: Resource not accessible by integration");
@@ -1278,9 +1279,42 @@ test("UI: an unclear outcome waits for a later write of its card and is then tol
   assert.equal(st().unclear.length, 1);
   const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
   await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" }, "updateProjectV2ItemFieldValue");
+  assert.equal(b.notice.text, "tender#3004 → In review nicht gespeichert: Resource not accessible by integration", "no column claimed while the first outcome is open");
   assert.equal(host.open("gh").length, 1, "the refusal asks GitHub for the first write's outcome");
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“", "by the server, not by the overlay");
+});
+
+test("UI: a refresh that fails while a later write of the card is under way leaves its open outcome unsaid", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", { code: 1, stdout: "", stderr: GH_DNS }, "items(first");
+  assert.equal(b.notice.text, "tender#3004 → In review …", "no „weiter offen“ for an outcome that is not due");
+  assert.equal(st().unclear.length, 1);
+  const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
+  await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" }, "updateProjectV2ItemFieldValue");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
+});
+
+test("UI: a later write refused while views.json is invalid starts no refresh", async () => {
+  const { b, cx, host, st } = await openBoard();
+  const view = b.view();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  // Its refresh stays unanswered, so the outcome stays open.
+  host.config = "{ views: [";
+  await press(b, cx, "r");
+  const calls = host.calls.length;
+  b.moveTo(view, "PVTI_rec4", "opt-in-review", cx);
+  await settle();
+  const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
+  await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" }, "updateProjectV2ItemFieldValue");
+  assert.equal(host.calls.length, calls + 1, "only the write");
+  assert.equal(st().error, null);
+  assert.equal(st().unclear.length, 1);
 });
 
 test("UI: open outcomes of a view that is no board any more are dropped without a word", async () => {
