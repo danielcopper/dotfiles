@@ -7,7 +7,7 @@ prints.
 usage: python3 -I mutants.py [memex-sync]
 The script defaults to the repo's memex/.local/bin/memex-sync;
 memex-watch is always the repo's. The mutated copies live in a temporary
-directory that is removed at the end.
+directory that is removed at the end. A wrong argument exits 2.
 """
 
 import os
@@ -17,13 +17,37 @@ import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.realpath(os.path.join(HERE, "..", ".."))
-src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "memex/.local/bin/memex-sync")
+USAGE = "usage: python3 -I mutants.py [memex-sync]"
+
+
+def usage_error(problem: str) -> None:
+    print(f"mutants.py: {problem}\n{USAGE}", file=sys.stderr)
+    sys.exit(2)
+
+
+args = sys.argv[1:]
+if len(args) > 1:
+    usage_error(f"one argument at most, got {len(args)}")
+if args and not os.path.isfile(args[0]):
+    usage_error(f"no such file: {args[0]}")
+# Absolute, as scenarios.sh takes an argument for its script only with a /.
+src = os.path.realpath(args[0]) if args else os.path.join(REPO, "memex/.local/bin/memex-sync")
 watch_src = os.path.join(REPO, "memex/.local/bin/memex-watch")
 runner = os.path.join(HERE, "scenarios.sh")
 with open(src) as f:
     text = f.read()
 with open(watch_src) as f:
     watch_text = f.read()
+
+# What scenarios.sh prints about itself, not about the script under test;
+# each must still be in its source.
+HARNESS_LINES = ("listed in CASES, but no such function", "no such scenario")
+with open(runner) as f:
+    runner_text = f.read()
+for line in HARNESS_LINES:
+    if line not in runner_text:
+        print(f'{runner} no longer says "{line}"; update HARNESS_LINES in mutants.py')
+        sys.exit(1)
 
 FETCH = "fetched=true\nfetch_origin || fetched=false\n"
 GUARD_COMMENT = ("# Checked after the fetch, right before the commit: an operation started\n"
@@ -263,9 +287,10 @@ listing = subprocess.run([runner, "--list"], stdout=subprocess.PIPE, text=True)
 if listing.returncode != 0:
     print(f"{runner} --list failed with exit {listing.returncode}")
     sys.exit(1)
+if not listing.stdout.strip():
+    print(f"{runner} --list printed no names")
+    sys.exit(1)
 scenarios = set(listing.stdout.splitlines())
-# What scenarios.sh prints about itself, not about the script under test.
-HARNESS_LINES = ("listed in CASES, but no such function", "no such scenario")
 
 ok = True
 outdir = tempfile.mkdtemp(prefix="memex-sync-mutants.")
