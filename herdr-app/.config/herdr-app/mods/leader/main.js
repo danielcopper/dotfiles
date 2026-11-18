@@ -404,25 +404,31 @@ const ACTIONS = [
 // S and c are aliases of s and t; the list shows each action once.
 const LEADER = level("Leader", ACTIONS, ["S", "c"], "1-9 tab · Esc");
 
-// Tab and shift-Tab. herdr binds them itself, to moving the keyboard to the
-// next or previous tab stop, and a binding is matched before on_key_down: the
-// press never reaches the leader, and the keyboard leaves it, so Esc doesn't
-// either. A "tab" entry in keys.json's "mod:leader" section doesn't beat that
-// binding after the app starts. Seen in herdr-app 0.1.16: once keys.json had
-// been saved while the app ran, Tab reached on_key_down even without such an
-// entry, until the next start. A binding in the leader's own key context comes
-// first, as herdr's win98 menu does it for Escape: the deepest matching
-// context wins. Its action comes here as the key it stands for.
+// Keys the leader binds in its own key context. herdr binds Tab and
+// shift-Tab itself, to moving the keyboard to the next or previous tab stop.
+// GPUI runs a matching binding's action first and hands the key to
+// on_key_down only when no action stopped it, so Tab never reached the leader,
+// and the keyboard left it, so Esc didn't either. Seen in herdr-app 0.1.16:
+// from the app's start a "tab" entry in keys.json's "mod:leader" section lost
+// to herdr's binding, and once keys.json had been saved while the app ran,
+// Tab reached on_key_down without any entry, until the next start. Of the
+// matching bindings, the one in the deepest context wins, so a binding in the
+// context of the leader's root comes first. herdr's win98 menu binds Escape
+// that way, since the app's own Escape closes an overlay before its key
+// handler sees it; the leader does the same. Each action runs what its key
+// does in the leader. keys.json's "mod:leader" Escape stays, for an Esc
+// should these bindings fail.
 const KEY_CONTEXT = "Leader";
-const TAB_KEYS = [
-  { keystroke: "tab", action: "leader_tab", shift: false },
-  { keystroke: "shift-tab", action: "leader_shift_tab", shift: true },
-];
-const tabKey = ({ keystroke, shift }) => ({
-  key: "tab",
+const keyEvent = (key, keystroke, shift) => ({
+  key,
   keystroke,
   modifiers: { shift, control: false, alt: false, platform: false, function: false },
 });
+const BOUND_KEYS = [
+  { keystroke: "tab", action: "leader_tab", name: "Tab", run: (leader, cx) => leader.press(keyEvent("tab", "tab", false), cx) },
+  { keystroke: "shift-tab", action: "leader_shift_tab", name: "shift-Tab", run: (leader, cx) => leader.press(keyEvent("tab", "shift-tab", true), cx) },
+  { keystroke: "escape", action: "leader_escape", name: "Esc", run: (leader, cx) => leader.escape(cx) },
+];
 
 export default class Leader extends View {
   init(_props, cx) {
@@ -438,7 +444,8 @@ export default class Leader extends View {
     // A second ctrl-space and Esc normally don't reach on_key_down: keys.json's
     // "mod:leader" section binds them to leader.send_prefix and leader.escape,
     // which arrive here (in the personal layout a ctrl-space may come through
-    // focus-history instead, the same command).
+    // focus-history instead, the same command); Esc comes first as the
+    // leader_escape action (BOUND_KEYS).
     //
     // ctrl-space ctrl-space <key> is for a tmux in the focused terminal, whose
     // prefix is ctrl-space too: the leader takes <key> itself once the
@@ -467,24 +474,29 @@ export default class Leader extends View {
         else if (command === "escape") this.escape(cx);
       }
     });
-    this.bindTabKeys(cx);
+    this.bindKeys(cx);
   }
 
-  // Binds TAB_KEYS in KEY_CONTEXT. Every leader binds them again, as herdr's
-  // win98 menu does, so a binding that a keymap reset dropped comes back, and
-  // one whose name this file changed takes effect, with the next leader rather
-  // than the next start. A failure leaves the rest of the leader working and
-  // says why.
-  bindTabKeys(cx) {
+  // Binds BOUND_KEYS in KEY_CONTEXT. Every leader binds them again, as herdr's
+  // win98 menu does, so that a binding a keymap reset dropped would come back,
+  // and one whose name this file changed would take effect, with the next
+  // leader rather than the next start. The keymap only grows. Measured in
+  // herdr-app 0.1.16: 15000 extra bindings, some 5000 leaders, slowed typing
+  // into a terminal by about 1.7 ms a key (60 keys: 245 -> 345 ms) and the
+  // leader's Tab and Esc by a few ms; after keys.json was saved, typing was
+  // back to its old speed. A failure leaves the rest of the leader working
+  // and says why.
+  bindKeys(cx) {
     let reason;
     try {
-      const count = cx.bind_keys(TAB_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: KEY_CONTEXT })));
-      if (count === TAB_KEYS.length) return;
-      reason = `${count} of ${TAB_KEYS.length} bindings added`;
+      const count = cx.bind_keys(BOUND_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: KEY_CONTEXT })));
+      if (count === BOUND_KEYS.length) return;
+      reason = `${count} of ${BOUND_KEYS.length} bindings added`;
     } catch (e) {
       reason = String(e?.message ?? e);
     }
-    notify({ title: "Leader: Tab and shift-Tab not bound", body: reason, level: "error" });
+    const names = BOUND_KEYS.map((k) => k.name);
+    notify({ title: `Leader: ${names.slice(0, -1).join(", ")} and ${names.at(-1)} not bound`, body: reason, level: "error" });
   }
 
   prefixAgain(cx) {
@@ -611,8 +623,8 @@ export default class Leader extends View {
       p.cancelled = true;
       return this.close();
     }
-    // Esc arrives as leader.escape (init); this is in case herdr hands it to
-    // the overlay instead.
+    // Esc arrives as the leader_escape action or leader.escape (init); this is
+    // in case herdr hands it to the overlay instead.
     if (e.key === "escape") return this.escape(cx);
     if (e.modifiers?.control || e.modifiers?.alt || e.modifiers?.platform) return this.close();
     const key = e.key === "tab" && !e.modifiers?.shift ? "Tab" : (e.key_char ?? e.key);
@@ -660,9 +672,9 @@ export default class Leader extends View {
         ? `${name} (repeat)`
         : name;
     let root = h_flex().id("leader").track_focus(this.handle).key_context(KEY_CONTEXT);
-    for (const k of TAB_KEYS) {
+    for (const k of BOUND_KEYS) {
       root = root.on_action(k.action, (_e, cx) => {
-        this.press(tabKey(k), cx);
+        k.run(this, cx);
         cx.stop_propagation();
       });
     }

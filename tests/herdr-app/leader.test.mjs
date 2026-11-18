@@ -1,5 +1,5 @@
 // Tests for the herdr leader mod (herdr-app/.config/herdr-app/mods/leader/main.js):
-// how Tab and shift-Tab reach it, driven through the Leader class with a fake
+// how Tab, shift-Tab and Esc reach it, driven through the Leader class with a fake
 // herdr. Run with `mise run herdr-leader-test` (README, "herdr app"), or from
 // the repo root with `node --test tests/herdr-app/leader.test.mjs`.
 //
@@ -13,8 +13,8 @@
 // a test fail against a broken one).
 //
 // These tests check what the leader binds and what its handlers and its
-// on_key_down then do. That the leader's binding comes before herdr's own Tab
-// binding is the app's behaviour, which no test here covers.
+// on_key_down then do. That the leader's bindings come before herdr's own
+// bindings of those keys is the app's behaviour, which no test here covers.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -153,9 +153,14 @@ async function openLeader({ bindKeys, ...options } = {}) {
   return { leader, cx, host };
 }
 
-const TAB = { key: "tab", keystroke: "tab", modifiers: { shift: false, control: false, alt: false, platform: false, function: false } };
-const SHIFT_TAB = { key: "tab", keystroke: "shift-tab", modifiers: { ...TAB.modifiers, shift: true } };
-const X = { key: "x", keystroke: "x", key_char: "x", modifiers: TAB.modifiers };
+const PLAIN = { shift: false, control: false, alt: false, platform: false, function: false };
+// Each key the leader binds, as GPUI hands it to on_key_down.
+const KEY = {
+  tab: { key: "tab", keystroke: "tab", modifiers: PLAIN },
+  "shift-tab": { key: "tab", keystroke: "shift-tab", modifiers: { ...PLAIN, shift: true } },
+  escape: { key: "escape", keystroke: "escape", modifiers: PLAIN },
+};
+const X = { key: "x", keystroke: "x", key_char: "x", modifiers: PLAIN };
 
 // A key as GPUI hands it to the root's on_key_down.
 async function pressRaw(leader, cx, event) {
@@ -166,8 +171,12 @@ async function pressRaw(leader, cx, event) {
 }
 
 // The root's handler for the action bound to `keystroke`, as GPUI runs it
-// when that binding matches; an action it lets through goes on to
-// on_key_down as the same key, so a key pressed twice shows in the results.
+// when that binding matches. GPUI dispatches a matching binding's action
+// first and gives the key to on_key_down only when no action stopped it
+// (window.rs, dispatch_key_event); there an action stops by default in the
+// bubble phase. This stand-in is stricter: an action that doesn't call
+// stop_propagation goes on to on_key_down as the same key, so a key handled
+// twice shows in the results.
 async function pressBound(leader, cx, keystroke) {
   const binding = cx.bound.find((b) => b.keystroke === keystroke);
   assert.ok(binding, `no binding for ${keystroke}`);
@@ -176,12 +185,14 @@ async function pressBound(leader, cx, keystroke) {
   const stopped = cx.stopped;
   handler({ action: binding.action }, cx);
   await settle();
-  if (cx.stopped === stopped) await pressRaw(leader, cx, keystroke === "tab" ? TAB : SHIFT_TAB);
+  if (cx.stopped === stopped) await pressRaw(leader, cx, KEY[keystroke]);
 }
 
-test("the leader binds tab and shift-tab in the key context its root declares, and handles both actions", async () => {
+const BOUND = ["tab", "shift-tab", "escape"];
+
+test("the leader binds tab, shift-tab and escape in the key context its root declares, and handles each action", async () => {
   const { leader, cx } = await openLeader();
-  assert.deepEqual(cx.bound.map((b) => b.keystroke), ["tab", "shift-tab"]);
+  assert.deepEqual(cx.bound.map((b) => b.keystroke), BOUND);
   const root = leader.render(cx);
   const contexts = callsOf(root, "key_context").map(([c]) => c);
   assert.equal(contexts.length, 1);
@@ -190,20 +201,20 @@ test("the leader binds tab and shift-tab in the key context its root declares, a
   for (const b of cx.bound) assert.ok(handled.includes(b.action), `no handler for ${b.action}`);
 });
 
-test("every leader that opens binds tab and shift-tab again", async () => {
+test("every leader that opens binds its keys again", async () => {
   const first = await openLeader();
   const second = await openLeader();
-  assert.deepEqual(first.cx.bound.map((b) => b.keystroke), ["tab", "shift-tab"]);
+  assert.deepEqual(first.cx.bound.map((b) => b.keystroke), BOUND);
   assert.deepEqual(second.cx.bound, first.cx.bound);
 });
 
 for (const [name, bindKeys, reason] of [
   ["throws", () => { throw new Error("bad keystroke"); }, "bad keystroke"],
-  ["adds fewer than asked", () => 1, "1 of 2 bindings added"],
+  ["adds fewer than asked", () => 2, "2 of 3 bindings added"],
 ]) {
   test(`a bind_keys that ${name} is said in a toast; Esc and a second ctrl-space still work`, async () => {
     const { host } = await openLeader({ bindKeys });
-    assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: Tab and shift-Tab not bound", reason, "error"]]);
+    assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: Tab, shift-Tab and Esc not bound", reason, "error"]]);
     await host.command("escape");
     assert.deepEqual(host.closed, ["mod-leader"]);
 
@@ -216,7 +227,7 @@ for (const [name, bindKeys, reason] of [
 
 for (const [how, press] of [
   ["through its binding", (leader, cx, keystroke) => pressBound(leader, cx, keystroke)],
-  ["as a key", (leader, cx, keystroke) => pressRaw(leader, cx, keystroke === "tab" ? TAB : SHIFT_TAB)],
+  ["as a key", (leader, cx, keystroke) => pressRaw(leader, cx, KEY[keystroke])],
 ]) {
   test(`Tab ${how} focuses the previous pane and closes the leader`, async () => {
     const { leader, cx, host } = await openLeader();
@@ -241,8 +252,16 @@ for (const [how, press] of [
     assert.deepEqual(host.closed, ["mod-leader"]);
   });
 
-  test(`after ctrl-space ctrl-space, Tab ${how} goes to tmux after its prefix, shift-Tab as BTab`, async () => {
-    for (const [keystroke, key] of [["tab", "Tab"], ["shift-tab", "BTab"]]) {
+  test(`Esc ${how} closes the leader and runs nothing`, async () => {
+    const { leader, cx, host } = await openLeader();
+    await press(leader, cx, "escape");
+    assert.deepEqual(host.runs, []);
+    assert.deepEqual(host.notes, []);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
+
+  test(`after ctrl-space ctrl-space, Tab ${how} goes to tmux after its prefix, shift-Tab as BTab, Esc as Escape`, async () => {
+    for (const [keystroke, key] of [["tab", "Tab"], ["shift-tab", "BTab"], ["escape", "Escape"]]) {
       // The second ctrl-space came before the leader had the keyboard.
       const { leader, cx, host } = await openLeader({ leaderState: { at: Date.now(), ready: false, pending: 1 } });
       await press(leader, cx, keystroke);
