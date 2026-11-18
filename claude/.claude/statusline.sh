@@ -34,19 +34,38 @@ data=$(printf '%s' "$input" | jq -r '
 ')
 IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_7D RESET_5H RESET_7D SESSION_ID <<< "$data"
 
-##### Terminal width detection (no JSON field exposes this) ###################
-# Anthropic's statusline JSON omits terminal dimensions, so derive it here. In
-# the render context stdin is the JSON pipe and the subprocess has no
-# controlling tty — `tput cols` and `stty size` (with or without `</dev/tty`)
-# fail or return terminfo defaults (typically 80) and ignore real resize events.
+##### Terminal width (no JSON field exposes this) #############################
+# The statusline JSON carries no terminal size, and this subprocess has no
+# controlling tty: stdin is the JSON pipe, so `tput cols` and `stty size` (also
+# with `</dev/tty`) fail or return the terminfo default of 80.
 #
-# Order: $COLUMNS env (rarely set in render context but cheap to check) →
-# conservative default. `/dev/tty` probes were tried; they fail in piped
-# subprocesses on this setup.
-COLS=${COLUMNS:-}
-if [ -z "$COLS" ] || ! [ "$COLS" -gt 0 ] 2>/dev/null; then
-    COLS=140
-fi
+# So ask what draws the terminal; the first usable answer wins:
+#   herdr terminal ($HC_TERMINAL_ID): `hc get` reports its cols
+#   tmux pane ($TMUX and $TMUX_PANE): tmux reports the pane's width
+#   $COLUMNS, rarely exported to this subprocess
+#   140, a conservative default
+# herdr comes first because herdr-core passes the TMUX and TMUX_PANE it was
+# started with on to its terminals (see bash/.bashrc), and those name a pane
+# that is not this one. Each probe gives up after half a second and keeps its
+# errors off stderr, so a hung or missing hc or tmux delays the line by at most
+# that and never prints into it.
+term_width() {
+    local num='^[1-9][0-9]*$' w=""
+    if [ -n "${HC_TERMINAL_ID:-}" ]; then
+        w=$(timeout 0.5 hc get "$HC_TERMINAL_ID" 2>/dev/null | jq -r '.cols // empty' 2>/dev/null)
+    fi
+    if ! [[ $w =~ $num ]] && [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
+        w=$(timeout 0.5 tmux display -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
+    fi
+    if ! [[ $w =~ $num ]]; then
+        w=${COLUMNS:-}
+    fi
+    if ! [[ $w =~ $num ]]; then
+        w=140
+    fi
+    printf '%s\n' "$w"
+}
+COLS=$(term_width)
 
 # Truncation caps used by the content-aware shrink loop further below. The
 # loop measures the rendered line's visible width and shrinks variants from
@@ -297,8 +316,8 @@ CTX_BAR=$(build_bar $((${#CTX_LABEL} + 2)) "$PCT"    "$CTX_LABEL")
 H_BAR=$(build_bar   $((${#H_LABEL}   + 2)) "$PCT_5H" "$H_LABEL"   "$FILL_5H_LOW")
 W_BAR=$(build_bar   $((${#W_LABEL}   + 2)) "$PCT_7D" "$W_LABEL"   "$FILL_7D_LOW")
 
-##### Mini-bars (last-resort fallback for very narrow panes) ##################
-# When even max-truncated path + branch still overflow the pane, replace the
+##### Mini-bars (last-resort fallback for a very narrow terminal) #############
+# When even max-truncated path + branch still overflow $COLS, replace the
 # three labelled bars with one-cell vertical-block glyphs (▁ → █). Each bar
 # becomes a single column whose fill height = percentage / 12.5. Loses the
 # reset-time label and exact %, but keeps the tier (low/mid/high) via colour
