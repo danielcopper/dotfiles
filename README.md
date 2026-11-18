@@ -484,8 +484,8 @@ herdr-app-check` and `mise run herdr-board-test` under "herdr app".
 `tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the
 `memex` package and the `~/Memory` link that `install-dotfiles.sh` makes, and
 the directories that must be real ("Install / update" above), in
-throwaway homes; each file's header lists its cases, and `--list` prints
-their names. It needs stow, git and tar.
+throwaway homes. Each file's header lists its cases, `--list` prints their
+names, and naming cases runs only those. It needs stow, git and tar.
 
 `mise run shell-test` (without mise, `tests/statusline/width.sh` and
 `tests/bash/startup.sh`) checks how the Claude Code status line finds the
@@ -495,8 +495,9 @@ starts the keyring daemon, and the one line it prints on stderr when the lock
 stays busy or the start fails. Stand-ins take the place of hc, tmux,
 fastfetch and gnome-keyring-daemon, and flock and mkdir run through logging
 wrappers around the real tools, so no herdr or tmux server is asked and no
-real keyring daemon starts. Each file's header lists its cases, and naming
-cases runs only those. It needs jq, timeout, flock and python3.
+real keyring daemon starts. Each file's header lists its cases, `--list`
+prints their names, and naming cases runs only those. It needs jq, timeout,
+flock and python3.
 
 ## Memory protection on the Steam Deck
 
