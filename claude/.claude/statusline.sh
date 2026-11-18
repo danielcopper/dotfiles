@@ -48,9 +48,9 @@ IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_
 # herdr-core passes the TMUX and TMUX_PANE it was started with on to its
 # terminals. bash/.bashrc drops them in an interactive shell, but a Claude Code
 # started any other way (`hc run claude`, `bash -lc`) still carries them, and
-# they name another pane. A probe gives up after half a second and keeps its
-# errors off stderr, so a hung or missing hc or tmux delays the line by at most
-# half a second per probe and never prints into it.
+# they name another pane. Only one of the two probes runs. It gives up after
+# half a second and keeps its errors off stderr, so a hung or missing hc or tmux
+# delays the line by at most half a second and never prints into it.
 #
 # term_width sets COLS and, for the debug log at the end, COLS_SRC: hc, tmux,
 # columns or default. It runs in this shell, not in $(…), so both stay set.
