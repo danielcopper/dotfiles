@@ -176,9 +176,10 @@ The herdr desktop app comes from its official installer script into
 `~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
 package carries the config that is mine: `keys.json` (the shipped defaults plus
 `ctrl-space` for the leader mod, and a `mod:leader` section that hands the
-leader a second `ctrl-space`, and `Esc` should the leader's own binding of it
-fail; a `tab` entry there does not beat herdr's own Tab binding after the
-app starts, see below), the mods `mods/leader/` (its `f`
+leader a second `ctrl-space`, and `Esc` while the leader's own bindings are
+missing: a failed bind, or `keys.json` reloaded while a leader is open; a
+`tab` entry there does not beat herdr's own Tab binding after the app starts,
+see below), the mods `mods/leader/` (its `f`
 opens a second level for files: `f f` and `f g`, the keys of nvim's
 `<leader>ff` and `<leader>fg`, open the file popup, `f e` and `f G` show the
 right panel on Files or Changes; `Z` switches that panel between its normal
@@ -263,7 +264,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   count; it needs tmux 3.4 or newer and Linux (`/proc`) where tmux runs. In
   the personal layout `ctrl-space` goes through focus-history, so a fast
   second `ctrl-space` still reaches the leader; in other layouts it can
-  close the leader again.
+  close the leader again. An `Esc` within about 10–30 ms of the first
+  `ctrl-space` after a start goes to the terminal, since the leader does not
+  have the keyboard yet; a second `Esc` closes the leader.
 - **The leader binds Tab, shift-Tab and Esc itself.** herdr's own bindings
   would take Tab and shift-Tab first; the comment above `BOUND_KEYS` in
   `mods/leader/main.js` says how and why. `mise run herdr-leader-test`

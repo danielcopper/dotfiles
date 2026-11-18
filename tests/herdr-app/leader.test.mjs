@@ -26,6 +26,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const modDir = resolve(here, "../../herdr-app/.config/herdr-app/mods/leader");
 const mainPath = process.env.LEADER_MAIN ? resolve(process.env.LEADER_MAIN) : join(modDir, "main.js");
+const keysPath = resolve(here, "../../herdr-app/.config/herdr-app/keys.json");
 const STUBBED = new Set(["gpui-kit", "gpui-base", "herdr"]);
 
 registerHooks({
@@ -84,7 +85,8 @@ const TTY = "/dev/pts/7";
 // on terminal t1, none of whose keys repeat. `leaderState` is what
 // focus-history left in shared("leader.state") before the leader started;
 // host.command(name) hands the leader a key command (leader.<name>).
-function fakeHost({ previous = "p2", leaderState = null } = {}) {
+// `failRun`: a command run throws for, as a broken app command would.
+function fakeHost({ previous = "p2", leaderState = null, failRun = null } = {}) {
   const shared = new Map([["focus.history", { current: "p1", previous }], ["leader.state", leaderState]]);
   const waiting = [];
   const host = {
@@ -94,7 +96,10 @@ function fakeHost({ previous = "p2", leaderState = null } = {}) {
     sent: [],
     shared: (key) => shared.get(key) ?? null,
     setShared: (key, value) => shared.set(key, value),
-    run: (name, args) => host.runs.push([name, args]),
+    run: (name, args) => {
+      if (name === failRun) throw new Error(`${name} broke`);
+      host.runs.push([name, args]);
+    },
     notify: (n) => host.notes.push(n),
     props: () => ({ overlay: "mod-leader" }),
     closeOverlay: (id) => host.closed.push(id),
@@ -208,13 +213,13 @@ test("every leader that opens binds its keys again", async () => {
   assert.deepEqual(second.cx.bound, first.cx.bound);
 });
 
-for (const [name, bindKeys, reason] of [
-  ["throws", () => { throw new Error("bad keystroke"); }, "bad keystroke"],
-  ["adds fewer than asked", () => 2, "2 of 3 bindings added"],
+for (const [name, bindKeys, title, reason] of [
+  ["throws", () => { throw new Error("bad keystroke"); }, "Leader: Tab, shift-Tab and Esc not bound", "bad keystroke"],
+  ["adds fewer than asked", () => 2, "Leader: Tab, shift-Tab and Esc not all bound", "2 of 3 bindings added"],
 ]) {
   test(`a bind_keys that ${name} is said in a toast; Esc and a second ctrl-space still work`, async () => {
     const { host } = await openLeader({ bindKeys });
-    assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: Tab, shift-Tab and Esc not bound", reason, "error"]]);
+    assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[title, reason, "error"]]);
     await host.command("escape");
     assert.deepEqual(host.closed, ["mod-leader"]);
 
@@ -260,7 +265,7 @@ for (const [how, press] of [
     assert.deepEqual(host.closed, ["mod-leader"]);
   });
 
-  test(`after ctrl-space ctrl-space, Tab ${how} goes to tmux after its prefix, shift-Tab as BTab, Esc as Escape`, async () => {
+  test(`after ctrl-space ctrl-space, Tab, shift-Tab and Esc go to tmux after its prefix as Tab, BTab and Escape (${how})`, async () => {
     for (const [keystroke, key] of [["tab", "Tab"], ["shift-tab", "BTab"], ["escape", "Escape"]]) {
       // The second ctrl-space came before the leader had the keyboard.
       const { leader, cx, host } = await openLeader({ leaderState: { at: Date.now(), ready: false, pending: 1 } });
@@ -271,3 +276,16 @@ for (const [how, press] of [
     }
   });
 }
+
+test("a bound key whose handling throws says so in a toast and goes no further", async () => {
+  const { leader, cx, host } = await openLeader({ failRun: "pane.focus" });
+  await pressBound(leader, cx, "tab");
+  assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: Tab failed", "pane.focus broke", "error"]]);
+  assert.deepEqual(host.closed, ["mod-leader"]);
+});
+
+test("keys.json still hands the leader a second ctrl-space and Esc", () => {
+  const section = JSON.parse(readFileSync(keysPath, "utf8"))["mod:leader"];
+  assert.equal(section?.["ctrl-space"], "leader.send_prefix");
+  assert.equal(section?.escape, "leader.escape");
+});
