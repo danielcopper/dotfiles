@@ -118,8 +118,9 @@
 #       <main>.worktrees/ (relative, as stow writes it) or under .worktrees/, is
 #       removed and the package file linked
 #   s69 a staging directory beside such a link is put in its place
-#   s70 a dangling top-level link outside every worktree is left alone, the
-#       run says so, and stow names the conflict
+#   s70 without --backup, a dangling top-level link outside every worktree is
+#       left alone, the run says to remove or move it, and stow names the
+#       conflict
 #   s71 a late clash on a listed top-level directory (~/.claude): the run
 #       stows, names both paths and exits 1
 #   s72 a staging directory beside a link to a package file is named as not
@@ -131,19 +132,33 @@
 #   s75 beside such a link to a file where a directory belongs, the run says
 #       to move the link elsewhere; once it is gone, the next run puts the
 #       staging directory in its place
-#   s76 beside such a link where a file belongs, it says that no directory
-#       belongs there and names the staging directory at the end
+#   s76 beside such a link where a file belongs, without --backup, it says to
+#       remove or move the link, that no directory belongs there, and names the
+#       staging directory at the end
 #   s77 a staging directory beside a link to a file in another worktree, which
 #       is relinked, is named as in s72
 #   s78 s67 with files the app wrote through the fold: the run names them and
 #       says to move them into the staging directory first, which keeps the
 #       repo clean
-#   s79 with --backup, top-level links left alone, to a file outside the repo
-#       (with a staging directory beside it) or dangling outside the
-#       worktrees, are not backed up
+#   s79 with --backup, a top-level link to a file outside the repo and one
+#       dangling outside the worktrees go into the backup, and stow links the
+#       package files
 #   s80 a failing rm keeps a dangling link into a removed worktree; the run
 #       says so and stops before stow
 #   s81 the same for a failing readlink
+#   s82 with --backup, such a link with a staging directory beside it is left
+#       alone and named with it, the other one backed up
+#   s83 without --backup, both are left alone, each line says to remove or
+#       move the link, nothing is backed up, stow names the conflict
+#   s84 with --backup, a link to a file outside the repo below a real
+#       directory (~/.githooks/pre-commit) goes into the backup
+#   s85 beside a dangling link where a directory belongs, the run says to move
+#       the link elsewhere; once it is gone, the next run puts the staging
+#       directory in its place
+#   s86 s67 with git ls-files failing: the run says the listing failed and
+#       what to do all the same
+#   s87 s78 with a file the staging directory has too: the run names it apart
+#       and says to merge it
 # usage: shared-dirs.sh [installer] [case ...]
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them.
@@ -1099,7 +1114,9 @@ s66_file_at_top_level_dir_beside_stage_left_alone() {
 }
 
 # expect_stage_beside_own_fold_stops: a run over a fold of ~/.githooks into
-# the git package with a staging directory beside it stops with what to do.
+# the git package with a staging directory beside it stops, names both and
+# leaves the link, the staging directory and the package as they are; the
+# caller checks what it says to do.
 expect_stage_beside_own_fold_stops() {
   check "exit 1 (got $RC)" eq "$RC" 1
   check "names both and the repo" grep -qxF \
@@ -1142,9 +1159,10 @@ s78_stage_beside_own_fold_names_app_files() {
   printf 'deep\n' >"$HOME/.githooks/sub/deep"
   run_relink git
   expect_stage_beside_own_fold_stops
-  check "names what the app wrote" eq "$(grep -A2 -xF "The app already wrote these through the link into the repo, untracked in $src:" <<<"$OUT" | tail -2 | tr '\n' ' ')" "  app   sub "
-  check "says what to do" grep -qxF \
-    "To keep it all out of the repo, move these from $src into $HOME/.githooks.unfolding, then remove the link $HOME/.githooks and run this again; the run then puts $HOME/.githooks.unfolding in its place, and stow links the package's files into it." <<<"$OUT"
+  check "names what the app wrote, then what to do" eq "$(grep -A3 -xF "The app already wrote these through the link into the repo, untracked in $src:" <<<"$OUT" | tail -3)" \
+    "  app
+  sub
+To keep it all out of the repo, move these from $src into $HOME/.githooks.unfolding, then remove the link $HOME/.githooks and run this again; the run then puts $HOME/.githooks.unfolding in its place, and stow links the package's files into it."
   mv -- "$src/app" "$src/sub" "$HOME/.githooks.unfolding/"
   expect_stage_put_in_place_of_own_fold
   check "then the app's files in place" eq "$(cat "$HOME/.githooks/app" "$HOME/.githooks/sub/deep" 2>/dev/null | tr '\n' ' ')" "app deep "
@@ -1187,7 +1205,7 @@ s70_dangling_top_level_link_outside_worktrees_kept() {
   check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" /nonexistent/.bashrc
   check ".inputrc left as it is" eq "$(readlink -- "$HOME/.inputrc")" "$ROOT/elsewhere/.inputrc"
   check "removes nothing" eq "$(grep -c '^removed ' <<<"$OUT")" 0
-  check "says it left .bashrc alone" left_alone_line .bashrc "its target does not exist"
+  check "says it left .bashrc alone" left_alone_line .bashrc "its target does not exist; remove or move it, then run this again"
   check "stow names the conflict" grep -q "existing target is not owned by stow: .bashrc" <<<"$OUT"
 }
 
@@ -1280,25 +1298,120 @@ s76_stage_beside_link_to_file_where_file_belongs() {
   run_relink bash
   check "exit 1 (got $RC)" eq "$RC" 1
   check "says it does not belong" left_alone_line .bashrc \
-    "it points outside this repo; $HOME/.bashrc.unfolding holds what an earlier run staged for it; no directory belongs here any more: move $HOME/.bashrc.unfolding elsewhere, or remove it if you need nothing in it"
+    "it points outside this repo; remove or move it, then run this again; $HOME/.bashrc.unfolding holds what an earlier run staged for it; no directory belongs here any more: move $HOME/.bashrc.unfolding elsewhere, or remove it if you need nothing in it"
   check "names it at the end" stray_closing_line "$HOME/.bashrc.unfolding"
 }
 
-s79_backup_skips_top_level_links_left_alone() {
-  mkdir -p "$ROOT/elsewhere" "$HOME/.bashrc.unfolding"
+# foreign_top_level_links [stage]: ~/.bashrc a link to a file outside the
+# repo, ~/.inputrc a link dangling outside the worktrees; with "stage", a
+# staging directory beside ~/.bashrc.
+foreign_top_level_links() {
+  mkdir -p "$ROOT/elsewhere"
   printf 'own\n' >"$ROOT/elsewhere/file"
-  printf 'staged\n' >"$HOME/.bashrc.unfolding/staged"
   ln -s "$ROOT/elsewhere/file" "$HOME/.bashrc"
   ln -s /nonexistent/.inputrc "$HOME/.inputrc"
+  if [ "${1:-}" = stage ]; then
+    mkdir -p "$HOME/.bashrc.unfolding"
+    printf 'staged\n' >"$HOME/.bashrc.unfolding/staged"
+  fi
+}
+backed_up_link() { readlink -- "$HOME"/.dotfiles-pre-stow.*/"$1" 2>/dev/null; }
+
+s79_backup_takes_foreign_top_level_links() {
+  foreign_top_level_links
+  run_stow --backup bash inputrc
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "leaves nothing alone" eq "$(grep -c 'left alone' <<<"$OUT")" 0
+  check ".bashrc's link in the backup" eq "$(backed_up_link .bashrc)" "$ROOT/elsewhere/file"
+  check ".inputrc's link in the backup" eq "$(backed_up_link .inputrc)" /nonexistent/.inputrc
+  check "says so" grep -qxF "backed up 2 file(s)" <<<"$OUT"
+  check ".bashrc linked" linked_to .bashrc "$COPY/bash/.bashrc"
+  check ".inputrc linked" linked_to .inputrc "$COPY/inputrc/.inputrc"
+}
+
+s82_backup_leaves_foreign_link_beside_stage() {
+  foreign_top_level_links stage
   run_stow --backup bash inputrc
   check "exit 1 (got $RC)" eq "$RC" 1
-  check "says it left .bashrc alone" grep -q "^stow-packages.sh: left alone: $HOME/.bashrc -> " <<<"$OUT"
-  check "says it left .inputrc alone" left_alone_line .inputrc "its target does not exist"
+  check "names .bashrc with the staging directory" left_alone_line .bashrc \
+    "it points outside this repo; $HOME/.bashrc.unfolding holds what an earlier run staged for it; no directory belongs here any more: move $HOME/.bashrc.unfolding elsewhere, or remove it if you need nothing in it"
+  check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$ROOT/elsewhere/file"
+  check "the staged file untouched" eq "$(cat "$HOME/.bashrc.unfolding/staged" 2>/dev/null)" staged
+  check ".bashrc not in the backup" eq "$(backed_up_link .bashrc)" ""
+  check ".inputrc's link in the backup" eq "$(backed_up_link .inputrc)" /nonexistent/.inputrc
+  check "says so" grep -qxF "backed up 1 file(s)" <<<"$OUT"
+  check "leaves .inputrc to the backup" eq "$(grep -c "left alone: $HOME/.inputrc" <<<"$OUT")" 0
+}
+
+s83_relink_says_to_move_foreign_links() {
+  foreign_top_level_links
+  run_relink bash inputrc
+  check "exit non-zero (got $RC)" test "$RC" -ne 0
+  check "says what to do with .bashrc" left_alone_line .bashrc "it points outside this repo; remove or move it, then run this again"
+  check "says what to do with .inputrc" left_alone_line .inputrc "its target does not exist; remove or move it, then run this again"
   check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$ROOT/elsewhere/file"
   check ".inputrc left as it is" eq "$(readlink -- "$HOME/.inputrc")" /nonexistent/.inputrc
-  check "the staged file untouched" eq "$(cat "$HOME/.bashrc.unfolding/staged" 2>/dev/null)" staged
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
-  check "says nothing about a backup" eq "$(grep -c 'back' <<<"$OUT")" 0
+  check "says nothing about a backup" eq "$(grep -c 'backing up\|backed up' <<<"$OUT")" 0
+  check "stow names the conflict" grep -q "existing target is not owned by stow: .bashrc" <<<"$OUT"
+}
+
+s84_backup_takes_nested_foreign_link() {
+  mkdir -p "$ROOT/elsewhere" "$HOME/.githooks"
+  printf 'own\n' >"$ROOT/elsewhere/file"
+  ln -s "$ROOT/elsewhere/file" "$HOME/.githooks/pre-commit"
+  run_stow --backup git
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the link in the backup" eq "$(backed_up_link .githooks/pre-commit)" "$ROOT/elsewhere/file"
+  check "pre-commit linked" linked_to .githooks/pre-commit "$COPY/git/.githooks/pre-commit"
+}
+
+s85_dangling_link_beside_stage_where_dir_belongs() {
+  mkdir -p "$HOME/$stage"
+  printf 'staged\n' >"$HOME/$stage/staged"
+  ln -s /nonexistent/x "$HOME/.config/environment.d"
+  run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "says what to do" left_alone_line .config/environment.d \
+    "its target does not exist; $HOME/$stage holds what an earlier run staged for it; move $HOME/.config/environment.d elsewhere, and the next run puts $HOME/$stage in its place"
+  rm -- "$HOME/.config/environment.d"
+  run_install debian
+  check "then exit 0 (got $RC)" eq "$RC" 0
+  check "then the staged file in place" eq "$(cat "$HOME/.config/environment.d/staged" 2>/dev/null)" staged
+}
+
+s86_own_fold_listing_failure_says_what_to_do() {
+  local src=$COPY/git/.githooks
+  fold .githooks "$COPY/git"
+  mkdir -p "$HOME/.githooks.unfolding"
+  printf 'staged\n' >"$HOME/.githooks.unfolding/staged"
+  failing git '*ls-files*'
+  PATH=$ROOT/failbin:$PATH run_relink git
+  expect_stage_beside_own_fold_stops
+  check "says the listing failed" grep -qxF \
+    "stow-packages.sh: git ls-files failed in $COPY, so what the app wrote into $src cannot be listed." <<<"$OUT"
+  check "says what to do" grep -qxF \
+    "To keep it all out of the repo, move what git does not track in $src into $HOME/.githooks.unfolding, merging what it already has into its own, then remove the link $HOME/.githooks and run this again; the run then puts $HOME/.githooks.unfolding in its place, and stow links the package's files into it." <<<"$OUT"
+}
+
+s87_own_fold_app_file_staged_too_merged() {
+  local src=$COPY/git/.githooks
+  fold .githooks "$COPY/git"
+  mkdir -p "$HOME/.githooks.unfolding"
+  printf 'staged\n' >"$HOME/.githooks.unfolding/staged"
+  printf 'staged app\n' >"$HOME/.githooks.unfolding/app"
+  printf 'app\n' >"$HOME/.githooks/app"
+  printf 'new\n' >"$HOME/.githooks/new"
+  run_relink git
+  expect_stage_beside_own_fold_stops
+  check "names what the app wrote, what is staged too, then what to do" \
+    eq "$(grep -A5 -xF "The app already wrote these through the link into the repo, untracked in $src:" <<<"$OUT" | tail -5)" \
+    "  app
+  new
+$HOME/.githooks.unfolding already has these too:
+  app
+To keep it all out of the repo, move these from $src into $HOME/.githooks.unfolding, merging those it already has into its own, then remove the link $HOME/.githooks and run this again; the run then puts $HOME/.githooks.unfolding in its place, and stow links the package's files into it."
+  check "the staged app untouched" eq "$(cat "$HOME/.githooks.unfolding/app")" "staged app"
 }
 
 # expect_dangling_kept <message>: a run that could not drop a dangling link
@@ -1322,7 +1435,7 @@ s81_dangling_link_readlink_failure_stops() {
   ln -s "$ROOT/repo.worktrees/fix/gone/bash/.bashrc" "$HOME/.bashrc"
   failing readlink -m
   PATH=$ROOT/failbin:$PATH run_relink bash inputrc
-  expect_dangling_kept "readlink could not resolve the dangling link $HOME/.bashrc, which stays"
+  expect_dangling_kept "readlink could not resolve the dangling link $HOME/.bashrc, which stays; remove it and run this again"
 }
 
 all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_program_files_moved
@@ -1355,8 +1468,11 @@ all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_p
   s73_stage_beside_dangling_file_link_named s74_stage_beside_foreign_top_level_link_named
   s75_stage_beside_link_to_file_where_dir_belongs s76_stage_beside_link_to_file_where_file_belongs
   s77_stage_beside_relinked_file_link_named s78_stage_beside_own_fold_names_app_files
-  s79_backup_skips_top_level_links_left_alone s80_dangling_link_rm_failure_stops
-  s81_dangling_link_readlink_failure_stops)
+  s79_backup_takes_foreign_top_level_links s80_dangling_link_rm_failure_stops
+  s81_dangling_link_readlink_failure_stops s82_backup_leaves_foreign_link_beside_stage
+  s83_relink_says_to_move_foreign_links s84_backup_takes_nested_foreign_link
+  s85_dangling_link_beside_stage_where_dir_belongs s86_own_fold_listing_failure_says_what_to_do
+  s87_own_fold_app_file_staged_too_merged)
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
