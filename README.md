@@ -281,12 +281,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   and is written to GitHub or Azure; a refusal moves the card back with the
   error, and a write without a clear answer refreshes the board and then says
   where the card is. It runs gh and az by the path my shell gives on their
-  machine, since herdr's own PATH lacks Homebrew and mise; it asks once per
-  machine and again after `r`. `mise run herdr-board-test` (without mise,
-  `node --test tests/herdr-app/board.test.mjs` from the repo) tests its data
-  functions and a few of its key paths against sample answers of gh, GitHub
-  and az; the test file's header says which are recorded, which built by hand
-  and which written from az's documentation. It needs node.
+  machine, since herdr's own PATH lacks Homebrew and mise; on a machine
+  without sh (Windows) it runs them by name. `mise run herdr-board-test`
+  (without mise, `node --test tests/herdr-app/board.test.mjs` from the repo)
+  tests its data functions and a few of its key paths against sample answers
+  of gh, GitHub and az; the test file's header says which are recorded, which
+  built by hand and which written from az's documentation. It needs node.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
