@@ -45,7 +45,7 @@ A `mise install` that fails does not stop the steps after it: the run ends with 
 | `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), stows the given packages and seeds missing live files of reference copies; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the first shell's greeter and keyring start (`tests/bash/first-shell.sh`), and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the bash startup (`tests/bash/startup.sh`), and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -426,6 +426,12 @@ localhost: ntfy and the refusing origins are small python servers there.
 Without mise, run `tests/memex-sync/scenarios.sh` and
 `python3 tests/memex-sync/mutants.py` from the repo.
 
+## Tests
+
+The test runners are mise tasks that read the clone at `~/dotfiles`, or at
+`DOTFILES_DIR` ("Install / update" above). `mise run memex-sync-test` is
+described under "memex sync", in its "Tests" part.
+
 `mise run install-dotfiles-test` (without mise,
 `tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the
 `memex` package and the `~/Memory` link that `install-dotfiles.sh` makes, and
@@ -434,12 +440,13 @@ throwaway homes; each file's header lists its cases. It needs stow, git and
 tar.
 
 `mise run shell-test` (without mise, `tests/statusline/width.sh` and
-`tests/bash/first-shell.sh`) checks how the Claude Code status line finds the
-terminal's width, and what only the first shell of a terminal window does: the
-greeter and, on wsl-arch, the keyring daemon. Stand-ins take the place of hc,
-tmux, fastfetch and gnome-keyring-daemon, so no herdr or tmux server is asked;
-each file's header lists its cases, and naming cases runs only those. It needs
-jq and timeout.
+`tests/bash/startup.sh`) checks how the Claude Code status line finds the
+terminal's width, and the startup of an interactive bash: the greeter, the
+TMUX variables a herdr terminal drops and, on wsl-arch, how a shell finds or
+starts the keyring daemon. Stand-ins take the place of hc, tmux, fastfetch,
+flock and gnome-keyring-daemon, so no herdr or tmux server is asked and no
+daemon starts; each file's header lists its cases, and naming cases runs only
+those. It needs jq, timeout, flock and python3.
 
 ## Memory protection on the Steam Deck
 
