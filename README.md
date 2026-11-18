@@ -443,11 +443,12 @@ tar.
 `tests/bash/startup.sh`) checks how the Claude Code status line finds the
 terminal's width, and the startup of an interactive bash: the greeter, the
 TMUX variables a herdr terminal drops and, on wsl-arch, how a shell finds or
-starts the keyring daemon. Stand-ins take the place of hc, tmux, fastfetch
-and gnome-keyring-daemon, and flock and mkdir run through logging wrappers
-around the real tools, so no herdr or tmux server is asked and no real
-keyring daemon starts. Each file's header lists its cases, and naming cases
-runs only those. It needs jq, timeout, flock and python3.
+starts the keyring daemon, and the one line it prints on stderr when the lock
+stays busy or the start fails. Stand-ins take the place of hc, tmux,
+fastfetch and gnome-keyring-daemon, and flock and mkdir run through logging
+wrappers around the real tools, so no herdr or tmux server is asked and no
+real keyring daemon starts. Each file's header lists its cases, and naming
+cases runs only those. It needs jq, timeout, flock and python3.
 
 ## Memory protection on the Steam Deck
 
