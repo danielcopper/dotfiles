@@ -173,7 +173,20 @@ m11_failed_mise_and_real_directory() {
   check "names the mise install failure" grep -qx "mise install failed with exit 1; see its output above, fix it and run this again." <<<"$OUT"
 }
 
+# in_cases <name>: the name is in CASES.
+in_cases() {
+  local name
+  for name in "${CASES[@]}"; do
+    [ "$name" = "$1" ] && return 0
+  done
+  return 1
+}
+
 missing=0
+if [ ${#CASES[@]} -eq 0 ]; then
+  echo "FAIL: CASES is empty"
+  missing=1
+fi
 for CASE in "${CASES[@]}"; do
   if ! declare -F "$CASE" >/dev/null; then
     echo "FAIL $CASE: listed in CASES, but no such function"
@@ -188,7 +201,7 @@ for CASE in "${all[@]}"; do
   FAILED=0
   rm -rf "$HOME"
   mkdir -p "$HOME"
-  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
+  if in_cases "$CASE" && declare -F "$CASE" >/dev/null; then
     "$CASE"
   else
     fail "no such case"

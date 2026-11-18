@@ -223,7 +223,20 @@ d1_debug_log() {
   check "names hc as the source" grep -q " | src=hc COLUMNS=unset COLS=218 " "$ROOT/debug.log"
 }
 
+# in_cases <name>: the name is in CASES.
+in_cases() {
+  local name
+  for name in "${CASES[@]}"; do
+    [ "$name" = "$1" ] && return 0
+  done
+  return 1
+}
+
 structure_ok=1
+if [ ${#CASES[@]} -eq 0 ]; then
+  echo "FAIL: CASES is empty"
+  structure_ok=0
+fi
 defs=$(grep -c '^term_width() {$' "$SUT")
 call_sites=$(grep -c '^term_width$' "$SUT")
 if [ "$defs" != 1 ]; then
@@ -247,7 +260,7 @@ all=("${CASES[@]}")
 for CASE in "${all[@]}"; do
   FAILED=0
   stand_ins
-  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
+  if in_cases "$CASE" && declare -F "$CASE" >/dev/null; then
     "$CASE"
   else
     fail "no such case"

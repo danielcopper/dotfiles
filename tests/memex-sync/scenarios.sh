@@ -1214,7 +1214,20 @@ s57_commit_refused() {
   check "marker gone" test ! -e "$T/state/memex-sync/commit-refused"
 }
 
+# in_cases <name>: the name is in CASES.
+in_cases() {
+  local name
+  for name in "${CASES[@]}"; do
+    [ "$name" = "$1" ] && return 0
+  done
+  return 1
+}
+
 missing=0
+if [ ${#CASES[@]} -eq 0 ]; then
+  echo "FAIL: CASES is empty"
+  missing=1
+fi
 for SCENARIO in "${CASES[@]}"; do
   if ! declare -F "$SCENARIO" >/dev/null; then
     echo "FAIL $SCENARIO: listed in CASES, but no such function"
@@ -1228,7 +1241,7 @@ all=("${CASES[@]}")
 for SCENARIO in "${all[@]}"; do
   FAILED=0
   # Checked before new_world, which builds its world under $ROOT/$SCENARIO.
-  if ! { printf '%s\n' "${CASES[@]}" | grep -qxF -- "$SCENARIO" && declare -F "$SCENARIO" >/dev/null; }; then
+  if ! { in_cases "$SCENARIO" && declare -F "$SCENARIO" >/dev/null; }; then
     fail "no such scenario"
     failures=$((failures + 1))
     continue

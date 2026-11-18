@@ -1534,7 +1534,20 @@ s90_backup_line_only_where_the_backup_runs() {
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
 }
 
+# in_cases <name>: the name is in CASES.
+in_cases() {
+  local name
+  for name in "${CASES[@]}"; do
+    [ "$name" = "$1" ] && return 0
+  done
+  return 1
+}
+
 missing=0
+if [ ${#CASES[@]} -eq 0 ]; then
+  echo "FAIL: CASES is empty"
+  missing=1
+fi
 for CASE in "${CASES[@]}"; do
   if ! declare -F "$CASE" >/dev/null; then
     echo "FAIL $CASE: listed in CASES, but no such function"
@@ -1555,7 +1568,7 @@ for CASE in "${all[@]}"; do
     git -C "$tree" checkout -q -- .
   done
   git -C "$COPY" worktree prune
-  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
+  if in_cases "$CASE" && declare -F "$CASE" >/dev/null; then
     "$CASE"
   else
     fail "no such case"
