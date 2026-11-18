@@ -19,6 +19,7 @@
 !/herdr-app/.config/herdr-app/mods/focus-history/
 !/herdr-app/.config/herdr-app/mods/file-popup/
 !/herdr-app/.config/herdr-app/mods/board/
+!/herdr-app/.config/herdr-app/mods/board-button/
 /herdr-app/.config/herdr-app/mods/*/gpui-kit.d.ts
 /herdr-app/.config/herdr-app/mods/*/jsconfig.json
 /herdr-app/.config/herdr-app/mods/*/.*

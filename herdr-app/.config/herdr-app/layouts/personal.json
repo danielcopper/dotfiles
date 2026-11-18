@@ -76,15 +76,35 @@
       "type": "column",
       "children": [
         {
-          "id": "tabs",
-          "type": "block",
-          "content": {
-            "mod": "tabs"
-          },
+          "id": "tab-row",
+          "type": "row",
+          "children": [
+            {
+              "id": "board-button",
+              "type": "block",
+              "content": {
+                "mod": "board-button"
+              },
+              "size": {
+                "px": 36
+              }
+            },
+            {
+              "id": "tabs",
+              "type": "block",
+              "content": {
+                "mod": "tabs"
+              },
+              "size": {
+                "weight": 1
+              },
+              "window_drag": true
+            }
+          ],
           "size": {
             "px": 42
           },
-          "window_drag": true
+          "resizable": false
         },
         {
           "id": "work-body",

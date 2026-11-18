@@ -1,6 +1,7 @@
 // Tests for the herdr board mod (herdr-app/.config/herdr-app/mods/board/main.js):
 // its data functions, and a few UI paths driven through the Board class with
-// a fake herdr. Run with `mise run herdr-board-test` (README, "herdr app"),
+// a fake herdr; also the board button (mods/board-button/) and its place in
+// layouts/personal.json. Run with `mise run herdr-board-test` (README, "herdr app"),
 // or from the repo root with `node --test tests/herdr-app/board.test.mjs`.
 //
 // The mod imports "gpui-kit", "gpui-base" and "herdr", which only herdr
@@ -1056,10 +1057,11 @@ let clockOffset = 0;
 Date.now = () => realNow() + clockOffset;
 const advance = (ms) => (clockOffset += ms);
 
-// An element of the fake gpui: it records the styling calls by name and
-// keeps its children; when(cond, fn) applies fn when cond holds.
+// An element of the fake gpui: it records the styling calls by name (and
+// each one's last arguments in `with`) and keeps its children; when(cond,
+// fn) applies fn when cond holds.
 function element(kind) {
-  const el = { kind, styles: [], kids: [] };
+  const el = { kind, styles: [], with: {}, kids: [] };
   const proxy = new Proxy(el, {
     get(target, p) {
       if (p in target) return target[p];
@@ -1067,7 +1069,10 @@ function element(kind) {
         if (p === "child") target.kids.push(args[0]);
         else if (p === "children") target.kids.push(...args[0]);
         else if (p === "when") return args[0] ? args[1](proxy) : proxy;
-        else target.styles.push(p);
+        else {
+          target.styles.push(p);
+          target.with[p] = args;
+        }
         return proxy;
       };
     },
@@ -1122,6 +1127,7 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => `/opt
     h_flex: () => element("h_flex"),
     v_flex: () => element("v_flex"),
     "Input.new": () => element("input"),
+    svg: (path) => element("svg").path(path),
   };
   // A call of a tool: by its name, or by the path which gave for it.
   const named = (c, tool) => c.tool === tool || c.tool.endsWith(`/${tool}`);
@@ -1909,4 +1915,75 @@ test("UI: the board and the detail beside it start at the top", async () => {
   const column = pathTo(root, (s) => s === name);
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
+});
+
+// ---- The board button (mods/board-button/) ----
+
+const buttonDir = resolve(modDir, "../board-button");
+// The text between a file's openBoard markers.
+const openBoardCopy = (file) => {
+  const src = readFileSync(file, "utf8");
+  const at = src.indexOf("// ---- openBoard:");
+  return at < 0 ? null : src.slice(at, src.indexOf("// ---- end openBoard ----", at));
+};
+
+// The element with the id `id` under `el`, or null.
+function byId(el, id) {
+  if (!el || typeof el === "string") return null;
+  if (el.with.id?.[0] === id) return el;
+  for (const kid of el.kids) {
+    const found = byId(kid, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+test("the board button shows the board with the leader's own openBoard, the same text in both", () => {
+  const button = openBoardCopy(join(buttonDir, "main.js"));
+  assert.ok(button?.includes("function openBoard() {"), "the button has the marked copy");
+  assert.equal(openBoardCopy(resolve(modDir, "../leader/main.js")), button, "the leader's copy is the same");
+});
+
+test("UI: a click on the board button shows the board's tab wherever it is, else opens one named Board", async () => {
+  const { default: BoardButton } = await import(pathToFileURL(join(buttonDir, "main.js")).href);
+  const host = fakeHost();
+  globalThis.__boardHost = host;
+  const click = () => {
+    const view = new BoardButton();
+    view.init({}, fakeCx());
+    const el = byId(view.render(), "board-open");
+    assert.ok(el, "the button is drawn");
+    el.with.on_click[0]({}, fakeCx());
+  };
+  host.panes = () => [];
+  click();
+  assert.deepEqual(host.runs.splice(0), [["tab.new", { name: "Board", mod: "board" }]]);
+  host.panes = () => [{ pane: "p1", mod: "board", tab: "t1" }];
+  click();
+  assert.deepEqual(host.runs.splice(0), [["pane.focus", { pane: "p1" }]]);
+  host.panes = () => [{ pane: "p2", tab: "t1", zoomed: true }, { pane: "p1", mod: "board", tab: "t1" }];
+  click();
+  assert.deepEqual(host.runs.splice(0), [["pane.zoom", { pane: "p2" }], ["pane.focus", { pane: "p1" }]]);
+});
+
+test("UI: the board button is an icon, named Board for the pointer and screen readers", async () => {
+  const { default: BoardButton } = await import(pathToFileURL(join(buttonDir, "main.js")).href);
+  globalThis.__boardHost = fakeHost();
+  const view = new BoardButton();
+  view.init({}, fakeCx());
+  const el = byId(view.render(), "board-open");
+  assert.deepEqual([el.with.tooltip, el.with.accessibility_label], [["Board"], ["Board"]]);
+  assert.deepEqual(el.kids.map((k) => k.with.path?.[0]), ["mods/board-button/board.svg"]);
+  assert.match(readFileSync(join(buttonDir, "board.svg"), "utf8"), /^<svg [^>]*stroke="currentColor"/, "tinted with the text color");
+});
+
+test("the personal layout puts the board button left of the tabs, in a row as high as the tab bar", () => {
+  const find = (node, id) => (node?.id === id ? node : (node?.children ?? []).map((c) => find(c, id)).find(Boolean) ?? null);
+  const layout = JSON.parse(readFileSync(resolve(modDir, "../../layouts/personal.json"), "utf8"));
+  const row = find(layout, "tab-row");
+  assert.ok(row, "a tab-row");
+  assert.deepEqual([row.type, row.size, row.resizable], ["row", { px: 42 }, false]);
+  assert.deepEqual(row.children.map((c) => [c.id, c.content?.mod, c.size]), [["board-button", "board-button", { px: 36 }], ["tabs", "tabs", { weight: 1 }]]);
+  assert.equal(row.children[1].window_drag, true, "the tab bar still moves the window");
+  assert.equal(find(layout, "work").children[0], row, "first in the work column");
 });

@@ -278,6 +278,9 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
+// ---- openBoard: the same in leader/main.js and board-button/main.js ----
+// (herdr loads no module from outside a mod's folder; board.test.mjs checks
+// that both copies match.)
 // Shows the board's tab ("Board", the board mod as its only pane) wherever
 // it is, found by its pane, so a renamed tab is found too; or opens one in
 // the shown space. pane.focus also shows its space and tab; a pane zoomed in
@@ -292,6 +295,7 @@ function openBoard() {
   if (zoomed && zoomed.pane !== board.pane) run("pane.zoom", { pane: zoomed.pane });
   run("pane.focus", { pane: board.pane });
 }
+// ---- end openBoard ----
 
 function findNode(node, id) {
   if (!node || typeof node !== "object") return null;

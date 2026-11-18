@@ -185,11 +185,13 @@ ctrl-space <key>` is for a tmux in the focused terminal, see below),
 `mods/focus-history/` (it remembers the previously focused pane for the
 leader's `Tab`), `mods/file-popup/` (a popup with the files of the focused
 pane's repo or folder, or with the repo's changed files, that opens the
-picked one in nvim in a new pane on the right) and `mods/board/` (the
-"Board" tab the leader's `b` opens, see below), the layout
+picked one in nvim in a new pane on the right), `mods/board/` (the "Board"
+tab the leader's `b` opens, see below) and `mods/board-button/` (a button
+at the start of the tab row that does the same), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
-keeps focus-history running; its right panel has no maximum width) and the
-theme `themes/catppuccin-mocha.json`.
+keeps focus-history running and the board button's block left of the tabs;
+its right panel has no maximum width) and the theme
+`themes/catppuccin-mocha.json`.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its comment on
 `no_folding_pkgs`), so relink it
