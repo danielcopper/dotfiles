@@ -1056,6 +1056,25 @@ let clockOffset = 0;
 Date.now = () => realNow() + clockOffset;
 const advance = (ms) => (clockOffset += ms);
 
+// An element of the fake gpui: it records the styling calls by name and
+// keeps its children; when(cond, fn) applies fn when cond holds.
+function element(kind) {
+  const el = { kind, styles: [], kids: [] };
+  const proxy = new Proxy(el, {
+    get(target, p) {
+      if (p in target) return target[p];
+      return (...args) => {
+        if (p === "child") target.kids.push(args[0]);
+        else if (p === "children") target.kids.push(...args[0]);
+        else if (p === "when") return args[0] ? args[1](proxy) : proxy;
+        else target.styles.push(p);
+        return proxy;
+      };
+    },
+  });
+  return proxy;
+}
+
 // The fake herdr: exec calls wait until the test answers them, except the
 // questions for gh's and az's paths: those are answered at once from
 // which(tool, on) (a path, "" for not found, an Error, or exec's result) and
@@ -1070,7 +1089,7 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => `/opt
     notes: [],
     focused: 0,
     config,
-    spaceList: [{ id: "s1", name: "x", folder: "/r/tender", machine: null, branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Arbeit", active: true }] }],
+    spaceList: [{ id: "s1", name: "x", folder: "/r/tender", machine: null, branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Board", active: true }] }],
     spaces: () => host.spaceList,
     exec: (tool, args, options) => {
       if (tool === "sh" && args[1] === board.WHICH_SCRIPT) {
@@ -1099,6 +1118,10 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => `/opt
       return { on: () => true, value: () => value, set_value: (v) => (value = v), focus: () => {} };
     },
     "ScrollHandle.new": () => ({ scroll_to_item() {} }),
+    div: () => element("div"),
+    h_flex: () => element("h_flex"),
+    v_flex: () => element("v_flex"),
+    "Input.new": () => element("input"),
   };
   // A call of a tool: by its name, or by the path which gave for it.
   const named = (c, tool) => c.tool === tool || c.tool.endsWith(`/${tool}`);
@@ -1652,7 +1675,7 @@ test("UI: another machine in the dialog runs the checkout there; a tab needs a s
 
 test("UI: a tab on this machine needs a space here; one in the same folder on another machine does not count", async () => {
   const { b, cx, host } = await openBoard();
-  host.spaceList = [{ id: "s2", name: "y", folder: "/home/me/src/tender", machine: "server", branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Arbeit", active: true }] }];
+  host.spaceList = [{ id: "s2", name: "y", folder: "/home/me/src/tender", machine: "server", branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Board", active: true }] }];
   await openStart(b, cx);
   await press(b, cx, "tab");
   await press(b, cx, "tab");
@@ -1831,4 +1854,26 @@ test("UI: a program gone from the path found is asked for again at the next call
   b.refresh(b.view(), cx);
   await settle();
   assert.equal(host.asked.filter((a) => a.tool === "gh").length, 2);
+});
+
+// ---- UI: drawing ----
+
+// The elements from `el` down to the first text `match` (a function, or a
+// text it holds), or null.
+function pathTo(el, match) {
+  const hit = typeof match === "function" ? match : (s) => s.includes(match);
+  if (typeof el === "string") return hit(el) ? [] : null;
+  for (const kid of el?.kids ?? []) {
+    const below = pathTo(kid, hit);
+    if (below) return [el, ...below];
+  }
+  return null;
+}
+
+test("the board is named Board: its mod, the tab the leader opens and its header without a view", async () => {
+  assert.equal(JSON.parse(readFileSync(join(modDir, "mod.json"), "utf8")).title, "Board");
+  const leader = readFileSync(resolve(modDir, "../leader/main.js"), "utf8");
+  assert.ok(leader.includes('run("tab.new", { name: "Board", mod: "board" });'), "the leader opens the tab as Board");
+  const { b } = await bootBoard({ config: "{" });
+  assert.ok(pathTo(b.render(), (s) => s === "Board"), "the header names the board");
 });

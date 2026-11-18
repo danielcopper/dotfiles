@@ -186,7 +186,7 @@ ctrl-space <key>` is for a tmux in the focused terminal, see below),
 leader's `Tab`), `mods/file-popup/` (a popup with the files of the focused
 pane's repo or folder, or with the repo's changed files, that opens the
 picked one in nvim in a new pane on the right) and `mods/board/` (the
-"Arbeit" tab the leader's `b` opens, see below), the layout
+"Board" tab the leader's `b` opens, see below), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
 keeps focus-history running; its right panel has no maximum width) and the
 theme `themes/catppuccin-mocha.json`.

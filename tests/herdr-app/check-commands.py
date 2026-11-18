@@ -21,7 +21,7 @@ every mod under herdr-app/.config/herdr-app/mods/, comments included:
   (a `mod` inside its props does not count) fails too, so the check does
   not support openOverlay({ layout }); no mod here uses it;
 - the mod of a tab.new or pane.split run() call that names a literal `mod`
-  at its top level (`run("tab.new", { name: "Arbeit", mod: "board" })`),
+  at its top level (`run("tab.new", { name: "Board", mod: "board" })`),
   by the same rule; one without a `mod` opens a terminal and passes.
 
 It also checks every action in the package's keys.json, the other place

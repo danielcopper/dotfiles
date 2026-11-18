@@ -1,7 +1,8 @@
-// The "Arbeit" board: one's own work from GitHub (issues and pull requests on
-// a Projects v2 board, open pull requests) and Azure Boards (work items), in
-// the views that views.json beside this file defines. The leader's `b` shows
-// or opens its tab. Keys and behaviour: README, "herdr app".
+// The board, in its tab "Board": one's own work from GitHub (issues and pull
+// requests on a Projects v2 board, open pull requests) and Azure Boards (work
+// items), in the views that views.json beside this file defines. The
+// leader's `b` shows or opens its tab. Keys and behaviour: README, "herdr
+// app".
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
@@ -1914,7 +1915,7 @@ export default class Board extends View {
       .items_center()
       .border_b(1)
       .border_color(t.border)
-      .child(div().flex_none().text_size(15).font_semibold().child(view?.name ?? "Arbeit"))
+      .child(div().flex_none().text_size(15).font_semibold().child(view?.name ?? "Board"))
       .child(
         h_flex()
           .flex_1()

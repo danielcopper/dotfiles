@@ -278,13 +278,14 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
-// Shows the board's tab ("Arbeit", the board mod as its only pane) wherever
-// it is, or opens one in the shown space. pane.focus also shows its space
-// and tab; a pane zoomed in that tab is unzoomed first, so the board shows.
+// Shows the board's tab ("Board", the board mod as its only pane) wherever
+// it is, found by its pane, so a renamed tab is found too; or opens one in
+// the shown space. pane.focus also shows its space and tab; a pane zoomed in
+// that tab is unzoomed first, so the board shows.
 function openBoard() {
   const board = panes().find((p) => p.mod === "board");
   if (!board) {
-    run("tab.new", { name: "Arbeit", mod: "board" });
+    run("tab.new", { name: "Board", mod: "board" });
     return;
   }
   const zoomed = panes().find((p) => p.tab === board.tab && p.zoomed);
