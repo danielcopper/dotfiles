@@ -7,7 +7,11 @@ maven = "3"
 node = "lts"
 "npm:@angular/cli" = "latest"
 "npm:@angular/language-server" = "latest"
-"npm:@mermaid-js/mermaid-cli" = "latest"
+# chromium-bidi (pinned by puppeteer) has been published through Chrome for
+# Testing since 2026-09-30, with registry signatures but no provenance, which
+# aube's no-downgrade trust policy rejects. The bare name is needed because its
+# Chrome-style versions are prereleases that change with every puppeteer bump.
+"npm:@mermaid-js/mermaid-cli" = { version = "latest", trust_policy_excludes = ["chromium-bidi"] }
 "npm:typescript-language-server" = "latest"
 "pipx:pyright" = "latest"
 pipx = "latest"
@@ -24,4 +28,9 @@ uv = "latest"
 #   mise run mermaid-browser
 [tasks.mermaid-browser]
 description = "Install chrome-headless-shell for mermaid-cli/puppeteer"
-run = '"$(mise where npm:@mermaid-js/mermaid-cli)/lib/node_modules/@mermaid-js/mermaid-cli/node_modules/.bin/puppeteer" browsers install chrome-headless-shell'
+# aube installs in a pnpm-style store, so puppeteer's CLI is resolved through
+# node from mermaid-cli's real directory instead of a fixed node_modules path.
+run = '''
+cli="$(node -p 'const fs = require("fs"), path = require("path"); const cli = fs.realpathSync(path.join(process.argv[1], "node_modules/@mermaid-js/mermaid-cli")); const pj = require.resolve("puppeteer/package.json", { paths: [cli] }); const bin = require(pj).bin; path.join(path.dirname(pj), typeof bin === "string" ? bin : bin.puppeteer)' "$(mise where npm:@mermaid-js/mermaid-cli)")"
+node "$cli" browsers install chrome-headless-shell
+'''
