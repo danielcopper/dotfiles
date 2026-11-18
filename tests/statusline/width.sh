@@ -25,12 +25,20 @@
 # status line. Before the cases, the script must define term_width once and
 # call it once, so the function run here is the one that sets $COLS.
 # usage: width.sh [statusline] [case ...]
+#        width.sh --list
 #   The script defaults to the repo's claude/.claude/statusline.sh, the cases
-#   to all of them.
+#   to all of them. --list prints the case names.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. HOME points into a temporary directory for the whole run, which
 # is removed at the end. Needs jq and timeout.
 set -uo pipefail
+
+CASES=(w1_herdr_first w2_hc_unusable w3_hc_hangs w4_hc_missing w5_tmux_pane w6_tmux_unusable
+  w7_tmux_hangs w8_pane_without_tmux w8b_tmux_without_pane w9_default d1_debug_log)
+if [ "${1:-}" = --list ]; then
+  printf '%s\n' "${CASES[@]}"
+  exit 0
+fi
 
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
@@ -205,7 +213,6 @@ d1_debug_log() {
   script=${script//\/tmp\/statusline-debug.log/$ROOT\/debug.log}
   printf '%s\n' "$script" >"$ROOT/statusline.sh"
   mkdir -p "$ROOT/dir"
-  # The stand-ins come first in PATH, so the real hc and tmux stay unasked.
   printf '{"model":{"display_name":"Opus"},"workspace":{"current_dir":"%s"},"session_id":"x"}' "$ROOT/dir" |
     env -i PATH="$ROOT/bin:$PATH" HOME="$HOME" STATUSLINE_DEBUG=1 "${HERDR[@]}" "${IN_TMUX[@]}" \
       "$BASH_BIN" "$ROOT/statusline.sh" >/dev/null 2>"$ROOT/stderr"
@@ -228,13 +235,12 @@ if [ "$call_sites" != 1 ]; then
 fi
 [ "$structure_ok" = 1 ] || exit 1
 
-all=(w1_herdr_first w2_hc_unusable w3_hc_hangs w4_hc_missing w5_tmux_pane w6_tmux_unusable
-  w7_tmux_hangs w8_pane_without_tmux w8b_tmux_without_pane w9_default d1_debug_log)
+all=("${CASES[@]}")
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
   stand_ins
-  if declare -F "$CASE" >/dev/null; then
+  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE"; then
     "$CASE"
   else
     fail "no such case"
