@@ -27,6 +27,14 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     # the commits being pushed are usually on one.
     range="$local_sha --not --remotes"
   else
+    # The remote moved past anything fetched here: gitleaks cannot build the
+    # range and fails, which would read as a leak below.
+    if ! git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
+      echo "pre-push: $remote_ref on the remote is at ${remote_sha:0:7}, which is not here yet." >&2
+      echo "          fetch and rebase (or merge) first, then push again." >&2
+      exit_status=1
+      continue
+    fi
     # Updating an existing branch — scan the new commits only.
     range="${remote_sha}..${local_sha}"
   fi
