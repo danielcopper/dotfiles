@@ -67,6 +67,13 @@ export class BoardError extends Error {
   }
 }
 
+// A failure: with `write` and `unclear` (it may have reached the server) one
+// whose outcome is unclear, else a plain error. The one place that choice is
+// made.
+export function failure(text, { write = false, unclear = false } = {}) {
+  return write && unclear ? new BoardError(`Ergebnis unklar: ${text}`, { unclear: true }) : new BoardError(text);
+}
+
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const isText = (v) => typeof v === "string" && v.trim() !== "";
 const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -100,13 +107,13 @@ function startProblems(start, where) {
   return out;
 }
 
-const textOrNull = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
+const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
 
-// Every view has these keys; each kind adds its own (VIEW_KINDS).
+// Keys every view may have; each kind adds its own (VIEW_KINDS).
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
 // Per view kind ("<source> <layout>"): its own keys, what is wrong with them,
-// and the view with its defaults filled in.
+// and its fields with their defaults filled in.
 const VIEW_KINDS = {
   "github board": {
     keys: ["project", "filter"],
@@ -116,7 +123,7 @@ const VIEW_KINDS = {
       if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
         out.push("„project“ braucht „owner“ (Text) und „number“ (ganze Zahl)");
       } else if (p.field !== undefined && !isText(p.field)) out.push("„project.field“ muss Text sein");
-      return [...out, ...textOrNull(v, ["filter"])];
+      return [...out, ...textProblems(v, ["filter"])];
     },
     defaults: (v) => ({
       project: { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" },
@@ -134,7 +141,7 @@ const VIEW_KINDS = {
   },
   "azure board": {
     keys: ["where", "hideCategories", "organization", "project", "on"],
-    problems: (v) => textOrNull(v, ["where", "organization", "project", "on"]),
+    problems: (v) => textProblems(v, ["where", "organization", "project", "on"]),
     defaults: (v) => ({
       where: v.where ?? "[System.AssignedTo] = @Me",
       hideCategories: v.hideCategories ?? [],
@@ -354,7 +361,8 @@ export function errorAt(errors, path) {
 // A hidden column's cards are only those moved there since the last refresh;
 // its count is the server's plus those. Items without a status, or in an
 // option the field no longer has, go to "Ohne Status", which takes no drops.
-// A part missing from the answer is explained by the error at its path.
+// A missing owner, project, field or item list is explained by the error at
+// its path.
 export function parseGithubBoard(json, view, hidden, errors = []) {
   const { owner, number, field: fieldName } = view.project;
   const ownerNode = json?.data?.repositoryOwner;
@@ -370,7 +378,10 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     throw new BoardError(e ? `Projekt ${number} von ${owner}: ${why(e)}` : `Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
   }
   const field = project.field;
-  if (!field?.options) throw new BoardError(`Projekt „${project.title}“ hat kein Auswahlfeld „${fieldName}“`);
+  if (!field?.options) {
+    const e = errorAt(errors, ["repositoryOwner", "projectV2", "field"]);
+    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ hat kein Auswahlfeld „${fieldName}“`);
+  }
   if (!Array.isArray(project.items?.nodes)) {
     const e = errorAt(errors, ["repositoryOwner", "projectV2", "items"]);
     throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
@@ -406,8 +417,11 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
   };
 }
 
+// The mutation's field, and the path its own GraphQL errors carry.
+const MOVE_FIELD = "updateProjectV2ItemFieldValue";
+export const MOVE_PATH = [MOVE_FIELD];
 export const MOVE_MUTATION = `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-  updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) {
+  ${MOVE_FIELD}(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) {
     projectV2Item { id }
   }
 }`;
@@ -423,8 +437,8 @@ export function githubMoveArgs(meta, card, column) {
 // A mutation's answer must name the item it changed; anything else leaves
 // open whether the change landed.
 export function checkMoveResult(json, card) {
-  if (json?.data?.updateProjectV2ItemFieldValue?.projectV2Item?.id !== card.itemId) {
-    throw new BoardError("Ergebnis unklar: GitHub hat die Änderung nicht bestätigt", { unclear: true });
+  if (json?.data?.[MOVE_FIELD]?.projectV2Item?.id !== card.itemId) {
+    throw failure("GitHub hat die Änderung nicht bestätigt", { write: true, unclear: true });
   }
 }
 
@@ -525,31 +539,38 @@ export function parseGithubList(json, view, errors = []) {
   return { kind: "list", sections };
 }
 
-// gh's network failures, as Go's net package and gh word them; the first
-// kind means the request never reached GitHub.
-const NOT_SENT = /could not resolve host|no such host|connection refused/i;
-const NETWORK = /could not resolve host|no such host|connection refused|dial tcp|connection reset|i\/o timeout|Client\.Timeout|\bEOF\b/i;
+// gh's network failures, as Go's net package and gh word them. NOT_SENT: the
+// request never reached GitHub (gh prints a failed DNS lookup as "error
+// connecting to <host>"; a failed dial never connected). SENT_FAILURE: the
+// connection broke or timed out after it was made, so a write may have
+// landed.
+const NOT_SENT = /could not resolve host|no such host|connection refused|dial tcp|^error connecting to /im;
+const SENT_FAILURE = /connection reset|i\/o timeout|Client\.Timeout|\bEOF\b|http2|stream error|context deadline exceeded/i;
+// GitHub's words for a request it did not finish in time (GraphQL and REST).
+const SERVER_TIMEOUT = /This may be the result of a timeout|couldn't respond to your request in time/i;
 
 // A gh call that ran, { code, stdout, stderr } → { json, warnings, errors },
 // or a BoardError. gh exits 1 whenever GraphQL's answer holds errors, even
-// next to data. Errors that make the answer useless (login, scope, rate
-// limit) throw; with data, the others come back as warnings, and the raw
-// errors for the parser to explain a missing part.
-// With `write`, any GraphQL error is a refusal carrying its message (the one
-// whose path names the mutation first), and a failure that may have reached
-// GitHub (a network error after sending, HTTP 5xx, an unreadable answer) is
-// unclear.
-export function readGh({ code, stdout, stderr }, { write = false } = {}) {
+// next to data, and prints them as "gh: <message>", without their type.
+// Errors that make the answer useless (login, scope, rate limit) throw; with
+// data, the others come back as warnings, and the raw errors for the parser
+// to explain a missing part.
+// With `write` (`path`: where the mutation's own errors point), a GraphQL
+// error with a type or code is a refusal carrying its message, the mutation's
+// own first; an error without either, a server timeout, a connection that
+// broke after it was made, HTTP 5xx, an unreadable answer and any failure gh
+// does not explain are unclear. A request that never left (NOT_SENT) and
+// HTTP 4xx are refusals.
+export function readGh({ code, stdout, stderr }, { write = false, path = null } = {}) {
   const err = String(stderr ?? "");
   const said = firstLine(err.replace(/^gh: /gm, ""));
-  const unclear = (text) => new BoardError(`Ergebnis unklar: ${text}`, { unclear: true });
   let json = null;
   try {
     json = JSON.parse(stdout);
   } catch {
     // Not JSON: what went wrong is on stderr.
   }
-  if (code === 0 && json === null) throw write ? unclear("gh antwortete ohne lesbares JSON") : new BoardError("gh antwortete ohne lesbares JSON");
+  if (code === 0 && json === null) throw failure("gh antwortete ohne lesbares JSON", { write, unclear: true });
   const errors = Array.isArray(json?.errors) ? json.errors : [];
   const types = errors.map((e) => e.type);
   if (code === 4 || /gh auth login/.test(err)) throw new BoardError("gh ist nicht angemeldet: gh auth login");
@@ -560,17 +581,18 @@ export function readGh({ code, stdout, stderr }, { write = false } = {}) {
     throw new BoardError("GitHub-Ratenlimit erreicht; es geht nach dem nächsten Zurücksetzen weiter");
   }
   if (write && errors.length) {
-    const own = errors.find((e) => Array.isArray(e.path) && e.path[0] === "updateProjectV2ItemFieldValue") ?? errors[0];
-    throw new BoardError(firstLine(own.message) || "GitHub hat die Änderung abgelehnt");
+    const own = (path && errorAt(errors, path)) ?? errors[0];
+    const typed = Boolean(own.type || own.extensions?.code) && !SERVER_TIMEOUT.test(own.message ?? "");
+    throw failure(firstLine(own.message) || "GitHub hat die Änderung abgelehnt", { write, unclear: !typed });
   }
   if (json?.data) return { json, warnings: errors.map((e) => firstLine(e.message)).filter(Boolean), errors };
-  if (NETWORK.test(err)) {
-    if (write && !NOT_SENT.test(err)) throw unclear(`GitHub nicht erreichbar: ${said}`);
-    throw new BoardError(`GitHub nicht erreichbar: ${said}`);
+  if (NOT_SENT.test(err) || SENT_FAILURE.test(err)) {
+    throw failure(`GitHub nicht erreichbar: ${said}`, { write, unclear: !NOT_SENT.test(err) });
   }
   const status = Number(err.match(/\bHTTP (\d{3})\b/)?.[1]);
-  if (status >= 500) throw write ? unclear(`GitHub antwortete mit ${said}`) : new BoardError(`GitHub antwortete mit ${said}`);
-  throw new BoardError(firstLine(errors[0]?.message) || said || `gh endete mit ${code}`);
+  if (status >= 500 || SERVER_TIMEOUT.test(err)) throw failure(`GitHub antwortete mit ${said}`, { write, unclear: true });
+  const text = firstLine(errors[0]?.message) || said || `gh endete mit ${code}`;
+  throw failure(text, { write, unclear: !(status >= 400) });
 }
 
 // ---- Azure -----------------------------------------------------------------
@@ -695,22 +717,25 @@ export function azureMoveArgs(view, card, column) {
 }
 
 export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…";
-// az's (Python requests') words for a connection that failed on the way.
-const AZ_NETWORK = /HTTPSConnectionPool|Connection aborted|Read timed out|Max retries/i;
+// az's words for a request that may have reached Azure without an answer:
+// msrest's "Error occurred in request., <requests exception>: …" for a
+// connection that failed (ConnectionError, ReadTimeout, …), the Azure DevOps
+// client's "Operation returned a 5xx status code.", and TF400898 (an internal
+// error).
+const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries|Operation returned a 5\d\d status code|TF400898/i;
 
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
 // lines are left out). Missing sign-in or extension make the view
-// unavailable rather than an error. With `write`, a connection that failed
-// on the way leaves open whether the change landed; a TFxxxx or other
-// ERROR: answer is a refusal.
+// unavailable rather than an error. With `write`, a request that may have
+// reached Azure without an answer (AZ_SENT_FAILURE) or a failure without an
+// ERROR: line leaves open whether the change landed; any other ERROR:
+// answer (TFxxxx, a validation) is a refusal.
 export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const said = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const errorLine = lines.find((l) => /^ERROR:/.test(l));
+  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
   const az = on ? `az auf ${on}` : "az";
-  if (AZ_NETWORK.test(lines.join("\n"))) {
-    const text = `Azure nicht erreichbar (${az}): ${said}`;
-    return write ? new BoardError(`Ergebnis unklar: ${text}`, { unclear: true }) : new BoardError(text);
-  }
+  if (AZ_SENT_FAILURE.test(lines.join("\n"))) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
   if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
     return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
   }
@@ -719,7 +744,7 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   }
   if (/^--project must be specified/.test(said)) return new BoardError(AZ_NO_PROJECT);
   if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
-  return new BoardError(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`);
+  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine });
 }
 
 // An exec that could not run at all (exec rejected). Only a missing az makes
@@ -730,15 +755,11 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
 export function execRejection(tool, error, timeoutMs, on = null, { write = false } = {}) {
   const msg = firstLine(error?.message ?? error);
   const who = on ? `${tool} auf ${on}` : tool;
-  const unclear = (text) => new BoardError(`Ergebnis unklar: ${text}`, { unclear: true });
   if (/program not found|no such file or directory|command not found|not installed|ENOENT/i.test(msg)) {
     return new BoardError(`${who} ist nicht installiert`, { unavailable: tool === "az" });
   }
-  if (/time(d)?[ -]?out/i.test(msg)) {
-    const text = `${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`;
-    return write ? unclear(text) : new BoardError(text);
-  }
-  if (write && on) return unclear(`${who}: ${msg}`);
+  if (/time(d)?[ -]?out/i.test(msg)) return failure(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { write, unclear: true });
+  if (write && on) return failure(`${who}: ${msg}`, { write, unclear: true });
   return new BoardError(`${who} ließ sich nicht starten: ${msg}`);
 }
 
@@ -969,7 +990,8 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
 const GH_TIMEOUT = 30000;
 const AZ_TIMEOUT = 60000;
 const CHECKOUT_TIMEOUT = 30000;
-// When the board looks for a session it opened (watchSession), in ms.
+// How long watchSession waits before each check for a session it opened, in
+// ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
 const TICK_MS = 30000;
 const SCROLLS = 24;
@@ -1016,7 +1038,7 @@ function makeSources() {
         return { data: parseGithubBoard(json, view, hidden, errors), warnings };
       },
       async move(view, data, card, column) {
-        checkMoveResult((await gh(githubMoveArgs(data.meta, card, column), { write: true })).json, card);
+        checkMoveResult((await gh(githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
       },
     },
     azure: {
@@ -1065,6 +1087,8 @@ const store = {
 
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
 const machineName = (name) => name ?? "Dieser Rechner";
+// "auf <machine>", or "auf diesem Rechner" for this one.
+const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
 // Whether a board pane is in the shown tab of the shown space.
 function boardShown() {
@@ -1164,9 +1188,8 @@ export default class Board extends View {
     return st.hidden;
   }
 
-  // Reads views.json again and refreshes the shown view. Azure views not
-  // shown are tried too, so the list knows whether they are available; their
-  // work item types are read anew.
+  // Reads views.json again and refreshes the shown view; see Calls in the
+  // header.
   reload(cx) {
     cx.spawn(async (cx) => {
       const text = await readTextFile(`${appHome()}/mods/${MOD}/${CONFIG_NAME}.json`).catch((e) => {
@@ -1177,6 +1200,8 @@ export default class Board extends View {
       for (const source of Object.values(this.sources)) source.reset();
       cx.notify();
       if (!this.config) return;
+      const ids = new Set(this.config.views.map((v) => v.id));
+      for (const [id, st] of Object.entries(this.views)) if (!ids.has(id)) st.unclear = [];
       for (const v of this.config.views) this.state(v.id).unavailable = null;
       const shown = this.view();
       for (const v of this.config.views) if (this.sources[v.source].probe && v !== shown) this.refresh(v, cx);
@@ -1202,12 +1227,13 @@ export default class Board extends View {
         st.unavailable = null;
         st.at = Date.now();
         this.keepSelection(view);
-        this.settleUnclear(view, cx);
+        this.settleUnclear(view, started, cx);
       } catch (e) {
         if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
         else st.error = report(e);
-        if (st.unclear.length) {
-          this.say(`${st.unclear.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
+        const open = st.unclear.filter((u) => u.at <= started);
+        if (open.length) {
+          this.say(`${open.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
         }
       } finally {
         st.loading = false;
@@ -1231,13 +1257,29 @@ export default class Board extends View {
     return unknownHidden(view, data.meta?.states ?? data.columns).map((n) => `„${n}“ aus hide oder hideCategories passt zu keiner Spalte`);
   }
 
-  // After a refresh that succeeded: where the cards of unclear writes are now.
-  settleUnclear(view, cx) {
+  // After a refresh that succeeded: where the cards of unclear writes are
+  // now, for the writes whose outcome came before that refresh started (an
+  // older one may have read before the write ended). The target column: the
+  // write landed. Another one: a warning. Not loaded because the target is
+  // hidden: most likely landed, said as such.
+  settleUnclear(view, started, cx) {
     const st = this.state(view.id);
-    if (!st.unclear.length) return;
-    const where = st.unclear.map((u) => `${u.label} steht nach dem Neuladen in „${findCard(st.data, u.key)?.column.name ?? "keiner geladenen Spalte"}“`);
-    st.unclear = [];
-    this.say(where.join("; "), "info", cx);
+    const due = st.unclear.filter((u) => u.at <= started);
+    if (!due.length) return;
+    st.unclear = st.unclear.filter((u) => u.at > started);
+    const lines = due.map((u) => {
+      const now = findCard(st.data, u.key)?.column;
+      if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };
+      if (now) return { text: `${u.label} steht nach dem Neuladen in „${now.name}“, nicht in „${u.to.name}“`, warn: true };
+      if (st.data.columns.find((c) => c.id === u.to.id)?.hidden) {
+        return { text: `${u.label} steht nicht in den gezeigten Spalten („${u.to.name}“ ist ausgeblendet)`, warn: false };
+      }
+      return { text: `${u.label} ist nach dem Neuladen nicht auf dem Board`, warn: true };
+    });
+    const level = lines.some((l) => l.warn) ? "warning" : "info";
+    const text = lines.map((l) => l.text).join("; ");
+    this.say(text, level, cx);
+    if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
   }
 
   // Every TICK_MS while the board shows: the shown view and the unavailable
@@ -1280,9 +1322,9 @@ export default class Board extends View {
         st.moves = st.moves.filter((m) => m !== move);
         const why = report(e);
         if (e instanceof BoardError && e.unclear) {
-          st.unclear.push({ key, label });
+          st.unclear.push({ key, label, to: { id: to.id, name: to.name }, at: Date.now() });
           this.say(`${label} → ${to.name}: ${why}; lädt neu`, "warning", cx);
-          notify({ title: `Status von ${label}: Ergebnis unklar`, body: why, level: "warning" });
+          notify({ title: `Status von ${label}`, body: why, level: "warning" });
           this.refresh(view, cx);
         } else {
           st.data = rollback(st.data, move);
@@ -1424,11 +1466,11 @@ export default class Board extends View {
         m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
         if (!agents.length) m.agentsError = "Kein Agent installiert";
         else if (wanted && !agents.some((a) => a.key === wanted)) {
-          m.agentNote = `Agent „${wanted}“ ist ${on ? `auf ${on}` : "auf diesem Rechner"} nicht installiert; gewählt: ${agents[0].name}`;
+          m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
         }
       } catch (e) {
         if (this.modal !== m || m.machines[m.machine] !== on) return;
-        m.agentsError = `Agents auf ${machineName(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+        m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
       }
       m.notes = [m.machineNote, m.agentNote].filter(Boolean);
       cx.notify();
@@ -1473,7 +1515,7 @@ export default class Board extends View {
         let space = null;
         if (m.open === "tab") {
           space = spaceForTab(spaces(), on, folder);
-          if (!space) throw new BoardError(`Kein Space auf ${machineName(on)} für einen neuen Tab; als neuer Space öffnen`);
+          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
         }
         run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
         if (this.modal === m) {
@@ -1497,14 +1539,14 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Looks for a space or tab named `name` after each of SESSION_CHECKS ms;
+  // Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
   // says so when it appears, warns when it has not after the last.
   watchSession(name, cx, at = 0) {
     cx.timer.after(SESSION_CHECKS[at], (cx) => {
       const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
       if (there) return this.say(`Sitzung geöffnet: ${name}`, "success", cx);
       if (at + 1 < SESSION_CHECKS.length) return this.watchSession(name, cx, at + 1);
-      this.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung hat wohl nicht gestartet`, "warning", cx);
+      this.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
       notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
     });
   }

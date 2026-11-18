@@ -41,8 +41,9 @@ const modDir = resolve(here, "../../herdr-app/.config/herdr-app/mods/board");
 const mainPath = process.env.BOARD_MAIN ? resolve(process.env.BOARD_MAIN) : join(modDir, "main.js");
 const STUBBED = new Set(["gpui-kit", "gpui-base", "herdr"]);
 const realHome = process.env.HOME;
-process.env.HOME = mkdtempSync(join(tmpdir(), "board-home-"));
-after(() => rmSync(process.env.HOME, { recursive: true, force: true }));
+const tempHome = mkdtempSync(join(tmpdir(), "board-home-"));
+process.env.HOME = tempHome;
+after(() => rmSync(tempHome, { recursive: true, force: true }));
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -340,6 +341,9 @@ test("a part missing from GitHub's answer is explained by the error at its path"
   assert.throws(parse({ repositoryOwner: { projectV2: project } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items", "nodes", 0], message: "no access to a repository" }]),
     { message: "Projekt „Sample“: no access to a repository" });
   assert.throws(parse({ repositoryOwner: { projectV2: project } }, []), { message: "Projekt „Sample“ lieferte keine Einträge" });
+  const noField = { ...json("github-board.json").data.repositoryOwner.projectV2, field: null };
+  assert.throws(parse({ repositoryOwner: { projectV2: noField } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "field"], message: "field hidden" }]),
+    { message: "Projekt „Sample“: field hidden" });
 });
 
 test("a board with more items than one page says it is cut", () => {
@@ -368,6 +372,11 @@ test("gh exiting 1 with data and other errors gives the data and the errors as w
   assert.deepEqual(board.readGh({ code: 0, stdout: fixture("github-move.json"), stderr: "" }).warnings, []);
 });
 
+// gh's output for a failed DNS lookup (internal/ghcmd/cmd.go printError).
+const GH_DNS = "error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n";
+// GitHub's answer when it ran out of time on a GraphQL request, and gh's line for it.
+const GH_SERVER_TIMEOUT = "Something went wrong while executing your query. This may be the result of a timeout, or it could be a GitHub bug. Please include `0400:3A1B:1C2D3E:4F5061:63A0B1C2` when reporting this issue.";
+
 test("gh's failures become messages: not signed in, missing scope, rate limit, network, others without gh's prefix", () => {
   const fail = (r) => {
     try {
@@ -381,42 +390,61 @@ test("gh's failures become messages: not signed in, missing scope, rate limit, n
   assert.match(fail({ code: 1, stdout: fixture("github-scope-error.json"), stderr: "gh: Your token has not been granted the required scopes" }).message, /Scope „project“/);
   assert.match(fail({ code: 1, stdout: fixture("github-rate-limited.json"), stderr: "" }).message, /Ratenlimit/);
   assert.match(fail({ code: 1, stdout: "", stderr: "HTTP 403: API rate limit exceeded for user" }).message, /Ratenlimit/);
-  for (const net of ["dial tcp: lookup api.github.com: no such host", "Post \"https://api.github.com/graphql\": dial tcp 1.2.3.4:443: connect: connection refused", "read: connection reset by peer", "net/http: i/o timeout", "could not resolve host: api.github.com"]) {
-    assert.match(fail({ code: 1, stdout: "", stderr: `gh: ${net}` }).message, /^GitHub nicht erreichbar: /, net);
+  // gh prints a transport error as is, and a failed DNS lookup in two lines of its own.
+  for (const net of [GH_DNS, "Post \"https://api.github.com/graphql\": dial tcp 140.82.121.6:443: connect: connection refused",
+    "Post \"https://api.github.com/graphql\": read tcp 10.0.0.2:5000->140.82.121.6:443: read: connection reset by peer"]) {
+    assert.match(fail({ code: 1, stdout: "", stderr: net }).message, /^GitHub nicht erreichbar: /, net);
   }
+  assert.equal(fail({ code: 1, stdout: "", stderr: GH_DNS }).message, "GitHub nicht erreichbar: error connecting to api.github.com");
   assert.equal(fail({ code: 1, stdout: "", stderr: "gh: the connection to a field was reshaped" }).message, "the connection to a field was reshaped");
   assert.equal(fail({ code: 2, stdout: "", stderr: "" }).message, "gh endete mit 2");
   const garbled = fail({ code: 0, stdout: "<html>", stderr: "" });
   assert.deepEqual([garbled.unclear, garbled.message], [false, "gh antwortete ohne lesbares JSON"]);
 });
 
-test("on a write, any GraphQL error is a refusal with its message, the mutation's own first", () => {
+test("on a write, a GraphQL error with a type or code is a refusal with its message, the mutation's own first; one without either is unclear", () => {
+  const write = { write: true, path: board.MOVE_PATH };
+  const answer = (errors) => ({ code: 1, stdout: JSON.stringify({ data: null, errors }), stderr: `gh: ${errors.map((e) => e.message).join("\n")}` });
   const refused = { code: 1, stdout: '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"locations":[{"line":2,"column":3}],"message":"Resource not accessible by integration"}]}', stderr: "gh: Resource not accessible by integration" };
-  assert.throws(() => board.readGh(refused, { write: true }), (e) => !e.unclear && e.message === "Resource not accessible by integration");
-  const two = { code: 1, stdout: JSON.stringify({ data: null, errors: [{ message: "other", path: ["x"] }, { message: "mine", path: ["updateProjectV2ItemFieldValue"] }] }), stderr: "" };
-  assert.throws(() => board.readGh(two, { write: true }), { message: "mine" });
+  assert.throws(() => board.readGh(refused, write), (e) => !e.unclear && e.message === "Resource not accessible by integration");
+  const three = answer([{ type: "FORBIDDEN", message: "first", path: ["a"] }, { type: "UNPROCESSABLE", message: "mine", path: board.MOVE_PATH }, { type: "NOT_FOUND", message: "third", path: ["b"] }]);
+  assert.throws(() => board.readGh(three, write), (e) => !e.unclear && e.message === "mine");
+  assert.throws(() => board.readGh(answer([{ message: "by code", extensions: { code: "argumentLiteralsIncompatible" } }]), write), (e) => !e.unclear);
+  assert.throws(() => board.readGh(answer([{ message: GH_SERVER_TIMEOUT }]), write), (e) => e.unclear && e.message === `Ergebnis unklar: ${GH_SERVER_TIMEOUT}`);
+  assert.throws(() => board.readGh(answer([{ type: "INTERNAL", message: GH_SERVER_TIMEOUT }]), write), (e) => e.unclear, "a server timeout even with a type");
+  assert.throws(() => board.readGh(answer([{ message: "Something else" }]), write), (e) => e.unclear, "an error without type or code");
 });
 
-test("on a write, a failure that may have reached GitHub is unclear; one that never left is a refusal", () => {
-  const outcome = (stderr, code = 1) => {
+test("on a write, a failure that may have reached GitHub is unclear; one that never left, or that GitHub refused (4xx), is a refusal", () => {
+  const error = (stderr, code = 1) => {
     try {
       board.readGh({ code, stdout: "", stderr }, { write: true });
     } catch (e) {
-      return e.unclear ? "unclear" : "refused";
+      return e;
     }
-    return "ok";
+    return assert.fail("no error");
   };
-  for (const err of ["gh: read tcp 10.0.0.2:5000->140.82.121.6:443: read: connection reset by peer", "gh: net/http: i/o timeout",
-    "gh: Post \"https://api.github.com/graphql\": net/http: request canceled (Client.Timeout exceeded while awaiting headers)",
-    "gh: Post \"https://api.github.com/graphql\": unexpected EOF", "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)"]) {
+  const outcome = (stderr, code = 1) => (error(stderr, code).unclear ? "unclear" : "refused");
+  const post = 'Post "https://api.github.com/graphql": ';
+  for (const err of [`${post}read tcp 10.0.0.2:5000->140.82.121.6:443: read: connection reset by peer`, `${post}net/http: i/o timeout`,
+    `${post}net/http: request canceled (Client.Timeout exceeded while awaiting headers)`, `${post}unexpected EOF`,
+    `${post}http2: client connection lost`, `${post}http2: server sent GOAWAY and closed the connection`, `${post}stream error: stream ID 3; INTERNAL_ERROR`,
+    `${post}context deadline exceeded`, "gh: HTTP 502", "gh: HTTP 504",
+    "gh: We couldn't respond to your request in time. Sorry about that. Please try resubmitting your request and contact us if the problem persists. (HTTP 504)",
+    `gh: ${GH_SERVER_TIMEOUT}`, "some failure gh does not explain", ""]) {
     assert.equal(outcome(err), "unclear", err);
   }
-  for (const err of ["gh: dial tcp: lookup api.github.com: no such host", "gh: dial tcp 140.82.121.6:443: connect: connection refused",
-    "gh: HTTP 422: Unprocessable Entity (https://api.github.com/graphql)"]) {
+  for (const err of [GH_DNS, `${post}dial tcp 140.82.121.6:443: connect: connection refused`, `${post}dial tcp: lookup api.github.com: no such host`,
+    `${post}dial tcp 140.82.121.6:443: i/o timeout`, "gh: Validation Failed (HTTP 422)", "gh: Not Found (HTTP 404)"]) {
     assert.equal(outcome(err), "refused", err);
   }
+  for (const err of ["connection reset by peer", "i/o timeout", "Client.Timeout exceeded", "unexpected EOF", "http2: client connection lost",
+    "http2: server sent GOAWAY", "stream error: stream ID 3", "context deadline exceeded"]) {
+    assert.equal(error(`${post}${err}`).message, `Ergebnis unklar: GitHub nicht erreichbar: ${post}${err}`, err);
+  }
+  assert.equal(error(`gh: ${GH_SERVER_TIMEOUT}`).message, `Ergebnis unklar: GitHub antwortete mit ${GH_SERVER_TIMEOUT}`);
   assert.equal(outcome("", 0), "unclear", "an unreadable answer to a write");
-  assert.throws(() => board.readGh({ code: 1, stdout: "", stderr: "gh: HTTP 502: Bad Gateway" }), (e) => !e.unclear && /GitHub antwortete mit HTTP 502/.test(e.message));
+  assert.throws(() => board.readGh({ code: 1, stdout: "", stderr: "gh: HTTP 502" }), (e) => !e.unclear && e.message === "GitHub antwortete mit HTTP 502");
 });
 
 // ---- Status changes ----
@@ -612,18 +640,26 @@ test("az's failures: login and a missing extension make the view unavailable, ot
   assert.equal(board.azFailure({ code: 1, stderr: "ERROR: boom" }, "server").message, "az auf server: boom");
 });
 
-test("on a write, az's connection failures are unclear and its ERROR: answers refusals", () => {
+test("on a write, az's failed requests, 5xx answers, internal errors and failures without ERROR: are unclear; its other ERROR: answers refusals", () => {
   const write = { write: true };
-  const timedOut = "ERROR: HTTPSConnectionPool(host='dev.azure.com', port=443): Read timed out. (read timeout=30)";
+  // msrest wraps a requests exception as "Error occurred in request., <type>: <message>".
+  const timedOut = "ERROR: Error occurred in request., ReadTimeout: HTTPSConnectionPool(host='dev.azure.com', port=443): Read timed out. (read timeout=30)";
   const unclear = board.azFailure({ code: 1, stderr: timedOut }, null, write);
-  assert.deepEqual([unclear.unclear, unclear.message.startsWith("Ergebnis unklar: Azure nicht erreichbar (az): ")], [true, true]);
-  for (const err of ["ERROR: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
-    "ERROR: HTTPSConnectionPool(host='dev.azure.com', port=443): Max retries exceeded with url: /_apis"]) {
+  assert.deepEqual([unclear.unclear, unclear.message.startsWith("Ergebnis unklar: Azure nicht erreichbar (az): Error occurred in request., ReadTimeout")], [true, true]);
+  for (const err of [
+    "ERROR: Error occurred in request., ConnectionError: HTTPSConnectionPool(host='dev.azure.com', port=443): Max retries exceeded with url: /example-org/_apis/wit/workitems/102 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object>: Failed to establish a new connection: [Errno 101] Network is unreachable'))",
+    "ERROR: Error occurred in request., ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+    "ERROR: Error occurred in request., ChunkedEncodingError: (\"Connection broken: InvalidChunkLength(got length b'', 0 bytes read)\", InvalidChunkLength(got length b'', 0 bytes read))",
+    "ERROR: Operation returned a 503 status code.",
+    "ERROR: TF400898: An Internal Error Occurred. Activity Id: 0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b.",
+    "Traceback (most recent call last):\n  File \"az\", line 1\nKeyboardInterrupt",
+  ]) {
     assert.equal(board.azFailure({ code: 1, stderr: err }, null, write).unclear, true, err);
   }
   assert.equal(board.azFailure({ code: 1, stderr: timedOut }).unclear, false, "a read is just an error");
   const rule = board.azFailure({ code: 1, stderr: "ERROR: TF401320: Rule Error for field State. Error code: Required, InvalidEmpty." }, null, write);
   assert.deepEqual([rule.unclear, rule.message], [false, "TF401320: Rule Error for field State. Error code: Required, InvalidEmpty."]);
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: Operation returned a 400 status code." }, null, write).unclear, false);
 });
 
 // ---- Azure ----
@@ -706,15 +742,15 @@ test("an item's session is the tab or space named after it; a branch with its nu
   const tab = (id, name, status = null) => ({ id, name, status });
   const spaces = [
     { id: "s1", name: "atlas", folder: "/r/atlas", branch: "main", status: "blocked", tabs: [tab("t1", "atlas#3000 other")] },
-    { id: "s2", name: "romm", folder: "/r/tender", branch: "main", status: "working", tabs: [tab("t2", "1"), tab("t3", "tender#3000 feat(dev)…", "working")] },
+    { id: "s2", name: "work", folder: "/r/tender", branch: "main", status: "working", tabs: [tab("t2", "1"), tab("t3", "tender#3000 sample…", "working")] },
   ];
-  assert.deepEqual(board.linkedSession(card, spaces), { space: "s2", tab: "t3", status: "working", label: "tender#3000 feat(dev)…" });
+  assert.deepEqual(board.linkedSession(card, spaces), { space: "s2", tab: "t3", status: "working", label: "tender#3000 sample…" });
   const two = [{ id: "s7", name: "x", folder: "/r/tender", branch: "main", status: null,
     tabs: [tab("t7", "tender#3000 a", "idle"), tab("t8", "tender#3000 b", "blocked"), tab("t9", "tender#30001 c", "blocked")] }];
   assert.equal(board.linkedSession(card, two).tab, "t8", "the most urgent first; tender#30001 is another item");
   assert.equal(board.linkedSession(card, [{ ...two[0], tabs: [two[0].tabs[2]] }]), null);
-  const named = [{ id: "s3", name: "tender#3000 feat(dev)…", folder: "/r/tender", branch: "main", status: "done", tabs: [tab("t4", "1", "done")] }];
-  assert.deepEqual(board.linkedSession(card, named), { space: "s3", tab: null, status: "done", label: "tender#3000 feat(dev)…" });
+  const named = [{ id: "s3", name: "tender#3000 sample…", folder: "/r/tender", branch: "main", status: "done", tabs: [tab("t4", "1", "done")] }];
+  assert.deepEqual(board.linkedSession(card, named), { space: "s3", tab: null, status: "done", label: "tender#3000 sample…" });
   const branch = [{ id: "s4", name: "x", folder: "/r/tender.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [tab("t5", "1")] }];
   assert.deepEqual(board.linkedSession(card, branch), { space: "s4", tab: null, status: "idle", label: "feat/3000-x" });
   const elsewhere = [{ id: "s5", name: "x", folder: "/r/atlas.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [] }];
@@ -800,19 +836,27 @@ function deferred() {
 }
 
 // The UI tests' own views.json: three GitHub views and an Azure one.
-function testConfig({ start = {}, filter = "assignee:@me" } = {}) {
+// azureStart: the Azure view's start (null: none); repos: more repos entries.
+function testConfig({ start = {}, filter = "assignee:@me", azureStart = { checkout: "~/src/work" }, repos = {} } = {}) {
+  const azure = { id: "azure", name: "Azure", source: "azure", layout: "board", hide: ["Inactive"], hideCategories: ["Completed", "Removed"] };
   return JSON.stringify({
     refreshMinutes: 3,
     start: { agent: "claude", message: "/work {number}", review: "/look {number}", ...start },
-    repos: { "example/tender": { checkout: "~/src/tender" } },
+    repos: { "example/tender": { checkout: "~/src/tender" }, ...repos },
     views: [
       { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter, hide: ["Backlog", "Done"] },
       { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
       { id: "other", name: "Other", source: "github", layout: "board", project: { owner: "sample-user", number: 8 }, hide: ["Done"] },
-      { id: "azure", name: "Azure", source: "azure", layout: "board", hide: ["Inactive"], hideCategories: ["Completed", "Removed"], start: { checkout: "~/src/work" } },
+      azureStart ? { ...azure, start: azureStart } : azure,
     ],
   });
 }
+
+// A clock the tests can move: the mod reads Date.now().
+const realNow = Date.now.bind(Date);
+let clockOffset = 0;
+Date.now = () => realNow() + clockOffset;
+const advance = (ms) => (clockOffset += ms);
 
 // The fake herdr: exec calls wait until the test answers them; spaces() is
 // spaceList, which a test may change.
@@ -905,6 +949,7 @@ const ok = (stdout) => ({ code: 0, stdout, stderr: "" });
 // (or `answer`), the Azure view unavailable (no az).
 async function openBoard(options = {}) {
   memory.clear();
+  clockOffset = 0;
   const host = fakeHost(options);
   globalThis.__boardHost = host;
   const b = new board.default();
@@ -955,6 +1000,8 @@ test("UI: number keys beyond the views do nothing; [ and ] go back and forth, al
   assert.equal(b.view().id, "prs");
   await press(b, cx, "4");
   assert.equal(b.view().id, "prs", "4 names no view while Azure is unavailable");
+  await press(b, cx, "9");
+  assert.equal(b.view().id, "prs");
   await press(b, cx, "3");
   assert.equal(b.view().id, "other");
 });
@@ -1014,26 +1061,95 @@ test("UI: a second move of a card is refused while the first is written; a refus
   assert.equal(host.notes.at(-1).level, "error");
 });
 
-test("UI: a write without a clear answer keeps the card, warns, and the next refresh says where it is", async () => {
+test("UI: a write without a clear answer keeps the card, warns once, and the next refresh says where it is", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
   await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
   assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s; lädt neu");
-  assert.equal(host.notes.at(-1).level, "warning");
+  assert.deepEqual(host.notes.at(-1), { title: "Status von tender#3004", body: "Ergebnis unklar: gh antwortete nicht in 30 s", level: "warning" });
   assert.equal(host.open("gh").length, 1, "a refresh asks GitHub");
   await host.answer("gh", ok(fixture("github-board.json")));
-  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
+  assert.equal(b.notice.level, "warning");
+  assert.deepEqual(host.notes.at(-1), { title: "Status nach dem Neuladen", body: "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“", level: "warning" });
+});
+
+// github-board.json with a card moved to another option, or left out.
+function boardWith(change) {
+  const data = json("github-board.json");
+  change(data.data.repositoryOwner.projectV2.items.nodes);
+  return JSON.stringify(data);
+}
+
+test("UI: after an unclear write, a card in its target is said as landed; one in a hidden target as not shown", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", ok(boardWith((nodes) => (nodes.find((n) => n.id === "PVTI_rec4").fieldValueByName.optionId = "opt-in-progress"))));
+  assert.deepEqual([b.notice.text, b.notice.level], ["tender#3004 steht nach dem Neuladen in „In progress“", "info"]);
+  await press(b, cx, "s");
+  await press(b, cx, "5");
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", ok(boardWith((nodes) => nodes.splice(nodes.findIndex((n) => n.id === "PVTI_rec4"), 1))));
+  assert.deepEqual([b.notice.text, b.notice.level], ["tender#3004 steht nicht in den gezeigten Spalten („Done“ ist ausgeblendet)", "info"]);
+});
+
+test("UI: a refresh that read before an unclear write ended says nothing about it; the one after does", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "r");
+  advance(5);
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  const unclear = b.notice.text;
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, unclear, "the refresh that started before the outcome settles nothing");
+  assert.equal(host.open("gh").length, 1, "the follow-up refresh");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
+});
+test("UI: a refresh settles the outcomes that came before it started and keeps the later ones for the next", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  advance(5);
+  b.views.mine.sel = { col: 2, key: "PVTI_rec1" };
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“", "only the first write's outcome");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3000 steht nach dem Neuladen in „In progress“, nicht in „In review“");
+});
+
+test("UI: a refresh that read before an unclear write ended and then failed says nothing about it", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "r");
+  advance(5);
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  const unclear = b.notice.text;
+  await host.answer("gh", { code: 1, stdout: "", stderr: GH_DNS }, "items(first");
+  assert.equal(b.notice.text, unclear);
 });
 
 test("UI: a refresh that fails after an unclear write says the outcome is still open", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
   await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
-  await host.answer("gh", { code: 1, stdout: "", stderr: "gh: dial tcp: lookup api.github.com: no such host" });
-  assert.match(b.notice.text, /^tender#3004: Ergebnis weiter offen, Neuladen fehlgeschlagen \(GitHub nicht erreichbar/);
+  await host.answer("gh", { code: 1, stdout: "", stderr: GH_DNS });
+  assert.equal(b.notice.text, "tender#3004: Ergebnis weiter offen, Neuladen fehlgeschlagen (GitHub nicht erreichbar: error connecting to api.github.com)");
 });
 
+test("UI: r forgets the open outcomes of views no longer in views.json", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.equal(b.views.mine.unclear.length, 1);
+  host.config = JSON.stringify({ ...JSON.parse(testConfig()), views: JSON.parse(testConfig()).views.filter((v) => v.id !== "mine") });
+  await press(b, cx, "r");
+  assert.deepEqual(b.views.mine.unclear, []);
+});
 test("UI: a refresh during a write keeps the move until the write is confirmed", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
@@ -1079,22 +1195,28 @@ test("UI: Enter in the dialog opens the session in the checkout; Esc does nothin
   const name = "tender#3004 feat(api): page through long lists";
   assert.deepEqual(host.runs.at(-1), ["space.new", { name, tab: name, machine: "", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
   assert.equal(b.notice.text, `Sitzung wird geöffnet: ${name}`);
+  await cx.fire();
+  assert.equal(b.notice.text, `Sitzung wird geöffnet: ${name}`, "not there at the first check");
   host.spaceList = [...host.spaceList, { id: "s9", name, folder: "/home/me/src/tender", machine: null, branch: "main", active: false, status: null, tabs: [{ id: "t9", name }] }];
   await cx.fire();
   assert.equal(b.notice.text, `Sitzung geöffnet: ${name}`);
 });
 
-test("UI: a session that does not appear is warned about", async () => {
+test("UI: a session that does not appear is warned about after the last check only", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
   b.startAgent(cx);
   await settle();
   await host.answer("sh", ok("/home/me/src/tender\n"));
-  for (let i = 0; i < 3; i++) await cx.fire();
-  assert.match(b.notice.text, /^Kein Space und kein Tab „tender#3004 feat\(api\): page through long lists“ erschienen/);
+  const notes = host.notes.length;
+  await cx.fire();
+  await cx.fire();
+  assert.match(b.notice.text, /^Sitzung wird geöffnet/, "no warning before the last check");
+  assert.equal(host.notes.length, notes);
+  await cx.fire();
+  assert.equal(b.notice.text, "Kein Space und kein Tab „tender#3004 feat(api): page through long lists“ erschienen; die Sitzung ist wohl nicht gestartet");
   assert.equal(host.notes.at(-1).level, "warning");
 });
-
 test("UI: a checkout that is missing, or no space for a tab, is said in the dialog, which stays", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
@@ -1159,20 +1281,56 @@ test("UI: a configured machine or agent that is missing is said in the dialog", 
 test("UI: agents that cannot be read are said for the machine they were asked on", async () => {
   const { b, cx, host } = await openBoard();
   host.knownAgents = async () => {
-    throw new Error("machine server is unreachable\nmore");
+    throw new Error("agent check failed\nmore");
   };
   await openStart(b, cx);
-  assert.equal(b.modal.agentsError, "Agents auf Dieser Rechner nicht lesbar: machine server is unreachable");
+  assert.equal(b.modal.agentsError, "Agents auf diesem Rechner nicht lesbar: agent check failed");
 });
 
-test("UI: an Azure view loads its defaults and types once, again after r, and the timer brings it back when it was unavailable", async () => {
+test("UI: agents asked of a machine no longer chosen are ignored, also when the ask fails", async () => {
   const { b, cx, host } = await openBoard();
-  assert.ok(b.views.azure.unavailable);
-  b.views.azure.tried = 0;
+  const asks = [];
+  host.knownAgents = ({ on }) => {
+    const d = deferred();
+    asks.push({ on, ...d });
+    return d.promise;
+  };
+  await openStart(b, cx);
+  await press(b, cx, "tab");
+  await press(b, cx, "tab");
+  await press(b, cx, "l");
+  assert.deepEqual(asks.map((a) => a.on), [null, "server"]);
+  asks[0].reject(new Error("too late"));
+  await settle();
+  assert.equal(b.modal.agentsError, null);
+  asks[1].resolve([{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }]);
+  await settle();
+  assert.equal(b.modal.agents.length, 1);
+});
+// Brings the Azure view back: the timer tries it once refreshMinutes have
+// passed, and az answers its defaults, types and work items.
+async function azureBack(cx, host) {
+  advance(3 * 60000);
   await cx.tick();
   await host.answer("az", ok(fixture("azure-defaults.txt")), "configure");
   await host.answer("az", ok(fixture("azure-types.json")), "workitemtypes");
   await host.answer("az", ok(fixture("azure-items.json")), "--wiql");
+}
+
+test("UI: the timer tries an unavailable view again only after refreshMinutes", async () => {
+  const { b, cx, host } = await openBoard();
+  assert.ok(b.views.azure.unavailable);
+  advance(2 * 60000);
+  await cx.tick();
+  assert.equal(host.open("az").length, 0, "not before refreshMinutes");
+  advance(60000);
+  await cx.tick();
+  assert.equal(host.open("az").length, 1);
+});
+
+test("UI: an Azure view loads its defaults and types once and again after r", async () => {
+  const { b, cx, host } = await openBoard();
+  await azureBack(cx, host);
   assert.equal(b.views.azure.unavailable, null);
   assert.equal(b.views.azure.data.columns.length, 7);
   assert.deepEqual(b.views.azure.warnings, [], "Inactive is a state of the project's types, though no item has it");
@@ -1183,18 +1341,24 @@ test("UI: an Azure view loads its defaults and types once, again after r, and th
   await press(b, cx, "r");
   assert.ok(host.open("az").some((c) => c.args.includes("configure")), "r reads az's defaults and the types anew");
 });
-
 test("UI: an Azure card without a checkout names where to set one", async () => {
-  const { b, cx, host } = await openBoard({ config: testConfig().replace(', "start": { "checkout": "~/src/work" }', "").replace(',"start":{"checkout":"~/src/work"}', "") });
-  b.views.azure.tried = 0;
-  await cx.tick();
-  await host.answer("az", ok(fixture("azure-defaults.txt")), "configure");
-  await host.answer("az", ok(fixture("azure-types.json")), "workitemtypes");
-  await host.answer("az", ok(fixture("azure-items.json")), "--wiql");
+  const { b, cx, host } = await openBoard({ config: testConfig({ azureStart: null }) });
+  await azureBack(cx, host);
   await press(b, cx, "4");
   assert.equal(b.view().id, "azure");
   await press(b, cx, "enter");
   await press(b, cx, "enter");
   assert.equal(b.modal, null);
   assert.equal(b.notice.text, "Für Example Project steht kein „checkout“ in views.json: „repos“ → „Example Project“ oder „start.checkout“ der Ansicht „Azure“");
+});
+
+test("UI: an Azure card starts from its project's entry in repos", async () => {
+  const { b, cx, host } = await openBoard({ config: testConfig({ azureStart: null, repos: { "Example Project": { checkout: "~/src/example" } } }) });
+  await azureBack(cx, host);
+  await press(b, cx, "4");
+  await openStart(b, cx);
+  assert.equal(b.messageInput.value(), "/work 102", "the first card, in New");
+  b.startAgent(cx);
+  await settle();
+  assert.deepEqual(host.open("sh")[0].args.slice(-1), ["~/src/example"]);
 });
