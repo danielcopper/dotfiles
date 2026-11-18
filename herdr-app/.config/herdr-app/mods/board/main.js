@@ -1861,9 +1861,12 @@ export default class Board extends View {
     if (this.notice || this.configErrors.length) out = out.child(this.banner(t));
     out = out
       .child(
+        // h_flex centres its items; the sidebar, the content and the detail
+        // span the full height, each starting at the top.
         h_flex()
           .flex_1()
           .min_h(0)
+          .items_stretch()
           .child(this.sidebar(t, view))
           .child(this.main(t, mono, view, st))
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),

@@ -1877,3 +1877,36 @@ test("the board is named Board: its mod, the tab the leader opens and its header
   const { b } = await bootBoard({ config: "{" });
   assert.ok(pathTo(b.render(), (s) => s === "Board"), "the header names the board");
 });
+
+// How an element lines up its children across its axis: its last items_*,
+// else h_flex's own items_center (gpui-base), else stretched.
+const crossAlign = (el) => el.styles.filter((s) => s.startsWith("items_")).at(-1) ?? (el.kind === "h_flex" ? "items_center" : "items_stretch");
+const centring = (chain) => chain.filter((el) => crossAlign(el) === "items_center").map((el) => el.kind);
+
+test("UI: the views sidebar fills the height; the content and its error start at the top", async () => {
+  const { b, st } = await bootBoard({ which: (tool) => (tool === "gh" ? "" : "/opt/fake/bin/az") });
+  assert.equal(st().error, "gh ist nicht installiert");
+  const root = b.render();
+  for (const text of ["ANSICHTEN", "gh ist nicht installiert"]) {
+    const chain = pathTo(root, text);
+    assert.ok(chain, text);
+    assert.deepEqual(centring(chain), [], `no row centres „${text}“`);
+  }
+  const row = pathTo(root, "ANSICHTEN").filter((el) => el.kind === "h_flex").at(-1);
+  assert.equal(crossAlign(row), "items_stretch", "the sidebar's row stretches it to the full height");
+});
+
+test("UI: the board and the detail beside it start at the top", async () => {
+  const { b, cx } = await openBoard();
+  await press(b, cx, "enter");
+  assert.equal(b.views.mine.detail, true);
+  const root = b.render();
+  const detail = pathTo(root, "SITZUNG");
+  assert.ok(detail);
+  assert.deepEqual(centring(detail), [], "no row centres the detail");
+  // A column's name sits in its head, a centring row of its own.
+  const name = b.views.mine.data.columns.find((c) => !c.hidden).name;
+  const column = pathTo(root, (s) => s === name);
+  assert.ok(column, name);
+  assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
+});
