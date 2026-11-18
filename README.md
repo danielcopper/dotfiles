@@ -12,7 +12,7 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
-The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `memex-sync-test` and `install-dotfiles-test` use it unless `DOTFILES_DIR` is set.
+The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
 
@@ -432,6 +432,14 @@ Without mise, run `tests/memex-sync/scenarios.sh` and
 the directories that must be real ("Install / update" above), in
 throwaway homes; each file's header lists its cases. It needs stow, git and
 tar.
+
+`mise run shell-test` (without mise, `tests/statusline/width.sh` and
+`tests/bash/first-shell.sh`) checks how the Claude Code status line finds the
+terminal's width, and what only the first shell of a terminal window does: the
+greeter and, on wsl-arch, the keyring daemon. Stand-ins take the place of hc,
+tmux, fastfetch and gnome-keyring-daemon, so no herdr or tmux server is asked;
+each file's header lists its cases, and naming cases runs only those. It needs
+jq and timeout.
 
 ## Memory protection on the Steam Deck
 
