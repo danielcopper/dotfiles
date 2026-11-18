@@ -237,14 +237,20 @@ drop_dangling() {
   if [ ! -L "$live" ] || [ -e "$live" ]; then
     return 1
   fi
-  target="$(readlink -m -- "$live")" || exit 1
+  if ! target="$(readlink -m -- "$live")"; then
+    echo "stow-packages.sh: readlink could not resolve the dangling link $live, which stays" >&2
+    exit 1
+  fi
   under_worktree_root "$target" || return 1
-  rm -- "$live" || exit 1
+  if ! rm -- "$live"; then
+    echo "stow-packages.sh: could not remove $live, a dangling link to $target; remove it and run this again" >&2
+    exit 1
+  fi
   echo "removed $live: it was a link to $target, which no longer exists"
 }
 
-# not_fold_why <rel>: why the link at ~/<rel>, which fold_of rejects, is left
-# alone.
+# not_fold_why <rel>: why the link at ~/<rel>, which is no fold to unfold, is
+# left alone.
 not_fold_why() {
   local live="$HOME/$1" error
   if [ ! -e "$live" ]; then
@@ -342,12 +348,16 @@ print_clashes() {
 
 stage_of() { echo "$HOME/$1.unfolding"; }
 
-# dir_belongs <rel> [<package>]: true when a directory belongs at ~/<rel>: one
-# of the directories to make real, given without a package, or a directory at
-# <rel> in the package.
+# dir_belongs <rel> [<package>]: true when a directory belongs at ~/<rel>:
+# when it is one of the directories to make real, or a directory at <rel> in
+# the package.
 dir_belongs() {
-  [ -z "${2:-}" ] || { [ -d "$DIR/$2/$1" ] && [ ! -L "$DIR/$2/$1" ]; }
+  in_list "$1" "${real_dirs[@]}" || { [ -d "$DIR/${2:-}/$1" ] && [ ! -L "$DIR/${2:-}/$1" ]; }
 }
+
+# Staging directories left alone where no directory belongs; the run names
+# them again at the end and exits 1.
+stray_stages=()
 
 # leave_alone <rel> <why> [<package>]: say that ~/<rel> is left alone and why,
 # naming a staging directory beside it; the package as for dir_belongs.
@@ -357,8 +367,11 @@ leave_alone() {
   stage="$(stage_of "$1")"
   if [ -e "$stage" ]; then
     why="$why; $stage holds what an earlier run staged for it"
-    # settle_stage puts the staging directory in place of a missing ~/<rel>.
-    if [ -d "$stage" ] && [ -e "$live" ] && [ ! -d "$live" ] && dir_belongs "$1" "${3:-}"; then
+    if [ -d "$stage" ] && ! dir_belongs "$1" "${3:-}"; then
+      why="$why; no directory belongs here any more: move $stage elsewhere, or remove it if you need nothing in it"
+      stray_stages+=("$stage")
+    elif [ -d "$stage" ] && [ -e "$live" ] && [ ! -d "$live" ]; then
+      # settle_stage puts the staging directory in place of a missing ~/<rel>.
       why="$why; move $live elsewhere, and the next run puts $stage in its place"
     fi
   fi
@@ -373,10 +386,10 @@ leave_alone() {
 # settle_stage <rel> [<package>]: a staging directory an earlier run left beside
 # ~/<rel>, where a directory belongs (dir_belongs), takes its place when ~/<rel>
 # is missing. A file at ~/<rel> is left alone, named with the staging directory
-# and what to do. When ~/<rel> is stow's link into the package, or a directory,
-# the run names both and stops. Where no directory belongs, the staging
+# and what to do. When ~/<rel> is stow's link into the package, the run names
+# both and what the app already wrote through the link, and stops; when it is
+# a directory, it names both and stops. Where no directory belongs, the staging
 # directory is left alone and named, and the run exits 1 after stow.
-stray_stages=()
 settle_stage() {
   local live="$HOME/$1" stage
   stage="$(stage_of "$1")"
@@ -391,9 +404,21 @@ settle_stage() {
     return 0
   fi
   if [ -L "$live" ]; then
-    # Only the top-level pass leaves such a link in place: one stow made.
-    echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which is now stow's link to $(readlink -f -- "$live"): what is moved into it lands in the repo." >&2
-    echo "To keep it out of the repo, remove the link $live and run this again; the run then puts $stage in its place, and stow links the package's files into it." >&2
+    # Only the top-level pass leaves such a link in place: one stow made into
+    # the package.
+    local src="$DIR/$2/$1"
+    echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which is now stow's link to $src: what is moved into it lands in the repo." >&2
+    if ! untracked_in "$DIR" "$2" "$1"; then
+      echo "stow-packages.sh: git ls-files failed in $DIR, so what the app wrote into $src cannot be listed" >&2
+      exit 1
+    fi
+    if [ ${#listed[@]} -gt 0 ]; then
+      echo "The app already wrote these through the link into the repo, untracked in $src:" >&2
+      printf '  %s\n' "${listed[@]}" >&2
+      echo "To keep it all out of the repo, move these from $src into $stage, then remove the link $live and run this again; the run then puts $stage in its place, and stow links the package's files into it." >&2
+    else
+      echo "To keep it out of the repo, remove the link $live and run this again; the run then puts $stage in its place, and stow links the package's files into it." >&2
+    fi
     exit 1
   fi
   if [ -e "$live" ]; then
@@ -553,8 +578,8 @@ done
 # dropped, so stow links the given package's file; a link to a directory is
 # made real like the directories above, so what git does not track there moves
 # along. A dangling link into a worktree of this repo is removed, and any other
-# link that is no such fold is left alone, as above. The directories above,
-# settled or left alone there, are skipped.
+# link, except stow's own into this package, is left alone, as above. The
+# directories above are skipped: the pass above handles each of them.
 for pkg in "${pkgs[@]}"; do
   top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
   while IFS= read -r rel; do
@@ -628,6 +653,8 @@ if [ -n "$backup" ]; then
       # The app writes into the live file of a reference copy, so moving it
       # aside as a "conflict" would take the live configuration with it.
       in_list "$src" "${reference_copies[@]}" && continue
+      # What the run said it leaves alone stays where it is.
+      in_list "$rel" "${left_alone[@]}" && continue
       if [ ! -e "$target" ] && [ ! -L "$target" ]; then
         continue
       fi
@@ -700,6 +727,10 @@ if [ ${#late_clashes[@]} -gt 0 ]; then
 fi
 if [ ${#not_stowed[@]} -gt 0 ]; then
   echo "stow-packages.sh: not stowed: ${not_stowed[*]}; stow says why above" >&2
+fi
+if [ ${#stray_stages[@]} -gt 0 ]; then
+  echo "stow-packages.sh: no directory belongs beside these staging directories any more; move each elsewhere, or remove it if you need nothing in it:" >&2
+  printf '  %s\n' "${stray_stages[@]}" >&2
 fi
 if [ ${#late_clashes[@]} -gt 0 ] || [ ${#not_stowed[@]} -gt 0 ] || [ ${#stray_stages[@]} -gt 0 ]; then
   exit 1
