@@ -37,12 +37,14 @@
 #       control: the daemon is started
 #   k10 a daemon that fails and prints nothing, with a plain file named
 #       control or a dead daemon's socket in place: the variable stays unset,
-#       the shell still starts
+#       the shell says so in one line on stderr with the daemon's exit code,
+#       and still starts; a start ended by an interrupt (130, 143) says nothing
 #   k11 with XDG_RUNTIME_DIR unset or empty the daemon and the lock are left
 #       alone
 #   k12 a lock another process holds on, also with a dead daemon's socket in
 #       place: the shell gives up waiting after 5 s, says so in one line on
-#       stderr and starts without the variable instead of hanging
+#       stderr (the only case with that line; k2 and k10 have none) and starts
+#       without the variable instead of hanging
 #   k13 a keyring directory at 0755, also with a dead daemon's socket in it:
 #       the daemon starts in keyring-XXXXXX and the variable names that
 # Every case also checks that the shell exited 0 within its time, read .bashrc
@@ -130,6 +132,7 @@ cat >"$ROOT/bin/gnome-keyring-daemon" <<EOF
 echo "gnome-keyring-daemon \$*" >>"$ROOT/calls"
 echo "stand-in daemon on stderr" >&2
 [ "\${KEYRING_MODE:-}" = fail ] && exit 3
+[ -n "\${KEYRING_EXIT:-}" ] && exit "\$KEYRING_EXIT"
 dir=\$XDG_RUNTIME_DIR/keyring
 pidfile=\$XDG_RUNTIME_DIR/stand-in-daemon.pid
 if [ -S "\$dir/control" ] && [ -f "\$pidfile" ] && kill -0 "\$("$(command -v cat)" "\$pidfile")" 2>/dev/null; then
@@ -176,19 +179,20 @@ absent() { # absent <pattern> <file>: no line matches; a grep error fails too
   [ $? = 1 ]
 }
 
-# start_shell [--no-runtime-dir] <tag> [VAR=value ...]: an interactive bash on
+# start_shell <tag> [--no-runtime-dir] [VAR=value ...]: an interactive bash on
 # $SUT; what it ends with goes to $ROOT/control.<tag>, one key=value line each,
 # its stderr to $ROOT/stderr.<tag>, its exit code to $ROOT/rc.<tag>; the
-# previous run's files of that tag are removed first. Only XDG_RUNTIME_DIR,
-# left out with --no-runtime-dir, and the given variables are set.
+# previous run's files of that tag are removed first. Only PATH, HOME, TERM,
+# XDG_RUNTIME_DIR (left out with --no-runtime-dir) and the given variables are
+# set.
 start_shell() {
+  local tag=$1
+  shift
   local runtime=("XDG_RUNTIME_DIR=$RUN")
-  if [ "$1" = --no-runtime-dir ]; then
+  if [ "${1:-}" = --no-runtime-dir ]; then
     runtime=()
     shift
   fi
-  local tag=$1
-  shift
   rm -f "$ROOT/control.$tag" "$ROOT/stderr.$tag" "$ROOT/rc.$tag"
   # The braces' stderr takes bash's notice about a killed hung shell.
   # shellcheck disable=SC2016 # expanded by the inner bash, not here
@@ -225,21 +229,16 @@ controls() {
     check "control: $tool found (got $(get "$1" "$tool"))" eq "$(get "$1" "$tool")" "$want"
   done
   check "control: .bashrc read to its end" eq "$(get "$1" end)" yes
+  check "control: keyring_vars written" grep -q "^keyring_vars=" "$ROOT/control.$1"
   check "no keyring_ variable left (got $(get "$1" keyring_vars))" eq "$(get "$1" keyring_vars)" ""
   check "daemon's stderr kept out of the shell" absent "stand-in daemon on stderr" "$ROOT/stderr.$1"
   check "nothing refused (calls: $(cat "$ROOT/calls"))" absent "^refused" "$ROOT/calls"
 }
 # shell [--no-runtime-dir] [VAR=value ...]: start_shell and controls in one;
-# greeter runs in
-# $GREETS, daemon starts in $STARTS, attaches in $ATTACHES, `declare -p` of
-# the shell's GNOME_KEYRING_CONTROL in $GKC.
+# greeter runs in $GREETS, daemon starts in $STARTS, attaches in $ATTACHES,
+# `declare -p` of the shell's GNOME_KEYRING_CONTROL in $GKC.
 shell() {
-  if [ "${1:-}" = --no-runtime-dir ]; then
-    shift
-    start_shell --no-runtime-dir one "$@"
-  else
-    start_shell one "$@"
-  fi
+  start_shell one "$@"
   controls one
   counts one
 }
@@ -255,9 +254,17 @@ socket() { # socket <path>: a unix socket nobody listens on
   "$PYTHON_BIN" -Ic 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$1"
   [ -S "$1" ] || { echo "FAIL $CASE: could not create the socket $1"; exit 1; }
 }
-matches() { [[ $1 =~ $2 ]]; } # matches <string> <regex>
-lock_held() { ! flock -n "$RUN/keyring.lock" true; }
-OTHER_DIR="^declare -x GNOME_KEYRING_CONTROL=\"$RUN/keyring-[A-Za-z0-9]{6}\"\$"
+# lock_held: someone holds the lock; an error of flock itself is no answer.
+lock_held() {
+  flock -n -E 99 "$RUN/keyring.lock" true
+  [ $? = 99 ]
+}
+# other_dir <declare -p output>: exported to $RUN/keyring-XXXXXX.
+other_dir() {
+  local prefix="declare -x GNOME_KEYRING_CONTROL=\"$RUN/keyring-" suffix='^[A-Za-z0-9]{6}"$'
+  [[ $1 == "$prefix"* ]] && [[ ${1#"$prefix"} =~ $suffix ]]
+}
+BUSY="keyring: $RUN/keyring.lock busy for 5 s, GNOME_KEYRING_CONTROL not set"
 started() { # started: the daemon started once and exported (shell one)
   check "daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
   check "exported (got $GKC)" eq "$GKC" "$EXPORTED"
@@ -299,6 +306,7 @@ k1_live_daemon() {
 k2_no_daemon() {
   shell
   started
+  check "no keyring line on stderr" absent "^keyring: " "$ROOT/stderr.one"
   check "under the lock in XDG_RUNTIME_DIR (calls: $(calls))" grep -q "^flock .*$RUN/keyring.lock" "$ROOT/calls"
   check "with the secrets component" grep -qx "gnome-keyring-daemon --start --components=secrets" "$ROOT/calls"
   check "the default directory, at 0700" eq "$(stat -c %a "$RUN/keyring" 2>/dev/null)" 700
@@ -373,12 +381,28 @@ k10_daemon_fails() {
   shell KEYRING_MODE=fail
   check "the daemon was asked (calls: $(calls))" grep -q "^gnome-keyring-daemon --start" "$ROOT/calls"
   check "not exported (got $GKC)" eq "$GKC" unset
+  failed_line ""
   rm -f "$RUN/keyring/control"
   socket "$RUN/keyring/control"
   : >"$ROOT/calls"
   shell KEYRING_MODE=fail
   check "dead socket: the daemon was asked (calls: $(calls))" grep -q "^gnome-keyring-daemon --start" "$ROOT/calls"
   check "dead socket: not exported (got $GKC)" eq "$GKC" unset
+  failed_line "dead socket: "
+  local code
+  for code in 130 143; do
+    shell KEYRING_EXIT=$code
+    check "exit $code: not exported (got $GKC)" eq "$GKC" unset
+    check "exit $code: no keyring line on stderr" absent "^keyring: " "$ROOT/stderr.one"
+  done
+}
+
+# failed_line <label>: the shell said, with the stand-in's exit code 3, that
+# the start failed, and said nothing of a busy lock.
+failed_line() {
+  check "${1}says the start failed (got: $(cat "$ROOT/stderr.one"))" grep -qxF \
+    "keyring: gnome-keyring-daemon --start failed (exit 3), GNOME_KEYRING_CONTROL not set" "$ROOT/stderr.one"
+  check "${1}no busy line" absent "busy for 5 s" "$ROOT/stderr.one"
 }
 
 k11_no_runtime_dir() {
@@ -411,10 +435,12 @@ k12_stuck_lock() {
     check "$how: the lock is held" lock_held
     shell
     kill "$holder" 2>/dev/null
+    wait "$holder" 2>/dev/null
     check "$how: daemon not reached (calls: $(calls))" absent "^gnome-keyring-daemon" "$ROOT/calls"
     check "$how: not exported (got $GKC)" eq "$GKC" unset
-    check "$how: says so on stderr (got: $(cat "$ROOT/stderr.one"))" grep -qxF \
-      "keyring: $RUN/keyring.lock busy for 5 s, GNOME_KEYRING_CONTROL not set" "$ROOT/stderr.one"
+    check "$how: one busy line on stderr (got: $(cat "$ROOT/stderr.one"))" \
+      eq "$(grep -cxF "$BUSY" "$ROOT/stderr.one")" 1
+    check "$how: no failure line" absent "start failed" "$ROOT/stderr.one"
   done
 }
 
@@ -422,7 +448,7 @@ k13_keyring_dir_0755() {
   mkdir -m 755 "$RUN/keyring"
   shell
   check "daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
-  check "exported to keyring-XXXXXX (got $GKC)" matches "$GKC" "$OTHER_DIR"
+  check "exported to keyring-XXXXXX (got $GKC)" other_dir "$GKC"
   stop_daemons
   rm -rf "${RUN:?}"/*
   mkdir -m 755 "$RUN/keyring"
@@ -430,7 +456,7 @@ k13_keyring_dir_0755() {
   : >"$ROOT/calls"
   shell
   check "dead socket: daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
-  check "dead socket: exported to keyring-XXXXXX (got $GKC)" matches "$GKC" "$OTHER_DIR"
+  check "dead socket: exported to keyring-XXXXXX (got $GKC)" other_dir "$GKC"
 }
 
 missing=0

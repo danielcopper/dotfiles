@@ -33,9 +33,10 @@ command -v carapace >/dev/null && source <(carapace _carapace)
 # and a child shell asks again. The lock makes shells that start at once, such
 # as several herdr panes, take turns: the first starts the daemon, the later
 # ones attach to it. -o keeps the lock out of the daemon, which would otherwise
-# hold it for its whole life; -w 5 bounds the wait, and a shell that gave up
-# says so on stderr. Without XDG_RUNTIME_DIR the daemon has no fixed directory
-# a later shell could find, so the block leaves it alone.
+# hold it for its whole life; -w 5 bounds the wait. A shell that gave up on the
+# lock, or whose start failed, says so in one line on stderr; an interrupted
+# start (Ctrl-C, TERM) stays silent. Without XDG_RUNTIME_DIR the daemon has no
+# fixed directory a later shell could find, so the block leaves it alone.
 if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     keyring_env=$(flock -o -w 5 -E 75 "$XDG_RUNTIME_DIR/keyring.lock" \
         gnome-keyring-daemon --start --components=secrets 2>/dev/null)
@@ -48,6 +49,8 @@ if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
         [ -n "${GNOME_KEYRING_CONTROL:-}" ] && export GNOME_KEYRING_CONTROL
     elif [ "$keyring_status" = 75 ]; then
         echo "keyring: $XDG_RUNTIME_DIR/keyring.lock busy for 5 s, GNOME_KEYRING_CONTROL not set" >&2
+    elif [ "$keyring_status" != 130 ] && [ "$keyring_status" != 143 ]; then
+        echo "keyring: gnome-keyring-daemon --start failed (exit $keyring_status), GNOME_KEYRING_CONTROL not set" >&2
     fi
     unset keyring_env keyring_status
 fi
