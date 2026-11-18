@@ -329,6 +329,23 @@ leave_alone() { # leave_alone <rel> <why>
   fi
 }
 
+# settle_stage <rel>: a staging directory an earlier run left beside ~/<rel>,
+# which is no link now, takes its place when ~/<rel> is missing; when ~/<rel>
+# exists, the run names both and stops.
+settle_stage() {
+  local live="$HOME/$1" stage
+  stage="$(stage_of "$1")"
+  [ -d "$stage" ] || return 0
+  if [ -e "$live" ]; then
+    echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which exists now." >&2
+    echo "Move what you want to keep from $stage into $live, remove $stage and run this again." >&2
+    exit 1
+  fi
+  mv -T -- "$stage" "$live"
+  made_real+=("$live")
+  echo "finished making $live a real directory: moved $stage, left by an earlier run, into its place"
+}
+
 # unfold <rel> <worktree> <package>: replace the link at ~/<rel> to <rel> in
 # that package with a real directory, through the staging directory stage_of
 # names (README, "Install / update"). Only the swap changes the link, so every
@@ -380,7 +397,7 @@ unfold() {
   done
   for entry in "${copies[@]}"; do
     if mkdir -p -- "$(dirname -- "$stage/$entry")" && cp -p -- "$src/$entry" "$stage/$entry"; then
-      copied[$entry]="$(cksum -- "$src/$entry")"
+      copied[$entry]="$(cksum <"$stage/$entry")"
     else
       stayed+=("$entry (to copy)")
     fi
@@ -444,7 +461,7 @@ unfold() {
     printf '  %s\n' "${late[@]}"
   fi
   for entry in "${copies[@]}"; do
-    if [ "$(cksum -- "$src/$entry")" != "${copied[$entry]}" ]; then
+    if [ "$(cksum <"$src/$entry")" != "${copied[$entry]}" ]; then
       echo "stow-packages.sh: $src/$entry changed after it was copied into $live; compare it with $live/$entry, the live file" >&2
     fi
   done
@@ -481,17 +498,7 @@ for rel in "${real_dirs[@]}"; do
     leave_alone "$rel" "a file where a directory belongs"
     continue
   fi
-  stage="$(stage_of "$rel")"
-  if [ -d "$stage" ]; then
-    if [ -e "$live" ]; then
-      echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which exists now." >&2
-      echo "Move what you want to keep from $stage into $live, remove $stage and run this again." >&2
-      exit 1
-    fi
-    mv -T -- "$stage" "$live"
-    made_real+=("$live")
-    echo "finished making $live a real directory: moved $stage, left by an earlier run, into its place"
-  fi
+  settle_stage "$rel"
   [ -d "$live" ] || mkdir -- "$live"
 done
 
@@ -504,7 +511,11 @@ for pkg in "${pkgs[@]}"; do
   top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
   while IFS= read -r rel; do
     live="$HOME/$rel"
-    if [ -z "$rel" ] || [ ! -L "$live" ]; then continue; fi
+    [ -n "$rel" ] || continue
+    if [ ! -L "$live" ]; then
+      settle_stage "$rel"
+      continue
+    fi
     fold="$(fold_of "$live" "$rel")" || continue
     top="${fold%%$'\n'*}"
     from_pkg="${fold#*$'\n'}"

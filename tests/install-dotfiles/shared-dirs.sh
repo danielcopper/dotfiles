@@ -102,6 +102,9 @@
 #       reference seeded
 #   s62 dotfiles-relink seeds the live settings too
 #   s63 a run that stops after making a directory real names it
+#   s64 a file the app writes during the swap of a top-level directory linked
+#       into another worktree also stops the next runs on the staging
+#       directory until it is gone
 # usage: shared-dirs.sh [installer] [case ...]
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them.
@@ -809,7 +812,7 @@ s47_relink_replaces_claude_settings_link() {
   run_relink
   check "exit 0 (got $RC)" eq "$RC" 0
   check "a real file" test -f "$HOME/.claude/settings.json" -a ! -L "$HOME/.claude/settings.json"
-  check "with what the link pointed at" eq "$(cat "$HOME/.claude/settings.json")" '{"from":"sibling"}' 
+  check "with what the link pointed at" eq "$(cat "$HOME/.claude/settings.json")" '{"from":"sibling"}'
   check "says so" grep -qxF "replaced the ~/.claude/settings.json link into the repo with a local copy" <<<"$OUT"
 }
 
@@ -821,7 +824,7 @@ s48_relink_replaces_herdr_settings_link() {
   run_relink herdr-app
   check "exit 0 (got $RC)" eq "$RC" 0
   check "a real file" test -f "$HOME/$d/settings.json" -a ! -L "$HOME/$d/settings.json"
-  check "with what the link pointed at" eq "$(cat "$HOME/$d/settings.json")" '{"zoom":3}' 
+  check "with what the link pointed at" eq "$(cat "$HOME/$d/settings.json")" '{"zoom":3}'
   check "says so" grep -qxF "replaced the ~/$d/settings.json link into the repo with a local copy" <<<"$OUT"
 }
 
@@ -845,7 +848,7 @@ s50_settings_link_outside_repo_kept() {
   run_relink
   check "exit 0 (got $RC)" eq "$RC" 0
   check "the link left as it is" eq "$(readlink -- "$HOME/.claude/settings.json")" "$ROOT/elsewhere/settings.json"
-  check "its file untouched" eq "$(cat "$ROOT/elsewhere/settings.json")" '{"mine":1}' 
+  check "its file untouched" eq "$(cat "$ROOT/elsewhere/settings.json")" '{"mine":1}'
 }
 
 s51_settings_link_to_gone_file_reseeded() {
@@ -923,7 +926,7 @@ s57_write_to_live_settings_after_swap_not_reported() {
   standin git ls-files "[ -L '$HOME/.claude' ] || echo '{\"app\":1}' >'$HOME/.claude/settings.json'"
   PATH=$ROOT/failbin:$PATH run_relink
   check "exit 0 (got $RC)" eq "$RC" 0
-  check "the app's write is there" eq "$(cat "$HOME/.claude/settings.json")" '{"app":1}' 
+  check "the app's write is there" eq "$(cat "$HOME/.claude/settings.json")" '{"app":1}'
   check "reports no change" eq "$(grep -c 'settings.json changed' <<<"$OUT")" 0
 }
 
@@ -986,6 +989,26 @@ s63_stop_after_making_real_names_it() {
   check "names what it made real" eq "$(grep -A1 -xF "so the package links in them are missing until a run gets through:" <<<"$OUT" | tail -1)" "  $HOME/.claude"
 }
 
+s64_top_level_clash_stops_next_run() {
+  local src=$SIBLING/git/.githooks
+  printf 'written\n' >"$src/written"
+  ln -s "$src" "$HOME/.githooks"
+  standin mv '*/.githooks.unfolding' "echo again >'$src/written'"
+  PATH=$ROOT/failbin:$PATH run_relink git
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "names the repo's copy, now staged" grep -qxF "  $HOME/.githooks.unfolding/written" <<<"$OUT"
+  check "names the live one" grep -qxF "  $HOME/.githooks/written" <<<"$OUT"
+  rm -rf "$ROOT/failbin"
+  run_relink git
+  check "the next run exit 1 (got $RC)" eq "$RC" 1
+  check "the next run names the staging directory" grep -qxF \
+    "stow-packages.sh: $HOME/.githooks.unfolding holds what an earlier run moved out of this repo for $HOME/.githooks, which exists now." <<<"$OUT"
+  check "the staged copy kept" eq "$(cat "$HOME/.githooks.unfolding/written" 2>/dev/null)" again
+  rm -rf "${HOME:?}/.githooks.unfolding"
+  run_relink git
+  check "once it is gone exit 0 (got $RC)" eq "$RC" 0
+}
+
 all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_program_files_moved
   s5_fold_into_other_worktree s6_nothing_created_below_other_link s7_link_into_repo_not_a_fold_kept
   s8_file_kept s9_fold_into_other_repo_kept s10_systemd_user_fold_on_steamdeck
@@ -1008,7 +1031,7 @@ all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_p
   s56_one_package_in_conflict s57_write_to_live_settings_after_swap_not_reported
   s58_link_into_unreadable_worktree_kept s59_file_gone_before_move_counts_as_moved
   s60_stage_beside_left_alone_link_named s61_dangling_settings_link_into_removed_worktree s62_relink_seeds_settings
-  s63_stop_after_making_real_names_it)
+  s63_stop_after_making_real_names_it s64_top_level_clash_stops_next_run)
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
