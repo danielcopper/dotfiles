@@ -404,22 +404,22 @@ const ACTIONS = [
 // S and c are aliases of s and t; the list shows each action once.
 const LEADER = level("Leader", ACTIONS, ["S", "c"], "1-9 tab · Esc");
 
-// Keys the leader binds in its own key context. herdr binds Tab and
-// shift-Tab itself (gpui-kit's ShellRoot), to moving the keyboard to the next
-// or previous tab stop. GPUI runs a matching binding's action first and hands
+// Keys the leader binds in its own key context. herdr binds Tab and shift-Tab
+// itself (gpui-kit's ShellRoot), to moving the keyboard to the next or
+// previous tab stop. GPUI runs a matching binding's action first and hands
 // the key to on_key_down only when no action stopped it, so Tab never reached
 // the leader, and the keyboard left it, so Esc didn't either. Of the matching
 // bindings, the one in the deepest context wins, so a binding in the context
 // of the leader's root comes first. Seen in herdr-app 0.1.16: once keys.json
 // had been saved while the app ran, Tab reached on_key_down without any
 // binding of its own, until the next start. herdr's source explains it:
-// ShellRoot binds Tab once per app, and keys::install, which clears the keymap on every
-// load of keys.json, doesn't add it back. herdr's win98 menu binds Escape in
-// its own context, since the app's Escape closes an overlay before the menu's
-// key handler sees it. In the leader's path no herdr binding of Escape sits
-// deeper than keys.json's "mod:leader" one; the leader binds Escape like the
-// menu anyway, as a safeguard. Each action runs what its key does in the
-// leader.
+// ShellRoot binds Tab once per app, and keys::install, which clears the
+// keymap on every load of keys.json, doesn't add it back. herdr's win98 menu
+// binds Escape in its own context, since the app's Escape closes an overlay
+// before the menu's key handler sees it. In the leader's path no herdr
+// binding of Escape sits deeper than keys.json's "mod:leader" one; the leader
+// binds Escape like the menu anyway, as a safeguard. Each action runs what
+// its key does in the leader.
 const KEY_CONTEXT = "Leader";
 const tabEvent = (keystroke) => ({
   key: "tab",
@@ -685,6 +685,7 @@ export default class Leader extends View {
         try {
           k.run(this, cx, k);
         } catch (e) {
+          console.log(e?.stack ?? String(e));
           notify({ title: `Leader: ${k.name} failed`, body: String(e?.message ?? e), level: "error" });
         }
       });
