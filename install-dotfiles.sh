@@ -85,6 +85,66 @@ into_our_repo() {
   [ -n "$their" ] && [ "$their" = "$repo_common_dir" ]
 }
 
+# A directory that more than one of these packages fills must be a real
+# directory in $HOME. Stow folds a directory that only one package fills into
+# one link to that package. When a second package fills it later, `stow -R`
+# of both aborts with "unstow_contents() called with invalid target" (GNU
+# Stow 2.4.1): its unstow pass plans to remove the link and then still
+# descends through it for the second package. A plain `stow` would unfold the
+# link; `-R` does not get that far. So each such directory that an earlier run
+# left as a fold into this repo, from this or another worktree, becomes a real
+# directory before stow runs. What a program wrote through the fold is
+# untracked in the package; it moves into the new directory, where the program
+# looks for it, and out of the repo. The tracked files stay and stow links
+# them below. Any other link, or a file, in the place of such a directory is
+# left alone, and so is everything below it; stow reports the conflict. The
+# set comes from the packages, so a directory that a second package starts to
+# fill needs no change here.
+shared_dirs=()
+while IFS= read -r rel; do
+  shared_dirs+=("$rel")
+done < <(for pkg in "${all_pkgs[@]}"; do find "$pkg" -mindepth 1 -type d -printf '%P\n'; done | LC_ALL=C sort | uniq -d)
+left_alone=()
+for rel in "${shared_dirs[@]}"; do
+  live="$HOME/$rel"
+  for left in "${left_alone[@]}"; do
+    [[ "$rel/" == "$left/"* ]] && continue 2
+  done
+  if [ -L "$live" ]; then
+    src="$(readlink -f -- "$live" 2>/dev/null || true)"
+    # A fold points at <worktree>/<package>/<the same path>.
+    top=""
+    if [ -d "$src" ] && into_our_repo "$src"; then
+      top="$(git -C "$src" rev-parse --show-toplevel 2>/dev/null || true)"
+    fi
+    pkg_of_src="${src#"$top"/}"
+    pkg_of_src="${pkg_of_src%/"$rel"}"
+    if [ -z "$top" ] || [ "$src" != "$top/$pkg_of_src/$rel" ] || [[ "$pkg_of_src" == */* ]]; then
+      left_alone+=("$rel")
+      continue
+    fi
+    untracked=()
+    while IFS= read -r -d '' entry; do
+      untracked+=("${entry%/}")
+    done < <(git -C "$src" ls-files -z --others --directory)
+    rm -- "$live"
+    mkdir -- "$live"
+    echo "made $live a real directory; it was a link to $src"
+    if [ ${#untracked[@]} -gt 0 ]; then
+      for entry in "${untracked[@]}"; do
+        mkdir -p -- "$(dirname -- "$live/$entry")"
+        mv -- "$src/$entry" "$live/$entry"
+      done
+      echo "moved what the repo does not track from there into it:"
+      printf '  %s\n' "${untracked[@]}"
+    fi
+  elif [ -e "$live" ] && [ ! -d "$live" ]; then
+    left_alone+=("$rel")
+    continue
+  fi
+  mkdir -p -- "$live"
+done
+
 # Pre-pass: drop top-level $HOME entries that are symlinks pointing into
 # our repo but at a different worktree path than $DIR. These are stale
 # stow folds left over from a previous run done from another working

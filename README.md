@@ -16,6 +16,8 @@ The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githo
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
 
+A directory that several of the class's packages fill, such as `~/.config/environment.d` (`mise` and the class's host package), has to be a real directory in `$HOME`: where a run from the time only one package filled it left it as one link into this repo, `stow -R` aborts with `unstow_contents() called with invalid target`. So `install-dotfiles.sh` makes each such link into the repo, from this clone or one of its worktrees, a real directory before it stows, moves what programs wrote there and the repo does not track into it, and lists what it moved; any other link there is left alone.
+
 A `mise install` that fails does not stop the steps after it: the run ends with exit 1 and names it.
 
 ## Layout
@@ -414,9 +416,12 @@ Without mise, run `tests/memex-sync/scenarios.sh` and
 `python3 tests/memex-sync/mutants.py` from the repo.
 
 `mise run install-dotfiles-test` (without mise,
-`tests/install-dotfiles/memory-link.sh`) checks the `memex` package and the
-`~/Memory` link that `install-dotfiles.sh` makes, in throwaway homes; its
-header lists the cases. It needs stow and git.
+`tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the
+`memex` package and the `~/Memory` link that `install-dotfiles.sh` makes, and
+the directories several packages fill ("Install / update" above), in
+throwaway homes; each file's header lists its cases. `shared-dirs.sh` runs the
+installer from a throwaway copy of the repo, so what it writes into a package
+stays out of this one. It needs stow, git and tar.
 
 ## Memory protection on the Steam Deck
 

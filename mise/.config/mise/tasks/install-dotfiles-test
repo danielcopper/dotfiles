@@ -1,12 +1,29 @@
 #!/usr/bin/env bash
 # Global mise task: run the install-dotfiles.sh tests from the dotfiles repo;
-# what they check is in the header of tests/install-dotfiles/memory-link.sh.
+# what they check is in the headers of tests/install-dotfiles/memory-link.sh
+# and shared-dirs.sh.
 #
 # Usage: mise run install-dotfiles-test [case...]   (defaults to all)
+#   Each case runs from the test file that defines it.
 set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
 tests="$dotfiles/tests/install-dotfiles"
 [ -d "$tests" ] || { echo "install-dotfiles-test: no such directory: $tests" >&2; exit 1; }
 
-exec "$tests/memory-link.sh" "$@"
+files=("$tests/memory-link.sh" "$tests/shared-dirs.sh")
+for name in "$@"; do
+  grep -q "^$name() {" "${files[@]}" || { echo "install-dotfiles-test: no such case: $name" >&2; exit 1; }
+done
+
+status=0
+for file in "${files[@]}"; do
+  cases=()
+  for name in "$@"; do
+    if grep -q "^$name() {" "$file"; then cases+=("$name"); fi
+  done
+  if [ $# -eq 0 ] || [ ${#cases[@]} -gt 0 ]; then
+    "$file" "${cases[@]}" || status=1
+  fi
+done
+exit "$status"
