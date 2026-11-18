@@ -230,6 +230,34 @@ fold_of() {
   printf '%s\n%s\n' "$top" "$pkg"
 }
 
+# drop_dangling <rel>: when ~/<rel> is a dangling link into a worktree of this
+# repo, nothing is behind it: remove it and say so. False otherwise.
+drop_dangling() {
+  local live="$HOME/$1" target
+  if [ ! -L "$live" ] || [ -e "$live" ]; then
+    return 1
+  fi
+  target="$(readlink -m -- "$live")" || exit 1
+  under_worktree_root "$target" || return 1
+  rm -- "$live" || exit 1
+  echo "removed $live: it was a link to $target, which no longer exists"
+}
+
+# not_fold_why <rel>: why the link at ~/<rel>, which fold_of rejects, is left
+# alone.
+not_fold_why() {
+  local live="$HOME/$1" error
+  if [ ! -e "$live" ]; then
+    echo "its target does not exist"
+  elif into_our_repo "$(readlink -f -- "$live")"; then
+    echo "it points into this repo, but not at $1 in a package"
+  elif error="$(git_trouble "$(readlink -f -- "$live")")"; then
+    echo "git cannot read where it points: $error"
+  else
+    echo "it points outside this repo"
+  fi
+}
+
 # Directories this run made real in place of a link. Until stow has run, the
 # package links in them are missing; a run that stops before that names them.
 made_real=()
@@ -314,14 +342,23 @@ print_clashes() {
 
 stage_of() { echo "$HOME/$1.unfolding"; }
 
+# dir_belongs <rel> [<package>]: true when a directory belongs at ~/<rel>: one
+# of the directories to make real, given without a package, or a directory at
+# <rel> in the package.
+dir_belongs() {
+  [ -z "${2:-}" ] || { [ -d "$DIR/$2/$1" ] && [ ! -L "$DIR/$2/$1" ]; }
+}
+
+# leave_alone <rel> <why> [<package>]: say that ~/<rel> is left alone and why,
+# naming a staging directory beside it; the package as for dir_belongs.
 left_alone=()
-leave_alone() { # leave_alone <rel> <why>
+leave_alone() {
   local live="$HOME/$1" why="$2" stage
   stage="$(stage_of "$1")"
   if [ -e "$stage" ]; then
     why="$why; $stage holds what an earlier run staged for it"
     # settle_stage puts the staging directory in place of a missing ~/<rel>.
-    if [ -d "$stage" ] && [ ! -L "$live" ] && [ -e "$live" ] && [ ! -d "$live" ]; then
+    if [ -d "$stage" ] && [ -e "$live" ] && [ ! -d "$live" ] && dir_belongs "$1" "${3:-}"; then
       why="$why; move $live elsewhere, and the next run puts $stage in its place"
     fi
   fi
@@ -333,17 +370,31 @@ leave_alone() { # leave_alone <rel> <why>
   fi
 }
 
-# settle_stage <rel>: a staging directory an earlier run left beside ~/<rel>
-# takes its place when ~/<rel> is missing. A file at ~/<rel> is left alone,
-# named with the staging directory; when ~/<rel> is a directory, also through
-# a link, the run names both and stops.
+# settle_stage <rel> [<package>]: a staging directory an earlier run left beside
+# ~/<rel>, where a directory belongs (dir_belongs), takes its place when ~/<rel>
+# is missing. A file at ~/<rel> is left alone, named with the staging directory
+# and what to do. When ~/<rel> is stow's link into the package, or a directory,
+# the run names both and stops. Where no directory belongs, the staging
+# directory is left alone and named, and the run exits 1 after stow.
+stray_stages=()
 settle_stage() {
   local live="$HOME/$1" stage
   stage="$(stage_of "$1")"
   [ -d "$stage" ] || return 0
-  if [ -e "$live" ] && [ ! -d "$live" ]; then
-    leave_alone "$1" "a file where a directory belongs"
+  if ! dir_belongs "$1" "${2:-}"; then
+    echo "stow-packages.sh: left alone: $stage: an earlier run staged it for a directory at $live, but $DIR/$2/$1 is no directory; move it elsewhere, or remove it if you need nothing in it" >&2
+    stray_stages+=("$stage")
     return 0
+  fi
+  if [ -e "$live" ] && [ ! -d "$live" ]; then
+    leave_alone "$1" "a file where a directory belongs" "${2:-}"
+    return 0
+  fi
+  if [ -L "$live" ]; then
+    # Only the top-level pass leaves such a link in place: one stow made.
+    echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which is now stow's link to $(readlink -f -- "$live"): what is moved into it lands in the repo." >&2
+    echo "To keep it out of the repo, remove the link $live and run this again; the run then puts $stage in its place, and stow links the package's files into it." >&2
+    exit 1
   fi
   if [ -e "$live" ]; then
     echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which exists now." >&2
@@ -481,28 +532,14 @@ for rel in "${real_dirs[@]}"; do
   for left in "${left_alone[@]}"; do
     [[ "$rel/" == "$left/"* ]] && continue 2
   done
-  if [ -L "$live" ]; then
-    target="$(readlink -m -- "$live")"
-    if [ ! -e "$live" ] && under_worktree_root "$target"; then
-      # A dangling link into a worktree of this repo: nothing is behind it.
-      rm -- "$live"
-      echo "removed $live: it was a link to $target, which no longer exists"
-    elif [ -d "$live" ] && fold="$(fold_of "$live" "$rel")"; then
+  if [ -L "$live" ] && ! drop_dangling "$rel"; then
+    if [ -d "$live" ] && fold="$(fold_of "$live" "$rel")"; then
       unfold "$rel" "${fold%%$'\n'*}" "${fold#*$'\n'}"
       continue
-    elif [ ! -e "$live" ]; then
-      leave_alone "$rel" "its target does not exist"
-      continue
-    elif into_our_repo "$(readlink -f -- "$live")"; then
-      leave_alone "$rel" "it points into this repo, but not at $rel in a package"
-      continue
-    elif git_error="$(git_trouble "$(readlink -f -- "$live")")"; then
-      leave_alone "$rel" "git cannot read where it points: $git_error"
-      continue
-    else
-      leave_alone "$rel" "it points outside this repo"
-      continue
     fi
+    why="$(not_fold_why "$rel")"
+    leave_alone "$rel" "$why"
+    continue
   elif [ -e "$live" ] && [ ! -d "$live" ]; then
     leave_alone "$rel" "a file where a directory belongs"
     continue
@@ -515,41 +552,33 @@ done
 # another package of this one, left by an earlier run. A link to a file is
 # dropped, so stow links the given package's file; a link to a directory is
 # made real like the directories above, so what git does not track there moves
-# along. A dangling link into a worktree of this repo is removed, as above.
-# What the pass above left alone is skipped; the directories it made real are
-# no such links any more.
+# along. A dangling link into a worktree of this repo is removed, and any other
+# link that is no such fold is left alone, as above. The directories above,
+# settled or left alone there, are skipped.
 for pkg in "${pkgs[@]}"; do
   top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
   while IFS= read -r rel; do
-    live="$HOME/$rel"
     [ -n "$rel" ] || continue
-    in_list "$rel" "${left_alone[@]}" && continue
-    if [ ! -L "$live" ]; then
-      settle_stage "$rel"
-      continue
+    in_list "$rel" "${real_dirs[@]}" && continue
+    live="$HOME/$rel"
+    if [ -L "$live" ] && ! drop_dangling "$rel"; then
+      if ! fold="$(fold_of "$live" "$rel")"; then
+        why="$(not_fold_why "$rel")"
+        leave_alone "$rel" "$why" "$pkg"
+        continue
+      fi
+      top="${fold%%$'\n'*}"
+      from_pkg="${fold#*$'\n'}"
+      if [ "$top/$from_pkg" != "$DIR/$pkg" ]; then
+        if [ -d "$live" ]; then
+          unfold "$rel" "$top" "$from_pkg"
+          continue
+        fi
+        echo "relinking $live from $top/$from_pkg to $DIR/$pkg"
+        rm -- "$live"
+      fi
     fi
-    target="$(readlink -m -- "$live")"
-    if [ ! -e "$live" ] && under_worktree_root "$target"; then
-      rm -- "$live"
-      echo "removed $live: it was a link to $target, which no longer exists"
-      settle_stage "$rel"
-      continue
-    fi
-    fold="$(fold_of "$live" "$rel")" || continue
-    top="${fold%%$'\n'*}"
-    from_pkg="${fold#*$'\n'}"
-    if [ "$top/$from_pkg" = "$DIR/$pkg" ]; then
-      # A link stow made, beside which an earlier run may have left its
-      # staging directory.
-      settle_stage "$rel"
-      continue
-    fi
-    if [ -d "$live" ]; then
-      unfold "$rel" "$top" "$from_pkg"
-    else
-      echo "relinking $live from $top/$from_pkg to $DIR/$pkg"
-      rm -- "$live"
-    fi
+    settle_stage "$rel" "$pkg"
   done <<<"$top_level"
 done
 
@@ -573,12 +602,7 @@ for ref in "${reference_copies[@]}"; do
   rel="${ref#*/}"
   live="$HOME/$rel"
   if [ ! -L "$live" ] || below_link "$rel"; then continue; fi
-  target="$(readlink -m -- "$live")"
-  if [ ! -e "$live" ] && under_worktree_root "$target"; then
-    rm -- "$live"
-    echo "removed $live: it was a link to $target, which no longer exists"
-    continue
-  fi
+  if drop_dangling "$rel"; then continue; fi
   src="$(readlink -f -- "$live" 2>/dev/null || true)"
   into_our_repo "$src" || continue
   cp --remove-destination -- "$src" "$live"
@@ -677,6 +701,6 @@ fi
 if [ ${#not_stowed[@]} -gt 0 ]; then
   echo "stow-packages.sh: not stowed: ${not_stowed[*]}; stow says why above" >&2
 fi
-if [ ${#late_clashes[@]} -gt 0 ] || [ ${#not_stowed[@]} -gt 0 ]; then
+if [ ${#late_clashes[@]} -gt 0 ] || [ ${#not_stowed[@]} -gt 0 ] || [ ${#stray_stages[@]} -gt 0 ]; then
   exit 1
 fi
