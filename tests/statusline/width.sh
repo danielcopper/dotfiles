@@ -28,7 +28,9 @@
 # usage: width.sh [statusline] [case ...]
 #        width.sh --list
 #   The script defaults to the repo's claude/.claude/statusline.sh, the cases
-#   to all of them. --list prints the case names.
+#   to all of them. --list prints the case names. The script argument needs
+#   a / in its path (./statusline.sh for one here), so a case name is never
+#   taken for it.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. HOME points into a temporary directory for the whole run, which
 # is removed at the end. Needs jq and timeout.
@@ -44,7 +46,7 @@ fi
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/claude/.claude/statusline.sh
-if [ $# -gt 0 ] && [ -f "$1" ]; then
+if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
 fi

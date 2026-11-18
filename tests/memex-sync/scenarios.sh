@@ -7,7 +7,9 @@
 #   The script defaults to the repo's memex/.local/bin/memex-sync, the
 #   scenarios to all of them. WATCH_SUT overrides the memex-watch under test
 #   (default memex/.local/bin/memex-watch). --list prints the scenario names;
-#   every name in CASES must be a function of this file.
+#   every name in CASES must be a function of this file. The script argument
+#   needs a / in its path (./memex-sync for one here), so a scenario name is
+#   never taken for it.
 # Prints "PASS <scenario>" or "FAIL <scenario>: <check>" per scenario; exits 1
 # when any scenario failed. VERBOSE=1 prints every run's output. All state
 # lives in a temporary directory that is removed at the end.
@@ -35,7 +37,7 @@ fi
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/memex/.local/bin/memex-sync
-if [ $# -gt 0 ] && [ -f "$1" ]; then
+if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
 fi

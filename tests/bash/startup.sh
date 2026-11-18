@@ -56,7 +56,9 @@
 #        startup.sh --list
 #   The files default to the repo's bash/.bashrc and
 #   host-wsl-arch/.bashrc.local, the cases to all of them. --list prints the
-#   case names; every name in CASES must be a function of this file.
+#   case names; every name in CASES must be a function of this file. A file
+#   argument needs a / in its path (./bashrc for one here), so a case name
+#   is never taken for a file.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. HOME points into a temporary directory for the whole run, which
 # is removed at the end. Needs flock, python3 and timeout.
@@ -76,10 +78,10 @@ HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/bash/.bashrc
 SUT_LOCAL=$REPO/host-wsl-arch/.bashrc.local
-if [ $# -gt 0 ] && [ -f "$1" ]; then
+if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
-  if [ $# -gt 0 ] && [ -f "$1" ]; then
+  if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
     SUT_LOCAL=$(readlink -f "$1")
     shift
   fi

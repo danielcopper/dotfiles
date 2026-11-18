@@ -20,7 +20,9 @@
 #        memory-link.sh --list
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them. --list prints the case names; every name in CASES must be a
-#   function of this file.
+#   function of this file. The installer argument needs a / in its path
+#   (./install-dotfiles.sh for one here), so a case name is never taken for
+#   it.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. VERBOSE=1 prints every run's output. HOME points into a
 # temporary directory for the whole run, and systemctl and mise are stand-ins
@@ -40,7 +42,7 @@ fi
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/install-dotfiles.sh
-if [ $# -gt 0 ] && [ -f "$1" ]; then
+if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
 fi
