@@ -541,10 +541,11 @@ export function parseGithubList(json, view, errors = []) {
 
 // gh's network failures, as Go's net package and gh word them. NOT_SENT: the
 // request never reached GitHub (gh prints a failed DNS lookup as "error
-// connecting to <host>"; a failed dial never connected). SENT_FAILURE: the
+// connecting to <host>"; a failed dial, refused or timed out, never
+// connected). SENT_FAILURE: the
 // connection broke or timed out after it was made, so a write may have
 // landed.
-const NOT_SENT = /could not resolve host|no such host|connection refused|dial tcp|^error connecting to /im;
+const NOT_SENT = /^error connecting to |dial tcp/im;
 const SENT_FAILURE = /connection reset|i\/o timeout|Client\.Timeout|\bEOF\b|http2|stream error|context deadline exceeded/i;
 // GitHub's words for a request it did not finish in time (GraphQL and REST).
 const SERVER_TIMEOUT = /This may be the result of a timeout|couldn't respond to your request in time/i;
@@ -583,7 +584,8 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
   if (write && errors.length) {
     const own = (path && errorAt(errors, path)) ?? errors[0];
     const typed = Boolean(own.type || own.extensions?.code) && !SERVER_TIMEOUT.test(own.message ?? "");
-    throw failure(firstLine(own.message) || "GitHub hat die Änderung abgelehnt", { write, unclear: !typed });
+    const text = firstLine(own.message) || (typed ? "GitHub hat die Änderung abgelehnt" : "GitHub meldete einen Fehler ohne Text");
+    throw failure(text, { write, unclear: !typed });
   }
   if (json?.data) return { json, warnings: errors.map((e) => firstLine(e.message)).filter(Boolean), errors };
   if (NOT_SENT.test(err) || SENT_FAILURE.test(err)) {
@@ -717,25 +719,32 @@ export function azureMoveArgs(view, card, column) {
 }
 
 export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…";
-// az's words for a request that may have reached Azure without an answer:
-// msrest's "Error occurred in request., <requests exception>: …" for a
-// connection that failed (ConnectionError, ReadTimeout, …), the Azure DevOps
-// client's "Operation returned a 5xx status code.", and TF400898 (an internal
-// error).
-const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries|Operation returned a 5\d\d status code|TF400898/i;
+// az's words for a request that may have reached Azure but got no clear
+// answer: msrest's "Error occurred in request., <requests exception>: …"
+// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
+const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
+// Azure's answers that it failed itself: the Azure DevOps client's
+// "Operation returned a 5xx status code." and TF400898 (an internal error).
+const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898/i;
+// ERROR: answers that are a refusal: rule errors (TF401320),
+// permissions (VS403…), something that does not exist, az's own argument
+// errors, and 4xx status lines.
+const AZ_REFUSED = /^(TF401320|VS403\d+)\b|does not exist|not found|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
 
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
 // lines are left out). Missing sign-in or extension make the view
-// unavailable rather than an error. With `write`, a request that may have
-// reached Azure without an answer (AZ_SENT_FAILURE) or a failure without an
-// ERROR: line leaves open whether the change landed; any other ERROR:
-// answer (TFxxxx, a validation) is a refusal.
+// unavailable rather than an error. With `write`, only an ERROR: answer of a
+// known refusal form (AZ_REFUSED) is a refusal; anything else (a request
+// without a clear answer, a server error, az's own crash or interrupt, a
+// failure without an ERROR: line) leaves open whether the change landed.
 export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
   const errorLine = lines.find((l) => /^ERROR:/.test(l));
   const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
   const az = on ? `az auf ${on}` : "az";
-  if (AZ_SENT_FAILURE.test(lines.join("\n"))) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
+  const all = lines.join("\n");
+  if (AZ_SENT_FAILURE.test(all)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
+  if (AZ_SERVER_ERROR.test(all)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
   if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
     return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
   }
@@ -744,7 +753,7 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   }
   if (/^--project must be specified/.test(said)) return new BoardError(AZ_NO_PROJECT);
   if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
-  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine });
+  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
 // An exec that could not run at all (exec rejected). Only a missing az makes
@@ -1161,8 +1170,9 @@ export default class Board extends View {
   // A view's state: data and error, loading (again: one more refresh after
   // this one), at (last success) and tried (last start), unavailable (why the
   // view is not listed), warnings, moves (laid over refreshes, see
-  // pendingMoves), pending (card keys being written), unclear ({ key, label }
-  // of writes whose outcome the next refresh tells), stored/hidden (the
+  // pendingMoves), pending (card keys being written), unclear ({ key, label,
+  // to, at } of writes whose outcome is still open; see settleUnclear),
+  // stored/hidden (the
   // person's toggles and the hidden set), sel ({ col, key }, null before
   // the first data) and detail.
   state(id) {
@@ -1196,12 +1206,14 @@ export default class Board extends View {
         this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
         return undefined;
       });
+      const kindBefore = new Map((this.config?.views ?? []).map((v) => [v.id, `${v.source} ${v.layout}`]));
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
       for (const source of Object.values(this.sources)) source.reset();
       cx.notify();
       if (!this.config) return;
-      const ids = new Set(this.config.views.map((v) => v.id));
-      for (const [id, st] of Object.entries(this.views)) if (!ids.has(id)) st.unclear = [];
+      // Open outcomes of a view that is gone, or is now of another kind, are dropped.
+      const kinds = new Map(this.config.views.map((v) => [v.id, `${v.source} ${v.layout}`]));
+      for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== kindBefore.get(id)) st.unclear = [];
       for (const v of this.config.views) this.state(v.id).unavailable = null;
       const shown = this.view();
       for (const v of this.config.views) if (this.sources[v.source].probe && v !== shown) this.refresh(v, cx);
@@ -1260,8 +1272,10 @@ export default class Board extends View {
   // After a refresh that succeeded: where the cards of unclear writes are
   // now, for the writes whose outcome came before that refresh started (an
   // older one may have read before the write ended). The target column: the
-  // write landed. Another one: a warning. Not loaded because the target is
-  // hidden: most likely landed, said as such.
+  // write landed (info). Another column: a warning. Not loaded and the target
+  // is hidden: said as not shown (info); not loaded while other columns are
+  // hidden: not shown, it may be in any of them (warning); else not on the
+  // board (warning).
   settleUnclear(view, started, cx) {
     const st = this.state(view.id);
     const due = st.unclear.filter((u) => u.at <= started);
@@ -1274,6 +1288,8 @@ export default class Board extends View {
       if (st.data.columns.find((c) => c.id === u.to.id)?.hidden) {
         return { text: `${u.label} steht nicht in den gezeigten Spalten („${u.to.name}“ ist ausgeblendet)`, warn: false };
       }
+      const hidden = st.data.columns.filter((c) => c.hidden).map((c) => `„${c.name}“`);
+      if (hidden.length) return { text: `${u.label} steht nicht in den gezeigten Spalten (ausgeblendet: ${hidden.join(", ")})`, warn: true };
       return { text: `${u.label} ist nach dem Neuladen nicht auf dem Board`, warn: true };
     });
     const level = lines.some((l) => l.warn) ? "warning" : "info";
@@ -1308,6 +1324,8 @@ export default class Board extends View {
     if (found.column.id === columnId) return;
     if (st.pending[key]) return this.say(`${label} wird noch gespeichert`, "info", cx);
     if (!canDrop(st.data, found.card, to)) return this.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
+    // A new move of the card replaces the open outcome of an earlier one.
+    st.unclear = st.unclear.filter((u) => u.key !== key);
     const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
     st.moves.push(move);
     st.data = moveCard(st.data, key, columnId);

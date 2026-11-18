@@ -413,6 +413,8 @@ test("on a write, a GraphQL error with a type or code is a refusal with its mess
   assert.throws(() => board.readGh(answer([{ message: GH_SERVER_TIMEOUT }]), write), (e) => e.unclear && e.message === `Ergebnis unklar: ${GH_SERVER_TIMEOUT}`);
   assert.throws(() => board.readGh(answer([{ type: "INTERNAL", message: GH_SERVER_TIMEOUT }]), write), (e) => e.unclear, "a server timeout even with a type");
   assert.throws(() => board.readGh(answer([{ message: "Something else" }]), write), (e) => e.unclear, "an error without type or code");
+  assert.throws(() => board.readGh(answer([{ message: "" }]), write), { message: "Ergebnis unklar: GitHub meldete einen Fehler ohne Text" });
+  assert.throws(() => board.readGh(answer([{ type: "FORBIDDEN", message: "" }]), write), (e) => !e.unclear && e.message === "GitHub hat die Änderung abgelehnt");
 });
 
 test("on a write, a failure that may have reached GitHub is unclear; one that never left, or that GitHub refused (4xx), is a refusal", () => {
@@ -434,7 +436,7 @@ test("on a write, a failure that may have reached GitHub is unclear; one that ne
     `gh: ${GH_SERVER_TIMEOUT}`, "some failure gh does not explain", ""]) {
     assert.equal(outcome(err), "unclear", err);
   }
-  for (const err of [GH_DNS, `${post}dial tcp 140.82.121.6:443: connect: connection refused`, `${post}dial tcp: lookup api.github.com: no such host`,
+  for (const err of [GH_DNS, `${post}dial tcp 140.82.121.6:443: connect: connection refused`,
     `${post}dial tcp 140.82.121.6:443: i/o timeout`, "gh: Validation Failed (HTTP 422)", "gh: Not Found (HTTP 404)"]) {
     assert.equal(outcome(err), "refused", err);
   }
@@ -640,26 +642,56 @@ test("az's failures: login and a missing extension make the view unavailable, ot
   assert.equal(board.azFailure({ code: 1, stderr: "ERROR: boom" }, "server").message, "az auf server: boom");
 });
 
-test("on a write, az's failed requests, 5xx answers, internal errors and failures without ERROR: are unclear; its other ERROR: answers refusals", () => {
-  const write = { write: true };
+test("az says a request without a clear answer and a server error apart, on reads and writes", () => {
   // msrest wraps a requests exception as "Error occurred in request., <type>: <message>".
   const timedOut = "ERROR: Error occurred in request., ReadTimeout: HTTPSConnectionPool(host='dev.azure.com', port=443): Read timed out. (read timeout=30)";
-  const unclear = board.azFailure({ code: 1, stderr: timedOut }, null, write);
-  assert.deepEqual([unclear.unclear, unclear.message.startsWith("Ergebnis unklar: Azure nicht erreichbar (az): Error occurred in request., ReadTimeout")], [true, true]);
+  const lost = "Azure nicht erreichbar (az): Error occurred in request., ReadTimeout: HTTPSConnectionPool(host='dev.azure.com', port=443): Read timed out. (read timeout=30)";
+  assert.deepEqual([board.azFailure({ code: 1, stderr: timedOut }).message, board.azFailure({ code: 1, stderr: timedOut }).unclear], [lost, false]);
+  assert.equal(board.azFailure({ code: 1, stderr: timedOut }, null, { write: true }).message, `Ergebnis unklar: ${lost}`);
+  const broken = "ERROR: Error occurred in request., ChunkedEncodingError: (\"Connection broken: InvalidChunkLength(got length b'', 0 bytes read)\", InvalidChunkLength(got length b'', 0 bytes read))";
+  assert.equal(board.azFailure({ code: 1, stderr: broken }).message, `Azure nicht erreichbar (az): ${broken.slice(7)}`, "msrest's prefix alone says so");
+  // The Azure DevOps client's line for a failed answer without a message of its own.
+  const server = "Azure antwortete mit einem Fehler (az): Operation returned a 503 status code.";
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: Operation returned a 503 status code." }).message, server);
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: Operation returned a 503 status code." }, null, { write: true }).message, `Ergebnis unklar: ${server}`);
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: TF400898: An Internal Error Occurred. Activity Id: 1." }, "server").message,
+    "Azure antwortete mit einem Fehler (az auf server): TF400898: An Internal Error Occurred. Activity Id: 1.");
+});
+
+test("on a write, only az's known refusal forms are refusals; any other failure is unclear", () => {
+  const write = { write: true };
+  const unclear = (stderr, code = 1) => board.azFailure({ code, stderr }, null, write).unclear;
   for (const err of [
     "ERROR: Error occurred in request., ConnectionError: HTTPSConnectionPool(host='dev.azure.com', port=443): Max retries exceeded with url: /example-org/_apis/wit/workitems/102 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object>: Failed to establish a new connection: [Errno 101] Network is unreachable'))",
     "ERROR: Error occurred in request., ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
     "ERROR: Error occurred in request., ChunkedEncodingError: (\"Connection broken: InvalidChunkLength(got length b'', 0 bytes read)\", InvalidChunkLength(got length b'', 0 bytes read))",
     "ERROR: Operation returned a 503 status code.",
     "ERROR: TF400898: An Internal Error Occurred. Activity Id: 0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b.",
-    "Traceback (most recent call last):\n  File \"az\", line 1\nKeyboardInterrupt",
+    "ERROR: TF246017: Team Foundation Server could not connect to the database.",
+    // az's handle_exception for a crash and for Ctrl-C.
+    "ERROR: The command failed with an unexpected error. Here is the traceback:\nTraceback (most recent call last):\nValueError: x",
+    "ERROR: Keyboard interrupt is captured.",
+    "", // killed: nothing on stderr
+    "The work item does not exist", // a refusal's words, but no ERROR: line
   ]) {
-    assert.equal(board.azFailure({ code: 1, stderr: err }, null, write).unclear, true, err);
+    assert.equal(unclear(err), true, err);
   }
-  assert.equal(board.azFailure({ code: 1, stderr: timedOut }).unclear, false, "a read is just an error");
-  const rule = board.azFailure({ code: 1, stderr: "ERROR: TF401320: Rule Error for field State. Error code: Required, InvalidEmpty." }, null, write);
-  assert.deepEqual([rule.unclear, rule.message], [false, "TF401320: Rule Error for field State. Error code: Required, InvalidEmpty."]);
-  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: Operation returned a 400 status code." }, null, write).unclear, false);
+  for (const err of [
+    "ERROR: TF401320: Rule Error for field State. Error code: Required, InvalidEmpty.",
+    "ERROR: VS403323: You do not have permissions to update work item 102.",
+    "ERROR: TF401232: Work item 9 does not exist, or you do not have permissions to read it.",
+    "ERROR: The iteration path was not found: Example Project\\Nope",
+    "ERROR: argument --state: expected one argument",
+    "ERROR: the following arguments are required: --id",
+    "ERROR: unrecognized arguments: --stat New",
+    "ERROR: Operation returned a 400 status code.",
+    "ERROR: Operation returned a 404 status code.",
+    "ERROR: The requested resource requires user authentication: https://dev.azure.com/example-org/_apis/wit/workitems/102",
+  ]) {
+    assert.equal(unclear(err), false, err);
+  }
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: TF401320: Rule Error for field State." }, null, write).message, "TF401320: Rule Error for field State.");
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: Keyboard interrupt is captured." }).unclear, false, "a read is just an error");
 });
 
 // ---- Azure ----
@@ -836,15 +868,16 @@ function deferred() {
 }
 
 // The UI tests' own views.json: three GitHub views and an Azure one.
-// azureStart: the Azure view's start (null: none); repos: more repos entries.
-function testConfig({ start = {}, filter = "assignee:@me", azureStart = { checkout: "~/src/work" }, repos = {} } = {}) {
+// hide: the first view's hidden columns; azureStart: the Azure view's start
+// (null: none); repos: more repos entries.
+function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "Done"], azureStart = { checkout: "~/src/work" }, repos = {} } = {}) {
   const azure = { id: "azure", name: "Azure", source: "azure", layout: "board", hide: ["Inactive"], hideCategories: ["Completed", "Removed"] };
   return JSON.stringify({
     refreshMinutes: 3,
     start: { agent: "claude", message: "/work {number}", review: "/look {number}", ...start },
     repos: { "example/tender": { checkout: "~/src/tender" }, ...repos },
     views: [
-      { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter, hide: ["Backlog", "Done"] },
+      { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter, hide },
       { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
       { id: "other", name: "Other", source: "github", layout: "board", project: { owner: "sample-user", number: 8 }, hide: ["Done"] },
       azureStart ? { ...azure, start: azureStart } : azure,
@@ -1061,7 +1094,7 @@ test("UI: a second move of a card is refused while the first is written; a refus
   assert.equal(host.notes.at(-1).level, "error");
 });
 
-test("UI: a write without a clear answer keeps the card, warns once, and the next refresh says where it is", async () => {
+test("UI: a write without a clear answer keeps the card, says „Ergebnis unklar“ once, and the next refresh says where it is", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
   await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
@@ -1108,6 +1141,46 @@ test("UI: a refresh that read before an unclear write ended says nothing about i
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
 });
+test("UI: a card gone from its shown target is said as not shown while columns are hidden, else as not on the board", async () => {
+  const gone = ok(boardWith((nodes) => nodes.splice(nodes.findIndex((n) => n.id === "PVTI_rec4"), 1)));
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", gone);
+  assert.deepEqual([b.notice.text, b.notice.level], ["tender#3004 steht nicht in den gezeigten Spalten (ausgeblendet: „Backlog“, „Done“)", "warning"]);
+  const all = await openBoard({ config: testConfig({ hide: [] }) });
+  await press(all.b, all.cx, "l", shiftL);
+  await all.host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await all.host.answer("gh", gone);
+  assert.deepEqual([all.b.notice.text, all.b.notice.level], ["tender#3004 ist nach dem Neuladen nicht auf dem Board", "warning"]);
+  assert.deepEqual(all.host.notes.at(-1), { title: "Status nach dem Neuladen", body: "tender#3004 ist nach dem Neuladen nicht auf dem Board", level: "warning" });
+});
+
+test("UI: a new move of a card drops the open outcome of its earlier one", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  assert.deepEqual(st().unclear, []);
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 → Ready …", "no word on the earlier move");
+});
+
+test("UI: r drops the open outcomes of a view that became a list", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  const config = JSON.parse(testConfig());
+  config.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
+  host.config = JSON.stringify(config);
+  await press(b, cx, "r");
+  assert.deepEqual(b.views.mine.unclear, []);
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  await host.answer("gh", ok(fixture("github-list.json")), "search(");
+  assert.equal(b.views.mine.error, null);
+  assert.equal(b.views.mine.data.kind, "list");
+});
+
 test("UI: a refresh settles the outcomes that came before it started and keeps the later ones for the next", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
@@ -1249,6 +1322,20 @@ test("UI: another machine in the dialog runs the checkout there; a tab needs a s
   await host.answer("sh", ok("/home/me/src/tender\n"));
   assert.equal(b.modal.error, "Kein Space auf server für einen neuen Tab; als neuer Space öffnen");
   assert.equal(host.runs.length, 0);
+});
+
+test("UI: a tab on this machine needs a space here", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ id: "s2", name: "y", folder: "/srv/tender", machine: "server", branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Arbeit", active: true }] }];
+  await openStart(b, cx);
+  await press(b, cx, "tab");
+  await press(b, cx, "tab");
+  await press(b, cx, "tab");
+  await press(b, cx, "l");
+  assert.equal(b.modal.open, "tab");
+  await press(b, cx, "enter");
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.equal(b.modal.error, "Kein Space auf diesem Rechner für einen neuen Tab; als neuer Space öffnen");
 });
 
 test("UI: Enter twice on a card with a session goes to it", async () => {
