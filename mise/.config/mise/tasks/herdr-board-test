@@ -2,8 +2,10 @@
 # Global mise task: run the tests of the herdr board mod from the dotfiles
 # repo with node's test runner; README, "herdr app", says what they cover.
 # They run under node's permission model: reads only in the repo and the
-# temporary folder, writes only in the temporary folder; child processes
-# (sh) are allowed and are not bound by it.
+# temporary folder, writes only in the temporary folder. Child processes are
+# allowed (the runner starts each test file as one, under the same limits;
+# the sh the checkout test runs is not bound by them). BOARD_TEST_PERMISSION
+# tells the tests they must run under those limits.
 #
 # Usage: mise run herdr-board-test [node --test option...]
 #   e.g. --test-name-pattern=UI
@@ -17,5 +19,6 @@ tmp="${TMPDIR:-/tmp}"
 # From the repo and by a relative path: the test runner looks an absolute
 # path up from /, which the permission model does not let it read.
 cd "$dotfiles"
+export BOARD_TEST_PERMISSION=1
 exec node --permission --allow-fs-read="$dotfiles" --allow-fs-read="$tmp" --allow-fs-write="$tmp" --allow-child-process \
   --test "$@" tests/herdr-app/board.test.mjs

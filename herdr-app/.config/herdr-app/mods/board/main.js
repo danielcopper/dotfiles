@@ -4,9 +4,9 @@
 // or opens its tab. Keys and behaviour: README, "herdr app".
 //
 // views.json:
-// - refreshMinutes (3): how often the shown view refreshes while its tab shows.
+// - refreshMinutes (3), see Calls below.
 // - views: [{ id, name, source: "github" | "azure", layout: "board" | "list",
-//   hide?: [column names], limit?, start? }], and by kind:
+//   hide?: [column names], limit?, start? }], and by kind (VIEW_KINDS):
 //   a GitHub board has project { owner, number, field? ("Status") } and
 //   filter? (a Projects filter such as "assignee:@me"); its columns are the
 //   options of that single-select field. A GitHub list has sections
@@ -22,18 +22,20 @@
 //   in; ~ is that machine's home), message (the first message for issues and
 //   work items) and review (for pull requests). Templates take {number}
 //   {title} {url} {owner} {repo} {key}.
-// - repos: { "<owner>/<repo>": { any start field } }. startSettings says which
-//   start applies.
+// - repos: { "<owner>/<repo>" (on Azure: the project): { any start field } }.
+//   startSettings says which start applies; an Azure card starts from its
+//   project's entry or from its view's start.checkout.
 //
 // Hidden columns are left out of the query; on GitHub the same request counts
 // them for their stubs (Azure stubs show no count).
 //
 // Calls: a GitHub view costs one gh call per refresh, an Azure view one az
-// call, plus up to two on its first load (az's defaults and the work item
-// types). A view refreshes when the board opens, on `r` (which also tries the
-// Azure views not shown, to learn whether they are available), after `x`,
-// when it is shown again older than refreshMinutes, and every refreshMinutes
-// while its tab shows.
+// call, plus up to two more (az's defaults and the work item types) on its
+// first load and after each `r`. A view refreshes when the board opens, on
+// `r`, after `x`, when it is shown again older than refreshMinutes, and every
+// refreshMinutes while its tab shows. Opening the board and `r` also try the
+// Azure views not shown, to learn whether they are available, and the timer
+// tries an unavailable view again every refreshMinutes.
 //
 // The data logic is plain exported functions at the top, tested by
 // tests/herdr-app/board.test.mjs with node; it lives in this file because a
@@ -55,9 +57,9 @@ const CONFIG_NAME = "views";
 // ---------------------------------------------------------------------------
 
 export class BoardError extends Error {
-  // unavailable: the view's tool is missing or not signed in, so the view is
-  // left out of the list rather than shown with an error. unclear: a write
-  // may or may not have landed.
+  // unavailable: the view's tool is missing, not signed in or without its
+  // extension, so the view is left out of the list rather than shown with an
+  // error. unclear: a write may or may not have landed.
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
@@ -78,9 +80,11 @@ export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwart
 
 export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
-// Keys of the start that made a worktree; the agent's own skills make it now.
+// Keys of the start that made a worktree or set the status; the agent's own
+// skills do both now.
 const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
+const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "views"];
 
 function startProblems(start, where) {
@@ -96,14 +100,51 @@ function startProblems(start, where) {
   return out;
 }
 
-function viewKeys(v) {
-  return new Set([
-    "id", "name", "source", "layout", "hide", "limit", "start",
-    ...(v.source === "github" && v.layout === "board" ? ["project", "filter"] : []),
-    ...(v.layout === "list" ? ["sections"] : []),
-    ...(v.source === "azure" ? ["where", "hideCategories", "organization", "project", "on"] : []),
-  ]);
-}
+const textOrNull = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
+
+// Every view has these keys; each kind adds its own (VIEW_KINDS).
+const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
+
+// Per view kind ("<source> <layout>"): its own keys, what is wrong with them,
+// and the view with its defaults filled in.
+const VIEW_KINDS = {
+  "github board": {
+    keys: ["project", "filter"],
+    problems(v) {
+      const p = v.project;
+      const out = [];
+      if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
+        out.push("„project“ braucht „owner“ (Text) und „number“ (ganze Zahl)");
+      } else if (p.field !== undefined && !isText(p.field)) out.push("„project.field“ muss Text sein");
+      return [...out, ...textOrNull(v, ["filter"])];
+    },
+    defaults: (v) => ({
+      project: { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" },
+      filter: v.filter ?? "",
+      limit: v.limit ?? 100,
+    }),
+  },
+  "github list": {
+    keys: ["sections"],
+    problems: (v) =>
+      Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query))
+        ? []
+        : ["„sections“ braucht Einträge mit „name“ und „query“"],
+    defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query })), limit: v.limit ?? 50 }),
+  },
+  "azure board": {
+    keys: ["where", "hideCategories", "organization", "project", "on"],
+    problems: (v) => textOrNull(v, ["where", "organization", "project", "on"]),
+    defaults: (v) => ({
+      where: v.where ?? "[System.AssignedTo] = @Me",
+      hideCategories: v.hideCategories ?? [],
+      organization: v.organization ?? null,
+      project: v.project ?? null,
+      on: v.on ?? null,
+      limit: v.limit ?? 100,
+    }),
+  },
+};
 
 function viewProblems(v) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
@@ -113,58 +154,23 @@ function viewProblems(v) {
   if (v.source !== "github" && v.source !== "azure") out.push("„source“ ist \"github\" oder \"azure\"");
   if (v.layout !== "board" && v.layout !== "list") out.push("„layout“ ist \"board\" oder \"list\"");
   if (v.source === "azure" && v.layout === "list") out.push("Azure-Ansichten sind Boards (\"layout\": \"board\")");
-  const allowed = viewKeys(v);
+  const kind = VIEW_KINDS[`${v.source} ${v.layout}`];
+  if (!kind) return out;
   for (const key of Object.keys(v)) {
-    if (key === "startColumn") out.push(`„startColumn“ ${GONE}`);
+    if (key === "startColumn") out.push(GONE_STATUS);
     else if (key === "on" && v.source === "github") out.push("„on“ gilt nur für Azure-Ansichten");
-    else if (!allowed.has(key) && (v.source === "github" || v.source === "azure")) out.push(`„${key}“ gibt es nicht`);
-  }
-  if (v.source === "github" && v.layout === "board") {
-    const p = v.project;
-    if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
-      out.push("„project“ braucht „owner“ (Text) und „number“ (ganze Zahl)");
-    } else if (p.field !== undefined && !isText(p.field)) out.push("„project.field“ muss Text sein");
-    if (v.filter !== undefined && typeof v.filter !== "string") out.push("„filter“ muss Text sein");
-  }
-  if (v.layout === "list" && (!Array.isArray(v.sections) || !v.sections.length || !v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query)))) {
-    out.push("„sections“ braucht Einträge mit „name“ und „query“");
+    else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
   for (const key of ["hide", "hideCategories"]) {
     if (v[key] !== undefined && !textList(v[key])) out.push(`„${key}“ muss eine Liste von Texten sein`);
   }
-  if (v.source === "azure") {
-    for (const key of ["where", "organization", "project", "on"]) {
-      if (v[key] !== undefined && v[key] !== null && typeof v[key] !== "string") out.push(`„${key}“ muss Text sein`);
-    }
-  }
   if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= 100)) out.push("„limit“ ist eine ganze Zahl von 1 bis 100");
-  return [...out, ...startProblems(v.start, "start")];
+  return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 
 function normalizeView(v) {
-  const view = {
-    id: v.id,
-    name: v.name,
-    source: v.source,
-    layout: v.layout,
-    hide: v.hide ?? [],
-    hideCategories: v.hideCategories ?? [],
-    start: v.start ?? {},
-    limit: v.limit ?? (v.layout === "list" ? 50 : 100),
-    on: null,
-  };
-  if (v.source === "github" && v.layout === "board") {
-    view.project = { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" };
-    view.filter = v.filter ?? "";
-  }
-  if (v.layout === "list") view.sections = v.sections.map((s) => ({ name: s.name, query: s.query }));
-  if (v.source === "azure") {
-    view.where = v.where ?? "[System.AssignedTo] = @Me";
-    view.organization = v.organization ?? null;
-    view.project = v.project ?? null;
-    view.on = v.on ?? null;
-  }
-  return view;
+  const common = { id: v.id, name: v.name, source: v.source, layout: v.layout, hide: v.hide ?? [], start: v.start ?? {}, hideCategories: [], on: null };
+  return { ...common, ...VIEW_KINDS[`${v.source} ${v.layout}`].defaults(v) };
 }
 
 // views.json as text (null: there is none) → { config, errors }. A view with
@@ -251,11 +257,12 @@ export function toggleHidden(view, stored, column, columns) {
   return next;
 }
 
-// Names in a view's hide and hideCategories that match no column it has.
+// Names in a view's hide that match none of `columns` (on Azure: every state
+// of the project's work item types, shown or not), and names in
+// hideCategories that are no Azure state category.
 export function unknownHidden(view, columns) {
   const names = new Set(columns.map((c) => c.name));
-  const categories = new Set(columns.map((c) => c.category).filter(Boolean));
-  return [...view.hide.filter((n) => !names.has(n)), ...view.hideCategories.filter((c) => !categories.has(c))];
+  return [...view.hide.filter((n) => !names.has(n)), ...view.hideCategories.filter((c) => !CATEGORIES.includes(c))];
 }
 
 // ---- GitHub ----------------------------------------------------------------
@@ -336,20 +343,38 @@ function githubCard(node) {
   };
 }
 
-// gh's answer for githubBoardArgs → a board:
+// The GraphQL error whose path starts with `path`, or null.
+export function errorAt(errors, path) {
+  return (errors ?? []).find((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p)) ?? null;
+}
+
+// gh's answer for githubBoardArgs (and the GraphQL errors that came with its
+// data) → a board:
 // { kind: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited }.
 // A hidden column's cards are only those moved there since the last refresh;
-// its count is the server's plus those (null on Azure, which has no count).
-// Items without a status, or in an option the field no longer has, go to
-// "Ohne Status", which takes no drops.
-export function parseGithubBoard(json, view, hidden) {
+// its count is the server's plus those. Items without a status, or in an
+// option the field no longer has, go to "Ohne Status", which takes no drops.
+// A part missing from the answer is explained by the error at its path.
+export function parseGithubBoard(json, view, hidden, errors = []) {
   const { owner, number, field: fieldName } = view.project;
   const ownerNode = json?.data?.repositoryOwner;
-  if (!ownerNode) throw new BoardError(`GitHub kennt „${owner}“ nicht`);
+  const why = (e) => firstLine(e.message);
+  if (!ownerNode) {
+    const e = errorAt(errors, ["repositoryOwner"]);
+    throw new BoardError(e && e.type !== "NOT_FOUND" ? `GitHub: ${why(e)}` : `GitHub kennt „${owner}“ nicht`);
+  }
   const project = ownerNode.projectV2;
-  if (!project) throw new BoardError(`Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
+  if (!project) {
+    const e = errorAt(errors, ["repositoryOwner", "projectV2"]);
+    if (e?.type === "NOT_FOUND") throw new BoardError(`Projekt ${number} von ${owner} nicht gefunden – project.number in ${CONFIG_NAME}.json prüfen`);
+    throw new BoardError(e ? `Projekt ${number} von ${owner}: ${why(e)}` : `Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
+  }
   const field = project.field;
   if (!field?.options) throw new BoardError(`Projekt „${project.title}“ hat kein Auswahlfeld „${fieldName}“`);
+  if (!Array.isArray(project.items?.nodes)) {
+    const e = errorAt(errors, ["repositoryOwner", "projectV2", "items"]);
+    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
+  }
   const names = [...hidden];
   const columns = field.options.map((o) => ({
     id: o.id,
@@ -452,14 +477,19 @@ export function checksSummary(rollup) {
 const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewünscht", REVIEW_REQUIRED: "noch kein Review" };
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
-// gh's answer for githubListArgs → { kind: "list", sections: [{ name, count, limited, skipped, rows }] }.
+// gh's answer for githubListArgs (and the GraphQL errors that came with its
+// data) → { kind: "list", sections: [{ name, count, limited, skipped, rows }] }.
 // A pull request found by two sections shows in the first only; a result
-// that is no pull request is counted in skipped.
-export function parseGithubList(json, view) {
+// that is no pull request is counted in skipped. A search missing from the
+// answer is explained by the error at its alias.
+export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
     const found = json?.data?.[`s${i}`];
-    if (!found) throw new BoardError(`Die Suche „${s.query}“ fehlt in GitHubs Antwort`);
+    if (!Array.isArray(found?.nodes)) {
+      const e = errorAt(errors, [`s${i}`]);
+      throw new BoardError(e ? `Die Suche „${s.query}“: ${firstLine(e.message)}` : `Die Suche „${s.query}“ fehlt in GitHubs Antwort`);
+    }
     const rows = [];
     let skipped = 0;
     for (const pr of found.nodes) {
@@ -495,24 +525,31 @@ export function parseGithubList(json, view) {
   return { kind: "list", sections };
 }
 
-// gh's network failures, as Go's net package and gh word them.
-const NETWORK = /could not resolve host|dial tcp|connection refused|connection reset|i\/o timeout|no such host/i;
+// gh's network failures, as Go's net package and gh word them; the first
+// kind means the request never reached GitHub.
+const NOT_SENT = /could not resolve host|no such host|connection refused/i;
+const NETWORK = /could not resolve host|no such host|connection refused|dial tcp|connection reset|i\/o timeout|Client\.Timeout|\bEOF\b/i;
 
-// A gh call that ran, { code, stdout, stderr } → { json, warnings }, or a
-// BoardError. gh exits 1 whenever GraphQL's answer holds errors, even next to
-// data: errors that make the answer useless (login, scope, rate limit, not
-// found) throw; with data, the other errors come back as warnings.
-// `notFound` is the message for a NOT_FOUND error.
-export function readGh({ code, stdout, stderr }, { notFound } = {}) {
+// A gh call that ran, { code, stdout, stderr } → { json, warnings, errors },
+// or a BoardError. gh exits 1 whenever GraphQL's answer holds errors, even
+// next to data. Errors that make the answer useless (login, scope, rate
+// limit) throw; with data, the others come back as warnings, and the raw
+// errors for the parser to explain a missing part.
+// With `write`, any GraphQL error is a refusal carrying its message (the one
+// whose path names the mutation first), and a failure that may have reached
+// GitHub (a network error after sending, HTTP 5xx, an unreadable answer) is
+// unclear.
+export function readGh({ code, stdout, stderr }, { write = false } = {}) {
   const err = String(stderr ?? "");
   const said = firstLine(err.replace(/^gh: /gm, ""));
+  const unclear = (text) => new BoardError(`Ergebnis unklar: ${text}`, { unclear: true });
   let json = null;
   try {
     json = JSON.parse(stdout);
   } catch {
     // Not JSON: what went wrong is on stderr.
   }
-  if (code === 0 && json === null) throw new BoardError("Ergebnis unklar: gh antwortete ohne lesbares JSON", { unclear: true });
+  if (code === 0 && json === null) throw write ? unclear("gh antwortete ohne lesbares JSON") : new BoardError("gh antwortete ohne lesbares JSON");
   const errors = Array.isArray(json?.errors) ? json.errors : [];
   const types = errors.map((e) => e.type);
   if (code === 4 || /gh auth login/.test(err)) throw new BoardError("gh ist nicht angemeldet: gh auth login");
@@ -522,10 +559,17 @@ export function readGh({ code, stdout, stderr }, { notFound } = {}) {
   if (types.includes("RATE_LIMITED") || /rate limit/i.test(err)) {
     throw new BoardError("GitHub-Ratenlimit erreicht; es geht nach dem nächsten Zurücksetzen weiter");
   }
-  const missing = errors.find((e) => e.type === "NOT_FOUND");
-  if (missing) throw new BoardError(notFound ?? `Nicht gefunden: ${firstLine(missing.message)}`);
-  if (json?.data) return { json, warnings: errors.map((e) => firstLine(e.message)).filter(Boolean) };
-  if (NETWORK.test(err)) throw new BoardError(`GitHub nicht erreichbar: ${said}`);
+  if (write && errors.length) {
+    const own = errors.find((e) => Array.isArray(e.path) && e.path[0] === "updateProjectV2ItemFieldValue") ?? errors[0];
+    throw new BoardError(firstLine(own.message) || "GitHub hat die Änderung abgelehnt");
+  }
+  if (json?.data) return { json, warnings: errors.map((e) => firstLine(e.message)).filter(Boolean), errors };
+  if (NETWORK.test(err)) {
+    if (write && !NOT_SENT.test(err)) throw unclear(`GitHub nicht erreichbar: ${said}`);
+    throw new BoardError(`GitHub nicht erreichbar: ${said}`);
+  }
+  const status = Number(err.match(/\bHTTP (\d{3})\b/)?.[1]);
+  if (status >= 500) throw write ? unclear(`GitHub antwortete mit ${said}`) : new BoardError(`GitHub antwortete mit ${said}`);
   throw new BoardError(firstLine(errors[0]?.message) || said || `gh endete mit ${code}`);
 }
 
@@ -567,7 +611,9 @@ export function azureTypesArgs(view, project) {
 export function parseAzureTypes(stdout) {
   const types = {};
   const states = new Map();
-  for (const type of JSON.parse(stdout)?.value ?? []) {
+  const value = JSON.parse(stdout)?.value;
+  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
+  for (const type of value) {
     types[type.name] = (type.states ?? []).map((s) => s.name);
     for (const s of type.states ?? []) {
       if (!states.has(s.name)) states.set(s.name, { id: s.name, name: s.name, category: s.category, color: CATEGORY_COLORS[s.category] ?? "muted" });
@@ -600,7 +646,7 @@ const personName = (who) => (typeof who === "string" ? who.replace(/\s*<[^>]*>$/
 // `az boards query` output → a board whose columns are the states of the work
 // item types it found, in category order; without work items it has none. az
 // prints nothing at all when nothing matches. meta.types holds each type's
-// states, the columns its cards may go to.
+// states, the columns its cards may go to; meta.states all the types' states.
 export function parseAzureBoard(stdout, types, hidden) {
   const items = String(stdout ?? "").trim() ? JSON.parse(stdout) : [];
   const cards = items.map((item) => {
@@ -641,41 +687,58 @@ export function parseAzureBoard(stdout, types, hidden) {
     col.cards.push(card);
     if (!col.hidden) col.count++;
   }
-  return { kind: "board", meta: { types: types.types }, columns, total: cards.length, limited: false };
+  return { kind: "board", meta: { types: types.types, states: types.states }, columns, total: cards.length, limited: false };
 }
 
 export function azureMoveArgs(view, card, column) {
   return ["boards", "work-item", "update", "--id", String(card.number), "--state", column.name, "-o", "json", ...azScope(view, false)];
 }
 
+export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…";
+// az's (Python requests') words for a connection that failed on the way.
+const AZ_NETWORK = /HTTPSConnectionPool|Connection aborted|Read timed out|Max retries/i;
+
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
 // lines are left out). Missing sign-in or extension make the view
-// unavailable rather than an error.
-export function azFailure({ code, stderr }, on = null) {
+// unavailable rather than an error. With `write`, a connection that failed
+// on the way leaves open whether the change landed; a TFxxxx or other
+// ERROR: answer is a refusal.
+export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
   const said = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
   const az = on ? `az auf ${on}` : "az";
+  if (AZ_NETWORK.test(lines.join("\n"))) {
+    const text = `Azure nicht erreichbar (${az}): ${said}`;
+    return write ? new BoardError(`Ergebnis unklar: ${text}`, { unclear: true }) : new BoardError(text);
+  }
   if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
     return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
   }
   if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
     return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
   }
-  if (/^--project must be specified/.test(said)) return new BoardError("Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…");
+  if (/^--project must be specified/.test(said)) return new BoardError(AZ_NO_PROJECT);
   if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
   return new BoardError(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`);
 }
 
 // An exec that could not run at all (exec rejected). Only a missing az makes
 // its view unavailable; an unreachable machine or a failed start is an error.
-// A timeout leaves open what a write did.
-export function execRejection(tool, error, timeoutMs, on = null) {
+// With `write`, a timeout, or any other failure of a call on another machine,
+// leaves open whether the change landed; a program that is not installed
+// changed nothing.
+export function execRejection(tool, error, timeoutMs, on = null, { write = false } = {}) {
   const msg = firstLine(error?.message ?? error);
   const who = on ? `${tool} auf ${on}` : tool;
-  if (/time(d)?[ -]?out/i.test(msg)) return new BoardError(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { unclear: true });
+  const unclear = (text) => new BoardError(`Ergebnis unklar: ${text}`, { unclear: true });
   if (/program not found|no such file or directory|command not found|not installed|ENOENT/i.test(msg)) {
     return new BoardError(`${who} ist nicht installiert`, { unavailable: tool === "az" });
   }
+  if (/time(d)?[ -]?out/i.test(msg)) {
+    const text = `${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`;
+    return write ? unclear(text) : new BoardError(text);
+  }
+  if (write && on) return unclear(`${who}: ${msg}`);
   return new BoardError(`${who} ließ sich nicht starten: ${msg}`);
 }
 
@@ -723,11 +786,12 @@ export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
 }
 
-// Whether a card may go to a column: one that takes drops, and on Azure a
-// state of the card's own type.
+// Whether a card may go to a column: one that takes drops and, where the
+// board knows its types' states (Azure; GitHub boards carry none), a state of
+// the card's own type.
 export function canDrop(board, card, column) {
   if (!column?.target) return false;
-  const states = card.source === "azure" ? board.meta?.types?.[card.type] : null;
+  const states = board.meta?.types?.[card.type];
   return !states || states.includes(column.name);
 }
 
@@ -883,12 +947,11 @@ export const CHECKOUT_SCRIPT = [
 
 export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
 
-// The space a new tab goes into: one on that machine in the checkout or below
-// it (its worktrees too), else the shown space when it is on that machine.
+// The space a new tab goes into: one on that machine in the checkout or
+// below it, else the shown space when it is on that machine.
 export function spaceForTab(allSpaces, on, repoFolder) {
   const here = allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
-  return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}.worktrees/`) || s.folder.startsWith(`${repoFolder}/`)))
-    ?? here.find((s) => s.active) ?? null;
+  return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}/`))) ?? here.find((s) => s.active) ?? null;
 }
 
 // The app command that opens a session: [name, args]. A new space and its
@@ -905,65 +968,80 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
 
 const GH_TIMEOUT = 30000;
 const AZ_TIMEOUT = 60000;
+const CHECKOUT_TIMEOUT = 30000;
+// When the board looks for a session it opened (watchSession), in ms.
+const SESSION_CHECKS = [1000, 2000, 3000];
 const TICK_MS = 30000;
 const SCROLLS = 24;
 
 // One run of a program: its result, or a BoardError when it could not run.
-async function call(tool, args, on, timeout) {
+// `write` is for calls that change something (see execRejection).
+async function call(tool, args, on, timeout, { write = false } = {}) {
   try {
     return await exec(tool, args, { on, timeout });
   } catch (e) {
-    throw execRejection(tool, e, timeout, on);
+    throw execRejection(tool, e, timeout, on, { write });
   }
 }
 
-const gh = async (args, options) => readGh(await call("gh", args, null, GH_TIMEOUT), options);
+const gh = async (args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, options), options);
 
-async function az(view, args) {
-  const r = await call("az", args, view.on, AZ_TIMEOUT);
-  if (r.code !== 0) throw azFailure(r, view.on);
+async function az(view, args, options = {}) {
+  const r = await call("az", args, view.on, AZ_TIMEOUT, options);
+  if (r.code !== 0) throw azFailure(r, view.on, options);
   return r.stdout;
 }
 
-// What differs between GitHub and Azure: loading a view, writing a move, the
-// sidebar's tag and the name of the site `o` opens.
-const SOURCES = {
-  github: {
-    tag: (view) => (view.layout === "list" ? "PR" : "GH"),
-    site: "GitHub",
-    async load(board, view) {
-      if (view.layout === "list") {
-        const { json, warnings } = await gh(githubListArgs(view));
-        return { data: parseGithubList(json, view), warnings };
-      }
-      const { owner, number } = view.project;
-      const hidden = board.hiddenFor(view, []);
-      const notFound = `Projekt ${number} von ${owner} nicht gefunden – project.number in ${CONFIG_NAME}.json prüfen`;
-      const { json, warnings } = await gh(githubBoardArgs(view, hidden), { notFound });
-      return { data: parseGithubBoard(json, view, hidden), warnings };
+// What differs between GitHub and Azure, one set per Board: loading a view
+// (`hiddenFor(view, columns)` gives its hidden columns), writing a move, the
+// sidebar's tag, the name of the site `o` opens, whether `r` and opening the
+// board try its views while not shown (`probe`), and what `r` forgets
+// (`reset`). Azure keeps each view's work item types (parseAzureTypes) until
+// then.
+function makeSources() {
+  let azureTypes = {};
+  return {
+    github: {
+      tag: (view) => (view.layout === "list" ? "PR" : "GH"),
+      site: "GitHub",
+      probe: false,
+      reset() {},
+      async load(view, hiddenFor) {
+        if (view.layout === "list") {
+          const { json, warnings, errors } = await gh(githubListArgs(view));
+          return { data: parseGithubList(json, view, errors), warnings };
+        }
+        const hidden = hiddenFor(view, []);
+        const { json, warnings, errors } = await gh(githubBoardArgs(view, hidden));
+        return { data: parseGithubBoard(json, view, hidden, errors), warnings };
+      },
+      async move(view, data, card, column) {
+        checkMoveResult((await gh(githubMoveArgs(data.meta, card, column), { write: true })).json, card);
+      },
     },
-    async move(view, data, card, column) {
-      checkMoveResult((await gh(githubMoveArgs(data.meta, card, column))).json, card);
+    azure: {
+      tag: () => "AZ",
+      site: "Azure",
+      probe: true,
+      reset() {
+        azureTypes = {};
+      },
+      async load(view, hiddenFor) {
+        if (!azureTypes[view.id]) {
+          const project = view.project ?? parseAzureDefaults(await az(view, azureDefaultsArgs())).project;
+          if (!project) throw new BoardError(AZ_NO_PROJECT);
+          azureTypes[view.id] = parseAzureTypes(await az(view, azureTypesArgs(view, project)));
+        }
+        const types = azureTypes[view.id];
+        const hidden = hiddenFor(view, types.states);
+        return { data: parseAzureBoard(await az(view, azureQueryArgs(view, hidden)), types, hidden), warnings: [] };
+      },
+      async move(view, _data, card, column) {
+        await az(view, azureMoveArgs(view, card, column), { write: true });
+      },
     },
-  },
-  azure: {
-    tag: () => "AZ",
-    site: "Azure",
-    async load(board, view) {
-      const cache = (board.azure[view.id] ??= {});
-      if (!cache.types) {
-        const project = view.project ?? parseAzureDefaults(await az(view, azureDefaultsArgs())).project;
-        if (!project) throw new BoardError("Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…");
-        cache.types = parseAzureTypes(await az(view, azureTypesArgs(view, project)));
-      }
-      const hidden = board.hiddenFor(view, cache.types.states);
-      return { data: parseAzureBoard(await az(view, azureQueryArgs(view, hidden)), cache.types, hidden), warnings: [] };
-    },
-    async move(view, _data, card, column) {
-      await az(view, azureMoveArgs(view, card, column));
-    },
-  },
-};
+  };
+}
 
 // Settings that last across reloads (the shown view, hidden columns). A full
 // or missing localStorage keeps them for this session only.
@@ -1013,7 +1091,7 @@ export default class Board extends View {
     this.notice = null; // { text, level }
     this.drag = null; // { key, from }
     this.over = null; // the column index under a drag
-    this.azure = {}; // per Azure view id: { types } (parseAzureTypes)
+    this.sources = makeSources();
     this.scrolls = Array.from({ length: SCROLLS }, () => ScrollHandle.new());
     this.listScroll = ScrollHandle.new();
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
@@ -1059,12 +1137,13 @@ export default class Board extends View {
   // A view's state: data and error, loading (again: one more refresh after
   // this one), at (last success) and tried (last start), unavailable (why the
   // view is not listed), warnings, moves (laid over refreshes, see
-  // pendingMoves), pending (card keys being written), stored/hidden (the
+  // pendingMoves), pending (card keys being written), unclear ({ key, label }
+  // of writes whose outcome the next refresh tells), stored/hidden (the
   // person's toggles and the hidden set), sel ({ col, key }, null before
   // the first data) and detail.
   state(id) {
     this.views[id] ??= {
-      data: null, error: null, loading: false, again: false, at: 0, tried: 0, unavailable: null, warnings: [], moves: [], pending: {},
+      data: null, error: null, loading: false, again: false, at: 0, tried: 0, unavailable: null, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, detail: false,
     };
     return this.views[id];
@@ -1095,12 +1174,12 @@ export default class Board extends View {
         return undefined;
       });
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
-      this.azure = {};
+      for (const source of Object.values(this.sources)) source.reset();
       cx.notify();
       if (!this.config) return;
       for (const v of this.config.views) this.state(v.id).unavailable = null;
       const shown = this.view();
-      for (const v of this.config.views) if (v.source === "azure" && v !== shown) this.refresh(v, cx);
+      for (const v of this.config.views) if (this.sources[v.source].probe && v !== shown) this.refresh(v, cx);
       if (shown) this.refresh(shown, cx);
     });
   }
@@ -1115,7 +1194,7 @@ export default class Board extends View {
     const started = st.tried;
     cx.spawn(async (cx) => {
       try {
-        const { data, warnings } = await SOURCES[view.source].load(this, view);
+        const { data, warnings } = await this.sources[view.source].load(view, (v, columns) => this.hiddenFor(v, columns));
         st.moves = pendingMoves(st.moves, started);
         st.data = data.kind === "board" ? applyMoves(data, st.moves) : data;
         st.warnings = [...warnings, ...this.dataWarnings(view, data)];
@@ -1123,12 +1202,18 @@ export default class Board extends View {
         st.unavailable = null;
         st.at = Date.now();
         this.keepSelection(view);
+        this.settleUnclear(view, cx);
       } catch (e) {
         if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
         else st.error = report(e);
+        if (st.unclear.length) {
+          this.say(`${st.unclear.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
+        }
       } finally {
         st.loading = false;
-        if (st.again) this.refresh(view, cx);
+        // The follow-up refresh reads the view from the config as it is now.
+        const fresh = this.config?.views.find((v) => v.id === view.id);
+        if (st.again && fresh) this.refresh(fresh, cx);
         // A view that takes the place of one just found unavailable loads now.
         const next = this.view();
         const waiting = next && next !== view && !this.state(next.id).data && !this.state(next.id).loading;
@@ -1143,7 +1228,16 @@ export default class Board extends View {
     if (data.kind === "list") {
       return data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`);
     }
-    return unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide oder hideCategories passt zu keiner Spalte`);
+    return unknownHidden(view, data.meta?.states ?? data.columns).map((n) => `„${n}“ aus hide oder hideCategories passt zu keiner Spalte`);
+  }
+
+  // After a refresh that succeeded: where the cards of unclear writes are now.
+  settleUnclear(view, cx) {
+    const st = this.state(view.id);
+    if (!st.unclear.length) return;
+    const where = st.unclear.map((u) => `${u.label} steht nach dem Neuladen in „${findCard(st.data, u.key)?.column.name ?? "keiner geladenen Spalte"}“`);
+    st.unclear = [];
+    this.say(where.join("; "), "info", cx);
   }
 
   // Every TICK_MS while the board shows: the shown view and the unavailable
@@ -1179,14 +1273,16 @@ export default class Board extends View {
     this.say(`${label} → ${to.name} …`, "info", cx);
     cx.spawn(async (cx) => {
       try {
-        await SOURCES[view.source].move(view, st.data, found.card, to);
+        await this.sources[view.source].move(view, st.data, found.card, to);
         move.confirmedAt = Date.now();
         this.say(`${label} steht jetzt in „${to.name}“`, "success", cx);
       } catch (e) {
         st.moves = st.moves.filter((m) => m !== move);
         const why = report(e);
         if (e instanceof BoardError && e.unclear) {
-          this.say(`${label} → ${to.name}: Ergebnis unklar (${why}); lädt neu`, "warning", cx);
+          st.unclear.push({ key, label });
+          this.say(`${label} → ${to.name}: ${why}; lädt neu`, "warning", cx);
+          notify({ title: `Status von ${label}: Ergebnis unklar`, body: why, level: "warning" });
           this.refresh(view, cx);
         } else {
           st.data = rollback(st.data, move);
@@ -1282,6 +1378,7 @@ export default class Board extends View {
       st.detail = true;
       return cx.notify();
     }
+    if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
     const session = linkedSession(item, spaces());
     if (!session) return this.openStart(view, item, cx);
     run("space.select", { id: session.space });
@@ -1293,7 +1390,8 @@ export default class Board extends View {
   openStart(view, item, cx) {
     const settings = startSettings(this.config, view, item.repo);
     if (!settings.checkout) {
-      return this.say(`Für ${item.repo || view.name} steht kein „checkout“ in ${CONFIG_NAME}.json (repos oder start)`, "error", cx);
+      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
+      return this.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
     }
     const template = item.kind === "pr" ? settings.review : settings.message;
     this.messageInput.set_value(renderTemplate(template, templateVars(item)));
@@ -1329,7 +1427,8 @@ export default class Board extends View {
           m.agentNote = `Agent „${wanted}“ ist ${on ? `auf ${on}` : "auf diesem Rechner"} nicht installiert; gewählt: ${agents[0].name}`;
         }
       } catch (e) {
-        if (this.modal === m) m.agentsError = `Agents nicht lesbar: ${report(e)}`;
+        if (this.modal !== m || m.machines[m.machine] !== on) return;
+        m.agentsError = `Agents auf ${machineName(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
       }
       m.notes = [m.machineNote, m.agentNote].filter(Boolean);
       cx.notify();
@@ -1349,9 +1448,12 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Opens the item's session in its checkout on the chosen machine. The
-  // dialog stays until the result is in; a result that comes after the dialog
-  // went shows in the banner and as a toast.
+  // Opens the item's session in its checkout on the chosen machine: finds the
+  // checkout's folder there, then runs space.new or tab.new. run() answers
+  // nothing, so the board says the session is being opened and watches for a
+  // space or tab of its name (watchSession). The dialog stays until the
+  // folder is known or the start failed; a failure that comes after the
+  // dialog went shows in the banner and as a toast.
   startAgent(cx) {
     const m = this.modal;
     if (m?.kind !== "start" || m.busy) return;
@@ -1364,9 +1466,10 @@ export default class Board extends View {
     m.error = null;
     cx.spawn(async (cx) => {
       try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, 30000);
+        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
         if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
         const folder = r.stdout.trim().split("\n").pop();
+        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
         let space = null;
         if (m.open === "tab") {
           space = spaceForTab(spaces(), on, folder);
@@ -1377,7 +1480,8 @@ export default class Board extends View {
           this.modal = null;
           this.handle.focus();
         }
-        this.say(`Sitzung geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "success", cx);
+        this.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
+        this.watchSession(name, cx);
       } catch (e) {
         const why = report(e);
         if (this.modal === m) m.error = why;
@@ -1391,6 +1495,18 @@ export default class Board extends View {
       }
     });
     cx.notify();
+  }
+
+  // Looks for a space or tab named `name` after each of SESSION_CHECKS ms;
+  // says so when it appears, warns when it has not after the last.
+  watchSession(name, cx, at = 0) {
+    cx.timer.after(SESSION_CHECKS[at], (cx) => {
+      const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
+      if (there) return this.say(`Sitzung geöffnet: ${name}`, "success", cx);
+      if (at + 1 < SESSION_CHECKS.length) return this.watchSession(name, cx, at + 1);
+      this.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung hat wohl nicht gestartet`, "warning", cx);
+      notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
+    });
   }
 
   closeModal(cx) {
@@ -1681,7 +1797,7 @@ export default class Board extends View {
             .on_click((_e, cx) => {
               if (!this.modal) this.switchView(i, cx);
             })
-            .child(div().w(22).text_size(11).text_color(t.dim).child(SOURCES[v.source].tag(v)))
+            .child(div().w(22).text_size(11).text_color(t.dim).child(this.sources[v.source].tag(v)))
             .child(div().flex_1().min_w(0).truncate().child(v.name))
             .child(div().text_size(12).text_color(t.muted).child(this.state(v.id).loading ? "…" : count(v)))
             .child(div().w(10).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : "")),
@@ -1972,7 +2088,7 @@ export default class Board extends View {
           .when(Boolean(column), (el) => el.child(this.button(t, "act-status", "Status s", false, (cx) => {
             if (!this.modal) openStatus(cx);
           })))
-          .child(this.button(t, "act-open", `${SOURCES[item.source].site} o`, false, (cx) => {
+          .child(this.button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
             if (!this.modal) this.open(item, cx);
           })),
       );

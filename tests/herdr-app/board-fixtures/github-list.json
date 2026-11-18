@@ -6,12 +6,12 @@
     {
      "id": "PR_sample1",
      "number": 2820,
-     "title": "build(desktop): draw the Emulation card",
+     "title": "build(ui): draw the summary card",
      "url": "https://github.com/example/tender/pull/2820",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
-     "headRefName": "pr/desktop-emulation-card",
+     "headRefName": "pr/summary-card",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
       "nameWithOwner": "example/tender"
@@ -56,7 +56,7 @@
     {
      "id": "PR_sample2",
      "number": 1921,
-     "title": "chore(main): release tender 1.0.0",
+     "title": "chore(main): release sample 1.0.0",
      "url": "https://github.com/example/tender/pull/1921",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
@@ -123,12 +123,12 @@
     {
      "id": "PR_sample1",
      "number": 2820,
-     "title": "build(desktop): draw the Emulation card",
+     "title": "build(ui): draw the summary card",
      "url": "https://github.com/example/tender/pull/2820",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
-     "headRefName": "feat/x",
+     "headRefName": "pr/summary-card",
      "reviewDecision": null,
      "repository": {
       "nameWithOwner": "example/tender"

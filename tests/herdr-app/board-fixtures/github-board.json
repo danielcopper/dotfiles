@@ -51,7 +51,7 @@
        "content": {
         "__typename": "Issue",
         "number": 3000,
-        "title": "[Epic] sample adoption across the machine",
+        "title": "[Epic] sample tool rollout",
         "url": "https://github.com/example/tender/issues/3000",
         "issueType": null,
         "repository": {
@@ -93,7 +93,7 @@
        "content": {
         "__typename": "Issue",
         "number": 3001,
-        "title": "fix(saves): keep the last save when a sync fails",
+        "title": "fix(cache): keep the last entry when a refresh fails",
         "url": "https://github.com/example/tender/issues/3001",
         "issueType": null,
         "repository": {
@@ -127,7 +127,7 @@
        "content": {
         "__typename": "Issue",
         "number": 3003,
-        "title": "feat(dev): run the dev loop on another machine",
+        "title": "feat(cli): add a dry-run flag",
         "url": "https://github.com/example/tender/issues/3003",
         "issueType": null,
         "repository": {
@@ -163,7 +163,7 @@
        "content": {
         "__typename": "Issue",
         "number": 3004,
-        "title": "feat(dev): set up a remote dev target",
+        "title": "feat(api): page through long lists",
         "url": "https://github.com/example/tender/issues/3004",
         "issueType": null,
         "repository": {
@@ -233,7 +233,7 @@
        "content": {
         "__typename": "Issue",
         "number": 3007,
-        "title": "fix(launch): pass the controller to the emulator",
+        "title": "fix(input): pass the key map to the viewer",
         "url": "https://github.com/example/tender/issues/3007",
         "issueType": null,
         "repository": {

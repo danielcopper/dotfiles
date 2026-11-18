@@ -51,9 +51,9 @@
        "content": {
         "__typename": "PullRequest",
         "number": 3050,
-        "title": "feat(dev): wire the remote target into the dev loop",
+        "title": "feat(api): retry a failed request once",
         "url": "https://github.com/example/tender/pull/3050",
-        "headRefName": "feat/3000-remote-dev-loop",
+        "headRefName": "feat/3000-retry-once",
         "repository": {
          "nameWithOwner": "example/tender"
         },
