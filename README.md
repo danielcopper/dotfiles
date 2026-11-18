@@ -445,10 +445,9 @@ terminal's width, and the startup of an interactive bash: the greeter, the
 TMUX variables a herdr terminal drops and, on wsl-arch, how a shell finds or
 starts the keyring daemon. Stand-ins take the place of hc, tmux, fastfetch
 and gnome-keyring-daemon, and flock and mkdir run through logging wrappers
-that refuse any path outside the test's directory, so no herdr or tmux server
-is asked and no real keyring daemon starts. Each file's header lists its
-cases, and naming cases runs only those. It needs jq, timeout, flock and
-python3.
+around the real tools, so no herdr or tmux server is asked and no real
+keyring daemon starts. Each file's header lists its cases, and naming cases
+runs only those. It needs jq, timeout, flock and python3.
 
 ## Memory protection on the Steam Deck
 
