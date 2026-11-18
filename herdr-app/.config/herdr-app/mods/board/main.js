@@ -81,6 +81,7 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 const isText = (v) => typeof v === "string" && v.trim() !== "";
 const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
+const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 
 // The message to show for an error: a BoardError's own, else marked as
 // unexpected.
@@ -844,12 +845,19 @@ export function readShell(stdout) {
   return { asked, own };
 }
 
-// The absolute path of a program on a machine (on: null here), asked of the
-// shell there with `execute` (herdr's exec). Not there: notInstalled, noting
-// /bin/sh when it was asked in place of the person's shell. A shell that
-// could not be asked, or gave no answer or no path, says so instead. A
-// machine other than this one without sh (Windows) runs the program by its
-// bare name, from the PATH herdr runs it with there.
+// What herdr says when it cannot start sh on another machine: a Windows
+// machine (as herdr's own Files mod reads it).
+const NO_SH = "cannot start sh: program not found";
+// The lines an interactive bash without a terminal prints on every start.
+const JOB_CONTROL = /cannot set terminal process group|no job control in this shell/;
+
+// A program on a machine (on: null here), asked of the shell there with
+// `execute` (herdr's exec): { program: its absolute path, bare: false }. Not
+// there: notInstalled, noting /bin/sh when it was asked in place of the
+// person's shell. A shell that could not be asked, or gave no answer or no
+// path, says so instead. Another machine where herdr cannot start sh
+// (Windows) runs the program by its bare name, from the PATH herdr runs it
+// with there: { program: tool, bare: true }.
 export async function findTool(execute, tool, on, timeoutMs) {
   const unknown = `Pfad von ${toolOn(tool, on)} nicht ermittelt`;
   let r;
@@ -857,46 +865,58 @@ export async function findTool(execute, tool, on, timeoutMs) {
     r = await execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs });
   } catch (e) {
     const msg = firstLine(e?.message ?? e);
-    if (on && NOT_INSTALLED.test(msg)) return tool;
+    if (on && String(e?.message ?? e).includes(NO_SH)) return { program: tool, bare: true };
     throw new BoardError(TIMED_OUT.test(msg) ? `${unknown}: die Shell antwortete nicht in ${Math.round(timeoutMs / 1000)} s` : `${unknown}: ${msg}`);
   }
   const shell = readShell(r.stdout);
   const answer = readWhich(r.stdout);
   if (answer === null) {
-    // An interactive shell without a terminal starts stderr with its own
-    // complaint about job control; the last line is the one that failed.
-    const said = String(r.stderr ?? "").trim().split("\n").at(-1).trim();
+    // The last line that is not bash's own job control notice is the one
+    // that says what ended the shell.
+    const said = lastLine(String(r.stderr ?? "").split("\n").filter((l) => !JOB_CONTROL.test(l)).join("\n"));
     throw new BoardError(`${unknown}: ${shell?.asked ?? "die Shell"} endete mit ${r.code} ohne Antwort${said ? ` (${said})` : ""}`);
   }
   if (answer === "") {
-    const stand = shell && shell.asked !== shell.own;
+    const standIn = shell && shell.asked !== shell.own;
     const own = shell?.own ? ` statt ${shell.own.split("/").pop()}` : ", keine Shell eingetragen";
-    throw notInstalled(tool, on, stand ? `gefragt: ${shell.asked}${own}` : "");
+    throw notInstalled(tool, on, standIn ? `gefragt: ${shell.asked}${own}` : "");
   }
   if (!answer.startsWith("/")) throw new BoardError(`${unknown}: die Shell kennt nur „${firstLine(answer)}“, kein Programm`);
-  return answer;
+  return { program: answer, bare: false };
 }
 
-// The paths findTool found, per machine and program, kept until reset (on
-// `r`) or until a call finds the program gone from its path (forget, for
-// the lookup that call used). One question is asked at a time per machine
-// and program; one that fails is not kept, so the next call asks again.
+// Runs gh and az by what findTool finds, per machine and program. A found
+// program is kept until reset (on `r`); one lookup runs at a time per
+// machine and program, and one that fails is not kept, so the next run asks
+// again. When a run finds the program gone from its path (exec's words for
+// a missing program), that lookup is forgotten, unless a newer one has taken
+// its place, and the shell is asked once more: the program never started,
+// so even a write may run again. Gone a second time, the run fails; a bare
+// name is not asked for again.
 export function toolPaths(execute) {
   const known = new Map();
-  const id = (tool, on) => `${on ?? ""}\n${tool}`;
   return {
-    path(tool, on, timeoutMs) {
-      const key = id(tool, on);
-      if (!known.has(key)) {
-        const asked = findTool(execute, tool, on, timeoutMs);
-        known.set(key, asked);
-        asked.catch(() => known.get(key) === asked && known.delete(key));
+    // start(program) runs the program; its rejection passes on unchanged,
+    // but for the second time it is gone.
+    async run(tool, on, timeoutMs, start) {
+      const key = `${on ?? ""}\n${tool}`;
+      for (let again = false; ; again = true) {
+        if (!known.has(key)) {
+          const fresh = findTool(execute, tool, on, timeoutMs);
+          known.set(key, fresh);
+          fresh.catch(() => known.get(key) === fresh && known.delete(key));
+        }
+        const lookup = known.get(key);
+        const { program, bare } = await lookup;
+        try {
+          return await start(program);
+        } catch (e) {
+          const msg = firstLine(e?.message ?? e);
+          if (bare || !NOT_INSTALLED.test(msg)) throw e;
+          if (known.get(key) === lookup) known.delete(key);
+          if (again) throw new BoardError(`${toolOn(tool, on)} ließ sich nicht starten: ${msg}`);
+        }
       }
-      return known.get(key);
-    },
-    forget(tool, on, asked) {
-      const key = id(tool, on);
-      if (known.get(key) === asked) known.delete(key);
     },
     reset() {
       known.clear();
@@ -1143,22 +1163,14 @@ const TICK_MS = 30000;
 const SCROLLS = 24;
 
 // One run of a program: its result, or a BoardError when it could not run.
-// With `paths` (toolPaths) it runs by the path found there; when the program
-// is no longer at it, that path is forgotten and the shell asked once more
-// (the program never started, so a write may run again too). `write` is for
-// calls that change something (see execRejection).
+// With `paths` (toolPaths) it runs by what that finds. `write` is for calls
+// that change something (see execRejection).
 async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
-  for (let again = false; ; again = true) {
-    const asked = paths?.path(tool, on, timeout);
-    const program = asked ? await asked : tool;
-    try {
-      return await exec(program, args, { on, timeout });
-    } catch (e) {
-      const msg = firstLine(e?.message ?? e);
-      if (!asked || program === tool || !NOT_INSTALLED.test(msg)) throw execRejection(tool, e, timeout, on, { write });
-      paths.forget(tool, on, asked);
-      if (again) throw new BoardError(`${toolOn(tool, on)} ließ sich unter ${program} nicht starten: ${msg}`);
-    }
+  const start = (program) => exec(program, args, { on, timeout });
+  try {
+    return await (paths ? paths.run(tool, on, timeout, start) : start(tool));
+  } catch (e) {
+    throw e instanceof BoardError ? e : execRejection(tool, e, timeout, on, { write });
   }
 }
 
@@ -1697,7 +1709,7 @@ export default class Board extends View {
       try {
         const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
         if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
-        const folder = r.stdout.trim().split("\n").pop();
+        const folder = lastLine(r.stdout);
         if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
         let space = null;
         if (m.open === "tab") {

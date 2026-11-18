@@ -664,10 +664,10 @@ test("the shell's answer and the shell asked are read between their markers, wha
 
 test("a program's path is asked of the shell: interactive here, also login on another machine", async () => {
   const here = fakeRun(answered("/home/linuxbrew/.linuxbrew/bin/gh"));
-  assert.equal(await board.findTool(here.run, "gh", null, 30000), "/home/linuxbrew/.linuxbrew/bin/gh");
+  assert.deepEqual(await board.findTool(here.run, "gh", null, 30000), { program: "/home/linuxbrew/.linuxbrew/bin/gh", bare: false });
   assert.deepEqual(here.calls, [{ program: "sh", args: ["-c", board.WHICH_SCRIPT, "board-which", "gh", ""], options: { on: null, timeout: 30000 } }]);
   const there = fakeRun(answered("/usr/bin/az"));
-  assert.equal(await board.findTool(there.run, "az", "server", 60000), "/usr/bin/az");
+  assert.deepEqual(await board.findTool(there.run, "az", "server", 60000), { program: "/usr/bin/az", bare: false });
   assert.deepEqual(there.calls[0].args.slice(-2), ["az", "login"]);
   assert.deepEqual(there.calls[0].options, { on: "server", timeout: 60000 });
 });
@@ -686,77 +686,132 @@ test("not installed names /bin/sh when it was asked in place of the person's she
   assert.equal(await find(answered("", { asked: "/bin/sh", own: "/bin/sh" })), "gh ist nicht installiert", "sh asked as itself");
 });
 
+// What an interactive bash without a terminal prints on stderr at every start.
+const JOB_NOISE = "bash: cannot set terminal process group (-1): Inappropriate ioctl for device\nbash: no job control in this shell\n";
+
 test("a shell that cannot be asked, or gives no answer or no path, says so, not that the program is missing", async () => {
   const fail = (answer, tool = "az", on = "server") => board.findTool(fakeRun(answer).run, tool, on, 60000).catch((e) => e);
   const away = await fail(new Error("machine server is unreachable"));
   assert.deepEqual([away instanceof board.BoardError, away.message, away.unavailable], [true, "Pfad von az auf server nicht ermittelt: machine server is unreachable", false]);
   assert.equal((await fail(new Error("timed out after 60000 ms"))).message, "Pfad von az auf server nicht ermittelt: die Shell antwortete nicht in 60 s");
-  const stderr = "bash: cannot set terminal process group (-1): Inappropriate ioctl for device\nbash: no job control in this shell\nbash: line 1: exec: zsh: not found\n";
-  const silent = await fail({ code: 1, stdout: `${board.SHELL_START}/bin/bash\t/bin/bash${board.SHELL_END}${BANNER}`, stderr }, "gh", null);
+  const asked = `${board.SHELL_START}/bin/bash\t/bin/bash${board.SHELL_END}${BANNER}`;
+  const stderr = `${JOB_NOISE}bash: /home/me/.bashrc: line 3: brew: command not found\nbash: line 1: exec: zsh: not found\n`;
+  const silent = await fail({ code: 1, stdout: asked, stderr }, "gh", null);
   assert.deepEqual([silent.message, silent.unavailable], ["Pfad von gh nicht ermittelt: /bin/bash endete mit 1 ohne Antwort (bash: line 1: exec: zsh: not found)", false]);
+  const quiet = await fail({ code: 3, stdout: asked, stderr: JOB_NOISE }, "gh", null);
+  assert.equal(quiet.message, "Pfad von gh nicht ermittelt: /bin/bash endete mit 3 ohne Antwort", "bash's own notice is no reason");
   assert.equal((await fail({ code: 127, stdout: "", stderr: "" }, "gh", null)).message, "Pfad von gh nicht ermittelt: die Shell endete mit 127 ohne Antwort");
-  assert.equal((await fail(answered("alias gh='gh --pager=cat'"), "gh", null)).message, "Pfad von gh nicht ermittelt: die Shell kennt nur „alias gh='gh --pager=cat'“, kein Programm");
+  assert.equal((await fail(answered("bin/gh"), "gh", null)).message, "Pfad von gh nicht ermittelt: die Shell kennt nur „bin/gh“, kein Programm");
 });
 
-test("another machine without sh (Windows) runs the program by its bare name; this one says sh is missing", async () => {
-  const noSh = new Error("failed to start sh: program not found");
-  assert.equal(await board.findTool(fakeRun(noSh).run, "az", "win", 60000), "az");
+test("another machine where herdr cannot start sh (Windows) runs the program by its bare name; this one says sh is missing", async () => {
+  // herdr's words, as its own Files mod reads them.
+  const noSh = new Error("cannot start sh: program not found");
+  assert.deepEqual(await board.findTool(fakeRun(noSh).run, "az", "win", 60000), { program: "az", bare: true });
   const here = await board.findTool(fakeRun(noSh).run, "gh", null, 30000).catch((e) => e);
-  assert.deepEqual([here instanceof board.BoardError, here.message], [true, "Pfad von gh nicht ermittelt: failed to start sh: program not found"]);
+  assert.deepEqual([here instanceof board.BoardError, here.message], [true, "Pfad von gh nicht ermittelt: cannot start sh: program not found"]);
+  const missing = await board.findTool(fakeRun(new Error("failed to start sh: No such file or directory")).run, "az", "server", 60000).catch((e) => e);
+  assert.equal(missing.message, "Pfad von az auf server nicht ermittelt: failed to start sh: No such file or directory", "only herdr's words for that");
 });
 
-test("a found path is asked for once per machine and program, until reset or forgotten; a failed question is not kept", async () => {
+// A run's start that answers with the program it was given.
+const echo = async (program) => program;
+const gone = (path) => new Error(`failed to start ${path}: No such file or directory`);
+
+test("a found program is asked for once per machine and program, until reset; a failed question is not kept", async () => {
   const { run, calls } = fakeRun(answered("/x/gh"));
   const paths = board.toolPaths(run);
-  const [a, b] = await Promise.all([paths.path("gh", null, 30000), paths.path("gh", null, 30000)]);
-  assert.deepEqual([a, b, calls.length], ["/x/gh", "/x/gh", 1], "one question for two calls at once");
-  assert.equal(await paths.path("gh", null, 30000), "/x/gh");
+  const [a, b] = await Promise.all([paths.run("gh", null, 30000, echo), paths.run("gh", null, 30000, echo)]);
+  assert.deepEqual([a, b, calls.length], ["/x/gh", "/x/gh", 1], "one question for two runs at once");
+  assert.equal(await paths.run("gh", null, 30000, echo), "/x/gh");
   assert.equal(calls.length, 1, "reused");
-  await paths.path("gh", "server", 30000);
-  await paths.path("az", null, 30000);
+  await paths.run("gh", "server", 30000, echo);
+  await paths.run("az", null, 30000, echo);
   assert.equal(calls.length, 3, "another machine and another program are asked of their own");
-  paths.forget("gh", null, paths.path("gh", null, 30000));
-  await paths.path("gh", null, 30000);
-  await paths.path("gh", "server", 30000);
-  assert.equal(calls.length, 4, "forget drops only that machine's path");
-  paths.forget("gh", null, Promise.resolve("/x/gh"));
-  await paths.path("gh", null, 30000);
-  assert.equal(calls.length, 4, "forget keeps a lookup other than the one it names");
   paths.reset();
-  await paths.path("gh", null, 30000);
-  await paths.path("gh", "server", 30000);
-  assert.equal(calls.length, 6, "reset drops all");
+  await paths.run("gh", null, 30000, echo);
+  await paths.run("gh", "server", 30000, echo);
+  assert.equal(calls.length, 5, "reset drops all");
   const missing = fakeRun(answered(""), answered("/y/az"));
   const later = board.toolPaths(missing.run);
-  await assert.rejects(later.path("az", null, 60000), /az ist nicht installiert/);
-  assert.equal(await later.path("az", null, 60000), "/y/az", "asked again after it was not found");
+  await assert.rejects(later.run("az", null, 60000, echo), /az ist nicht installiert/);
+  assert.equal(await later.run("az", null, 60000, echo), "/y/az", "asked again after it was not found");
+});
+
+test("a program gone from its path is asked for once more and run from the new one; gone again, the run fails", async () => {
+  const { run, calls } = fakeRun(answered("/old/gh"), answered("/new/gh"));
+  const paths = board.toolPaths(run);
+  const fromNew = async (program) => {
+    if (program === "/old/gh") throw gone(program);
+    return program;
+  };
+  assert.equal(await paths.run("gh", null, 30000, fromNew), "/new/gh");
+  assert.equal(calls.length, 2);
+  const late = new Error("timed out after 30000 ms");
+  await assert.rejects(paths.run("gh", null, 30000, async () => { throw late; }), (e) => e === late, "any other failure passes on as it is");
+  assert.equal(calls.length, 2, "and keeps the path");
+  // A start that fails some other way once it has run too often, so asking
+  // again and again ends instead of hanging the test.
+  let starts = 0;
+  const alwaysGone = async (program) => {
+    if (++starts > 3) throw new Error("started more than three times");
+    throw gone(program);
+  };
+  const lost = await paths.run("gh", null, 30000, alwaysGone).catch((e) => e);
+  assert.deepEqual([lost instanceof board.BoardError, lost.message], [true, "gh ließ sich nicht starten: failed to start /new/gh: No such file or directory"]);
+  assert.equal(calls.length, 3, "asked once more, not again and again");
+});
+
+test("a bare name that does not start is not asked for again", async () => {
+  const { run, calls } = fakeRun(new Error("cannot start sh: program not found"));
+  const paths = board.toolPaths(run);
+  const error = gone("az");
+  await assert.rejects(paths.run("az", "win", 60000, async () => { throw error; }), (e) => e === error);
+  assert.equal(calls.length, 1);
+});
+
+test("a run that finds its program gone forgets only its own lookup, not a newer one", async () => {
+  const answers = [answered("/old/gh"), answered("/new/gh")];
+  let asked = 0;
+  const paths = board.toolPaths(async () => answers[asked++]);
+  const held = deferred();
+  let starts = 0;
+  const first = paths.run("gh", null, 30000, (program) => (starts++ === 0 ? held.promise : echo(program)));
+  await settle();
+  paths.reset();
+  assert.equal(await paths.run("gh", null, 30000, echo), "/new/gh");
+  held.reject(gone("/old/gh"));
+  assert.equal(await first, "/new/gh", "run again from the newer lookup");
+  assert.equal(asked, 2, "which it did not drop");
 });
 
 test("a question that fails after reset leaves the answer of the one asked since", async () => {
   const answers = [deferred(), deferred()];
   let asked = 0;
   const paths = board.toolPaths(() => answers[asked++].promise);
-  const first = paths.path("gh", null, 30000);
+  const first = paths.run("gh", null, 30000, echo);
   paths.reset();
-  const second = paths.path("gh", null, 30000);
+  const second = paths.run("gh", null, 30000, echo);
   answers[1].resolve(answered("/new/gh"));
   answers[0].reject(new Error("timed out after 30000 ms"));
   await assert.rejects(first, /die Shell antwortete nicht/);
   assert.equal(await second, "/new/gh");
   // Counted first: a third question would fail on the fake's missing answer,
   // which says less than the count.
-  const third = paths.path("gh", null, 30000);
+  const third = paths.run("gh", null, 30000, echo);
   assert.equal(asked, 2, "the answer since is kept");
   assert.equal(await third, "/new/gh");
 });
 
 // The real script under sh, with a bare environment as herdr's service has
 // (a PATH without Homebrew), in a home where each shell's startup files
-// print a banner and add one folder when interactive (with an alias or
-// function of the same name as its program) and another when a login shell,
-// each folder with a program of its own. bash's .bash_profile sources a
-// .bashrc that returns early when not interactive, as Debian's does. run's
-// `shell` is $SHELL (null: unset; "": empty); `sh` runs the script.
+// print a banner and add one folder when interactive (bash with an alias,
+// zsh with a function of the same name as its program; fish has neither,
+// since its own `command -v` skips functions anyway) and another when a
+// login shell, each folder with a program of its own. bash's .bash_profile
+// sources a .bashrc that returns early when not interactive, as Debian's
+// does. run's `shell` is $SHELL (null: unset; "": empty); `sh` runs the
+// script.
 const shellAt = (name) => spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 const [bash, dash, zsh, fish] = ["bash", "dash", "zsh", "fish"].map(shellAt);
 function inShellHome(fn) {
@@ -776,7 +831,7 @@ function inShellHome(fn) {
     writeFileSync(join(home, ".zprofile"), `PATH=$PATH:${login}\n`);
     mkdirSync(join(home, ".config/fish"), { recursive: true });
     writeFileSync(join(home, ".config/fish/config.fish"), [
-      "if status is-interactive", "  echo fish banner", `  set -gx PATH $PATH ${rc}`, "  function board-rc-tool; end", "end",
+      "if status is-interactive", "  echo fish banner", `  set -gx PATH $PATH ${rc}`, "end",
       "if status is-login", `  set -gx PATH $PATH ${login}`, "end", "",
     ].join("\n"));
     const run = (tool, on, shell = bash, sh = "sh") => {
@@ -793,7 +848,7 @@ function inShellHome(fn) {
 }
 
 // What each shell must answer: the interactive folder here and on another
-// machine (whatever alias or function shadows the program), the login
+// machine (whatever alias or function shadows the program there), the login
 // folder only on another machine, nothing for a program that is nowhere.
 function answersOfShell(shell) {
   inShellHome((run, want) => {
@@ -814,7 +869,7 @@ test("the path script asks bash interactive here, login and interactive on anoth
 test("the path script asks zsh the same way", { skip: !zsh && "no zsh on this machine" }, () => answersOfShell(zsh));
 test("the path script asks fish the same way", { skip: !fish && "no fish on this machine" }, () => answersOfShell(fish));
 
-test("the path script asks /bin/sh for any other shell and says so", { skip: !bash && "no bash on this machine" }, () => {
+test("the path script asks /bin/sh for any other shell and says so", () => {
   inShellHome((run) => {
     const other = run("sh", null, "/usr/bin/board-no-such-shell");
     assert.match(other.answer, /^\/.*\/sh$/);
@@ -1903,6 +1958,18 @@ test("UI: az for a view on another machine is asked for and run there", async ()
   assert.deepEqual(host.open("az").map((c) => [c.tool, c.options.on]), [["/opt/server/bin/az", "server"]]);
 });
 
+test("UI: az on a machine where herdr cannot start sh runs by its bare name; missing there, its view is left out without asking again", async () => {
+  const config = JSON.parse(testConfig());
+  config.views[3].on = "win";
+  const which = (tool, on) => (on === "win" ? new Error("cannot start sh: program not found") : found(tool));
+  const { b, host } = await bootBoard({ config: JSON.stringify(config), which });
+  assert.deepEqual(host.open("az").map((c) => [c.tool, c.options.on]), [["az", "win"]]);
+  await host.answer("az", new Error("failed to start az: program not found"));
+  assert.equal(b.views.azure.unavailable, "az auf win ist nicht installiert");
+  assert.equal(host.asked.filter((a) => a.tool === "az").length, 1, "asked once");
+  assert.equal(host.open("az").length, 0, "and not run again");
+});
+
 test("UI: gh and az that the shell does not find are not installed; the Azure view is left out", async () => {
   const { b, host, st } = await bootBoard({ which: () => "" });
   assert.deepEqual(host.calls, [], "nothing runs");
@@ -1914,8 +1981,6 @@ test("UI: a shell that cannot be asked says so, not that gh is missing", async (
   const { st } = await bootBoard({ which: (tool) => (tool === "gh" ? new Error("timed out after 30000 ms") : "") });
   assert.equal(st().error, "Pfad von gh nicht ermittelt: die Shell antwortete nicht in 30 s");
 });
-
-const gone = (path) => new Error(`failed to start ${path}: No such file or directory`);
 
 test("UI: a program gone from the path found is asked for again and run in the same call; a timeout keeps the path", async () => {
   const { b, cx, host, st } = await openBoard();
@@ -1946,7 +2011,7 @@ test("UI: a program the shell no longer finds is not installed at once; one it f
   await settle();
   await host.answer("gh", gone(found("gh")));
   await host.answer("gh", gone(found("gh")));
-  assert.equal(b.views.mine.error, "gh ließ sich unter /opt/fake/bin/gh nicht starten: failed to start /opt/fake/bin/gh: No such file or directory");
+  assert.equal(b.views.mine.error, "gh ließ sich nicht starten: failed to start /opt/fake/bin/gh: No such file or directory");
 });
 
 test("UI: a move whose lookup fails is a plain refusal: the card goes back, nothing is unclear", async () => {
@@ -1990,7 +2055,8 @@ const crossAlign = (el) => el.styles.filter((s) => s.startsWith("items_")).at(-1
 const isRow = (el) => el.kind === "h_flex" || (el.kind === "div" && el.styles.includes("flex") && !el.styles.includes("flex_col"));
 // Whether `parent` centres `child` in the height: a row whose items line up
 // in the centre, unless the child takes the full height; a v_flex that
-// justifies its children to the centre; or a child that centres itself.
+// justifies its children to the centre; or a child that centres itself
+// (counted under any parent, the safe side).
 const centres = (parent, child) =>
   (isRow(parent) && crossAlign(parent) === "items_center" && !child.styles.includes("h_full")) ||
   (parent.kind === "v_flex" && parent.styles.includes("justify_center")) ||
