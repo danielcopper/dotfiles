@@ -230,9 +230,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   is a link out of the mod folder, which every stowed file is, as it refuses
   one from another mod's folder. So `mods/file-popup/` keeps its listers in
   `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
-  own marked copy of the leader's `openBoard` (the board tests check that
-  the two match). An icon is no module: `mods/board-button/board.svg` draws
-  through its link.
+  own marked copy of the leader's `openBoard`. An icon is no module:
+  `mods/board-button/board.svg` draws through its link.
 - **herdr's `run` answers ok for a command it does not know,** so a mod
   that runs a misspelt one fails without a word. `mise run herdr-app-check`
   checks the commands this package's mods and `keys.json` use against the

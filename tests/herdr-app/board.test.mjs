@@ -2028,6 +2028,17 @@ test("UI: a move whose lookup fails is a plain refusal: the card goes back, noth
 
 // ---- UI: drawing ----
 
+// The elements from `el` down to the first element `pick` takes, or null.
+function chainTo(el, pick) {
+  if (!el || typeof el === "string") return null;
+  if (pick(el)) return [el];
+  for (const kid of el.kids) {
+    const below = chainTo(kid, pick);
+    if (below) return [el, ...below];
+  }
+  return null;
+}
+
 // The elements from `el` down to the first text `match` (a function, or a
 // text it holds), or null.
 function pathTo(el, match) {
@@ -2077,7 +2088,7 @@ test("UI: the views sidebar fills the height; the content and its error start at
   assert.equal(crossAlign(row), "items_stretch", "the sidebar's row stretches it to the full height");
 });
 
-test("UI: the board and the detail beside it start at the top; a column spans the board's height", async () => {
+test("UI: the board, its stubs and the detail beside it start at the top", async () => {
   const { b, cx } = await openBoard();
   await press(b, cx, "enter");
   assert.equal(b.views.mine.detail, true);
@@ -2090,12 +2101,31 @@ test("UI: the board and the detail beside it start at the top; a column spans th
   const column = pathTo(root, (s) => s === name);
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
-  // The row lines its columns up at the top; a shown column takes the row's
-  // full height, so its cards get a height to scroll in (a stub keeps its own).
-  assert.ok(column.at(-3).styles.includes("h_full"), "a shown column spans the row's height");
-  const stub = pathTo(root, (s) => s === b.views.mine.data.columns.find((c) => c.hidden).name);
-  assert.equal(stub.at(-3).styles.includes("h_full"), false, "a stub does not");
-  assert.deepEqual(centring(stub.slice(0, -2)), [], "no row centres a stub");
+  const at = b.columns(b.view()).findIndex((c) => c.hidden);
+  const stub = chainTo(root, (el) => el.with.id?.[0] === `col-${at}`);
+  assert.ok(stub, "a stub");
+  assert.deepEqual(centring(stub), [], "no row centres a stub");
+  assert.equal(stub.at(-1).styles.includes("h_full"), false, "a stub keeps its own height");
+});
+
+// Whether `child` takes its height from `parent`: in a column by flex_1, in
+// a row by the row's stretch or its own h_full.
+const heightFrom = (parent, child) =>
+  isRow(parent) ? crossAlign(parent) === "items_stretch" || child.styles.includes("h_full") : child.styles.includes("flex_1");
+
+test("UI: a column's card list takes its height from the board, step by step, and scrolls in it", async () => {
+  const { b } = await openBoard();
+  const root = b.render();
+  const at = b.columns(b.view()).findIndex((c) => !c.hidden && c.shown.length);
+  const chain = chainTo(root, (el) => el.with.id?.[0] === `cards-${at}`);
+  assert.ok(chain, "a card list");
+  chain.slice(1).forEach((child, i) => assert.ok(heightFrom(chain[i], child), `step ${i + 1}: a ${child.kind} in a ${chain[i].kind}`));
+  const list = chain.at(-1);
+  assert.ok(list.styles.includes("overflow_y_scrollbar"), "the list scrolls");
+  assert.deepEqual(list.with.min_h, [0], "and may be lower than its cards");
+  const column = byId(root, `col-${at}`);
+  assert.ok(chain.includes(column), "the list is in its column");
+  assert.deepEqual(column.with.min_h, [0], "which may be lower than its content");
 });
 
 // ---- The board button (mods/board-button/) ----
