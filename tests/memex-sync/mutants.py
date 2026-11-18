@@ -41,14 +41,16 @@ with open(watch_src) as f:
     watch_text = f.read()
 
 # What scenarios.sh prints about itself, not about the script under test;
-# each must still end a quoted message in its code, the text of a line before
-# its first #, so a message extended or reworded there stops the run.
+# each must still be a whole message in its code (the text of a line before
+# its first #), as `fail "<line>"` or `"FAIL $SCENARIO: <line>"`, so a message
+# changed at either end stops the run.
 HARNESS_LINES = ("listed in CASES, but no such function", "no such scenario")
 with open(runner) as f:
     runner_code = [line.split("#", 1)[0] for line in f.read().splitlines()]
 for harness_line in HARNESS_LINES:
-    if not any(f'{harness_line}"' in code for code in runner_code):
-        print(f'{runner} no longer ends a message in "{harness_line}"; update HARNESS_LINES in mutants.py')
+    forms = (f'fail "{harness_line}"', f'"FAIL $SCENARIO: {harness_line}"')
+    if not any(form in code for code in runner_code for form in forms):
+        print(f'{runner} no longer prints "{harness_line}" as a whole message; update HARNESS_LINES in mutants.py')
         sys.exit(1)
 
 FETCH = "fetched=true\nfetch_origin || fetched=false\n"
