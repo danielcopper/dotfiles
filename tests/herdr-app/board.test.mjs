@@ -107,6 +107,13 @@ const azureBoard = (hidden = new Set(["Done", "Removed"])) => board.parseAzureBo
 const names = (b) => b.columns.map((c) => c.name);
 const numbersIn = (b, name) => b.columns.find((c) => c.name === name).cards.map((c) => c.number);
 
+// herdr's words when exec rejects (src/mods.rs, herdr 0.1.16): a program
+// that does not start here, one stopped at its timeout (here or on another
+// machine), and one the core on another machine cannot start.
+const notRun = (program) => new Error(`cannot run ${program}: No such file or directory (os error 2)`);
+const stopped = (program, s = 30, on = null) => new Error(`${program} took longer than ${s} s${on ? ` on ${on}` : ""} and was stopped`);
+const notThere = (program) => new Error(`cannot start ${program}: program not found`);
+
 // mise run herdr-board-test sets BOARD_TEST_PERMISSION; then node must run
 // under its permission model, and this test fails rather than skips.
 const underTask = Boolean(process.env.BOARD_TEST_PERMISSION);
@@ -603,12 +610,14 @@ test("a section missing from GitHub's answer is an error, explained by the error
 // ---- Tools that cannot run ----
 
 test("a tool that cannot run, or runs out of time, says so; only a missing az makes its view unavailable", () => {
-  const missing = board.execRejection("az", new Error("failed to start az: No such file or directory (os error 2)"), 60000, null);
+  const missing = board.execRejection("az", notRun("az"), 60000, null);
   assert.deepEqual([missing.message, missing.unavailable], ["az ist nicht installiert", true]);
-  const gh = board.execRejection("gh", new Error("program not found"), 30000, null);
-  assert.deepEqual([gh.message, gh.unavailable], ["gh ist nicht installiert", false]);
-  const late = board.execRejection("gh", new Error("timed out after 30000 ms"), 30000, null);
+  const gh = board.execRejection("gh", notThere("gh"), 30000, "server");
+  assert.deepEqual([gh.message, gh.unavailable], ["gh auf server ist nicht installiert", false]);
+  const late = board.execRejection("gh", stopped("/opt/bin/gh"), 30000, null);
   assert.deepEqual([late.message, late.unclear], ["gh antwortete nicht in 30 s", false]);
+  assert.equal(board.execRejection("az", stopped("az", 60, "server"), 60000, "server").message, "az auf server antwortete nicht in 60 s");
+  assert.equal(board.execRejection("gh", new Error("operation timed out"), 30000, null).message, "gh antwortete nicht in 30 s", "other words for a timeout");
   const away = board.execRejection("az", new Error("machine server is unreachable"), 60000, "server");
   assert.deepEqual([away.message, away.unavailable], ["az auf server ließ sich nicht starten: machine server is unreachable", false]);
   assert.equal(board.execRejection("gh", new Error("boom"), 30000, null).message, "gh ließ sich nicht starten: boom");
@@ -616,11 +625,13 @@ test("a tool that cannot run, or runs out of time, says so; only a missing az ma
 
 test("on a write, a timeout or a lost remote call is unclear; a missing program or a local start failure is a refusal", () => {
   const write = { write: true };
-  const late = board.execRejection("gh", new Error("timed out after 30000 ms"), 30000, null, write);
+  const late = board.execRejection("gh", stopped("/opt/bin/gh"), 30000, null, write);
   assert.deepEqual([late.unclear, late.message], [true, "Ergebnis unklar: gh antwortete nicht in 30 s"]);
+  const lateThere = board.execRejection("az", stopped("az", 60, "server"), 60000, "server", write);
+  assert.deepEqual([lateThere.unclear, lateThere.message], [true, "Ergebnis unklar: az auf server antwortete nicht in 60 s"]);
   const lost = board.execRejection("az", new Error("connection to server lost"), 60000, "server", write);
   assert.deepEqual([lost.unclear, lost.message], [true, "Ergebnis unklar: az auf server: connection to server lost"]);
-  assert.equal(board.execRejection("az", new Error("No such file or directory"), 60000, "server", write).unclear, false);
+  assert.equal(board.execRejection("az", notThere("az"), 60000, "server", write).unclear, false);
   assert.equal(board.execRejection("gh", new Error("boom"), 30000, null, write).unclear, false);
 });
 
@@ -693,7 +704,7 @@ test("a shell that cannot be asked, or gives no answer or no path, says so, not 
   const fail = (answer, tool = "az", on = "server") => board.findTool(fakeRun(answer).run, tool, on, 60000).catch((e) => e);
   const away = await fail(new Error("machine server is unreachable"));
   assert.deepEqual([away instanceof board.BoardError, away.message, away.unavailable], [true, "Pfad von az auf server nicht ermittelt: machine server is unreachable", false]);
-  assert.equal((await fail(new Error("timed out after 60000 ms"))).message, "Pfad von az auf server nicht ermittelt: die Shell antwortete nicht in 60 s");
+  assert.equal((await fail(stopped("sh", 60, "server"))).message, "Pfad von az auf server nicht ermittelt: die Shell antwortete nicht in 60 s");
   const asked = `${board.SHELL_START}/bin/bash\t/bin/bash${board.SHELL_END}${BANNER}`;
   const stderr = `${JOB_NOISE}bash: /home/me/.bashrc: line 3: brew: command not found\nbash: line 1: exec: zsh: not found\n`;
   const silent = await fail({ code: 1, stdout: asked, stderr }, "gh", null);
@@ -706,17 +717,16 @@ test("a shell that cannot be asked, or gives no answer or no path, says so, not 
 
 test("another machine where herdr cannot start sh (Windows) runs the program by its bare name; this one says sh is missing", async () => {
   // herdr's words, as its own Files mod reads them.
-  const noSh = new Error("cannot start sh: program not found");
+  const noSh = notThere("sh");
   assert.deepEqual(await board.findTool(fakeRun(noSh).run, "az", "win", 60000), { program: "az", bare: true });
   const here = await board.findTool(fakeRun(noSh).run, "gh", null, 30000).catch((e) => e);
   assert.deepEqual([here instanceof board.BoardError, here.message], [true, "Pfad von gh nicht ermittelt: cannot start sh: program not found"]);
-  const missing = await board.findTool(fakeRun(new Error("failed to start sh: No such file or directory")).run, "az", "server", 60000).catch((e) => e);
-  assert.equal(missing.message, "Pfad von az auf server nicht ermittelt: failed to start sh: No such file or directory", "only herdr's words for that");
+  const missing = await board.findTool(fakeRun(new Error('cannot start "sh": No such file or directory')).run, "az", "server", 60000).catch((e) => e);
+  assert.equal(missing.message, 'Pfad von az auf server nicht ermittelt: cannot start "sh": No such file or directory', "only herdr's words for that");
 });
 
 // A run's start that answers with the program it was given.
 const echo = async (program) => program;
-const gone = (path) => new Error(`failed to start ${path}: No such file or directory`);
 
 test("a found program is asked for once per machine and program, until reset; a failed question is not kept", async () => {
   const { run, calls } = fakeRun(answered("/x/gh"));
@@ -742,12 +752,12 @@ test("a program gone from its path is asked for once more and run from the new o
   const { run, calls } = fakeRun(answered("/old/gh"), answered("/new/gh"));
   const paths = board.toolPaths(run);
   const fromNew = async (program) => {
-    if (program === "/old/gh") throw gone(program);
+    if (program === "/old/gh") throw notRun(program);
     return program;
   };
   assert.equal(await paths.run("gh", null, 30000, fromNew), "/new/gh");
   assert.equal(calls.length, 2);
-  const late = new Error("timed out after 30000 ms");
+  const late = stopped("/x/gh");
   await assert.rejects(paths.run("gh", null, 30000, async () => { throw late; }), (e) => e === late, "any other failure passes on as it is");
   assert.equal(calls.length, 2, "and keeps the path");
   // A start that fails some other way once it has run too often, so asking
@@ -755,17 +765,17 @@ test("a program gone from its path is asked for once more and run from the new o
   let starts = 0;
   const alwaysGone = async (program) => {
     if (++starts > 3) throw new Error("started more than three times");
-    throw gone(program);
+    throw notRun(program);
   };
   const lost = await paths.run("gh", null, 30000, alwaysGone).catch((e) => e);
-  assert.deepEqual([lost instanceof board.BoardError, lost.message], [true, "gh ließ sich nicht starten: failed to start /new/gh: No such file or directory"]);
+  assert.deepEqual([lost instanceof board.BoardError, lost.message], [true, "gh ließ sich nicht starten: cannot run /new/gh: No such file or directory (os error 2)"]);
   assert.equal(calls.length, 3, "asked once more, not again and again");
 });
 
 test("a bare name that does not start is not asked for again", async () => {
-  const { run, calls } = fakeRun(new Error("cannot start sh: program not found"));
+  const { run, calls } = fakeRun(notThere("sh"));
   const paths = board.toolPaths(run);
-  const error = gone("az");
+  const error = notThere("az");
   await assert.rejects(paths.run("az", "win", 60000, async () => { throw error; }), (e) => e === error);
   assert.equal(calls.length, 1);
 });
@@ -780,7 +790,7 @@ test("a run that finds its program gone forgets only its own lookup, not a newer
   await settle();
   paths.reset();
   assert.equal(await paths.run("gh", null, 30000, echo), "/new/gh");
-  held.reject(gone("/old/gh"));
+  held.reject(notRun("/old/gh"));
   assert.equal(await first, "/new/gh", "run again from the newer lookup");
   assert.equal(asked, 2, "which it did not drop");
 });
@@ -793,7 +803,7 @@ test("a question that fails after reset leaves the answer of the one asked since
   paths.reset();
   const second = paths.run("gh", null, 30000, echo);
   answers[1].resolve(answered("/new/gh"));
-  answers[0].reject(new Error("timed out after 30000 ms"));
+  answers[0].reject(stopped("sh"));
   await assert.rejects(first, /die Shell antwortete nicht/);
   assert.equal(await second, "/new/gh");
   // Counted first: a third question would fail on the fake's missing answer,
@@ -1432,7 +1442,7 @@ test("UI: a second move of a card is refused while the first is written; a refus
 test("UI: a write without a clear answer keeps the card, says „Ergebnis unklar“ once, and the next refresh says where it is", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s; lädt neu");
   assert.deepEqual(host.notes.at(-1), { title: "Status von tender#3004", body: "Ergebnis unklar: gh antwortete nicht in 30 s", level: "warning" });
@@ -1453,12 +1463,12 @@ function boardWith(change) {
 test("UI: after an unclear write, a card in its target is said as landed; one in a hidden target as not shown", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await host.answer("gh", ok(boardWith((nodes) => (nodes.find((n) => n.id === "PVTI_rec4").fieldValueByName.optionId = "opt-in-progress"))));
   assert.deepEqual([b.notice.text, b.notice.level], ["tender#3004 steht nach dem Neuladen in „In progress“", "info"]);
   await press(b, cx, "s");
   await press(b, cx, "5");
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await host.answer("gh", ok(boardWith((nodes) => nodes.splice(nodes.findIndex((n) => n.id === "PVTI_rec4"), 1))));
   assert.deepEqual([b.notice.text, b.notice.level], ["tender#3004 steht nicht in den gezeigten Spalten („Done“ ist ausgeblendet)", "info"]);
 });
@@ -1468,7 +1478,7 @@ test("UI: a refresh that read before an unclear write ended says nothing about i
   await press(b, cx, "r");
   advance(5);
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   const unclear = b.notice.text;
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.equal(b.notice.text, unclear, "the refresh that started before the outcome settles nothing");
@@ -1480,12 +1490,12 @@ test("UI: a card gone from its shown target is said as not shown while columns a
   const gone = ok(boardWith((nodes) => nodes.splice(nodes.findIndex((n) => n.id === "PVTI_rec4"), 1)));
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await host.answer("gh", gone);
   assert.deepEqual([b.notice.text, b.notice.level], ["tender#3004 steht nicht in den gezeigten Spalten (ausgeblendet: „Backlog“, „Done“)", "warning"]);
   const all = await openBoard({ config: testConfig({ hide: [] }) });
   await press(all.b, all.cx, "l", shiftL);
-  await all.host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await all.host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await all.host.answer("gh", gone);
   assert.deepEqual([all.b.notice.text, all.b.notice.level], ["tender#3004 ist nach dem Neuladen nicht auf dem Board", "warning"]);
   assert.deepEqual(all.host.notes.at(-1), { title: "Status nach dem Neuladen", body: "tender#3004 ist nach dem Neuladen nicht auf dem Board", level: "warning" });
@@ -1494,7 +1504,7 @@ test("UI: a card gone from its shown target is said as not shown while columns a
 test("UI: a new move of a card that lands drops the open outcome of its earlier one", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
   assert.equal(st().unclear.length, 1, "kept while the new write is under way");
   await host.answer("gh", confirmed("PVTI_rec4"), "updateProjectV2ItemFieldValue");
@@ -1506,16 +1516,16 @@ test("UI: a new move of a card that lands drops the open outcome of its earlier 
 test("UI: a new move of a card that is unclear too replaces the open outcome of its earlier one", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.deepEqual(st().unclear.map((u) => u.to.name), ["Ready"]);
 });
 
 test("UI: a new move of a card that is refused keeps the open outcome of its earlier one", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
   const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
   await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" }, "updateProjectV2ItemFieldValue");
@@ -1528,7 +1538,7 @@ test("UI: r with views.json unchanged, or after an invalid one was fixed, keeps 
   for (const broken of [false, true]) {
     const { b, cx, host, st } = await openBoard();
     await press(b, cx, "l", shiftL);
-    await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+    await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
     if (broken) {
       host.config = "{ views: [";
       await press(b, cx, "r");
@@ -1550,7 +1560,7 @@ test("UI: a write under way while r makes its view a list leaves nothing open", 
   host.config = JSON.stringify(config);
   await press(b, cx, "r");
   await host.answer("gh", ok(fixture("github-list.json")), "search(");
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s", "no follow-up promised");
   assert.deepEqual(b.views.mine.unclear, []);
   assert.equal(host.open("gh").length, 0, "no refresh of a board that is gone");
@@ -1562,7 +1572,7 @@ test("UI: a write under way while r removes its view promises no follow-up", asy
   await press(b, cx, "l", shiftL);
   host.config = JSON.stringify({ ...JSON.parse(testConfig()), views: JSON.parse(testConfig()).views.filter((v) => v.id !== "mine") });
   await press(b, cx, "r");
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s");
   assert.deepEqual(b.views.mine.unclear, []);
 });
@@ -1572,7 +1582,7 @@ test("UI: a write that ends unclear after r read an invalid views.json is told o
   await press(b, cx, "l", shiftL);
   host.config = "{ views: [";
   await press(b, cx, "r");
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s; wird nach dem nächsten Neuladen gemeldet");
   assert.equal(st().unclear.length, 1);
   assert.equal(host.open("gh").length, 0, "nothing reloads while views.json is invalid");
@@ -1585,7 +1595,7 @@ test("UI: a write that ends unclear after r read an invalid views.json is told o
 test("UI: an unclear outcome waits for a later write of its card and is then told by the server's answer", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await press(b, cx, "l", shiftL);
   assert.equal(st().pending.PVTI_rec4, true, "the second write is under way");
   const notes = host.notes.length;
@@ -1604,7 +1614,7 @@ test("UI: an unclear outcome waits for a later write of its card and is then tol
 test("UI: a refresh that fails while a later write of the card is under way leaves its open outcome unsaid", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await press(b, cx, "l", shiftL);
   await host.answer("gh", { code: 1, stdout: "", stderr: GH_DNS }, "items(first");
   assert.equal(b.notice.text, "tender#3004 → In review …", "no „weiter offen“ for an outcome that is not due");
@@ -1619,7 +1629,7 @@ test("UI: a later write refused while views.json is invalid starts no refresh", 
   const { b, cx, host, st } = await openBoard();
   const view = b.view();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   // Its refresh stays unanswered, so the outcome stays open.
   host.config = "{ views: [";
   await press(b, cx, "r");
@@ -1646,7 +1656,7 @@ test("UI: open outcomes of a view that is no board any more are dropped without 
 test("UI: r drops the open outcomes of a view that became a list", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   const config = JSON.parse(testConfig());
   config.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
   host.config = JSON.stringify(config);
@@ -1661,11 +1671,11 @@ test("UI: r drops the open outcomes of a view that became a list", async () => {
 test("UI: a refresh settles the outcomes that came before it started and keeps the later ones for the next", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   advance(5);
   b.views.mine.sel = { col: 2, key: "PVTI_rec1" };
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“", "only the first write's outcome");
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
@@ -1677,7 +1687,7 @@ test("UI: a refresh that read before an unclear write ended and then failed says
   await press(b, cx, "r");
   advance(5);
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   const unclear = b.notice.text;
   await host.answer("gh", { code: 1, stdout: "", stderr: GH_DNS }, "items(first");
   assert.equal(b.notice.text, unclear);
@@ -1686,7 +1696,7 @@ test("UI: a refresh that read before an unclear write ended and then failed says
 test("UI: a refresh that fails after an unclear write says the outcome is still open", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await host.answer("gh", { code: 1, stdout: "", stderr: GH_DNS });
   assert.equal(b.notice.text, "tender#3004: Ergebnis weiter offen, Neuladen fehlgeschlagen (GitHub nicht erreichbar: error connecting to api.github.com)");
 });
@@ -1694,7 +1704,7 @@ test("UI: a refresh that fails after an unclear write says the outcome is still 
 test("UI: r forgets the open outcomes of views no longer in views.json", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.views.mine.unclear.length, 1);
   host.config = JSON.stringify({ ...JSON.parse(testConfig()), views: JSON.parse(testConfig()).views.filter((v) => v.id !== "mine") });
   await press(b, cx, "r");
@@ -1964,7 +1974,7 @@ test("UI: az on a machine where herdr cannot start sh runs by its bare name; mis
   const which = (tool, on) => (on === "win" ? new Error("cannot start sh: program not found") : found(tool));
   const { b, host } = await bootBoard({ config: JSON.stringify(config), which });
   assert.deepEqual(host.open("az").map((c) => [c.tool, c.options.on]), [["az", "win"]]);
-  await host.answer("az", new Error("failed to start az: program not found"));
+  await host.answer("az", notThere("az"));
   assert.equal(b.views.azure.unavailable, "az auf win ist nicht installiert");
   assert.equal(host.asked.filter((a) => a.tool === "az").length, 1, "asked once");
   assert.equal(host.open("az").length, 0, "and not run again");
@@ -1978,8 +1988,16 @@ test("UI: gh and az that the shell does not find are not installed; the Azure vi
 });
 
 test("UI: a shell that cannot be asked says so, not that gh is missing", async () => {
-  const { st } = await bootBoard({ which: (tool) => (tool === "gh" ? new Error("timed out after 30000 ms") : "") });
+  const { st } = await bootBoard({ which: (tool) => (tool === "gh" ? stopped("sh") : "") });
   assert.equal(st().error, "Pfad von gh nicht ermittelt: die Shell antwortete nicht in 30 s");
+});
+
+test("UI: a read that herdr stops at its timeout says gh did not answer", async () => {
+  const { b, cx, host, st } = await openBoard();
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", stopped(found("gh")));
+  assert.equal(st().error, "gh antwortete nicht in 30 s");
 });
 
 test("UI: a program gone from the path found is asked for again and run in the same call; a timeout keeps the path", async () => {
@@ -1987,12 +2005,12 @@ test("UI: a program gone from the path found is asked for again and run in the s
   const asks = () => host.asked.filter((a) => a.tool === "gh").length;
   b.refresh(b.view(), cx);
   await settle();
-  await host.answer("gh", new Error("timed out after 30000 ms"));
+  await host.answer("gh", stopped(found("gh")));
   b.refresh(b.view(), cx);
   await settle();
   assert.equal(asks(), 1, "kept after a timeout");
   host.which = () => "/home/linuxbrew/.linuxbrew/bin/gh";
-  await host.answer("gh", gone(found("gh")));
+  await host.answer("gh", notRun(found("gh")));
   assert.equal(asks(), 2, "asked again at once");
   assert.equal(host.open("gh")[0].tool, "/home/linuxbrew/.linuxbrew/bin/gh", "and run from the new path");
   await host.answer("gh", ok(fixture("github-board.json")));
@@ -2005,19 +2023,19 @@ test("UI: a program the shell no longer finds is not installed at once; one it f
   host.which = (tool) => (tool === "az" ? "" : found(tool));
   b.refresh(b.config.views.find((v) => v.id === "azure"), cx);
   await settle();
-  await host.answer("az", gone(found("az")), "--wiql");
+  await host.answer("az", notRun(found("az")), "--wiql");
   assert.equal(b.views.azure.unavailable, "az ist nicht installiert", "left out now, not after the timer");
   b.refresh(b.view(), cx);
   await settle();
-  await host.answer("gh", gone(found("gh")));
-  await host.answer("gh", gone(found("gh")));
-  assert.equal(b.views.mine.error, "gh ließ sich nicht starten: failed to start /opt/fake/bin/gh: No such file or directory");
+  await host.answer("gh", notRun(found("gh")));
+  await host.answer("gh", notRun(found("gh")));
+  assert.equal(b.views.mine.error, "gh ließ sich nicht starten: cannot run /opt/fake/bin/gh: No such file or directory (os error 2)");
 });
 
 test("UI: a move whose lookup fails is a plain refusal: the card goes back, nothing is unclear", async () => {
   const { b, cx, host, st } = await openBoard();
   b.paths.reset();
-  host.which = () => new Error("timed out after 30000 ms");
+  host.which = () => stopped("sh");
   const before = board.findCard(st().data, "PVTI_rec4").column.id;
   await press(b, cx, "l", shiftL);
   assert.equal(board.findCard(st().data, "PVTI_rec4").column.id, before, "moved back");

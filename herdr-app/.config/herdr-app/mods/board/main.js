@@ -766,9 +766,12 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
-// exec's words for a program that is not there, and for a timeout.
+// exec's words for a program that is not there, and for a timeout: herdr
+// stops a program at its timeout with "<program> took longer than <n> s
+// and was stopped" (" on <machine>" before "and" on another machine);
+// "timed out" stays for other wordings of the same.
 const NOT_INSTALLED = /program not found|no such file or directory|command not found|not installed|ENOENT/i;
-const TIMED_OUT = /time(d)?[ -]?out/i;
+const TIMED_OUT = /took longer than [\d.]+ s( on .+)? and was stopped|time(d)?[ -]?out/i;
 const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
 
 // A program that is not there, with a note on how that was found out. Only a
