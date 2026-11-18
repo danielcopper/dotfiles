@@ -109,7 +109,8 @@ const numbersIn = (b, name) => b.columns.find((c) => c.name === name).cards.map(
 
 // herdr's words when exec rejects (src/mods.rs, herdr 0.1.16): a program
 // that does not start here, one stopped at its timeout (here or on another
-// machine), and one the core on another machine cannot start.
+// machine), and one the core on another machine cannot start (the core's
+// own words, as src/programs.rs reads them).
 const notRun = (program) => new Error(`cannot run ${program}: No such file or directory (os error 2)`);
 const stopped = (program, s = 30, on = null) => new Error(`${program} took longer than ${s} s${on ? ` on ${on}` : ""} and was stopped`);
 const notThere = (program) => new Error(`cannot start ${program}: program not found`);
@@ -772,6 +773,24 @@ test("a program gone from its path is asked for once more and run from the new o
   assert.equal(calls.length, 3, "asked once more, not again and again");
 });
 
+test("a gone program forgets only its own machine's and program's lookup", async () => {
+  const { run, calls } = fakeRun(answered("/x/gh"));
+  const paths = board.toolPaths(run);
+  await paths.run("gh", null, 30000, echo);
+  await paths.run("gh", "server", 30000, echo);
+  await paths.run("az", null, 60000, echo);
+  assert.equal(calls.length, 3);
+  let starts = 0;
+  await paths.run("gh", null, 30000, async (program) => {
+    if (starts++ === 0) throw notRun(program);
+    return program;
+  });
+  assert.equal(calls.length, 4, "gh here is asked for again");
+  await paths.run("gh", "server", 30000, echo);
+  await paths.run("az", null, 60000, echo);
+  assert.equal(calls.length, 4, "gh on the server and az here are kept");
+});
+
 test("a bare name that does not start is not asked for again", async () => {
   const { run, calls } = fakeRun(notThere("sh"));
   const paths = board.toolPaths(run);
@@ -781,7 +800,8 @@ test("a bare name that does not start is not asked for again", async () => {
 });
 
 test("a run that finds its program gone forgets only its own lookup, not a newer one", async () => {
-  const answers = [answered("/old/gh"), answered("/new/gh")];
+  // A third answer, should the run ask again, so that shows as a wrong path.
+  const answers = [answered("/old/gh"), answered("/new/gh"), answered("/third/gh")];
   let asked = 0;
   const paths = board.toolPaths(async () => answers[asked++]);
   const held = deferred();
@@ -816,12 +836,11 @@ test("a question that fails after reset leaves the answer of the one asked since
 // The real script under sh, with a bare environment as herdr's service has
 // (a PATH without Homebrew), in a home where each shell's startup files
 // print a banner and add one folder when interactive (bash with an alias,
-// zsh with a function of the same name as its program; fish has neither,
-// since its own `command -v` skips functions anyway) and another when a
-// login shell, each folder with a program of its own. bash's .bash_profile
-// sources a .bashrc that returns early when not interactive, as Debian's
-// does. run's `shell` is $SHELL (null: unset; "": empty); `sh` runs the
-// script.
+// zsh and fish with a function of the same name as its program) and another
+// when a login shell, each folder with a program of its own. bash's
+// .bash_profile sources a .bashrc that returns early when not interactive,
+// as Debian's does. run's `shell` is $SHELL (null: unset; "": empty); `sh`
+// runs the script.
 const shellAt = (name) => spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 const [bash, dash, zsh, fish] = ["bash", "dash", "zsh", "fish"].map(shellAt);
 function inShellHome(fn) {
@@ -841,7 +860,7 @@ function inShellHome(fn) {
     writeFileSync(join(home, ".zprofile"), `PATH=$PATH:${login}\n`);
     mkdirSync(join(home, ".config/fish"), { recursive: true });
     writeFileSync(join(home, ".config/fish/config.fish"), [
-      "if status is-interactive", "  echo fish banner", `  set -gx PATH $PATH ${rc}`, "end",
+      "if status is-interactive", "  echo fish banner", `  set -gx PATH $PATH ${rc}`, "  function board-rc-tool; end", "end",
       "if status is-login", `  set -gx PATH $PATH ${login}`, "end", "",
     ].join("\n"));
     const run = (tool, on, shell = bash, sh = "sh") => {
@@ -2057,6 +2076,11 @@ function chainTo(el, pick) {
   return null;
 }
 
+// Picks the element with the id `id`.
+const hasId = (id) => (el) => el.with.id?.[0] === id;
+// The element with the id `id` under `el`, or null.
+const byId = (el, id) => chainTo(el, hasId(id))?.at(-1) ?? null;
+
 // The elements from `el` down to the first text `match` (a function, or a
 // text it holds), or null.
 function pathTo(el, match) {
@@ -2120,22 +2144,29 @@ test("UI: the board, its stubs and the detail beside it start at the top", async
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
   const at = b.columns(b.view()).findIndex((c) => c.hidden);
-  const stub = chainTo(root, (el) => el.with.id?.[0] === `col-${at}`);
+  const stub = chainTo(root, hasId(`col-${at}`));
   assert.ok(stub, "a stub");
   assert.deepEqual(centring(stub), [], "no row centres a stub");
   assert.equal(stub.at(-1).styles.includes("h_full"), false, "a stub keeps its own height");
 });
 
-// Whether `child` takes its height from `parent`: in a column by flex_1, in
-// a row by the row's stretch or its own h_full.
-const heightFrom = (parent, child) =>
-  isRow(parent) ? crossAlign(parent) === "items_stretch" || child.styles.includes("h_full") : child.styles.includes("flex_1");
+// A column: a v_flex, or a div made flex with flex_col.
+const isColumn = (el) => el.kind === "v_flex" || (el.kind === "div" && el.styles.includes("flex") && el.styles.includes("flex_col"));
+// Whether `child` takes its height from `parent`: in a column by flex_1 and
+// min_h(0) (it may be lower than its content), in a row by the row's
+// stretch or its own h_full, in a plain block by its own h_full.
+const heightFrom = (parent, child) => {
+  if (isColumn(parent)) return child.styles.includes("flex_1") && child.with.min_h?.[0] === 0;
+  if (isRow(parent)) return crossAlign(parent) === "items_stretch" || child.styles.includes("h_full");
+  return child.styles.includes("h_full");
+};
 
 test("UI: a column's card list takes its height from the board, step by step, and scrolls in it", async () => {
   const { b } = await openBoard();
   const root = b.render();
   const at = b.columns(b.view()).findIndex((c) => !c.hidden && c.shown.length);
-  const chain = chainTo(root, (el) => el.with.id?.[0] === `cards-${at}`);
+  assert.ok(root.styles.includes("size_full"), "the board fills its block");
+  const chain = chainTo(root, hasId(`cards-${at}`));
   assert.ok(chain, "a card list");
   chain.slice(1).forEach((child, i) => assert.ok(heightFrom(chain[i], child), `step ${i + 1}: a ${child.kind} in a ${chain[i].kind}`));
   const list = chain.at(-1);
@@ -2155,17 +2186,6 @@ const openBoardCopy = (file) => {
   const at = src.indexOf("// ---- openBoard:");
   return at < 0 ? null : src.slice(at, src.indexOf("// ---- end openBoard ----", at));
 };
-
-// The element with the id `id` under `el`, or null.
-function byId(el, id) {
-  if (!el || typeof el === "string") return null;
-  if (el.with.id?.[0] === id) return el;
-  for (const kid of el.kids) {
-    const found = byId(kid, id);
-    if (found) return found;
-  }
-  return null;
-}
 
 test("the board button shows the board with the leader's own openBoard, the same text in both", () => {
   const button = openBoardCopy(join(buttonDir, "main.js"));

@@ -284,8 +284,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   error, and a write without a clear answer refreshes the board and then says
   where the card is. It runs gh and az by the path my shell gives on their
   machine, since herdr's own PATH lacks Homebrew and mise; on another
-  machine without sh (Windows), when herdr says it cannot start sh there, it
-  runs them by name. `mise run herdr-board-test`
+  machine where herdr cannot start sh (Windows) it runs them by name. Known
+  limit, not tried: az on Windows is `az.cmd`, which a start by bare name
+  may not find. `mise run herdr-board-test`
   (without mise, `node --test tests/herdr-app/board.test.mjs` from the repo)
   tests its data functions and a few of its key paths against sample answers
   of gh, GitHub and az; the test file's header says which are recorded, which

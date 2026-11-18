@@ -779,6 +779,9 @@ const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
 const notInstalled = (tool, on, note = "") =>
   new BoardError(`${toolOn(tool, on)} ist nicht installiert${note ? ` (${note})` : ""}`, { unavailable: tool === "az" });
 
+// A program that would not start, with exec's words for why.
+const notStarted = (tool, on, msg) => new BoardError(`${toolOn(tool, on)} ließ sich nicht starten: ${msg}`);
+
 // An exec that could not run at all (exec rejected). An unreachable machine
 // or a failed start is an error; a missing program is notInstalled. With
 // `write`, a timeout, or any other failure of a call on another machine,
@@ -790,7 +793,7 @@ export function execRejection(tool, error, timeoutMs, on = null, { write = false
   if (NOT_INSTALLED.test(msg)) return notInstalled(tool, on);
   if (TIMED_OUT.test(msg)) return failure(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { write, unclear: true });
   if (write && on) return failure(`${who}: ${msg}`, { write, unclear: true });
-  return new BoardError(`${who} ließ sich nicht starten: ${msg}`);
+  return notStarted(tool, on, msg);
 }
 
 // ---- Finding gh and az -----------------------------------------------------
@@ -889,13 +892,14 @@ export async function findTool(execute, tool, on, timeoutMs) {
 }
 
 // Runs gh and az by what findTool finds, per machine and program. A found
-// program is kept until reset (on `r`); one lookup runs at a time per
-// machine and program, and one that fails is not kept, so the next run asks
-// again. When a run finds the program gone from its path (exec's words for
-// a missing program), that lookup is forgotten, unless a newer one has taken
-// its place, and the shell is asked once more: the program never started,
-// so even a write may run again. Gone a second time, the run fails; a bare
-// name is not asked for again.
+// program is kept until reset (on `r`); runs at the same time share one
+// lookup per machine and program, and one that fails is not kept, so the
+// next run asks again. When a run finds the program gone from its path
+// (exec's words for a missing program), that lookup is forgotten (a newer
+// one that has taken its place is kept) and the run starts again from the
+// current lookup, asking the shell if there is none: the program never
+// started, so even a write may run again. Gone a second time, the run fails
+// and the next run asks again; a bare name is not asked for again.
 export function toolPaths(execute) {
   const known = new Map();
   return {
@@ -917,7 +921,7 @@ export function toolPaths(execute) {
           const msg = firstLine(e?.message ?? e);
           if (bare || !NOT_INSTALLED.test(msg)) throw e;
           if (known.get(key) === lookup) known.delete(key);
-          if (again) throw new BoardError(`${toolOn(tool, on)} ließ sich nicht starten: ${msg}`);
+          if (again) throw notStarted(tool, on, msg);
         }
       }
     },
