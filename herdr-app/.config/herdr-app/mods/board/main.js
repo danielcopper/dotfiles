@@ -31,8 +31,11 @@
 //
 // Calls: a GitHub view costs one gh call per refresh, an Azure view one az
 // call, plus up to two more (az's defaults and the work item types) on its
-// first load and after each `r`. A view refreshes when the board opens, on
-// `r`, after `x`, when it is shown again older than refreshMinutes, and every
+// first load and after each `r`. Before the first gh or az call on a
+// machine, and again after `r`, one sh call asks the person's shell there for
+// the program's path (toolPaths); a program it does not find is asked for
+// again at the next call. A view refreshes when the board opens, on `r`,
+// after `x`, when it is shown again older than refreshMinutes, and every
 // refreshMinutes while its tab shows. Opening the board and `r` also try the
 // Azure views not shown, to learn whether they are available, and the timer
 // tries an unavailable view again every refreshMinutes.
@@ -762,6 +765,14 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
+// exec's words for a program that is not there, and for a timeout.
+const NOT_INSTALLED = /program not found|no such file or directory|command not found|not installed|ENOENT/i;
+const TIMED_OUT = /time(d)?[ -]?out/i;
+const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
+
+// A program that is not there. Only a missing az makes its view unavailable.
+const notInstalled = (tool, on) => new BoardError(`${toolOn(tool, on)} ist nicht installiert`, { unavailable: tool === "az" });
+
 // An exec that could not run at all (exec rejected). Only a missing az makes
 // its view unavailable; an unreachable machine or a failed start is an error.
 // With `write`, a timeout, or any other failure of a call on another machine,
@@ -769,13 +780,93 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
 // changed nothing.
 export function execRejection(tool, error, timeoutMs, on = null, { write = false } = {}) {
   const msg = firstLine(error?.message ?? error);
-  const who = on ? `${tool} auf ${on}` : tool;
-  if (/program not found|no such file or directory|command not found|not installed|ENOENT/i.test(msg)) {
-    return new BoardError(`${who} ist nicht installiert`, { unavailable: tool === "az" });
-  }
-  if (/time(d)?[ -]?out/i.test(msg)) return failure(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { write, unclear: true });
+  const who = toolOn(tool, on);
+  if (NOT_INSTALLED.test(msg)) return notInstalled(tool, on);
+  if (TIMED_OUT.test(msg)) return failure(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { write, unclear: true });
   if (write && on) return failure(`${who}: ${msg}`, { write, unclear: true });
   return new BoardError(`${who} ließ sich nicht starten: ${msg}`);
+}
+
+// ---- Finding gh and az -----------------------------------------------------
+
+// herdr runs a program with the PATH it was started with, which may lack
+// what the person's shell adds (Homebrew, mise). So gh and az run by the
+// absolute path that shell gives on their machine, the way herdr starts
+// agents (AGENTS.md, programs.json): interactive here, login and interactive
+// on another machine. Its startup files may print anything (a banner), so
+// the answer stands between markers.
+export const WHICH_START = "<<board-which>>";
+export const WHICH_END = "<</board-which>>";
+
+// Prints the path of the program named in $1 (a name of this file's own,
+// never one from views.json) as the person's shell finds it, between the
+// markers; "login" in $2 starts that shell as a login shell too. The shell is
+// $SHELL, else the account's; sh, bash, zsh, dash, ksh and fish run as
+// themselves, any other shell (or none) as /bin/sh with the same flags.
+export const WHICH_SCRIPT = [
+  'shell=${SHELL:-$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)}',
+  "case ${shell##*/} in sh|bash|zsh|dash|ksh|fish) ;; *) shell=/bin/sh ;; esac",
+  'if [ "$2" = login ]; then set -- "$1" -l -i; else set -- "$1" -i; fi',
+  "tool=$1",
+  "shift",
+  `exec "$shell" "$@" -c "printf '%s' '${WHICH_START}'; command -v $tool; printf '%s' '${WHICH_END}'"`,
+].join("\n");
+
+export const whichArgs = (tool, on) => ["-c", WHICH_SCRIPT, "board-which", tool, on ? "login" : ""];
+
+// The shell's answer from what it printed: the text between the last pair of
+// markers, trimmed ("" when the shell does not find the program), or null
+// when there is no such pair.
+export function readWhich(stdout) {
+  const text = String(stdout ?? "");
+  const end = text.lastIndexOf(WHICH_END);
+  const start = end < 0 ? -1 : text.lastIndexOf(WHICH_START, end);
+  return start < 0 ? null : text.slice(start + WHICH_START.length, end).trim();
+}
+
+// The absolute path of a program on a machine (on: null here), asked of the
+// shell there with `execute` (herdr's exec). Not there: notInstalled. A shell
+// that could not be asked, or gave no answer or no path, says so instead.
+export async function findTool(execute, tool, on, timeoutMs) {
+  const unknown = `Pfad von ${toolOn(tool, on)} nicht ermittelt`;
+  let r;
+  try {
+    r = await execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs });
+  } catch (e) {
+    const msg = firstLine(e?.message ?? e);
+    throw new BoardError(TIMED_OUT.test(msg) ? `${unknown}: die Shell antwortete nicht in ${Math.round(timeoutMs / 1000)} s` : `${unknown}: ${msg}`);
+  }
+  const answer = readWhich(r.stdout);
+  if (answer === null) throw new BoardError(`${unknown}: die Shell endete mit ${r.code} ohne Antwort`);
+  if (answer === "") throw notInstalled(tool, on);
+  if (!answer.startsWith("/")) throw new BoardError(`${unknown}: die Shell kennt nur „${firstLine(answer)}“, kein Programm`);
+  return answer;
+}
+
+// The paths findTool found, per machine and program, kept until reset (on
+// `r`) or until the program is gone from its path (forget). One question is
+// asked at a time per machine and program; one that fails is not kept, so
+// the next call asks again.
+export function toolPaths(execute) {
+  const known = new Map();
+  const id = (tool, on) => `${on ?? ""}\n${tool}`;
+  return {
+    path(tool, on, timeoutMs) {
+      const key = id(tool, on);
+      if (!known.has(key)) {
+        const asked = findTool(execute, tool, on, timeoutMs);
+        known.set(key, asked);
+        asked.catch(() => known.get(key) === asked && known.delete(key));
+      }
+      return known.get(key);
+    },
+    forget(tool, on) {
+      known.delete(id(tool, on));
+    },
+    reset() {
+      known.clear();
+    },
+  };
 }
 
 // ---- Board state -----------------------------------------------------------
@@ -1017,19 +1108,23 @@ const TICK_MS = 30000;
 const SCROLLS = 24;
 
 // One run of a program: its result, or a BoardError when it could not run.
-// `write` is for calls that change something (see execRejection).
-async function call(tool, args, on, timeout, { write = false } = {}) {
+// With `paths` (toolPaths) it runs by the path found there, which is
+// forgotten when the program is no longer at it. `write` is for calls that
+// change something (see execRejection).
+async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
+  const program = paths ? await paths.path(tool, on, timeout) : tool;
   try {
-    return await exec(tool, args, { on, timeout });
+    return await exec(program, args, { on, timeout });
   } catch (e) {
+    if (paths && NOT_INSTALLED.test(firstLine(e?.message ?? e))) paths.forget(tool, on);
     throw execRejection(tool, e, timeout, on, { write });
   }
 }
 
-const gh = async (args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, options), options);
+const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
-async function az(view, args, options = {}) {
-  const r = await call("az", args, view.on, AZ_TIMEOUT, options);
+async function az(paths, view, args, options = {}) {
+  const r = await call("az", args, view.on, AZ_TIMEOUT, { ...options, paths });
   if (r.code !== 0) throw azFailure(r, view.on, options);
   return r.stdout;
 }
@@ -1039,8 +1134,8 @@ async function az(view, args, options = {}) {
 // sidebar's tag, the name of the site `o` opens, whether `r` and opening the
 // board try its views while not shown (`probe`), and what `r` forgets
 // (`reset`). Azure keeps each view's work item types (parseAzureTypes) until
-// then.
-function makeSources() {
+// then. gh and az run by the paths `paths` (toolPaths) finds.
+function makeSources(paths) {
   let azureTypes = {};
   return {
     github: {
@@ -1050,15 +1145,15 @@ function makeSources() {
       reset() {},
       async load(view, hiddenFor) {
         if (view.layout === "list") {
-          const { json, warnings, errors } = await gh(githubListArgs(view));
+          const { json, warnings, errors } = await gh(paths, githubListArgs(view));
           return { data: parseGithubList(json, view, errors), warnings };
         }
         const hidden = hiddenFor(view, []);
-        const { json, warnings, errors } = await gh(githubBoardArgs(view, hidden));
+        const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden));
         return { data: parseGithubBoard(json, view, hidden, errors), warnings };
       },
       async move(view, data, card, column) {
-        checkMoveResult((await gh(githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
+        checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
       },
     },
     azure: {
@@ -1070,16 +1165,16 @@ function makeSources() {
       },
       async load(view, hiddenFor) {
         if (!azureTypes[view.id]) {
-          const project = view.project ?? parseAzureDefaults(await az(view, azureDefaultsArgs())).project;
+          const project = view.project ?? parseAzureDefaults(await az(paths, view, azureDefaultsArgs())).project;
           if (!project) throw new BoardError(AZ_NO_PROJECT);
-          azureTypes[view.id] = parseAzureTypes(await az(view, azureTypesArgs(view, project)));
+          azureTypes[view.id] = parseAzureTypes(await az(paths, view, azureTypesArgs(view, project)));
         }
         const types = azureTypes[view.id];
         const hidden = hiddenFor(view, types.states);
-        return { data: parseAzureBoard(await az(view, azureQueryArgs(view, hidden)), types, hidden), warnings: [] };
+        return { data: parseAzureBoard(await az(paths, view, azureQueryArgs(view, hidden)), types, hidden), warnings: [] };
       },
       async move(view, _data, card, column) {
-        await az(view, azureMoveArgs(view, card, column), { write: true });
+        await az(paths, view, azureMoveArgs(view, card, column), { write: true });
       },
     },
   };
@@ -1135,7 +1230,8 @@ export default class Board extends View {
     this.notice = null; // { text, level }
     this.drag = null; // { key, from }
     this.over = null; // the column index under a drag
-    this.sources = makeSources();
+    this.paths = toolPaths(exec);
+    this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
     this.scrolls = Array.from({ length: SCROLLS }, () => ScrollHandle.new());
     this.listScroll = ScrollHandle.new();
@@ -1220,6 +1316,7 @@ export default class Board extends View {
       });
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
       for (const source of Object.values(this.sources)) source.reset();
+      this.paths.reset();
       cx.notify();
       if (!this.config) return;
       // Open outcomes of a view that is gone, or is now of another kind than
