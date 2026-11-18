@@ -3,9 +3,10 @@
 // folder's outside a repo; "changes" lists the repo's changed files, each
 // marked staged, unstaged (both when it has both), untracked or conflict,
 // with git's letter (M modified, A added, D deleted, T type changed). Typing
-// filters (case-insensitive substring, as the picker does), up/down or
-// ctrl-j/ctrl-k move, Enter or a click opens the file in nvim in a new pane
-// right of the focused one, on the same machine, and Esc closes.
+// filters (case-insensitive substring, as the picker does), up/down,
+// ctrl-j/ctrl-k or ctrl-n/ctrl-p move, Enter or a click opens the file in
+// nvim in a new pane right of the focused one, on the same machine, and Esc
+// closes.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -242,8 +243,8 @@ export default class FilePopup extends View {
       .on_key_down((e, cx) => {
         const k = e.key, ctrl = e.modifiers?.control;
         if (k === "escape") return this.close();
-        if (k === "down" || (ctrl && k === "j")) this.move(1);
-        else if (k === "up" || (ctrl && k === "k")) this.move(-1);
+        if (k === "down" || (ctrl && (k === "j" || k === "n"))) this.move(1);
+        else if (k === "up" || (ctrl && (k === "k" || k === "p"))) this.move(-1);
         else return;
         cx.stop_propagation();
         cx.notify();
