@@ -354,11 +354,15 @@ print_clashes() {
 
 stage_of() { echo "$HOME/$1.unfolding"; }
 
+# package_dir <package> <rel>: true when the package has a real directory at
+# <rel>.
+package_dir() { [ -d "$DIR/$1/$2" ] && [ ! -L "$DIR/$1/$2" ]; }
+
 # dir_belongs <rel> [<package>]: true when a directory belongs at ~/<rel>:
 # when it is one of the directories to make real, or a directory at <rel> in
 # the package.
 dir_belongs() {
-  in_list "$1" "${real_dirs[@]}" || { [ -n "${2:-}" ] && [ -d "$DIR/$2/$1" ] && [ ! -L "$DIR/$2/$1" ]; }
+  in_list "$1" "${real_dirs[@]}" || { [ -n "${2:-}" ] && package_dir "$2" "$1"; }
 }
 
 # Staging directories left alone where no directory belongs; the run names
@@ -615,8 +619,8 @@ below_link() {
 # fold stow handles or reports; and it does not lead into this repo, as a
 # link stow made does.
 backup_moves() {
-  local entry="$DIR/$1/$2" target="$HOME/$2"
-  if [ -d "$entry" ] && [ ! -L "$entry" ]; then return 1; fi
+  local target="$HOME/$2"
+  package_dir "$1" "$2" && return 1
   in_list "$1/$2" "${reference_copies[@]}" && return 1
   in_list "$2" "${left_alone[@]}" && return 1
   if [ ! -e "$target" ] && [ ! -L "$target" ]; then return 1; fi
@@ -630,8 +634,8 @@ backup_moves() {
 # made real like the directories above, so what git does not track there moves
 # along. A dangling link into a worktree of this repo is removed, and any other
 # link, except stow's own into this package, is left alone, as above; one the
-# backup below moves (backup_moves) goes there instead with --backup, named in
-# one line, unless a staging directory sits beside it. The directories above
+# backup below moves (backup_moves) goes there instead with --backup, which
+# names it, unless a staging directory sits beside it. The directories above
 # are skipped: the pass above handles each of them.
 for pkg in "${pkgs[@]}"; do
   top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
@@ -642,14 +646,13 @@ for pkg in "${pkgs[@]}"; do
     if [ -L "$live" ] && ! drop_dangling "$rel"; then
       if ! fold="$(fold_of "$live" "$rel")"; then
         why="$(not_fold_why "$rel")"
+        # Otherwise, with --backup, the backup below moves it and names it.
         if ! backup_moves "$pkg" "$rel"; then
           leave_alone "$rel" "$why" "$pkg"
         elif [ -z "$backup" ]; then
-          leave_alone "$rel" "$why; remove or move it, then run this again" "$pkg"
+          leave_alone "$rel" "$why" "$pkg" "remove or move the link, then run this again"
         elif stray_stage "$rel" "$pkg"; then
           leave_alone "$rel" "$why" "$pkg" "then run this again, and the backup takes the link"
-        else
-          echo "$live -> $(readlink -- "$live"): $why; it goes into the backup"
         fi
         continue
       fi
@@ -703,6 +706,11 @@ if [ -n "$backup" ]; then
       if [ -z "$backup_dir" ]; then
         backup_dir="$HOME/.dotfiles-pre-stow.$(date +%Y%m%d-%H%M%S)"
         echo "backing up pre-existing files to $backup_dir"
+      fi
+      if [[ "$rel" != */* ]] && [ -L "$target" ]; then
+        # A top-level link the pass above let through, as no fold.
+        why="$(not_fold_why "$rel")"
+        echo "$target -> $(readlink -- "$target"): $why; it goes into the backup"
       fi
       mkdir -p "$backup_dir/$(dirname -- "$rel")"
       mv -- "$target" "$backup_dir/$rel"

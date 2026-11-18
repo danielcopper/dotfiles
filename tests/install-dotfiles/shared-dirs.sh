@@ -132,9 +132,9 @@
 #   s75 beside such a link to a file where a directory belongs, the run says
 #       to move the link elsewhere; once it is gone, the next run puts the
 #       staging directory in its place
-#   s76 beside such a link where a file belongs, without --backup, it says to
-#       remove or move the link, that no directory belongs there, and names the
-#       staging directory at the end
+#   s76 beside such a link where a file belongs, without --backup, it says
+#       that no directory belongs there, then to remove or move the link, and
+#       names the staging directory at the end
 #   s77 a staging directory beside a link to a file in another worktree, which
 #       is relinked, is named as in s72
 #   s78 s67 with files the app wrote through the fold: the run names them and
@@ -165,6 +165,8 @@
 #       into the backup, named with git's error
 #   s89 with --backup, a top-level link into the repo that is no fold is left
 #       alone and not backed up
+#   s90 with --backup, a run that stops before the backup on a staging
+#       directory beside a fold says of no link that it goes into the backup
 # usage: shared-dirs.sh [installer] [case ...]
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them.
@@ -1211,7 +1213,7 @@ s70_dangling_top_level_link_outside_worktrees_kept() {
   check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" /nonexistent/.bashrc
   check ".inputrc left as it is" eq "$(readlink -- "$HOME/.inputrc")" "$ROOT/elsewhere/.inputrc"
   check "removes nothing" eq "$(grep -c '^removed ' <<<"$OUT")" 0
-  check "says it left .bashrc alone" left_alone_line .bashrc "its target does not exist; remove or move it, then run this again"
+  check "says it left .bashrc alone" left_alone_line .bashrc "its target does not exist; remove or move the link, then run this again"
   check "stow names the conflict" grep -q "existing target is not owned by stow: .bashrc" <<<"$OUT"
 }
 
@@ -1241,9 +1243,10 @@ expect_stray_stage() {
   check "names it at the end" stray_closing_line "$stage"
 }
 
-# stray_closing_line <stage>: the run's closing lines name it.
+# stray_closing_line <stage>: the run's closing lines name it, and only it.
 stray_closing_line() {
-  eq "$(grep -A1 -xF "stow-packages.sh: no directory belongs beside these staging directories any more; move each elsewhere, or remove it if you need nothing in it:" <<<"$OUT" | tail -1)" "  $1"
+  local header="stow-packages.sh: no directory belongs beside these staging directories any more; move each elsewhere, or remove it if you need nothing in it:"
+  eq "$(awk -v h="$header" 'f { print } $0 == h { f = 1 }' <<<"$OUT")" "  $1"
 }
 
 s72_stage_beside_link_to_package_file_named() {
@@ -1304,7 +1307,7 @@ s76_stage_beside_link_to_file_where_file_belongs() {
   run_relink bash
   check "exit 1 (got $RC)" eq "$RC" 1
   check "says it does not belong" left_alone_line .bashrc \
-    "it points outside this repo; remove or move it, then run this again; $HOME/.bashrc.unfolding holds what an earlier run staged for it; no directory belongs here any more: move $HOME/.bashrc.unfolding elsewhere, or remove it if you need nothing in it"
+    "it points outside this repo; $HOME/.bashrc.unfolding holds what an earlier run staged for it; no directory belongs here any more: move $HOME/.bashrc.unfolding elsewhere, or remove it if you need nothing in it; remove or move the link, then run this again"
   check "names it at the end" stray_closing_line "$HOME/.bashrc.unfolding"
 }
 
@@ -1356,8 +1359,8 @@ s83_relink_says_to_move_foreign_links() {
   foreign_top_level_links
   run_relink bash inputrc
   check "exit non-zero (got $RC)" test "$RC" -ne 0
-  check "says what to do with .bashrc" left_alone_line .bashrc "it points outside this repo; remove or move it, then run this again"
-  check "says what to do with .inputrc" left_alone_line .inputrc "its target does not exist; remove or move it, then run this again"
+  check "says what to do with .bashrc" left_alone_line .bashrc "it points outside this repo; remove or move the link, then run this again"
+  check "says what to do with .inputrc" left_alone_line .inputrc "its target does not exist; remove or move the link, then run this again"
   check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$ROOT/elsewhere/file"
   check ".inputrc left as it is" eq "$(readlink -- "$HOME/.inputrc")" /nonexistent/.inputrc
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
@@ -1456,10 +1459,13 @@ s88_backup_names_link_into_unreadable_worktree() {
   git -C "$COPY" worktree add -q --detach "$ROOT/pruned"
   rm -rf "$COPY/.git/worktrees/pruned"
   ln -s "$ROOT/pruned/bash/.bashrc" "$HOME/.bashrc"
+  local error
+  error=$(git -C "$ROOT/pruned/bash" rev-parse --git-common-dir 2>&1 >/dev/null)
   run_stow --backup bash
   check "exit 0 (got $RC)" eq "$RC" 0
-  check "names it with git's error" grep -qx \
-    "$HOME/.bashrc -> $ROOT/pruned/bash/.bashrc: git cannot read where it points: .*; it goes into the backup" <<<"$OUT"
+  check "git's error is one line" eq "$(wc -l <<<"$error")" 1
+  check "names it with git's error" grep -qxF \
+    "$HOME/.bashrc -> $ROOT/pruned/bash/.bashrc: git cannot read where it points: $error; it goes into the backup" <<<"$OUT"
   check "the link in the backup" eq "$(backed_up_link .bashrc)" "$ROOT/pruned/bash/.bashrc"
   check ".bashrc linked" linked_to .bashrc "$COPY/bash/.bashrc"
 }
@@ -1470,6 +1476,18 @@ s89_backup_keeps_link_into_repo_left_alone() {
   check "exit 1 (got $RC)" eq "$RC" 1
   check "says it left it alone" left_alone_line .bashrc "it points into this repo, but not at .bashrc in a package"
   check "the link left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$COPY/README.md"
+  check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
+}
+
+s90_backup_line_only_where_the_backup_runs() {
+  foreign_top_level_links
+  fold .githooks "$COPY/git"
+  mkdir -p "$HOME/.githooks.unfolding"
+  run_stow --backup bash git
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "stops on the staging directory" grep -q "^stow-packages.sh: $HOME/.githooks.unfolding holds " <<<"$OUT"
+  check "says nothing goes into the backup" eq "$(grep -c 'goes into the backup' <<<"$OUT")" 0
+  check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$ROOT/elsewhere/file"
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
 }
 
@@ -1508,7 +1526,7 @@ all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_p
   s83_relink_says_to_move_foreign_links s84_backup_takes_nested_foreign_link
   s85_dangling_link_beside_stage_where_dir_belongs s86_own_fold_listing_failure_says_what_to_do
   s87_own_fold_app_file_staged_too_merged s88_backup_names_link_into_unreadable_worktree
-  s89_backup_keeps_link_into_repo_left_alone)
+  s89_backup_keeps_link_into_repo_left_alone s90_backup_line_only_where_the_backup_runs)
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
