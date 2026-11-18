@@ -19,7 +19,10 @@ every mod under herdr-app/.config/herdr-app/mods/, comments included:
   not: it must be a mod folder in this repo or in the live mods folder.
   An openOverlay( call whose object has no literal `mod` at its top level
   (a `mod` inside its props does not count) fails too, so the check does
-  not support openOverlay({ layout }); no mod here uses it.
+  not support openOverlay({ layout }); no mod here uses it;
+- the mod of a tab.new or pane.split run() call that names a literal `mod`
+  at its top level (`run("tab.new", { name: "Arbeit", mod: "board" })`),
+  by the same rule; one without a `mod` opens a terminal and passes.
 
 It also checks every action in the package's keys.json, the other place
 that names commands: `name` or `name:value` must be a documented command
@@ -54,6 +57,8 @@ FILE_TYPES = {"js", "json", "md", "svg", "png", "ts", "toml"}
 DOCUMENTED = re.compile(r"\b([a-z]+)\.([a-z_]+(?:\|[a-z_]+)*)\b")
 SHAPED = re.compile(r"""(["'`])([A-Za-z]+\.[A-Za-z_-]+)\1""")
 RUN = re.compile(r"""\brun\(\s*(["'`])([^"'`]*)\1""")
+# The app commands whose `mod` argument opens a mod.
+MOD_COMMANDS = {"tab.new", "pane.split"}
 Q = r"""["'`]"""
 MOD_OPEN = re.compile(rf"""{Q}mod\.open{Q}\s*,\s*\{{\s*{Q}?name{Q}?\s*:\s*{Q}([^"'`]+){Q}""")
 OPEN_OVERLAY = re.compile(r"\bopenOverlay\(")
@@ -166,6 +171,11 @@ def main():
                 overlays.append(found.group(1))
             else:
                 findings.append(f"{where}: openOverlay( without a literal mod at offset {call.start()}")
+        for call in RUN.finditer(text):
+            if call.group(2) in MOD_COMMANDS:
+                found = OVERLAY_MOD.search(call_top_level(text, text.index("(", call.start())))
+                if found:
+                    overlays.append(found.group(1))
         for name in MOD_OPEN.findall(text) + overlays:
             checked.add(f"mod {name}")
             if name not in mods:

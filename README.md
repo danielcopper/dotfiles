@@ -235,7 +235,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   run it after changing a mod or a key. It needs python3 and a herdr app
   that has started once, since herdr writes the files it reads into
   `~/.config/herdr-app`. The header of `tests/herdr-app/check-commands.py`
-  says what it checks in detail.
+  says what it checks in detail; `mise run herdr-app-check --test` runs the
+  check's own tests.
 - **tmux inside herdr keeps `ctrl-space` as its prefix.** `ctrl-space
   ctrl-space <key>` gives `<key>` to the tmux in the focused terminal as if
   typed after tmux's prefix, so a tmux inside herdr needs no second prefix;

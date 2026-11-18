@@ -4,10 +4,14 @@
 # script's header, tests/herdr-app/check-commands.py.
 #
 # Usage: mise run herdr-app-check [herdr-app home]   (defaults to ~/.config/herdr-app)
+#        mise run herdr-app-check --test             (the check's own tests)
 set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
 script="$dotfiles/tests/herdr-app/check-commands.py"
 [ -f "$script" ] || { echo "herdr-app-check: no such file: $script" >&2; exit 1; }
 
+if [ "${1:-}" = --test ]; then
+  exec python3 -I "$dotfiles/tests/herdr-app/check-commands-test.py"
+fi
 exec python3 -I "$script" "$@"
