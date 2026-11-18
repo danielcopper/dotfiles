@@ -92,7 +92,7 @@ ruling on that list replaces step 3 for all tasks.
 2. **Validate empirically**: run, mutate, probe, cite source lines and exit codes; read the installed library source
    rather than trusting memory. `cmd | tail` returns `tail`'s exit code (use `${PIPESTATUS[0]}`); force flaky failures
    to repeat (e.g. `--testTimeout=1`). A real code path is not a reachable one
-   (`~/.claude/memory/verification-reachability.md`).
+   (`~/Memory/global/verification-reachability.md`).
 3. Report the evidence with your lean (post / skip), then wait: post, skip, shorter, more proof, or a draft to show
    first.
 4. Post or drop per the platform file's Phase 5, and record the outcome.

@@ -149,7 +149,6 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
 ├── review-agents.md              # Which review agents run, fix rounds, finding routing
 ├── agents/                       # Custom subagents (Workflow system → Agents)
 ├── skills/                       # User-invoked skills (implement, epic, plan-epic, …)
-├── memory/                       # Global personal memory (see ~/Memory/global/README.md)
 └── hooks/
     ├── config.toml               # Hook toggles, TTS config, security
     ├── block_ai_attribution.py   # Commit guard: no AI attribution
