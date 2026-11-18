@@ -62,7 +62,7 @@ MOD_COMMANDS = {"tab.new", "pane.split"}
 Q = r"""["'`]"""
 MOD_OPEN = re.compile(rf"""{Q}mod\.open{Q}\s*,\s*\{{\s*{Q}?name{Q}?\s*:\s*{Q}([^"'`]+){Q}""")
 OPEN_OVERLAY = re.compile(r"\bopenOverlay\(")
-OVERLAY_MOD = re.compile(rf"""{Q}?\bmod{Q}?\s*:\s*{Q}([^"'`]+){Q}""")
+MOD_ARG = re.compile(rf"""{Q}?\bmod{Q}?\s*:\s*{Q}([^"'`]+){Q}""")
 
 
 def call_top_level(text, start):
@@ -164,19 +164,19 @@ def main():
             checked.add(name)
             if name not in known and name not in NOT_COMMANDS:
                 findings.append(f"{where}: unknown app command {name!r}")
-        overlays = []
+        opened = []
         for call in OPEN_OVERLAY.finditer(text):
-            found = OVERLAY_MOD.search(call_top_level(text, call.end() - 1))
+            found = MOD_ARG.search(call_top_level(text, call.end() - 1))
             if found:
-                overlays.append(found.group(1))
+                opened.append(found.group(1))
             else:
                 findings.append(f"{where}: openOverlay( without a literal mod at offset {call.start()}")
         for call in RUN.finditer(text):
             if call.group(2) in MOD_COMMANDS:
-                found = OVERLAY_MOD.search(call_top_level(text, text.index("(", call.start())))
+                found = MOD_ARG.search(call_top_level(text, text.index("(", call.start())))
                 if found:
-                    overlays.append(found.group(1))
-        for name in MOD_OPEN.findall(text) + overlays:
+                    opened.append(found.group(1))
+        for name in MOD_OPEN.findall(text) + opened:
             checked.add(f"mod {name}")
             if name not in mods:
                 findings.append(f"{where}: no mod named {name!r}")

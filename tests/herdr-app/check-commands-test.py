@@ -62,7 +62,9 @@ class ModInNewTabs(unittest.TestCase):
         self.assertIn("PASS", out)
 
     def test_a_mod_inside_props_is_not_the_tabs(self):
-        code, out = check({"a": 'run("tab.new", { name: "A", mod: "b", props: { mod: "nosuch" } });', "b": "// b"})
+        code, out = check({"a": 'run("tab.new", { props: { mod: "nosuch" }, name: "A" });'})
+        self.assertEqual(code, 0, out)
+        code, out = check({"a": 'run("tab.new", { props: { mod: "nosuch" }, mod: "b" });', "b": "// b"})
         self.assertEqual(code, 0, out)
 
 
