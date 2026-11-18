@@ -691,14 +691,14 @@ test("on a write, only az's known refusal forms are refusals; any other failure 
     "ERROR: Keyboard interrupt is captured.",
     "", // killed, or az's silent Ctrl-C (knack exits 1 without output)
     "The work item does not exist", // a refusal's words, but no ERROR: line
+    // azure-devops-cli-extension, azext_devops/dev/boards/work_item.py: a query helper's, not a write's.
+    "ERROR: Work Item 102 was not found in the original query results.",
   ]) {
     assert.equal(unclear(err), true, err);
   }
   for (const err of [
     "ERROR: TF401320: Rule Error for field State. Error code: Required, InvalidEmpty.",
     "ERROR: TF401232: Work item 9 does not exist, or you do not have permissions to read it.",
-    // azure-devops-cli-extension, azext_devops/dev/boards/work_item.py
-    "ERROR: Work Item 102 was not found in the original query results.",
     "ERROR: argument --state: expected one argument",
     "ERROR: the following arguments are required: --id",
     "ERROR: unrecognized arguments: --stat New",
@@ -1234,9 +1234,53 @@ test("UI: a write under way while r makes its view a list leaves nothing open", 
   await press(b, cx, "r");
   await host.answer("gh", ok(fixture("github-list.json")), "search(");
   await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s", "no follow-up promised");
   assert.deepEqual(b.views.mine.unclear, []);
   assert.equal(host.open("gh").length, 0, "no refresh of a board that is gone");
   assert.equal(b.views.mine.error, null);
+});
+
+test("UI: a write under way while r removes its view promises no follow-up", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  host.config = JSON.stringify({ ...JSON.parse(testConfig()), views: JSON.parse(testConfig()).views.filter((v) => v.id !== "mine") });
+  await press(b, cx, "r");
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s");
+  assert.deepEqual(b.views.mine.unclear, []);
+});
+
+test("UI: a write that ends unclear after r read an invalid views.json is told once views.json is fixed", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  host.config = "{ views: [";
+  await press(b, cx, "r");
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s; wird nach dem nächsten Neuladen gemeldet");
+  assert.equal(st().unclear.length, 1);
+  assert.equal(host.open("gh").length, 0, "nothing reloads while views.json is invalid");
+  host.config = testConfig();
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
+});
+
+test("UI: an unclear outcome waits for a later write of its card and is then told by the server's answer", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await press(b, cx, "l", shiftL);
+  assert.equal(st().pending.PVTI_rec4, true, "the second write is under way");
+  const notes = host.notes.length;
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 → In review …", "no word while the second write is open");
+  assert.equal(host.notes.length, notes);
+  assert.equal(st().unclear.length, 1);
+  const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
+  await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" }, "updateProjectV2ItemFieldValue");
+  assert.equal(host.open("gh").length, 1, "the refusal asks GitHub for the first write's outcome");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“", "by the server, not by the overlay");
 });
 
 test("UI: open outcomes of a view that is no board any more are dropped without a word", async () => {
@@ -1245,7 +1289,7 @@ test("UI: open outcomes of a view that is no board any more are dropped without 
   st.data = board.parseGithubList(json("github-list.json"), listView());
   st.unclear = [{ key: "PVTI_rec4", label: "tender#3004", to: { id: "opt-in-progress", name: "In progress" }, at: 0 }];
   b.notice = null;
-  b.settleUnclear(b.config.views[0], 1, cx);
+  b.settleUnclear(b.config.views[0], 1, st.data, cx);
   assert.deepEqual([st.unclear, b.notice], [[], null]);
 });
 

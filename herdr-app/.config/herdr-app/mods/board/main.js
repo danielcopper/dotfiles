@@ -728,13 +728,12 @@ export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht 
 const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
 // Azure's answers that it failed itself: the Azure DevOps client's
 // "Operation returned a 5xx status code.", TF400898 (an internal error), and
-// msrest's RetryError after retrying 5xx answers ("too many 503 error
-// responses"), which also names "Max retries" and is tested first.
+// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
+// error responses"), which also names "Max retries" and is tested first.
 const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
 // ERROR: answers that are a refusal: rule errors (TF401320), something that
-// does not exist or was not found, az's own argument errors, and 4xx status
-// lines.
-const AZ_REFUSED = /^TF401320\b|does not exist|not found|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+// does not exist, az's own argument errors, and 4xx status lines.
+const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
 
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
 // lines are left out; without an ERROR: line, from all it printed). Missing
@@ -1250,7 +1249,7 @@ export default class Board extends View {
         st.unavailable = null;
         st.at = Date.now();
         this.keepSelection(view);
-        this.settleUnclear(view, started, cx);
+        this.settleUnclear(view, started, data, cx);
       } catch (e) {
         if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
         else st.error = report(e);
@@ -1281,27 +1280,30 @@ export default class Board extends View {
   }
 
   // After a refresh that succeeded: where the cards of unclear writes are
-  // now, for the writes whose outcome came before that refresh started (an
-  // older one may have read before the write ended). The target column: the
+  // now, by the server's answer (`data`, without the moves laid over it), for
+  // the writes whose outcome came before that refresh started (an older one
+  // may have read before the write ended) and whose card has no write under
+  // way (that write decides first). The target column: the
   // write landed (info). Another column: a warning. Not loaded and the target
   // is hidden: said as not shown (info); not loaded while other columns are
   // hidden: not shown, it may be in any of them (warning); else not on the
   // board (warning).
-  settleUnclear(view, started, cx) {
+  settleUnclear(view, started, data, cx) {
     const st = this.state(view.id);
-    const due = st.unclear.filter((u) => u.at <= started);
+    const isDue = (u) => u.at <= started && !st.pending[u.key];
+    const due = st.unclear.filter(isDue);
     if (!due.length) return;
-    st.unclear = st.unclear.filter((u) => u.at > started);
+    st.unclear = st.unclear.filter((u) => !isDue(u));
     // A view that is no board any more has no columns to tell.
-    if (st.data?.kind !== "board") return;
+    if (data?.kind !== "board") return;
     const lines = due.map((u) => {
-      const now = findCard(st.data, u.key)?.column;
+      const now = findCard(data, u.key)?.column;
       if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };
       if (now) return { text: `${u.label} steht nach dem Neuladen in „${now.name}“, nicht in „${u.to.name}“`, warn: true };
-      if (st.data.columns.find((c) => c.id === u.to.id)?.hidden) {
+      if (data.columns.find((c) => c.id === u.to.id)?.hidden) {
         return { text: `${u.label} steht nicht in den gezeigten Spalten („${u.to.name}“ ist ausgeblendet)`, warn: false };
       }
-      const hidden = st.data.columns.filter((c) => c.hidden).map((c) => `„${c.name}“`);
+      const hidden = data.columns.filter((c) => c.hidden).map((c) => `„${c.name}“`);
       if (hidden.length) return { text: `${u.label} steht nicht in den gezeigten Spalten (ausgeblendet: ${hidden.join(", ")})`, warn: true };
       return { text: `${u.label} ist nach dem Neuladen nicht auf dem Board`, warn: true };
     });
@@ -1352,19 +1354,24 @@ export default class Board extends View {
       } catch (e) {
         st.moves = st.moves.filter((m) => m !== move);
         const why = report(e);
+        // Followed up only while views.json still has this view, of the same
+        // kind (as the last valid views.json says; an invalid one in between
+        // keeps it).
+        const followed = this.kinds?.get(view.id) === viewKind(view);
+        const current = this.config?.views.find((v) => v.id === view.id);
         if (e instanceof BoardError && e.unclear) {
-          this.say(`${label} → ${to.name}: ${why}; lädt neu`, "warning", cx);
+          if (followed) st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
+          const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
+          this.say(`${label} → ${to.name}: ${why}${next}`, "warning", cx);
           notify({ title: `Status von ${label}`, body: why, level: "warning" });
-          // Followed up only while views.json still has this view as it was.
-          const current = this.config?.views.find((v) => v.id === view.id);
-          if (current && viewKind(current) === viewKind(view)) {
-            st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
-            this.refresh(current, cx);
-          }
+          if (followed && current) this.refresh(current, cx);
         } else {
           st.data = rollback(st.data, move);
           this.say(`${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
           notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
+          // An earlier unclear write of the card waited for this one; the
+          // server's answer tells it now.
+          if (followed && current && st.unclear.some((u) => u.key === key)) this.refresh(current, cx);
         }
       } finally {
         delete st.pending[key];
