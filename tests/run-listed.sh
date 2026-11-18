@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Runs test cases from the test files that list them, for the mise tasks
-# install-dotfiles-test, memex-sync-test and shell-test.
+# Runs test cases from the test files that list them.
 # usage: run-listed.sh <task> <file>... -- [case ...]
 #   Reads each file's --list once. A failing or empty --list, a line that is
-#   no plain name ([A-Za-z_][A-Za-z0-9_]*), a name two files list, and an
-#   empty or unknown case stop the run before any file runs. A named case runs
-#   from the file that lists it; without names every file runs all of its
-#   cases. Messages start with "<task>: ". Exits 1 when any file's run failed.
+#   no plain name ([A-Za-z_][A-Za-z0-9_]*), a name listed twice, and an empty
+#   or unknown case stop the run with exit 1 before any file runs. A named
+#   case runs from the file that lists it; without names every file runs all
+#   of its cases. Messages start with "<task>: ". A file that exits non-zero
+#   is named with its code, and the run exits with the first such code.
 set -euo pipefail
 
 [ $# -gt 0 ] || { echo "usage: run-listed.sh <task> <file>... -- [case ...]" >&2; exit 2; }
@@ -36,10 +36,13 @@ for file in "${files[@]}"; do
   mapfile -t listed <<<"$list"
   for name in "${listed[@]}"; do
     if ! [[ $name =~ $name_re ]]; then
-      echo "$task: $file --list printed \"$name\", which is no case name" >&2
+      printf '%s: %s --list printed %q, which is no case name\n' "$task" "$file" "$name" >&2
       exit 1
     fi
-    if [ -n "${owner[$name]+set}" ]; then
+    if [ "${owner[$name]-}" = "$file" ]; then
+      echo "$task: $file lists case $name twice" >&2
+      exit 1
+    elif [ -n "${owner[$name]+set}" ]; then
       echo "$task: case $name is listed by ${owner[$name]} and $file" >&2
       exit 1
     fi
@@ -48,7 +51,7 @@ for file in "${files[@]}"; do
 done
 for name in "$@"; do
   [[ $name =~ $name_re ]] && [ -n "${owner[$name]+set}" ] ||
-    { echo "$task: no such case: $name" >&2; exit 1; }
+    { printf '%s: no such case: %q\n' "$task" "$name" >&2; exit 1; }
 done
 
 status=0
@@ -58,7 +61,12 @@ for file in "${files[@]}"; do
     if [ "${owner[$name]}" = "$file" ]; then cases+=("$name"); fi
   done
   if [ $# -eq 0 ] || [ ${#cases[@]} -gt 0 ]; then
-    "$file" "${cases[@]}" || status=1
+    rc=0
+    "$file" "${cases[@]}" || rc=$?
+    if [ "$rc" != 0 ]; then
+      echo "$task: $file exited with $rc" >&2
+      [ "$status" != 0 ] || status=$rc
+    fi
   fi
 done
 exit "$status"
