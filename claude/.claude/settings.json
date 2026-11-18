@@ -288,7 +288,7 @@
     "security-guidance@claude-plugins-official": true,
     "sonarqube@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
-    "tmux-agent-sidebar@hiroppy": true
+    "tmux-agent-sidebar@hiroppy": false
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
