@@ -105,6 +105,19 @@
 #   s64 a file the app writes during the swap of a top-level directory linked
 #       into another worktree also stops the next runs on the staging
 #       directory until it is gone
+#   s65 a file at ~/.claude beside a staging directory is left alone with it;
+#       the run names both once, says to move the file elsewhere, stows the
+#       other packages and exits 1; once the file is moved, the next run puts
+#       the staging directory in its place
+#   s66 the same for a file at a top-level directory of a package, ~/.githooks
+#   s67 a staging directory beside a top-level directory folded into its own
+#       package stops the run, as beside an existing directory
+#   s68 a dangling top-level link into a removed worktree, under the sibling
+#       <main>.worktrees/ or under .worktrees/, is removed and the package file
+#       linked
+#   s69 a staging directory beside such a link is put in its place
+#   s70 a dangling top-level link outside every worktree is left alone, and
+#       stow names the conflict
 # usage: shared-dirs.sh [installer] [case ...]
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them.
@@ -1009,6 +1022,109 @@ s64_top_level_clash_stops_next_run() {
   check "once it is gone exit 0 (got $RC)" eq "$RC" 0
 }
 
+# file_beside_stage <rel>: a file at ~/<rel> and a staging directory beside it
+# that holds staged.
+file_beside_stage() {
+  mkdir -p "$HOME/$1.unfolding"
+  printf 'own\n' >"$HOME/$1"
+  printf 'staged\n' >"$HOME/$1.unfolding/staged"
+}
+
+# expect_file_beside_stage_left_alone <rel>: the run left both alone, said so
+# once with what to do, and did not stop before stow.
+expect_file_beside_stage_left_alone() {
+  local live=$HOME/$1 stage=$HOME/$1.unfolding
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "the file untouched" eq "$(cat "$live")" own
+  check "the staged file untouched" eq "$(cat "$stage/staged")" staged
+  check "says once what to do" eq "$(grep -cxF "stow-packages.sh: left alone: $live: a file where a directory belongs; $stage holds what an earlier run staged for it; move $live elsewhere, and the next run puts $stage in its place" <<<"$OUT")" 1
+  check "no merge into a file" eq "$(grep -c 'Move what you want to keep' <<<"$OUT")" 0
+  check "stow names the conflict" grep -q "over existing target $1 since neither a link nor a directory" <<<"$OUT"
+}
+
+# expect_stage_put_in_place <rel>: once the file is moved elsewhere, the next
+# run puts the staging directory in its place.
+expect_stage_put_in_place() {
+  local live=$HOME/$1 stage=$HOME/$1.unfolding
+  mkdir -p "$ROOT/elsewhere"
+  mv -- "$live" "$ROOT/elsewhere/file"
+  "${@:2}"
+  check "then exit 0 (got $RC)" eq "$RC" 0
+  check "then says it finished" grep -qxF \
+    "finished making $live a real directory: moved $stage, left by an earlier run, into its place" <<<"$OUT"
+  check "then the staged file in place" eq "$(cat "$live/staged" 2>/dev/null)" staged
+}
+
+s65_file_at_claude_beside_stage_left_alone() {
+  file_beside_stage .claude
+  run_install debian
+  expect_file_beside_stage_left_alone .claude
+  check "the other packages stowed" linked_to .bashrc "$COPY/bash/.bashrc"
+  expect_stage_put_in_place .claude run_install debian
+  check "then CLAUDE.md linked" linked_to .claude/CLAUDE.md "$COPY/claude/.claude/CLAUDE.md"
+}
+
+s66_file_at_top_level_dir_beside_stage_left_alone() {
+  file_beside_stage .githooks
+  run_relink git
+  expect_file_beside_stage_left_alone .githooks
+  expect_stage_put_in_place .githooks run_relink git
+  check "then pre-commit linked" linked_to .githooks/pre-commit "$COPY/git/.githooks/pre-commit"
+}
+
+s67_stage_beside_fold_into_own_package_stops() {
+  fold .githooks "$COPY/git"
+  mkdir -p "$HOME/.githooks.unfolding"
+  printf 'staged\n' >"$HOME/.githooks.unfolding/staged"
+  run_relink git
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "names both" grep -qxF \
+    "stow-packages.sh: $HOME/.githooks.unfolding holds what an earlier run moved out of this repo for $HOME/.githooks, which exists now." <<<"$OUT"
+  check "the staged file untouched" eq "$(cat "$HOME/.githooks.unfolding/staged")" staged
+  check "the link untouched" linked_to .githooks "$COPY/git/.githooks"
+  check "nothing stowed" test ! -e "$HOME/.gitconfig"
+}
+
+s68_dangling_top_level_links_into_removed_worktrees_removed() {
+  local in_sibling=$ROOT/repo.worktrees/fix/gone/bash/.bashrc in_inner=$COPY/.worktrees/gone/inputrc/.inputrc
+  ln -s "$in_sibling" "$HOME/.bashrc"
+  ln -s "$in_inner" "$HOME/.inputrc"
+  run_relink bash inputrc
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "says it removed .bashrc" grep -qxF \
+    "removed $HOME/.bashrc: it was a link to $in_sibling, which no longer exists" <<<"$OUT"
+  check "says it removed .inputrc" grep -qxF \
+    "removed $HOME/.inputrc: it was a link to $in_inner, which no longer exists" <<<"$OUT"
+  check ".bashrc linked" linked_to .bashrc "$COPY/bash/.bashrc"
+  check ".inputrc linked" linked_to .inputrc "$COPY/inputrc/.inputrc"
+}
+
+s69_dangling_top_level_link_beside_stage_settled() {
+  local gone=$ROOT/repo.worktrees/fix/gone/git/.githooks
+  ln -s "$gone" "$HOME/.githooks"
+  mkdir -p "$HOME/.githooks.unfolding"
+  printf 'staged\n' >"$HOME/.githooks.unfolding/staged"
+  run_relink git
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "says it removed it" grep -qxF "removed $HOME/.githooks: it was a link to $gone, which no longer exists" <<<"$OUT"
+  check "says it finished" grep -qxF \
+    "finished making $HOME/.githooks a real directory: moved $HOME/.githooks.unfolding, left by an earlier run, into its place" <<<"$OUT"
+  check "a real directory" test -d "$HOME/.githooks" -a ! -L "$HOME/.githooks"
+  check "the staged file in place" eq "$(cat "$HOME/.githooks/staged" 2>/dev/null)" staged
+  check "pre-commit linked" linked_to .githooks/pre-commit "$COPY/git/.githooks/pre-commit"
+}
+
+s70_dangling_top_level_link_outside_worktrees_kept() {
+  ln -s /nonexistent/.bashrc "$HOME/.bashrc"
+  ln -s "$ROOT/elsewhere/.inputrc" "$HOME/.inputrc"
+  run_relink bash inputrc
+  check "exit non-zero (got $RC)" test "$RC" -ne 0
+  check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" /nonexistent/.bashrc
+  check ".inputrc left as it is" eq "$(readlink -- "$HOME/.inputrc")" "$ROOT/elsewhere/.inputrc"
+  check "removes nothing" eq "$(grep -c '^removed ' <<<"$OUT")" 0
+  check "stow names the conflict" grep -q "existing target is not owned by stow: .bashrc" <<<"$OUT"
+}
+
 all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_program_files_moved
   s5_fold_into_other_worktree s6_nothing_created_below_other_link s7_link_into_repo_not_a_fold_kept
   s8_file_kept s9_fold_into_other_repo_kept s10_systemd_user_fold_on_steamdeck
@@ -1031,7 +1147,10 @@ all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_p
   s56_one_package_in_conflict s57_write_to_live_settings_after_swap_not_reported
   s58_link_into_unreadable_worktree_kept s59_file_gone_before_move_counts_as_moved
   s60_stage_beside_left_alone_link_named s61_dangling_settings_link_into_removed_worktree s62_relink_seeds_settings
-  s63_stop_after_making_real_names_it s64_top_level_clash_stops_next_run)
+  s63_stop_after_making_real_names_it s64_top_level_clash_stops_next_run
+  s65_file_at_claude_beside_stage_left_alone s66_file_at_top_level_dir_beside_stage_left_alone
+  s67_stage_beside_fold_into_own_package_stops s68_dangling_top_level_links_into_removed_worktrees_removed
+  s69_dangling_top_level_link_beside_stage_settled s70_dangling_top_level_link_outside_worktrees_kept)
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0

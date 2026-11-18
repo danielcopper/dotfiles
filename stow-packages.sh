@@ -320,6 +320,10 @@ leave_alone() { # leave_alone <rel> <why>
   stage="$(stage_of "$1")"
   if [ -e "$stage" ]; then
     why="$why; $stage holds what an earlier run staged for it"
+    # settle_stage puts the staging directory in place of a missing ~/<rel>.
+    if [ -d "$stage" ] && [ ! -L "$live" ] && [ -e "$live" ] && [ ! -d "$live" ]; then
+      why="$why; move $live elsewhere, and the next run puts $stage in its place"
+    fi
   fi
   left_alone+=("$1")
   if [ -L "$live" ]; then
@@ -329,13 +333,18 @@ leave_alone() { # leave_alone <rel> <why>
   fi
 }
 
-# settle_stage <rel>: a staging directory an earlier run left beside ~/<rel>,
-# which is no link now, takes its place when ~/<rel> is missing; when ~/<rel>
-# exists, the run names both and stops.
+# settle_stage <rel>: a staging directory an earlier run left beside ~/<rel>
+# takes its place when ~/<rel> is missing. A file at ~/<rel> is left alone,
+# named with the staging directory; when ~/<rel> is a directory, also through
+# a link, the run names both and stops.
 settle_stage() {
   local live="$HOME/$1" stage
   stage="$(stage_of "$1")"
   [ -d "$stage" ] || return 0
+  if [ -e "$live" ] && [ ! -d "$live" ]; then
+    leave_alone "$1" "a file where a directory belongs"
+    return 0
+  fi
   if [ -e "$live" ]; then
     echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which exists now." >&2
     echo "Move what you want to keep from $stage into $live, remove $stage and run this again." >&2
@@ -506,20 +515,35 @@ done
 # another package of this one, left by an earlier run. A link to a file is
 # dropped, so stow links the given package's file; a link to a directory is
 # made real like the directories above, so what git does not track there moves
-# along. The directories made real above are no such links any more.
+# along. A dangling link into a worktree of this repo is removed, as above.
+# What the pass above left alone is skipped; the directories it made real are
+# no such links any more.
 for pkg in "${pkgs[@]}"; do
   top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
   while IFS= read -r rel; do
     live="$HOME/$rel"
     [ -n "$rel" ] || continue
+    in_list "$rel" "${left_alone[@]}" && continue
     if [ ! -L "$live" ]; then
+      settle_stage "$rel"
+      continue
+    fi
+    target="$(readlink -m -- "$live")"
+    if [ ! -e "$live" ] && under_worktree_root "$target"; then
+      rm -- "$live"
+      echo "removed $live: it was a link to $target, which no longer exists"
       settle_stage "$rel"
       continue
     fi
     fold="$(fold_of "$live" "$rel")" || continue
     top="${fold%%$'\n'*}"
     from_pkg="${fold#*$'\n'}"
-    [ "$top/$from_pkg" != "$DIR/$pkg" ] || continue
+    if [ "$top/$from_pkg" = "$DIR/$pkg" ]; then
+      # A link stow made, beside which an earlier run may have left its
+      # staging directory.
+      settle_stage "$rel"
+      continue
+    fi
     if [ -d "$live" ]; then
       unfold "$rel" "$top" "$from_pkg"
     else
