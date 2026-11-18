@@ -12,11 +12,11 @@
 // registered. LEADER_MAIN points the tests at another copy of main.js (to see
 // a test fail against a broken one).
 //
-// That herdr's own Tab binding loses to the leader's is the app's behaviour
-// and is checked in the app; these tests check what the leader binds and
-// what its handlers do.
+// These tests check what the leader binds and what its handlers and its
+// on_key_down then do. That the leader's binding comes before herdr's own Tab
+// binding is the app's behaviour, which no test here covers.
 
-import { beforeEach, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -59,7 +59,7 @@ const leaderModule = await import(pathToFileURL(mainPath).href);
 // mise run herdr-leader-test sets LEADER_TEST_PERMISSION; then node must run
 // under its permission model, and this test fails rather than skips.
 const underTask = Boolean(process.env.LEADER_TEST_PERMISSION);
-test("under mise run herdr-leader-test nothing outside the repo can be read or written", { skip: !underTask && !process.permission && "node runs without --permission" }, () => {
+test("under mise run herdr-leader-test reads stay in the repo and nothing is written", { skip: !underTask && !process.permission && "node runs without --permission" }, () => {
   assert.ok(process.permission, "LEADER_TEST_PERMISSION is set but node runs without --permission");
   assert.equal(process.permission.has("fs.read", join(process.env.HOME, ".bashrc")), false);
   assert.equal(process.permission.has("fs.write", process.env.HOME), false);
@@ -81,9 +81,12 @@ const SOCKET = "/tmp/tmux-1000/default";
 const TTY = "/dev/pts/7";
 
 // The fake herdr: two panes, p1 focused after p2; a tmux with prefix C-Space
-// on terminal t1, none of whose keys repeat.
-function fakeHost({ previous = "p2" } = {}) {
-  const shared = new Map([["focus.history", { current: "p1", previous }]]);
+// on terminal t1, none of whose keys repeat. `leaderState` is what
+// focus-history left in shared("leader.state") before the leader started;
+// host.command(name) hands the leader a key command (leader.<name>).
+function fakeHost({ previous = "p2", leaderState = null } = {}) {
+  const shared = new Map([["focus.history", { current: "p1", previous }], ["leader.state", leaderState]]);
+  const waiting = [];
   const host = {
     runs: [],
     notes: [],
@@ -96,7 +99,13 @@ function fakeHost({ previous = "p2" } = {}) {
     props: () => ({ overlay: "mod-leader" }),
     closeOverlay: (id) => host.closed.push(id),
     checking: () => false,
-    nextCommand: () => new Promise(() => {}),
+    nextCommand: () => new Promise((resolve) => waiting.push(resolve)),
+    command: async (name) => {
+      await settle();
+      assert.ok(waiting.length, `nobody waits for ${name}`);
+      waiting.shift()(name);
+      await settle();
+    },
     panes: () => [{ pane: "p1" }, { pane: "p2" }],
     focused: () => ({ pane: "p1", terminal: "t1", shown: null }),
     theme: () => ({}),
@@ -114,12 +123,14 @@ function fakeHost({ previous = "p2" } = {}) {
   return host;
 }
 
-function fakeCx() {
+// bind_keys: what the fake keymap does with the bindings; by default it
+// takes them all.
+function fakeCx(bindKeys = (bindings) => bindings.length) {
   const cx = {
     bound: [],
     stopped: 0,
     focus_handle: () => ({ focus() {} }),
-    bind_keys: (bindings) => (cx.bound.push(...bindings), bindings.length),
+    bind_keys: (bindings) => (cx.bound.push(...bindings), bindKeys(bindings)),
     spawn: (fn) => Promise.resolve().then(() => fn(cx)),
     timer: { after() {}, every() {} },
     notify() {},
@@ -132,82 +143,112 @@ async function settle() {
   for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
 }
 
-// The bindings live in the app's keymap, which a test starts without.
-beforeEach(() => {
-  delete globalThis.leaderTabKeys;
-});
-
-function openLeader(options) {
+async function openLeader({ bindKeys, ...options } = {}) {
   const host = fakeHost(options);
   globalThis.__leaderHost = host;
   const leader = new leaderModule.default();
-  const cx = fakeCx();
+  const cx = fakeCx(bindKeys);
   leader.init({}, cx);
+  await settle();
   return { leader, cx, host };
 }
 
-// Runs the root's handler for the action bound to `keystroke`, as GPUI does
-// when that binding matches.
+const TAB = { key: "tab", keystroke: "tab", modifiers: { shift: false, control: false, alt: false, platform: false, function: false } };
+const SHIFT_TAB = { key: "tab", keystroke: "shift-tab", modifiers: { ...TAB.modifiers, shift: true } };
+const X = { key: "x", keystroke: "x", key_char: "x", modifiers: TAB.modifiers };
+
+// A key as GPUI hands it to the root's on_key_down.
+async function pressRaw(leader, cx, event) {
+  const [handler] = callsOf(leader.render(cx), "on_key_down").map(([h]) => h);
+  assert.ok(handler, "the root has no on_key_down");
+  handler(event, cx);
+  await settle();
+}
+
+// The root's handler for the action bound to `keystroke`, as GPUI runs it
+// when that binding matches; an action it lets through goes on to
+// on_key_down as the same key, so a key pressed twice shows in the results.
 async function pressBound(leader, cx, keystroke) {
   const binding = cx.bound.find((b) => b.keystroke === keystroke);
   assert.ok(binding, `no binding for ${keystroke}`);
   const handler = callsOf(leader.render(cx), "on_action").find(([action]) => action === binding.action)?.[1];
   assert.ok(handler, `the root has no handler for ${binding.action}`);
+  const stopped = cx.stopped;
   handler({ action: binding.action }, cx);
   await settle();
+  if (cx.stopped === stopped) await pressRaw(leader, cx, keystroke === "tab" ? TAB : SHIFT_TAB);
 }
 
-test("the leader binds tab and shift-tab in the key context its root declares, and handles both actions", () => {
-  const { leader, cx } = openLeader();
+test("the leader binds tab and shift-tab in the key context its root declares, and handles both actions", async () => {
+  const { leader, cx } = await openLeader();
   assert.deepEqual(cx.bound.map((b) => b.keystroke), ["tab", "shift-tab"]);
   const root = leader.render(cx);
   const contexts = callsOf(root, "key_context").map(([c]) => c);
   assert.equal(contexts.length, 1);
-  assert.equal(new Set(cx.bound.map((b) => b.context)).size, 1);
-  assert.equal(cx.bound[0].context, contexts[0]);
+  for (const b of cx.bound) assert.equal(b.context, contexts[0], b.keystroke);
   const handled = callsOf(root, "on_action").map(([action]) => action);
   for (const b of cx.bound) assert.ok(handled.includes(b.action), `no handler for ${b.action}`);
 });
 
-test("the bindings are added once, not by every leader that opens", () => {
-  const { cx } = openLeader();
-  const again = openLeader();
-  assert.equal(cx.bound.length, 2);
-  assert.equal(again.cx.bound.length, 0);
+test("every leader that opens binds tab and shift-tab again", async () => {
+  const first = await openLeader();
+  const second = await openLeader();
+  assert.deepEqual(first.cx.bound.map((b) => b.keystroke), ["tab", "shift-tab"]);
+  assert.deepEqual(second.cx.bound, first.cx.bound);
 });
 
-test("Tab through its binding focuses the previous pane and closes the leader", async () => {
-  const { leader, cx, host } = openLeader();
-  await pressBound(leader, cx, "tab");
-  assert.deepEqual(host.runs, [["pane.focus", { pane: "p2" }]]);
-  assert.deepEqual(host.closed, ["mod-leader"]);
-  assert.ok(cx.stopped > 0, "the action goes no further");
-});
+for (const [name, bindKeys, reason] of [
+  ["throws", () => { throw new Error("bad keystroke"); }, "bad keystroke"],
+  ["adds fewer than asked", () => 1, "1 of 2 bindings added"],
+]) {
+  test(`a bind_keys that ${name} is said in a toast; Esc and a second ctrl-space still work`, async () => {
+    const { host } = await openLeader({ bindKeys });
+    assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: Tab and shift-Tab not bound", reason, "error"]]);
+    await host.command("escape");
+    assert.deepEqual(host.closed, ["mod-leader"]);
 
-test("Tab through its binding with the previous pane gone says so and closes the leader", async () => {
-  const { leader, cx, host } = openLeader({ previous: "p9" });
-  await pressBound(leader, cx, "tab");
-  assert.deepEqual(host.runs, []);
-  assert.deepEqual(host.notes.map((n) => n.title), ["No previous pane"]);
-  assert.deepEqual(host.closed, ["mod-leader"]);
-});
+    const again = await openLeader({ bindKeys });
+    await again.host.command("send_prefix");
+    await pressRaw(again.leader, again.cx, X);
+    assert.deepEqual(again.host.sent, [["C-Space", "x"]]);
+  });
+}
 
-test("shift-Tab through its binding is no leader key: it closes the leader and runs nothing", async () => {
-  const { leader, cx, host } = openLeader();
-  await pressBound(leader, cx, "shift-tab");
-  assert.deepEqual(host.runs, []);
-  assert.deepEqual(host.closed, ["mod-leader"]);
-});
+for (const [how, press] of [
+  ["through its binding", (leader, cx, keystroke) => pressBound(leader, cx, keystroke)],
+  ["as a key", (leader, cx, keystroke) => pressRaw(leader, cx, keystroke === "tab" ? TAB : SHIFT_TAB)],
+]) {
+  test(`Tab ${how} focuses the previous pane and closes the leader`, async () => {
+    const { leader, cx, host } = await openLeader();
+    await press(leader, cx, "tab");
+    assert.deepEqual(host.runs, [["pane.focus", { pane: "p2" }]]);
+    assert.deepEqual(host.notes, []);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
 
-test("ctrl-space ctrl-space Tab gives tmux its prefix and Tab, shift-Tab its prefix and BTab", async () => {
-  for (const [keystroke, key] of [["tab", "Tab"], ["shift-tab", "BTab"]]) {
-    delete globalThis.leaderTabKeys;
-    const { leader, cx, host } = openLeader();
-    leader.prefixAgain(cx);
-    await settle();
-    await pressBound(leader, cx, keystroke);
-    assert.deepEqual(host.sent, [["C-Space", key]], keystroke);
-    assert.deepEqual(host.runs, [], keystroke);
-    assert.deepEqual(host.closed, ["mod-leader"], keystroke);
-  }
-});
+  test(`Tab ${how} with the previous pane gone says so and closes the leader`, async () => {
+    const { leader, cx, host } = await openLeader({ previous: "p9" });
+    await press(leader, cx, "tab");
+    assert.deepEqual(host.runs, []);
+    assert.deepEqual(host.notes.map((n) => n.title), ["No previous pane"]);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
+
+  test(`shift-Tab ${how} is no leader key: it closes the leader and runs nothing`, async () => {
+    const { leader, cx, host } = await openLeader();
+    await press(leader, cx, "shift-tab");
+    assert.deepEqual(host.runs, []);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
+
+  test(`after ctrl-space ctrl-space, Tab ${how} goes to tmux after its prefix, shift-Tab as BTab`, async () => {
+    for (const [keystroke, key] of [["tab", "Tab"], ["shift-tab", "BTab"]]) {
+      // The second ctrl-space came before the leader had the keyboard.
+      const { leader, cx, host } = await openLeader({ leaderState: { at: Date.now(), ready: false, pending: 1 } });
+      await press(leader, cx, keystroke);
+      assert.deepEqual(host.sent, [["C-Space", key]], keystroke);
+      assert.deepEqual(host.runs, [], keystroke);
+      assert.deepEqual(host.closed, ["mod-leader"], keystroke);
+    }
+  });
+}

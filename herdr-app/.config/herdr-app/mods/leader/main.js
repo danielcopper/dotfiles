@@ -404,21 +404,23 @@ const ACTIONS = [
 // S and c are aliases of s and t; the list shows each action once.
 const LEADER = level("Leader", ACTIONS, ["S", "c"], "1-9 tab · Esc");
 
-// Tab and shift-Tab. From its start, herdr binds them to moving the keyboard
-// to the next or previous tab stop, and a binding is matched before
-// on_key_down: the press never reaches the leader, and the keyboard leaves it,
-// so Esc doesn't either. A "mod:leader" entry in keys.json doesn't beat that
-// binding (once keys.json is reloaded, the binding is gone and Tab arrives as
-// a key). A binding in the leader's own key context does, since the deepest
-// matching context wins; its action comes here as the key it stands for.
+// Tab and shift-Tab. herdr binds them itself, to moving the keyboard to the
+// next or previous tab stop, and a binding is matched before on_key_down: the
+// press never reaches the leader, and the keyboard leaves it, so Esc doesn't
+// either. A "tab" entry in keys.json's "mod:leader" section doesn't beat that
+// binding after the app starts. Seen in herdr-app 0.1.16: once keys.json had
+// been saved while the app ran, Tab reached on_key_down even without such an
+// entry, until the next start. A binding in the leader's own key context comes
+// first, as herdr's win98 menu does it for Escape: the deepest matching
+// context wins. Its action comes here as the key it stands for.
 const KEY_CONTEXT = "Leader";
 const TAB_KEYS = [
-  { keystroke: "tab", action: "leader_tab", context: KEY_CONTEXT },
-  { keystroke: "shift-tab", action: "leader_shift_tab", context: KEY_CONTEXT },
+  { keystroke: "tab", action: "leader_tab", shift: false },
+  { keystroke: "shift-tab", action: "leader_shift_tab", shift: true },
 ];
-const tabKey = (shift) => ({
+const tabKey = ({ keystroke, shift }) => ({
   key: "tab",
-  keystroke: shift ? "shift-tab" : "tab",
+  keystroke,
   modifiers: { shift, control: false, alt: false, platform: false, function: false },
 });
 
@@ -451,12 +453,6 @@ export default class Leader extends View {
     // reach tmux after its window has closed.
     this.passing = null;
     if (checking()) return;
-    // The keymap is the app's, so the bindings are added once, not per copy;
-    // like the keymap, globalThis outlives a reload of this file.
-    if (!globalThis.leaderTabKeys) {
-      cx.bind_keys(TAB_KEYS);
-      globalThis.leaderTabKeys = true;
-    }
     // ctrl-space presses that came before the leader had the keyboard are
     // counted in shared("leader.state").pending (focus-history's header has
     // the protocol): the first of them is the second ctrl-space, which starts
@@ -471,6 +467,24 @@ export default class Leader extends View {
         else if (command === "escape") this.escape(cx);
       }
     });
+    this.bindTabKeys(cx);
+  }
+
+  // Binds TAB_KEYS in KEY_CONTEXT. Every leader binds them again, as herdr's
+  // win98 menu does, so a binding that a keymap reset dropped comes back, and
+  // one whose name this file changed takes effect, with the next leader rather
+  // than the next start. A failure leaves the rest of the leader working and
+  // says why.
+  bindTabKeys(cx) {
+    let reason;
+    try {
+      const count = cx.bind_keys(TAB_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: KEY_CONTEXT })));
+      if (count === TAB_KEYS.length) return;
+      reason = `${count} of ${TAB_KEYS.length} bindings added`;
+    } catch (e) {
+      reason = String(e?.message ?? e);
+    }
+    notify({ title: "Leader: Tab and shift-Tab not bound", body: reason, level: "error" });
   }
 
   prefixAgain(cx) {
@@ -645,18 +659,14 @@ export default class Leader extends View {
       : this.repeating
         ? `${name} (repeat)`
         : name;
-    const root = h_flex()
-      .id("leader")
-      .track_focus(this.handle)
-      .key_context(KEY_CONTEXT)
-      .on_action("leader_tab", (_e, cx) => {
-        this.press(tabKey(false), cx);
+    let root = h_flex().id("leader").track_focus(this.handle).key_context(KEY_CONTEXT);
+    for (const k of TAB_KEYS) {
+      root = root.on_action(k.action, (_e, cx) => {
+        this.press(tabKey(k), cx);
         cx.stop_propagation();
-      })
-      .on_action("leader_shift_tab", (_e, cx) => {
-        this.press(tabKey(true), cx);
-        cx.stop_propagation();
-      })
+      });
+    }
+    root = root
       .on_key_down((e, cx) => {
         this.press(e, cx);
         cx.stop_propagation();

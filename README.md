@@ -176,7 +176,8 @@ The herdr desktop app comes from its official installer script into
 `~/.local/share/herdr-app`; this repo does not install it. The `herdr-app`
 package carries the config that is mine: `keys.json` (the shipped defaults plus
 `ctrl-space` for the leader mod, and a `mod:leader` section that hands the
-leader a second `ctrl-space` and `Esc`), the mods `mods/leader/` (its `f`
+leader a second `ctrl-space` and `Esc`; a `tab` entry there does not beat
+herdr's own Tab binding after the app starts, see below), the mods `mods/leader/` (its `f`
 opens a second level for files: `f f` and `f g`, the keys of nvim's
 `<leader>ff` and `<leader>fg`, open the file popup, `f e` and `f G` show the
 right panel on Files or Changes; `Z` switches that panel between its normal
@@ -262,14 +263,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   the personal layout `ctrl-space` goes through focus-history, so a fast
   second `ctrl-space` still reaches the leader; in other layouts it can
   close the leader again.
-- **The leader binds Tab and shift-Tab itself.** From its start, herdr
-  binds both to moving the keyboard between tab stops, which comes before
-  a mod sees the key, and a `mod:leader` entry in `keys.json` does not beat
-  that; the leader binds them in its own key context (`cx.bind_keys`)
-  instead. `mise run herdr-leader-test` (without mise, `node --test
-  tests/herdr-app/leader.test.mjs` from the repo) tests what it binds and
-  what Tab and shift-Tab then do, in the leader and on their way to tmux.
-  It needs node.
+- **The leader binds Tab and shift-Tab itself.** herdr's own binding of
+  both would take them first; the comment above `TAB_KEYS` in
+  `mods/leader/main.js` says how and why. `mise run herdr-leader-test`
+  (without mise, `node --test tests/herdr-app/leader.test.mjs` from the
+  repo) tests what the leader binds and what Tab and shift-Tab then do, in
+  the leader and on their way to tmux. It needs node.
 - **The board (`mods/board/`) shows my own work.** As `mods/board/views.json`
   sets them, its views are "Meine Aufgaben" (my issues on the Tender project's
   board, in the columns of its Status field), "PRs" (pull requests I opened or
