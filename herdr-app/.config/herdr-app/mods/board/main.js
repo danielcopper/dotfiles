@@ -1,49 +1,43 @@
-// The "Arbeit" board: one's own work from GitHub (issues on a Projects v2
-// board, open pull requests) and Azure Boards (work items), in the views that
-// views.json beside this file defines. The leader's `b` opens it as a tab
-// (tab.new {name: "Arbeit", mod: "board"}).
+// The "Arbeit" board: one's own work from GitHub (issues and pull requests on
+// a Projects v2 board, open pull requests) and Azure Boards (work items), in
+// the views that views.json beside this file defines. The leader's `b` shows
+// or opens its tab. Keys and behaviour: README, "herdr app".
 //
-// A view is a saved filter with a layout:
-// - board, GitHub: the items of a Projects v2 project that match `filter`,
-//   in the columns of its single-select field (`field` in `project`,
-//   default "Status");
-// - list, GitHub: pull requests from one GitHub search per section;
-// - board, Azure: work items from a WIQL condition (`where`), in the states
-//   of their work item types. The view shows only where `az` runs and is
-//   signed in; otherwise the sidebar says why it is missing.
-// Columns listed in `hide` (and, on Azure, states of a category listed in
-// `hideCategories`) show as narrow stubs with their count and are left out
-// of the query; `x` shows or hides a column, remembered per view.
-//
-// Everything about the person (login, project, repos, checkouts, the first
-// message an agent gets, machines) is in views.json; the code holds none of
-// it. Its fields:
-// - refreshMinutes (3): how often the shown view refreshes while visible.
+// views.json:
+// - refreshMinutes (3): how often the shown view refreshes while its tab shows.
 // - views: [{ id, name, source: "github" | "azure", layout: "board" | "list",
-//   hide?: [column names], startColumn?: where Start moves a card, limit?,
-//   start?: as below, for this view }], and by kind: a GitHub board has
-//   project { owner, number, field? } and filter? (a Projects filter such as
-//   "assignee:@me"); a GitHub list has sections [{ name, query }] (GitHub
-//   searches); an Azure board has where? (a WIQL condition, default assigned
-//   to @Me), hideCategories?, organization?, project? (az's configured
-//   defaults where missing) and on? (the machine az runs on).
+//   hide?: [column names], limit?, start? }], and by kind:
+//   a GitHub board has project { owner, number, field? ("Status") } and
+//   filter? (a Projects filter such as "assignee:@me"); its columns are the
+//   options of that single-select field. A GitHub list has sections
+//   [{ name, query }], one GitHub search for pull requests each. An Azure
+//   board has where? (a WIQL condition, default assigned to @Me),
+//   hideCategories? (state categories to hide), organization? and project?
+//   (az's configured defaults where missing) and on? (the machine az runs
+//   on); its columns are the states of the work item types it finds. An Azure
+//   view is listed only where az runs, is signed in and has the azure-devops
+//   extension; otherwise the sidebar says why.
 // - start: what the start dialog proposes: agent (a programs.json key),
-//   machine, open ("space" | "tab"), branch, worktree, base, message (for
-//   issues), review (for pull requests), checkout. Templates take {number}
-//   {title} {url} {owner} {repo} {type} {slug} {branch} {branchDashed}
-//   {checkout}.
-// - repos: { "<owner>/<repo>": { checkout, and any other start field } }; a
-//   repo's entry wins over the view's start, which wins over start.
-// The data logic is in plain exported functions at the top, tested by
+//   machine, open ("space" | "tab"), checkout (the folder the session starts
+//   in; ~ is that machine's home), message (the first message for issues and
+//   work items) and review (for pull requests). Templates take {number}
+//   {title} {url} {owner} {repo} {key}.
+// - repos: { "<owner>/<repo>": { any start field } }. startSettings says which
+//   start applies.
+//
+// Hidden columns are left out of the query; on GitHub the same request counts
+// them for their stubs (Azure stubs show no count).
+//
+// Calls: a GitHub view costs one gh call per refresh, an Azure view one az
+// call, plus up to two on its first load (az's defaults and the work item
+// types). A view refreshes when the board opens, on `r` (which also tries the
+// Azure views not shown, to learn whether they are available), after `x`,
+// when it is shown again older than refreshMinutes, and every refreshMinutes
+// while its tab shows.
+//
+// The data logic is plain exported functions at the top, tested by
 // tests/herdr-app/board.test.mjs with node; it lives in this file because a
 // stowed mod is one main.js (README, "herdr app").
-//
-// Reads cost one gh or az call per view and refresh (on open, `r`, and every
-// refreshMinutes while the tab is shown). A status change (keys `H`/`L`,
-// the `s` menu, or dragging a card onto a column) moves the card at once,
-// writes to GitHub or Azure, and moves it back with the error shown when
-// that fails. Enter on a card opens its details, a second Enter starts an
-// agent for it in a new worktree (or goes to the one already working on it).
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
@@ -56,16 +50,18 @@ export const MOD = "board";
 const CONFIG_NAME = "views";
 
 // ---------------------------------------------------------------------------
-// Data: config, queries, parsing, moves. No host calls below this line until
-// the UI section.
+// Data: config, queries, parsing, board state. No host calls until the UI
+// section.
 // ---------------------------------------------------------------------------
 
 export class BoardError extends Error {
-  // unavailable: the view's tool is missing or not signed in, so the view
-  // is left out of the list rather than shown with an error.
-  constructor(message, { unavailable = false } = {}) {
+  // unavailable: the view's tool is missing or not signed in, so the view is
+  // left out of the list rather than shown with an error. unclear: a write
+  // may or may not have landed.
+  constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
+    this.unclear = unclear;
   }
 }
 
@@ -74,34 +70,39 @@ const isText = (v) => typeof v === "string" && v.trim() !== "";
 const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
 
-// What a start dialog uses when neither views.json's `start`, the view's
-// `start` nor the repo's entry says otherwise. The worktree folder follows
-// herdr's own default (AGENTS.md, settings.json `worktrees`).
-export const START_DEFAULTS = {
-  agent: null,
-  machine: null,
-  open: "space",
-  branch: "{type}/{number}-{slug}",
-  worktree: "~/.herdr/worktrees/{repo}/{branchDashed}",
-  base: "main",
-  message: "",
-  review: "",
-  checkout: null,
-};
+// The message to show for an error: a BoardError's own, else marked as
+// unexpected.
+export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
+
+// ---- views.json ------------------------------------------------------------
+
+export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
+// Keys of the start that made a worktree; the agent's own skills make it now.
+const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
+const GONE_START = ["branch", "worktree", "base"];
+const TOP_KEYS = ["refreshMinutes", "start", "repos", "views"];
 
 function startProblems(start, where) {
   if (start === undefined) return [];
-  if (!isObject(start)) return [`${where}: „start“ muss ein Objekt sein`];
+  if (!isObject(start)) return [`„${where}“ muss ein Objekt sein`];
   const out = [];
   for (const [key, value] of Object.entries(start)) {
-    if (!START_KEYS.includes(key)) out.push(`${where}: „start.${key}“ gibt es nicht`);
-    else if (value !== null && typeof value !== "string") out.push(`${where}: „start.${key}“ muss Text sein`);
+    if (GONE_START.includes(key)) out.push(`„${where}.${key}“ ${GONE}`);
+    else if (!START_KEYS.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
+    else if (value !== null && typeof value !== "string") out.push(`„${where}.${key}“ muss Text sein`);
   }
-  if (start.open !== undefined && start.open !== "space" && start.open !== "tab") {
-    out.push(`${where}: „start.open“ ist "space" oder "tab"`);
-  }
+  if (start.open !== undefined && start.open !== "space" && start.open !== "tab") out.push(`„${where}.open“ ist "space" oder "tab"`);
   return out;
+}
+
+function viewKeys(v) {
+  return new Set([
+    "id", "name", "source", "layout", "hide", "limit", "start",
+    ...(v.source === "github" && v.layout === "board" ? ["project", "filter"] : []),
+    ...(v.layout === "list" ? ["sections"] : []),
+    ...(v.source === "azure" ? ["where", "hideCategories", "organization", "project", "on"] : []),
+  ]);
 }
 
 function viewProblems(v) {
@@ -112,6 +113,12 @@ function viewProblems(v) {
   if (v.source !== "github" && v.source !== "azure") out.push("„source“ ist \"github\" oder \"azure\"");
   if (v.layout !== "board" && v.layout !== "list") out.push("„layout“ ist \"board\" oder \"list\"");
   if (v.source === "azure" && v.layout === "list") out.push("Azure-Ansichten sind Boards (\"layout\": \"board\")");
+  const allowed = viewKeys(v);
+  for (const key of Object.keys(v)) {
+    if (key === "startColumn") out.push(`„startColumn“ ${GONE}`);
+    else if (key === "on" && v.source === "github") out.push("„on“ gilt nur für Azure-Ansichten");
+    else if (!allowed.has(key) && (v.source === "github" || v.source === "azure")) out.push(`„${key}“ gibt es nicht`);
+  }
   if (v.source === "github" && v.layout === "board") {
     const p = v.project;
     if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
@@ -119,22 +126,19 @@ function viewProblems(v) {
     } else if (p.field !== undefined && !isText(p.field)) out.push("„project.field“ muss Text sein");
     if (v.filter !== undefined && typeof v.filter !== "string") out.push("„filter“ muss Text sein");
   }
-  if (v.layout === "list") {
-    if (!Array.isArray(v.sections) || !v.sections.length || !v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query))) {
-      out.push("„sections“ braucht Einträge mit „name“ und „query“");
-    }
+  if (v.layout === "list" && (!Array.isArray(v.sections) || !v.sections.length || !v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query)))) {
+    out.push("„sections“ braucht Einträge mit „name“ und „query“");
   }
   for (const key of ["hide", "hideCategories"]) {
     if (v[key] !== undefined && !textList(v[key])) out.push(`„${key}“ muss eine Liste von Texten sein`);
   }
-  for (const key of ["where", "organization", "project", "startColumn", "on"]) {
-    if (key === "project" && v.source !== "azure") continue;
-    if (v[key] !== undefined && v[key] !== null && typeof v[key] !== "string") out.push(`„${key}“ muss Text sein`);
+  if (v.source === "azure") {
+    for (const key of ["where", "organization", "project", "on"]) {
+      if (v[key] !== undefined && v[key] !== null && typeof v[key] !== "string") out.push(`„${key}“ muss Text sein`);
+    }
   }
-  if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= 100)) {
-    out.push("„limit“ ist eine ganze Zahl von 1 bis 100");
-  }
-  return [...out, ...startProblems(v.start, "„start“").map((p) => p.replace(/^„start“: /, ""))];
+  if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= 100)) out.push("„limit“ ist eine ganze Zahl von 1 bis 100");
+  return [...out, ...startProblems(v.start, "start")];
 }
 
 function normalizeView(v) {
@@ -145,10 +149,9 @@ function normalizeView(v) {
     layout: v.layout,
     hide: v.hide ?? [],
     hideCategories: v.hideCategories ?? [],
-    startColumn: v.startColumn ?? null,
-    on: v.on ?? null,
     start: v.start ?? {},
     limit: v.limit ?? (v.layout === "list" ? 50 : 100),
+    on: null,
   };
   if (v.source === "github" && v.layout === "board") {
     view.project = { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" };
@@ -159,6 +162,7 @@ function normalizeView(v) {
     view.where = v.where ?? "[System.AssignedTo] = @Me";
     view.organization = v.organization ?? null;
     view.project = v.project ?? null;
+    view.on = v.on ?? null;
   }
   return view;
 }
@@ -178,18 +182,19 @@ export function readConfig(text) {
 }
 
 export function validateConfig(raw) {
-  const errors = [];
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
+  const errors = Object.keys(raw).filter((k) => !TOP_KEYS.includes(k)).map((k) => `„${k}“ gibt es nicht`);
   let refreshMinutes = raw.refreshMinutes ?? 3;
   if (typeof refreshMinutes !== "number" || !(refreshMinutes >= 1)) {
     errors.push("„refreshMinutes“ ist eine Zahl ab 1");
     refreshMinutes = 3;
   }
-  errors.push(...startProblems(raw.start, "„start“").map((p) => p.replace(/^„start“: /, "")));
+  const startErrors = startProblems(raw.start, "start");
+  errors.push(...startErrors);
   const repos = {};
   if (raw.repos !== undefined && !isObject(raw.repos)) errors.push("„repos“ muss ein Objekt sein");
   for (const [name, entry] of Object.entries(isObject(raw.repos) ? raw.repos : {})) {
-    const problems = startProblems(entry, `„repos.${name}“`);
+    const problems = startProblems(entry, `repos.${name}`);
     if (problems.length) errors.push(...problems);
     else repos[name] = entry;
   }
@@ -204,24 +209,53 @@ export function validateConfig(raw) {
     ids.add(v.id);
     views.push(normalizeView(v));
   });
-  const start = startProblems(raw.start, "").length ? {} : raw.start ?? {};
+  const start = startErrors.length ? {} : raw.start ?? {};
   return { config: views.length ? { refreshMinutes, start, repos, views } : null, errors };
 }
 
-// The hidden columns of a view: what the person toggled (stored, a list of
-// names) wins over the view's defaults (`hide`, plus the columns whose
-// category is in `hideCategories`).
+// The start for an item: the defaults, then views.json's start, then the
+// view's start, then the repo's entry in repos; a later one wins.
+export function startSettings(config, view, repo) {
+  return { ...START_DEFAULTS, ...config.start, ...view.start, ...(config.repos[repo] ?? {}) };
+}
+
+// ---- Hidden columns --------------------------------------------------------
+
+// The stored toggles of a view, { hide: [names], show: [names] }, or null when
+// what was stored is not that.
+export function readStoredHidden(value) {
+  return isObject(value) && textList(value.hide) && textList(value.show) ? { hide: [...value.hide], show: [...value.show] } : null;
+}
+
+// The hidden columns: the view's hide (and on Azure the columns of a category
+// in hideCategories), plus what the person hid, minus what they showed.
 export function hiddenColumns(view, stored, columns = []) {
-  if (Array.isArray(stored)) return new Set(stored);
   const hidden = new Set(view.hide);
   for (const c of columns) if (c.category && view.hideCategories.includes(c.category)) hidden.add(c.name);
+  const own = readStoredHidden(stored);
+  for (const name of own?.hide ?? []) hidden.add(name);
+  for (const name of own?.show ?? []) hidden.delete(name);
   return hidden;
 }
 
-// The start settings for an item: defaults < views.json `start` < the view's
-// `start` < the repo's entry in `repos`.
-export function startSettings(config, view, repo) {
-  return { ...START_DEFAULTS, ...config.start, ...view.start, ...(config.repos[repo] ?? {}) };
+// The stored toggles after hiding or showing a column: only what differs from
+// the view's defaults, so a later edit to hide takes effect. A column that
+// takes no drops ("Ohne Status") cannot be hidden: unchanged.
+export function toggleHidden(view, stored, column, columns) {
+  if (!column?.target) return stored;
+  const own = readStoredHidden(stored) ?? { hide: [], show: [] };
+  const byDefault = hiddenColumns(view, null, columns).has(column.name);
+  const hideNow = !hiddenColumns(view, own, columns).has(column.name);
+  const next = { hide: own.hide.filter((n) => n !== column.name), show: own.show.filter((n) => n !== column.name) };
+  if (hideNow !== byDefault) (hideNow ? next.hide : next.show).push(column.name);
+  return next;
+}
+
+// Names in a view's hide and hideCategories that match no column it has.
+export function unknownHidden(view, columns) {
+  const names = new Set(columns.map((c) => c.name));
+  const categories = new Set(columns.map((c) => c.category).filter(Boolean));
+  return [...view.hide.filter((n) => !names.has(n)), ...view.hideCategories.filter((c) => !categories.has(c))];
 }
 
 // ---- GitHub ----------------------------------------------------------------
@@ -252,7 +286,7 @@ const ITEM_FIELDS = `
 
 // One GraphQL request for a board view: the project, its field's options and
 // the items of the shown columns, plus one count per hidden column (`h0`,
-// `h1`, … aliases, first: 0) so the stubs can say how many they hold.
+// `h1`, … aliases, first: 0) for the stubs.
 export function githubBoardArgs(view, hidden) {
   const { owner, number, field } = view.project;
   const names = [...hidden];
@@ -304,8 +338,10 @@ function githubCard(node) {
 
 // gh's answer for githubBoardArgs → a board:
 // { kind: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited }.
-// A hidden column's cards are only those moved there since the last
-// refresh; its count is the server's plus those.
+// A hidden column's cards are only those moved there since the last refresh;
+// its count is the server's plus those (null on Azure, which has no count).
+// Items without a status, or in an option the field no longer has, go to
+// "Ohne Status", which takes no drops.
 export function parseGithubBoard(json, view, hidden) {
   const { owner, number, field: fieldName } = view.project;
   const ownerNode = json?.data?.repositoryOwner;
@@ -324,13 +360,15 @@ export function parseGithubBoard(json, view, hidden) {
     target: true,
     cards: [],
   }));
-  const cards = project.items.nodes.map(githubCard);
-  if (cards.some((c) => c.column === NO_STATUS)) {
-    columns.unshift({ id: NO_STATUS, name: "Ohne Status", color: "dim", hidden: false, count: 0, target: false, cards: [] });
-  }
   const byId = new Map(columns.map((c) => [c.id, c]));
+  const cards = project.items.nodes.map(githubCard).map((c) => (byId.has(c.column) ? c : { ...c, column: NO_STATUS }));
+  if (cards.some((c) => c.column === NO_STATUS)) {
+    const none = { id: NO_STATUS, name: "Ohne Status", color: "dim", hidden: false, count: 0, target: false, cards: [] };
+    columns.unshift(none);
+    byId.set(NO_STATUS, none);
+  }
   for (const card of cards) {
-    const col = byId.get(card.column) ?? byId.get(NO_STATUS);
+    const col = byId.get(card.column);
     col.cards.push(card);
     if (!col.hidden) col.count++;
   }
@@ -357,9 +395,12 @@ export function githubMoveArgs(meta, card, column) {
   ];
 }
 
+// A mutation's answer must name the item it changed; anything else leaves
+// open whether the change landed.
 export function checkMoveResult(json, card) {
-  const id = json?.data?.updateProjectV2ItemFieldValue?.projectV2Item?.id;
-  if (id !== card.itemId) throw new BoardError(firstLine(json?.errors?.[0]?.message) || "GitHub hat die Änderung nicht bestätigt");
+  if (json?.data?.updateProjectV2ItemFieldValue?.projectV2Item?.id !== card.itemId) {
+    throw new BoardError("Ergebnis unklar: GitHub hat die Änderung nicht bestätigt", { unclear: true });
+  }
 }
 
 const PR_FIELDS = `
@@ -406,19 +447,27 @@ export function checksSummary(rollup) {
   return { ...n, state, short, text };
 }
 
+// GitHub's review decision as a label. No decision is also what a repo
+// without required reviews reports, so it shows nothing.
 const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewünscht", REVIEW_REQUIRED: "noch kein Review" };
-export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "noch kein Review");
+export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
-// gh's answer for githubListArgs → { kind: "list", sections: [{ name, count, limited, rows }] }.
-// A pull request found by two sections shows in the first only.
+// gh's answer for githubListArgs → { kind: "list", sections: [{ name, count, limited, skipped, rows }] }.
+// A pull request found by two sections shows in the first only; a result
+// that is no pull request is counted in skipped.
 export function parseGithubList(json, view) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
     const found = json?.data?.[`s${i}`];
-    if (!found) throw new BoardError(`Die Suche „${s.query}“ kam ohne Ergebnis zurück`);
+    if (!found) throw new BoardError(`Die Suche „${s.query}“ fehlt in GitHubs Antwort`);
     const rows = [];
+    let skipped = 0;
     for (const pr of found.nodes) {
-      if (!pr?.id || seen.has(pr.id)) continue;
+      if (!pr?.id) {
+        skipped++;
+        continue;
+      }
+      if (seen.has(pr.id)) continue;
       seen.add(pr.id);
       const repo = pr.repository.nameWithOwner;
       rows.push({
@@ -437,33 +486,47 @@ export function parseGithubList(json, view) {
         updatedAt: pr.updatedAt,
         createdAt: pr.createdAt,
         branch: pr.headRefName,
+        labels: [],
+        assignees: [],
       });
     }
-    return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, rows };
+    return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };
   });
   return { kind: "list", sections };
 }
 
-// What went wrong with a gh call that ran: { code, stdout, stderr } → a
-// message for the person. GraphQL errors come in stdout's JSON.
-export function ghFailure({ code, stdout, stderr }) {
-  let errors = [];
-  try {
-    errors = JSON.parse(stdout)?.errors ?? [];
-  } catch {
-    // Not JSON: gh's own message is on stderr.
-  }
+// gh's network failures, as Go's net package and gh word them.
+const NETWORK = /could not resolve host|dial tcp|connection refused|connection reset|i\/o timeout|no such host/i;
+
+// A gh call that ran, { code, stdout, stderr } → { json, warnings }, or a
+// BoardError. gh exits 1 whenever GraphQL's answer holds errors, even next to
+// data: errors that make the answer useless (login, scope, rate limit, not
+// found) throw; with data, the other errors come back as warnings.
+// `notFound` is the message for a NOT_FOUND error.
+export function readGh({ code, stdout, stderr }, { notFound } = {}) {
   const err = String(stderr ?? "");
+  const said = firstLine(err.replace(/^gh: /gm, ""));
+  let json = null;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    // Not JSON: what went wrong is on stderr.
+  }
+  if (code === 0 && json === null) throw new BoardError("Ergebnis unklar: gh antwortete ohne lesbares JSON", { unclear: true });
+  const errors = Array.isArray(json?.errors) ? json.errors : [];
   const types = errors.map((e) => e.type);
-  if (code === 4 || /gh auth login/.test(err)) return new BoardError("gh ist nicht angemeldet: gh auth login");
+  if (code === 4 || /gh auth login/.test(err)) throw new BoardError("gh ist nicht angemeldet: gh auth login");
   if (types.includes("INSUFFICIENT_SCOPES") || /required scopes|has not been granted/i.test(err)) {
-    return new BoardError("Dem gh-Token fehlt der Scope „project“: gh auth refresh -s project");
+    throw new BoardError("Dem gh-Token fehlt der Scope „project“: gh auth refresh -s project");
   }
   if (types.includes("RATE_LIMITED") || /rate limit/i.test(err)) {
-    return new BoardError("GitHub-Ratenlimit erreicht; es geht nach dem nächsten Zurücksetzen weiter");
+    throw new BoardError("GitHub-Ratenlimit erreicht; es geht nach dem nächsten Zurücksetzen weiter");
   }
-  if (/could not resolve|connect|timeout|no such host|network/i.test(err)) return new BoardError(`GitHub nicht erreichbar: ${firstLine(err)}`);
-  return new BoardError(firstLine(errors[0]?.message) || firstLine(err.replace(/^gh: /, "")) || `gh endete mit ${code}`);
+  const missing = errors.find((e) => e.type === "NOT_FOUND");
+  if (missing) throw new BoardError(notFound ?? `Nicht gefunden: ${firstLine(missing.message)}`);
+  if (json?.data) return { json, warnings: errors.map((e) => firstLine(e.message)).filter(Boolean) };
+  if (NETWORK.test(err)) throw new BoardError(`GitHub nicht erreichbar: ${said}`);
+  throw new BoardError(firstLine(errors[0]?.message) || said || `gh endete mit ${code}`);
 }
 
 // ---- Azure -----------------------------------------------------------------
@@ -472,8 +535,8 @@ export function ghFailure({ code, stdout, stderr }) {
 const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
 const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
 
-// Azure's field names start with "System."; read through this so the name
-// stays one place.
+// The fields read here are all `System.` ones; they are read through this so
+// the prefix stays in one place.
 const SYSTEM = "System.";
 const field = (fields, name) => fields?.[SYSTEM + name];
 const FIELDS = ["Id", "Title", "State", "WorkItemType", "AssignedTo", "Tags", "TeamProject"].map((f) => `[${SYSTEM}${f}]`).join(", ");
@@ -534,9 +597,10 @@ export function azureWebUrl(apiUrl, project, id) {
 
 const personName = (who) => (typeof who === "string" ? who.replace(/\s*<[^>]*>$/, "") : who?.displayName ?? null);
 
-// `az boards query` output → a board whose columns are the states of the
-// work item types it found (all known states when it found none). az prints
-// nothing at all when nothing matches.
+// `az boards query` output → a board whose columns are the states of the work
+// item types it found, in category order; without work items it has none. az
+// prints nothing at all when nothing matches. meta.types holds each type's
+// states, the columns its cards may go to.
 export function parseAzureBoard(stdout, types, hidden) {
   const items = String(stdout ?? "").trim() ? JSON.parse(stdout) : [];
   const cards = items.map((item) => {
@@ -557,13 +621,14 @@ export function parseAzureBoard(stdout, types, hidden) {
       type: field(f, "WorkItemType") ?? null,
       parent: null,
       sub: null,
+      branch: null,
       column: field(f, "State") ?? "",
     };
   });
   const present = new Set(cards.map((c) => c.type));
   const wanted = new Set(Object.entries(types.types).filter(([t]) => present.has(t)).flatMap(([, s]) => s));
   const columns = types.states
-    .filter((s) => !cards.length || wanted.has(s.name) || hidden.has(s.name))
+    .filter((s) => wanted.has(s.name))
     .map((s) => ({ ...s, hidden: hidden.has(s.name), count: hidden.has(s.name) ? null : 0, target: true, cards: [] }));
   const byName = new Map(columns.map((c) => [c.name, c]));
   for (const card of cards) {
@@ -576,38 +641,42 @@ export function parseAzureBoard(stdout, types, hidden) {
     col.cards.push(card);
     if (!col.hidden) col.count++;
   }
-  return { kind: "board", meta: {}, columns, total: cards.length, limited: false };
+  return { kind: "board", meta: { types: types.types }, columns, total: cards.length, limited: false };
 }
 
 export function azureMoveArgs(view, card, column) {
   return ["boards", "work-item", "update", "--id", String(card.number), "--state", column.name, "-o", "json", ...azScope(view, false)];
 }
 
-// What went wrong with an az call that ran. Missing sign-in or extension
-// make the view unavailable rather than an error.
-export function azFailure({ code, stderr }) {
-  const err = String(stderr ?? "");
-  if (/az (devops )?login|Before you can run Azure DevOps commands|Please run 'az login'/i.test(err)) {
-    return new BoardError("az ist nicht angemeldet (az login oder az devops login)", { unavailable: true });
+// What went wrong with an az call that ran, from its ERROR: line (WARNING:
+// lines are left out). Missing sign-in or extension make the view
+// unavailable rather than an error.
+export function azFailure({ code, stderr }, on = null) {
+  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const said = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const az = on ? `az auf ${on}` : "az";
+  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
+    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
   }
-  if (/'(boards|devops)' is (misspelled|not in)|extension.*azure-devops/i.test(err)) {
-    return new BoardError("Die az-Erweiterung azure-devops fehlt: az extension add --name azure-devops", { unavailable: true });
+  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
+    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
   }
-  if (/project.*(required|not.*found|does not exist)|--project/i.test(err)) {
-    return new BoardError(`Azure-Projekt fehlt oder ist unbekannt: ${firstLine(err.replace(/^ERROR: /, ""))}`);
-  }
-  return new BoardError(firstLine(err.replace(/^ERROR: /, "")) || `az endete mit ${code}`);
+  if (/^--project must be specified/.test(said)) return new BoardError("Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…");
+  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
+  return new BoardError(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`);
 }
 
-// An exec that could not run at all (exec rejected): the tool is missing, the
-// machine is unreachable, or it timed out.
-export function execRejection(tool, error, timeoutMs) {
-  const msg = String(error?.message ?? error);
-  if (/time(d)?[ -]?out/i.test(msg)) return new BoardError(`${tool} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`);
-  if (/not found|no such file|cannot find|not installed|ENOENT|failed to (start|spawn)/i.test(msg)) {
-    return new BoardError(`${tool} ist nicht installiert`, { unavailable: tool === "az" });
+// An exec that could not run at all (exec rejected). Only a missing az makes
+// its view unavailable; an unreachable machine or a failed start is an error.
+// A timeout leaves open what a write did.
+export function execRejection(tool, error, timeoutMs, on = null) {
+  const msg = firstLine(error?.message ?? error);
+  const who = on ? `${tool} auf ${on}` : tool;
+  if (/time(d)?[ -]?out/i.test(msg)) return new BoardError(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { unclear: true });
+  if (/program not found|no such file or directory|command not found|not installed|ENOENT/i.test(msg)) {
+    return new BoardError(`${who} ist nicht installiert`, { unavailable: tool === "az" });
   }
-  return new BoardError(`${tool} ließ sich nicht starten: ${firstLine(msg)}`, { unavailable: tool === "az" });
+  return new BoardError(`${who} ließ sich nicht starten: ${msg}`);
 }
 
 // ---- Board state -----------------------------------------------------------
@@ -623,8 +692,8 @@ export function findCard(board, key) {
 }
 
 // A new board with the card in another column; counts follow (a hidden
-// column counts the server's number plus what was moved in). Unchanged when
-// the card or column is unknown.
+// column's count, where it has one, is the server's plus what was moved in).
+// Unchanged when the card or column is unknown, or the card is there already.
 export function moveCard(board, key, columnId) {
   const found = findCard(board, key);
   if (!found || !board.columns.some((c) => c.id === columnId) || found.column.id === columnId) return board;
@@ -638,10 +707,41 @@ export function moveCard(board, key, columnId) {
   return next;
 }
 
-// Moves made since a refresh started, laid over its result, so a refresh
-// that was under way during a move does not undo it on screen.
+// A failed move undone: the card goes back to move.from, unless it has moved
+// on since.
+export function rollback(board, move) {
+  return findCard(board, move.key)?.column.id === move.to ? moveCard(board, move.key, move.from) : board;
+}
+
+// Moves laid over every refresh: those still being written, and confirmed
+// ones until a refresh that started after the confirmation shows them.
+export function pendingMoves(moves, started) {
+  return moves.filter((m) => !m.confirmedAt || m.confirmedAt >= started);
+}
+
 export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
+}
+
+// Whether a card may go to a column: one that takes drops, and on Azure a
+// state of the card's own type.
+export function canDrop(board, card, column) {
+  if (!column?.target) return false;
+  const states = card.source === "azure" ? board.meta?.types?.[card.type] : null;
+  return !states || states.includes(column.name);
+}
+
+export const targetsFor = (board, card) => board.columns.filter((c) => canDrop(board, card, c));
+
+// The column H (step -1) or L (+1) moves a card to: the next shown column,
+// stubs included, the card may go to; null at the edge.
+export function stepTarget(board, columns, key, step) {
+  const found = findCard(board, key);
+  if (!found) return null;
+  for (let i = columns.findIndex((c) => c.id === found.column.id) + step; i >= 0 && i < columns.length; i += step) {
+    if (canDrop(board, found.card, columns[i])) return columns[i];
+  }
+  return null;
 }
 
 // A view's columns with the person's hidden set applied.
@@ -653,7 +753,7 @@ export function withHidden(board, hidden) {
 export function matches(card, text) {
   const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [card.title, card.number !== null ? `#${card.number}` : "", card.repo, card.type, card.author, card.branch,
+  const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
     ...(card.labels ?? []), ...(card.assignees ?? [])].filter(Boolean).join("\n").toLowerCase();
   return words.every((w) => hay.includes(w));
 }
@@ -664,9 +764,10 @@ export function shownColumns(board, filter) {
   return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => matches(card, filter)) }));
 }
 
-// Keyboard movement on a board: sel = { col, key } (key null on a stub or an
-// empty column) → the next sel. "up"/"down" move within the column, "left"/
-// "right" to the next column (stubs too), keeping the row where it can.
+// Keyboard movement: sel = { col, key } (key null on a stub or an empty
+// column) → the next sel. "up"/"down" move within the column, "left"/"right"
+// to the next column (stubs too), keeping the row where they can. A list is
+// one column.
 export function navigate(columns, sel, dir) {
   if (!columns.length) return { col: 0, key: null };
   let ci = Math.min(Math.max(sel?.col ?? 0, 0), columns.length - 1);
@@ -681,6 +782,16 @@ export function navigate(columns, sel, dir) {
   if (dir === "left" || dir === "right") ci = Math.min(Math.max(ci + (dir === "left" ? -1 : 1), 0), columns.length - 1);
   const list = cards(ci);
   return { col: ci, key: list.length ? list[Math.min(row, list.length - 1)].key : null };
+}
+
+// The selection after new data or a filter: its card's column again, else the
+// first card; a selected stub or empty column stays selected.
+export function selectionAfter(columns, sel) {
+  const at = columns.findIndex((c) => c.shown.some((card) => card.key === sel?.key));
+  if (at >= 0) return { col: at, key: sel.key };
+  if (!sel?.key && columns[sel?.col]) return sel;
+  const first = columns.findIndex((c) => c.shown.length);
+  return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
 }
 
 // ---- Times -----------------------------------------------------------------
@@ -705,132 +816,87 @@ export function ageLabel(iso, now) {
   return `${then.getDate()}.${then.getMonth() + 1}.`;
 }
 
-// ---- Agents and starting one -----------------------------------------------
+// ---- Sessions --------------------------------------------------------------
 
-// The space whose branch belongs to the item (a pull request: its head
-// branch; anything else: a branch with `<number>-` after its type, in a
-// folder of the item's repo), the most urgent first.
-const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
-export function linkedSpace(item, allSpaces) {
+// An item's key: `<repo>#<number>` on GitHub, `AB#<id>` on Azure (Azure
+// Boards' own way to name a work item), null for a draft.
+export function itemKey(item) {
   if (item.number === null || item.number === undefined) return null;
-  const own = new RegExp(`(^|/)${item.number}(-|$)`);
-  const hits = allSpaces.filter((s) => {
-    if (!s.branch) return false;
-    if (item.kind === "pr" && item.branch) return s.branch === item.branch;
-    return own.test(s.branch) && (!item.repoShort || (s.folder ?? "").includes(item.repoShort));
-  });
+  return item.source === "azure" ? `AB#${item.number}` : `${item.repoShort}#${item.number}`;
+}
+
+export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
+
+const NAME_MAX = 60;
+
+// The name of the tab and space a session starts in: the item's key and title,
+// cut to NAME_MAX characters. linkedSession finds the session by it.
+export function sessionName(item) {
+  const key = itemKey(item);
+  const full = key ? `${key} ${item.title}` : item.title;
+  return full.length <= NAME_MAX ? full : `${full.slice(0, NAME_MAX - 1)}…`;
+}
+
+const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
+
+// An item's session: a tab or space whose name starts with its key, the most
+// urgent first; failing that, on GitHub a space on its branch (a pull
+// request's head branch, or `<type>/<number>-…` in a folder of its repo).
+// → { space, tab (null for a space), status, label } or null.
+export function linkedSession(item, allSpaces) {
+  const key = itemKey(item);
+  const named = (name) => Boolean(key) && (name === key || String(name ?? "").startsWith(`${key} `));
+  let hits = [];
+  for (const s of allSpaces) {
+    for (const t of s.tabs ?? []) if (named(t.name)) hits.push({ space: s.id, tab: t.id, status: t.status ?? null, label: t.name });
+    if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
+  }
+  if (!hits.length && item.source === "github" && key) {
+    const own = new RegExp(`(^|/)${item.number}(-|$)`);
+    hits = allSpaces
+      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : own.test(s.branch) && (s.folder ?? "").includes(item.repoShort)))
+      .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
+  }
   hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
   return hits[0] ?? null;
 }
 
 export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
 
-const FOLD = { ä: "ae", ö: "oe", ü: "ue", ß: "ss", à: "a", á: "a", â: "a", é: "e", è: "e", ê: "e", í: "i", ó: "o", ô: "o", ú: "u", ñ: "n", ç: "c" };
-const COMMIT_TYPES = ["feat", "fix", "docs", "chore", "refactor", "test", "build", "ci", "perf", "style", "revert"];
-const TITLE_PREFIX = /^\s*([a-z]+)(\([^)]*\))?!?:\s*/i;
-
-// A branch-safe slug of a title without its Conventional Commits prefix, cut
-// at a word boundary.
-export function slugify(title, max = 40) {
-  const words = String(title ?? "")
-    .replace(TITLE_PREFIX, "")
-    .toLowerCase()
-    .replace(/[^\x00-\x7f]/g, (ch) => FOLD[ch] ?? " ")
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-  let slug = "";
-  for (const w of words) {
-    const next = slug ? `${slug}-${w}` : w;
-    if (next.length > max) break;
-    slug = next;
-  }
-  return slug || words[0]?.slice(0, max) || "item";
-}
-
-// The branch type: the title's Conventional Commits type, else from the
-// issue type or labels (a bug is a fix), else feat.
-export function branchType(item) {
-  const prefix = String(item.title ?? "").match(TITLE_PREFIX)?.[1]?.toLowerCase();
-  if (prefix && COMMIT_TYPES.includes(prefix)) return prefix;
-  const words = [item.type, ...(item.labels ?? [])].filter(Boolean).map((w) => w.toLowerCase());
-  if (words.some((w) => w === "bug" || w === "defect")) return "fix";
-  if (words.some((w) => w === "documentation" || w === "docs")) return "docs";
-  return "feat";
-}
-
 // `{name}` placeholders filled from vars; unknown ones stay.
 export function renderTemplate(template, vars) {
   return String(template ?? "").replace(/\{(\w+)\}/g, (all, name) => (vars[name] !== undefined && vars[name] !== null ? String(vars[name]) : all));
 }
 
-export function templateVars(item, settings, branch) {
-  const [owner = "", repo = ""] = item.repo.includes("/") ? item.repo.split("/") : ["", item.repo];
-  const vars = {
-    number: item.number ?? "",
-    title: item.title,
-    url: item.url ?? "",
-    owner,
-    repo: repo || item.repoShort || "",
-    type: branchType(item),
-    slug: slugify(item.title),
-    checkout: settings.checkout ?? "",
-  };
-  vars.branch = branch ?? (item.kind === "pr" && item.branch ? item.branch : renderTemplate(settings.branch, vars));
-  vars.branchDashed = vars.branch.replace(/\//g, "-");
-  return vars;
+export function templateVars(item) {
+  const [owner, repo] = item.repo.includes("/") ? item.repo.split("/") : ["", item.repo];
+  return { number: item.number ?? "", title: item.title, url: item.url ?? "", owner, repo, key: itemKey(item) ?? "" };
 }
 
-// Makes the worktree on the chosen machine and prints its folder and the
-// checkout's: an existing worktree of the branch is reused; a branch that
-// exists locally or on origin is checked out; otherwise a new branch starts
-// from origin/<base>. $1 checkout, $2 base, $3 branch, $4 worktree folder
-// (both may start with ~/).
-export const WORKTREE_SCRIPT = [
-  "set -eu",
-  'home() { case $1 in \\~) printf "%s" "$HOME";; \\~/*) printf "%s/%s" "$HOME" "${1#\\~/}";; *) printf "%s" "$1";; esac; }',
-  'repo=$(home "$1"); base=$2; branch=$3; path=$(home "$4")',
-  '[ -d "$repo" ] || { echo "Kein Checkout unter $repo" >&2; exit 3; }',
-  'cd "$repo"',
-  'git check-ref-format --branch "$branch" >/dev/null 2>&1 || { echo "Ungültiger Branch-Name: $branch" >&2; exit 4; }',
-  'existing=$(git worktree list --porcelain | awk -v b="branch refs/heads/$branch" \'/^worktree /{p=substr($0,10)} $0==b{print p; exit}\')',
-  'if [ -n "$existing" ]; then printf "%s\\n%s\\n" "$existing" "$repo"; exit 0; fi',
-  'git fetch --quiet origin "$base"',
-  'if git show-ref --verify --quiet "refs/heads/$branch"; then',
-  '  git worktree add --quiet "$path" "$branch"',
-  'elif git fetch --quiet origin "$branch" 2>/dev/null && git show-ref --verify --quiet "refs/remotes/origin/$branch"; then',
-  '  git worktree add --quiet --track -b "$branch" "$path" "origin/$branch"',
-  "else",
-  '  git worktree add --quiet --no-track -b "$branch" "$path" "origin/$base"',
-  "fi",
-  'printf "%s\\n%s\\n" "$path" "$repo"',
+// Prints the checkout's folder on the chosen machine ($1; a leading ~ is that
+// machine's home), or exits 3 when there is none.
+export const CHECKOUT_SCRIPT = [
+  "case $1 in \\~) dir=$HOME ;; \\~/*) dir=$HOME/${1#\\~/} ;; *) dir=$1 ;; esac",
+  '[ -d "$dir" ] || { echo "Kein Checkout unter $dir" >&2; exit 3; }',
+  'cd "$dir" && pwd',
 ].join("\n");
 
-export function worktreeArgs(settings, vars) {
-  return ["-c", WORKTREE_SCRIPT, "board-worktree", settings.checkout, settings.base, vars.branch, renderTemplate(settings.worktree, vars)];
-}
+export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
 
-// The space a new tab goes into: one on that machine in the checkout or one
-// of its worktrees, else the shown space when it is on that machine.
+// The space a new tab goes into: one on that machine in the checkout or below
+// it (its worktrees too), else the shown space when it is on that machine.
 export function spaceForTab(allSpaces, on, repoFolder) {
   const here = allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
   return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}.worktrees/`) || s.folder.startsWith(`${repoFolder}/`)))
     ?? here.find((s) => s.active) ?? null;
 }
 
-// The app command that opens the agent: [name, args].
+// The app command that opens a session: [name, args]. A new space and its
+// first tab both carry the session's name.
 export function startCommand({ open, on, folder, argv, task, name, space }) {
   const common = { folder, argv, ...(task ? { task } : {}) };
   if (open === "tab") return ["tab.new", { name, space, ...common }];
-  return ["space.new", { tab: name, machine: on ?? "", ...common }];
-}
-
-// The column an item goes to when its agent starts: the view's startColumn,
-// else on Azure the first state of category InProgress.
-export function startColumn(view, board) {
-  const cols = board?.columns ?? [];
-  if (view.startColumn) return cols.find((c) => c.name === view.startColumn) ?? null;
-  if (view.source === "azure") return cols.find((c) => c.category === "InProgress") ?? null;
-  return null;
+  return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
 }
 
 // ---------------------------------------------------------------------------
@@ -841,50 +907,86 @@ const GH_TIMEOUT = 30000;
 const AZ_TIMEOUT = 60000;
 const TICK_MS = 30000;
 const SCROLLS = 24;
-const SOURCE_TAG = { github: "GH", azure: "AZ" };
 
-// One call of gh or az: its result, or a BoardError when it could not run.
+// One run of a program: its result, or a BoardError when it could not run.
 async function call(tool, args, on, timeout) {
   try {
     return await exec(tool, args, { on, timeout });
   } catch (e) {
-    throw execRejection(tool, e, timeout);
+    throw execRejection(tool, e, timeout, on);
   }
 }
 
-async function ghJson(args) {
-  const r = await call("gh", args, null, GH_TIMEOUT);
-  if (r.code !== 0) throw ghFailure(r);
-  const json = JSON.parse(r.stdout);
-  if (json.errors?.length && !json.data) throw ghFailure({ ...r, code: 1 });
-  return json;
-}
+const gh = async (args, options) => readGh(await call("gh", args, null, GH_TIMEOUT), options);
 
 async function az(view, args) {
   const r = await call("az", args, view.on, AZ_TIMEOUT);
-  if (r.code !== 0) throw azFailure(r);
+  if (r.code !== 0) throw azFailure(r, view.on);
   return r.stdout;
 }
 
+// What differs between GitHub and Azure: loading a view, writing a move, the
+// sidebar's tag and the name of the site `o` opens.
+const SOURCES = {
+  github: {
+    tag: (view) => (view.layout === "list" ? "PR" : "GH"),
+    site: "GitHub",
+    async load(board, view) {
+      if (view.layout === "list") {
+        const { json, warnings } = await gh(githubListArgs(view));
+        return { data: parseGithubList(json, view), warnings };
+      }
+      const { owner, number } = view.project;
+      const hidden = board.hiddenFor(view, []);
+      const notFound = `Projekt ${number} von ${owner} nicht gefunden – project.number in ${CONFIG_NAME}.json prüfen`;
+      const { json, warnings } = await gh(githubBoardArgs(view, hidden), { notFound });
+      return { data: parseGithubBoard(json, view, hidden), warnings };
+    },
+    async move(view, data, card, column) {
+      checkMoveResult((await gh(githubMoveArgs(data.meta, card, column))).json, card);
+    },
+  },
+  azure: {
+    tag: () => "AZ",
+    site: "Azure",
+    async load(board, view) {
+      const cache = (board.azure[view.id] ??= {});
+      if (!cache.types) {
+        const project = view.project ?? parseAzureDefaults(await az(view, azureDefaultsArgs())).project;
+        if (!project) throw new BoardError("Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…");
+        cache.types = parseAzureTypes(await az(view, azureTypesArgs(view, project)));
+      }
+      const hidden = board.hiddenFor(view, cache.types.states);
+      return { data: parseAzureBoard(await az(view, azureQueryArgs(view, hidden)), cache.types, hidden), warnings: [] };
+    },
+    async move(view, _data, card, column) {
+      await az(view, azureMoveArgs(view, card, column));
+    },
+  },
+};
+
+// Settings that last across reloads (the shown view, hidden columns). A full
+// or missing localStorage keeps them for this session only.
 const store = {
-  get(key, fallback) {
+  get(key) {
     try {
       const v = localStorage.getItem(key);
-      return v === null ? fallback : JSON.parse(v);
+      return v === null ? null : JSON.parse(v);
     } catch {
-      return fallback;
+      return null;
     }
   },
   set(key, value) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch {
-      // localStorage full or missing: the setting lasts until the mod reloads.
+      // Kept in memory only; see above.
     }
   },
 };
 
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
+const machineName = (name) => name ?? "Dieser Rechner";
 
 // Whether a board pane is in the shown tab of the shown space.
 function boardShown() {
@@ -892,23 +994,29 @@ function boardShown() {
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }
 
+// An error's message for the UI; an unexpected one is logged with its stack.
+function report(e) {
+  if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
+  return errorText(e);
+}
+
 export default class Board extends View {
   init(_props, cx) {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    this.views = {}; // per view id: { data, error, loading, at, tried, unavailable, moves, sel, detail }
-    this.viewId = store.get("view", null);
+    this.views = {}; // per view id, see state()
+    this.viewId = store.get("view");
     this.filterText = "";
     this.filtering = false;
-    this.modal = null;
-    this.notice = null;
-    this.drag = null;
-    this.over = null;
-    this.azure = {}; // per view id: { states, types, project }
+    this.modal = null; // { kind: "status", … } or { kind: "start", … }
+    this.notice = null; // { text, level }
+    this.drag = null; // { key, from }
+    this.over = null; // the column index under a drag
+    this.azure = {}; // per Azure view id: { types } (parseAzureTypes)
     this.scrolls = Array.from({ length: SCROLLS }, () => ScrollHandle.new());
     this.listScroll = ScrollHandle.new();
-    this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Nummer, Labels …" });
+    this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
       cx.notify();
@@ -922,23 +1030,23 @@ export default class Board extends View {
       cx.notify();
     });
     this.filterInput.on("submit", () => this.handle.focus());
-    this.branchInput = InputState.new({ placeholder: "Branch" });
     this.messageInput = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
-    for (const [input, field] of [[this.branchInput, "branch"], [this.messageInput, "message"]]) {
-      input.on("focus", (_e, cx) => {
-        if (this.modal?.kind === "start") this.modal.field = field;
-        cx.notify();
-      });
-      input.on("submit", (_e, cx) => this.startAgent(cx));
-    }
-    this.handle.focus();
+    this.messageInput.on("focus", (_e, cx) => {
+      if (this.modal?.kind === "start") this.modal.field = "message";
+      cx.notify();
+    });
+    this.messageInput.on("submit", (_e, cx) => this.startAgent(cx));
     if (checking()) return;
-    cx.timer.after(300, () => this.handle.focus());
+    // A copy that is not shown (a reload of a background tab) leaves the
+    // keyboard where it is.
+    if (boardShown()) {
+      this.handle.focus();
+      cx.timer.after(300, () => this.handle.focus());
+    }
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
         if (command === "focus") this.handle.focus();
-        else if (command === "refresh") this.reload(cx);
         cx.notify();
       }
     });
@@ -948,8 +1056,17 @@ export default class Board extends View {
 
   // ---- data ----
 
+  // A view's state: data and error, loading (again: one more refresh after
+  // this one), at (last success) and tried (last start), unavailable (why the
+  // view is not listed), warnings, moves (laid over refreshes, see
+  // pendingMoves), pending (card keys being written), stored/hidden (the
+  // person's toggles and the hidden set), sel ({ col, key }, null before
+  // the first data) and detail.
   state(id) {
-    this.views[id] ??= { data: null, error: null, loading: false, at: 0, tried: 0, unavailable: null, moves: [], sel: { col: 0, key: null }, detail: false };
+    this.views[id] ??= {
+      data: null, error: null, loading: false, again: false, at: 0, tried: 0, unavailable: null, warnings: [], moves: [], pending: {},
+      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, detail: false,
+    };
     return this.views[id];
   }
 
@@ -962,29 +1079,30 @@ export default class Board extends View {
     return shown.find((v) => v.id === this.viewId) ?? shown[0] ?? null;
   }
 
-  // Reads views.json again and refreshes the shown view; Azure views not
-  // shown are tried once so the list knows whether they are available.
+  hiddenFor(view, columns) {
+    const st = this.state(view.id);
+    st.hidden = hiddenColumns(view, st.stored, columns);
+    return st.hidden;
+  }
+
+  // Reads views.json again and refreshes the shown view. Azure views not
+  // shown are tried too, so the list knows whether they are available; their
+  // work item types are read anew.
   reload(cx) {
     cx.spawn(async (cx) => {
       const text = await readTextFile(`${appHome()}/mods/${MOD}/${CONFIG_NAME}.json`).catch((e) => {
         this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
         return undefined;
       });
-      if (text !== undefined) Object.assign(this, (({ config, errors }) => ({ config, configErrors: errors }))(readConfig(text)));
+      if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
+      this.azure = {};
       cx.notify();
       if (!this.config) return;
-      for (const v of this.config.views) {
-        const st = this.state(v.id);
-        st.unavailable = null;
-        if (v.source === "azure" && v.id !== this.view()?.id) this.refresh(v, cx);
-      }
-      const v = this.view();
-      if (v) this.refresh(v, cx);
+      for (const v of this.config.views) this.state(v.id).unavailable = null;
+      const shown = this.view();
+      for (const v of this.config.views) if (v.source === "azure" && v !== shown) this.refresh(v, cx);
+      if (shown) this.refresh(shown, cx);
     });
-  }
-
-  hidden(view, columns) {
-    return hiddenColumns(view, store.get(`hidden:${view.id}`, null), columns);
   }
 
   refresh(view, cx) {
@@ -997,76 +1115,84 @@ export default class Board extends View {
     const started = st.tried;
     cx.spawn(async (cx) => {
       try {
-        const data = await this.load(view);
-        st.moves = st.moves.filter((m) => m.at >= started);
+        const { data, warnings } = await SOURCES[view.source].load(this, view);
+        st.moves = pendingMoves(st.moves, started);
         st.data = data.kind === "board" ? applyMoves(data, st.moves) : data;
+        st.warnings = [...warnings, ...this.dataWarnings(view, data)];
         st.error = null;
+        st.unavailable = null;
         st.at = Date.now();
         this.keepSelection(view);
       } catch (e) {
         if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
-        else st.error = e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`;
+        else st.error = report(e);
       } finally {
         st.loading = false;
         if (st.again) this.refresh(view, cx);
+        // A view that takes the place of one just found unavailable loads now.
+        const next = this.view();
+        const waiting = next && next !== view && !this.state(next.id).data && !this.state(next.id).loading;
+        if (st.unavailable && waiting) this.refresh(next, cx);
         cx.notify();
       }
     });
     cx.notify();
   }
 
-  async load(view) {
-    if (view.source === "github" && view.layout === "list") return parseGithubList(await ghJson(githubListArgs(view)), view);
-    if (view.source === "github") {
-      const hidden = this.hidden(view);
-      return parseGithubBoard(await ghJson(githubBoardArgs(view, hidden)), view, hidden);
+  dataWarnings(view, data) {
+    if (data.kind === "list") {
+      return data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`);
     }
-    const cache = (this.azure[view.id] ??= {});
-    if (!cache.types) {
-      const project = view.project ?? parseAzureDefaults(await az(view, azureDefaultsArgs())).project;
-      if (!project) throw new BoardError("Kein Azure-Projekt: „project“ in der Ansicht oder az devops configure --defaults project=…");
-      cache.types = parseAzureTypes(await az(view, azureTypesArgs(view, project)));
-    }
-    const hidden = this.hidden(view, cache.types.states);
-    return parseAzureBoard(await az(view, azureQueryArgs(view, hidden)), cache.types, hidden);
+    return unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide oder hideCategories passt zu keiner Spalte`);
   }
 
+  // Every TICK_MS while the board shows: the shown view and the unavailable
+  // ones once refreshMinutes have passed since they were last tried.
   tick(cx) {
-    const v = this.view();
-    if (!v || !boardShown()) return;
-    const st = this.state(v.id);
-    if (Date.now() - st.tried >= this.config.refreshMinutes * 60000) this.refresh(v, cx);
-    else cx.notify();
+    if (!this.config || !boardShown()) return;
+    const every = this.config.refreshMinutes * 60000;
+    const due = (v) => Date.now() - this.state(v.id).tried >= every;
+    const shown = this.view();
+    if (shown && due(shown)) this.refresh(shown, cx);
+    for (const v of this.config.views) if (this.state(v.id).unavailable && due(v)) this.refresh(v, cx);
+    cx.notify();
   }
 
   // ---- moves ----
 
-  // Moves a card to a column at once and writes it; on failure it moves back
-  // and the error stays visible.
+  // Moves a card to a column at once and writes it; one write per card at a
+  // time. A refusal moves it back with the error shown; a write whose outcome
+  // is unclear leaves it and refreshes.
   moveTo(view, key, columnId, cx) {
     const st = this.state(view.id);
     const found = findCard(st.data, key);
     const to = st.data?.columns.find((c) => c.id === columnId);
-    if (!found || !to || found.column.id === columnId) return;
-    if (!to.target) return this.say(`Nach „${to.name}“ lässt sich nichts verschieben`, "warning", cx);
-    const from = found.column.id;
-    const label = `${found.card.repoShort} #${found.card.number}`;
-    const move = { key, to: columnId, at: Date.now() };
+    if (!found || !to) return this.say("Die Karte oder Spalte gibt es nicht mehr", "warning", cx);
+    const label = itemLabel(found.card);
+    if (found.column.id === columnId) return;
+    if (st.pending[key]) return this.say(`${label} wird noch gespeichert`, "info", cx);
+    if (!canDrop(st.data, found.card, to)) return this.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
+    const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
     st.moves.push(move);
     st.data = moveCard(st.data, key, columnId);
-    st.pending = { ...st.pending, [key]: true };
+    st.pending[key] = true;
     this.say(`${label} → ${to.name} …`, "info", cx);
     cx.spawn(async (cx) => {
       try {
-        if (view.source === "github") checkMoveResult(await ghJson(githubMoveArgs(st.data.meta, found.card, to)), found.card);
-        else await az(view, azureMoveArgs(view, found.card, to));
+        await SOURCES[view.source].move(view, st.data, found.card, to);
+        move.confirmedAt = Date.now();
         this.say(`${label} steht jetzt in „${to.name}“`, "success", cx);
       } catch (e) {
         st.moves = st.moves.filter((m) => m !== move);
-        st.data = moveCard(st.data, key, from);
-        const why = e instanceof BoardError ? e.message : firstLine(e?.message ?? e);
-        this.say(`${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
-        notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
+        const why = report(e);
+        if (e instanceof BoardError && e.unclear) {
+          this.say(`${label} → ${to.name}: Ergebnis unklar (${why}); lädt neu`, "warning", cx);
+          this.refresh(view, cx);
+        } else {
+          st.data = rollback(st.data, move);
+          this.say(`${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
+          notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
+        }
       } finally {
         delete st.pending[key];
         cx.notify();
@@ -1092,46 +1218,35 @@ export default class Board extends View {
     return st.data.sections.flatMap((s) => s.rows.filter((r) => matches(r, this.filterText)));
   }
 
-  selected(view) {
-    const st = this.state(view.id);
-    const key = st.sel.key;
-    if (!key) return null;
-    if (st.data?.kind === "board") return findCard(st.data, key)?.card ?? null;
-    return this.rows(view).find((r) => r.key === key) ?? null;
+  // The board's columns, or a list as one column, as navigate takes them.
+  navColumns(view) {
+    return this.state(view.id).data?.kind === "list" ? [{ shown: this.rows(view) }] : this.columns(view);
   }
 
-  // After new data or a filter: the selected card's column again, else the
-  // first card; a selected stub or empty column stays selected.
+  selected(view) {
+    const st = this.state(view.id);
+    if (!st.sel?.key) return null;
+    if (st.data?.kind === "board") return findCard(st.data, st.sel?.key)?.card ?? null;
+    return this.rows(view).find((r) => r.key === st.sel?.key) ?? null;
+  }
+
   keepSelection(view) {
     const st = this.state(view.id);
-    if (st.data?.kind === "list") {
-      const rows = this.rows(view);
-      if (!rows.some((r) => r.key === st.sel.key)) st.sel = { col: 0, key: rows[0]?.key ?? null };
-      return;
-    }
-    const cols = this.columns(view);
-    const at = cols.findIndex((c) => c.shown.some((card) => card.key === st.sel.key));
-    if (at >= 0) st.sel = { col: at, key: st.sel.key };
-    else if (!st.sel.key && cols[st.sel.col]) return;
-    else {
-      const first = cols.findIndex((c) => c.shown.length);
-      st.sel = first >= 0 ? { col: first, key: cols[first].shown[0].key } : { col: 0, key: null };
-    }
+    st.sel = selectionAfter(this.navColumns(view), st.sel);
   }
 
   select(view, sel) {
     const st = this.state(view.id);
     st.sel = sel;
-    if (st.data?.kind === "board") {
-      const col = this.columns(view)[sel.col];
-      const row = col?.shown.findIndex((c) => c.key === sel.key) ?? -1;
-      if (row >= 0) this.scrolls[sel.col % SCROLLS].scroll_to_item(row);
-    }
+    const cols = this.navColumns(view);
+    const row = cols[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
+    if (row < 0) return;
+    if (st.data?.kind === "board") this.scrolls[sel.col % SCROLLS].scroll_to_item(row);
+    else this.scrollList(view, sel.key);
   }
 
   switchView(index, cx) {
-    const shown = this.shownViews();
-    const v = shown[(index + shown.length) % shown.length];
+    const v = this.shownViews()[index];
     if (!v) return;
     this.viewId = v.id;
     store.set("view", v.id);
@@ -1143,12 +1258,12 @@ export default class Board extends View {
 
   toggleColumn(view, col, cx) {
     const st = this.state(view.id);
-    if (!st.data || st.data.kind !== "board") return;
-    const hidden = this.hidden(view, st.data.columns);
-    if (hidden.has(col.name)) hidden.delete(col.name);
-    else hidden.add(col.name);
-    store.set(`hidden:${view.id}`, [...hidden]);
-    st.data = withHidden(st.data, hidden);
+    if (st.data?.kind !== "board") return;
+    if (!col.target) return this.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
+    st.stored = toggleHidden(view, st.stored, col, st.data.columns);
+    st.hidden = hiddenColumns(view, st.stored, st.data.columns);
+    store.set(`hidden:${view.id}`, st.stored);
+    st.data = withHidden(st.data, st.hidden);
     // What a column holds comes from the query, which leaves hidden ones out.
     this.refresh(view, cx);
   }
@@ -1158,7 +1273,7 @@ export default class Board extends View {
     else this.say("Dazu gibt es keine Seite", "warning", cx);
   }
 
-  // Enter: details first, then the agent (go to it, or start one).
+  // Enter: details first, then the item's session (go to it, or start one).
   enter(view, cx) {
     const st = this.state(view.id);
     const item = this.selected(view);
@@ -1167,9 +1282,10 @@ export default class Board extends View {
       st.detail = true;
       return cx.notify();
     }
-    const space = linkedSpace(item, spaces());
-    if (space) run("space.select", { id: space.id });
-    else this.openStart(view, item, cx);
+    const session = linkedSession(item, spaces());
+    if (!session) return this.openStart(view, item, cx);
+    run("space.select", { id: session.space });
+    if (session.tab) run("tab.select", { id: session.tab });
   }
 
   // ---- the start dialog ----
@@ -1179,20 +1295,18 @@ export default class Board extends View {
     if (!settings.checkout) {
       return this.say(`Für ${item.repo || view.name} steht kein „checkout“ in ${CONFIG_NAME}.json (repos oder start)`, "error", cx);
     }
-    const vars = templateVars(item, settings);
     const template = item.kind === "pr" ? settings.review : settings.message;
-    this.branchInput.set_value(vars.branch);
-    this.messageInput.set_value(renderTemplate(template, vars));
-    const list = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
-    const machine = Math.max(0, list.indexOf(settings.machine ?? null));
-    const column = item.kind === "pr" ? null : startColumn(view, this.state(view.id).data);
+    this.messageInput.set_value(renderTemplate(template, templateVars(item)));
+    const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
+    const list = listed.length ? listed : [null];
+    let machine = list.indexOf(settings.machine ?? null);
+    const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
+    if (machine < 0) machine = 0;
     this.modal = {
-      kind: "start", view, item, settings, field: "branch", agents: [], agent: 0, agentsError: null,
-      machines: list.length ? list : [null], machine, open: settings.open === "tab" ? "tab" : "space",
-      column, move: Boolean(column) && findCard(this.state(view.id).data, item.key)?.column.id !== column?.id,
-      busy: null, error: null,
+      kind: "start", view, item, settings, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
     };
-    this.branchInput.focus();
+    this.messageInput.focus();
     this.loadAgents(cx);
     cx.notify();
   }
@@ -1202,63 +1316,75 @@ export default class Board extends View {
     const on = m.machines[m.machine];
     m.agents = [];
     m.agentsError = null;
+    m.agentNote = null;
     cx.spawn(async (cx) => {
       try {
         const agents = (await knownAgents({ on })).filter((a) => a.installed);
         if (this.modal !== m || m.machines[m.machine] !== on) return;
         m.agents = agents;
-        m.agent = Math.max(0, agents.findIndex((a) => a.key === m.settings.agent));
+        const wanted = m.settings.agent;
+        m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
         if (!agents.length) m.agentsError = "Kein Agent installiert";
+        else if (wanted && !agents.some((a) => a.key === wanted)) {
+          m.agentNote = `Agent „${wanted}“ ist ${on ? `auf ${on}` : "auf diesem Rechner"} nicht installiert; gewählt: ${agents[0].name}`;
+        }
       } catch (e) {
-        if (this.modal === m) m.agentsError = `Agents nicht lesbar: ${firstLine(e?.message ?? e)}`;
+        if (this.modal === m) m.agentsError = `Agents nicht lesbar: ${report(e)}`;
       }
+      m.notes = [m.machineNote, m.agentNote].filter(Boolean);
       cx.notify();
     });
   }
 
   cycle(field, by, cx) {
     const m = this.modal;
+    if (m.busy) return;
     if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
     if (field === "machine") {
       m.machine = (m.machine + by + m.machines.length) % m.machines.length;
+      m.machineNote = null;
       this.loadAgents(cx);
     }
     if (field === "open") m.open = m.open === "space" ? "tab" : "space";
-    if (field === "move" && m.column) m.move = !m.move;
     cx.notify();
   }
 
+  // Opens the item's session in its checkout on the chosen machine. The
+  // dialog stays until the result is in; a result that comes after the dialog
+  // went shows in the banner and as a toast.
   startAgent(cx) {
     const m = this.modal;
     if (m?.kind !== "start" || m.busy) return;
     const agent = m.agents[m.agent];
-    const branch = this.branchInput.value().trim();
-    if (!branch) return void ((m.error = "Der Branch fehlt"), cx.notify());
     if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
     const on = m.machines[m.machine];
-    const vars = templateVars(m.item, m.settings, branch);
     const task = this.messageInput.value().trim();
-    m.busy = "Worktree wird angelegt …";
+    const name = sessionName(m.item);
+    m.busy = "Sitzung wird geöffnet …";
     m.error = null;
     cx.spawn(async (cx) => {
       try {
-        const r = await call("sh", worktreeArgs(m.settings, vars), on, 120000);
-        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `Worktree: sh endete mit ${r.code}`);
-        const [folder, repoFolder] = r.stdout.trim().split("\n");
+        const r = await call("sh", checkoutArgs(m.settings.checkout), on, 30000);
+        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
+        const folder = r.stdout.trim().split("\n").pop();
         let space = null;
         if (m.open === "tab") {
-          space = spaceForTab(spaces(), on, repoFolder);
-          if (!space) throw new BoardError(`Kein Space auf ${on ?? "diesem Rechner"} für einen neuen Tab; als neuer Space öffnen`);
+          space = spaceForTab(spaces(), on, folder);
+          if (!space) throw new BoardError(`Kein Space auf ${machineName(on)} für einen neuen Tab; als neuer Space öffnen`);
         }
-        const name = m.item.number !== null ? `#${m.item.number}` : vars.slug;
-        const [command, args] = startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id });
-        run(command, args);
-        this.modal = null;
-        this.handle.focus();
-        this.say(`Agent gestartet: ${branch}${on ? ` auf ${on}` : ""}`, "success", cx);
-        if (m.move && m.column) this.moveTo(m.view, m.item.key, m.column.id, cx);
+        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
+        if (this.modal === m) {
+          this.modal = null;
+          this.handle.focus();
+        }
+        this.say(`Sitzung geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "success", cx);
       } catch (e) {
-        m.error = e instanceof BoardError ? e.message : firstLine(e?.message ?? e);
+        const why = report(e);
+        if (this.modal === m) m.error = why;
+        else {
+          this.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
+          notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
+        }
       } finally {
         m.busy = null;
         cx.notify();
@@ -1268,6 +1394,7 @@ export default class Board extends View {
   }
 
   closeModal(cx) {
+    if (this.modal?.busy) return;
     this.modal = null;
     this.handle.focus();
     cx.notify();
@@ -1293,20 +1420,20 @@ export default class Board extends View {
       cx.stop_propagation();
       cx.notify();
     };
-    // [ ] and / come through AltGr or Shift on some layouts, so they count
-    // whatever modifier typed them.
-    if (!mod.control && (ch === "[" || ch === "]")) {
-      const at = this.shownViews().indexOf(view);
-      return this.switchView(at + (ch === "[" ? -1 : 1), cx), done();
+    // [ ] and / may come with Shift, or AltGr, which Windows reports as
+    // Control+Alt; Control alone stays herdr's.
+    const typed = !(mod.control && !mod.alt) && !mod.platform;
+    if (typed && (ch === "[" || ch === "]")) {
+      const shown = this.shownViews();
+      return this.switchView((shown.indexOf(view) + (ch === "[" ? -1 : 1) + shown.length) % shown.length, cx), done();
     }
-    if (!mod.control && ch === "/") return this.filterInput.focus(), done();
+    if (typed && ch === "/") return this.filterInput.focus(), done();
     if (mod.control || mod.alt || mod.platform) return;
     if (/^[1-9]$/.test(ch)) return this.switchView(Number(ch) - 1, cx), done();
     if (k === "r" && !mod.shift) return this.reload(cx), done();
     if (!view) return;
     const st = this.state(view.id);
     if (st.data) this.keepSelection(view);
-    const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
     if (k === "escape") {
       if (st.detail) st.detail = false;
       else if (this.notice) this.notice = null;
@@ -1316,33 +1443,21 @@ export default class Board extends View {
       }
       return done();
     }
-    const dir = { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
-    if (st.data?.kind === "list") {
-      const rows = this.rows(view);
-      let at = Math.max(0, rows.findIndex((r) => r.key === st.sel.key));
-      if (dir === "down" || dir === "up") {
-        at = Math.min(Math.max(at + (dir === "up" ? -1 : 1), 0), rows.length - 1);
-        if (rows[at]) {
-          st.sel = { col: 0, key: rows[at].key };
-          this.scrollList(view, rows[at].key);
-        }
-        return done();
-      }
-    } else if (st.data?.kind === "board") {
-      const cols = this.columns(view);
-      if (dir && !mod.shift) return this.select(view, navigate(cols, st.sel, dir)), done();
+    const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
+    if (dir && st.data) {
+      if (st.data.kind === "board" || dir === "up" || dir === "down") this.select(view, navigate(this.navColumns(view), st.sel, dir));
+      return done();
+    }
+    if (st.data?.kind === "board") {
+      const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
       if (upper === "H" || upper === "L") {
-        const card = this.selected(view);
-        const here = cols.findIndex((c) => c.id === findCard(st.data, card?.key)?.column.id);
-        const step = upper === "H" ? -1 : 1;
-        let target = here + step;
-        while (cols[target] && !cols[target].target) target += step;
-        if (card && cols[target]) this.moveTo(view, card.key, cols[target].id, cx);
+        const target = st.sel?.key && stepTarget(st.data, this.columns(view), st.sel?.key, upper === "H" ? -1 : 1);
+        if (target) this.moveTo(view, st.sel?.key, target.id, cx);
         return done();
       }
       if (k === "s") return this.openStatusMenu(view), done();
       if (k === "x") {
-        const col = cols[st.sel.col];
+        const col = this.columns(view)[st.sel?.col];
         if (col) this.toggleColumn(view, col, cx);
         return done();
       }
@@ -1367,7 +1482,7 @@ export default class Board extends View {
     const st = this.state(view.id);
     const card = this.selected(view);
     if (!card || st.data?.kind !== "board") return;
-    const targets = st.data.columns.filter((c) => c.target);
+    const targets = targetsFor(st.data, card);
     const at = Math.max(0, targets.findIndex((c) => c.id === findCard(st.data, card.key)?.column.id));
     this.modal = { kind: "status", view, key: card.key, targets, at };
   }
@@ -1382,28 +1497,31 @@ export default class Board extends View {
     }
     if (m.kind === "status") {
       cx.stop_propagation();
+      let commit = k === "enter";
       if (k === "j" || k === "down") m.at = Math.min(m.at + 1, m.targets.length - 1);
       else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
-      else if (/^[1-9]$/.test(ch) && m.targets[Number(ch) - 1]) m.at = Number(ch) - 1;
-      if (k === "enter" || /^[1-9]$/.test(ch)) {
-        this.closeModal(cx);
-        return this.moveTo(m.view, m.key, m.targets[m.at].id, cx);
+      else if (/^[1-9]$/.test(ch)) {
+        // A digit beyond the rows does nothing.
+        if (!m.targets[Number(ch) - 1]) return cx.notify();
+        m.at = Number(ch) - 1;
+        commit = true;
       }
-      return cx.notify();
+      if (!commit) return cx.notify();
+      this.closeModal(cx);
+      return this.moveTo(m.view, m.key, m.targets[m.at].id, cx);
     }
     // The start dialog: Tab walks the fields; h/l or the arrows change a
-    // choice, space ticks the box, Enter starts. Typing goes to the inputs.
-    const fields = ["branch", "agent", "machine", "open", "message", ...(m.column ? ["move"] : [])];
+    // choice, Enter starts. Typing goes to the message.
+    const fields = ["message", "agent", "machine", "open"];
     if (k === "tab") {
       cx.stop_propagation();
       const at = fields.indexOf(m.field);
       m.field = fields[(at + (e.modifiers?.shift ? -1 : 1) + fields.length) % fields.length];
-      if (m.field === "branch") this.branchInput.focus();
-      else if (m.field === "message") this.messageInput.focus();
+      if (m.field === "message") this.messageInput.focus();
       else this.handle.focus();
       return cx.notify();
     }
-    if (m.field === "branch" || m.field === "message") return;
+    if (m.field === "message") return;
     cx.stop_propagation();
     if (k === "enter") return this.startAgent(cx);
     if (k === "h" || k === "left") return this.cycle(m.field, -1, cx);
@@ -1417,7 +1535,8 @@ export default class Board extends View {
     const mono = settings().font_family ?? "JetBrains Mono";
     const view = this.view();
     const st = view ? this.state(view.id) : null;
-    const root = v_flex()
+    const item = st?.detail && view ? this.selected(view) : null;
+    let out = v_flex()
       .id("board")
       .track_focus(this.handle)
       .size_full()
@@ -1432,20 +1551,21 @@ export default class Board extends View {
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
       .on_hover((hovered, cx) => {
         if (!hovered) this.endDrag(cx);
-      });
-    let out = root.child(this.toolbar(t, view, st));
+      })
+      .child(this.toolbar(t, view, st));
     if (this.notice || this.configErrors.length) out = out.child(this.banner(t));
-    out = out.child(
-      h_flex()
-        .flex_1()
-        .min_h(0)
-        .child(this.sidebar(t, view))
-        .child(this.main(t, mono, view, st))
-        .when(Boolean(st?.detail && view && this.selected(view)), (el) => el.child(this.detail(t, mono, view, this.selected(view)))),
-    );
-    out = out.child(this.hints(t, st));
+    out = out
+      .child(
+        h_flex()
+          .flex_1()
+          .min_h(0)
+          .child(this.sidebar(t, view))
+          .child(this.main(t, mono, view, st))
+          .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
+      )
+      .child(this.hints(t, st));
     if (this.modal?.kind === "status") out = out.child(this.statusMenu(t));
-    if (this.modal?.kind === "start") out = out.child(this.startDialog(t, mono));
+    if (this.modal?.kind === "start") out = out.child(this.startDialog(t));
     return out;
   }
 
@@ -1454,6 +1574,30 @@ export default class Board extends View {
     this.drag = null;
     this.over = null;
     cx.notify();
+  }
+
+  // A button; `primary` is the solid one. A disabled one ignores clicks.
+  button(t, id, label, primary, action, disabled = false) {
+    return div()
+      .id(id)
+      .px(12)
+      .py(7)
+      .rounded(6)
+      .text_size(12)
+      .cursor_pointer()
+      .opacity(disabled ? 0.5 : 1)
+      .bg(primary ? t.solid : t.raised)
+      .text_color(primary ? t.solid_foreground : t.foreground)
+      .when(primary, (el) => el.font_semibold())
+      .hover((s) => s.bg(primary ? t.accent : t.hover))
+      .on_click((_e, cx) => {
+        if (!disabled) action(cx);
+      })
+      .child(label);
+  }
+
+  checkColor(t, state) {
+    return { failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 }[state] ?? t.dim;
   }
 
   toolbar(t, view, st) {
@@ -1486,19 +1630,7 @@ export default class Board extends View {
           .child(Input.new(this.filterInput).flex_1().text_size(12.5).text_color(t.foreground)),
       )
       .child(div().flex_none().text_size(12).text_color(t.muted).child(updated))
-      .child(
-        div()
-          .id("refresh")
-          .flex_none()
-          .px(10)
-          .py(4)
-          .rounded(6)
-          .bg(t.raised)
-          .cursor_pointer()
-          .hover((s) => s.bg(t.hover))
-          .on_click((_e, cx) => this.reload(cx))
-          .child("↻"),
-      );
+      .child(this.button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
   }
 
   banner(t) {
@@ -1517,9 +1649,8 @@ export default class Board extends View {
   }
 
   sidebar(t, view) {
-    const all = this.config?.views ?? [];
     const shown = this.shownViews();
-    const missing = all.filter((v) => this.state(v.id).unavailable);
+    const missing = (this.config?.views ?? []).filter((v) => this.state(v.id).unavailable);
     const count = (v) => {
       const d = this.state(v.id).data;
       if (!d) return "";
@@ -1550,41 +1681,43 @@ export default class Board extends View {
             .on_click((_e, cx) => {
               if (!this.modal) this.switchView(i, cx);
             })
-            .child(div().w(22).text_size(11).text_color(t.dim).child(v.layout === "list" ? "PR" : SOURCE_TAG[v.source]))
+            .child(div().w(22).text_size(11).text_color(t.dim).child(SOURCES[v.source].tag(v)))
             .child(div().flex_1().min_w(0).truncate().child(v.name))
             .child(div().text_size(12).text_color(t.muted).child(this.state(v.id).loading ? "…" : count(v)))
             .child(div().w(10).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : "")),
         ),
       )
       .child(div().flex_1())
-      .children(
-        missing.map((v) => div().px(8).py(4).text_size(11).text_color(t.dim).child(`${v.name}: ${this.state(v.id).unavailable}`)),
-      );
+      .children(missing.map((v) => div().px(8).py(4).text_size(11).text_color(t.dim).child(`${v.name}: ${this.state(v.id).unavailable}`)));
   }
 
   main(t, mono, view, st) {
     const box = v_flex().flex_1().min_w(0).min_h(0);
-    const message = (text, color = t.muted) => box.child(div().p(20).text_color(color).child(text));
-    if (!this.config) return message(this.configErrors.length ? "Keine gültige Ansicht in views.json" : "Lädt …");
+    const message = (text) => box.child(div().p(20).text_color(t.muted).child(text));
+    if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
     if (!view) return message("Keine Ansicht verfügbar");
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
-    const shown = st.error ? box.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error)) : box;
+    let shown = box;
+    if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
+    if (st.warnings.length) shown = shown.children(st.warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;
+    if (st.data.kind === "board" && !st.data.columns.length) return shown.child(div().p(20).text_color(t.muted).child("Keine Einträge"));
     return shown.child(st.data.kind === "board" ? this.board(t, mono, view, st) : this.list(t, mono, view, st));
   }
 
   board(t, mono, view, st) {
     const cols = this.columns(view);
     const allSpaces = spaces();
+    const dragged = this.drag ? findCard(st.data, this.drag.key)?.card : null;
     const columnEl = (col, ci) => {
-      const focusedCol = st.sel.col === ci;
-      const target = Boolean(this.drag) && this.over === ci && this.drag.from !== col.id && col.target;
+      const focusedCol = st.sel?.col === ci;
+      const target = Boolean(dragged) && this.over === ci && this.drag.from !== col.id && canDrop(st.data, dragged, col);
       const base = (el) =>
         el
           .id(`col-${ci}`)
           .rounded(10)
           .border_1()
-          .border_color(target ? t.accent : focusedCol && !st.sel.key ? t.input : t.border)
+          .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
           .bg(target ? t.selected : t.chrome)
           .p(10)
           .on_hover((hovered, cx) => {
@@ -1597,10 +1730,8 @@ export default class Board extends View {
             if (!this.drag) return;
             cx.stop_propagation();
             const { key } = this.drag;
-            this.drag = null;
-            this.over = null;
+            this.endDrag(cx);
             this.moveTo(view, key, col.id, cx);
-            cx.notify();
           });
       const head = h_flex()
         .gap(6)
@@ -1633,25 +1764,17 @@ export default class Board extends View {
     return v_flex()
       .flex_1()
       .min_h(0)
-      .child(
-        h_flex()
-          .id("columns")
-          .flex_1()
-          .min_h(0)
-          .gap(12)
-          .p(14)
-          .items_start()
-          .children(cols.map(columnEl)),
-      )
+      .child(h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl)))
       .when(Boolean(st.data.limited), (el) =>
-        el.child(div().px(16).pb(8).text_size(12).text_color(t.ansi3).child(`Nur die ersten ${view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+        el.child(div().px(16).pb(8).text_size(12).text_color(t.ansi3)
+          .child(`Nur die ersten ${view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
       );
   }
 
   card(t, mono, view, st, card, ci, allSpaces) {
-    const selected = st.sel.key === card.key;
+    const selected = st.sel?.key === card.key;
     const dragging = this.drag?.key === card.key;
-    const agent = linkedSpace(card, allSpaces);
+    const session = linkedSession(card, allSpaces);
     const chip = (text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
     return v_flex()
       .id(`card-${card.key}`)
@@ -1662,7 +1785,7 @@ export default class Board extends View {
       .border_1()
       .border_color(selected ? t.accent : t.border)
       .bg(selected ? t.selected : t.background)
-      .opacity(dragging ? 0.5 : st.pending?.[card.key] ? 0.7 : 1)
+      .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
       .cursor_pointer()
       .on_mouse_down("left", (_e, cx) => {
         cx.stop_propagation();
@@ -1678,8 +1801,7 @@ export default class Board extends View {
         // card: the column under it takes the drop.
         if (this.modal || (this.drag && this.drag.key !== card.key)) return;
         cx.stop_propagation();
-        this.drag = null;
-        this.over = null;
+        this.endDrag(cx);
         st.detail = true;
         cx.notify();
       })
@@ -1687,8 +1809,8 @@ export default class Board extends View {
         h_flex()
           .gap(6)
           .items_center()
-          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(`${card.repoShort} #${card.number ?? "–"}`))
-          .when(Boolean(st.pending?.[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
+          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+          .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
       )
       .child(div().text_size(12.5).line_height("17px").child(card.title))
       .child(
@@ -1701,15 +1823,14 @@ export default class Board extends View {
           .when(card.labels.length > 3, (el) => el.child(chip(`+${card.labels.length - 3}`)))
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
           .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-          .when(Boolean(agent), (el) => el.child(chip(AGENT_STATUS[agent?.status] ?? "Agent", t.background, t[agent?.status] ?? t.idle))),
+          .when(Boolean(session), (el) => el.child(chip(AGENT_STATUS[session?.status] ?? "Sitzung", t.background, t[session?.status] ?? t.idle))),
       );
   }
 
   list(t, mono, view, st) {
     const now = Date.now();
-    const checkColor = { failed: t.ansi1, pending: t.ansi3, passed: t.ansi2, none: t.dim };
     const row = (r) => {
-      const selected = st.sel.key === r.key;
+      const selected = st.sel?.key === r.key;
       return h_flex()
         .id(`row-${r.key}`)
         .flex_none()
@@ -1729,50 +1850,36 @@ export default class Board extends View {
           this.handle.focus();
           cx.notify();
         })
-        .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(`${r.repoShort} #${r.number}`))
+        .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
         .child(div().flex_1().min_w(0).truncate().child(r.title))
         .child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.draft ? `${r.author} · Entwurf` : r.author))
-        .child(div().w(70).flex_none().text_size(12).text_color(checkColor[r.checks.state]).child(r.checks.short))
+        .child(div().w(70).flex_none().text_size(12).text_color(this.checkColor(t, r.checks.state)).child(r.checks.short))
         .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
     };
     const children = [];
     for (const s of st.data.sections) {
-      const rows = s.rows.filter((r) => matches(r, this.filterText));
       children.push(
         div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted)
           .child(`${s.name.toUpperCase()} · ${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`),
       );
-      children.push(...(rows.length ? rows.map(row) : []));
+      children.push(...s.rows.filter((r) => matches(r, this.filterText)).map(row));
     }
     return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(this.listScroll).children(children);
   }
 
   detail(t, mono, view, item) {
     const st = this.state(view.id);
-    const space = linkedSpace(item, spaces());
+    const session = linkedSession(item, spaces());
     const column = st.data?.kind === "board" ? findCard(st.data, item.key)?.column : null;
     const section = (title, ...kids) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border)
       .child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
-    const button = (id, label, primary, action) =>
-      div()
-        .id(id)
-        .px(12)
-        .py(7)
-        .rounded(6)
-        .text_size(12)
-        .cursor_pointer()
-        .bg(primary ? t.solid : t.raised)
-        .text_color(primary ? t.solid_foreground : t.foreground)
-        .when(primary, (el) => el.font_semibold())
-        .hover((s) => s.bg(primary ? t.accent : t.hover))
-        .on_click((_e, cx) => {
-          if (!this.modal) action(cx);
-        })
-        .child(label);
-    const startLabel = space ? "Zum Agent ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
-    const site = item.source === "azure" ? "Azure o" : "GitHub o";
     const settings = startSettings(this.config, view, item.repo);
-    const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item, settings));
+    const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
+    const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
+    const openStatus = (cx) => {
+      this.openStatusMenu(view);
+      cx.notify();
+    };
     return v_flex()
       .w(360)
       .flex_none()
@@ -1791,7 +1898,7 @@ export default class Board extends View {
               .font_family(mono)
               .text_size(11.5)
               .text_color(t.muted)
-              .child(div().flex_1().min_w(0).truncate().child(`${item.repoShort} #${item.number ?? "–"}${item.branch ? ` · ${item.branch}` : ""}`))
+              .child(div().flex_1().min_w(0).truncate().child(`${itemLabel(item)}${item.branch ? ` · ${item.branch}` : ""}`))
               .child(div().text_size(11).child("Esc schließt")),
           )
           .child(div().text_size(15).font_semibold().line_height("20px").child(item.title))
@@ -1813,14 +1920,12 @@ export default class Board extends View {
                     .bg(t[column?.color] ?? t.muted)
                     .text_color(t.background)
                     .on_click((_e, cx) => {
-                      if (this.modal) return;
-                      this.openStatusMenu(view);
-                      cx.notify();
+                      if (!this.modal) openStatus(cx);
                     })
                     .child(`${column?.name} ▾`),
                 ),
               )
-              .when(Boolean(item.author), (el) => el.child(div().text_size(12).text_color(t.muted).child(`von ${item.author} · ${item.review}`)))
+              .when(Boolean(item.author), (el) => el.child(div().text_size(12).text_color(t.muted).child([`von ${item.author}`, item.review].filter(Boolean).join(" · "))))
               .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von #${item.parent}`)))
               .when(Boolean(item.sub), (el) => el.child(div().text_size(12).text_color(t.muted).child(`◔ ${item.sub?.done}/${item.sub?.total} erledigt`))),
           )
@@ -1829,13 +1934,11 @@ export default class Board extends View {
           )
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
-      .when(Boolean(item.checks), (el) =>
-        el.child(section("CHECKS", div().text_color({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 }[item.checks.state] ?? t.muted).child(item.checks.text))),
-      )
+      .when(Boolean(item.checks), (el) => el.child(section("CHECKS", div().text_color(this.checkColor(t, item.checks?.state)).child(item.checks?.text ?? ""))))
       .child(
         section(
-          "AGENT",
-          space
+          "SITZUNG",
+          session
             ? h_flex()
               .gap(8)
               .items_center()
@@ -1845,11 +1948,11 @@ export default class Board extends View {
               .border_1()
               .border_color(t.border)
               .bg(t.background)
-              .child(div().size(8).flex_none().rounded(4).bg(t[space.status] ?? t.idle))
-              .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(12).child(space.branch))
-              .child(div().text_size(12).text_color(t.muted).child(AGENT_STATUS[space.status] ?? ""))
+              .child(div().size(8).flex_none().rounded(4).bg(t[session.status] ?? t.idle))
+              .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(12).child(session.label))
+              .child(div().text_size(12).text_color(t.muted).child(AGENT_STATUS[session.status] ?? ""))
             : div().text_size(12).text_color(t.muted).line_height("18px")
-              .child(firstMessage ? `Noch kein Agent. Enter startet einen mit „${firstMessage}“.` : "Noch kein Agent. Enter startet einen."),
+              .child(firstMessage ? `Noch keine Sitzung. Enter startet eine mit „${firstMessage}“.` : "Noch keine Sitzung. Enter startet eine."),
         ),
       )
       .child(div().flex_1())
@@ -1861,21 +1964,23 @@ export default class Board extends View {
           .flex_wrap()
           .border_t(1)
           .border_color(t.border)
-          .child(button("act-start", startLabel, true, (cx) => {
+          .child(this.button(t, "act-start", startLabel, true, (cx) => {
+            if (this.modal) return;
             st.detail = true;
             this.enter(view, cx);
           }))
-          .when(Boolean(column), (el) => el.child(button("act-status", "Status s", false, (cx) => {
-            this.openStatusMenu(view);
-            cx.notify();
+          .when(Boolean(column), (el) => el.child(this.button(t, "act-status", "Status s", false, (cx) => {
+            if (!this.modal) openStatus(cx);
           })))
-          .child(button("act-open", site, false, (cx) => this.open(item, cx))),
+          .child(this.button(t, "act-open", `${SOURCES[item.source].site} o`, false, (cx) => {
+            if (!this.modal) this.open(item, cx);
+          })),
       );
   }
 
   hints(t, st) {
     const keys = st?.data?.kind === "list"
-      ? [["1 2 3", "Ansicht"], ["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]]
+      ? [["1 2 3 [ ]", "Ansicht"], ["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]]
       : [["1 2 3 [ ]", "Ansicht"], ["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"],
         ["o", "öffnen"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
     return h_flex()
@@ -1891,7 +1996,7 @@ export default class Board extends View {
       .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))));
   }
 
-  // A layer over the whole board that swallows clicks, with a panel on it.
+  // A layer over the whole board that swallows presses, with a panel on it.
   layer(t, id, panel) {
     return div()
       .id(id)
@@ -1947,7 +2052,7 @@ export default class Board extends View {
     );
   }
 
-  startDialog(t, mono) {
+  startDialog(t) {
     const m = this.modal;
     const label = (text) => div().text_size(12).text_color(t.muted).child(text);
     const frame = (field, inner) =>
@@ -1977,21 +2082,6 @@ export default class Board extends View {
             .child(div().text_color(t.dim).child("◂ ▸"))),
         );
     const agent = m.agents[m.agent];
-    const machineName = (name) => name ?? "Dieser Rechner";
-    const button = (id, text, primary, action) =>
-      div()
-        .id(id)
-        .px(14)
-        .py(8)
-        .rounded(6)
-        .text_size(12)
-        .cursor_pointer()
-        .bg(primary ? t.solid : t.raised)
-        .text_color(primary ? t.solid_foreground : t.foreground)
-        .when(primary, (el) => el.font_semibold())
-        .hover((s) => s.bg(primary ? t.accent : t.hover))
-        .on_click((_e, cx) => action(cx))
-        .child(text);
     return this.layer(
       t,
       "start-layer",
@@ -2010,7 +2100,7 @@ export default class Board extends View {
             .gap(4)
             .border_b(1)
             .border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${m.item.repoShort} #${m.item.number}`))
+            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${itemLabel(m.item)}`))
             .child(div().text_size(12).text_color(t.muted).truncate().child(m.item.title)),
         )
         .child(
@@ -2018,12 +2108,7 @@ export default class Board extends View {
             .px(20)
             .py(16)
             .gap(14)
-            .child(
-              v_flex()
-                .gap(6)
-                .child(label(`Branch und Worktree (neu von origin/${m.settings.base}, falls es ihn nicht gibt)`))
-                .child(frame("branch", Input.new(this.branchInput).flex_1().font_family(mono).text_size(12).text_color(t.foreground))),
-            )
+            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
             .child(
               h_flex()
                 .gap(12)
@@ -2037,35 +2122,7 @@ export default class Board extends View {
                 .child(label("Erste Nachricht"))
                 .child(frame("message", Input.new(this.messageInput).flex_1().text_size(12).text_color(t.foreground))),
             )
-            .when(Boolean(m.column), (el) =>
-              el.child(
-                h_flex()
-                  .id("choice-move")
-                  .gap(8)
-                  .items_center()
-                  .cursor_pointer()
-                  .on_click((_e, cx) => {
-                    m.field = "move";
-                    this.handle.focus();
-                    this.cycle("move", 1, cx);
-                  })
-                  .child(
-                    div()
-                      .size(16)
-                      .flex()
-                      .items_center()
-                      .justify_center()
-                      .rounded(4)
-                      .border_1()
-                      .border_color(m.field === "move" ? t.accent : t.input)
-                      .bg(m.move ? t.accent : t.background)
-                      .text_size(11)
-                      .text_color(t.accent_foreground)
-                      .child(m.move ? "✓" : ""),
-                  )
-                  .child(div().text_size(12).child(`Auf dem Board nach „${m.column?.name}“ verschieben`)),
-              ),
-            )
+            .children(m.notes.map((n) => div().text_size(12).text_color(t.ansi3).child(n)))
             .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
         )
         .child(
@@ -2077,8 +2134,8 @@ export default class Board extends View {
             .border_t(1)
             .border_color(t.border)
             .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
-            .child(button("start-cancel", "Abbrechen Esc", false, (cx) => this.closeModal(cx)))
-            .child(button("start-go", "Starten ↵", true, (cx) => this.startAgent(cx))),
+            .child(this.button(t, "start-cancel", "Abbrechen Esc", false, (cx) => this.closeModal(cx), Boolean(m.busy)))
+            .child(this.button(t, "start-go", "Starten ↵", true, (cx) => this.startAgent(cx), Boolean(m.busy))),
         ),
     );
   }

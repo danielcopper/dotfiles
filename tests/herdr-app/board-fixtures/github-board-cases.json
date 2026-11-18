@@ -1,0 +1,132 @@
+{
+ "data": {
+  "repositoryOwner": {
+   "projectV2": {
+    "id": "PVT_sample",
+    "title": "Sample",
+    "url": "https://github.com/users/sample-user/projects/7",
+    "field": {
+     "id": "PVTSSF_sample",
+     "name": "Status",
+     "options": [
+      {
+       "id": "opt-backlog",
+       "name": "Backlog",
+       "color": "GREEN"
+      },
+      {
+       "id": "opt-ready",
+       "name": "Ready",
+       "color": "BLUE"
+      },
+      {
+       "id": "opt-in-progress",
+       "name": "In progress",
+       "color": "YELLOW"
+      },
+      {
+       "id": "opt-in-review",
+       "name": "In review",
+       "color": "PURPLE"
+      },
+      {
+       "id": "opt-done",
+       "name": "Done",
+       "color": "ORANGE"
+      }
+     ]
+    },
+    "items": {
+     "totalCount": 4,
+     "pageInfo": {
+      "hasNextPage": false
+     },
+     "nodes": [
+      {
+       "id": "PVTI_case1",
+       "fieldValueByName": {
+        "optionId": "opt-in-review",
+        "name": "In review"
+       },
+       "content": {
+        "__typename": "PullRequest",
+        "number": 3050,
+        "title": "feat(dev): wire the remote target into the dev loop",
+        "url": "https://github.com/example/tender/pull/3050",
+        "headRefName": "feat/3000-remote-dev-loop",
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": []
+        },
+        "assignees": {
+         "nodes": [
+          {
+           "login": "sample-user"
+          }
+         ]
+        }
+       }
+      },
+      {
+       "id": "PVTI_case2",
+       "fieldValueByName": null,
+       "content": {
+        "__typename": "DraftIssue",
+        "title": "Draft: sort the release notes",
+        "assignees": {
+         "nodes": []
+        }
+       }
+      },
+      {
+       "id": "PVTI_case3",
+       "fieldValueByName": {
+        "optionId": "opt-ready",
+        "name": "Ready"
+       },
+       "content": null
+      },
+      {
+       "id": "PVTI_case4",
+       "fieldValueByName": {
+        "optionId": "opt-removed-meanwhile",
+        "name": "Parked"
+       },
+       "content": {
+        "__typename": "Issue",
+        "number": 3060,
+        "title": "chore: an item in an option that no longer exists",
+        "url": "https://github.com/example/tender/issues/3060",
+        "issueType": {
+         "name": "Task"
+        },
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": []
+        },
+        "assignees": {
+         "nodes": []
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      }
+     ]
+    },
+    "h0": {
+     "totalCount": 265
+    },
+    "h1": {
+     "totalCount": 957
+    }
+   }
+  }
+ }
+}

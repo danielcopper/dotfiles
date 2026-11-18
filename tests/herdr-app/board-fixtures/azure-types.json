@@ -1,5 +1,5 @@
 {
- "count": 3,
+ "count": 4,
  "value": [
   {
    "name": "Task",
@@ -78,6 +78,26 @@
      "name": "Removed",
      "color": "ffffff",
      "category": "Removed"
+    }
+   ]
+  },
+  {
+   "name": "Test Plan",
+   "states": [
+    {
+     "name": "Active",
+     "color": "007acc",
+     "category": "InProgress"
+    },
+    {
+     "name": "Inactive",
+     "color": "b2b2b2",
+     "category": "Completed"
+    },
+    {
+     "name": "In Planning",
+     "color": "b2b2b2",
+     "category": "Proposed"
     }
    ]
   }

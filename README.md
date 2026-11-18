@@ -258,27 +258,31 @@ herdr-app`. Which files of the package git tracks is set in the root
   the personal layout `ctrl-space` goes through focus-history, so a fast
   second `ctrl-space` still reaches the leader; in other layouts it can
   close the leader again.
-- **The board (`mods/board/`) shows my own work.** Its views live in
-  `mods/board/views.json`: "Meine Aufgaben" (my issues on the Tender
-  project's board, columns from its Status field), "PRs" (pull requests I
-  opened or am asked to review, with checks and review state) and "Azure"
-  (work items assigned to me, columns from their states; it shows only where
-  `az` is installed and signed in, otherwise the sidebar says why). A view is
-  a filter: adding one there adds it to the board, and `r` reads the file
-  again. The code holds nothing of mine (login, project, repos, checkouts,
-  the first message an agent gets); all of that is in `views.json`, and the
-  header of `mods/board/main.js` describes its fields. Keys: `1 2 3` or
-  `[ ]` view, `h/l j/k` move, `H/L` move a card a column (or `s` for a menu,
-  or drag it), `x` hide or show a column (Backlog and Done start hidden),
-  `/` filter, `o` open in the browser, `r` refresh (it also refreshes every
-  few minutes while the tab is shown), `Enter` details, a second `Enter`
-  starts an agent in a new worktree (`<checkout>.worktrees/<type>/<n>-<slug>`
-  on the chosen machine) or goes to the one on the card's branch. A status
-  change writes to GitHub or Azure and moves the card back with the error
-  when that fails. `mise run herdr-board-test` (without mise, `node --test
-  tests/herdr-app/board.test.mjs`) tests its data functions against sample
-  answers of gh, GitHub and az, and its worktree script against a
-  throwaway git repo; it needs node and git.
+- **The board (`mods/board/`) shows my own work.** As `mods/board/views.json`
+  sets them, its views are "Meine Aufgaben" (my issues on the Tender
+  project's board, in the columns of its Status field), "PRs" (pull requests
+  I opened or am asked to review, with checks and review state) and "Azure"
+  (work items assigned to me, in the columns of their states). A view is a
+  filter: adding one to `views.json` adds it to the board, and `r` reads the
+  file again. The code holds nothing of mine; the header of
+  `mods/board/main.js` describes the file's fields and when Azure shows.
+  Keys: `1 2 3` or `[ ]` switch the view, `h/l j/k` move, `H/L` move a card
+  one column (`s` picks from a menu, or drag the card onto a column), `x`
+  hides or shows a column (Backlog and Done start hidden), `/` filters, `o`
+  opens the item in the browser, `r` refreshes (the shown view also
+  refreshes every few minutes while the tab is shown), `Esc` closes.
+  `Enter` opens the details, a second `Enter` goes to the item's session or
+  starts one: a new space or tab on the chosen machine, in the repo's
+  checkout, whose agent gets `/implement <n>` (`/pr-review <n>` for a pull
+  request) as its first message and makes its own worktree. The session is
+  named after the item (`romm-tender#2845 …`, `AB#456 …`), which is how the
+  board finds it again. A status change shows at once and is written to
+  GitHub or Azure; a refusal moves the card back with the error, and a write
+  without a clear answer refreshes the board. `mise run herdr-board-test`
+  (without mise, `node --test tests/herdr-app/board.test.mjs` from the repo)
+  tests its data functions and a few of its key paths against sample answers
+  of gh and GitHub, recorded and reduced to sample data, and of az, written
+  from az's documentation; it needs node.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in

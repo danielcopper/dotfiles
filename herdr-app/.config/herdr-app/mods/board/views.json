@@ -2,9 +2,6 @@
   "refreshMinutes": 3,
   "start": {
     "agent": "claude",
-    "branch": "{type}/{number}-{slug}",
-    "worktree": "{checkout}.worktrees/{branch}",
-    "base": "main",
     "message": "/implement {number}",
     "review": "/pr-review {number}",
     "open": "space"
@@ -21,8 +18,7 @@
       "layout": "board",
       "project": { "owner": "danielcopper", "number": 2, "field": "Status" },
       "filter": "assignee:@me",
-      "hide": ["Backlog", "Done"],
-      "startColumn": "In progress"
+      "hide": ["Backlog", "Done"]
     },
     {
       "id": "prs",

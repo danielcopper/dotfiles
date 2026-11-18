@@ -1,22 +1,35 @@
-// Tests for the data functions of the herdr board mod
-// (herdr-app/.config/herdr-app/mods/board/main.js), run with node's test
-// runner: `mise run herdr-board-test`, or `node --test tests/herdr-app/`.
+// Tests for the herdr board mod (herdr-app/.config/herdr-app/mods/board/main.js):
+// its data functions, and a few UI paths driven through the Board class with
+// a fake herdr. Run with `mise run herdr-board-test` (README, "herdr app"),
+// or `node --test tests/herdr-app/board.test.mjs`.
 //
-// The mod imports "gpui-kit" and "herdr", which only herdr provides; a
-// resolve/load hook hands node a stand-in for each that exports every name
-// the mod imports, as functions that throw when called, so importing the
-// module runs nothing of herdr's. BOARD_MAIN points the tests at another copy
-// of main.js (to see a test fail against a broken one).
+// The mod imports "gpui-kit", "gpui-base" and "herdr", which only herdr
+// provides. A resolve/load hook hands node a stand-in for each that exports
+// every name the mod imports: View as an empty class, everything else as a
+// function (with `.new` and any other member) that calls the fake host a test
+// puts in globalThis.__boardHost, and throws when there is none. HOME points
+// at an empty temporary folder before the mod is imported. BOARD_MAIN points
+// the tests at another copy of main.js (to see a test fail against a broken
+// one).
 //
-// The fixtures in board-fixtures/ hold sample data in the shapes gh 2.96 and
-// GitHub's GraphQL API returned when they were recorded; the Azure ones follow
-// the documented shapes of `az boards query`, `az devops invoke` (work item
-// types) and `az devops configure --list`, since no az was at hand.
+// Fixtures in board-fixtures/:
+// - recorded from gh 2.96 and GitHub's GraphQL API, then reduced to six items
+//   and rewritten as sample data: github-board.json (the query
+//   githubBoardArgs builds from the shipped views.json), github-not-found.json
+//   (a project number that does not exist), gh-no-login.txt (gh's stderr
+//   without a login);
+// - built by hand in the shapes GitHub returns: github-board-cases.json (a
+//   pull request, a draft, an item without access, an item in an option that
+//   is gone), github-list.json, github-move.json, github-rate-limited.json,
+//   github-scope-error.json;
+// - written from az's documentation (`az boards query`, `az devops invoke`
+//   for work item types, `az devops configure --list`), not recorded:
+//   azure-items.json, azure-types.json, azure-defaults.txt.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -26,6 +39,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const modDir = resolve(here, "../../herdr-app/.config/herdr-app/mods/board");
 const mainPath = process.env.BOARD_MAIN ? resolve(process.env.BOARD_MAIN) : join(modDir, "main.js");
 const STUBBED = new Set(["gpui-kit", "gpui-base", "herdr"]);
+const realHome = process.env.HOME;
+process.env.HOME = mkdtempSync(join(tmpdir(), "board-home-"));
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -38,11 +53,21 @@ registerHooks({
   load(url, context, next) {
     if (!url.startsWith("stub:")) return next(url, context);
     const [specifier, list] = url.slice(5).split("?");
-    const source = list
-      .split(",")
-      .filter(Boolean)
-      .map((n) => `export function ${n}() { throw new Error("${specifier}.${n} is not available under node"); }`)
-      .join("\n");
+    const source = [
+      `const call = (name) => (...a) => {
+        const h = globalThis.__boardHost?.[name];
+        if (!h) throw new Error(\`${specifier} \${name} is not available under node\`);
+        return h(...a);
+      };`,
+      ...list
+        .split(",")
+        .filter(Boolean)
+        .map((n) =>
+          n === "View"
+            ? "export class View {}"
+            : `export const ${n} = new Proxy(call("${n}"), { get: (t, p) => (typeof p === "string" ? call("${n}." + p) : t[p]) });`,
+        ),
+    ].join("\n");
     return { format: "module", source, shortCircuit: true };
   },
 });
@@ -55,12 +80,12 @@ const shippedConfig = () => readFileSync(join(modDir, "views.json"), "utf8");
 // A config with one view of each kind, for the functions that take views.
 function sampleConfig() {
   const { config, errors } = board.validateConfig({
-    start: { message: "/work {number}", worktree: "{checkout}.worktrees/{branch}" },
+    start: { message: "/work {number}", review: "/look {number}" },
     repos: { "example/tender": { checkout: "~/src/tender", machine: "server" } },
     views: [
-      { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter: "assignee:@me", hide: ["Backlog", "Done"], startColumn: "In progress" },
+      { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter: "assignee:@me", hide: ["Backlog", "Done"] },
       { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
-      { id: "az", name: "Azure", source: "azure", layout: "board", hideCategories: ["Completed", "Removed"], start: { checkout: "~/src/work" } },
+      { id: "az", name: "Azure", source: "azure", layout: "board", hideCategories: ["Completed", "Removed"], start: { checkout: "~/src/work", message: "AB {number}" } },
     ],
   });
   assert.deepEqual(errors, []);
@@ -70,9 +95,20 @@ function sampleConfig() {
 const githubView = () => sampleConfig().views[0];
 const listView = () => sampleConfig().views[1];
 const azureView = () => sampleConfig().views[2];
-const githubBoard = () => board.parseGithubBoard(json("github-board.json"), githubView(), new Set(["Backlog", "Done"]));
+const HIDDEN = new Set(["Backlog", "Done"]);
+const githubBoard = () => board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN);
+const casesBoard = () => board.parseGithubBoard(json("github-board-cases.json"), githubView(), HIDDEN);
+const azureTypes = () => board.parseAzureTypes(fixture("azure-types.json"));
+const azureBoard = (hidden = new Set(["Done", "Removed"])) => board.parseAzureBoard(fixture("azure-items.json"), azureTypes(), hidden);
+const names = (b) => b.columns.map((c) => c.name);
+const numbersIn = (b, name) => b.columns.find((c) => c.name === name).cards.map((c) => c.number);
 
-// ---- views.json (decision 2) ----
+test("under mise run herdr-board-test the real home cannot be read", { skip: !process.permission && "node runs without --permission" }, () => {
+  assert.equal(process.permission.has("fs.read", join(realHome, ".bashrc")), false);
+  assert.equal(process.permission.has("fs.read", mainPath), true);
+});
+
+// ---- views.json ----
 
 test("the shipped views.json holds exactly the three default views, valid", () => {
   const { config, errors } = board.readConfig(shippedConfig());
@@ -83,7 +119,7 @@ test("the shipped views.json holds exactly the three default views, valid", () =
     ["Azure", "azure", "board"],
   ]);
   const [mine, prs, azure] = config.views;
-  assert.ok(mine.hide.includes("Done"), "Done is hidden by default");
+  assert.deepEqual(mine.hide, ["Backlog", "Done"]);
   assert.match(prs.sections.map((s) => s.query).join(" "), /author:@me/);
   assert.match(prs.sections.map((s) => s.query).join(" "), /review-requested:@me/);
   assert.match(azure.where, /@Me/);
@@ -103,7 +139,7 @@ test("no person-specific value of views.json appears in main.js", () => {
     add(repo.split("/")[0]);
     Object.values(entry).forEach(add);
   }
-  for (const key of ["message", "review", "agent", "machine", "worktree"]) add(raw.start?.[key]);
+  for (const key of ["message", "review", "agent", "machine"]) add(raw.start?.[key]);
   const code = readFileSync(mainPath, "utf8");
   assert.ok(values.size >= 5, "the config names the person's values");
   for (const value of values) assert.ok(!code.includes(value), `main.js holds ${JSON.stringify(value)}`);
@@ -117,27 +153,46 @@ test("readConfig reports a missing file and invalid JSON", () => {
 });
 
 test("validateConfig keeps valid views and names each problem of the others", () => {
+  const ok = { source: "github", layout: "list", sections: [{ name: "A", query: "is:pr" }] };
   const { config, errors } = board.validateConfig({
     refreshMinutes: 0,
-    start: { colour: "x" },
+    colour: "blue",
+    start: { colour: "x", open: "window" },
     views: [
-      { id: "ok", name: "Ok", source: "github", layout: "list", sections: [{ name: "A", query: "is:pr" }] },
-      { id: "ok", name: "Twice", source: "github", layout: "list", sections: [{ name: "A", query: "is:pr" }] },
-      { name: "No id", source: "github", layout: "list", sections: [{ name: "A", query: "is:pr" }] },
+      { id: "ok", name: "Ok", ...ok },
+      { id: "ok", name: "Twice", ...ok },
+      { name: "No id", ...ok },
       { id: "b", name: "Bad source", source: "jira", layout: "board" },
       { id: "c", name: "No project", source: "github", layout: "board" },
       { id: "d", name: "Azure list", source: "azure", layout: "list", sections: [{ name: "A", query: "x" }] },
       { id: "e", name: "No sections", source: "github", layout: "list" },
       { id: "f", name: "Bad hide", source: "github", layout: "board", project: { owner: "o", number: 1 }, hide: "Done" },
+      { id: "g", name: "Typo", ...ok, hidden: ["Done"] },
+      { id: "h", name: "On", source: "github", layout: "board", project: { owner: "o", number: 1 }, on: "server" },
     ],
   });
   assert.deepEqual(config.views.map((v) => v.id), ["ok"]);
   assert.equal(config.refreshMinutes, 3);
   const text = errors.join("\n");
-  for (const expected of [/refreshMinutes/, /start\.colour/, /„id“ ok gibt es schon/, /Ansicht 3 \(„No id“\): „id“ fehlt/, /„source“/,
-    /„project“ braucht/, /Azure-Ansichten sind Boards/, /„sections“ braucht/, /„hide“ muss eine Liste/]) {
+  for (const expected of [/refreshMinutes/, /„colour“ gibt es nicht/, /„start\.colour“ gibt es nicht/, /„start\.open“ ist "space" oder "tab"/,
+    /„id“ ok gibt es schon/, /Ansicht 3 \(„No id“\): „id“ fehlt/, /„source“/, /„project“ braucht/, /Azure-Ansichten sind Boards/,
+    /„sections“ braucht/, /„hide“ muss eine Liste/, /Ansicht 9 \(„Typo“\): „hidden“ gibt es nicht/, /„on“ gilt nur für Azure-Ansichten/]) {
     assert.match(text, expected);
   }
+});
+
+test("validateConfig rejects the keys of the worktree start with a clear message", () => {
+  const { config, errors } = board.validateConfig({
+    start: { worktree: "{checkout}.worktrees/{branch}", branch: "{type}/{number}-{slug}", base: "main" },
+    repos: { "o/r": { checkout: "~/r", worktree: "x" } },
+    views: [{ id: "a", name: "A", source: "github", layout: "board", project: { owner: "o", number: 1 }, startColumn: "In progress" }],
+  });
+  assert.equal(config, null);
+  const text = errors.join("\n");
+  for (const key of ["start.worktree", "start.branch", "start.base", "repos.o/r.worktree"]) {
+    assert.match(text, new RegExp(`„${key.replace(/\./g, "\\.")}“ gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout`));
+  }
+  assert.match(text, /„startColumn“ gibt es nicht mehr/);
 });
 
 test("validateConfig without any usable view gives no config", () => {
@@ -146,24 +201,60 @@ test("validateConfig without any usable view gives no config", () => {
   assert.match(errors[0], /mindestens eine Ansicht/);
 });
 
-test("start settings merge defaults, start, the view's start and the repo's entry, in that order", () => {
+test("start settings: defaults < start < the view's start < the repo's entry", () => {
   const config = sampleConfig();
   const s = board.startSettings(config, config.views[0], "example/tender");
-  assert.equal(s.message, "/work {number}");
-  assert.equal(s.checkout, "~/src/tender");
-  assert.equal(s.machine, "server");
-  assert.equal(s.base, "main");
+  assert.deepEqual([s.message, s.review, s.checkout, s.machine, s.open], ["/work {number}", "/look {number}", "~/src/tender", "server", "space"]);
   assert.equal(board.startSettings(config, config.views[2], "Example Project").checkout, "~/src/work");
+  assert.equal(board.startSettings(config, config.views[2], "Example Project").message, "AB {number}");
   assert.equal(board.startSettings(config, config.views[2], "example/tender").checkout, "~/src/tender", "the repo's entry wins over the view's start");
   assert.equal(board.startSettings(config, config.views[0], "other/repo").checkout, null);
 });
 
-// ---- GitHub board (decisions 3, 6) ----
+// ---- Hidden columns ----
+
+test("hidden columns: the view's hide plus what the person hid, minus what they showed", () => {
+  const view = githubView();
+  assert.deepEqual([...board.hiddenColumns(view, null)], ["Backlog", "Done"]);
+  assert.deepEqual([...board.hiddenColumns(view, { hide: ["Ready"], show: ["Done"] })].sort(), ["Backlog", "Ready"]);
+  const later = { ...view, hide: ["Done", "In review"] };
+  assert.deepEqual([...board.hiddenColumns(later, { hide: [], show: ["Backlog"] })].sort(), ["Done", "In review"], "a later edit to hide takes effect");
+});
+
+test("a stored hidden set is read only when it is lists of names", () => {
+  assert.deepEqual(board.readStoredHidden({ hide: ["A"], show: [] }), { hide: ["A"], show: [] });
+  for (const bad of [null, ["A"], { hide: [1], show: [] }, { hide: ["A"] }, "x"]) assert.equal(board.readStoredHidden(bad), null);
+});
+
+test("toggling stores only the difference to the view's hide; a column that takes no drops is never stored", () => {
+  const view = githubView();
+  const cols = casesBoard().columns;
+  const col = (name) => cols.find((c) => c.name === name);
+  let stored = board.toggleHidden(view, null, col("Done"), cols);
+  assert.deepEqual(stored, { hide: [], show: ["Done"] });
+  stored = board.toggleHidden(view, stored, col("Done"), cols);
+  assert.deepEqual(stored, { hide: [], show: [] });
+  stored = board.toggleHidden(view, stored, col("Ready"), cols);
+  assert.deepEqual(stored, { hide: ["Ready"], show: [] });
+  assert.equal(board.toggleHidden(view, stored, col("Ohne Status"), cols), stored);
+});
+
+test("Azure hides the states of the view's hidden categories", () => {
+  assert.deepEqual([...board.hiddenColumns(azureView(), null, azureTypes().states)].sort(), ["Done", "Inactive", "Removed"]);
+});
+
+test("names in hide or hideCategories that match no column are reported", () => {
+  const view = { ...githubView(), hide: ["Backlog", "Doen"], hideCategories: [] };
+  assert.deepEqual(board.unknownHidden(view, githubBoard().columns), ["Doen"]);
+  const az = { ...azureView(), hideCategories: ["Completed", "Closed"] };
+  assert.deepEqual(board.unknownHidden(az, azureBoard().columns), ["Closed"]);
+});
+
+// ---- GitHub board ----
 
 test("the board query leaves hidden columns out and counts them in the same request", () => {
-  const args = board.githubBoardArgs(githubView(), new Set(["Backlog", "Done"]));
-  const value = (name) => args[args.indexOf(args.find((a) => a.startsWith(`${name}=`)))].slice(name.length + 1);
-  assert.equal(args.filter((a) => a === "graphql").length, 1);
+  const args = board.githubBoardArgs(githubView(), HIDDEN);
+  const value = (name) => args.find((a) => a.startsWith(`${name}=`)).slice(name.length + 1);
   assert.equal(value("filter"), 'assignee:@me -status:"Backlog","Done"');
   assert.equal(value("h0"), 'assignee:@me status:"Backlog"');
   assert.equal(value("h1"), 'assignee:@me status:"Done"');
@@ -172,46 +263,42 @@ test("the board query leaves hidden columns out and counts them in the same requ
   assert.match(doc, /h0: items\(first: 0, query: \$h0\)/);
   assert.match(doc, /items\(first: 100, query: \$filter\)/);
   assert.match(doc, /\$h1: String!/);
-});
-
-test("a board without hidden columns asks for no counts", () => {
-  const args = board.githubBoardArgs({ ...githubView(), filter: "" }, new Set());
-  assert.ok(args.includes("filter="));
-  assert.doesNotMatch(args.find((a) => a.startsWith("query=")), /\$h0/);
+  assert.doesNotMatch(board.githubBoardArgs({ ...githubView(), filter: "" }, new Set()).find((a) => a.startsWith("query=")), /\$h0/);
 });
 
 test("columns come from the project's field options, in order, with theme colors", () => {
   const b = githubBoard();
-  assert.deepEqual(b.columns.map((c) => c.name), ["Ohne Status", "Backlog", "Ready", "In progress", "In review", "Done"]);
-  assert.deepEqual(b.columns.map((c) => c.color), ["dim", "ansi2", "ansi4", "ansi3", "ansi5", "ansi11"]);
+  assert.deepEqual(names(b), ["Backlog", "Ready", "In progress", "In review", "Done"]);
+  assert.deepEqual(b.columns.map((c) => c.color), ["ansi2", "ansi4", "ansi3", "ansi5", "ansi11"]);
   assert.deepEqual(b.meta, { projectId: "PVT_sample", fieldId: "PVTSSF_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7" });
 });
 
-test("hidden columns carry the server's count and no cards; shown ones their cards", () => {
+test("hidden columns carry the server's count; shown ones their cards", () => {
   const b = githubBoard();
   const col = (name) => b.columns.find((c) => c.name === name);
   assert.deepEqual([col("Backlog").hidden, col("Backlog").count, col("Backlog").cards.length], [true, 265, 0]);
   assert.deepEqual([col("Done").hidden, col("Done").count], [true, 957]);
-  assert.deepEqual(col("In progress").cards.map((c) => c.number), [2845, 1735]);
-  assert.equal(col("In progress").count, 2);
-  assert.deepEqual(col("Ready").cards.map((c) => c.title), ["fix(saves): a save sync no longer fails its uploads", "(kein Zugriff)"]);
+  assert.deepEqual(numbersIn(b, "In progress"), [3000, 3001, 3003]);
+  assert.deepEqual(numbersIn(b, "Ready"), [3004, 3005, 3007]);
+  assert.equal(col("In progress").count, 3);
   assert.equal(b.limited, false);
 });
 
-test("items without a status get their own column that takes no drops", () => {
-  const none = githubBoard().columns[0];
-  assert.equal(none.target, false);
-  assert.deepEqual(none.cards.map((c) => [c.kind, c.title, c.number]), [["draft", "Draft: sort the release notes", null]]);
+test("a card carries repo, number, title, labels, assignees, parent and sub-issues", () => {
+  const b = githubBoard();
+  const epic = board.findCard(b, "PVTI_rec1").card;
+  assert.deepEqual([epic.repo, epic.repoShort, epic.labels, epic.assignees, epic.sub], ["example/tender", "tender", ["enhancement", "area:architecture", "epic"], ["sample-user"], { total: 22, done: 15 }]);
+  assert.equal(board.findCard(b, "PVTI_rec2").card.parent, 3002);
 });
 
-test("a card carries repo, number, title, labels, type, assignees, parent and sub-issues", () => {
-  const card = board.findCard(githubBoard(), "PVTI_sample3").card;
-  assert.equal(card.repoShort, "tender");
-  assert.equal(card.repo, "example/tender");
-  assert.deepEqual(card.labels, ["enhancement", "area:architecture"]);
-  assert.deepEqual(card.assignees, ["sample-user"]);
-  assert.deepEqual(card.sub, { total: 22, done: 15 });
-  assert.equal(board.findCard(githubBoard(), "PVTI_sample1").card.parent, 2844);
+test("items without a status, or in an option that is gone, share a column that takes no drops", () => {
+  const b = casesBoard();
+  const none = b.columns[0];
+  assert.deepEqual([none.name, none.target], ["Ohne Status", false]);
+  assert.deepEqual(none.cards.map((c) => [c.kind, c.title]), [["draft", "Draft: sort the release notes"], ["issue", "chore: an item in an option that no longer exists"]]);
+  assert.deepEqual(board.findCard(b, "PVTI_case3").card.title, "(kein Zugriff)");
+  const pr = board.findCard(b, "PVTI_case1").card;
+  assert.deepEqual([pr.kind, pr.branch, pr.number], ["pr", "feat/3000-remote-dev-loop", 3050]);
 });
 
 test("parseGithubBoard says when the owner, project or field is missing", () => {
@@ -227,110 +314,164 @@ test("a board with more items than one page says it is cut", () => {
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.pageInfo.hasNextPage = true;
   data.data.repositoryOwner.projectV2.items.totalCount = 290;
-  const b = board.parseGithubBoard(data, githubView(), new Set(["Backlog", "Done"]));
+  const b = board.parseGithubBoard(data, githubView(), HIDDEN);
   assert.deepEqual([b.limited, b.total], [true, 290]);
 });
 
-// ---- Status changes (decision 4) ----
+// ---- gh's answers ----
+
+test("gh exiting 1 with a NOT_FOUND error names the project and where to fix it", () => {
+  const r = { code: 1, stdout: fixture("github-not-found.json"), stderr: "gh: Could not resolve to a ProjectV2 with the number 99.\n" };
+  assert.throws(() => board.readGh(r, { notFound: "Projekt 99 von sample-user nicht gefunden – project.number in views.json prüfen" }),
+    { message: "Projekt 99 von sample-user nicht gefunden – project.number in views.json prüfen" });
+  assert.throws(() => board.readGh(r), { message: "Nicht gefunden: Could not resolve to a ProjectV2 with the number 99." });
+});
+
+test("gh exiting 1 with data and other errors gives the data and the errors as warnings", () => {
+  const partial = { data: { s0: { issueCount: 0, nodes: [] } }, errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration" }] };
+  const got = board.readGh({ code: 1, stdout: JSON.stringify(partial), stderr: "gh: Resource not accessible by integration" });
+  assert.deepEqual(got.json.data, partial.data);
+  assert.deepEqual(got.warnings, ["Resource not accessible by integration"]);
+  assert.deepEqual(board.readGh({ code: 0, stdout: fixture("github-move.json"), stderr: "" }).warnings, []);
+});
+
+test("gh's failures become messages: not signed in, missing scope, rate limit, network, others without gh's prefix", () => {
+  const fail = (r) => {
+    try {
+      board.readGh(r);
+    } catch (e) {
+      return e;
+    }
+    return assert.fail("no error");
+  };
+  assert.match(fail({ code: 4, stdout: "", stderr: fixture("gh-no-login.txt") }).message, /nicht angemeldet: gh auth login/);
+  assert.match(fail({ code: 1, stdout: fixture("github-scope-error.json"), stderr: "gh: Your token has not been granted the required scopes" }).message, /Scope „project“/);
+  assert.match(fail({ code: 1, stdout: fixture("github-rate-limited.json"), stderr: "" }).message, /Ratenlimit/);
+  assert.match(fail({ code: 1, stdout: "", stderr: "HTTP 403: API rate limit exceeded for user" }).message, /Ratenlimit/);
+  for (const net of ["dial tcp: lookup api.github.com: no such host", "Post \"https://api.github.com/graphql\": dial tcp 1.2.3.4:443: connect: connection refused", "read: connection reset by peer", "net/http: i/o timeout", "could not resolve host: api.github.com"]) {
+    assert.match(fail({ code: 1, stdout: "", stderr: `gh: ${net}` }).message, /^GitHub nicht erreichbar: /, net);
+  }
+  assert.equal(fail({ code: 1, stdout: "", stderr: "gh: the connection to a field was reshaped" }).message, "the connection to a field was reshaped");
+  assert.equal(fail({ code: 2, stdout: "", stderr: "" }).message, "gh endete mit 2");
+  const garbled = fail({ code: 0, stdout: "<html>", stderr: "" });
+  assert.deepEqual([garbled.unclear, /Ergebnis unklar/.test(garbled.message)], [true, true]);
+});
+
+// ---- Status changes ----
 
 test("a GitHub status change is one GraphQL mutation with the project, item, field and option ids", () => {
   const b = githubBoard();
-  const card = board.findCard(b, "PVTI_sample2").card;
+  const card = board.findCard(b, "PVTI_rec4").card;
   const args = board.githubMoveArgs(b.meta, card, b.columns.find((c) => c.name === "In progress"));
   assert.deepEqual(args.slice(0, 2), ["api", "graphql"]);
   assert.ok(args.includes(`query=${board.MOVE_MUTATION}`));
   assert.match(board.MOVE_MUTATION, /updateProjectV2ItemFieldValue/);
   assert.deepEqual(args.filter((a, i) => args[i - 1] === "-f" && !a.startsWith("query=")),
-    ["project=PVT_sample", "item=PVTI_sample2", "field=PVTSSF_sample", "option=opt-progress"]);
+    ["project=PVT_sample", "item=PVTI_rec4", "field=PVTSSF_sample", "option=opt-in-progress"]);
 });
 
-test("a mutation's answer must name the item it changed", () => {
-  const card = board.findCard(githubBoard(), "PVTI_sample2").card;
+test("a mutation's answer must name the item it changed, else the outcome is unclear", () => {
+  const card = { itemId: "PVTI_sample2" };
   board.checkMoveResult(json("github-move.json"), card);
-  assert.throws(() => board.checkMoveResult({ data: { updateProjectV2ItemFieldValue: null }, errors: [{ message: "Item not found" }] }, card), /Item not found/);
-  assert.throws(() => board.checkMoveResult({}, card), /nicht bestätigt/);
+  assert.throws(() => board.checkMoveResult({}, card), (e) => e.unclear && /Ergebnis unklar/.test(e.message));
 });
 
-test("moving a card changes its column and the counts, and moving back restores them", () => {
+test("moving a card changes its column and the counts, and rollback restores them", () => {
   const before = githubBoard();
-  const moved = board.moveCard(before, "PVTI_sample2", "opt-progress");
-  const col = (b, name) => b.columns.find((c) => c.name === name);
-  assert.deepEqual(col(moved, "In progress").cards.map((c) => c.number), [2845, 1735, 2837]);
-  assert.equal(col(moved, "Ready").count, 1);
-  assert.equal(col(moved, "In progress").count, 3);
-  assert.equal(board.findCard(moved, "PVTI_sample2").card.column, "opt-progress");
-  assert.equal(col(before, "Ready").count, 2, "the board moved from stays as it was");
-  const back = board.moveCard(moved, "PVTI_sample2", "opt-ready");
-  assert.equal(col(back, "Ready").count, 2);
-  assert.equal(col(back, "In progress").count, 2);
+  const move = { key: "PVTI_rec4", from: "opt-ready", to: "opt-in-progress" };
+  const moved = board.moveCard(before, move.key, move.to);
+  assert.deepEqual(numbersIn(moved, "In progress"), [3000, 3001, 3003, 3004]);
+  assert.deepEqual([moved.columns[1].count, moved.columns[2].count], [2, 4]);
+  assert.equal(board.findCard(moved, move.key).card.column, "opt-in-progress");
+  assert.equal(before.columns[1].count, 3, "the board moved from stays as it was");
+  const back = board.rollback(moved, move);
+  assert.deepEqual([back.columns[1].count, back.columns[2].count], [3, 3]);
+  assert.equal(board.rollback(board.moveCard(moved, move.key, "opt-in-review"), move).columns[3].cards[0].key, move.key,
+    "a rollback leaves a card that moved on since");
 });
 
 test("a card moved into a hidden column adds to its count and can come back", () => {
-  const moved = board.moveCard(githubBoard(), "PVTI_sample1", "opt-done");
-  const done = moved.columns.find((c) => c.name === "Done");
-  assert.equal(done.count, 958);
+  const moved = board.moveCard(githubBoard(), "PVTI_rec1", "opt-done");
+  assert.equal(moved.columns.find((c) => c.name === "Done").count, 958);
   assert.deepEqual(board.shownColumns(moved, "").find((c) => c.name === "Done").shown, []);
-  const back = board.moveCard(moved, "PVTI_sample1", "opt-progress");
+  const back = board.moveCard(moved, "PVTI_rec1", "opt-in-progress");
   assert.equal(back.columns.find((c) => c.name === "Done").count, 957);
-  assert.equal(board.findCard(back, "PVTI_sample1").column.name, "In progress");
 });
 
 test("moving to an unknown column, an unknown card or the same column changes nothing", () => {
   const b = githubBoard();
-  assert.equal(board.moveCard(b, "PVTI_sample2", "nope"), b);
+  assert.equal(board.moveCard(b, "PVTI_rec4", "nope"), b);
   assert.equal(board.moveCard(b, "nope", "opt-done"), b);
-  assert.equal(board.moveCard(b, "PVTI_sample2", "opt-ready"), b);
+  assert.equal(board.moveCard(b, "PVTI_rec4", "opt-ready"), b);
 });
 
-test("moves made during a refresh are laid over its result", () => {
-  const fresh = githubBoard();
-  const b = board.applyMoves(fresh, [{ key: "PVTI_sample2", to: "opt-review" }, { key: "PVTI_sample3", to: "opt-ready" }]);
-  assert.equal(board.findCard(b, "PVTI_sample2").column.name, "In review");
-  assert.equal(board.findCard(b, "PVTI_sample3").column.name, "Ready");
+test("a move stays laid over refreshes until it is confirmed and a refresh started after that", () => {
+  const unconfirmed = { key: "a", to: "x", at: 100, confirmedAt: null };
+  const confirmedEarly = { key: "b", to: "x", at: 100, confirmedAt: 150 };
+  const confirmedLate = { key: "c", to: "x", at: 100, confirmedAt: 250 };
+  assert.deepEqual(board.pendingMoves([unconfirmed, confirmedEarly, confirmedLate], 200), [unconfirmed, confirmedLate]);
+  const b = board.applyMoves(githubBoard(), [{ key: "PVTI_rec4", to: "opt-in-review" }, { key: "PVTI_rec1", to: "opt-ready" }]);
+  assert.equal(board.findCard(b, "PVTI_rec4").column.name, "In review");
+  assert.equal(board.findCard(b, "PVTI_rec1").column.name, "Ready");
 });
 
-// ---- Hidden columns, filter, keyboard (decisions 3, 7) ----
-
-test("the person's toggles win over the view's hidden columns", () => {
-  const view = githubView();
-  assert.deepEqual([...board.hiddenColumns(view, null)], ["Backlog", "Done"]);
-  assert.deepEqual([...board.hiddenColumns(view, ["Done"])], ["Done"]);
-  assert.deepEqual([...board.hiddenColumns(view, [])], []);
-  const shown = board.withHidden(githubBoard(), new Set(["Done"]));
-  assert.deepEqual(shown.columns.filter((c) => c.hidden).map((c) => c.name), ["Done"]);
+test("Azure cards can only go to the states of their own type", () => {
+  const b = azureBoard();
+  const task = board.findCard(b, "az-101").card;
+  assert.deepEqual(board.targetsFor(b, task).map((c) => c.name), ["To Do", "In Progress", "Done", "Removed"]);
+  assert.equal(board.canDrop(b, task, b.columns.find((c) => c.name === "Committed")), false);
+  const cases = casesBoard();
+  assert.equal(board.canDrop(cases, board.findCard(cases, "PVTI_case1").card, cases.columns[0]), false, "never into Ohne Status");
 });
 
-test("Azure hides the states of the view's hidden categories", () => {
-  const { states } = board.parseAzureTypes(fixture("azure-types.json"));
-  assert.deepEqual([...board.hiddenColumns(azureView(), null, states)], ["Done", "Removed"]);
+test("H/L step to the next column the card may go to, stubs included", () => {
+  const b = azureBoard();
+  const cols = board.shownColumns(b, "");
+  assert.deepEqual(names(b), ["To Do", "New", "Approved", "In Progress", "Committed", "Done", "Removed"]);
+  assert.equal(board.stepTarget(b, cols, "az-101", 1)?.name, "Done");
+  assert.equal(board.stepTarget(b, cols, "az-101", -1)?.name, "To Do");
+  assert.equal(board.stepTarget(b, cols, "az-102", -1), null, "nothing left of the first state");
+  const gh = casesBoard();
+  assert.equal(board.stepTarget(gh, board.shownColumns(gh, ""), "PVTI_case3", -1)?.name, "Backlog", "Ohne Status is skipped");
 });
 
-test("the filter keeps cards holding every word, in title, number, repo, labels or assignee", () => {
-  const cols = board.shownColumns(githubBoard(), "#2837 BUG");
-  assert.deepEqual(cols.flatMap((c) => c.shown.map((x) => x.number)), [2837]);
-  assert.deepEqual(board.shownColumns(githubBoard(), "epic area:arch").flatMap((c) => c.shown.map((x) => x.number)), [1735]);
-  assert.equal(board.shownColumns(githubBoard(), "").flatMap((c) => c.shown).length, 6);
-  assert.equal(board.shownColumns(githubBoard(), "nothing-like-this").flatMap((c) => c.shown).length, 0);
-  assert.equal(board.shownColumns(githubBoard(), "#2837 epic").flatMap((c) => c.shown).length, 0, "one matching word is not enough");
+// ---- Filter and keyboard ----
+
+test("the filter keeps cards holding every word, in title, key, repo, labels or assignee", () => {
+  const all = (text) => board.shownColumns(githubBoard(), text).flatMap((c) => c.shown.map((x) => x.number));
+  assert.deepEqual(all("#3004 epic"), []);
+  assert.deepEqual(all("tender#3004"), [3004]);
+  assert.deepEqual(all("BUG launch"), [3007]);
+  assert.deepEqual(all("EPIC area:arch"), [3000]);
+  assert.equal(all("").length, 6);
 });
 
 test("j/k move within a column, h/l across columns and stubs, keeping the row", () => {
   const cols = board.shownColumns(githubBoard(), "");
-  // Columns: 0 Ohne Status, 1 Backlog (stub), 2 Ready, 3 In progress, 4 In review, 5 Done (stub).
-  let sel = { col: 3, key: "PVTI_sample1" };
+  // Columns: 0 Backlog (stub), 1 Ready, 2 In progress, 3 In review, 4 Done (stub).
+  let sel = { col: 2, key: "PVTI_rec1" };
   sel = board.navigate(cols, sel, "down");
-  assert.deepEqual(sel, { col: 3, key: "PVTI_sample3" });
-  assert.deepEqual(board.navigate(cols, sel, "down"), sel, "stops at the last card");
-  sel = board.navigate(cols, sel, "left");
-  assert.deepEqual(sel, { col: 2, key: "PVTI_sample5" });
-  sel = board.navigate(cols, sel, "left");
-  assert.deepEqual(sel, { col: 1, key: null }, "a stub takes the selection without a card");
-  assert.deepEqual(board.navigate(cols, { col: 5, key: null }, "right"), { col: 5, key: null });
-  assert.deepEqual(board.navigate(cols, { col: 1, key: null }, "up"), { col: 1, key: null }, "up and down on a stub stay there");
+  assert.deepEqual(sel, { col: 2, key: "PVTI_rec2" });
+  sel = board.navigate(cols, board.navigate(cols, sel, "down"), "down");
+  assert.deepEqual(sel, { col: 2, key: "PVTI_rec3" }, "stops at the last card");
+  assert.deepEqual(board.navigate(cols, sel, "left"), { col: 1, key: "PVTI_rec6" });
+  assert.deepEqual(board.navigate(cols, { col: 1, key: "PVTI_rec4" }, "left"), { col: 0, key: null }, "a stub takes the selection without a card");
+  assert.deepEqual(board.navigate(cols, { col: 0, key: null }, "up"), { col: 0, key: null });
+  assert.deepEqual(board.navigate(cols, { col: 4, key: null }, "right"), { col: 4, key: null });
   assert.deepEqual(board.navigate([], null, "down"), { col: 0, key: null });
+  const list = [{ shown: [{ key: "a" }, { key: "b" }] }];
+  assert.deepEqual(board.navigate(list, { col: 0, key: "a" }, "down"), { col: 0, key: "b" }, "a list is one column");
 });
 
-// ---- PR list (decision 2) ----
+test("after new data the selection follows its card, else falls to the first card", () => {
+  const cols = board.shownColumns(githubBoard(), "");
+  assert.deepEqual(board.selectionAfter(cols, { col: 0, key: "PVTI_rec4" }), { col: 1, key: "PVTI_rec4" });
+  assert.deepEqual(board.selectionAfter(cols, { col: 2, key: "gone" }), { col: 1, key: "PVTI_rec4" });
+  assert.deepEqual(board.selectionAfter(cols, { col: 4, key: null }), { col: 4, key: null }, "a selected stub stays");
+  assert.deepEqual(board.selectionAfter([], { col: 3, key: "x" }), { col: 0, key: null });
+});
+
+// ---- PR list ----
 
 test("the PR list is one GraphQL request with one search per section", () => {
   const args = board.githubListArgs(listView());
@@ -342,57 +483,62 @@ test("the PR list is one GraphQL request with one search per section", () => {
 
 test("PR sections hold their rows once, with checks, review state and branch", () => {
   const list = board.parseGithubList(json("github-list.json"), listView());
-  assert.deepEqual(list.sections.map((s) => [s.name, s.count, s.rows.map((r) => r.number)]), [
-    ["Review", 1, [2820]],
-    ["Mine", 4, [1921, 808, 77]],
-  ]);
-  assert.equal(list.sections[1].limited, false);
+  assert.deepEqual(list.sections.map((s) => [s.name, s.count, s.rows.map((r) => r.number)]), [["Review", 1, [2820]], ["Mine", 4, [1921, 808, 77]]]);
   const [review] = list.sections[0].rows;
   assert.deepEqual([review.repoShort, review.author, review.review, review.branch, review.checks.short, review.checks.text],
     ["tender", "sample-contributor", "noch kein Review", "pr/desktop-emulation-card", "✓ 15", "15 bestanden · 3 übersprungen"]);
   const [release, draft, failing] = list.sections[1].rows;
-  assert.deepEqual([release.checks.state, release.checks.short], ["pending", "◷ 2"]);
+  assert.deepEqual([release.review, release.checks.state, release.checks.short], ["", "pending", "◷ 2"]);
   assert.deepEqual([draft.review, draft.checks.state, draft.checks.text], ["Entwurf", "none", "keine Checks"]);
   assert.deepEqual([failing.review, failing.checks.state, failing.checks.text], ["Änderungen gewünscht", "failed", "3 bestanden · 2 fehlgeschlagen"]);
 });
 
-test("a section whose search came back empty-handed is an error", () => {
-  assert.throws(() => board.parseGithubList({ data: { s0: { issueCount: 0, nodes: [] } } }, listView()), /„is:pr author:@me“/);
+test("a search result that is no pull request is counted, not dropped silently", () => {
+  const data = json("github-list.json");
+  data.data.s0.nodes.push({}, {});
+  const list = board.parseGithubList(data, listView());
+  assert.equal(list.sections[0].skipped, 2);
+  assert.equal(list.sections[1].skipped, 0);
 });
 
-// ---- Errors surface (constraint: no silent catch) ----
-
-test("gh's failures become messages: not signed in, missing scope, rate limit, network, GraphQL", () => {
-  assert.match(board.ghFailure({ code: 4, stdout: "", stderr: fixture("gh-no-login.txt") }).message, /nicht angemeldet: gh auth login/);
-  const scope = { code: 1, stdout: fixture("github-scope-error.json"), stderr: "gh: Your token has not been granted the required scopes" };
-  assert.match(board.ghFailure(scope).message, /Scope „project“/);
-  assert.match(board.ghFailure({ code: 1, stdout: fixture("github-rate-limited.json"), stderr: "" }).message, /Ratenlimit/);
-  assert.match(board.ghFailure({ code: 1, stdout: "", stderr: "HTTP 403: API rate limit exceeded for user" }).message, /Ratenlimit/);
-  assert.match(board.ghFailure({ code: 1, stdout: "", stderr: "error connecting to api.github.com" }).message, /nicht erreichbar/);
-  const graphql = { code: 1, stdout: '{"errors":[{"message":"Field \'nope\' doesn\'t exist on type \'Query\'"}]}', stderr: "gh: Field 'nope' doesn't exist" };
-  assert.equal(board.ghFailure(graphql).message, "Field 'nope' doesn't exist on type 'Query'");
-  assert.equal(board.ghFailure({ code: 2, stdout: "", stderr: "" }).message, "gh endete mit 2");
+test("a section missing from GitHub's answer is an error", () => {
+  assert.throws(() => board.parseGithubList({ data: { s0: { issueCount: 0, nodes: [] } } }, listView()), /Die Suche „is:pr author:@me“ fehlt in GitHubs Antwort/);
 });
 
-test("a tool that cannot run, or runs out of time, says so; a missing az makes its view unavailable", () => {
-  const missing = board.execRejection("az", new Error("failed to start az: No such file or directory (os error 2)"), 60000);
+// ---- Tools that cannot run ----
+
+test("a tool that cannot run, or runs out of time, says so; only a missing az makes its view unavailable", () => {
+  const missing = board.execRejection("az", new Error("failed to start az: No such file or directory (os error 2)"), 60000, null);
   assert.deepEqual([missing.message, missing.unavailable], ["az ist nicht installiert", true]);
-  const gh = board.execRejection("gh", new Error("program not found"), 30000);
+  const gh = board.execRejection("gh", new Error("program not found"), 30000, null);
   assert.deepEqual([gh.message, gh.unavailable], ["gh ist nicht installiert", false]);
-  assert.equal(board.execRejection("gh", new Error("timed out after 30000 ms"), 30000).message, "gh antwortete nicht in 30 s");
-  assert.match(board.execRejection("gh", new Error("machine unreachable"), 30000).message, /ließ sich nicht starten: machine unreachable/);
+  const late = board.execRejection("gh", new Error("timed out after 30000 ms"), 30000, null);
+  assert.deepEqual([late.message, late.unclear], ["gh antwortete nicht in 30 s", true]);
+  const away = board.execRejection("az", new Error("machine server is unreachable"), 60000, "server");
+  assert.deepEqual([away.message, away.unavailable], ["az auf server ließ sich nicht starten: machine server is unreachable", false]);
+  assert.equal(board.execRejection("gh", new Error("boom"), 30000, null).message, "gh ließ sich nicht starten: boom");
 });
 
-test("az's failures: not signed in and a missing extension make the view unavailable, others are errors", () => {
-  const login = board.azFailure({ code: 1, stderr: "ERROR: Before you can run Azure DevOps commands, you need to run the login command(az login if using AAD/MSA identity else az devops login if using PAT token) to setup credentials." });
-  assert.deepEqual([login.unavailable, /nicht angemeldet/.test(login.message)], [true, true]);
-  const ext = board.azFailure({ code: 2, stderr: "ERROR: 'boards' is misspelled or not recognized by the system." });
-  assert.deepEqual([ext.unavailable, /azure-devops/.test(ext.message)], [true, true]);
-  const other = board.azFailure({ code: 1, stderr: "ERROR: TF401232: Work item 9 does not exist, or you do not have permissions to read it." });
-  assert.deepEqual([other.unavailable, other.message], [false, "TF401232: Work item 9 does not exist, or you do not have permissions to read it."]);
+test("az's failures: login and a missing extension make the view unavailable, others are errors without az's WARNING lines", () => {
+  const login = board.azFailure({ code: 1, stderr: "WARNING: a notice\nERROR: Before you can run Azure DevOps commands, you need to run the login command(az login if using AAD/MSA identity else az devops login if using PAT token) to setup credentials." });
+  assert.deepEqual([login.unavailable, login.message], [true, "az ist nicht angemeldet (az login oder az devops login)"]);
+  for (const err of ["ERROR: 'boards' is misspelled or not recognized by the system.", "ERROR: az: 'devops' is not in the 'az' command group."]) {
+    const ext = board.azFailure({ code: 2, stderr: err });
+    assert.deepEqual([ext.unavailable, /azure-devops/.test(ext.message)], [true, true], err);
+  }
+  const other = board.azFailure({ code: 1, stderr: "WARNING: The behavior of this command will change\nERROR: TF401232: Work item 9 does not exist." });
+  assert.deepEqual([other.unavailable, other.message], [false, "TF401232: Work item 9 does not exist."]);
+  assert.equal(board.azFailure({ code: 1, stderr: "WARNING: The behavior of this command will change\nThe request failed" }).message, "The request failed");
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: --project must be specified. The value can be passed at command line or set using 'az devops configure --defaults project=<name>'." }).message,
+    "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…");
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: TF200016: The following project does not exist: Nope." }).message,
+    "Azure-Projekt unbekannt: TF200016: The following project does not exist: Nope.");
+  const wiql = "ERROR: TF51005: The query references a field that does not exist. The error is caused by «[System.Project]».";
+  assert.equal(board.azFailure({ code: 1, stderr: wiql }).message, wiql.slice(7), "a WIQL error naming a project field is no missing project");
+  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: boom" }, "server").message, "az auf server: boom");
 });
 
-// ---- Azure (decisions 2, 3, 4) ----
+// ---- Azure ----
 
 test("az's configured defaults give the organization and project", () => {
   assert.deepEqual(board.parseAzureDefaults(fixture("azure-defaults.txt")), { organization: "https://dev.azure.com/example-org/", project: "Example Project" });
@@ -400,8 +546,8 @@ test("az's configured defaults give the organization and project", () => {
 });
 
 test("Azure states come from the work item types, in category order", () => {
-  const { states, types } = board.parseAzureTypes(fixture("azure-types.json"));
-  assert.deepEqual(states.map((s) => s.name), ["To Do", "New", "Approved", "In Progress", "Committed", "Done", "Removed"]);
+  const { states, types } = azureTypes();
+  assert.deepEqual(states.map((s) => s.name), ["To Do", "New", "Approved", "In Planning", "In Progress", "Committed", "Active", "Done", "Inactive", "Removed"]);
   assert.deepEqual(types.Task, ["To Do", "In Progress", "Done", "Removed"]);
   assert.equal(states.find((s) => s.name === "Committed").color, "ansi4");
 });
@@ -418,10 +564,8 @@ test("the WIQL query asks for @Me's items without the hidden states, quotes esca
   assert.doesNotMatch(scoped[scoped.indexOf("--wiql") + 1], /NOT IN/);
 });
 
-test("Azure work items become cards in the states of their types", () => {
-  const types = board.parseAzureTypes(fixture("azure-types.json"));
-  const hidden = new Set(["Done", "Removed"]);
-  const b = board.parseAzureBoard(fixture("azure-items.json"), types, hidden);
+test("Azure columns are the states of the types found, hidden ones as stubs; others' states stay out", () => {
+  const b = azureBoard();
   assert.deepEqual(b.columns.map((c) => [c.name, c.hidden]), [
     ["To Do", false], ["New", false], ["Approved", false], ["In Progress", false], ["Committed", false], ["Done", true], ["Removed", true],
   ]);
@@ -429,72 +573,93 @@ test("Azure work items become cards in the states of their types", () => {
   assert.deepEqual([task.column.name, task.card.assignees, task.card.type, task.card.repoShort], ["In Progress", ["Sample Person"], "Task", "Example Project"]);
   assert.equal(task.card.url, "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/101");
   const bug = board.findCard(b, "az-102").card;
-  assert.deepEqual([bug.assignees, bug.labels], [["Sample Person"], ["import", "data"]]);
-  assert.equal(bug.url, "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/102");
+  assert.deepEqual([bug.assignees, bug.labels, bug.url], [["Sample Person"], ["import", "data"], "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/102"]);
+  assert.equal(b.columns.find((c) => c.name === "Done").count, null, "Azure stubs have no count");
 });
 
-test("az printing nothing means no work items, not an error", () => {
-  const b = board.parseAzureBoard("", board.parseAzureTypes(fixture("azure-types.json")), new Set());
-  assert.equal(b.total, 0);
-  assert.equal(b.columns.length, 7);
+test("az printing nothing means no work items and no columns, not an error", () => {
+  const b = board.parseAzureBoard("", azureTypes(), new Set());
+  assert.deepEqual([b.total, b.columns.length], [0, 0]);
 });
 
 test("an Azure state change is az boards work-item update --state", () => {
-  const b = board.parseAzureBoard(fixture("azure-items.json"), board.parseAzureTypes(fixture("azure-types.json")), new Set());
+  const b = azureBoard();
   const card = board.findCard(b, "az-102").card;
   const args = board.azureMoveArgs(azureView(), card, b.columns.find((c) => c.name === "Committed"));
   assert.deepEqual(args.slice(0, 7), ["boards", "work-item", "update", "--id", "102", "--state", "Committed"]);
   assert.ok(args.includes("--detect"));
 });
 
-// ---- Starting an agent (decision 5) ----
+// ---- Sessions ----
 
-test("branch type and slug come from the title, the issue type or its labels", () => {
-  const card = (title, extra = {}) => ({ title, labels: [], type: null, ...extra });
-  assert.equal(board.branchType(card("fix(saves): a save sync")), "fix");
-  assert.equal(board.branchType(card("Sync breaks", { labels: ["bug"] })), "fix");
-  assert.equal(board.branchType(card("Sync breaks", { type: "Bug" })), "fix");
-  assert.equal(board.branchType(card("Write the guide", { labels: ["documentation"] })), "docs");
-  assert.equal(board.branchType(card("Whatever: not a type")), "feat");
-  assert.equal(board.slugify("fix(saves): a save sync of a ROM RomM no longer has says so instead of failing"), "a-save-sync-of-a-rom-romm-no-longer-has");
-  assert.equal(board.slugify("Größe ändern: Über-Ansicht"), "groesse-aendern-ueber-ansicht");
-  assert.equal(board.slugify("!!!"), "item");
+test("an item's key names it on every source; a draft has none", () => {
+  assert.equal(board.itemKey(board.findCard(githubBoard(), "PVTI_rec1").card), "tender#3000");
+  assert.equal(board.itemKey(board.findCard(azureBoard(), "az-101").card), "AB#101");
+  const draft = board.findCard(casesBoard(), "PVTI_case2").card;
+  assert.equal(board.itemKey(draft), null);
+  assert.equal(board.itemLabel(draft), "Entwurf");
+  assert.equal(board.itemLabel(board.findCard(azureBoard(), "az-101").card), "AB#101");
 });
 
-test("template variables fill the branch, worktree folder and first message", () => {
-  const config = sampleConfig();
-  const view = config.views[0];
-  const card = board.findCard(githubBoard(), "PVTI_sample2").card;
-  const settings = board.startSettings(config, view, card.repo);
-  const vars = board.templateVars(card, settings);
-  assert.equal(vars.branch, "fix/2837-a-save-sync-no-longer-fails-its-uploads");
-  assert.equal(board.renderTemplate(settings.worktree, vars), "~/src/tender.worktrees/fix/2837-a-save-sync-no-longer-fails-its-uploads");
-  assert.equal(board.renderTemplate(settings.message, vars), "/work 2837");
-  assert.equal(board.renderTemplate("{nope} {number}", vars), "{nope} 2837");
-  assert.equal(board.renderTemplate(board.START_DEFAULTS.worktree, vars), "~/.herdr/worktrees/tender/fix-2837-a-save-sync-no-longer-fails-its-uploads");
+test("a session is named after its item, the title cut to fit", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec6").card;
+  assert.equal(board.sessionName(card), "tender#3007 fix(launch): pass the controller to the emulator");
+  assert.equal(board.sessionName({ ...card, title: "x".repeat(80) }), `tender#3007 ${"x".repeat(47)}…`);
+  assert.equal(board.sessionName(board.findCard(casesBoard(), "PVTI_case2").card), "Draft: sort the release notes");
+});
+
+test("an item's session is the tab or space named after it; a branch with its number is the fallback", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const tab = (id, name, status = null) => ({ id, name, status });
+  const spaces = [
+    { id: "s1", name: "atlas", folder: "/r/atlas", branch: "main", status: "blocked", tabs: [tab("t1", "atlas#3000 other")] },
+    { id: "s2", name: "romm", folder: "/r/tender", branch: "main", status: "working", tabs: [tab("t2", "1"), tab("t3", "tender#3000 feat(dev)…", "working")] },
+  ];
+  assert.deepEqual(board.linkedSession(card, spaces), { space: "s2", tab: "t3", status: "working", label: "tender#3000 feat(dev)…" });
+  const two = [{ id: "s7", name: "x", folder: "/r/tender", branch: "main", status: null,
+    tabs: [tab("t7", "tender#3000 a", "idle"), tab("t8", "tender#3000 b", "blocked"), tab("t9", "tender#30001 c", "blocked")] }];
+  assert.equal(board.linkedSession(card, two).tab, "t8", "the most urgent first; tender#30001 is another item");
+  assert.equal(board.linkedSession(card, [{ ...two[0], tabs: [two[0].tabs[2]] }]), null);
+  const named = [{ id: "s3", name: "tender#3000 feat(dev)…", folder: "/r/tender", branch: "main", status: "done", tabs: [tab("t4", "1", "done")] }];
+  assert.deepEqual(board.linkedSession(card, named), { space: "s3", tab: null, status: "done", label: "tender#3000 feat(dev)…" });
+  const branch = [{ id: "s4", name: "x", folder: "/r/tender.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [tab("t5", "1")] }];
+  assert.deepEqual(board.linkedSession(card, branch), { space: "s4", tab: null, status: "idle", label: "feat/3000-x" });
+  const elsewhere = [{ id: "s5", name: "x", folder: "/r/atlas.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [] }];
+  assert.equal(board.linkedSession(card, elsewhere), null, "the same number in another repo is not this item's");
+  const az = board.findCard(azureBoard(), "az-101").card;
+  assert.equal(board.linkedSession(az, [{ id: "s6", name: "w", folder: "/w", branch: null, status: null, tabs: [tab("t6", "AB#101 Write the sample importer", "blocked")] }]).tab, "t6");
   const pr = board.parseGithubList(json("github-list.json"), listView()).sections[0].rows[0];
-  assert.equal(board.templateVars(pr, settings).branch, "pr/desktop-emulation-card", "a pull request keeps its head branch");
-  const projectPr = board.findCard(githubBoard(), "PVTI_sample6").card;
-  assert.deepEqual([projectPr.kind, projectPr.branch], ["pr", "feat/2844-remote-dev-loop"]);
-  assert.equal(board.templateVars(projectPr, settings).branch, "feat/2844-remote-dev-loop", "so does one on a project board");
-  assert.equal(board.templateVars({ ...projectPr, branch: null }, settings).branch, "feat/2850-wire-the-remote-target-into-the-dev-loop");
-  assert.equal(board.templateVars(card, settings, "own/branch").branchDashed, "own-branch");
+  assert.equal(board.linkedSession(pr, [{ id: "p", name: "p", folder: "/x", branch: "pr/desktop-emulation-card", status: "idle", tabs: [] }]).space, "p");
 });
 
-test("the worktree script gets checkout, base, branch and folder as arguments, never inside the script", () => {
-  const settings = { ...board.START_DEFAULTS, checkout: "~/src/tender", worktree: "{checkout}.worktrees/{branch}" };
-  const args = board.worktreeArgs(settings, { branch: "fix/1-x; rm -rf ~", checkout: "~/src/tender" });
-  assert.deepEqual(args.slice(0, 2), ["-c", board.WORKTREE_SCRIPT]);
-  assert.deepEqual(args.slice(2), ["board-worktree", "~/src/tender", "main", "fix/1-x; rm -rf ~", "~/src/tender.worktrees/fix/1-x; rm -rf ~"]);
+test("templates take the item's number, title, url, owner, repo and key", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec4").card;
+  const vars = board.templateVars(card);
+  assert.deepEqual(vars, { number: 3004, title: card.title, url: "https://github.com/example/tender/issues/3004", owner: "example", repo: "tender", key: "tender#3004" });
+  assert.equal(board.renderTemplate("/implement {number} {nope}", vars), "/implement 3004 {nope}");
+  assert.equal(board.templateVars(board.findCard(azureBoard(), "az-101").card).repo, "Example Project");
 });
 
-test("an agent opens as a new space on its machine or a tab in a space there", () => {
-  assert.deepEqual(board.startCommand({ open: "space", on: "server", folder: "/w", argv: ["claude"], task: "/work 1", name: "#1" }),
-    ["space.new", { tab: "#1", machine: "server", folder: "/w", argv: ["claude"], task: "/work 1" }]);
-  assert.deepEqual(board.startCommand({ open: "space", on: null, folder: "/w", argv: ["claude"], task: "", name: "#1" }),
-    ["space.new", { tab: "#1", machine: "", folder: "/w", argv: ["claude"] }]);
-  assert.deepEqual(board.startCommand({ open: "tab", on: null, folder: "/w", argv: ["claude"], task: "go", name: "#1", space: "s2" }),
-    ["tab.new", { name: "#1", space: "s2", folder: "/w", argv: ["claude"], task: "go" }]);
+test("the checkout script expands ~ on the machine, checks the folder and prints it", () => {
+  const home = process.env.HOME;
+  mkdirSync(join(home, "src/tender"), { recursive: true });
+  const run = (checkout) => spawnSync("sh", board.checkoutArgs(checkout), { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } });
+  const ok = run("~/src/tender");
+  assert.deepEqual([ok.status, ok.stdout], [0, `${join(home, "src/tender")}\n`]);
+  assert.equal(run(join(home, "src/tender")).stdout, `${join(home, "src/tender")}\n`);
+  const missing = run("~/src/none");
+  assert.equal(missing.status, 3);
+  assert.match(missing.stderr, /Kein Checkout unter .*src\/none/);
+  assert.equal(board.checkoutArgs("~/x; rm -rf ~").at(-1), "~/x; rm -rf ~", "the checkout is an argument, never part of the script");
+});
+
+test("a session opens as a new space on its machine or a tab in a space there", () => {
+  assert.deepEqual(board.startCommand({ open: "space", on: "server", folder: "/w", argv: ["claude"], task: "/work 1", name: "tender#1 t" }),
+    ["space.new", { name: "tender#1 t", tab: "tender#1 t", machine: "server", folder: "/w", argv: ["claude"], task: "/work 1" }]);
+  assert.deepEqual(board.startCommand({ open: "space", on: null, folder: "/w", argv: ["claude"], task: "", name: "n" }),
+    ["space.new", { name: "n", tab: "n", machine: "", folder: "/w", argv: ["claude"] }]);
+  assert.deepEqual(board.startCommand({ open: "tab", on: null, folder: "/w", argv: ["claude"], task: "go", name: "n", space: "s2" }),
+    ["tab.new", { name: "n", space: "s2", folder: "/w", argv: ["claude"], task: "go" }]);
 });
 
 test("a new tab goes to a space of the repo on that machine, else the shown one there", () => {
@@ -509,30 +674,7 @@ test("a new tab goes to a space of the repo on that machine, else the shown one 
   assert.equal(board.spaceForTab(spaces, "laptop", "/home/me/src/tender"), null);
 });
 
-test("the start column is the view's, or on Azure the first in-progress state", () => {
-  assert.equal(board.startColumn(githubView(), githubBoard()).id, "opt-progress");
-  assert.equal(board.startColumn({ ...githubView(), startColumn: null }, githubBoard()), null);
-  const az = board.parseAzureBoard(fixture("azure-items.json"), board.parseAzureTypes(fixture("azure-types.json")), new Set());
-  assert.equal(board.startColumn(azureView(), az).name, "In Progress");
-});
-
-test("a card's agent is the space on its branch, the most urgent first", () => {
-  const card = board.findCard(githubBoard(), "PVTI_sample1").card;
-  const spaces = [
-    { id: "x", branch: "feat/28450-other", folder: "/r/tender.worktrees/a", status: "blocked" },
-    { id: "y", branch: "feat/2845-remote-target", folder: "/r/tender.worktrees/feat/2845-remote-target", status: "working" },
-    { id: "z", branch: "fix/2845-again", folder: "/r/tender.worktrees/fix/2845-again", status: "blocked" },
-    { id: "w", branch: "feat/2845-elsewhere", folder: "/r/atlas.worktrees/feat/2845-elsewhere", status: "blocked" },
-  ];
-  assert.equal(board.linkedSpace(card, spaces).id, "z");
-  assert.equal(board.linkedSpace(card, spaces.slice(0, 2)).id, "y");
-  assert.equal(board.linkedSpace(card, [spaces[1], spaces[3]]).id, "y", "a branch of the same number in another repo is not this card's");
-  assert.equal(board.linkedSpace(card, []), null);
-  const pr = board.parseGithubList(json("github-list.json"), listView()).sections[0].rows[0];
-  assert.equal(board.linkedSpace(pr, [{ id: "p", branch: "pr/desktop-emulation-card", folder: "/x", status: "idle" }]).id, "p");
-});
-
-// ---- Times (decision 6) ----
+// ---- Labels ----
 
 test("the refresh time and PR ages read as German labels", () => {
   const now = Date.parse("2026-11-18T12:00:00");
@@ -546,60 +688,252 @@ test("the refresh time and PR ages read as German labels", () => {
   assert.equal(board.ageLabel("2026-11-02T10:00:00", now), "2.11.");
 });
 
-// ---- The worktree script against a real git repo (decision 5) ----
+// ---- UI paths through a fake herdr ----
 
-function git(cwd, ...args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", env: gitEnv(), stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
-let home;
-const gitEnv = () => ({ PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" });
-function runScript(settings, branch) {
-  const vars = { branch, checkout: settings.checkout };
-  return spawnSync("sh", board.worktreeArgs(settings, vars), { encoding: "utf8", env: gitEnv() });
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => ((resolve = res), (reject = rej)));
+  return { promise, resolve, reject };
 }
 
-test("the worktree script makes, reuses and tracks worktrees from origin", (t) => {
-  home = mkdtempSync(join(tmpdir(), "board-wt-"));
-  t.after(() => rmSync(home, { recursive: true, force: true }));
-  const origin = join(home, "origin.git");
-  git(home, "init", "--quiet", "--bare", "--initial-branch=main", origin);
-  const seed = join(home, "seed");
-  git(home, "clone", "--quiet", origin, seed);
-  git(seed, "commit", "--quiet", "--allow-empty", "-m", "one");
-  git(seed, "push", "--quiet", "origin", "main");
-  git(seed, "switch", "--quiet", "-c", "pr/remote-only");
-  git(seed, "commit", "--quiet", "--allow-empty", "-m", "on the pr branch");
-  git(seed, "push", "--quiet", "origin", "pr/remote-only");
-  mkdirSync(join(home, "src"));
-  git(join(home, "src"), "clone", "--quiet", origin, "tender");
-  git(seed, "switch", "--quiet", "main");
-  git(seed, "commit", "--quiet", "--allow-empty", "-m", "two, after the clone");
-  git(seed, "push", "--quiet", "origin", "main");
-  const settings = { ...board.START_DEFAULTS, checkout: "~/src/tender", worktree: "{checkout}.worktrees/{branch}" };
+// The fake herdr: exec calls wait until the test answers them.
+function fakeHost({ config = shippedConfig(), shown = true } = {}) {
+  const calls = [];
+  const host = {
+    calls,
+    runs: [],
+    notes: [],
+    focused: 0,
+    exec: (tool, args, options) => {
+      const d = deferred();
+      calls.push({ tool, args, options, ...d });
+      return d.promise;
+    },
+    readTextFile: async () => config,
+    appHome: () => "/fake-home",
+    checking: () => false,
+    nextCommand: () => new Promise(() => {}),
+    notify: (n) => host.notes.push(n),
+    run: (name, args) => host.runs.push([name, args]),
+    spaces: () => [{ id: "s1", name: "x", folder: "/r/tender", machine: null, branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Arbeit", active: true }] }],
+    panes: () => (shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []),
+    machines: () => [{ name: null, layout: "ready" }, { name: "server", layout: "ready" }],
+    knownAgents: async () => [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }],
+    settings: () => ({}),
+    theme: () => ({}),
+    "InputState.new": (opts) => {
+      let value = opts?.value ?? "";
+      return { on: () => true, value: () => value, set_value: (v) => (value = v), focus: () => {} };
+    },
+    "ScrollHandle.new": () => ({ scroll_to_item() {} }),
+  };
+  // Answers the oldest open call of a tool (whose arguments hold `has`).
+  host.answer = async (tool, result, has) => {
+    const at = calls.findIndex((c) => c.tool === tool && !c.done && (!has || c.args.some((a) => String(a).includes(has))));
+    assert.ok(at >= 0, `no open ${tool} call${has ? ` with ${has}` : ""}`);
+    calls[at].done = true;
+    if (result instanceof Error) calls[at].reject(result);
+    else calls[at].resolve(result);
+    await settle();
+  };
+  host.open = (tool) => calls.filter((c) => c.tool === tool && !c.done);
+  return host;
+}
 
-  const made = runScript(settings, "fix/1-new");
-  assert.equal(made.status, 0, made.stderr);
-  const folder = join(home, "src/tender.worktrees/fix/1-new");
-  assert.deepEqual(made.stdout.trim().split("\n"), [folder, join(home, "src/tender")]);
-  assert.equal(git(folder, "log", "-1", "--format=%s"), "two, after the clone", "the new branch starts at the fetched origin/main");
-  assert.equal(git(folder, "rev-parse", "--abbrev-ref", "HEAD"), "fix/1-new");
+async function settle() {
+  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
+}
 
-  const again = runScript(settings, "fix/1-new");
-  assert.equal(again.status, 0, again.stderr);
-  assert.equal(again.stdout.trim().split("\n")[0], folder, "an existing worktree of the branch is reused");
+function fakeCx() {
+  const cx = {
+    focus_handle: () => ({ focus: () => globalThis.__boardHost.focused++ }),
+    spawn: (fn) => Promise.resolve().then(() => fn(cx)),
+    timer: { after() {}, every() {} },
+    notify() {},
+    stop_propagation() {},
+    open_url(url) {
+      (cx.opened ??= []).push(url);
+    },
+  };
+  return cx;
+}
 
-  const pr = runScript(settings, "pr/remote-only");
-  assert.equal(pr.status, 0, pr.stderr);
-  const prFolder = pr.stdout.trim().split("\n")[0];
-  assert.equal(git(prFolder, "log", "-1", "--format=%s"), "on the pr branch", "a branch on origin is checked out, not made anew");
-  assert.equal(git(prFolder, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/pr/remote-only");
+const memory = new Map();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: { getItem: (k) => memory.get(k) ?? null, setItem: (k, v) => memory.set(k, String(v)) },
+});
 
-  const missing = runScript({ ...settings, checkout: "~/src/none" }, "fix/2-x");
-  assert.equal(missing.status, 3);
-  assert.match(missing.stderr, /Kein Checkout unter .*src\/none/);
+// A Board on the fake host, its first view loaded from github-board.json
+// (or `answer`), the Azure view unavailable (no az).
+async function openBoard(options = {}) {
+  memory.clear();
+  const host = fakeHost(options);
+  globalThis.__boardHost = host;
+  const b = new board.default();
+  const cx = fakeCx();
+  b.init({}, cx);
+  await settle();
+  await host.answer("az", new Error("failed to start az: No such file or directory"));
+  await host.answer("gh", { code: 0, stdout: options.answer ?? fixture("github-board.json"), stderr: "" });
+  return { b, cx, host, st: () => b.views.mine };
+}
 
-  const bad = runScript(settings, "fix/3 two words");
-  assert.equal(bad.status, 4);
-  assert.match(bad.stderr, /Ungültiger Branch-Name/);
-  assert.ok(!existsSync(join(home, "src/tender.worktrees/fix/3 two words")));
+const key = (k, extra = {}) => ({ key: k, key_char: extra.char ?? (k.length === 1 ? k : undefined), keystroke: k, modifiers: extra.modifiers ?? {} });
+async function press(b, cx, k, extra) {
+  b.key(key(k, extra), cx);
+  await settle();
+}
+const shiftL = { char: "L", modifiers: { shift: true } };
+
+test("UI: the board loads its first view and hides Azure without az", async () => {
+  const { b, st, host } = await openBoard();
+  assert.equal(st().data.columns.length, 5);
+  assert.deepEqual(st().sel, { col: 1, key: "PVTI_rec4" });
+  assert.equal(b.views.azure.unavailable, "az ist nicht installiert");
+  assert.deepEqual(b.shownViews().map((v) => v.id), ["mine", "prs"]);
+  assert.ok(host.focused > 0);
+});
+
+test("UI: a board copy that is not shown does not take the keyboard", async () => {
+  memory.clear();
+  const host = fakeHost({ shown: false });
+  globalThis.__boardHost = host;
+  new board.default().init({}, fakeCx());
+  await settle();
+  assert.equal(host.focused, 0);
+});
+
+test("UI: number keys beyond the views do nothing; [ ] wrap, also with AltGr, not with Control alone", async () => {
+  const { b, cx } = await openBoard();
+  await press(b, cx, "9");
+  assert.equal(b.view().id, "mine");
+  await press(b, cx, "[", { modifiers: { control: true } });
+  assert.equal(b.view().id, "mine");
+  await press(b, cx, "[", { modifiers: { control: true, alt: true } });
+  assert.equal(b.view().id, "prs");
+  await press(b, cx, "]");
+  assert.equal(b.view().id, "mine");
+  await press(b, cx, "2");
+  assert.equal(b.view().id, "prs");
+  await press(b, cx, "3");
+  assert.equal(b.view().id, "prs", "3 names no view while Azure is unavailable");
+});
+
+test("UI: a digit beyond the status menu's rows does nothing; a valid one moves the card", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "s");
+  assert.equal(b.modal?.kind, "status");
+  await press(b, cx, "9");
+  assert.equal(b.modal?.kind, "status");
+  assert.equal(host.open("gh").length, 0);
+  await press(b, cx, "3");
+  assert.equal(b.modal, null);
+  assert.equal(host.open("gh").length, 1);
+  assert.ok(host.open("gh")[0].args.includes("option=opt-in-progress"));
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress");
+});
+
+test("UI: x on the column without status does nothing", async () => {
+  const { b, cx, st, host } = await openBoard({ answer: fixture("github-board-cases.json") });
+  st().sel = { col: 0, key: null };
+  await press(b, cx, "x");
+  assert.equal(memory.has("hidden:mine"), false);
+  assert.equal(st().data.columns[0].hidden, false);
+  assert.equal(host.open("gh").length, 0, "no refresh");
+});
+
+test("UI: x shows a hidden column and keeps it shown when storage fails", async () => {
+  const { b, cx, st, host } = await openBoard();
+  st().sel = { col: 4, key: null };
+  const setItem = localStorage.setItem;
+  localStorage.setItem = () => {
+    throw new Error("full");
+  };
+  try {
+    await press(b, cx, "x");
+  } finally {
+    localStorage.setItem = setItem;
+  }
+  assert.equal(st().hidden.has("Done"), false);
+  assert.equal(st().data.columns[4].hidden, false);
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog"'), "the refresh asks for Done again");
+});
+
+test("UI: a second move of a card waits for the first; a refusal moves it back", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress");
+  await press(b, cx, "l", shiftL);
+  assert.equal(host.open("gh").length, 1, "no second write");
+  assert.match(b.notice.text, /wird noch gespeichert/);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "gh: Resource not accessible by integration" });
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "Ready");
+  assert.equal(st().pending.PVTI_rec4, undefined);
+  assert.match(b.notice.text, /bleibt in „Ready“: Resource not accessible by integration/);
+  assert.equal(host.notes.at(-1).level, "error");
+});
+
+test("UI: a write without a clear answer keeps the card, says so and refreshes", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress");
+  assert.match(b.notice.text, /Ergebnis unklar/);
+  assert.equal(host.open("gh").length, 1, "a refresh asks GitHub");
+});
+
+test("UI: a refresh during a write keeps the move until the write is confirmed", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await new Promise((r) => setTimeout(r, 5)); // the refresh starts after the move, not in its millisecond
+  await press(b, cx, "r");
+  await host.answer("gh", { code: 0, stdout: fixture("github-board.json"), stderr: "" }, "items(first");
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress", "the old server state does not undo the move");
+  await host.answer("gh", { code: 0, stdout: JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_rec4" } } } }), stderr: "" });
+  assert.match(b.notice.text, /steht jetzt in „In progress“/);
+  assert.equal(st().moves.length, 1, "kept until a refresh starts after the confirmation");
+});
+
+test("UI: Enter twice opens the start dialog; Esc waits while it starts; the session opens in the checkout", async () => {
+  const config = shippedConfig().replace('"danielcopper/romm-tender"', '"example/tender"');
+  const { b, cx, host } = await openBoard({ config });
+  await press(b, cx, "enter");
+  assert.equal(b.views.mine.detail, true);
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "start");
+  assert.equal(b.messageInput.value(), "/implement 3004");
+  b.startAgent(cx);
+  await settle();
+  await press(b, cx, "escape");
+  assert.equal(b.modal?.kind, "start", "Esc does not drop a start under way");
+  await host.answer("sh", { code: 0, stdout: "/home/me/Repos/romm-tender\n", stderr: "" });
+  assert.equal(b.modal, null);
+  const name = "tender#3004 feat(dev): set up a remote dev target";
+  assert.deepEqual(host.runs.at(-1), ["space.new", { name, tab: name, machine: "", folder: "/home/me/Repos/romm-tender", argv: ["claude"], task: "/implement 3004" }]);
+  assert.ok(!host.calls.some((c) => c.args.some((a) => /worktree/.test(String(a)))), "no worktree");
+});
+
+test("UI: an Azure view loads its defaults and types once, and again after r", async () => {
+  const { b, cx, host } = await openBoard();
+  const config = shippedConfig();
+  host.readTextFile = async () => config;
+  await press(b, cx, "r");
+  await host.answer("az", { code: 0, stdout: fixture("azure-defaults.txt"), stderr: "" }, "configure");
+  await host.answer("az", { code: 0, stdout: fixture("azure-types.json"), stderr: "" }, "workitemtypes");
+  await host.answer("az", { code: 0, stdout: fixture("azure-items.json"), stderr: "" }, "--wiql");
+  assert.equal(b.views.azure.unavailable, null);
+  assert.equal(b.views.azure.data.columns.length, 7);
+  await press(b, cx, "r");
+  assert.ok(host.open("az").some((c) => c.args.includes("configure")), "r reads az's defaults and the types anew");
+});
+
+test("UI: a configured machine or agent that is missing is said in the dialog", async () => {
+  const config = shippedConfig().replace('"danielcopper/romm-tender"', '"example/tender"').replace('"agent": "claude"', '"agent": "codex", "machine": "laptop"');
+  const { b, cx } = await openBoard({ config });
+  await press(b, cx, "enter");
+  await press(b, cx, "enter");
+  await settle();
+  assert.match(b.modal.notes.join("\n"), /Rechner „laptop“ ist nicht verbunden/);
+  assert.match(b.modal.notes.join("\n"), /Agent „codex“ ist auf diesem Rechner nicht installiert/);
 });
