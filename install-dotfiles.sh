@@ -56,10 +56,6 @@ echo "stowing for class=$CLASS:"
 printf '  %s\n' "${all_pkgs[@]}"
 echo
 
-# Shared with stow-packages.sh: into_our_repo, for the settings link below.
-# shellcheck source=stow-lib.sh
-. "$DIR/stow-lib.sh"
-
 # Makes the directories real that must be (README, "Install / update"), moves
 # a conflicting file in $HOME aside and stows.
 "$DIR/stow-packages.sh" --backup "${all_pkgs[@]}"
@@ -74,17 +70,11 @@ systemctl --user enable --now systemd-tmpfiles-clean.timer ||
 # machine. The reference is deliberately not stowed: Claude Code writes the
 # model, the effort level and the auto-mode environment description into the
 # live file, and this repo is public. After this first copy the two drift on
-# purpose - diff them when you want to carry something over.
-# A machine set up before that split still has the live file as a symlink into
-# this repo, so everything Claude Code writes lands in the public reference.
-# Replace such a link with a local copy of what it points at.
+# purpose - diff them when you want to carry something over. A live file that
+# is still a link into this repo, from before that split, stow-packages.sh has
+# replaced with a local copy.
 live_settings="$HOME/.claude/settings.json"
-if [ -L "$live_settings" ] && into_our_repo "$(readlink -f -- "$live_settings")"; then
-  settings_src="$(readlink -f -- "$live_settings")"
-  [ -f "$settings_src" ] || settings_src="$DIR/claude/.claude/settings.json"
-  cp --remove-destination -- "$settings_src" "$live_settings"
-  echo "replaced the ~/.claude/settings.json link into the repo with a local copy"
-elif [ ! -e "$live_settings" ] && [ ! -L "$live_settings" ]; then
+if [ ! -e "$live_settings" ] && [ ! -L "$live_settings" ]; then
   cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
   echo "seeded ~/.claude/settings.json from the repo reference"
 fi

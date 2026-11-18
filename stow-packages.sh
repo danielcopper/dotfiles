@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stow the given packages into $HOME, after making real the directories that
-# must be real directories (README, "Install / update").
+# must be real directories; what that does to a fold and when it stops is in
+# the README, "Install / update".
 #
 # Stow folds a directory that only one package fills into one link to that
 # package, and what a program then writes there lands in this repo. A fold is
@@ -8,19 +9,26 @@
 # it aborts with "unstow_contents() called with invalid target" (GNU Stow
 # 2.4.1), as its unstow pass plans to remove the link and then still descends
 # through it for the second package. A plain `stow` would unfold the link;
-# `-R` does not get that far. So the directories below are made real before
-# stow runs, an old fold of one into this repo included.
+# `-R` does not get that far.
 #
 # Usage: stow-packages.sh [--backup] <package>...
+#   A package is a directory at the top of this repo, named without a path; one
+#   trailing / is dropped.
 #   --backup  move a file in $HOME that stands where a package file belongs
-#             into ~/.dotfiles-pre-stow.<time>/ instead of letting stow refuse
-#             (install-dotfiles.sh passes it)
+#             into ~/.dotfiles-pre-stow.<time>/ instead of letting stow refuse.
+#             install-dotfiles.sh passes it; dotfiles-relink does not, so a
+#             file in the way ends in stow's conflict there.
 set -euo pipefail
+shopt -s inherit_errexit
 
 DIR="$(dirname "$(readlink -f "$0")")"
 cd "$DIR"
-# shellcheck source=stow-lib.sh
-. "$DIR/stow-lib.sh"
+
+usage_error() {
+  echo "stow-packages.sh: $1" >&2
+  echo "usage: stow-packages.sh [--backup] <package>..." >&2
+  exit 2
+}
 
 backup=""
 if [ "${1:-}" = --backup ]; then
@@ -28,15 +36,65 @@ if [ "${1:-}" = --backup ]; then
   shift
 fi
 pkgs=()
-for pkg in "$@"; do
-  pkgs+=("${pkg%/}")
+for arg in "$@"; do
+  pkg="${arg%/}"
+  case "$pkg" in
+    "" | -* | .* | */*) usage_error "not a package name: $arg" ;;
+  esac
+  [ -d "$DIR/$pkg" ] || usage_error "no package $arg in $DIR"
+  pkgs+=("$pkg")
 done
-given() { [[ " ${pkgs[*]} " == *" $1 "* ]]; }
+
+# in_list <word> <item>...: true when <word> is one of the items.
+in_list() {
+  local word="$1" item
+  shift
+  for item in "$@"; do
+    [ "$item" = "$word" ] && return 0
+  done
+  return 1
+}
+
+# git tells a link into this repo from any other. Without it every link would
+# look foreign, and --backup would move the stowed ones aside.
+if ! command -v git >/dev/null 2>&1; then
+  echo "stow-packages.sh: git not found; it is needed to tell links into this repo from others" >&2
+  exit 1
+fi
+if ! git_error="$(git -C "$DIR" rev-parse --git-common-dir 2>&1 >/dev/null)"; then
+  echo "stow-packages.sh: git cannot read the repo at $DIR: $git_error" >&2
+  exit 1
+fi
+
+# Resolve the repo's shared git dir. Worktrees of the same repo share this,
+# so it lets us recognise existing symlinks that point into a sibling
+# worktree (or into the main checkout) as stale stow folds rather than
+# foreign files. `git rev-parse --git-common-dir` returns paths relative
+# to the queried directory, so resolve them with cd-then-readlink.
+git_common_dir_abs() {
+  local d="$1" rel
+  rel="$(git -C "$d" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  (cd "$d" && readlink -f -- "$rel" 2>/dev/null) || return 1
+}
+repo_common_dir="$(git_common_dir_abs "$DIR")"
+
+into_our_repo() {
+  # Return 0 if $1's containing dir is inside any worktree of our repo.
+  local p="$1"
+  [ -z "$p" ] && return 1
+  local d="$p"
+  [ -d "$d" ] || d="$(dirname -- "$d")"
+  [ -d "$d" ] || return 1
+  local their
+  their="$(git_common_dir_abs "$d" || true)"
+  [ -n "$their" ] && [ "$their" = "$repo_common_dir" ]
+}
 
 # The herdr app writes its own files into every directory of the herdr-app
-# package: ~/.config/herdr-app, each mod folder, themes and layouts. So
-# herdr-app is stowed with --no-folding, and each of its directories must be
-# real.
+# package: ~/.config/herdr-app, each mod folder, themes and layouts. Stow
+# folds a directory that is missing in $HOME into one link to this repo, and
+# everything herdr writes there would then land in the repo. So herdr-app is
+# stowed with --no-folding, and each of its directories must be real.
 no_folding_pkgs=(herdr-app)
 
 # Reference copies: tracked, but not stowed (each package's
@@ -44,8 +102,8 @@ no_folding_pkgs=(herdr-app)
 # config lives here"; README, "herdr app").
 reference_copies=(claude/.claude/settings.json herdr-app/.config/herdr-app/settings.json)
 
-# Directories that only one package fills and that a program writes into, as
-# <package>:<directory>, each made real when its package is stowed:
+# Directories a program writes into, as <package>:<directory>, each made real
+# when its package is stowed:
 # - claude:.claude: Claude Code's own files, and the live settings.json would
 #   be the public reference.
 # - opencode:.config/opencode: OpenCode's node_modules and package files, and
@@ -56,54 +114,64 @@ reference_copies=(claude/.claude/settings.json herdr-app/.config/herdr-app/setti
 #   such as timers.target.wants for the tmpfiles timer install-dotfiles.sh
 #   enables. The package ships default.target.wants, so it would fold on its
 #   own.
-# - host-steamdeck:.config/systemd/user/session.slice.d: systemd skips a
-#   drop-in directory that is a symlink, so a folded one would leave the
-#   desktop's memory protection unloaded.
+# - host-steamdeck:.config/systemd/user/session.slice.d and app.slice.d:
+#   systemd skips a drop-in directory that is a symlink, so a folded one would
+#   leave the memory protection of the desktop or of the apps unloaded
+#   (README, "Memory protection on the Steam Deck").
 written_dirs=(
   claude:.claude
   opencode:.config/opencode
   tmux:.config/tmux
   systemd:.config/systemd/user/default.target.wants
   host-steamdeck:.config/systemd/user/session.slice.d
+  host-steamdeck:.config/systemd/user/app.slice.d
 )
 
 # The directories to make real: those that more than one of the given
 # packages fills, every directory of a package stowed without folding, the
 # ones listed above, and the parents of each, parents first.
-with_parents() {
-  local d
-  while IFS= read -r d; do
+list_real_dirs() {
+  local pkg entry d
+  {
+    for pkg in "${pkgs[@]}"; do
+      find "$pkg" -mindepth 1 -type d -printf '%P\n'
+    done | LC_ALL=C sort | uniq -d
+    for pkg in "${pkgs[@]}"; do
+      if in_list "$pkg" "${no_folding_pkgs[@]}"; then
+        find "$pkg" -mindepth 1 -type d -printf '%P\n'
+      fi
+    done
+    for entry in "${written_dirs[@]}"; do
+      if in_list "${entry%%:*}" "${pkgs[@]}"; then
+        echo "${entry#*:}"
+      fi
+    done
+  } | while IFS= read -r d; do
     while [ "$d" != . ]; do
       echo "$d"
       d="$(dirname -- "$d")"
     done
-  done
+  done | LC_ALL=C sort -u
 }
+real_dirs_text="$(list_real_dirs)"
 real_dirs=()
-while IFS= read -r rel; do
-  real_dirs+=("$rel")
-done < <(
-  {
-    for pkg in "${pkgs[@]}"; do find "$pkg" -mindepth 1 -type d -printf '%P\n'; done | LC_ALL=C sort | uniq -d
-    for pkg in "${pkgs[@]}"; do
-      if [[ " ${no_folding_pkgs[*]} " == *" $pkg "* ]]; then find "$pkg" -mindepth 1 -type d -printf '%P\n'; fi
-    done
-    for entry in "${written_dirs[@]}"; do
-      if given "${entry%%:*}"; then echo "${entry#*:}"; fi
-    done
-  } | with_parents | LC_ALL=C sort -u
-)
+if [ -n "$real_dirs_text" ]; then
+  mapfile -t real_dirs <<<"$real_dirs_text"
+fi
 
-# The paths that worktrees of this repo live under: each registered one, also
-# when its directory is gone, and the main checkout, whose .worktrees/ holds
-# the others.
+# Where worktrees of this repo live: each registered one, also when its
+# directory is gone, the main checkout first; the sibling
+# <main checkout>.worktrees/ that `mise run worktree-new` creates them in;
+# and .worktrees/, an older place, inside the main checkout.
+worktree_list="$(git -C "$DIR" worktree list --porcelain)"
 worktree_roots=()
-if [ -n "$repo_common_dir" ]; then
-  while IFS= read -r line; do
-    case "$line" in
-      "worktree "*) worktree_roots+=("${line#worktree }") ;;
-    esac
-  done < <(git -C "$DIR" worktree list --porcelain)
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*) worktree_roots+=("${line#worktree }") ;;
+  esac
+done <<<"$worktree_list"
+if [ ${#worktree_roots[@]} -gt 0 ]; then
+  worktree_roots+=("$(dirname -- "${worktree_roots[0]}")/$(basename -- "${worktree_roots[0]}").worktrees")
 fi
 under_worktree_root() {
   local root
@@ -113,22 +181,84 @@ under_worktree_root() {
   return 1
 }
 
-# fold_of <link> <rel>: true when the link points at <rel> in a package of a
-# worktree of this repo, the place stow links it to; sets fold_top and
-# fold_pkg.
+# fold_of <link> <rel>: when the link points at <rel> in a package of a
+# worktree of this repo, the place stow links it to, print that worktree and
+# the package, one per line.
 fold_of() {
-  local src d
+  local src d top pkg
   src="$(readlink -f -- "$1" 2>/dev/null)" || return 1
   if [ ! -e "$src" ] || ! into_our_repo "$src"; then
     return 1
   fi
   d="$src"
   [ -d "$d" ] || d="$(dirname -- "$d")"
-  fold_top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || return 1
-  fold_pkg="${src#"$fold_top"/}"
-  fold_pkg="${fold_pkg%/"$2"}"
-  [ "$src" = "$fold_top/$fold_pkg/$2" ] && [[ "$fold_pkg" != */* ]]
+  top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  pkg="${src#"$top"/}"
+  pkg="${pkg%/"$2"}"
+  if [ "$src" != "$top/$pkg/$2" ] || [[ "$pkg" == */* ]]; then
+    return 1
+  fi
+  printf '%s\n%s\n' "$top" "$pkg"
 }
+
+tmp_list=""
+cleanup() {
+  if [ -n "$tmp_list" ]; then rm -f -- "$tmp_list"; fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# untracked_in <worktree> <package> <rel>: set `listed` to what git does not
+# track in <package>/<rel> of the worktree, relative to it; when git tracks
+# nothing there, to all it holds. False when git fails.
+untracked_in() {
+  local dir="$1/$2/$3" entry child
+  listed=()
+  if [ -z "$tmp_list" ]; then
+    if ! tmp_list="$(mktemp)"; then
+      echo "stow-packages.sh: mktemp failed, so what git does not track in $dir cannot be listed" >&2
+      exit 1
+    fi
+  fi
+  git --literal-pathspecs -C "$1" ls-files -z --others --directory -- "$2/$3/" >"$tmp_list" || return 1
+  while IFS= read -r -d '' entry; do
+    entry="${entry#"$2/$3/"}"
+    entry="${entry%/}"
+    if [ -n "$entry" ]; then
+      listed+=("$entry")
+    else
+      for child in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+        if [ -e "$child" ] || [ -L "$child" ]; then listed+=("${child##*/}"); fi
+      done
+    fi
+  done <"$tmp_list"
+}
+
+# move_in <from> <to>: move <from> to <to>. A directory that is there already
+# takes in what <from> holds; any other thing there already stops it, and both
+# paths go to `clashes`.
+clashes=()
+move_in() {
+  local from="$1" to="$2" child rc=0
+  if [ ! -e "$to" ] && [ ! -L "$to" ]; then
+    mkdir -p -- "$(dirname -- "$to")" && mv -T -- "$from" "$to"
+    return
+  fi
+  if [ -d "$from" ] && [ ! -L "$from" ] && [ -d "$to" ] && [ ! -L "$to" ]; then
+    for child in "$from"/* "$from"/.[!.]* "$from"/..?*; do
+      if [ -e "$child" ] || [ -L "$child" ]; then
+        move_in "$child" "$to/${child##*/}" || rc=1
+      fi
+    done
+    if [ "$rc" = 0 ]; then rmdir -- "$from"; fi
+    return "$rc"
+  fi
+  clashes+=("$from" "$to")
+  return 1
+}
+
+stage_of() { echo "$HOME/$1.unfolding"; }
 
 left_alone=()
 leave_alone() { # leave_alone <rel> <why>
@@ -141,60 +271,46 @@ leave_alone() { # leave_alone <rel> <why>
   fi
 }
 
-# unfold <rel>: replace the fold at ~/<rel> with a real directory. What git
-# does not track in the folded package directory moves into it, and each
-# reference copy there is copied, as the app reads it there. All of it goes
-# into a staging directory beside the link first; only once everything is in
-# it does it take the link's place, so a failure leaves the link, and a rerun
-# picks up where this one stopped.
+# unfold <rel> <worktree> <package>: replace the fold at ~/<rel> with a real
+# directory, through the staging directory stage_of names (README, "Install /
+# update"). Only the swap near the end changes the link, so every stop before
+# it leaves the link in place.
 unfold() {
-  local rel="$1" live="$HOME/$1" src="$fold_top/$fold_pkg/$1"
-  local stage list entry child
-  local entries=() copies=() moved=() stayed=()
-  stage="$(dirname -- "$live")/.$(basename -- "$live").unfolding"
-  list="$(mktemp)"
-  if ! git -C "$fold_top" ls-files -z --others --directory -- "$fold_pkg/$rel/" >"$list"; then
-    rm -f -- "$list"
-    echo "stow-packages.sh: git ls-files failed in $fold_top; $live stays the link to $src" >&2
-    return 1
+  local rel="$1" top="$2" pkg="$3"
+  local live="$HOME/$1" src="$2/$3/$1" stage entry i
+  local entries=() copies=() moved=() stayed=() late=()
+  stage="$(stage_of "$rel")"
+  if ! untracked_in "$top" "$pkg" "$rel"; then
+    echo "stow-packages.sh: git ls-files failed in $top; $live stays the link to $src" >&2
+    exit 1
   fi
-  while IFS= read -r -d '' entry; do
-    entry="${entry#"$fold_pkg/$rel/"}"
-    entry="${entry%/}"
-    if [ -n "$entry" ]; then
-      entries+=("$entry")
-    else
-      # git tracks nothing in it: all of it moves.
-      shopt -s nullglob dotglob
-      for child in "$src"/*; do
-        entries+=("${child##*/}")
-      done
-      shopt -u nullglob dotglob
-    fi
-  done <"$list"
-  rm -f -- "$list"
+  entries=("${listed[@]}")
   for entry in "${reference_copies[@]}"; do
-    if [[ "$entry" == "$fold_pkg/$rel/"* ]] && [ -f "$fold_top/$entry" ]; then
-      copies+=("${entry#"$fold_pkg/$rel/"}")
+    if [[ "$entry" == "$pkg/$rel/"* ]] && [ -f "$top/$entry" ]; then
+      copies+=("${entry#"$pkg/$rel/"}")
     fi
   done
 
   echo "making $live a real directory in place of its link to $src"
+  if [ -d "$stage" ]; then
+    echo "resuming from $stage, which already holds:"
+    (cd "$stage" && find . -mindepth 1 -maxdepth 1 -printf '  %P\n' | LC_ALL=C sort)
+  fi
   if [ ${#entries[@]} -gt 0 ]; then
-    echo "moving into it what $fold_top does not track in $fold_pkg/$rel:"
+    echo "moving into it what $top does not track in $pkg/$rel:"
     printf '  %s\n' "${entries[@]}"
   fi
   if [ ${#copies[@]} -gt 0 ]; then
-    echo "copying into it from $fold_top/$fold_pkg/$rel, as the live file the app reads:"
+    echo "copying into it from $src, as the live file the app reads:"
     printf '  %s\n' "${copies[@]}"
-    echo "git status in $fold_top shows whether the app changed the repo's copy through the link"
+    echo "git status in $top shows whether the app changed the repo's copy through the link"
   fi
-  mkdir -p -- "$stage" || {
+  if ! mkdir -p -- "$stage"; then
     echo "stow-packages.sh: could not create $stage; $live stays the link to $src" >&2
-    return 1
-  }
+    exit 1
+  fi
   for entry in "${entries[@]}"; do
-    if mkdir -p -- "$(dirname -- "$stage/$entry")" && mv -T -- "$src/$entry" "$stage/$entry"; then
+    if move_in "$src/$entry" "$stage/$entry"; then
       moved+=("$entry")
     else
       stayed+=("$entry")
@@ -205,6 +321,14 @@ unfold() {
       stayed+=("$entry (to copy)")
     fi
   done
+  if [ ${#clashes[@]} -gt 0 ]; then
+    echo "stow-packages.sh: $live stays the link to $src. Each of these exists in both places;" >&2
+    echo "keep what you want in the second, remove the first and run this again:" >&2
+    for ((i = 0; i < ${#clashes[@]}; i += 2)); do
+      printf '  %s\n  %s\n' "${clashes[i]}" "${clashes[i + 1]}" >&2
+    done
+    exit 1
+  fi
   if [ ${#stayed[@]} -gt 0 ]; then
     echo "stow-packages.sh: $live stays the link to $src; run this again to finish." >&2
     echo "  still in $src:" >&2
@@ -213,11 +337,50 @@ unfold() {
       echo "  already in $stage:" >&2
       printf '    %s\n' "${moved[@]}" >&2
     fi
-    return 1
+    exit 1
   fi
-  if ! { rm -- "$live" && mv -T -- "$stage" "$live"; }; then
-    echo "stow-packages.sh: could not put $stage in the place of the link $live; all of it is in $stage" >&2
-    return 1
+
+  if ! rm -- "$live"; then
+    echo "stow-packages.sh: could not remove the link $live; all of it is in $stage, run this again" >&2
+    exit 1
+  fi
+  if ! mv -T -- "$stage" "$live"; then
+    echo "stow-packages.sh: removed the link $live, but could not move $stage into its place;" >&2
+    echo "all of it is there. Run this again, or: mv -T $(printf %q "$stage") $(printf %q "$live")" >&2
+    exit 1
+  fi
+
+  # The app may have written through the link while all this ran.
+  if ! untracked_in "$top" "$pkg" "$rel"; then
+    echo "stow-packages.sh: git ls-files failed in $top; what the app wrote into $src meanwhile stays there" >&2
+    exit 1
+  fi
+  for entry in "${listed[@]}"; do
+    if [ -e "$live/$entry" ] || [ -L "$live/$entry" ]; then
+      clashes+=("$src/$entry" "$live/$entry")
+    elif move_in "$src/$entry" "$live/$entry"; then
+      late+=("$entry")
+    else
+      echo "stow-packages.sh: could not move $src/$entry into $live" >&2
+      exit 1
+    fi
+  done
+  if [ ${#late[@]} -gt 0 ]; then
+    echo "moved into it what the app wrote into $src meanwhile:"
+    printf '  %s\n' "${late[@]}"
+  fi
+  for entry in "${copies[@]}"; do
+    if ! cmp -s -- "$src/$entry" "$live/$entry"; then
+      echo "stow-packages.sh: $src/$entry changed while $live was made real; compare it with $live/$entry, the live file" >&2
+    fi
+  done
+  if [ ${#clashes[@]} -gt 0 ]; then
+    echo "stow-packages.sh: the app wrote into $src while $live was made real, and $live has its own." >&2
+    echo "Keep what you want in the second of each pair and remove the first:" >&2
+    for ((i = 0; i < ${#clashes[@]}; i += 2)); do
+      printf '  %s\n  %s\n' "${clashes[i]}" "${clashes[i + 1]}" >&2
+    done
+    exit 1
   fi
 }
 
@@ -232,8 +395,8 @@ for rel in "${real_dirs[@]}"; do
       # A fold into a worktree removed since: nothing is behind it.
       rm -- "$live"
       echo "removed $live: it was a link to $target, which no longer exists"
-    elif [ -d "$live" ] && fold_of "$live" "$rel"; then
-      unfold "$rel" || exit 1
+    elif [ -d "$live" ] && fold="$(fold_of "$live" "$rel")"; then
+      unfold "$rel" "${fold%%$'\n'*}" "${fold#*$'\n'}"
       continue
     elif [ ! -e "$live" ]; then
       leave_alone "$rel" "its target does not exist"
@@ -249,20 +412,46 @@ for rel in "${real_dirs[@]}"; do
     leave_alone "$rel" "a file where a directory belongs"
     continue
   fi
+  stage="$(stage_of "$rel")"
+  if [ -d "$stage" ]; then
+    if [ -e "$live" ]; then
+      echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which exists now." >&2
+      echo "Move what you want to keep from $stage into $live, remove $stage and run this again." >&2
+      exit 1
+    fi
+    mv -T -- "$stage" "$live"
+    echo "finished making $live a real directory: moved $stage, left by an earlier run, into its place"
+  fi
   [ -d "$live" ] || mkdir -- "$live"
 done
 
-# Drop the links to a package path in another worktree of this repo, left by a
-# run from there, so stow links them to this one. The directories above are no
-# such links any more.
+# Top-level links to a package path in another worktree of this repo, or in
+# another package of this one, left by an earlier run: dropped, so stow links
+# them to the given package here. For a directory among them, the run lists
+# what git does not track there; it stays where it is. The directories made
+# real above are no such links any more.
 for pkg in "${pkgs[@]}"; do
+  top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
   while IFS= read -r rel; do
     live="$HOME/$rel"
-    [ -L "$live" ] || continue
-    if fold_of "$live" "$rel" && [ "$fold_top/$fold_pkg" != "$DIR/$pkg" ]; then
-      rm -- "$live"
+    if [ -z "$rel" ] || [ ! -L "$live" ]; then continue; fi
+    fold="$(fold_of "$live" "$rel")" || continue
+    top="${fold%%$'\n'*}"
+    from_pkg="${fold#*$'\n'}"
+    [ "$top/$from_pkg" != "$DIR/$pkg" ] || continue
+    echo "relinking $live from $top/$from_pkg to $DIR/$pkg"
+    if [ -d "$live" ]; then
+      if ! untracked_in "$top" "$from_pkg" "$rel"; then
+        echo "stow-packages.sh: git ls-files failed in $top; $live stays the link to $top/$from_pkg/$rel" >&2
+        exit 1
+      fi
+      if [ ${#listed[@]} -gt 0 ]; then
+        echo "git does not track these in $top/$from_pkg/$rel; they stay there:"
+        printf '  %s\n' "${listed[@]}"
+      fi
     fi
-  done < <(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')
+    rm -- "$live"
+  done <<<"$top_level"
 done
 
 # below_link <rel>: true when a directory on the way to ~/<rel> is a link.
@@ -275,22 +464,39 @@ below_link() {
   return 1
 }
 
+# A machine set up before a reference copy was split off still has its live
+# file as a link into this repo, so everything the app writes lands in the
+# public reference. Such a link becomes a local copy of what it points at.
+for ref in "${reference_copies[@]}"; do
+  in_list "${ref%%/*}" "${pkgs[@]}" || continue
+  rel="${ref#*/}"
+  live="$HOME/$rel"
+  if [ ! -L "$live" ] || below_link "$rel"; then continue; fi
+  src="$(readlink -f -- "$live" 2>/dev/null || true)"
+  into_our_repo "$src" || continue
+  [ -f "$src" ] || src="$DIR/$ref"
+  cp --remove-destination -- "$src" "$live"
+  echo "replaced the ~/$rel link into the repo with a local copy"
+done
+
 # With --backup, move aside any pre-existing target file that would conflict
 # with stow: a real file (or a symlink not pointing into this repo) at a
 # target path blocks stow with refuses-conflicts. It goes into a timestamped
 # backup dir under $HOME, so stow can land cleanly. A target reached through a
-# link stays where it is: the link is either a fold into this repo, which
-# stow handles, or a directory left alone above, which stow reports.
+# link stays where it is: the link is a fold into this repo, which stow
+# handles, or another link, which stow reports.
 backup_dir=""
 backed_up_count=0
 if [ -n "$backup" ]; then
   for pkg in "${pkgs[@]}"; do
+    files="$(find "$pkg" \( -type f -o -type l \))"
     while IFS= read -r src; do
+      [ -n "$src" ] || continue
       rel="${src#"$pkg"/}"
       target="$HOME/$rel"
       # The app writes into the live file of a reference copy, so moving it
       # aside as a "conflict" would take the live configuration with it.
-      [[ " ${reference_copies[*]} " == *" $src "* ]] && continue
+      in_list "$src" "${reference_copies[@]}" && continue
       if [ ! -e "$target" ] && [ ! -L "$target" ]; then
         continue
       fi
@@ -307,7 +513,7 @@ if [ -n "$backup" ]; then
       mkdir -p "$backup_dir/$(dirname -- "$rel")"
       mv -- "$target" "$backup_dir/$rel"
       backed_up_count=$((backed_up_count + 1))
-    done < <(find "$pkg" \( -type f -o -type l \))
+    done <<<"$files"
   done
 fi
 if [ "$backed_up_count" -gt 0 ]; then
@@ -318,7 +524,7 @@ fi
 folding=()
 no_folding=()
 for pkg in "${pkgs[@]}"; do
-  if [[ " ${no_folding_pkgs[*]} " == *" $pkg "* ]]; then
+  if in_list "$pkg" "${no_folding_pkgs[@]}"; then
     no_folding+=("$pkg")
   else
     folding+=("$pkg")
