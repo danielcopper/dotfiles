@@ -4,7 +4,7 @@
 # What they need is listed in the repo's README, section "memex sync".
 #
 # Usage: mise run memex-sync-test [scenario...]          (defaults to all)
-#        mise run memex-sync-test --mutants              (break each guard in turn)
+#        mise run memex-sync-test --mutants [memex-sync] (break each guard in turn)
 set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
@@ -12,19 +12,9 @@ tests="$dotfiles/tests/memex-sync"
 [ -d "$tests" ] || { echo "memex-sync-test: no such directory: $tests" >&2; exit 1; }
 
 if [ "${1:-}" = --mutants ]; then
-  exec python3 -I "$tests/mutants.py"
+  exec python3 -I "$tests/mutants.py" "${@:2}"
 fi
-scenarios="$tests/scenarios.sh"
-# listed[scenario]: the names scenarios.sh --list prints. A failing --list
-# stops the run.
-if ! list=$("$scenarios" --list); then
-  echo "memex-sync-test: $scenarios --list failed" >&2
-  exit 1
-fi
-declare -A listed=()
-mapfile -t names <<<"$list"
-for name in "${names[@]}"; do listed[$name]=1; done
-for name in "$@"; do
-  [ -n "$name" ] && [ -n "${listed[$name]+set}" ] || { echo "memex-sync-test: no such scenario: $name" >&2; exit 1; }
-done
-exec "$scenarios" "$@"
+run_listed="$dotfiles/tests/run-listed.sh"
+[ -f "$run_listed" ] || { echo "memex-sync-test: no such file: $run_listed" >&2; exit 1; }
+
+exec "$run_listed" memex-sync-test "$tests/scenarios.sh" -- "$@"
