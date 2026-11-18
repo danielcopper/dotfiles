@@ -41,31 +41,39 @@ IFS=$'\1' read -r MODEL DIR PROJECT_DIR JSON_WORKTREE PCT MAX_TOKENS PCT_5H PCT_
 #
 # So ask what draws the terminal; the first usable answer wins:
 #   herdr terminal ($HC_TERMINAL_ID): `hc get` reports its cols
-#   tmux pane ($TMUX and $TMUX_PANE): tmux reports the pane's width
+#   otherwise a tmux pane ($TMUX and $TMUX_PANE): tmux reports its width
 #   $COLUMNS, rarely exported to this subprocess
 #   140, a conservative default
-# herdr comes first because herdr-core passes the TMUX and TMUX_PANE it was
-# started with on to its terminals (see bash/.bashrc), and those name a pane
-# that is not this one. Each probe gives up after half a second and keeps its
+# A herdr terminal never asks tmux, not even when hc gives no answer:
+# herdr-core passes the TMUX and TMUX_PANE it was started with on to its
+# terminals. bash/.bashrc drops them in an interactive shell, but a Claude Code
+# started any other way (`hc run claude`, `bash -lc`) still carries them, and
+# they name another pane. A probe gives up after half a second and keeps its
 # errors off stderr, so a hung or missing hc or tmux delays the line by at most
-# that and never prints into it.
+# half a second per probe and never prints into it.
+#
+# term_width sets COLS and, for the debug log at the end, COLS_SRC: hc, tmux,
+# columns or default. It runs in this shell, not in $(…), so both stay set.
 term_width() {
     local num='^[1-9][0-9]*$' w=""
     if [ -n "${HC_TERMINAL_ID:-}" ]; then
         w=$(timeout 0.5 hc get "$HC_TERMINAL_ID" 2>/dev/null | jq -r '.cols // empty' 2>/dev/null)
-    fi
-    if ! [[ $w =~ $num ]] && [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
+        COLS_SRC=hc
+    elif [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
         w=$(timeout 0.5 tmux display -p -t "$TMUX_PANE" '#{pane_width}' 2>/dev/null)
+        COLS_SRC=tmux
     fi
     if ! [[ $w =~ $num ]]; then
         w=${COLUMNS:-}
+        COLS_SRC=columns
     fi
     if ! [[ $w =~ $num ]]; then
         w=140
+        COLS_SRC=default
     fi
-    printf '%s\n' "$w"
+    COLS=$w
 }
-COLS=$(term_width)
+term_width
 
 # Truncation caps used by the content-aware shrink loop further below. The
 # loop measures the rendered line's visible width and shrinks variants from
@@ -325,8 +333,7 @@ W_BAR=$(build_bar   $((${#W_LABEL}   + 2)) "$PCT_7D" "$W_LABEL"   "$FILL_7D_LOW"
 MINI_GLYPHS=(' ' '▁' '▂' '▃' '▄' '▅' '▆' '▇' '█')
 build_mini_bar() {
     # mid/high have defaults so callers can pass just (pct, low) and still
-    # transition through the warning ramp at 65/85% — earlier signature
-    # required all four and a 2-arg call silently produced empty bg/fg.
+    # transition through the warning ramp at 65/85%.
     local pct=$1 low=$2 mid=${3:-$FILL_PEACH} high=${4:-$FILL_RED}
     local fill
     if   [ "$pct" -ge 85 ]; then fill="$high"
@@ -553,15 +560,15 @@ done
 
 printf '%s\n' "$FULL_LINE"
 
-# Temporary debug log — enable with `export STATUSLINE_DEBUG=1`. Captures
-# each render's COLS detection inputs and the tier chosen, so we can
-# diagnose why a paste-triggered rerender picks a different layout than
-# the prior render in the same pane. Remove once the rerender bug is
-# understood.
+# Temporary debug log — enable with `export STATUSLINE_DEBUG=1`. Records per
+# render where the width came from ($COLS_SRC), $COLUMNS, the width, the
+# budget, the tier chosen and the line's visible width, to diagnose why a
+# paste-triggered rerender picks a different layout than the prior render in
+# the same terminal. Remove once the rerender bug is understood.
 if [ -n "${STATUSLINE_DEBUG:-}" ]; then
-    printf '%s | COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
+    printf '%s | src=%s COLUMNS=%s COLS=%s budget=%s tier=%q vw=%s\n' \
         "$(date '+%H:%M:%S.%3N')" \
-        "${COLUMNS:-unset}" \
+        "$COLS_SRC" "${COLUMNS:-unset}" \
         "$COLS" "$BUDGET" "$combo" "$(visible_width "$FULL_LINE")" \
         >> /tmp/statusline-debug.log
 fi
