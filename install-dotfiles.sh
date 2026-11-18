@@ -172,9 +172,8 @@ done
 # Materialize mise-managed tools (runtimes + LSPs) declared in the
 # just-stowed ~/.config/mise/config.toml, and on debian in
 # ~/.config/mise/conf.d/debian.toml. mise itself is installed by
-# install-packages.sh from the class's package list. A tool that fails to
-# install does not keep the steps below from running; the run fails at the
-# end and names it.
+# install-packages.sh from the class's package list. When `mise install`
+# fails, the steps below still run; the end of this script names the failure.
 mise_status=0
 if command -v mise >/dev/null 2>&1; then
   echo
@@ -185,7 +184,7 @@ fi
 # A class that stows the memex package gets ~/Memory as a link into the memex
 # clone (README, "memex sync"), once the clone is there. Anything else already
 # at ~/Memory, a directory with notes of its own say, is left alone and fails
-# the run, last, so everything above is done.
+# the run.
 memory_left=""
 if [[ " ${all_pkgs[*]} " == *" memex "* ]]; then
   memory_link=memex/daniel/memory
@@ -204,8 +203,8 @@ if [[ " ${all_pkgs[*]} " == *" memex "* ]]; then
   fi
 fi
 
-# A failed mise install and a ~/Memory left alone fail the run here, after
-# every step.
+# A failed `mise install` and a ~/Memory left alone fail the run here, last,
+# so every step above has run.
 if [ "$mise_status" -ne 0 ]; then
   echo >&2
   echo "mise install failed with exit $mise_status; see its output above, fix it and run this again." >&2

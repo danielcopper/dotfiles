@@ -13,7 +13,7 @@
 #   m7  a class without the memex package (arch) gets none
 #   m8, m9  debian and steamdeck stow the memex package's five files
 #   m10 a failing mise install still gets the link made; the run ends with
-#       exit 1 and names mise install
+#       exit 1 and names mise install with its exit code
 #   m11 a failing mise install and a real directory at ~/Memory: exit 1, both
 #       named
 # usage: memory-link.sh [installer] [case ...]
@@ -146,11 +146,11 @@ m9_memex_stowed_on_steamdeck() { expect_memex_stowed steamdeck; }
 m10_link_made_after_failed_mise() {
   with_clone
   : >"$ROOT/calls"
-  MISE_EXIT=1 run_install debian
+  MISE_EXIT=3 run_install debian
   check "exit 1 (got $RC)" eq "$RC" 1
   check "mise install was run" grep -qx "mise install" "$ROOT/calls"
   check "the link made after it" eq "$(readlink -- "$HOME/Memory")" memex/daniel/memory
-  check "names the mise install failure" grep -qx "mise install failed with exit 1; see its output above, fix it and run this again." <<<"$OUT"
+  check "names the mise install failure" grep -qx "mise install failed with exit 3; see its output above, fix it and run this again." <<<"$OUT"
 }
 
 m11_failed_mise_and_real_directory() {
