@@ -9,12 +9,23 @@ set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
 files=("$dotfiles/tests/statusline/width.sh" "$dotfiles/tests/bash/startup.sh")
-# owner[case]: the file whose --list names the case, read once per file.
+# owner[case]: the file whose --list names the case, read once per file. A
+# failing --list or a name two files list stops the run.
 declare -A owner=()
 for file in "${files[@]}"; do
   [ -f "$file" ] || { echo "shell-test: no such file: $file" >&2; exit 1; }
-  mapfile -t listed < <("$file" --list)
-  for name in "${listed[@]}"; do owner[$name]=$file; done
+  if ! list=$("$file" --list); then
+    echo "shell-test: $file --list failed" >&2
+    exit 1
+  fi
+  mapfile -t listed <<<"$list"
+  for name in "${listed[@]}"; do
+    if [ -n "${owner[$name]+set}" ]; then
+      echo "shell-test: case $name is listed by ${owner[$name]} and $file" >&2
+      exit 1
+    fi
+    owner[$name]=$file
+  done
 done
 for name in "$@"; do
   [ -n "$name" ] && [ -n "${owner[$name]+set}" ] || { echo "shell-test: no such case: $name" >&2; exit 1; }
