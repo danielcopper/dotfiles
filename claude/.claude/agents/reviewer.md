@@ -24,6 +24,7 @@ When the dispatch gives a delta and earlier findings to judge, add `### Earlier 
 
 - Use absolute paths (`git -C <wt> …`); scratch files go in your scratchpad, not the tree.
 - In a worktree, LSP diagnostics are unreliable; the repo's own type checker and linter decide.
+- **Upstream source:** another project's repository is read from this machine's mirror, one per repository: `~/.claude/upstream-sources.md`.
 - Beyond the diff, read the rule files Part 2 names and only what a concrete risk you can name needs; how the change fits the rest of the tree is `architecture-reviewer`'s.
 
 ## Do not trust the report

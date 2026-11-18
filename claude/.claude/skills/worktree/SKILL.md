@@ -47,3 +47,5 @@ Push with `git -C <worktree> push -u origin <type>/<slug>` — the new branch ha
   ```
 
   The repos squash-merge, so the branch never counts as merged for git and `git branch -d` refuses. Remove the `<type>` and `<repo>.worktrees` directories when nothing is left in them (`rmdir` refuses a non-empty one).
+
+  Then delete, by name, each subdirectory of the session scratchpad that an agent of this change worked in.
