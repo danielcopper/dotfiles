@@ -1,5 +1,7 @@
 """Break one guard at a time on a copy of memex-sync or memex-watch and run the
-scenario that should catch it; every mutant must turn its scenario red.
+scenario that should catch it; every mutant must turn its scenario red. A
+mutant counts as caught only when its scenario printed a FAIL line, and every
+scenario named here must be one that scenarios.sh --list prints.
 
 usage: python3 -I mutants.py [memex-sync]
 The script defaults to the repo's memex/.local/bin/memex-sync;
@@ -256,10 +258,20 @@ WATCH_MUTANTS = [
      "close_write,create,delete,move,delete_self,move_self", "close_write,create,delete,move,delete_self"),
 ]
 
+listing = subprocess.run([runner, "--list"], stdout=subprocess.PIPE, text=True)
+if listing.returncode != 0:
+    print(f"{runner} --list failed with exit {listing.returncode}")
+    sys.exit(1)
+scenarios = set(listing.stdout.splitlines())
+
 ok = True
 outdir = tempfile.mkdtemp(prefix="memex-sync-mutants.")
 runs = [("memex-sync", text, m) for m in MUTANTS] + [("memex-watch", watch_text, m) for m in WATCH_MUTANTS]
 for i, (target, source, (scenario, what, old, new)) in enumerate(runs):
+    if scenario not in scenarios:
+        print(f"MUTANT {i} ({what}): no scenario {scenario} in scenarios.sh --list, not run")
+        ok = False
+        continue
     if source.count(old) != 1:
         print(f"MUTANT {i} ({what}): pattern found {source.count(old)}x in {target}, not applied")
         ok = False
@@ -274,8 +286,9 @@ for i, (target, source, (scenario, what, old, new)) in enumerate(runs):
     else:
         r = subprocess.run([runner, path, scenario], capture_output=True, text=True)
     first_fail = next((l for l in r.stdout.splitlines() if l.startswith("FAIL")), "")
-    verdict = "RED (caught)" if r.returncode != 0 else "GREEN (NOT caught)"
-    ok &= r.returncode != 0
+    caught = r.returncode != 0 and first_fail.startswith(f"FAIL {scenario}: ")
+    verdict = "RED (caught)" if caught else "GREEN (NOT caught)"
+    ok &= caught
     print(f"{scenario} | {what} | {verdict} | {first_fail}")
 for name in os.listdir(outdir):
     os.remove(os.path.join(outdir, name))

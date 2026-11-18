@@ -3,13 +3,34 @@
 # stand-ins on localhost for ntfy and for origins that refuse; nothing goes to
 # the network.
 # usage: scenarios.sh [script-under-test] [scenario ...]
+#        scenarios.sh --list
 #   The script defaults to the repo's memex/.local/bin/memex-sync, the
 #   scenarios to all of them. WATCH_SUT overrides the memex-watch under test
-#   (default memex/.local/bin/memex-watch).
+#   (default memex/.local/bin/memex-watch). --list prints the scenario names;
+#   every name in CASES must be a function of this file.
 # Prints "PASS <scenario>" or "FAIL <scenario>: <check>" per scenario; exits 1
 # when any scenario failed. VERBOSE=1 prints every run's output. All state
 # lives in a temporary directory that is removed at the end.
 set -uo pipefail
+
+CASES=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
+  s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
+  s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
+  s16_rebase_in_progress s17_rebase_apply_in_progress s18_merge_in_progress s19_cherry_pick_in_progress
+  s20_revert_in_progress s21_unmerged_files s22_askpass_never_called s23_fetch_401 s24_fetch_bad_credentials
+  s25_fetch_403 s26_fetch_404 s27_fetch_ssh_denied s28_fetch_no_connection s29_fetch_ssh_unresolved
+  s30_writer_during_rebase s31_writer_origin_not_ahead s32_fetch_before_commit
+  s33_merge_started_during_fetch s34_message_one_file s35_message_common_dir s36_message_no_common_dir
+  s37_message_rename s38_message_delete s39_message_path_with_space
+  s40_watch_debounce s41_watch_ignores_git_and_obsidian s42_watch_no_clone s43_watch_events_end
+  s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
+  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped
+  s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
+  s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused)
+if [ "${1:-}" = --list ]; then
+  printf '%s\n' "${CASES[@]}"
+  exit 0
+fi
 
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
@@ -1193,23 +1214,25 @@ s57_commit_refused() {
   check "marker gone" test ! -e "$T/state/memex-sync/commit-refused"
 }
 
-all=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_conflict_without_ntfy s7_resolved
-  s8_origin_without_main s9_lock_held s10_not_a_work_tree s11_push_refused_by_origin s12_second_conflict_same_day
-  s13_push_refused_by_pre_push_hook s14_push_lost_race s15_conflict_branch_push_refused
-  s16_rebase_in_progress s17_rebase_apply_in_progress s18_merge_in_progress s19_cherry_pick_in_progress
-  s20_revert_in_progress s21_unmerged_files s22_askpass_never_called s23_fetch_401 s24_fetch_bad_credentials
-  s25_fetch_403 s26_fetch_404 s27_fetch_ssh_denied s28_fetch_no_connection s29_fetch_ssh_unresolved
-  s30_writer_during_rebase s31_writer_origin_not_ahead s32_fetch_before_commit
-  s33_merge_started_during_fetch s34_message_one_file s35_message_common_dir s36_message_no_common_dir
-  s37_message_rename s38_message_delete s39_message_path_with_space
-  s40_watch_debounce s41_watch_ignores_git_and_obsidian s42_watch_no_clone s43_watch_events_end
-  s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
-  s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped
-  s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
-  s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused)
+missing=0
+for SCENARIO in "${CASES[@]}"; do
+  if ! declare -F "$SCENARIO" >/dev/null; then
+    echo "FAIL $SCENARIO: listed in CASES, but no such function"
+    missing=1
+  fi
+done
+[ "$missing" = 0 ] || exit 1
+
+all=("${CASES[@]}")
 [ $# -gt 0 ] && all=("$@")
 for SCENARIO in "${all[@]}"; do
   FAILED=0
+  # Checked before new_world, which builds its world under $ROOT/$SCENARIO.
+  if ! { printf '%s\n' "${CASES[@]}" | grep -qxF -- "$SCENARIO" && declare -F "$SCENARIO" >/dev/null; }; then
+    fail "no such scenario"
+    failures=$((failures + 1))
+    continue
+  fi
   SUT_ENV=()
   new_world
   NTFY_BEFORE=$(ntfy_count)

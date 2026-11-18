@@ -14,4 +14,17 @@ tests="$dotfiles/tests/memex-sync"
 if [ "${1:-}" = --mutants ]; then
   exec python3 -I "$tests/mutants.py"
 fi
-exec "$tests/scenarios.sh" "$@"
+scenarios="$tests/scenarios.sh"
+# listed[scenario]: the names scenarios.sh --list prints. A failing --list
+# stops the run.
+if ! list=$("$scenarios" --list); then
+  echo "memex-sync-test: $scenarios --list failed" >&2
+  exit 1
+fi
+declare -A listed=()
+mapfile -t names <<<"$list"
+for name in "${names[@]}"; do listed[$name]=1; done
+for name in "$@"; do
+  [ -n "$name" ] && [ -n "${listed[$name]+set}" ] || { echo "memex-sync-test: no such scenario: $name" >&2; exit 1; }
+done
+exec "$scenarios" "$@"
