@@ -1,7 +1,8 @@
 """Break one guard at a time on a copy of memex-sync or memex-watch and run the
 scenario that should catch it; every mutant must turn its scenario red. A
-mutant counts as caught only when its scenario printed a FAIL line, and every
-scenario named here must be one that scenarios.sh --list prints.
+mutant counts as caught only when the first FAIL line is its scenario's own
+check, and every scenario named here must be one that scenarios.sh --list
+prints.
 
 usage: python3 -I mutants.py [memex-sync]
 The script defaults to the repo's memex/.local/bin/memex-sync;
@@ -263,6 +264,8 @@ if listing.returncode != 0:
     print(f"{runner} --list failed with exit {listing.returncode}")
     sys.exit(1)
 scenarios = set(listing.stdout.splitlines())
+# What scenarios.sh prints about itself, not about the script under test.
+HARNESS_LINES = ("listed in CASES, but no such function", "no such scenario")
 
 ok = True
 outdir = tempfile.mkdtemp(prefix="memex-sync-mutants.")
@@ -286,7 +289,9 @@ for i, (target, source, (scenario, what, old, new)) in enumerate(runs):
     else:
         r = subprocess.run([runner, path, scenario], capture_output=True, text=True)
     first_fail = next((l for l in r.stdout.splitlines() if l.startswith("FAIL")), "")
-    caught = r.returncode != 0 and first_fail.startswith(f"FAIL {scenario}: ")
+    prefix = f"FAIL {scenario}: "
+    caught = (r.returncode != 0 and first_fail.startswith(prefix)
+              and first_fail[len(prefix):] not in HARNESS_LINES)
     verdict = "RED (caught)" if caught else "GREEN (NOT caught)"
     ok &= caught
     print(f"{scenario} | {what} | {verdict} | {first_fail}")
