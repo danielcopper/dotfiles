@@ -23,7 +23,8 @@
 #       the temporary directory instead of /tmp
 # Every case also checks that nothing reaches stderr, which would land in the
 # status line. Before the cases, the script must define term_width once and
-# call it once, so the function run here is the one that sets $COLS.
+# call it once, so the function run here is the one that sets $COLS, and every
+# name in CASES must be a function of this file.
 # usage: width.sh [statusline] [case ...]
 #        width.sh --list
 #   The script defaults to the repo's claude/.claude/statusline.sh, the cases
@@ -233,6 +234,12 @@ if [ "$call_sites" != 1 ]; then
   echo "FAIL: $call_sites lines calling term_width in $SUT, want 1"
   structure_ok=0
 fi
+for CASE in "${CASES[@]}"; do
+  if ! declare -F "$CASE" >/dev/null; then
+    echo "FAIL $CASE: listed in CASES, but no such function"
+    structure_ok=0
+  fi
+done
 [ "$structure_ok" = 1 ] || exit 1
 
 all=("${CASES[@]}")
@@ -240,7 +247,7 @@ all=("${CASES[@]}")
 for CASE in "${all[@]}"; do
   FAILED=0
   stand_ins
-  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE"; then
+  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
     "$CASE"
   else
     fail "no such case"

@@ -9,27 +9,22 @@ set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
 files=("$dotfiles/tests/statusline/width.sh" "$dotfiles/tests/bash/startup.sh")
+# owner[case]: the file whose --list names the case, read once per file.
+declare -A owner=()
 for file in "${files[@]}"; do
   [ -f "$file" ] || { echo "shell-test: no such file: $file" >&2; exit 1; }
+  mapfile -t listed < <("$file" --list)
+  for name in "${listed[@]}"; do owner[$name]=$file; done
 done
-# defines <file> <name>: the file lists the name among its cases (--list),
-# taken literally.
-defines() {
-  "$1" --list | grep -qxF -- "$2"
-}
 for name in "$@"; do
-  found=0
-  for file in "${files[@]}"; do
-    if defines "$file" "$name"; then found=1; fi
-  done
-  [ "$found" = 1 ] || { echo "shell-test: no such case: $name" >&2; exit 1; }
+  [ -n "$name" ] && [ -n "${owner[$name]+set}" ] || { echo "shell-test: no such case: $name" >&2; exit 1; }
 done
 
 status=0
 for file in "${files[@]}"; do
   cases=()
   for name in "$@"; do
-    if defines "$file" "$name"; then cases+=("$name"); fi
+    if [ "${owner[$name]}" = "$file" ]; then cases+=("$name"); fi
   done
   if [ $# -eq 0 ] || [ ${#cases[@]} -gt 0 ]; then
     "$file" "${cases[@]}" || status=1
