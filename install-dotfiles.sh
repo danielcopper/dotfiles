@@ -57,7 +57,8 @@ printf '  %s\n' "${all_pkgs[@]}"
 echo
 
 # Makes the directories real that must be (README, "Install / update"), moves
-# a conflicting file in $HOME aside and stows.
+# a conflicting file in $HOME aside, stows and seeds the live Claude and herdr
+# settings from their reference copies.
 "$DIR/stow-packages.sh" --backup "${all_pkgs[@]}"
 
 # The user's tmpfiles timer is what applies ~/.config/user-tmpfiles.d/claude.conf;
@@ -65,30 +66,6 @@ echo
 # session) this only warns, so the rest of the install still runs.
 systemctl --user enable --now systemd-tmpfiles-clean.timer ||
   echo "could not enable systemd-tmpfiles-clean.timer; run: systemctl --user enable --now systemd-tmpfiles-clean.timer" >&2
-
-# Seed the live Claude settings from the repo's reference copy on a fresh
-# machine. The reference is deliberately not stowed: Claude Code writes the
-# model, the effort level and the auto-mode environment description into the
-# live file, and this repo is public. After this first copy the two drift on
-# purpose - diff them when you want to carry something over. A live file that
-# is still a link into this repo, from before that split, stow-packages.sh has
-# replaced with a local copy.
-live_settings="$HOME/.claude/settings.json"
-if [ ! -e "$live_settings" ] && [ ! -L "$live_settings" ]; then
-  cp "$DIR/claude/.claude/settings.json" "$HOME/.claude/settings.json"
-  echo "seeded ~/.claude/settings.json from the repo reference"
-fi
-
-# herdr's settings.json is a reference copy too (README, "herdr app"). The
-# stow above has made ~/.config/herdr-app a real directory, so the seed lands
-# there and not in the repo. A class without the package has no such
-# directory and no herdr app to read the file.
-live_herdr_settings="$HOME/.config/herdr-app/settings.json"
-if [[ " ${all_pkgs[*]} " == *" herdr-app "* ]] &&
-  [ ! -e "$live_herdr_settings" ] && [ ! -L "$live_herdr_settings" ]; then
-  cp "$DIR/herdr-app/.config/herdr-app/settings.json" "$live_herdr_settings"
-  echo "seeded ~/.config/herdr-app/settings.json from the repo reference"
-fi
 
 # WSLg puts Linux GUI apps into the Windows Start menu and gives their windows
 # a taskbar icon only from desktop entries under /usr/share/applications,

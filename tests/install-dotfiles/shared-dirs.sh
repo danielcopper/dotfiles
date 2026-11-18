@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Tests for the directories that must be real directories in $HOME, such as
-# ~/.config/environment.d, which mise and the class's host package fill:
-# stow-packages.sh makes each real before stow runs, also where an earlier run
-# left it folded into one link to the repo. Each case runs install-dotfiles.sh,
-# the dotfiles-relink task or stow-packages.sh in a throwaway home, once or, to
-# see what a rerun does, twice.
+# ~/.config/environment.d: stow-packages.sh makes each real before stow runs,
+# also where an earlier run left it folded into one link to the repo. Each case
+# runs install-dotfiles.sh, the dotfiles-relink task or stow-packages.sh in a
+# throwaway home, once or, to see what a rerun does, more often.
 #   s1  debian, ~/.config/environment.d folded into the mise package: the run
 #       succeeds, the directory is real, and the files of both packages are
 #       linked
@@ -51,8 +50,9 @@
 #   s25 the dotfiles-relink task over a fold of ~/.claude keeps the live
 #       settings.json
 #   s26 the same for herdr's settings.json
-#   s27-s30 a fresh home on each class: every directory a program writes into
-#       is real (on steamdeck both slice drop-in directories too)
+#   s27-s30 a fresh home on each class: every directory in program_dirs of
+#       stow-packages.sh is real (on steamdeck both slice drop-in directories
+#       too)
 #   s31 a dangling link outside every worktree is left alone; exit 1
 #   s32 dotfiles-relink backs nothing up: a file in the way ends in stow's
 #       conflict
@@ -64,24 +64,44 @@
 #       already staged is merged in
 #   s36 a file staged and written again stops the run with both paths; once
 #       one is removed, a rerun finishes
-#   s37 what the app writes during the swap is moved in afterwards
-#   s38 a file the app writes during the swap that the new directory has too
-#       stops the run with both paths
-#   s39 a reference copy the app changes during the swap is named
-#   s40 stow-packages.sh refuses a path, an option, ".", a missing package or a
-#       late --backup with exit 2, before it changes anything
+#   s37 what the app writes while the run fills the staging directory is
+#       moved in after the swap
+#   s38 a file the app writes then that the new directory has too goes into
+#       the staging directory; the run stows, names both paths and exits 1, and
+#       the next run stops on the staging directory until it is gone
+#   s39 a reference copy the app changes then is named
+#   s40 stow-packages.sh refuses no package, a path, an option, ".", a missing
+#       package, a directory that is no package or a late --backup with exit 2,
+#       each with its own message, before it changes anything
 #   s41 one trailing / after a package name is fine
 #   s42 with git unusable, stow-packages.sh stops before it changes anything
 #   s43 a failing find stops the run before stow
 #   s44 a failing git worktree list stops the run before stow
-#   s45 a top-level directory linked into another worktree is relinked, and
-#       what git does not track there is listed
+#   s45 a top-level directory linked into another worktree is made real, and
+#       what git does not track there moves along
 #   s46 a dangling fold into a removed worktree under the sibling
 #       <main>.worktrees/ is removed
 #   s47 dotfiles-relink replaces a ~/.claude/settings.json link into the repo
 #       with a local copy
 #   s48 the same for herdr's settings.json
 #   s49 a link into a directory two levels into the repo is no fold
+#   s50 a ~/.claude/settings.json link outside the repo is left alone
+#   s51 a settings link into the repo whose file is gone is removed, and the
+#       reference seeded
+#   s52 a link into another package of this worktree is relinked
+#   s53 what the app writes into an already moved directory during the swap
+#       is merged in
+#   s54 a failing rmdir after a merge leaves the link
+#   s55 without stow nothing changes
+#   s56 one package in conflict: the others are stowed, and the run names it
+#   s57 a write to the live settings after the swap is no change to report
+#   s58 a link into a worktree git cannot read is left alone with git's error
+#   s59 a file gone between listing and moving counts as moved
+#   s60 a staging directory beside a link left alone is named with it
+#   s61 a dangling settings link into a removed worktree is removed and the
+#       reference seeded
+#   s62 dotfiles-relink seeds the live settings too
+#   s63 a run that stops after making a directory real names it
 # usage: shared-dirs.sh [installer] [case ...]
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them.
@@ -164,8 +184,8 @@ run_stow() {
 }
 
 # standin <tool> <pattern> <action>: a stand-in for <tool> in $ROOT/failbin
-# that runs the shell <action> once when one of its arguments matches the case
-# <pattern>, and then, unless the action exits, the real tool.
+# that, on every call with an argument matching the case <pattern>, runs the
+# shell <action> and then, unless the action exits, the real tool.
 standin() {
   local real
   real=$(command -v "$1")
@@ -480,6 +500,7 @@ s20_folded_claude_keeps_live_settings() {
   check "projects gone from the package" test ! -e "$COPY/claude/.claude/projects"
   check "CLAUDE.md linked" linked_to .claude/CLAUDE.md "$COPY/claude/.claude/CLAUDE.md"
   check "names the copy" grep -qxF "  settings.json" <<<"$OUT"
+  check "reports no change" eq "$(grep -c 'settings.json changed' <<<"$OUT")" 0
   check "the repo's reference copy still there" test -f "$COPY/claude/.claude/settings.json"
   check "nothing seeded" eq "$(grep -c '^seeded ' <<<"$OUT")" 0
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
@@ -553,9 +574,9 @@ s24_nothing_created_below_foreign_systemd() {
   check "says it left it alone" left_alone_line .config/systemd "it points outside this repo"
 }
 
-# expect_written_dirs_real <class> <dir...>: a fresh home on the class gets each
+# expect_program_dirs_real <class> <dir...>: a fresh home on the class gets each
 # directory as a real one.
-expect_written_dirs_real() {
+expect_program_dirs_real() {
   local class=$1 d
   shift
   run_install "$class"
@@ -564,14 +585,14 @@ expect_written_dirs_real() {
     check "$d is a real directory" test -d "$HOME/$d" -a ! -L "$HOME/$d"
   done
 }
-written=(.claude .config/opencode .config/tmux .config/systemd/user .config/systemd/user/default.target.wants)
-s27_fresh_debian() { expect_written_dirs_real debian "${written[@]}"; }
-s28_fresh_arch() { expect_written_dirs_real arch "${written[@]}"; }
+program_dirs=(.claude .config/opencode .config/tmux .config/systemd/user .config/systemd/user/default.target.wants)
+s27_fresh_debian() { expect_program_dirs_real debian "${program_dirs[@]}"; }
+s28_fresh_arch() { expect_program_dirs_real arch "${program_dirs[@]}"; }
 s29_fresh_steamdeck() {
-  expect_written_dirs_real steamdeck "${written[@]}" \
+  expect_program_dirs_real steamdeck "${program_dirs[@]}" \
     .config/systemd/user/session.slice.d .config/systemd/user/app.slice.d
 }
-s30_fresh_wsl_arch() { expect_written_dirs_real wsl-arch "${written[@]}"; }
+s30_fresh_wsl_arch() { expect_program_dirs_real wsl-arch "${program_dirs[@]}"; }
 
 s31_dangling_outside_worktrees_kept() {
   mkdir -p "$HOME/.config"
@@ -676,9 +697,21 @@ s38_written_during_swap_clash_stops() {
   standin mv '*/environment.d.unfolding' "echo again >'$src/written.conf'"
   PATH=$ROOT/failbin:$PATH run_install debian
   check "exit 1 (got $RC)" eq "$RC" 1
-  check "names the package's copy" grep -qxF "  $src/written.conf" <<<"$OUT"
+  check "names the repo's copy, now staged" grep -qxF "  $HOME/$stage/written.conf" <<<"$OUT"
   check "names the live one" grep -qxF "  $HOME/.config/environment.d/written.conf" <<<"$OUT"
   check "the live one kept" eq "$(cat "$HOME/.config/environment.d/written.conf")" written
+  check "the repo's copy kept" eq "$(cat "$HOME/$stage/written.conf" 2>/dev/null)" again
+  check "the repo clean" eq "$(git -C "$COPY" status --porcelain --ignored)" ""
+  check "stowed all the same" linked_to .bashrc "$COPY/bash/.bashrc"
+  check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
+  rm -rf "$ROOT/failbin"
+  run_install debian
+  check "the next run exit 1 (got $RC)" eq "$RC" 1
+  check "the next run names the staging directory" grep -qxF \
+    "stow-packages.sh: $HOME/$stage holds what an earlier run moved out of this repo for $HOME/.config/environment.d, which exists now." <<<"$OUT"
+  rm -rf "${HOME:?}/$stage"
+  run_install debian
+  check "once it is gone exit 0 (got $RC)" eq "$RC" 0
 }
 
 s39_reference_copy_changed_during_swap() {
@@ -688,20 +721,34 @@ s39_reference_copy_changed_during_swap() {
   PATH=$ROOT/failbin:$PATH run_relink
   check "exit 0 (got $RC)" eq "$RC" 0
   check "names the change" grep -qxF \
-    "stow-packages.sh: $ref changed while $HOME/.claude was made real; compare it with $HOME/.claude/settings.json, the live file" <<<"$OUT"
+    "stow-packages.sh: $ref changed after it was copied into $HOME/.claude; compare it with $HOME/.claude/settings.json, the live file" <<<"$OUT"
+}
+
+# expect_refused <message> <argument...>: stow-packages.sh exits 2 with it.
+expect_refused() {
+  local message=$1
+  shift
+  run_stow "$@"
+  check "$*: exit 2 (got $RC)" eq "$RC" 2
+  check "$*: says $message" grep -qxF "stow-packages.sh: $message" <<<"$OUT"
 }
 
 s40_bad_arguments_refused() {
-  local args
   printf 'own\n' >"$HOME/.bashrc"
-  mkdir -p "$HOME/.claude"
+  mkdir -p "$HOME/.claude" "$COPY/-x"
   printf 'live\n' >"$HOME/.claude/settings.json"
-  for args in "--backup ./claude" "--backup claude/hooks" "--backup -n" "--backup nonexistent" \
-    "--backup ." "bash --backup" "--backup claude//"; do
-    # shellcheck disable=SC2086 # split on purpose
-    run_stow $args
-    check "$args: exit 2 (got $RC)" eq "$RC" 2
-  done
+  expect_refused "no package given"
+  expect_refused "no package given" --backup
+  expect_refused "not a package name: ./claude" --backup ./claude
+  expect_refused "not a package name: claude/.claude" --backup claude/.claude
+  expect_refused "not a package name: claude//" --backup claude//
+  expect_refused "not a package name: -x" --backup -x
+  expect_refused "not a package name: ." --backup .
+  expect_refused "not a package name: --backup" bash --backup
+  expect_refused "no package nonexistent in $COPY" --backup nonexistent
+  expect_refused "not a stow package, as it holds no dotfile: tests" --backup tests
+  expect_refused "not a stow package, as it holds no dotfile: samples" --backup samples
+  expect_refused "not a stow package, as it holds no dotfile: packages" --backup packages
   check "the file left as it is" eq "$(cat "$HOME/.bashrc")" own
   check "the live settings left as they are" eq "$(cat "$HOME/.claude/settings.json")" live
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
@@ -743,10 +790,12 @@ s45_directory_link_into_other_worktree_relinked() {
   ln -s "$SIBLING/git/.githooks" "$HOME/.githooks"
   run_relink git
   check "exit 0 (got $RC)" eq "$RC" 0
-  check "says so" grep -qxF "relinking $HOME/.githooks from $SIBLING/git to $COPY/git" <<<"$OUT"
-  check "lists what stays there" eq "$(grep -A1 -xF "git does not track these in $SIBLING/git/.githooks; they stay there:" <<<"$OUT" | tail -1)" "  extra"
+  check "says so" grep -qxF "making $HOME/.githooks a real directory in place of its link to $SIBLING/git/.githooks" <<<"$OUT"
+  check "lists what moves" eq "$(grep -A1 -xF "moving into it what $SIBLING does not track in git/.githooks:" <<<"$OUT" | tail -1)" "  extra"
+  check "a real directory" test -d "$HOME/.githooks" -a ! -L "$HOME/.githooks"
+  check "the file moved along" eq "$(cat "$HOME/.githooks/extra" 2>/dev/null)" extra
+  check "gone from the other worktree" test ! -e "$SIBLING/git/.githooks/extra"
   check "linked to this worktree" linked_to .githooks/pre-commit "$COPY/git/.githooks/pre-commit"
-  check "the file still in the other worktree" eq "$(cat "$SIBLING/git/.githooks/extra")" extra
 }
 
 s46_dangling_fold_into_sibling_worktrees_dir() {
@@ -755,21 +804,24 @@ s46_dangling_fold_into_sibling_worktrees_dir() {
 
 s47_relink_replaces_claude_settings_link() {
   mkdir -p "$HOME/.claude"
+  printf '{"from":"sibling"}\n' >"$SIBLING/claude/.claude/settings.json"
   ln -s "$SIBLING/claude/.claude/settings.json" "$HOME/.claude/settings.json"
   run_relink
   check "exit 0 (got $RC)" eq "$RC" 0
   check "a real file" test -f "$HOME/.claude/settings.json" -a ! -L "$HOME/.claude/settings.json"
-  check "with what the link pointed at" cmp -s "$HOME/.claude/settings.json" "$SIBLING/claude/.claude/settings.json"
+  check "with what the link pointed at" eq "$(cat "$HOME/.claude/settings.json")" '{"from":"sibling"}' 
   check "says so" grep -qxF "replaced the ~/.claude/settings.json link into the repo with a local copy" <<<"$OUT"
 }
 
 s48_relink_replaces_herdr_settings_link() {
   local d=.config/herdr-app
   mkdir -p "$HOME/$d"
-  ln -s "$COPY/herdr-app/$d/settings.json" "$HOME/$d/settings.json"
+  printf '{"zoom":3}\n' >"$SIBLING/herdr-app/$d/settings.json"
+  ln -s "$SIBLING/herdr-app/$d/settings.json" "$HOME/$d/settings.json"
   run_relink herdr-app
   check "exit 0 (got $RC)" eq "$RC" 0
   check "a real file" test -f "$HOME/$d/settings.json" -a ! -L "$HOME/$d/settings.json"
+  check "with what the link pointed at" eq "$(cat "$HOME/$d/settings.json")" '{"zoom":3}' 
   check "says so" grep -qxF "replaced the ~/$d/settings.json link into the repo with a local copy" <<<"$OUT"
 }
 
@@ -784,6 +836,154 @@ s49_link_two_levels_into_repo_kept() {
   check "its file still there" eq "$(cat "$deep/x.conf")" x
   check "says it left it alone" left_alone_line .config/environment.d \
     "it points into this repo, but not at .config/environment.d in a package"
+}
+
+s50_settings_link_outside_repo_kept() {
+  mkdir -p "$HOME/.claude" "$ROOT/elsewhere"
+  printf '{"mine":1}\n' >"$ROOT/elsewhere/settings.json"
+  ln -s "$ROOT/elsewhere/settings.json" "$HOME/.claude/settings.json"
+  run_relink
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the link left as it is" eq "$(readlink -- "$HOME/.claude/settings.json")" "$ROOT/elsewhere/settings.json"
+  check "its file untouched" eq "$(cat "$ROOT/elsewhere/settings.json")" '{"mine":1}' 
+}
+
+s51_settings_link_to_gone_file_reseeded() {
+  mkdir -p "$HOME/.claude"
+  ln -s "$COPY/claude/.claude/gone.json" "$HOME/.claude/settings.json"
+  run_relink
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "says it removed it" grep -qxF \
+    "removed $HOME/.claude/settings.json: it was a link to $COPY/claude/.claude/gone.json, which no longer exists" <<<"$OUT"
+  check "a real file" test -f "$HOME/.claude/settings.json" -a ! -L "$HOME/.claude/settings.json"
+  check "the reference's content" cmp -s "$HOME/.claude/settings.json" "$COPY/claude/.claude/settings.json"
+  check "says it seeded it" grep -qxF "seeded ~/.claude/settings.json from the repo reference" <<<"$OUT"
+}
+
+s52_link_into_other_package_relinked() {
+  mkdir -p "$COPY/oldpkg"
+  printf 'old\n' >"$COPY/oldpkg/.bashrc"
+  ln -s "$COPY/oldpkg/.bashrc" "$HOME/.bashrc"
+  run_install debian
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check ".bashrc linked to the bash package" linked_to .bashrc "$COPY/bash/.bashrc"
+  check "says so" grep -qxF "relinking $HOME/.bashrc from $COPY/oldpkg to $COPY/bash" <<<"$OUT"
+}
+
+s53_written_into_moved_dir_during_swap_merged() {
+  local src=$COPY/mise/.config/environment.d
+  with_program_files
+  standin mv '*/environment.d.unfolding' "mkdir -p '$src/sub' && echo new >'$src/sub/new.conf'"
+  PATH=$ROOT/failbin:$PATH run_install debian
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the moved file still there" eq "$(cat "$HOME/.config/environment.d/sub/deep.conf" 2>/dev/null)" deep
+  check "the new file merged in" eq "$(cat "$HOME/.config/environment.d/sub/new.conf" 2>/dev/null)" new
+  check "says so" eq "$(grep -A1 -xF "moved into it what the app wrote into $src meanwhile:" <<<"$OUT" | tail -1)" "  sub"
+  check "the repo clean again" eq "$(git -C "$COPY" status --porcelain --ignored)" ""
+}
+
+s54_rmdir_failure_keeps_link() {
+  local link
+  staged_then_written new.conf new
+  link=$(readlink -- "$HOME/.config/environment.d")
+  failing rmdir '*'
+  PATH=$ROOT/failbin:$PATH run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "the link still there" eq "$(readlink -- "$HOME/.config/environment.d")" "$link"
+  check "names sub as still there" eq "$(grep -A1 -xF "  still in $COPY/mise/.config/environment.d:" <<<"$OUT" | tail -1)" "    sub"
+}
+
+s55_no_stow_changes_nothing() {
+  local tool link
+  mkdir -p "$ROOT/nostow"
+  for tool in bash dirname readlink git find sort uniq mkdir mv rm rmdir cp cksum mktemp date; do
+    ln -s "$(command -v "$tool")" "$ROOT/nostow/$tool"
+  done
+  fold_env_d "$COPY/mise"
+  link=$(readlink -- "$HOME/.config/environment.d")
+  OUT=$(PATH=$ROOT/nostow "$COPY/stow-packages.sh" --backup mise host-debian 2>&1)
+  RC=$?
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "says so" grep -qxF "stow-packages.sh: stow not found; nothing changed" <<<"$OUT"
+  check "the link left as it is" eq "$(readlink -- "$HOME/.config/environment.d")" "$link"
+}
+
+s56_one_package_in_conflict() {
+  printf 'own\n' >"$HOME/.bashrc"
+  run_relink bash git claude
+  check "exit non-zero (got $RC)" test "$RC" -ne 0
+  check "git stowed" linked_to .gitconfig "$COPY/git/.gitconfig"
+  check "claude stowed" linked_to .claude/CLAUDE.md "$COPY/claude/.claude/CLAUDE.md"
+  check "the file left as it is" eq "$(cat "$HOME/.bashrc")" own
+  check "names the package" grep -qxF "stow-packages.sh: not stowed: bash; stow says why above" <<<"$OUT"
+}
+
+s57_write_to_live_settings_after_swap_not_reported() {
+  fold .claude "$COPY/claude"
+  standin git ls-files "[ -L '$HOME/.claude' ] || echo '{\"app\":1}' >'$HOME/.claude/settings.json'"
+  PATH=$ROOT/failbin:$PATH run_relink
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the app's write is there" eq "$(cat "$HOME/.claude/settings.json")" '{"app":1}' 
+  check "reports no change" eq "$(grep -c 'settings.json changed' <<<"$OUT")" 0
+}
+
+s58_link_into_unreadable_worktree_kept() {
+  git -C "$COPY" worktree add -q --detach "$ROOT/pruned"
+  rm -rf "$COPY/.git/worktrees/pruned"
+  fold_env_d "$ROOT/pruned/mise"
+  run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "the link still there" test -L "$HOME/.config/environment.d"
+  check "names git's error" grep -q \
+    "^stow-packages.sh: left alone: $HOME/.config/environment.d -> .*: git cannot read where it points: ." <<<"$OUT"
+}
+
+s59_file_gone_before_move_counts_as_moved() {
+  local src=$COPY/mise/.config/environment.d
+  with_program_files
+  printf 'gone\n' >"$HOME/.config/environment.d/gone.conf"
+  standin git ls-files "$(command -v git) \"\$@\"; rc=\$?; rm -f '$src/gone.conf'; exit \$rc"
+  PATH=$ROOT/failbin:$PATH run_install debian
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "environment.d is a real directory" test -d "$HOME/.config/environment.d" -a ! -L "$HOME/.config/environment.d"
+  check "no false still-in" eq "$(grep -c 'still in' <<<"$OUT")" 0
+  check "written.conf in the home" eq "$(cat "$HOME/.config/environment.d/written.conf" 2>/dev/null)" written
+}
+
+s60_stage_beside_left_alone_link_named() {
+  mkdir -p "$ROOT/elsewhere" "$HOME/$stage"
+  ln -s "$ROOT/elsewhere" "$HOME/.config/environment.d"
+  run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "names the staging directory" left_alone_line .config/environment.d \
+    "it points outside this repo; $HOME/$stage holds what an earlier run staged for it"
+}
+
+s61_dangling_settings_link_into_removed_worktree() {
+  mkdir -p "$HOME/.claude"
+  ln -s "$COPY/.worktrees/gone/claude/.claude/settings.json" "$HOME/.claude/settings.json"
+  run_install debian
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "says it removed it" grep -qxF \
+    "removed $HOME/.claude/settings.json: it was a link to $COPY/.worktrees/gone/claude/.claude/settings.json, which no longer exists" <<<"$OUT"
+  check "a real file" test -f "$HOME/.claude/settings.json" -a ! -L "$HOME/.claude/settings.json"
+  check "says it seeded it" grep -qxF "seeded ~/.claude/settings.json from the repo reference" <<<"$OUT"
+}
+
+s62_relink_seeds_settings() {
+  run_relink claude
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "seeded" cmp -s "$HOME/.claude/settings.json" "$COPY/claude/.claude/settings.json"
+  check "says so" grep -qxF "seeded ~/.claude/settings.json from the repo reference" <<<"$OUT"
+}
+
+s63_stop_after_making_real_names_it() {
+  fold .claude "$COPY/claude"
+  with_program_files
+  failing mv '*written.conf'
+  PATH=$ROOT/failbin:$PATH run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "names what it made real" eq "$(grep -A1 -xF "so the package links in them are missing until a run gets through:" <<<"$OUT" | tail -1)" "  $HOME/.claude"
 }
 
 all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_program_files_moved
@@ -802,11 +1002,18 @@ all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_p
   s40_bad_arguments_refused s41_trailing_slash_accepted s42_git_unusable_stops s43_find_failure_stops
   s44_worktree_list_failure_stops s45_directory_link_into_other_worktree_relinked
   s46_dangling_fold_into_sibling_worktrees_dir s47_relink_replaces_claude_settings_link
-  s48_relink_replaces_herdr_settings_link s49_link_two_levels_into_repo_kept)
+  s48_relink_replaces_herdr_settings_link s49_link_two_levels_into_repo_kept
+  s50_settings_link_outside_repo_kept s51_settings_link_to_gone_file_reseeded s52_link_into_other_package_relinked
+  s53_written_into_moved_dir_during_swap_merged s54_rmdir_failure_keeps_link s55_no_stow_changes_nothing
+  s56_one_package_in_conflict s57_write_to_live_settings_after_swap_not_reported
+  s58_link_into_unreadable_worktree_kept s59_file_gone_before_move_counts_as_moved
+  s60_stage_beside_left_alone_link_named s61_dangling_settings_link_into_removed_worktree s62_relink_seeds_settings
+  s63_stop_after_making_real_names_it)
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
-  rm -rf "$HOME" "$ROOT/elsewhere" "$ROOT/other" "$ROOT/failbin" "$ROOT/gone" "$ROOT/repo.worktrees"
+  rm -rf "$HOME" "$ROOT/elsewhere" "$ROOT/other" "$ROOT/failbin" "$ROOT/gone" "$ROOT/repo.worktrees" \
+    "$ROOT/pruned" "$ROOT/nostow" "$COPY/-x"
   mkdir -p "$HOME"
   for tree in "$COPY" "$SIBLING"; do
     git -C "$tree" clean -qffdx

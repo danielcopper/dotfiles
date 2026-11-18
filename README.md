@@ -16,15 +16,17 @@ The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githo
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
 
-Some directories have to be real directories in `$HOME`, never one link into this repo: each one that more than one of the stowed packages fills, such as `~/.config/environment.d` (`mise` and, on arch and debian, the class's host package), every directory of `herdr-app`, and the ones a program writes into, listed with their reasons in `stow-packages.sh`. Once a second package fills a directory that an earlier run folded into one link, `stow -R` aborts; the header of `stow-packages.sh` says why. So `stow-packages.sh`, which `install-dotfiles.sh` and `mise run dotfiles-relink` stow through, makes each of them real before it stows:
+Some directories have to be real directories in `$HOME`, never one link into this repo: each one that more than one of the stowed packages fills, such as `~/.config/environment.d` (`mise` and, on arch and debian, the class's host package), every directory of `herdr-app`, and a few more, listed with their reasons in `stow-packages.sh`. Once a second package fills a directory that an earlier run folded into one link, `stow -R` aborts; the header of `stow-packages.sh` says why. So `stow-packages.sh`, which `install-dotfiles.sh` and `mise run dotfiles-relink` stow through, makes each of them real before it stows:
 
 - A link of one to its own path in a package of this clone or one of its worktrees becomes a real directory. What git does not track there moves into it, a reference copy such as Claude Code's `settings.json` is copied in as the live file, and the run lists both first, with the worktree they come from. All of it goes into `<directory>.unfolding` beside the link, which takes the link's place only once everything is in it.
-- A stop before that swap leaves the link, says what stayed where and fails the run, and the next run picks up from the staging directory, saying what it already holds. A file that is both staged and back in the repo is named with both paths, and the runs stop until one of them is removed. A staging directory left after the link is gone is put in its place by the next run; where the directory exists again by then, the run names both for you to merge and stops.
-- What the app writes through the link during the swap is moved in afterwards. A file the new directory has too is named with both paths and fails the run; a reference copy that changed meanwhile is named.
-- A link into a worktree that no longer exists, a registered one or one under `<main checkout>.worktrees/` or `.worktrees/`, is removed.
+- A stop before that swap leaves the link, says what stayed where and fails the run, and the next run picks up from the staging directory, saying what it already holds; a directory that is staged and back in the repo is merged. A file that is both staged and back in the repo is named with both paths, and the runs stop until it is merged into the staged one. A staging directory left after the link is gone is put in its place by the next run; where the directory exists again by then, the run names both for you to merge and stops.
+- What the app writes through the link while the run fills the staging directory is moved in after the swap, a directory merged with the one already moved. A file the new directory has too goes into the staging directory instead: the run stows, names both paths and fails, and the next runs stop on the staging directory until it is merged and gone. A reference copy that changed after it was copied is named.
+- A top-level link to a package path in another worktree, or in another package of this one, is made real the same way when it is a directory, so what git does not track there moves along; a link to a file is dropped and linked again from here.
+- A dangling link into any worktree of this repo, the main checkout, a registered worktree or one under `<main checkout>.worktrees/` or `.worktrees/`, is removed: nothing is behind it. The same goes for the live file of a reference copy.
 - Anything else in such a place, a link elsewhere, a dangling link outside the worktrees or a file, is left alone with everything below it, the backup included; the run says so in one line, and stow names the conflict.
+- Should stowing all packages together fail, each is stowed alone, and the run names the ones that still fail. A run that stops before stow names the directories it made real, whose package links are missing until a run gets through.
 
-`install-dotfiles.sh` passes `--backup`, so a file in the way of a package file goes into the backup; `mise run dotfiles-relink` does not, and stow's conflict stops it there.
+After stow, the live file of each reference copy that has none yet is seeded from the repo, as Claude Code's `settings.json` and herdr's are. `install-dotfiles.sh` passes `--backup`, so a file in the way of a package file goes into the backup; `mise run dotfiles-relink` does not, and stow's conflict stops it there.
 
 A `mise install` that fails does not stop the steps after it: the run ends with exit 1 and names it.
 
@@ -33,14 +35,14 @@ A `mise install` that fails does not stop the steps after it: the run ends with 
 | path | purpose |
 |---|---|
 | `bash/`, `git/`, `nvim/`, `tmux/`, `wezterm/`, … | Stow packages — one per app. Each mirrors the target tree under `$HOME`. |
-| `host-<class>/` | Per-host packages holding `.local` addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. the NVIDIA wireplumber tweak on arch). Claude Code's `settings.json` is not among them: the `claude` package keeps a reference copy that `install-dotfiles.sh` seeds into `~/.claude/settings.json` once, and that live file then drifts per machine (`CLAUDE.md`, "Claude config lives here"). |
+| `host-<class>/` | Per-host packages holding `.local` addenda (`.bashrc.local`, `.gitconfig.local`) and class-specific overrides where merge isn't possible (e.g. the NVIDIA wireplumber tweak on arch). Claude Code's `settings.json` is not among them: the `claude` package keeps a reference copy that `stow-packages.sh` seeds into `~/.claude/settings.json` once, and that live file then drifts per machine (`CLAUDE.md`, "Claude config lives here"). |
 | `packages/common.pkglist`, `packages/arch.pkglist`, `packages/wsl-arch.pkglist` | Pacman lists: `common.pkglist` plus the class's own, for the arch and wsl-arch classes. Blank lines and `#` comments ignored. |
 | `packages/debian.pkglist` | Apt list for the debian class, used instead of `common.pkglist`, whose names are Arch's. |
 | `packages/steamdeck.brewlist` | Linuxbrew list — SteamOS root is read-only, so steamdeck uses brew instead of pacman. `install-packages.sh` bootstraps brew if missing. |
 | `packages/steamdeck.flatpaklist` | Flatpak app list for steamdeck — for apps that ship as macOS-only Homebrew Casks (wezterm) and need a Linux install path. Installed user-scope from flathub. |
 | `install-packages.sh <class>` | Install / update OS packages (pacman on arch / wsl-arch, apt on debian, brew + flatpak on steamdeck). |
 | `install-dotfiles.sh <class>` | Symlink the relevant stow packages into `$HOME`. Worktree-aware; backs up real conflicts. |
-| `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), then stows the given packages; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` (with `--backup`) and `mise run dotfiles-relink` stow through it. |
+| `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), stows the given packages and seeds missing live files of reference copies; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
 | `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`) and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
@@ -178,7 +180,7 @@ herdr-app`. Which files of the package git tracks is set in the root
   `~/.config/herdr-app/settings.json` whenever it saves zoom or a Settings
   page, so a stow link there would become a local file. The reference keeps
   only `telemetry` and `theme`; zoom, font sizes and sounds are per device.
-  `install-dotfiles.sh` seeds the live file from it when none exists, and
+  `stow-packages.sh` seeds the live file from it when none exists, and
   after that the two drift: `diff ~/.config/herdr-app/settings.json
   herdr-app/.config/herdr-app/settings.json` shows what each has; copy across
   by hand and commit the reference when you want to keep a change.
