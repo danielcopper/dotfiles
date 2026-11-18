@@ -366,19 +366,14 @@ dir_belongs() {
 stray_stages=()
 
 # stray_stage <rel> [<package>]: true when a staging directory sits beside
-# ~/<rel> where no directory belongs (dir_belongs); it goes to stray_stages.
+# ~/<rel> where no directory belongs (dir_belongs).
 stray_stage() {
-  local stage
-  stage="$(stage_of "$1")"
-  if [ -d "$stage" ] && ! dir_belongs "$1" "${2:-}"; then
-    stray_stages+=("$stage")
-    return 0
-  fi
-  return 1
+  [ -d "$(stage_of "$1")" ] && ! dir_belongs "$1" "${2:-}"
 }
 
-# leave_alone <rel> <why> [<package>]: say that ~/<rel> is left alone and why,
-# naming a staging directory beside it; the package as for dir_belongs.
+# leave_alone <rel> <why> [<package> [<next>]]: say that ~/<rel> is left alone
+# and why, naming a staging directory beside it, and then <next>, what follows
+# once the owner has acted; the package as for dir_belongs.
 left_alone=()
 leave_alone() {
   local live="$HOME/$1" why="$2" stage
@@ -386,12 +381,14 @@ leave_alone() {
   if [ -e "$stage" ]; then
     why="$why; $stage holds what an earlier run staged for it"
     if stray_stage "$1" "${3:-}"; then
+      stray_stages+=("$stage")
       why="$why; no directory belongs here any more: move $stage elsewhere, or remove it if you need nothing in it"
     elif [ -d "$stage" ] && [ ! -d "$live" ]; then
       # settle_stage puts the staging directory in place of a missing ~/<rel>.
       why="$why; move $live elsewhere, and the next run puts $stage in its place"
     fi
   fi
+  if [ -n "${4:-}" ]; then why="$why; $4"; fi
   left_alone+=("$1")
   if [ -L "$live" ]; then
     echo "stow-packages.sh: left alone: $live -> $(readlink -- "$live"): $why" >&2
@@ -412,6 +409,7 @@ settle_stage() {
   stage="$(stage_of "$1")"
   [ -d "$stage" ] || return 0
   if stray_stage "$1" "${2:-}"; then
+    stray_stages+=("$stage")
     echo "stow-packages.sh: left alone: $stage: an earlier run staged it for a directory at $live, but $DIR/$2/$1 is no directory; move it elsewhere, or remove it if you need nothing in it" >&2
     return 0
   fi
@@ -427,7 +425,7 @@ settle_stage() {
     echo "stow-packages.sh: $stage holds what an earlier run moved out of this repo for $live, which is now stow's link to $src: what is moved into it lands in the repo." >&2
     if ! untracked_in "$DIR" "$2" "$1"; then
       echo "stow-packages.sh: git ls-files failed in $DIR, so what the app wrote into $src cannot be listed." >&2
-      echo "To keep it all out of the repo, move what git does not track in $src into $stage, merging what it already has into its own, then $rest" >&2
+      echo "To keep it all out of the repo, move what git does not track in $src into $stage, merging what $stage already has into its own copy, then $rest" >&2
       exit 1
     fi
     if [ ${#listed[@]} -eq 0 ]; then
@@ -442,7 +440,7 @@ settle_stage() {
     if [ ${#both[@]} -gt 0 ]; then
       echo "$stage already has these too:" >&2
       printf '  %s\n' "${both[@]}" >&2
-      echo "To keep it all out of the repo, move these from $src into $stage, merging those it already has into its own, then $rest" >&2
+      echo "To keep it all out of the repo, move everything in the first list from $src into $stage, merging the ones $stage already has into its own copies, then $rest" >&2
     else
       echo "To keep it all out of the repo, move these from $src into $stage, then $rest" >&2
     fi
@@ -600,13 +598,30 @@ for rel in "${real_dirs[@]}"; do
   [ -d "$live" ] || mkdir -- "$live"
 done
 
-# backup_takes <package> <rel>: true when the backup below, run with --backup,
-# moves the link at ~/<rel>: the package has a file there, and the link does
-# not lead into this repo.
-backup_takes() {
-  local entry="$DIR/$1/$2"
-  { [ -L "$entry" ] || [ ! -d "$entry" ]; } &&
-    ! into_our_repo "$(readlink -f -- "$HOME/$2" 2>/dev/null || true)"
+# below_link <rel>: true when a directory on the way to ~/<rel> is a link.
+below_link() {
+  local d="$1"
+  while [[ "$d" == */* ]]; do
+    d="${d%/*}"
+    [ -L "$HOME/$d" ] && return 0
+  done
+  return 1
+}
+
+# backup_moves <package> <rel>: true when the backup below, run with --backup,
+# moves ~/<rel>: the package has a file or a link at <rel> that is no reference
+# copy, whose live file the app writes; something stands at ~/<rel> that the
+# run did not leave alone, with no link on the way to it, which would be a
+# fold stow handles or reports; and it does not lead into this repo, as a
+# link stow made does.
+backup_moves() {
+  local entry="$DIR/$1/$2" target="$HOME/$2"
+  if [ -d "$entry" ] && [ ! -L "$entry" ]; then return 1; fi
+  in_list "$1/$2" "${reference_copies[@]}" && return 1
+  in_list "$2" "${left_alone[@]}" && return 1
+  if [ ! -e "$target" ] && [ ! -L "$target" ]; then return 1; fi
+  below_link "$2" && return 1
+  ! into_our_repo "$(readlink -f -- "$target" 2>/dev/null || true)"
 }
 
 # Top-level links to a package path in another worktree of this repo, or in
@@ -615,9 +630,9 @@ backup_takes() {
 # made real like the directories above, so what git does not track there moves
 # along. A dangling link into a worktree of this repo is removed, and any other
 # link, except stow's own into this package, is left alone, as above; one the
-# backup below would move goes there instead with --backup, unless a staging
-# directory sits beside it. The directories above are skipped: the pass above
-# handles each of them.
+# backup below moves (backup_moves) goes there instead with --backup, named in
+# one line, unless a staging directory sits beside it. The directories above
+# are skipped: the pass above handles each of them.
 for pkg in "${pkgs[@]}"; do
   top_level="$(find "$pkg" -mindepth 1 -maxdepth 1 -printf '%P\n')"
   while IFS= read -r rel; do
@@ -627,13 +642,15 @@ for pkg in "${pkgs[@]}"; do
     if [ -L "$live" ] && ! drop_dangling "$rel"; then
       if ! fold="$(fold_of "$live" "$rel")"; then
         why="$(not_fold_why "$rel")"
-        if backup_takes "$pkg" "$rel"; then
-          # With --backup the backup below moves it, unless a staging
-          # directory beside it is to be named; without, the owner does.
-          if [ -n "$backup" ] && [ ! -d "$(stage_of "$rel")" ]; then continue; fi
-          [ -n "$backup" ] || why="$why; remove or move it, then run this again"
+        if ! backup_moves "$pkg" "$rel"; then
+          leave_alone "$rel" "$why" "$pkg"
+        elif [ -z "$backup" ]; then
+          leave_alone "$rel" "$why; remove or move it, then run this again" "$pkg"
+        elif stray_stage "$rel" "$pkg"; then
+          leave_alone "$rel" "$why" "$pkg" "then run this again, and the backup takes the link"
+        else
+          echo "$live -> $(readlink -- "$live"): $why; it goes into the backup"
         fi
-        leave_alone "$rel" "$why" "$pkg"
         continue
       fi
       top="${fold%%$'\n'*}"
@@ -650,16 +667,6 @@ for pkg in "${pkgs[@]}"; do
     settle_stage "$rel" "$pkg"
   done <<<"$top_level"
 done
-
-# below_link <rel>: true when a directory on the way to ~/<rel> is a link.
-below_link() {
-  local d="$1"
-  while [[ "$d" == */* ]]; do
-    d="${d%/*}"
-    [ -L "$HOME/$d" ] && return 0
-  done
-  return 1
-}
 
 # A machine set up before a reference copy was split off still has its live
 # file as a link into this repo, so everything the app writes lands in the
@@ -679,13 +686,10 @@ for ref in "${reference_copies[@]}"; do
 done
 
 # With --backup, move aside what stands where a package file belongs and would
-# make stow refuse: a real file, or a link that does not lead into this repo,
-# such as one to a file outside it or one dangling outside the worktrees. It
-# goes into a timestamped backup dir under $HOME, so stow can land cleanly.
-# What the passes above left alone stays where it is, and so does a target
-# reached through a link: the link is a fold into this working tree, which
-# stow handles, or another link, a fold into another worktree included, which
-# stow reports.
+# make stow refuse, as backup_moves decides: a real file, or a link that does
+# not lead into this repo, such as one to a file outside it or one dangling
+# outside the worktrees. It goes into a timestamped backup dir under $HOME, so
+# stow can land cleanly.
 backup_dir=""
 backed_up_count=0
 if [ -n "$backup" ]; then
@@ -695,19 +699,7 @@ if [ -n "$backup" ]; then
       [ -n "$src" ] || continue
       rel="${src#"$pkg"/}"
       target="$HOME/$rel"
-      # The app writes into the live file of a reference copy, so moving it
-      # aside as a "conflict" would take the live configuration with it.
-      in_list "$src" "${reference_copies[@]}" && continue
-      in_list "$rel" "${left_alone[@]}" && continue
-      if [ ! -e "$target" ] && [ ! -L "$target" ]; then
-        continue
-      fi
-      below_link "$rel" && continue
-      # Already stowed: target is a symlink resolving into our repo.
-      target_canonical="$(readlink -f -- "$target" 2>/dev/null || true)"
-      if into_our_repo "$target_canonical"; then
-        continue
-      fi
+      backup_moves "$pkg" "$rel" || continue
       if [ -z "$backup_dir" ]; then
         backup_dir="$HOME/.dotfiles-pre-stow.$(date +%Y%m%d-%H%M%S)"
         echo "backing up pre-existing files to $backup_dir"
