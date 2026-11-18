@@ -16,6 +16,8 @@ The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githo
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving any genuinely conflicting `$HOME` files into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`.
 
+A `mise install` that fails does not stop the steps after it: the run ends with exit 1 and names it.
+
 ## Layout
 
 | path | purpose |

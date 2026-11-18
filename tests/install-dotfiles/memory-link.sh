@@ -12,6 +12,10 @@
 #   m6  the steamdeck class gets the same link
 #   m7  a class without the memex package (arch) gets none
 #   m8, m9  debian and steamdeck stow the memex package's five files
+#   m10 a failing mise install still gets the link made; the run ends with
+#       exit 1 and names mise install
+#   m11 a failing mise install and a real directory at ~/Memory: exit 1, both
+#       named
 # usage: memory-link.sh [installer] [case ...]
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
 #   of them.
@@ -19,7 +23,8 @@
 # case failed. VERBOSE=1 prints every run's output. HOME points into a
 # temporary directory for the whole run, and systemctl and mise are stand-ins
 # that only log their calls, so neither the user manager nor mise is reached;
-# the directory is removed at the end. Needs stow and git.
+# the mise stand-in exits with $MISE_EXIT (default 0). The directory is
+# removed at the end. Needs stow and git.
 set -uo pipefail
 
 HERE=$(dirname "$(readlink -f "$0")")
@@ -38,6 +43,8 @@ for tool in systemctl mise; do
   printf '#!/bin/sh\necho "%s $*" >>"%s/calls"\n' "$tool" "$ROOT" >"$ROOT/bin/$tool"
   chmod +x "$ROOT/bin/$tool"
 done
+# shellcheck disable=SC2016 # expanded by the stand-in, not here
+printf 'exit "${MISE_EXIT:-0}"\n' >>"$ROOT/bin/mise"
 PATH=$ROOT/bin:$PATH
 
 failures=0
@@ -136,8 +143,29 @@ expect_memex_stowed() {
 m8_memex_stowed_on_debian() { expect_memex_stowed debian; }
 m9_memex_stowed_on_steamdeck() { expect_memex_stowed steamdeck; }
 
+m10_link_made_after_failed_mise() {
+  with_clone
+  : >"$ROOT/calls"
+  MISE_EXIT=1 run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "mise install was run" grep -qx "mise install" "$ROOT/calls"
+  check "the link made after it" eq "$(readlink -- "$HOME/Memory")" memex/daniel/memory
+  check "names the mise install failure" grep -qx "mise install failed with exit 1; see its output above, fix it and run this again." <<<"$OUT"
+}
+
+m11_failed_mise_and_real_directory() {
+  with_clone
+  mkdir -p "$HOME/Memory"
+  MISE_EXIT=1 run_install debian
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "still a real directory" test -d "$HOME/Memory" -a ! -L "$HOME/Memory"
+  check "says why about Memory" grep -qx "$HOME/Memory exists and is not the link to $HOME/memex/daniel/memory; left as it is." <<<"$OUT"
+  check "names the mise install failure" grep -qx "mise install failed with exit 1; see its output above, fix it and run this again." <<<"$OUT"
+}
+
 all=(m1_link_made m2_real_directory_kept m3_other_link_kept m4_absolute_link_accepted m5_no_clone
-  m6_steamdeck_link_too m7_no_link_without_memex m8_memex_stowed_on_debian m9_memex_stowed_on_steamdeck)
+  m6_steamdeck_link_too m7_no_link_without_memex m8_memex_stowed_on_debian m9_memex_stowed_on_steamdeck
+  m10_link_made_after_failed_mise m11_failed_mise_and_real_directory)
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
