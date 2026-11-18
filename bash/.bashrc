@@ -18,16 +18,6 @@ if [ -n "${HC_TERMINAL_ID:-}" ]; then
   unset TMUX TMUX_PANE
 fi
 
-# first_shell: true in the first shell of a terminal window, the place for work
-# done once per window, such as the greeter below and the keyring daemon of
-# host-wsl-arch/.bashrc.local. SHLVL=1 leaves out subshells. A herdr terminal
-# (HC_TERMINAL_ID) is left out too: every pane, tab and agent there starts a
-# shell of its own. Defined before ~/.bashrc.local is sourced and removed after
-# the greeter.
-first_shell() {
-  [ "${SHLVL:-1}" = "1" ] && [ -z "${HC_TERMINAL_ID:-}" ]
-}
-
 # Aliases
 command -v lsd >/dev/null && alias ls='lsd'
 alias grep='grep --color=auto'
@@ -115,12 +105,13 @@ command -v ng >/dev/null && source <(ng completion script)
 # shellcheck source=/dev/null
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
-# Greeter — fastfetch in the first shell of a terminal window (first_shell
-# above), never as repeated noise in subshells or in each herdr pane.
-if command -v fastfetch >/dev/null && first_shell; then
-  fastfetch
+# Greeter — fastfetch on a fresh top-level shell, never as repeated noise.
+# SHLVL=1 keeps it to the outermost shell, not subshells. A herdr terminal
+# (HC_TERMINAL_ID) gets none: every pane, tab and agent there starts a shell
+# of its own, so the greeter would fill each; a plain terminal window keeps it.
+if command -v fastfetch >/dev/null && [ -z "${HC_TERMINAL_ID:-}" ]; then
+  [ "${SHLVL:-1}" = "1" ] && fastfetch
 fi
-unset -f first_shell
 
 # Prompt + cd jumper — must run last
 command -v starship >/dev/null && eval "$(starship init bash)"

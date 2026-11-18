@@ -22,14 +22,24 @@ command -v carapace >/dev/null && source <(carapace _carapace)
   . /usr/share/doc/pkgfile/command-not-found.bash
 
 # Auto-start gnome-keyring for MSAL token storage (WSL needs this manually).
-# Only in the first shell of a session (first_shell in the shared .bashrc, which
-# leaves out subshells and herdr terminals, and no TMUX) — otherwise parallel
-# shells race and spawn multiple daemons. Subsequent shells inherit
-# GNOME_KEYRING_CONTROL from the parent env.
-if [ -z "${GNOME_KEYRING_CONTROL:-}" ] && [ -z "${TMUX:-}" ] && first_shell; then
-    mkdir -p "/run/user/$UID/keyring" 2>/dev/null
-    eval "$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)"
-    export GNOME_KEYRING_CONTROL
+# A shell that did not inherit GNOME_KEYRING_CONTROL decides on the daemon's
+# control socket, not on which shell it is: herdr started from the Start menu
+# hands its terminals no GNOME_KEYRING_CONTROL, so any of them may be the
+# first. The daemon keeps the socket in $XDG_RUNTIME_DIR/keyring. With the
+# socket there, the shell takes that daemon; without it, it starts one. The
+# lock makes shells that start at once, such as several herdr panes, take
+# turns, and --start in the later ones attaches to the daemon already running.
+if [ -z "${GNOME_KEYRING_CONTROL:-}" ]; then
+    keyring_run=${XDG_RUNTIME_DIR:-/run/user/$UID}
+    if [ -S "$keyring_run/keyring/control" ]; then
+        GNOME_KEYRING_CONTROL=$keyring_run/keyring
+    else
+        mkdir -p "$keyring_run/keyring" 2>/dev/null
+        eval "$(flock "$keyring_run/keyring.lock" \
+            gnome-keyring-daemon --start --components=secrets 2>/dev/null)"
+    fi
+    [ -n "${GNOME_KEYRING_CONTROL:-}" ] && export GNOME_KEYRING_CONTROL
+    unset keyring_run
 fi
 
 # Force Azure Artifacts Credential Provider to use device-code flow instead

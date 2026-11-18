@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
 # Global mise task: run the tests of the shell startup and the Claude Code
 # status line from the dotfiles repo; what they check is in the headers of
-# tests/statusline/width.sh and tests/bash/first-shell.sh.
+# tests/statusline/width.sh and tests/bash/startup.sh.
 #
 # Usage: mise run shell-test [case...]   (defaults to all)
 #   Each case runs from the test file that defines it.
 set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
-files=("$dotfiles/tests/statusline/width.sh" "$dotfiles/tests/bash/first-shell.sh")
+files=("$dotfiles/tests/statusline/width.sh" "$dotfiles/tests/bash/startup.sh")
 for file in "${files[@]}"; do
   [ -f "$file" ] || { echo "shell-test: no such file: $file" >&2; exit 1; }
 done
+# defines <name> <file...>: a line that is exactly "<name>() {", taken literally.
+defines() {
+  local name=$1
+  shift
+  grep -qxF "$name() {" "$@"
+}
 for name in "$@"; do
-  grep -q "^$name() {" "${files[@]}" || { echo "shell-test: no such case: $name" >&2; exit 1; }
+  defines "$name" "${files[@]}" || { echo "shell-test: no such case: $name" >&2; exit 1; }
 done
 
 status=0
 for file in "${files[@]}"; do
   cases=()
   for name in "$@"; do
-    if grep -q "^$name() {" "$file"; then cases+=("$name"); fi
+    if defines "$name" "$file"; then cases+=("$name"); fi
   done
   if [ $# -eq 0 ] || [ ${#cases[@]} -gt 0 ]; then
     "$file" "${cases[@]}" || status=1
