@@ -15,7 +15,8 @@
 #     also writes a marker to stderr, which the shell must not show.
 #   flock, mkdir          logging wrappers around the real tools that refuse
 #                         any path outside the test directory
-# Each shell gets 8 seconds; one still running then counts as hung.
+# Each shell gets 8 seconds (and 2 more to end after TERM); one still running
+# then counts as hung.
 #   f1  the first shell of a plain terminal window greets
 #   f2  a top-level shell in a herdr terminal (HC_TERMINAL_ID) does not
 #   f3  a nested shell (SHLVL already 1) does not
@@ -35,26 +36,35 @@
 #   k9  a keyring directory without a socket, or with a plain file named
 #       control: the daemon is started
 #   k10 a daemon that fails and prints nothing, with a plain file named
-#       control in place: the variable stays unset, the shell still starts
-#   k11 without XDG_RUNTIME_DIR the daemon and the lock are left alone
-#   k12 a lock another process holds on: the shell gives up waiting and starts
-#       without the variable instead of hanging
-# Every case also checks that the shell read .bashrc to its end and found the
-# tools above, so a case that expects no call cannot pass on a shell that
-# never got that far.
+#       control or a dead daemon's socket in place: the variable stays unset,
+#       the shell still starts
+#   k11 with XDG_RUNTIME_DIR unset or empty the daemon and the lock are left
+#       alone
+#   k12 a lock another process holds on, also with a dead daemon's socket in
+#       place: the shell gives up waiting after 5 s, says so in one line on
+#       stderr and starts without the variable instead of hanging
+#   k13 a keyring directory at 0755, also with a dead daemon's socket in it:
+#       the daemon starts in keyring-XXXXXX and the variable names that
+# Every case also checks that the shell exited 0 within its time, read .bashrc
+# to its end, found fastfetch, gnome-keyring-daemon and flock in PATH, kept no
+# keyring_ variable, showed nothing of the daemon's own stderr and had no path
+# refused, so a case that expects no call cannot pass on a shell that never got
+# that far.
 # usage: startup.sh [bashrc [bashrc.local]] [case ...]
 #        startup.sh --list
 #   The files default to the repo's bash/.bashrc and
 #   host-wsl-arch/.bashrc.local, the cases to all of them. --list prints the
-#   case names.
+#   case names; every name in CASES must be a function of this file.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. HOME points into a temporary directory for the whole run, which
 # is removed at the end. Needs flock, python3 and timeout.
 set -uo pipefail
+umask 022
 
 CASES=(f1_plain_terminal f2_herdr_terminal f3_nested_shell f4_herdr_drops_tmux k1_live_daemon
   k2_no_daemon k3_keyring_inherited k4_herdr_terminal k5_nested_tmux_pane k6_parallel_start
-  k7_later_shell k8_dead_socket k9_no_socket k10_daemon_fails k11_no_runtime_dir k12_stuck_lock)
+  k7_later_shell k8_dead_socket k9_no_socket k10_daemon_fails k11_no_runtime_dir k12_stuck_lock
+  k13_keyring_dir_0755)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -73,7 +83,8 @@ if [ $# -gt 0 ] && [ -f "$1" ]; then
   fi
 fi
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/startup-test.XXXXXX")
-# stop_daemons: end the background children the stand-in daemon left.
+# stop_daemons: end the background children the stand-in daemon left and
+# k12's lock holder.
 stop_daemons() {
   local pid
   if [ -f "$ROOT/pids" ]; then
@@ -95,7 +106,6 @@ BASH_BIN=$(command -v bash)
 PYTHON_BIN=$(command -v python3)
 
 printf '#!/bin/sh\necho "fastfetch $*" >>"%s/calls"\n' "$ROOT" >"$ROOT/bin/fastfetch"
-# flock and mkdir: log, refuse a path outside $ROOT, else run the real tool.
 for tool in flock mkdir; do
   cat >"$ROOT/bin/$tool" <<EOF
 #!$BASH_BIN
@@ -161,17 +171,28 @@ check() { # check <description> <command...>
   "$@" || fail "$what"
 }
 eq() { [ "$1" = "$2" ]; }
-absent() { ! grep -q -- "$1" "$2"; } # absent <pattern> <file>
+absent() { # absent <pattern> <file>: no line matches; a grep error fails too
+  grep -q -- "$1" "$2"
+  [ $? = 1 ]
+}
 
-# start_shell <tag> [VAR=value ...]: an interactive bash on $SUT; what it ends
-# with goes to $ROOT/control.<tag>, one key=value line each, its stderr to
-# $ROOT/stderr.<tag>, its exit code to $ROOT/rc.<tag>. Only XDG_RUNTIME_DIR
-# and the given variables are set.
+# start_shell [--no-runtime-dir] <tag> [VAR=value ...]: an interactive bash on
+# $SUT; what it ends with goes to $ROOT/control.<tag>, one key=value line each,
+# its stderr to $ROOT/stderr.<tag>, its exit code to $ROOT/rc.<tag>; the
+# previous run's files of that tag are removed first. Only XDG_RUNTIME_DIR,
+# left out with --no-runtime-dir, and the given variables are set.
 start_shell() {
+  local runtime=("XDG_RUNTIME_DIR=$RUN")
+  if [ "$1" = --no-runtime-dir ]; then
+    runtime=()
+    shift
+  fi
   local tag=$1
   shift
+  rm -f "$ROOT/control.$tag" "$ROOT/stderr.$tag" "$ROOT/rc.$tag"
+  # The braces' stderr takes bash's notice about a killed hung shell.
   # shellcheck disable=SC2016 # expanded by the inner bash, not here
-  timeout 8 env -i PATH="$ROOT/bin" HOME="$HOME" TERM=dumb XDG_RUNTIME_DIR="$RUN" "$@" \
+  { timeout -k 2 8 env -i PATH="$ROOT/bin" HOME="$HOME" TERM=dumb "${runtime[@]}" "$@" \
     "$BASH_BIN" --rcfile "$SUT" -i -c '
     {
       echo "fastfetch=$(command -v fastfetch || echo missing)"
@@ -181,29 +202,44 @@ start_shell() {
       echo "gkc=$(declare -p GNOME_KEYRING_CONTROL 2>/dev/null || echo unset)"
       echo "tmux=${TMUX-unset}"
       echo "tmux_pane=${TMUX_PANE-unset}"
-    } >"$1"' _ "$ROOT/control.$tag" </dev/null >/dev/null 2>"$ROOT/stderr.$tag"
+      vars=$(compgen -v keyring_)
+      echo "keyring_vars=${vars//[[:space:]]/ }"
+    } >"$1"' _ "$ROOT/control.$tag" </dev/null >/dev/null 2>"$ROOT/stderr.$tag"; } 2>/dev/null
   echo $? >"$ROOT/rc.$tag"
 }
-get() { sed -n "s/^$2=//p" "$ROOT/control.$1"; } # get <tag> <key>
-# controls <tag>: the shell finished in time, read .bashrc to its end, found
-# the tools, and showed nothing of the daemon's stderr.
+get() { sed -n "s/^$2=//p" "$ROOT/control.$1" 2>/dev/null; } # get <tag> <key>
+# controls <tag>: the shell exited 0 within its time, read .bashrc to its end,
+# found fastfetch, gnome-keyring-daemon and flock in PATH, kept no keyring_
+# variable, showed nothing of the daemon's own stderr, and had no path refused.
 controls() {
-  local tool want
-  check "finished within 8 s (exit $(cat "$ROOT/rc.$1"))" test "$(cat "$ROOT/rc.$1")" != 124
+  local tool want rc
+  rc=$(cat "$ROOT/rc.$1" 2>/dev/null)
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    fail "hung: still running after 8 s (exit $rc)"
+  else
+    check "exited 0 (got ${rc:-nothing})" eq "$rc" 0
+  fi
   for tool in fastfetch daemon flock; do
     want=$ROOT/bin/$tool
     [ "$tool" = daemon ] && want=$ROOT/bin/gnome-keyring-daemon
     check "control: $tool found (got $(get "$1" "$tool"))" eq "$(get "$1" "$tool")" "$want"
   done
   check "control: .bashrc read to its end" eq "$(get "$1" end)" yes
+  check "no keyring_ variable left (got $(get "$1" keyring_vars))" eq "$(get "$1" keyring_vars)" ""
   check "daemon's stderr kept out of the shell" absent "stand-in daemon on stderr" "$ROOT/stderr.$1"
   check "nothing refused (calls: $(cat "$ROOT/calls"))" absent "^refused" "$ROOT/calls"
 }
-# shell [VAR=value ...]: start_shell and controls in one; greeter runs in
+# shell [--no-runtime-dir] [VAR=value ...]: start_shell and controls in one;
+# greeter runs in
 # $GREETS, daemon starts in $STARTS, attaches in $ATTACHES, `declare -p` of
 # the shell's GNOME_KEYRING_CONTROL in $GKC.
 shell() {
-  start_shell one "$@"
+  if [ "${1:-}" = --no-runtime-dir ]; then
+    shift
+    start_shell --no-runtime-dir one "$@"
+  else
+    start_shell one "$@"
+  fi
   controls one
   counts one
 }
@@ -219,6 +255,9 @@ socket() { # socket <path>: a unix socket nobody listens on
   "$PYTHON_BIN" -Ic 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$1"
   [ -S "$1" ] || { echo "FAIL $CASE: could not create the socket $1"; exit 1; }
 }
+matches() { [[ $1 =~ $2 ]]; } # matches <string> <regex>
+lock_held() { ! flock -n "$RUN/keyring.lock" true; }
+OTHER_DIR="^declare -x GNOME_KEYRING_CONTROL=\"$RUN/keyring-[A-Za-z0-9]{6}\"\$"
 started() { # started: the daemon started once and exported (shell one)
   check "daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
   check "exported (got $GKC)" eq "$GKC" "$EXPORTED"
@@ -307,7 +346,7 @@ k7_later_shell() {
 }
 
 k8_dead_socket() {
-  "$ROOT/bin/mkdir" -m 700 "$RUN/keyring"
+  mkdir -m 700 "$RUN/keyring"
   socket "$RUN/keyring/control"
   : >"$ROOT/calls"
   shell
@@ -315,13 +354,13 @@ k8_dead_socket() {
 }
 
 k9_no_socket() {
-  "$ROOT/bin/mkdir" -m 700 "$RUN/keyring"
+  mkdir -m 700 "$RUN/keyring"
   : >"$ROOT/calls"
   shell
   started
   stop_daemons
   rm -rf "${RUN:?}"/*
-  "$ROOT/bin/mkdir" -m 700 "$RUN/keyring"
+  mkdir -m 700 "$RUN/keyring"
   : >"$RUN/keyring/control"
   : >"$ROOT/calls"
   shell
@@ -329,32 +368,79 @@ k9_no_socket() {
 }
 
 k10_daemon_fails() {
-  "$ROOT/bin/mkdir" -m 700 "$RUN/keyring"
+  mkdir -m 700 "$RUN/keyring"
   : >"$RUN/keyring/control"
-  : >"$ROOT/calls"
   shell KEYRING_MODE=fail
   check "the daemon was asked (calls: $(calls))" grep -q "^gnome-keyring-daemon --start" "$ROOT/calls"
   check "not exported (got $GKC)" eq "$GKC" unset
+  rm -f "$RUN/keyring/control"
+  socket "$RUN/keyring/control"
+  : >"$ROOT/calls"
+  shell KEYRING_MODE=fail
+  check "dead socket: the daemon was asked (calls: $(calls))" grep -q "^gnome-keyring-daemon --start" "$ROOT/calls"
+  check "dead socket: not exported (got $GKC)" eq "$GKC" unset
 }
 
 k11_no_runtime_dir() {
-  shell XDG_RUNTIME_DIR=
-  check "daemon not asked (calls: $(calls))" absent "^gnome-keyring-daemon" "$ROOT/calls"
-  check "no lock taken (calls: $(calls))" absent "^flock" "$ROOT/calls"
-  check "not exported (got $GKC)" eq "$GKC" unset
+  local how
+  for how in unset empty; do
+    : >"$ROOT/calls"
+    if [ "$how" = unset ]; then shell --no-runtime-dir; else shell XDG_RUNTIME_DIR=; fi
+    check "$how: daemon not asked (calls: $(calls))" absent "^gnome-keyring-daemon" "$ROOT/calls"
+    check "$how: no lock taken (calls: $(calls))" absent "^flock" "$ROOT/calls"
+    check "$how: not exported (got $GKC)" eq "$GKC" unset
+  done
 }
 
 k12_stuck_lock() {
-  local holder
-  flock -F "$RUN/keyring.lock" sleep 20 &
-  holder=$!
-  echo "$holder" >>"$ROOT/pids"
-  sleep 0.2
-  shell
-  kill "$holder" 2>/dev/null
-  check "daemon not reached (calls: $(calls))" absent "^gnome-keyring-daemon" "$ROOT/calls"
-  check "not exported (got $GKC)" eq "$GKC" unset
+  local holder tries how
+  for how in plain dead-socket; do
+    if [ "$how" = dead-socket ]; then
+      mkdir -m 700 "$RUN/keyring"
+      socket "$RUN/keyring/control"
+    fi
+    : >"$ROOT/calls"
+    flock -F "$RUN/keyring.lock" sleep 20 &
+    holder=$!
+    echo "$holder" >>"$ROOT/pids"
+    tries=0
+    while ! lock_held && [ "$tries" -lt 50 ]; do
+      sleep 0.1
+      tries=$((tries + 1))
+    done
+    check "$how: the lock is held" lock_held
+    shell
+    kill "$holder" 2>/dev/null
+    check "$how: daemon not reached (calls: $(calls))" absent "^gnome-keyring-daemon" "$ROOT/calls"
+    check "$how: not exported (got $GKC)" eq "$GKC" unset
+    check "$how: says so on stderr (got: $(cat "$ROOT/stderr.one"))" grep -qxF \
+      "keyring: $RUN/keyring.lock busy for 5 s, GNOME_KEYRING_CONTROL not set" "$ROOT/stderr.one"
+  done
 }
+
+k13_keyring_dir_0755() {
+  mkdir -m 755 "$RUN/keyring"
+  shell
+  check "daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
+  check "exported to keyring-XXXXXX (got $GKC)" matches "$GKC" "$OTHER_DIR"
+  stop_daemons
+  rm -rf "${RUN:?}"/*
+  mkdir -m 755 "$RUN/keyring"
+  socket "$RUN/keyring/control"
+  : >"$ROOT/calls"
+  shell
+  check "dead socket: daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
+  check "dead socket: exported to keyring-XXXXXX (got $GKC)" matches "$GKC" "$OTHER_DIR"
+}
+
+missing=0
+for CASE in "${CASES[@]}"; do
+  if ! declare -F "$CASE" >/dev/null; then
+    echo "FAIL $CASE: listed in CASES, but no such function"
+    missing=1
+  fi
+done
+[ "$missing" = 0 ] || exit 1
 
 all=("${CASES[@]}")
 [ $# -gt 0 ] && all=("$@")
@@ -364,7 +450,7 @@ for CASE in "${all[@]}"; do
   rm -rf "$RUN" "$ROOT/inside"
   mkdir -p "$RUN"
   : >"$ROOT/calls"
-  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE"; then
+  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
     "$CASE"
   else
     fail "no such case"
