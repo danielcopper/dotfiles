@@ -12,7 +12,7 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
-The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
+The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-test`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving what is in the way of a package file into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`, as below.
 
@@ -45,7 +45,7 @@ A `mise install` that fails does not stop the steps after it: the run ends with 
 | `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), stows the given packages and seeds missing live files of reference copies; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the bash startup (`tests/bash/startup.sh`), and the herdr app's command check (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the bash startup (`tests/bash/startup.sh`), and the herdr app's command check and board mod (`tests/herdr-app/`). Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -183,9 +183,10 @@ right panel on Files or Changes; `Z` switches that panel between its normal
 width and about two thirds of the space beside the sidebar; `ctrl-space
 ctrl-space <key>` is for a tmux in the focused terminal, see below),
 `mods/focus-history/` (it remembers the previously focused pane for the
-leader's `Tab`) and `mods/file-popup/` (a popup with the files of the focused
+leader's `Tab`), `mods/file-popup/` (a popup with the files of the focused
 pane's repo or folder, or with the repo's changed files, that opens the
-picked one in nvim in a new pane on the right), the layout
+picked one in nvim in a new pane on the right) and `mods/board/` (the
+"Arbeit" tab the leader's `b` opens, see below), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
 keeps focus-history running; its right panel has no maximum width) and the
 theme `themes/catppuccin-mocha.json`.
@@ -256,6 +257,27 @@ herdr-app`. Which files of the package git tracks is set in the root
   the personal layout `ctrl-space` goes through focus-history, so a fast
   second `ctrl-space` still reaches the leader; in other layouts it can
   close the leader again.
+- **The board (`mods/board/`) shows my own work.** Its views live in
+  `mods/board/views.json`: "Meine Aufgaben" (my issues on the Tender
+  project's board, columns from its Status field), "PRs" (pull requests I
+  opened or am asked to review, with checks and review state) and "Azure"
+  (work items assigned to me, columns from their states; it shows only where
+  `az` is installed and signed in, otherwise the sidebar says why). A view is
+  a filter: adding one there adds it to the board, and `r` reads the file
+  again. The code holds nothing of mine (login, project, repos, checkouts,
+  the first message an agent gets); all of that is in `views.json`, and the
+  header of `mods/board/main.js` describes its fields. Keys: `1 2 3` or
+  `[ ]` view, `h/l j/k` move, `H/L` move a card a column (or `s` for a menu,
+  or drag it), `x` hide or show a column (Backlog and Done start hidden),
+  `/` filter, `o` open in the browser, `r` refresh (it also refreshes every
+  few minutes while the tab is shown), `Enter` details, a second `Enter`
+  starts an agent in a new worktree (`<checkout>.worktrees/<type>/<n>-<slug>`
+  on the chosen machine) or goes to the one on the card's branch. A status
+  change writes to GitHub or Azure and moves the card back with the error
+  when that fails. `mise run herdr-board-test` (without mise, `node --test
+  tests/herdr-app/board.test.mjs`) tests its data functions against sample
+  answers of gh, GitHub and az, and its worktree script against a
+  throwaway git repo; it needs node and git.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
@@ -448,9 +470,9 @@ Without mise, run `tests/memex-sync/scenarios.sh` and
 
 ## Tests
 
-Two runners are described beside what they check: `mise run memex-sync-test`
-under "memex sync", in its "Tests" part, and `mise run herdr-app-check` under
-"herdr app".
+Three runners are described beside what they check: `mise run
+memex-sync-test` under "memex sync", in its "Tests" part, and `mise run
+herdr-app-check` and `mise run herdr-board-test` under "herdr app".
 
 `mise run install-dotfiles-test` (without mise,
 `tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the

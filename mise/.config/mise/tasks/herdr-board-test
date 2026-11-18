@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Global mise task: run the tests of the herdr board mod's data functions
+# (herdr-app/.config/herdr-app/mods/board/main.js) from the dotfiles repo with
+# node's test runner; what they cover is in the header of
+# tests/herdr-app/board.test.mjs.
+#
+# Usage: mise run herdr-board-test [node --test option...]
+#   e.g. --test-name-pattern=worktree
+set -euo pipefail
+
+dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
+test="$dotfiles/tests/herdr-app/board.test.mjs"
+[ -f "$test" ] || { echo "herdr-board-test: no such file: $test" >&2; exit 1; }
+
+exec node --test "$@" "$test"

@@ -278,6 +278,20 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
+// Shows the board's tab ("Arbeit", the board mod as its only pane) wherever
+// it is, or opens one in the shown space. pane.focus also shows its space
+// and tab; a pane zoomed in that tab is unzoomed first, so the board shows.
+function openBoard() {
+  const board = panes().find((p) => p.mod === "board");
+  if (!board) {
+    run("tab.new", { name: "Arbeit", mod: "board" });
+    return;
+  }
+  const zoomed = panes().find((p) => p.tab === board.tab && p.zoomed);
+  if (zoomed && zoomed.pane !== board.pane) run("pane.zoom", { pane: zoomed.pane });
+  run("pane.focus", { pane: board.pane });
+}
+
 function findNode(node, id) {
   if (!node || typeof node !== "object") return null;
   if (node.id === id) return node;
@@ -379,6 +393,7 @@ const ACTIONS = [
   ["S", "pick", "Spaces", "mod.open", { name: "picker" }],
   ["a", "sidebar", "View", "layout.toggle", { id: "sidebar" }],
   ["Z", "wide panel", "View", togglePanelWidth, {}],
+  ["b", "board", "View", openBoard, {}],
   ["f", "+files", "View", FILES, {}],
 ];
 // S and c are aliases of s and t; the list shows each action once.

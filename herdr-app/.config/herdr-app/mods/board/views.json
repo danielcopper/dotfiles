@@ -1,0 +1,46 @@
+{
+  "refreshMinutes": 3,
+  "start": {
+    "agent": "claude",
+    "branch": "{type}/{number}-{slug}",
+    "worktree": "{checkout}.worktrees/{branch}",
+    "base": "main",
+    "message": "/implement {number}",
+    "review": "/pr-review {number}",
+    "open": "space"
+  },
+  "repos": {
+    "danielcopper/romm-tender": { "checkout": "~/Repos/romm-tender" },
+    "danielcopper/emu-atlas": { "checkout": "~/Repos/emu-atlas" }
+  },
+  "views": [
+    {
+      "id": "mine",
+      "name": "Meine Aufgaben",
+      "source": "github",
+      "layout": "board",
+      "project": { "owner": "danielcopper", "number": 2, "field": "Status" },
+      "filter": "assignee:@me",
+      "hide": ["Backlog", "Done"],
+      "startColumn": "In progress"
+    },
+    {
+      "id": "prs",
+      "name": "PRs",
+      "source": "github",
+      "layout": "list",
+      "sections": [
+        { "name": "Zu prüfen", "query": "is:pr is:open archived:false review-requested:@me" },
+        { "name": "Meine", "query": "is:pr is:open archived:false author:@me" }
+      ]
+    },
+    {
+      "id": "azure",
+      "name": "Azure",
+      "source": "azure",
+      "layout": "board",
+      "where": "[System.AssignedTo] = @Me",
+      "hideCategories": ["Completed", "Removed"]
+    }
+  ]
+}

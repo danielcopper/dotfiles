@@ -1,0 +1,1 @@
+{"errors": [{"type": "INSUFFICIENT_SCOPES", "locations": [{"line": 4, "column": 7}], "message": "Your token has not been granted the required scopes to execute this query. The 'projectV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes."}]}

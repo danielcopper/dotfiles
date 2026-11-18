@@ -1,0 +1,209 @@
+{
+ "data": {
+  "s0": {
+   "issueCount": 1,
+   "nodes": [
+    {
+     "id": "PR_sample1",
+     "number": 2820,
+     "title": "build(desktop): draw the Emulation card",
+     "url": "https://github.com/example/tender/pull/2820",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/desktop-emulation-card",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 15
+            },
+            {
+             "state": "SKIPPED",
+             "count": 3
+            },
+            {
+             "state": "FAILURE",
+             "count": 0
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "s1": {
+   "issueCount": 4,
+   "nodes": [
+    {
+     "id": "PR_sample2",
+     "number": 1921,
+     "title": "chore(main): release tender 1.0.0",
+     "url": "https://github.com/example/tender/pull/1921",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "release-please--branches--main",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-release-bot"
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 21
+            },
+            {
+             "state": "IN_PROGRESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_sample3",
+     "number": 808,
+     "title": "chore(main): release 0.35.1",
+     "url": "https://github.com/example/atlas/pull/808",
+     "isDraft": true,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "feat/x",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "example/atlas"
+     },
+     "author": {
+      "login": "sample-release-bot"
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_sample1",
+     "number": 2820,
+     "title": "build(desktop): draw the Emulation card",
+     "url": "https://github.com/example/tender/pull/2820",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "feat/x",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 15
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_sample4",
+     "number": 77,
+     "title": "fix: a check that fails",
+     "url": "https://github.com/example/tender/pull/77",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "feat/x",
+     "reviewDecision": "CHANGES_REQUESTED",
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-user"
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 3
+            },
+            {
+             "state": "FAILURE",
+             "count": 1
+            }
+           ],
+           "statusContextCountsByState": [
+            {
+             "state": "ERROR",
+             "count": 1
+            }
+           ]
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

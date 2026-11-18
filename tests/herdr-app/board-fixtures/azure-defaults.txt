@@ -1,0 +1,3 @@
+[defaults]
+organization = https://dev.azure.com/example-org/
+project = Example Project

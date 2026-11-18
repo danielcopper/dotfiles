@@ -1,0 +1,211 @@
+{
+ "data": {
+  "repositoryOwner": {
+   "projectV2": {
+    "id": "PVT_sample",
+    "title": "Sample",
+    "url": "https://github.com/users/sample-user/projects/7",
+    "field": {
+     "id": "PVTSSF_sample",
+     "name": "Status",
+     "options": [
+      {
+       "id": "opt-backlog",
+       "name": "Backlog",
+       "color": "GREEN"
+      },
+      {
+       "id": "opt-ready",
+       "name": "Ready",
+       "color": "BLUE"
+      },
+      {
+       "id": "opt-progress",
+       "name": "In progress",
+       "color": "YELLOW"
+      },
+      {
+       "id": "opt-review",
+       "name": "In review",
+       "color": "PURPLE"
+      },
+      {
+       "id": "opt-done",
+       "name": "Done",
+       "color": "ORANGE"
+      }
+     ]
+    },
+    "items": {
+     "totalCount": 6,
+     "pageInfo": {
+      "hasNextPage": false
+     },
+     "nodes": [
+      {
+       "id": "PVTI_sample1",
+       "fieldValueByName": {
+        "optionId": "opt-progress",
+        "name": "In progress"
+       },
+       "content": {
+        "__typename": "Issue",
+        "number": 2845,
+        "title": "feat(dev): set up a remote dev target with setup:remote-target",
+        "url": "https://github.com/example/tender/issues/2845",
+        "issueType": null,
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": []
+        },
+        "assignees": {
+         "nodes": [
+          {
+           "login": "sample-user"
+          }
+         ]
+        },
+        "parent": {
+         "number": 2844
+        },
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      },
+      {
+       "id": "PVTI_sample2",
+       "fieldValueByName": {
+        "optionId": "opt-ready",
+        "name": "Ready"
+       },
+       "content": {
+        "__typename": "Issue",
+        "number": 2837,
+        "title": "fix(saves): a save sync no longer fails its uploads",
+        "url": "https://github.com/example/tender/issues/2837",
+        "issueType": null,
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": [
+          {
+           "name": "bug"
+          }
+         ]
+        },
+        "assignees": {
+         "nodes": [
+          {
+           "login": "sample-user"
+          }
+         ]
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      },
+      {
+       "id": "PVTI_sample3",
+       "fieldValueByName": {
+        "optionId": "opt-progress",
+        "name": "In progress"
+       },
+       "content": {
+        "__typename": "Issue",
+        "number": 1735,
+        "title": "[Epic] emulator adoption across the machine",
+        "url": "https://github.com/example/tender/issues/1735",
+        "issueType": null,
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": [
+          {
+           "name": "enhancement"
+          },
+          {
+           "name": "area:architecture"
+          }
+         ]
+        },
+        "assignees": {
+         "nodes": [
+          {
+           "login": "sample-user"
+          }
+         ]
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 22,
+         "completed": 15
+        }
+       }
+      },
+      {
+       "id": "PVTI_sample4",
+       "fieldValueByName": null,
+       "content": {
+        "__typename": "DraftIssue",
+        "title": "Draft: sort the release notes",
+        "assignees": {
+         "nodes": []
+        }
+       }
+      },
+      {
+       "id": "PVTI_sample5",
+       "fieldValueByName": {
+        "optionId": "opt-ready",
+        "name": "Ready"
+       },
+       "content": null
+      },
+      {
+       "id": "PVTI_sample6",
+       "fieldValueByName": {
+        "optionId": "opt-review",
+        "name": "In review"
+       },
+       "content": {
+        "__typename": "PullRequest",
+        "number": 2850,
+        "title": "feat(dev): wire the remote target into the dev loop",
+        "url": "https://github.com/example/tender/pull/2850",
+        "headRefName": "feat/2844-remote-dev-loop",
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": []
+        },
+        "assignees": {
+         "nodes": [
+          {
+           "login": "sample-user"
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    "h0": {
+     "totalCount": 265
+    },
+    "h1": {
+     "totalCount": 957
+    }
+   }
+  }
+ }
+}

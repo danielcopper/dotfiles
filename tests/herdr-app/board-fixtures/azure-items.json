@@ -1,0 +1,32 @@
+[
+ {
+  "id": 101,
+  "rev": 3,
+  "url": "https://dev.azure.com/example-org/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b/_apis/wit/workItems/101",
+  "fields": {
+   "System.Id": 101,
+   "System.Title": "Write the sample importer",
+   "System.State": "In Progress",
+   "System.WorkItemType": "Task",
+   "System.AssignedTo": {
+    "displayName": "Sample Person",
+    "uniqueName": "sample@example.com"
+   },
+   "System.TeamProject": "Example Project"
+  }
+ },
+ {
+  "id": 102,
+  "rev": 1,
+  "url": "https://dev.azure.com/example-org/_apis/wit/workItems/102",
+  "fields": {
+   "System.Id": 102,
+   "System.Title": "Importer drops the last row",
+   "System.State": "New",
+   "System.WorkItemType": "Bug",
+   "System.AssignedTo": "Sample Person <sample@example.com>",
+   "System.Tags": "import; data",
+   "System.TeamProject": "Example Project"
+  }
+ }
+]
