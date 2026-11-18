@@ -21,6 +21,8 @@
 #   d1  the whole script with STATUSLINE_DEBUG set logs the width and where
 #       it came from; it runs as a copy whose git cache and debug log sit in
 #       the temporary directory instead of /tmp
+#   a1  run again from a directory holding a file named w1_herdr_first, the
+#       suite takes that name for the case w1, not for the script
 # Every case also checks that nothing reaches stderr, which would land in the
 # status line. Before the cases, the script must define term_width once and
 # call it once, so the function run here is the one that sets $COLS, and every
@@ -37,13 +39,15 @@
 set -uo pipefail
 
 CASES=(w1_herdr_first w2_hc_unusable w3_hc_hangs w4_hc_missing w5_tmux_pane w6_tmux_unusable
-  w7_tmux_hangs w8_pane_without_tmux w8b_tmux_without_pane w9_default d1_debug_log)
+  w7_tmux_hangs w8_pane_without_tmux w8b_tmux_without_pane w9_default d1_debug_log
+  a1_width_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
 fi
 
 HERE=$(dirname "$(readlink -f "$0")")
+SELF=$(readlink -f "$0")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/claude/.claude/statusline.sh
 if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
@@ -224,6 +228,29 @@ d1_debug_log() {
   check "one log line (got: $(cat "$ROOT/debug.log" 2>/dev/null))" eq "$(wc -l <"$ROOT/debug.log" 2>/dev/null)" 1
   check "names hc as the source" grep -q " | src=hc COLUMNS=unset COLS=218 " "$ROOT/debug.log"
 }
+
+# expect_case_beside_file <case> [arg ...]: this suite, run again from a
+# directory that holds an empty file named <case>, with the args and then
+# <case>, prints only "PASS <case>" and exits 0, so a case name is never taken
+# for the file argument. A rerun that took it for the file runs every case,
+# this one too: CASE_BESIDE_FILE_RERUN fails that one instead of running the
+# suite once more, and the rerun gets 120 s.
+expect_case_beside_file() {
+  local name=$1 out rc
+  shift
+  if [ -n "${CASE_BESIDE_FILE_RERUN:-}" ]; then
+    fail "run inside a rerun: the rerun took its case name for the file argument"
+    return
+  fi
+  rm -rf "$ROOT/cwd"
+  mkdir -p "$ROOT/cwd"
+  : >"$ROOT/cwd/$name"
+  out=$(cd "$ROOT/cwd" && env -u VERBOSE CASE_BESIDE_FILE_RERUN=1 timeout -k 5 120 "$SELF" "$@" "$name" 2>&1)
+  rc=$?
+  check "$name beside a file of its name: exit 0 (got $rc)" eq "$rc" 0
+  check "$name beside a file of its name: only its PASS line (got: $out)" eq "$out" "PASS $name"
+}
+a1_width_case_beside_file() { expect_case_beside_file w1_herdr_first; }
 
 # in_cases <name>: the name is in CASES.
 in_cases() {

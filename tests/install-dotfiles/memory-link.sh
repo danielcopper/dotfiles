@@ -16,6 +16,8 @@
 #       exit 1 and names mise install with its exit code
 #   m11 a failing mise install and a real directory at ~/Memory: exit 1, both
 #       named
+#   a1  run again from a directory holding a file named m5_no_clone, the
+#       suite takes that name for the case m5, not for the installer
 # usage: memory-link.sh [installer] [case ...]
 #        memory-link.sh --list
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
@@ -33,13 +35,15 @@ set -uo pipefail
 
 CASES=(m1_link_made m2_real_directory_kept m3_other_link_kept m4_absolute_link_accepted m5_no_clone
   m6_steamdeck_link_too m7_no_link_without_memex m8_memex_stowed_on_debian m9_memex_stowed_on_steamdeck
-  m10_link_made_after_failed_mise m11_failed_mise_and_real_directory)
+  m10_link_made_after_failed_mise m11_failed_mise_and_real_directory
+  a1_memory_link_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
 fi
 
 HERE=$(dirname "$(readlink -f "$0")")
+SELF=$(readlink -f "$0")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/install-dotfiles.sh
 if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
@@ -174,6 +178,29 @@ m11_failed_mise_and_real_directory() {
   check "says why about Memory" grep -qx "$HOME/Memory exists and is not the link to $HOME/memex/daniel/memory; left as it is." <<<"$OUT"
   check "names the mise install failure" grep -qx "mise install failed with exit 1; see its output above, fix it and run this again." <<<"$OUT"
 }
+
+# expect_case_beside_file <case> [arg ...]: this suite, run again from a
+# directory that holds an empty file named <case>, with the args and then
+# <case>, prints only "PASS <case>" and exits 0, so a case name is never taken
+# for the file argument. A rerun that took it for the file runs every case,
+# this one too: CASE_BESIDE_FILE_RERUN fails that one instead of running the
+# suite once more, and the rerun gets 120 s.
+expect_case_beside_file() {
+  local name=$1 out rc
+  shift
+  if [ -n "${CASE_BESIDE_FILE_RERUN:-}" ]; then
+    fail "run inside a rerun: the rerun took its case name for the file argument"
+    return
+  fi
+  rm -rf "$ROOT/cwd"
+  mkdir -p "$ROOT/cwd"
+  : >"$ROOT/cwd/$name"
+  out=$(cd "$ROOT/cwd" && env -u VERBOSE CASE_BESIDE_FILE_RERUN=1 timeout -k 5 120 "$SELF" "$@" "$name" 2>&1)
+  rc=$?
+  check "$name beside a file of its name: exit 0 (got $rc)" eq "$rc" 0
+  check "$name beside a file of its name: only its PASS line (got: $out)" eq "$out" "PASS $name"
+}
+a1_memory_link_case_beside_file() { expect_case_beside_file m5_no_clone; }
 
 # in_cases <name>: the name is in CASES.
 in_cases() {

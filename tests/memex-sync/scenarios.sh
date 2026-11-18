@@ -10,6 +10,8 @@
 #   every name in CASES must be a function of this file. The script argument
 #   needs a / in its path (./memex-sync for one here), so a scenario name is
 #   never taken for it.
+#   a1_scenarios_case_beside_file checks that: run again from a directory
+#   holding a file named s1_no_changes, the suite runs that scenario.
 # Prints "PASS <scenario>" or "FAIL <scenario>: <check>" per scenario; exits 1
 # when any scenario failed. VERBOSE=1 prints every run's output. All state
 # lives in a temporary directory that is removed at the end.
@@ -28,13 +30,15 @@ CASES=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_co
   s44_staged_list_fails s45_conflict_writes_nothing s46_stale_rebase_worktree s47_commit_during_rebase
   s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped
   s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
-  s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused)
+  s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused
+  a1_scenarios_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
 fi
 
 HERE=$(dirname "$(readlink -f "$0")")
+SELF=$(readlink -f "$0")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/memex/.local/bin/memex-sync
 if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
@@ -1217,6 +1221,29 @@ s57_commit_refused() {
   check "the change on origin" eq "$(git -C "$T/origin.git" show main:unsigned.md)" x
   check "marker gone" test ! -e "$T/state/memex-sync/commit-refused"
 }
+
+# expect_case_beside_file <case> [arg ...]: this suite, run again from a
+# directory that holds an empty file named <case>, with the args and then
+# <case>, prints only "PASS <case>" and exits 0, so a case name is never taken
+# for the file argument. A rerun that took it for the file runs every case,
+# this one too: CASE_BESIDE_FILE_RERUN fails that one instead of running the
+# suite once more, and the rerun gets 120 s.
+expect_case_beside_file() {
+  local name=$1 out rc
+  shift
+  if [ -n "${CASE_BESIDE_FILE_RERUN:-}" ]; then
+    fail "run inside a rerun: the rerun took its case name for the file argument"
+    return
+  fi
+  rm -rf "$ROOT/cwd"
+  mkdir -p "$ROOT/cwd"
+  : >"$ROOT/cwd/$name"
+  out=$(cd "$ROOT/cwd" && env -u VERBOSE CASE_BESIDE_FILE_RERUN=1 timeout -k 5 120 "$SELF" "$@" "$name" 2>&1)
+  rc=$?
+  check "$name beside a file of its name: exit 0 (got $rc)" eq "$rc" 0
+  check "$name beside a file of its name: only its PASS line (got: $out)" eq "$out" "PASS $name"
+}
+a1_scenarios_case_beside_file() { expect_case_beside_file s1_no_changes; }
 
 # in_cases <name>: the name is in CASES.
 in_cases() {

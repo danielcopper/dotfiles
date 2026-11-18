@@ -167,6 +167,9 @@
 #       alone and not backed up
 #   s90 with --backup, a run that stops before the backup on a staging
 #       directory beside a fold says of no link that it goes into the backup
+#   a1  run again from a directory holding a file named
+#       s41_trailing_slash_accepted, the suite takes that name for the case
+#       s41, not for the installer
 # usage: shared-dirs.sh [installer] [case ...]
 #        shared-dirs.sh --list
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
@@ -219,13 +222,15 @@ CASES=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4
   s83_relink_says_to_move_foreign_links s84_backup_takes_nested_foreign_link
   s85_dangling_link_beside_stage_where_dir_belongs s86_own_fold_listing_failure_says_what_to_do
   s87_own_fold_app_file_staged_too_merged s88_backup_names_link_into_unreadable_worktree
-  s89_backup_keeps_link_into_repo_left_alone s90_backup_line_only_where_the_backup_runs)
+  s89_backup_keeps_link_into_repo_left_alone s90_backup_line_only_where_the_backup_runs
+  a1_shared_dirs_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
 fi
 
 HERE=$(dirname "$(readlink -f "$0")")
+SELF=$(readlink -f "$0")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/install-dotfiles.sh
 if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
@@ -1535,6 +1540,29 @@ s90_backup_line_only_where_the_backup_runs() {
   check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$ROOT/elsewhere/file"
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
 }
+
+# expect_case_beside_file <case> [arg ...]: this suite, run again from a
+# directory that holds an empty file named <case>, with the args and then
+# <case>, prints only "PASS <case>" and exits 0, so a case name is never taken
+# for the file argument. A rerun that took it for the file runs every case,
+# this one too: CASE_BESIDE_FILE_RERUN fails that one instead of running the
+# suite once more, and the rerun gets 120 s.
+expect_case_beside_file() {
+  local name=$1 out rc
+  shift
+  if [ -n "${CASE_BESIDE_FILE_RERUN:-}" ]; then
+    fail "run inside a rerun: the rerun took its case name for the file argument"
+    return
+  fi
+  rm -rf "$ROOT/cwd"
+  mkdir -p "$ROOT/cwd"
+  : >"$ROOT/cwd/$name"
+  out=$(cd "$ROOT/cwd" && env -u VERBOSE CASE_BESIDE_FILE_RERUN=1 timeout -k 5 120 "$SELF" "$@" "$name" 2>&1)
+  rc=$?
+  check "$name beside a file of its name: exit 0 (got $rc)" eq "$rc" 0
+  check "$name beside a file of its name: only its PASS line (got: $out)" eq "$out" "PASS $name"
+}
+a1_shared_dirs_case_beside_file() { expect_case_beside_file s41_trailing_slash_accepted; }
 
 # in_cases <name>: the name is in CASES.
 in_cases() {

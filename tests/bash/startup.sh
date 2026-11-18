@@ -47,6 +47,10 @@
 #       without the variable instead of hanging
 #   k13 a keyring directory at 0755, also with a dead daemon's socket in it:
 #       the daemon starts in keyring-XXXXXX and the variable names that
+#   a1  run again from a directory holding a file named f1_plain_terminal,
+#       the suite takes that name for the case f1, not for the .bashrc
+#   a2  the same after an explicit .bashrc path: the name is not taken for
+#       the .bashrc.local
 # Every case also checks that the shell exited 0 within its time, read .bashrc
 # to its end, found fastfetch, gnome-keyring-daemon and flock in PATH, kept no
 # keyring_ variable, showed nothing of the daemon's own stderr and had no path
@@ -68,13 +72,15 @@ umask 022
 CASES=(f1_plain_terminal f2_herdr_terminal f3_nested_shell f4_herdr_drops_tmux k1_live_daemon
   k2_no_daemon k3_keyring_inherited k4_herdr_terminal k5_nested_tmux_pane k6_parallel_start
   k7_later_shell k8_dead_socket k9_no_socket k10_daemon_fails k11_no_runtime_dir k12_stuck_lock
-  k13_keyring_dir_0755)
+  k13_keyring_dir_0755
+  a1_startup_case_beside_file a2_startup_case_after_script)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
 fi
 
 HERE=$(dirname "$(readlink -f "$0")")
+SELF=$(readlink -f "$0")
 REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/bash/.bashrc
 SUT_LOCAL=$REPO/host-wsl-arch/.bashrc.local
@@ -460,6 +466,30 @@ k13_keyring_dir_0755() {
   check "dead socket: daemon started once (got $STARTS; calls: $(calls))" eq "$STARTS" 1
   check "dead socket: exported to keyring-XXXXXX (got $GKC)" other_dir "$GKC"
 }
+
+# expect_case_beside_file <case> [arg ...]: this suite, run again from a
+# directory that holds an empty file named <case>, with the args and then
+# <case>, prints only "PASS <case>" and exits 0, so a case name is never taken
+# for the file argument. A rerun that took it for the file runs every case,
+# this one too: CASE_BESIDE_FILE_RERUN fails that one instead of running the
+# suite once more, and the rerun gets 120 s.
+expect_case_beside_file() {
+  local name=$1 out rc
+  shift
+  if [ -n "${CASE_BESIDE_FILE_RERUN:-}" ]; then
+    fail "run inside a rerun: the rerun took its case name for the file argument"
+    return
+  fi
+  rm -rf "$ROOT/cwd"
+  mkdir -p "$ROOT/cwd"
+  : >"$ROOT/cwd/$name"
+  out=$(cd "$ROOT/cwd" && env -u VERBOSE CASE_BESIDE_FILE_RERUN=1 timeout -k 5 120 "$SELF" "$@" "$name" 2>&1)
+  rc=$?
+  check "$name beside a file of its name: exit 0 (got $rc)" eq "$rc" 0
+  check "$name beside a file of its name: only its PASS line (got: $out)" eq "$out" "PASS $name"
+}
+a1_startup_case_beside_file() { expect_case_beside_file f1_plain_terminal; }
+a2_startup_case_after_script() { expect_case_beside_file f1_plain_terminal "$SUT"; }
 
 # in_cases <name>: the name is in CASES.
 in_cases() {
