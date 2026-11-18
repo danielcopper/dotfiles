@@ -168,8 +168,10 @@
 #   s90 with --backup, a run that stops before the backup on a staging
 #       directory beside a fold says of no link that it goes into the backup
 # usage: shared-dirs.sh [installer] [case ...]
+#        shared-dirs.sh --list
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
-#   of them.
+#   of them. --list prints the case names; every name in CASES must be a
+#   function of this file.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. VERBOSE=1 prints every run's output. The installer runs from a
 # throwaway git repo holding a copy of this repo's files (tracked and new, as
@@ -179,6 +181,47 @@
 # calls, so neither the user manager nor mise is reached; the directory is
 # removed at the end. Needs stow, git and tar.
 set -uo pipefail
+
+CASES=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_program_files_moved
+  s5_fold_into_other_worktree s6_nothing_created_below_other_link s7_link_into_repo_not_a_fold_kept
+  s8_file_kept s9_fold_into_other_repo_kept s10_systemd_user_fold_on_steamdeck
+  s11_program_file_named_like_package_file s12_parent_fold_with_partial_untracked_path
+  s13_second_run_changes_nothing s14_relink_over_fold s15_git_failure_keeps_link s16_mv_failure_keeps_link
+  s17_dangling_fold_into_removed_worktree s18_dangling_fold_into_registered_worktree
+  s19_untracked_fold_target_moves_whole s20_folded_claude_keeps_live_settings s21_folded_herdr_on_arch
+  s22_link_at_config_into_repo_kept s23_file_link_into_other_worktree_relinked
+  s24_nothing_created_below_foreign_systemd s25_relink_keeps_live_claude_settings
+  s26_relink_keeps_live_herdr_settings s27_fresh_debian s28_fresh_arch s29_fresh_steamdeck s30_fresh_wsl_arch
+  s31_dangling_outside_worktrees_kept s32_relink_backs_nothing_up s33_swap_failure_then_rerun
+  s34_stage_beside_existing_dir_stops s35_written_into_staged_dir_merged s36_staged_file_written_again_stops
+  s37_written_during_swap_moved_in s38_written_during_swap_clash_stops s39_reference_copy_changed_during_swap
+  s40_bad_arguments_refused s41_trailing_slash_accepted s42_git_unusable_stops s43_find_failure_stops
+  s44_worktree_list_failure_stops s45_directory_link_into_other_worktree_relinked
+  s46_dangling_fold_into_sibling_worktrees_dir s47_relink_replaces_claude_settings_link
+  s48_relink_replaces_herdr_settings_link s49_link_two_levels_into_repo_kept
+  s50_settings_link_outside_repo_kept s51_settings_link_to_gone_file_reseeded s52_link_into_other_package_relinked
+  s53_written_into_moved_dir_during_swap_merged s54_rmdir_failure_keeps_link s55_no_stow_changes_nothing
+  s56_one_package_in_conflict s57_write_to_live_settings_after_swap_not_reported
+  s58_link_into_unreadable_worktree_kept s59_file_gone_before_move_counts_as_moved
+  s60_stage_beside_left_alone_link_named s61_dangling_settings_link_into_removed_worktree s62_relink_seeds_settings
+  s63_stop_after_making_real_names_it s64_top_level_clash_stops_next_run
+  s65_file_at_claude_beside_stage_left_alone s66_file_at_top_level_dir_beside_stage_left_alone
+  s67_stage_beside_fold_into_own_package_stops s68_dangling_top_level_links_into_removed_worktrees_removed
+  s69_dangling_top_level_link_beside_stage_settled s70_dangling_top_level_link_outside_worktrees_kept
+  s71_late_clash_on_listed_top_level_dir_stows s72_stage_beside_link_to_package_file_named
+  s73_stage_beside_dangling_file_link_named s74_stage_beside_foreign_top_level_link_named
+  s75_stage_beside_link_to_file_where_dir_belongs s76_stage_beside_link_to_file_where_file_belongs
+  s77_stage_beside_relinked_file_link_named s78_stage_beside_own_fold_names_app_files
+  s79_backup_takes_foreign_top_level_links s80_dangling_link_rm_failure_stops
+  s81_dangling_link_readlink_failure_stops s82_backup_leaves_foreign_link_beside_stage
+  s83_relink_says_to_move_foreign_links s84_backup_takes_nested_foreign_link
+  s85_dangling_link_beside_stage_where_dir_belongs s86_own_fold_listing_failure_says_what_to_do
+  s87_own_fold_app_file_staged_too_merged s88_backup_names_link_into_unreadable_worktree
+  s89_backup_keeps_link_into_repo_left_alone s90_backup_line_only_where_the_backup_runs)
+if [ "${1:-}" = --list ]; then
+  printf '%s\n' "${CASES[@]}"
+  exit 0
+fi
 
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
@@ -1491,42 +1534,16 @@ s90_backup_line_only_where_the_backup_runs() {
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
 }
 
-all=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4_program_files_moved
-  s5_fold_into_other_worktree s6_nothing_created_below_other_link s7_link_into_repo_not_a_fold_kept
-  s8_file_kept s9_fold_into_other_repo_kept s10_systemd_user_fold_on_steamdeck
-  s11_program_file_named_like_package_file s12_parent_fold_with_partial_untracked_path
-  s13_second_run_changes_nothing s14_relink_over_fold s15_git_failure_keeps_link s16_mv_failure_keeps_link
-  s17_dangling_fold_into_removed_worktree s18_dangling_fold_into_registered_worktree
-  s19_untracked_fold_target_moves_whole s20_folded_claude_keeps_live_settings s21_folded_herdr_on_arch
-  s22_link_at_config_into_repo_kept s23_file_link_into_other_worktree_relinked
-  s24_nothing_created_below_foreign_systemd s25_relink_keeps_live_claude_settings
-  s26_relink_keeps_live_herdr_settings s27_fresh_debian s28_fresh_arch s29_fresh_steamdeck s30_fresh_wsl_arch
-  s31_dangling_outside_worktrees_kept s32_relink_backs_nothing_up s33_swap_failure_then_rerun
-  s34_stage_beside_existing_dir_stops s35_written_into_staged_dir_merged s36_staged_file_written_again_stops
-  s37_written_during_swap_moved_in s38_written_during_swap_clash_stops s39_reference_copy_changed_during_swap
-  s40_bad_arguments_refused s41_trailing_slash_accepted s42_git_unusable_stops s43_find_failure_stops
-  s44_worktree_list_failure_stops s45_directory_link_into_other_worktree_relinked
-  s46_dangling_fold_into_sibling_worktrees_dir s47_relink_replaces_claude_settings_link
-  s48_relink_replaces_herdr_settings_link s49_link_two_levels_into_repo_kept
-  s50_settings_link_outside_repo_kept s51_settings_link_to_gone_file_reseeded s52_link_into_other_package_relinked
-  s53_written_into_moved_dir_during_swap_merged s54_rmdir_failure_keeps_link s55_no_stow_changes_nothing
-  s56_one_package_in_conflict s57_write_to_live_settings_after_swap_not_reported
-  s58_link_into_unreadable_worktree_kept s59_file_gone_before_move_counts_as_moved
-  s60_stage_beside_left_alone_link_named s61_dangling_settings_link_into_removed_worktree s62_relink_seeds_settings
-  s63_stop_after_making_real_names_it s64_top_level_clash_stops_next_run
-  s65_file_at_claude_beside_stage_left_alone s66_file_at_top_level_dir_beside_stage_left_alone
-  s67_stage_beside_fold_into_own_package_stops s68_dangling_top_level_links_into_removed_worktrees_removed
-  s69_dangling_top_level_link_beside_stage_settled s70_dangling_top_level_link_outside_worktrees_kept
-  s71_late_clash_on_listed_top_level_dir_stows s72_stage_beside_link_to_package_file_named
-  s73_stage_beside_dangling_file_link_named s74_stage_beside_foreign_top_level_link_named
-  s75_stage_beside_link_to_file_where_dir_belongs s76_stage_beside_link_to_file_where_file_belongs
-  s77_stage_beside_relinked_file_link_named s78_stage_beside_own_fold_names_app_files
-  s79_backup_takes_foreign_top_level_links s80_dangling_link_rm_failure_stops
-  s81_dangling_link_readlink_failure_stops s82_backup_leaves_foreign_link_beside_stage
-  s83_relink_says_to_move_foreign_links s84_backup_takes_nested_foreign_link
-  s85_dangling_link_beside_stage_where_dir_belongs s86_own_fold_listing_failure_says_what_to_do
-  s87_own_fold_app_file_staged_too_merged s88_backup_names_link_into_unreadable_worktree
-  s89_backup_keeps_link_into_repo_left_alone s90_backup_line_only_where_the_backup_runs)
+missing=0
+for CASE in "${CASES[@]}"; do
+  if ! declare -F "$CASE" >/dev/null; then
+    echo "FAIL $CASE: listed in CASES, but no such function"
+    missing=1
+  fi
+done
+[ "$missing" = 0 ] || exit 1
+
+all=("${CASES[@]}")
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
@@ -1538,7 +1555,11 @@ for CASE in "${all[@]}"; do
     git -C "$tree" checkout -q -- .
   done
   git -C "$COPY" worktree prune
-  "$CASE"
+  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
+    "$CASE"
+  else
+    fail "no such case"
+  fi
   if [ "$FAILED" = 0 ]; then echo "PASS $CASE"; else failures=$((failures + 1)); fi
   if [ "$FAILED" != 0 ] || [ -n "${VERBOSE:-}" ]; then sed 's/^/    /' "$ROOT/$CASE.transcript" 2>/dev/null; fi
 done

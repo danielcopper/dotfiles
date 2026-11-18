@@ -483,8 +483,8 @@ herdr-app-check` and `mise run herdr-board-test` under "herdr app".
 `tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the
 `memex` package and the `~/Memory` link that `install-dotfiles.sh` makes, and
 the directories that must be real ("Install / update" above), in
-throwaway homes; each file's header lists its cases. It needs stow, git and
-tar.
+throwaway homes; each file's header lists its cases, and `--list` prints
+their names. It needs stow, git and tar.
 
 `mise run shell-test` (without mise, `tests/statusline/width.sh` and
 `tests/bash/startup.sh`) checks how the Claude Code status line finds the

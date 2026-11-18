@@ -17,8 +17,10 @@
 #   m11 a failing mise install and a real directory at ~/Memory: exit 1, both
 #       named
 # usage: memory-link.sh [installer] [case ...]
+#        memory-link.sh --list
 #   The installer defaults to the repo's install-dotfiles.sh, the cases to all
-#   of them.
+#   of them. --list prints the case names; every name in CASES must be a
+#   function of this file.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. VERBOSE=1 prints every run's output. HOME points into a
 # temporary directory for the whole run, and systemctl and mise are stand-ins
@@ -26,6 +28,14 @@
 # the mise stand-in exits with $MISE_EXIT (default 0). The directory is
 # removed at the end. Needs stow and git.
 set -uo pipefail
+
+CASES=(m1_link_made m2_real_directory_kept m3_other_link_kept m4_absolute_link_accepted m5_no_clone
+  m6_steamdeck_link_too m7_no_link_without_memex m8_memex_stowed_on_debian m9_memex_stowed_on_steamdeck
+  m10_link_made_after_failed_mise m11_failed_mise_and_real_directory)
+if [ "${1:-}" = --list ]; then
+  printf '%s\n' "${CASES[@]}"
+  exit 0
+fi
 
 HERE=$(dirname "$(readlink -f "$0")")
 REPO=$(readlink -f "$HERE/../..")
@@ -163,15 +173,26 @@ m11_failed_mise_and_real_directory() {
   check "names the mise install failure" grep -qx "mise install failed with exit 1; see its output above, fix it and run this again." <<<"$OUT"
 }
 
-all=(m1_link_made m2_real_directory_kept m3_other_link_kept m4_absolute_link_accepted m5_no_clone
-  m6_steamdeck_link_too m7_no_link_without_memex m8_memex_stowed_on_debian m9_memex_stowed_on_steamdeck
-  m10_link_made_after_failed_mise m11_failed_mise_and_real_directory)
+missing=0
+for CASE in "${CASES[@]}"; do
+  if ! declare -F "$CASE" >/dev/null; then
+    echo "FAIL $CASE: listed in CASES, but no such function"
+    missing=1
+  fi
+done
+[ "$missing" = 0 ] || exit 1
+
+all=("${CASES[@]}")
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
   rm -rf "$HOME"
   mkdir -p "$HOME"
-  "$CASE"
+  if printf '%s\n' "${CASES[@]}" | grep -qxF -- "$CASE" && declare -F "$CASE" >/dev/null; then
+    "$CASE"
+  else
+    fail "no such case"
+  fi
   if [ "$FAILED" = 0 ]; then echo "PASS $CASE"; else failures=$((failures + 1)); fi
   if [ "$FAILED" != 0 ] || [ -n "${VERBOSE:-}" ]; then sed 's/^/    /' "$ROOT/$CASE.transcript" 2>/dev/null; fi
 done

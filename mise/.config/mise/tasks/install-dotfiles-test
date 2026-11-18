@@ -12,15 +12,33 @@ tests="$dotfiles/tests/install-dotfiles"
 [ -d "$tests" ] || { echo "install-dotfiles-test: no such directory: $tests" >&2; exit 1; }
 
 files=("$tests/memory-link.sh" "$tests/shared-dirs.sh")
+# owner[case]: the file whose --list names the case, read once per file. A
+# failing --list or a name two files list stops the run.
+declare -A owner=()
+for file in "${files[@]}"; do
+  [ -f "$file" ] || { echo "install-dotfiles-test: no such file: $file" >&2; exit 1; }
+  if ! list=$("$file" --list); then
+    echo "install-dotfiles-test: $file --list failed" >&2
+    exit 1
+  fi
+  mapfile -t listed <<<"$list"
+  for name in "${listed[@]}"; do
+    if [ -n "${owner[$name]+set}" ]; then
+      echo "install-dotfiles-test: case $name is listed by ${owner[$name]} and $file" >&2
+      exit 1
+    fi
+    owner[$name]=$file
+  done
+done
 for name in "$@"; do
-  grep -q "^$name() {" "${files[@]}" || { echo "install-dotfiles-test: no such case: $name" >&2; exit 1; }
+  [ -n "$name" ] && [ -n "${owner[$name]+set}" ] || { echo "install-dotfiles-test: no such case: $name" >&2; exit 1; }
 done
 
 status=0
 for file in "${files[@]}"; do
   cases=()
   for name in "$@"; do
-    if grep -q "^$name() {" "$file"; then cases+=("$name"); fi
+    if [ "${owner[$name]}" = "$file" ]; then cases+=("$name"); fi
   done
   if [ $# -eq 0 ] || [ ${#cases[@]} -gt 0 ]; then
     "$file" "${cases[@]}" || status=1
