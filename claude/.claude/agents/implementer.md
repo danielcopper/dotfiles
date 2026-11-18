@@ -22,7 +22,6 @@ Ask before you build: about the requirements and the approach up front, and when
 - **Your tree only, by absolute path:** work in the assigned worktree with absolute paths (`git -C <wt> …`; the shell's cwd resets between calls); leave the main checkout and other worktrees alone; scratch files go in your scratchpad, not the tree.
 - **Before the final gate**, if `origin/main` moved, rebase onto it and re-check every rename or "nowhere else" claim your change makes in the rebased tree.
 - **Real checkers:** in a worktree, LSP diagnostics are unreliable; the repo's own type checker and linter decide.
-- **Upstream source:** another project's repository is read from this machine's mirror, one per repository: `~/.claude/upstream-sources.md`.
 
 ## Scope
 
