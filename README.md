@@ -101,6 +101,26 @@ needs a token with the `admin:ssh_signing_key` scope, and the gh login on the
 server has no admin scopes. To commit unsigned instead, swap the two lines
 `host-debian/.gitconfig.local` names.
 
+**ssh-agent.** Debian's `openssh-client` ships a user `ssh-agent.socket`,
+enabled for every user, that points the user manager's `SSH_AUTH_SOCK` at
+`$XDG_RUNTIME_DIR/openssh_agent` and starts `ssh-agent.service` on the first
+connection. The `systemd` package replaces that service with the agent every
+class uses, on `$XDG_RUNTIME_DIR/ssh-agent.socket`, which never takes the
+socket's connections. Before it reads a signing key file, ssh-keygen asks the
+agent at `SSH_AUTH_SOCK` for the key, and a socket nobody answers makes that
+question wait forever: a user service that commits waits with it.
+`host-debian` masks the socket with an empty
+`~/.config/systemd/user/ssh-agent.socket` and, as `host-arch` does, points
+`SSH_AUTH_SOCK` at the repo's agent in `~/.config/environment.d/ssh-agent.conf`,
+which the user manager reads when it starts or reloads; `.bashrc` points the shell at the
+same agent. On a host where the socket already ran, stop it before the stow,
+which clears the variable, and set it until the user manager's next start:
+
+```bash
+systemctl --user stop ssh-agent.socket
+systemctl --user set-environment SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"
+```
+
 **Forgejo.** git takes the credentials for `https://git.kueppermann.com` from
 `~/.git-credentials`. git's store helper fills it the first time the token is
 entered, or it is written directly when the token is set up; this repo does
