@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Tests for term_width in claude/.claude/statusline.sh, which sets the width the
 # status line fits itself into ($COLS) and where that width came from
-# ($COLS_SRC). Each case runs the function alone, in a clean environment whose
-# PATH holds only stand-ins for hc and tmux and the few tools the function
-# needs, so neither a real herdr nor a real tmux server is asked.
+# ($COLS_SRC). The w cases run the function alone, in a clean environment
+# whose PATH holds only stand-ins for hc and tmux and the few tools the
+# function needs. d1 runs the whole script with the stand-ins ahead of the
+# real PATH. Either way neither a real herdr nor a real tmux server is asked.
 #   w1  in a herdr terminal hc's cols win over tmux and $COLUMNS; tmux is not
 #       asked
 #   w2  hc failing, printing no JSON, JSON without cols, or cols 0: $COLUMNS;
@@ -233,7 +234,11 @@ all=(w1_herdr_first w2_hc_unusable w3_hc_hangs w4_hc_missing w5_tmux_pane w6_tmu
 for CASE in "${all[@]}"; do
   FAILED=0
   stand_ins
-  "$CASE"
+  if declare -F "$CASE" >/dev/null; then
+    "$CASE"
+  else
+    fail "no such case"
+  fi
   if [ "$FAILED" = 0 ]; then echo "PASS $CASE"; else failures=$((failures + 1)); fi
 done
 [ "$failures" = 0 ]
