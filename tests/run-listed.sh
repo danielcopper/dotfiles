@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Runs test cases from the test files that list them.
 # usage: run-listed.sh <task> <file>... -- [case ...]
-#   Reads each file's --list once. A failing or empty --list, a line that is
-#   no plain name ([A-Za-z_][A-Za-z0-9_]*), a name listed twice, and an empty
-#   or unknown case stop the run with exit 1 before any file runs. A named
+#   Reads each file's --list once. A file given twice, a failing or empty
+#   --list, a line that is no plain name ([A-Za-z_][A-Za-z0-9_]*), a name
+#   listed twice, and an empty or unknown case stop the run with exit 1 before
+#   any file runs. A named
 #   case runs from the file that lists it; without names every file runs all
 #   of its cases. Messages start with "<task>: ". A file that exits non-zero
 #   is named with its code, and the run exits with the first such code.
@@ -23,15 +24,20 @@ if [ $# -eq 0 ] || [ ${#files[@]} -eq 0 ]; then
 fi
 shift
 
+# given[path]: the files given, by their resolved path.
+declare -A given=()
+for file in "${files[@]}"; do
+  [ -f "$file" ] || { echo "$task: no such file: $file" >&2; exit 1; }
+  path=$(readlink -f -- "$file")
+  [ -z "${given[$path]+set}" ] || { echo "$task: $file given twice" >&2; exit 1; }
+  given[$path]=1
+done
+
 name_re='^[A-Za-z_][A-Za-z0-9_]*$'
 # owner[case]: the file whose --list names the case.
 declare -A owner=()
 for file in "${files[@]}"; do
-  [ -f "$file" ] || { echo "$task: no such file: $file" >&2; exit 1; }
-  if ! list=$("$file" --list); then
-    echo "$task: $file --list failed" >&2
-    exit 1
-  fi
+  list=$("$file" --list) || { echo "$task: $file --list exited with $?" >&2; exit 1; }
   [ -n "$list" ] || { echo "$task: $file --list printed no names" >&2; exit 1; }
   mapfile -t listed <<<"$list"
   for name in "${listed[@]}"; do
