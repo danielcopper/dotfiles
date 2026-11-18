@@ -642,6 +642,24 @@ test("az's failures: login and a missing extension make the view unavailable, ot
   assert.equal(board.azFailure({ code: 1, stderr: "ERROR: boom" }, "server").message, "az auf server: boom");
 });
 
+test("az's RetryError after repeated 5xx answers is a server error, on reads and writes", () => {
+  // msrest retries 408, 500, 502, 503, 504 and from 506 on, then gives up with this line.
+  const retried = "ERROR: Error occurred in request., RetryError: HTTPSConnectionPool(host='dev.azure.com', port=443): Max retries exceeded with url: /example-org/_apis/wit/workitems/102 (Caused by ResponseError('too many 503 error responses'))";
+  const server = `Azure antwortete mit einem Fehler (az): ${retried.slice(7)}`;
+  assert.deepEqual([board.azFailure({ code: 1, stderr: retried }).message, board.azFailure({ code: 1, stderr: retried }).unclear], [server, false]);
+  const write = board.azFailure({ code: 1, stderr: retried }, null, { write: true });
+  assert.deepEqual([write.message, write.unclear], [`Ergebnis unklar: ${server}`, true]);
+});
+
+test("az's own ERROR: line decides, not the words of a crash's traceback", () => {
+  const crash = "ERROR: The command failed with an unexpected error. Here is the traceback:\nTraceback (most recent call last):\nurllib3.exceptions.MaxRetryError: Max retries exceeded with url: /x\nValueError: x";
+  const e = board.azFailure({ code: 1, stderr: crash });
+  assert.equal(e.message, "The command failed with an unexpected error. Here is the traceback:");
+  assert.equal(board.azFailure({ code: 1, stderr: crash }, null, { write: true }).message, "Ergebnis unklar: The command failed with an unexpected error. Here is the traceback:");
+  assert.equal(board.azFailure({ code: 1, stderr: "Traceback (most recent call last):\nMax retries exceeded" }).message, "Azure nicht erreichbar (az): Traceback (most recent call last):",
+    "without an ERROR: line all az printed counts");
+});
+
 test("az says a request without a clear answer and a server error apart, on reads and writes", () => {
   // msrest wraps a requests exception as "Error occurred in request., <type>: <message>".
   const timedOut = "ERROR: Error occurred in request., ReadTimeout: HTTPSConnectionPool(host='dev.azure.com', port=443): Read timed out. (read timeout=30)";
@@ -671,16 +689,16 @@ test("on a write, only az's known refusal forms are refusals; any other failure 
     // az's handle_exception for a crash and for Ctrl-C.
     "ERROR: The command failed with an unexpected error. Here is the traceback:\nTraceback (most recent call last):\nValueError: x",
     "ERROR: Keyboard interrupt is captured.",
-    "", // killed: nothing on stderr
+    "", // killed, or az's silent Ctrl-C (knack exits 1 without output)
     "The work item does not exist", // a refusal's words, but no ERROR: line
   ]) {
     assert.equal(unclear(err), true, err);
   }
   for (const err of [
     "ERROR: TF401320: Rule Error for field State. Error code: Required, InvalidEmpty.",
-    "ERROR: VS403323: You do not have permissions to update work item 102.",
     "ERROR: TF401232: Work item 9 does not exist, or you do not have permissions to read it.",
-    "ERROR: The iteration path was not found: Example Project\\Nope",
+    // azure-devops-cli-extension, azext_devops/dev/boards/work_item.py
+    "ERROR: Work Item 102 was not found in the original query results.",
     "ERROR: argument --state: expected one argument",
     "ERROR: the following arguments are required: --id",
     "ERROR: unrecognized arguments: --stat New",
@@ -1156,14 +1174,79 @@ test("UI: a card gone from its shown target is said as not shown while columns a
   assert.deepEqual(all.host.notes.at(-1), { title: "Status nach dem Neuladen", body: "tender#3004 ist nach dem Neuladen nicht auf dem Board", level: "warning" });
 });
 
-test("UI: a new move of a card drops the open outcome of its earlier one", async () => {
+test("UI: a new move of a card that lands drops the open outcome of its earlier one", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "l", shiftL);
   await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
   await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  assert.equal(st().unclear.length, 1, "kept while the new write is under way");
+  await host.answer("gh", confirmed("PVTI_rec4"), "updateProjectV2ItemFieldValue");
   assert.deepEqual(st().unclear, []);
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
-  assert.equal(b.notice.text, "tender#3004 → Ready …", "no word on the earlier move");
+  assert.equal(b.notice.text, "tender#3004 steht jetzt in „Ready“", "no word on the earlier move");
+});
+
+test("UI: a new move of a card that is unclear too replaces the open outcome of its earlier one", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.deepEqual(st().unclear.map((u) => u.to.name), ["Ready"]);
+});
+
+test("UI: a new move of a card that is refused keeps the open outcome of its earlier one", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  const refused = '{"data":{"updateProjectV2ItemFieldValue":null},"errors":[{"type":"FORBIDDEN","path":["updateProjectV2ItemFieldValue"],"message":"Resource not accessible by integration"}]}';
+  await host.answer("gh", { code: 1, stdout: refused, stderr: "gh: Resource not accessible by integration" }, "updateProjectV2ItemFieldValue");
+  assert.equal(st().unclear.length, 1);
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
+});
+
+test("UI: r with views.json unchanged, or after an invalid one was fixed, keeps an open outcome for the next refresh", async () => {
+  for (const broken of [false, true]) {
+    const { b, cx, host, st } = await openBoard();
+    await press(b, cx, "l", shiftL);
+    await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+    if (broken) {
+      host.config = "{ views: [";
+      await press(b, cx, "r");
+      assert.equal(b.config, null);
+      host.config = testConfig();
+    }
+    await press(b, cx, "r");
+    assert.equal(st().unclear.length, 1, broken ? "after a fixed views.json" : "after r");
+    await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+    assert.equal(b.notice.text, "tender#3004 steht nach dem Neuladen in „Ready“, nicht in „In progress“");
+  }
+});
+
+test("UI: a write under way while r makes its view a list leaves nothing open", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "l", shiftL);
+  const config = JSON.parse(testConfig());
+  config.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
+  host.config = JSON.stringify(config);
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-list.json")), "search(");
+  await host.answer("gh", new Error("timed out after 30000 ms"), "updateProjectV2ItemFieldValue");
+  assert.deepEqual(b.views.mine.unclear, []);
+  assert.equal(host.open("gh").length, 0, "no refresh of a board that is gone");
+  assert.equal(b.views.mine.error, null);
+});
+
+test("UI: open outcomes of a view that is no board any more are dropped without a word", async () => {
+  const { b, cx } = await openBoard();
+  const st = b.views.mine;
+  st.data = board.parseGithubList(json("github-list.json"), listView());
+  st.unclear = [{ key: "PVTI_rec4", label: "tender#3004", to: { id: "opt-in-progress", name: "In progress" }, at: 0 }];
+  b.notice = null;
+  b.settleUnclear(b.config.views[0], 1, cx);
+  assert.deepEqual([st.unclear, b.notice], [[], null]);
 });
 
 test("UI: r drops the open outcomes of a view that became a list", async () => {
@@ -1324,9 +1407,9 @@ test("UI: another machine in the dialog runs the checkout there; a tab needs a s
   assert.equal(host.runs.length, 0);
 });
 
-test("UI: a tab on this machine needs a space here", async () => {
+test("UI: a tab on this machine needs a space here; one in the same folder on another machine does not count", async () => {
   const { b, cx, host } = await openBoard();
-  host.spaceList = [{ id: "s2", name: "y", folder: "/srv/tender", machine: "server", branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Arbeit", active: true }] }];
+  host.spaceList = [{ id: "s2", name: "y", folder: "/home/me/src/tender", machine: "server", branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Arbeit", active: true }] }];
   await openStart(b, cx);
   await press(b, cx, "tab");
   await press(b, cx, "tab");
@@ -1336,6 +1419,7 @@ test("UI: a tab on this machine needs a space here", async () => {
   await press(b, cx, "enter");
   await host.answer("sh", ok("/home/me/src/tender\n"));
   assert.equal(b.modal.error, "Kein Space auf diesem Rechner für einen neuen Tab; als neuer Space öffnen");
+  assert.deepEqual(host.runs, []);
 });
 
 test("UI: Enter twice on a card with a session goes to it", async () => {

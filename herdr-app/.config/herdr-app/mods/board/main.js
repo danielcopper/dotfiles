@@ -153,6 +153,9 @@ const VIEW_KINDS = {
   },
 };
 
+// A view's kind, the key of VIEW_KINDS.
+export const viewKind = (v) => `${v.source} ${v.layout}`;
+
 function viewProblems(v) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
   const out = [];
@@ -161,7 +164,7 @@ function viewProblems(v) {
   if (v.source !== "github" && v.source !== "azure") out.push("„source“ ist \"github\" oder \"azure\"");
   if (v.layout !== "board" && v.layout !== "list") out.push("„layout“ ist \"board\" oder \"list\"");
   if (v.source === "azure" && v.layout === "list") out.push("Azure-Ansichten sind Boards (\"layout\": \"board\")");
-  const kind = VIEW_KINDS[`${v.source} ${v.layout}`];
+  const kind = VIEW_KINDS[viewKind(v)];
   if (!kind) return out;
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
@@ -177,7 +180,7 @@ function viewProblems(v) {
 
 function normalizeView(v) {
   const common = { id: v.id, name: v.name, source: v.source, layout: v.layout, hide: v.hide ?? [], start: v.start ?? {}, hideCategories: [], on: null };
-  return { ...common, ...VIEW_KINDS[`${v.source} ${v.layout}`].defaults(v) };
+  return { ...common, ...VIEW_KINDS[viewKind(v)].defaults(v) };
 }
 
 // views.json as text (null: there is none) → { config, errors }. A view with
@@ -724,17 +727,20 @@ export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht 
 // and the requests messages it wraps (ConnectionError, ReadTimeout, …).
 const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
 // Azure's answers that it failed itself: the Azure DevOps client's
-// "Operation returned a 5xx status code." and TF400898 (an internal error).
-const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898/i;
-// ERROR: answers that are a refusal: rule errors (TF401320),
-// permissions (VS403…), something that does not exist, az's own argument
-// errors, and 4xx status lines.
-const AZ_REFUSED = /^(TF401320|VS403\d+)\b|does not exist|not found|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+// "Operation returned a 5xx status code.", TF400898 (an internal error), and
+// msrest's RetryError after retrying 5xx answers ("too many 503 error
+// responses"), which also names "Max retries" and is tested first.
+const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
+// ERROR: answers that are a refusal: rule errors (TF401320), something that
+// does not exist or was not found, az's own argument errors, and 4xx status
+// lines.
+const AZ_REFUSED = /^TF401320\b|does not exist|not found|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
 
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
-// lines are left out). Missing sign-in or extension make the view
-// unavailable rather than an error. With `write`, only an ERROR: answer of a
-// known refusal form (AZ_REFUSED) is a refusal; anything else (a request
+// lines are left out; without an ERROR: line, from all it printed). Missing
+// sign-in or extension make the view unavailable rather than an error. With
+// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
+// sign-in, extension and project answers below; anything else (a request
 // without a clear answer, a server error, az's own crash or interrupt, a
 // failure without an ERROR: line) leaves open whether the change landed.
 export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
@@ -742,9 +748,10 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   const errorLine = lines.find((l) => /^ERROR:/.test(l));
   const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
   const az = on ? `az auf ${on}` : "az";
-  const all = lines.join("\n");
-  if (AZ_SENT_FAILURE.test(all)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
-  if (AZ_SERVER_ERROR.test(all)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
+  // A crash's traceback may hold any words; az's own line says what failed.
+  const subject = errorLine ? said : lines.join("\n");
+  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
+  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
   if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
     return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
   }
@@ -1125,6 +1132,7 @@ export default class Board extends View {
     this.drag = null; // { key, from }
     this.over = null; // the column index under a drag
     this.sources = makeSources();
+    this.kinds = null; // view id → viewKind in the last valid views.json
     this.scrolls = Array.from({ length: SCROLLS }, () => ScrollHandle.new());
     this.listScroll = ScrollHandle.new();
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
@@ -1206,14 +1214,17 @@ export default class Board extends View {
         this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
         return undefined;
       });
-      const kindBefore = new Map((this.config?.views ?? []).map((v) => [v.id, `${v.source} ${v.layout}`]));
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
       for (const source of Object.values(this.sources)) source.reset();
       cx.notify();
       if (!this.config) return;
-      // Open outcomes of a view that is gone, or is now of another kind, are dropped.
-      const kinds = new Map(this.config.views.map((v) => [v.id, `${v.source} ${v.layout}`]));
-      for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== kindBefore.get(id)) st.unclear = [];
+      // Open outcomes of a view that is gone, or is now of another kind than
+      // in the last valid views.json, are dropped.
+      const kinds = new Map(this.config.views.map((v) => [v.id, viewKind(v)]));
+      // Before the first valid views.json no view has a state to compare.
+      const before = this.kinds ?? kinds;
+      for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
+      this.kinds = kinds;
       for (const v of this.config.views) this.state(v.id).unavailable = null;
       const shown = this.view();
       for (const v of this.config.views) if (this.sources[v.source].probe && v !== shown) this.refresh(v, cx);
@@ -1281,6 +1292,8 @@ export default class Board extends View {
     const due = st.unclear.filter((u) => u.at <= started);
     if (!due.length) return;
     st.unclear = st.unclear.filter((u) => u.at > started);
+    // A view that is no board any more has no columns to tell.
+    if (st.data?.kind !== "board") return;
     const lines = due.map((u) => {
       const now = findCard(st.data, u.key)?.column;
       if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };
@@ -1324,8 +1337,6 @@ export default class Board extends View {
     if (found.column.id === columnId) return;
     if (st.pending[key]) return this.say(`${label} wird noch gespeichert`, "info", cx);
     if (!canDrop(st.data, found.card, to)) return this.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
-    // A new move of the card replaces the open outcome of an earlier one.
-    st.unclear = st.unclear.filter((u) => u.key !== key);
     const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
     st.moves.push(move);
     st.data = moveCard(st.data, key, columnId);
@@ -1335,15 +1346,21 @@ export default class Board extends View {
       try {
         await this.sources[view.source].move(view, st.data, found.card, to);
         move.confirmedAt = Date.now();
+        // A new move that landed replaces the open outcome of an earlier one.
+        st.unclear = st.unclear.filter((u) => u.key !== key);
         this.say(`${label} steht jetzt in „${to.name}“`, "success", cx);
       } catch (e) {
         st.moves = st.moves.filter((m) => m !== move);
         const why = report(e);
         if (e instanceof BoardError && e.unclear) {
-          st.unclear.push({ key, label, to: { id: to.id, name: to.name }, at: Date.now() });
           this.say(`${label} → ${to.name}: ${why}; lädt neu`, "warning", cx);
           notify({ title: `Status von ${label}`, body: why, level: "warning" });
-          this.refresh(view, cx);
+          // Followed up only while views.json still has this view as it was.
+          const current = this.config?.views.find((v) => v.id === view.id);
+          if (current && viewKind(current) === viewKind(view)) {
+            st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
+            this.refresh(current, cx);
+          }
         } else {
           st.data = rollback(st.data, move);
           this.say(`${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
