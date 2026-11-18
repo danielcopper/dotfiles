@@ -12,7 +12,7 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
-The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-test`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
+The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-test`, `herdr-leader-test`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving what is in the way of a package file into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`, as below.
 
@@ -262,6 +262,14 @@ herdr-app`. Which files of the package git tracks is set in the root
   the personal layout `ctrl-space` goes through focus-history, so a fast
   second `ctrl-space` still reaches the leader; in other layouts it can
   close the leader again.
+- **The leader binds Tab and shift-Tab itself.** From its start, herdr
+  binds both to moving the keyboard between tab stops, which comes before
+  a mod sees the key, and a `mod:leader` entry in `keys.json` does not beat
+  that; the leader binds them in its own key context (`cx.bind_keys`)
+  instead. `mise run herdr-leader-test` (without mise, `node --test
+  tests/herdr-app/leader.test.mjs` from the repo) tests what it binds and
+  what Tab and shift-Tab then do, in the leader and on their way to tmux.
+  It needs node.
 - **The board (`mods/board/`) shows my own work.** As `mods/board/views.json`
   sets them, its views are "Meine Aufgaben" (my issues on the Tender project's
   board, in the columns of its Status field), "PRs" (pull requests I opened or
@@ -484,9 +492,10 @@ Without mise, run `tests/memex-sync/scenarios.sh` and
 
 ## Tests
 
-Three runners are described beside what they check: `mise run
+Four runners are described beside what they check: `mise run
 memex-sync-test` under "memex sync", in its "Tests" part, and `mise run
-herdr-app-check` and `mise run herdr-board-test` under "herdr app".
+herdr-app-check`, `mise run herdr-board-test` and `mise run
+herdr-leader-test` under "herdr app".
 
 `mise run install-dotfiles-test` (without mise,
 `tests/install-dotfiles/memory-link.sh` and `shared-dirs.sh`) checks the

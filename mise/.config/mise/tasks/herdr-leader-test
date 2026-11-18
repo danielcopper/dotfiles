@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Global mise task: run the tests of the herdr leader mod from the dotfiles
+# repo with node's test runner; README, "herdr app", says what they cover.
+# They run under node's permission model: reads only in the repo, no writes.
+# Child processes are allowed (the runner starts each test file as one, under
+# the same limits). LEADER_TEST_PERMISSION tells the tests they must run under
+# those limits.
+#
+# Usage: mise run herdr-leader-test [node --test option...]
+#   e.g. --test-name-pattern=Tab
+set -euo pipefail
+
+dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
+test="$dotfiles/tests/herdr-app/leader.test.mjs"
+[ -f "$test" ] || { echo "herdr-leader-test: no such file: $test" >&2; exit 1; }
+
+# From the repo and by a relative path: the test runner looks an absolute
+# path up from /, which the permission model does not let it read.
+cd "$dotfiles"
+export LEADER_TEST_PERMISSION=1
+exec node --permission --allow-fs-read="$dotfiles" --allow-child-process \
+  --test "$@" tests/herdr-app/leader.test.mjs
