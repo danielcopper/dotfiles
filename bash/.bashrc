@@ -106,8 +106,10 @@ command -v ng >/dev/null && source <(ng completion script)
 [ -f ~/.bashrc.secrets ] && . ~/.bashrc.secrets
 
 # Greeter — fastfetch on a fresh top-level shell, never as repeated noise.
-# SHLVL=1 keeps it to the outermost shell, not subshells.
-if command -v fastfetch >/dev/null; then
+# SHLVL=1 keeps it to the outermost shell, not subshells. A herdr terminal
+# (HC_TERMINAL_ID) gets none: every pane, tab and agent there starts a shell
+# of its own, so the greeter would fill each; a plain terminal window keeps it.
+if command -v fastfetch >/dev/null && [ -z "${HC_TERMINAL_ID:-}" ]; then
   [ "${SHLVL:-1}" = "1" ] && fastfetch
 fi
 
