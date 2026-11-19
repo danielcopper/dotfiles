@@ -57,11 +57,13 @@ function showTab(layer, { keyboard = true } = {}) {
   }
   if (!keyboard) return;
   const f = focused();
+  const target = f?.pane ? { pane: f.pane } : f?.terminal ? { terminal: f.terminal } : null;
+  if (!target) return;
   try {
-    if (f?.pane) run("pane.focus", { pane: f.pane });
-    else if (f?.terminal) run("pane.focus", { terminal: f.terminal });
+    run("pane.focus", target);
   } catch (e) {
-    notify({ title: "Could not give the pane the keyboard", body: String(e?.message ?? e), level: "error" });
+    const [kind, id] = Object.entries(target)[0];
+    notify({ title: `Could not give ${kind} ${id} the keyboard`, body: String(e?.message ?? e), level: "error" });
   }
 }
 

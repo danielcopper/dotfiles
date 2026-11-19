@@ -84,9 +84,13 @@ registerHooks({
 
 const board = await import(pathToFileURL(mainPath).href);
 // Every render marks the fake host as drawing, as herdr does (ScrollHandle).
+// herdr draws, and so renders, only a copy that shows (a stack draws only
+// its shown child, a tab only while shown), so rendering one that does not
+// is refused.
 const realRender = board.default.prototype.render;
 board.default.prototype.render = function render(...args) {
   const host = globalThis.__boardHost;
+  if (host && !host.checking() && !board.boardShown(this.isLayer())) throw new Error("herdr renders only a board copy that shows");
   if (host) host.drawing = true;
   try {
     return realRender.apply(this, args);
@@ -1520,11 +1524,11 @@ function element(kind) {
 // by default gh is found and az is not) and recorded in asked. spaces() is
 // spaceList, which a test may change.
 // layout() is `tree` (the shown layout; none by default), focused() is
-// `focus`, props() is `propsNow` (null: herdr gives none), and shared()
-// reads `sharedValues`; a test may change each.
+// `focus`, props() is `copyProps` (the copy's own props, as herdr gives
+// them: `props`), and shared() reads `sharedValues`; a test may change each.
 // focusCalls counts the calls of a focus handle's focus().
 const found = (tool) => `/opt/fake/bin/${tool}`;
-function fakeHost({ config = testConfig(), shown = true, tree = null, which = (tool) => (tool === "az" ? "" : found(tool)) } = {}) {
+function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)) } = {}) {
   const calls = [];
   const host = {
     calls,
@@ -1560,8 +1564,9 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, which = (t
     tree,
     layout: () => host.tree,
     sharedValues: {},
-    propsNow: null,
-    props: () => host.propsNow,
+    handles: [],
+    copyProps: props,
+    props: () => host.copyProps,
     shared: (key) => host.sharedValues[key] ?? null,
     machines: () => [{ name: null, layout: "ready" }, { name: "server", layout: "ready" }],
     knownAgents: async () => [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }],
@@ -1572,9 +1577,16 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, which = (t
     "InputState.new": (opts) => {
       let value = opts?.value ?? "";
       const on = {};
+      // Its focus() takes the keyboard from the board's handles and the
+      // other inputs, as herdr's does.
       const input = {
         on: (event, fn) => ((on[event] = fn), true), value: () => value, set_value: (v) => (value = v),
-        focus: () => on.focus?.({}, { notify() {} }), blur: () => on.blur?.({}, { notify() {} }),
+        focus: () => {
+          for (const h of host.handles) h.held = false;
+          for (const other of host.inputs) if (other !== input) other.blur();
+          on.focus?.({}, { notify() {} });
+        },
+        blur: () => on.blur?.({}, { notify() {} }),
       };
       host.inputs.push(input);
       return input;
@@ -1609,29 +1621,34 @@ async function settle() {
   for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
 }
 
-// A fake cx; its timers run when a test calls fire() or tick().
+// A fake cx; its timers run when a test calls fire(), tick() or look().
 function fakeCx() {
   const cx = {
     later: [],
     every: [],
     // A handle that knows whether it has the keyboard: from its focus()
     // until a test says otherwise (handle.held = false).
+    // The board's handle, one of the host's handles: its focus() takes the
+    // keyboard from the others and from every input.
     focus_handle: () => {
+      const host = globalThis.__boardHost;
       const handle = {
         held: false,
         focus: () => {
+          for (const h of host.handles) h.held = false;
           handle.held = true;
-          globalThis.__boardHost.focusCalls++;
-          for (const input of globalThis.__boardHost.inputs ?? []) input.blur();
+          host.focusCalls++;
+          for (const input of host.inputs ?? []) input.blur();
         },
         is_focused: () => handle.held,
       };
+      host.handles.push(handle);
       return handle;
     },
     spawn: (fn) => Promise.resolve().then(() => fn(cx)),
     timer: {
       after: (ms, fn) => cx.later.push(fn),
-      every: (ms, fn) => cx.every.push(fn),
+      every: (ms, fn) => cx.every.push(Object.assign(fn, { ms })),
     },
     notify() {},
     stopped: 0,
@@ -1647,6 +1664,12 @@ function fakeCx() {
     },
     async tick() {
       for (const fn of cx.every) fn(cx);
+      await settle();
+    },
+    // One look of the copy's WATCH_MS timer, then what it queued.
+    async look() {
+      for (const fn of cx.every.filter((f) => f.ms === board.WATCH_MS)) fn(cx);
+      for (const fn of cx.later.splice(0)) fn(cx);
       await settle();
     },
   };
@@ -1750,7 +1773,8 @@ test("UI: a board copy that is not shown does not take the keyboard", async () =
 // Two board copies on one fake host, each loaded: the board layer's
 // (props { layer: true }) and one in a Board tab, the tab shown or not, in
 // the personal layout whose board layer shows `active`. `focused`: whether
-// the copy took the keyboard when it started.
+// the copy took the keyboard when it started; `as()` makes props() the
+// copy's own before the test drives it.
 async function twoCopies(active, tabShown) {
   memory.clear();
   memory.set("source", JSON.stringify("github"));
@@ -1759,13 +1783,14 @@ async function twoCopies(active, tabShown) {
   globalThis.__boardHost = host;
   const copies = { host };
   for (const [name, props] of [["layer", { layer: true }], ["tab", {}]]) {
+    host.copyProps = props;
     const before = host.focusCalls;
     const b = new board.default();
     const cx = fakeCx();
     b.init(props, cx);
     await settle();
     await host.answer("gh", ok(fixture("github-board.json")));
-    copies[name] = { b, cx, focused: host.focusCalls > before };
+    copies[name] = { b, cx, focused: host.focusCalls > before, as: () => (host.copyProps = props) };
   }
   return copies;
 }
@@ -1781,15 +1806,19 @@ test("UI: side by side, the layer's copy shows only while the layer shows the bo
     const { host, layer, tab } = await twoCopies(active, tabShown);
     assert.deepEqual({ layer: layer.focused, tab: tab.focused }, want, `who takes the keyboard: ${what}`);
     advance(3 * 60000);
+    layer.as();
     await layer.cx.tick();
     assert.equal(host.open("gh").length, Number(want.layer), `the layer's copy refreshes: ${what}`);
     while (host.open("gh").length) await host.answer("gh", ok(fixture("github-board.json")));
+    tab.as();
     await tab.cx.tick();
     assert.equal(host.open("gh").length, Number(want.tab), `the tab's copy refreshes: ${what}`);
   }
 });
 
 test("UI: the board's focus command gives the keyboard to a copy that shows, not to one that does not", async () => {
+  // herdr hands the command only to a copy that shows; the cases where none
+  // shows model the defence against a command that arrives after a switch.
   for (const [what, options, takes] of [
     ["a Board tab shown", { shown: true }, 1],
     ["a Board tab not shown", { shown: false }, 0],
@@ -1809,70 +1838,150 @@ test("UI: the board's focus command gives the keyboard to a copy that shows, not
   }
 });
 
-test("UI: herdr's props() say which copy is the layer's, else the props it started with", async () => {
-  const { b, host } = await openBoard({ shown: false, tree: layerLayout("board") });
-  assert.equal(b.isLayer(), false);
-  host.propsNow = { layer: true };
-  assert.equal(b.isLayer(), true, "props() say layer");
-  const started = await openBoard({ shown: false, tree: layerLayout("board"), props: { layer: true } });
-  assert.equal(started.b.isLayer(), true, "props() give none");
-  started.host.propsNow = { layer: false };
-  assert.equal(started.b.isLayer(), false, "props() win");
+test("UI: a throw while the board handles a command, or in its timer, is said once and ends neither", async () => {
+  memory.clear();
+  const host = fakeHost({ shown: true });
+  const commands = ["focus", "focus", "focus"];
+  host.nextCommand = () => (commands.length ? Promise.resolve(commands.shift()) : new Promise(() => {}));
+  globalThis.__boardHost = host;
+  const b = new board.default();
+  const cx = fakeCx();
+  b.init({}, cx);
+  b.handle.focus = () => {
+    throw new Error("focus broke");
+  };
+  await settle();
+  assert.equal(commands.length, 0, "every command was taken");
+  assert.deepEqual(host.notes.map((n) => [n.title, /focus broke/.test(n.body)]), [["Board: Befehl fehlgeschlagen", true]], "said once");
+  host.layout = () => {
+    throw new Error("layout broke");
+  };
+  await cx.look();
+  await cx.look();
+  const said = host.notes.filter((n) => n.title === "Board: Anzeige fehlgeschlagen");
+  assert.deepEqual(said.map((n) => /layout broke/.test(n.body)), [true], "the timer, said once");
 });
 
-test("UI: a copy that comes to show takes the keyboard once after the render, whoever showed it; not while its dialog or filter has it", async () => {
-  // A Board tab's copy whose tab becomes the shown one.
+test("UI: herdr's props() say which copy is the layer's; the props init got stand in only where it gives none", async () => {
+  const { b, host } = await openBoard({ shown: false, tree: layerLayout("board"), props: { layer: true } });
+  assert.equal(b.isLayer(), true);
+  host.copyProps = undefined;
+  assert.equal(b.isLayer(), true, "props() give none");
+  const tab = await openBoard({ tree: layerLayout("main") });
+  assert.equal(tab.b.isLayer(), false);
+});
+
+test("UI: the board's keyboard goes to the start dialog's message, else the filter being typed, else the board, whose keys a status menu takes", async () => {
+  const { b, cx, host } = await openBoard();
+  const taken = () => (b.handle.held ? "board" : b.modal?.inputFocused ? "message" : b.filtering ? "filter" : "none");
+  await press(b, cx, "s");
+  b.handle.held = false;
+  b.takeKeyboard();
+  assert.deepEqual([b.modal.kind, taken()], ["status", "board"], "the status menu");
+  await press(b, cx, "escape");
+  await openStart(b, cx);
+  b.handle.focus();
+  b.takeKeyboard();
+  assert.deepEqual([b.modal.field, taken()], ["message", "message"], "the start dialog on its message");
+  await press(b, cx, "tab");
+  b.takeKeyboard();
+  assert.deepEqual([b.modal.field, taken()], ["agent", "board"], "the start dialog on another field");
+  b.modal = null;
+  b.filterInput.focus();
+  b.handle.held = false;
+  b.takeKeyboard();
+  assert.equal(taken(), "filter", "the filter");
+  b.filterInput.blur();
+  b.takeKeyboard();
+  assert.equal(taken(), "board");
+  void host;
+});
+
+test("UI: a copy that comes to show takes the keyboard once, after its timer or its render saw it, whoever showed it, never rendered while hidden", async () => {
+  // A Board tab's copy: its tab away and back.
   const tab = await openBoard({ shown: false });
   const shownTab = (on) => (tab.host.panes = () => (on ? [{ pane: "p1", mod: "board", tab: "t1" }] : []));
   const before = tab.host.focusCalls;
+  await tab.cx.look();
   shownTab(true);
-  tab.b.render(tab.cx);
-  assert.equal(tab.host.focusCalls, before, "not during the render");
-  await tab.cx.fire();
-  assert.equal(tab.host.focusCalls, before + 1, "after it");
-  tab.b.render(tab.cx);
+  await tab.cx.look();
+  assert.equal(tab.host.focusCalls, before + 1, "the timer saw it");
+  await tab.cx.look();
   tab.b.render(tab.cx);
   await tab.cx.fire();
   assert.equal(tab.host.focusCalls, before + 1, "once");
   shownTab(false);
+  await tab.cx.look();
+  shownTab(true);
   tab.b.render(tab.cx);
+  await tab.cx.fire();
+  assert.equal(tab.host.focusCalls, before + 2, "or the render, back again");
+  shownTab(false);
+  await tab.cx.look();
   shownTab(true);
   tab.b.render(tab.cx);
   shownTab(false);
   await tab.cx.fire();
-  assert.equal(tab.host.focusCalls, before + 1, "only where it still shows");
+  assert.equal(tab.host.focusCalls, before + 2, "only where it still shows");
   // The layer's copy shown by a layout change, with no board.focus.
   const layer = await openBoard({ shown: false, tree: layerLayout("main"), props: { layer: true } });
   const at = layer.host.focusCalls;
-  layer.b.render(layer.cx);
+  await layer.cx.look();
   layer.host.tree = layerLayout("board");
-  layer.b.render(layer.cx);
-  await layer.cx.fire();
-  assert.equal(layer.host.focusCalls, at + 1, "the layer's copy");
-  layer.b.render(layer.cx);
-  await layer.cx.fire();
-  assert.equal(layer.host.focusCalls, at + 1, "once");
-  // A dialog or the filter keeps the keyboard.
-  for (const busy of [(b, cx) => press(b, cx, "s"), (b) => (b.filtering = true)]) {
-    const copy = await openBoard({ shown: false, tree: layerLayout("main"), props: { layer: true } });
-    copy.b.render(copy.cx);
-    await busy(copy.b, copy.cx);
-    assert.ok(copy.b.modal || copy.b.filtering, `${busy}`);
-    copy.host.tree = layerLayout("board");
-    const was = copy.host.focusCalls;
-    copy.b.render(copy.cx);
-    await copy.cx.fire();
-    assert.equal(copy.host.focusCalls, was, `${busy}`);
+  await layer.cx.look();
+  await layer.cx.look();
+  assert.equal(layer.host.focusCalls, at + 1, "the layer's copy, once");
+  // With the status menu open the board takes its keys; with the start
+  // dialog on its message, the message; the filter, the filter.
+  for (const [what, open, where] of [
+    ["the status menu", (b, cx) => press(b, cx, "s"), (b) => b.handle.held],
+    ["the start dialog", (b, cx) => openStart(b, cx), (b) => b.modal.inputFocused && !b.handle.held],
+    ["the filter", (b) => b.filterInput.focus(), (b) => b.filtering && !b.handle.held],
+  ]) {
+    const copy = await openBoard({ shown: true, tree: layerLayout("main") });
+    const show = (on) => (copy.host.panes = () => (on ? [{ pane: "p1", mod: "board", tab: "t1" }] : []));
+    await open(copy.b, copy.cx);
+    show(false);
+    for (const h of copy.host.handles) h.held = false;
+    await copy.cx.look();
+    show(true);
+    await copy.cx.look();
+    assert.ok(where(copy.b), what);
   }
 });
 
+test("UI: shown again after a focus moved while it was hidden, the layer's board stays: b, b, another tab, b", async () => {
+  const { host, cx, b } = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board") });
+  b.render(cx);
+  await cx.fire();
+  host.tree = layerLayout("main");
+  await cx.look();
+  host.focus = { ...host.focus, tab: "t2", pane: "p2" };
+  host.tree = layerLayout("board");
+  b.render(cx);
+  await cx.fire();
+  assert.deepEqual(host.runs, [], "shown by a render first");
+  host.tree = layerLayout("main");
+  await cx.look();
+  host.focus = { ...host.focus, tab: "t3", pane: "p3" };
+  host.tree = layerLayout("board");
+  await cx.look();
+  b.render(cx);
+  await cx.fire();
+  assert.deepEqual(host.runs, [], "or seen by the timer first");
+  host.focus = { ...host.focus, tab: "t4", pane: "p4" };
+  b.render(cx);
+  await cx.fire();
+  assert.deepEqual(host.runs, tabAgain("p4"), "a change after that still leaves");
+});
+
 test("UI: Enter to a session from the shown layer's board shows the tab's content before going to the session; behind the tab or in a tab it only goes", async () => {
-  for (const [props, active, before] of [
-    [{ layer: true }, "board", SHOW_TAB],
-    [{ layer: true }, "main", []],
-    [{}, "board", []],
+  for (const [props, active, tabShown, before] of [
+    [{ layer: true }, "board", false, SHOW_TAB],
+    [{ layer: true }, "main", false, []],
+    [{}, "main", true, []],
   ]) {
-    const { b, cx, host } = await openBoard({ props, shown: false, tree: layerLayout(active) });
+    const { b, cx, host } = await openBoard({ props, shown: tabShown, tree: layerLayout(active) });
     host.spaceList = [...host.spaceList, sessionSpace];
     await press(b, cx, "enter");
     await press(b, cx, "enter");
@@ -1880,16 +1989,22 @@ test("UI: Enter to a session from the shown layer's board shows the tab's conten
   }
 });
 
-test("UI: Enter to a session that cannot be shown says which space and tab", async () => {
-  const { b, cx, host } = await openBoard();
-  host.spaceList = [...host.spaceList, sessionSpace];
-  host.run = (name) => {
-    throw new Error(`${name} broke`);
-  };
-  await press(b, cx, "enter");
-  await press(b, cx, "enter");
-  assert.deepEqual(host.notes.map((n) => [n.title, n.level]), [["Sitzung nicht gezeigt: Space s5, Tab t5", "error"]]);
-  assert.match(host.notes[0].body, /space.select broke/);
+test("UI: Enter to a session that cannot be shown names its space and tab as one sees them, else by id", async () => {
+  for (const [what, gone, title] of [
+    ["names", false, "Sitzung nicht gezeigt: Space „y“, Tab „tender#3004 feat(api): page through long lists“"],
+    ["ids", true, "Sitzung nicht gezeigt: Space „s5“, Tab „t5“"],
+  ]) {
+    const { b, cx, host } = await openBoard();
+    host.spaceList = [...host.spaceList, sessionSpace];
+    host.run = (name) => {
+      if (gone) host.spaceList = [];
+      throw new Error(`${name} broke`);
+    };
+    await press(b, cx, "enter");
+    await press(b, cx, "enter");
+    assert.deepEqual(host.notes.map((n) => [n.title, n.level]), [[title, "error"]], what);
+    assert.match(host.notes[0].body, /space.select broke/);
+  }
 });
 
 test("UI: Esc closes the details, then the notice, then clears the filter, and then shows the tab's content again from the shown layer's board; in a tab it does nothing", async () => {
@@ -1913,48 +2028,53 @@ test("UI: Esc closes the details, then the notice, then clears the filter, and t
   }
 });
 
-test("UI: a press outside the shown layer's board shows the tab's content after the press, any button, with the keyboard back only if the board had it; a press inside, or one in a tab's board, does not", async () => {
+test("UI: a press outside the shown layer's board shows the tab's content after the press, any button; the pane gets the keyboard if the board still has it then", async () => {
   const { b, cx, host } = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board") });
   const root = byId(b.render(cx), "board");
+  await cx.fire();
   const [outside] = root.with.on_mouse_down_out;
+  const press = (button = "left") => outside({ button, position: { x: 150, y: 300 } }, cx);
   for (const button of ["left", "right", "middle"]) {
-    outside({ button, position: { x: 150, y: 300 } }, cx);
+    press(button);
     assert.deepEqual(host.runs, [], "not during the press");
     await cx.fire();
     assert.deepEqual(host.runs.splice(0), SHOW_TAB, `after a ${button} press, the board having the keyboard`);
   }
+  b.filterInput.focus();
+  press();
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "its filter having it");
+  b.filterInput.blur();
+  await openStart(b, cx);
+  press();
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "the start dialog's message having it (a press on the tab bar)");
+  b.modal = null;
+  b.handle.focus();
+  press();
   b.handle.held = false;
-  b.filtering = true;
-  outside({ button: "left", position: { x: 150, y: 300 } }, cx);
-  b.filtering = false;
   await cx.fire();
-  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "its filter having the keyboard");
-  outside({ button: "left", position: { x: 150, y: 300 } }, cx);
-  b.handle.held = true;
-  await cx.fire();
-  assert.deepEqual(host.runs.splice(0), [SHOW_TAB[0]], "the keyboard elsewhere at the press stays there");
-  outside({ button: "left", position: { x: 350, y: 20 } }, cx);
+  assert.deepEqual(host.runs.splice(0), [SHOW_TAB[0]], "the press took the keyboard (Files, Changes, the leader's popup): it keeps it");
+  b.handle.focus();
+  press();
   host.tree = layerLayout("main");
   await cx.fire();
   assert.deepEqual(host.runs.splice(0), [], "the board button's press already showed the tab");
-  outside({ button: "left", position: { x: 150, y: 300 } }, cx);
+  press();
   await cx.fire();
   assert.deepEqual(host.runs.splice(0), [], "behind the tab's content");
-  outside({ button: "left", position: { x: 350, y: 20 } }, cx);
   host.tree = layerLayout("board");
-  await cx.fire();
-  assert.deepEqual(host.runs.splice(0), [], "the board button's press that shows the board");
   root.with.on_mouse_down[1]({ button: "left" }, cx);
   await cx.fire();
   assert.deepEqual(host.runs.splice(0), [], "a press inside");
-  const inTab = await openBoard({ tree: layerLayout("board") });
+  const inTab = await openBoard({ tree: layerLayout("main") });
   byId(inTab.b.render(inTab.cx), "board").with.on_mouse_down_out[0]({ button: "left", position: { x: 150, y: 300 } }, inTab.cx);
   await inTab.cx.fire();
   assert.deepEqual(inTab.host.runs, [], "a Board tab's board");
 });
 
-// The layer's shown board on the fake host, rendered once (as herdr does
-// when it shows), its focus `focus` (by default the host's).
+// The layer's shown board on the fake host; render() draws it, after()
+// runs what it queued and returns the commands run since.
 async function shownLayerBoard() {
   const opened = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board") });
   const after = async () => {
@@ -1968,12 +2088,6 @@ const tabAgain = (pane) => [["layout.select", { stack: "work-stack", child: "mai
 test("UI: while the layer's board shows, a focus on another space, tab or pane shows the tab's content after the render; the terminal and other fields do not count", async () => {
   const { host, cx, render, after } = await shownLayerBoard();
   host.focus = { space: "s1", tab: "t1", pane: "p1", terminal: "t1", cwd: "/a", agent: null, shown: null, selection: null };
-  host.tree = layerLayout("main");
-  render();
-  host.focus = { ...host.focus, tab: "t2", pane: "p2" };
-  render();
-  assert.deepEqual(await after(), [], "the tab's content shows");
-  host.tree = layerLayout("board");
   render();
   render();
   assert.deepEqual(await after(), [], "the focus the board was shown with");
@@ -1982,7 +2096,7 @@ test("UI: while the layer's board shows, a focus on another space, tab or pane s
     render();
     assert.deepEqual(await after(), [], `no switch on a change of ${Object.keys(change)}`);
   }
-  for (const change of [{ tab: "t1", pane: "p1" }, { space: "s2" }, { pane: "p3" }, { tab: "t3" }]) {
+  for (const change of [{ tab: "t2", pane: "p2" }, { space: "s2" }, { pane: "p3" }, { tab: "t3" }]) {
     host.focus = { ...host.focus, ...change };
     render();
     assert.deepEqual(host.runs, [], "not from the render itself");
@@ -1990,21 +2104,6 @@ test("UI: while the layer's board shows, a focus on another space, tab or pane s
     render();
     assert.deepEqual(await after(), [], "once");
   }
-  host.tree = layerLayout("main");
-  render();
-  host.focus = { space: "s1", tab: "t1", pane: "p1", terminal: "t1" };
-  render();
-  host.tree = layerLayout("board");
-  render();
-  assert.deepEqual(await after(), [], "shown again, the board takes the focus of that moment, not the one it left with");
-  host.focus = { ...host.focus, tab: "t2" };
-  render();
-  assert.deepEqual(await after(), tabAgain("p1"), "and a change from it shows the tab");
-  host.tree = layerLayout("main");
-  render();
-  host.tree = layerLayout("board");
-  render();
-  await after();
   host.focus = { ...host.focus, tab: "t4" };
   render();
   assert.equal(cx.later.length, 1, "a switch is queued");
@@ -2012,32 +2111,10 @@ test("UI: while the layer's board shows, a focus on another space, tab or pane s
   assert.deepEqual(await after(), [], "and goes only where the layer still shows the board");
 });
 
-test("UI: a focus change leaves the layer only from the layer's copy; a Board tab's copy does nothing", async () => {
-  const { b, cx, host } = await openBoard({ tree: layerLayout("board") });
-  b.render(cx);
-  host.focus = { ...host.focus, tab: "t2", pane: "p2" };
-  b.render(cx);
-  await cx.fire();
-  assert.deepEqual(host.runs, []);
-});
-
-test("UI: a copy started under herdr-app check takes no keyboard when it draws", async () => {
-  memory.clear();
-  const host = fakeHost({ shown: true });
-  host.checking = () => true;
-  globalThis.__boardHost = host;
-  const b = new board.default();
-  const cx = fakeCx();
-  b.init({}, cx);
-  b.render(cx);
-  await cx.fire();
-  assert.equal(host.focusCalls, 0);
-});
-
 test("UI: no focus at all is never the one compared with; before a first focus, the first focus becomes it", async () => {
-  const { host, render, after } = await shownLayerBoard();
+  const { host, cx, render, after } = await shownLayerBoard();
   host.tree = layerLayout("main");
-  render();
+  await cx.look();
   host.tree = layerLayout("board");
   host.focus = null;
   render();
@@ -2053,6 +2130,24 @@ test("UI: no focus at all is never the one compared with; before a first focus, 
   host.focus = { ...host.focus, pane: "p2" };
   render();
   assert.deepEqual(await after(), tabAgain("p2"));
+});
+
+test("UI: a copy started under herdr-app check takes no keyboard when it draws", async () => {
+  memory.clear();
+  const host = fakeHost({ shown: true });
+  host.checking = () => true;
+  globalThis.__boardHost = host;
+  const b = new board.default();
+  const cx = fakeCx();
+  b.init({}, cx);
+  b.render(cx);
+  await cx.fire();
+  assert.equal(host.focusCalls, 0);
+});
+
+test("UI: a hidden board copy is never rendered in these tests, as herdr draws only a copy that shows", async () => {
+  const { b, cx } = await openBoard({ shown: false });
+  assert.throws(() => b.render(cx), /herdr renders only a board copy that shows/);
 });
 
 test("UI: number keys beyond the views do nothing; [ and ] go back and forth, also with Control+Alt, not with Control alone", async () => {
@@ -3417,13 +3512,16 @@ test("UI: a failed switch of the board layer says which stack and child; a faile
   failing = "pane.focus";
   active = "board";
   press();
+  host.focus = { space: "s1", tab: "t1", pane: null, terminal: "t7" };
+  press();
   assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [
     ['Could not show "board" in "work-stack"', "layout.select broke", "error"],
     ['Could not show "main" in "work-stack"', "layout.select broke", "error"],
     ["Could not give the board the keyboard", "board.focus broke", "error"],
-    ["Could not give the pane the keyboard", "pane.focus broke", "error"],
+    ["Could not give pane p1 the keyboard", "pane.focus broke", "error"],
+    ["Could not give terminal t7 the keyboard", "pane.focus broke", "error"],
   ]);
-  assert.deepEqual(host.runs, [SHOW_BOARD[0], SHOW_TAB[0]], "the switches that did not fail");
+  assert.deepEqual(host.runs, [SHOW_BOARD[0], SHOW_TAB[0], SHOW_TAB[0]], "the switches that did not fail");
 });
 
 test("UI: a press on the board button whose switch throws says so", async () => {

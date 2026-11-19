@@ -1,7 +1,8 @@
 // The start dialog: opens an item's session in its checkout, on a machine
 // and with an agent chosen here, as a new space or tab, with a first message
 // to edit. It is b.modal = { kind: "start", view, item, settings, input
-// (the message's InputState, made for this dialog), field, agents, agent,
+// (the message's InputState, made for this dialog), field, inputFocused,
+// agents, agent,
 // agentsError, machines, machine, machineNote, agentNote, notes, open,
 // busy, error }.
 
@@ -41,9 +42,15 @@ export const startModal = {
       kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
     };
+    // inputFocused: whether the message has the keyboard
+    // (Board.boardHasKeyboard).
     input.on("focus", (_e, cx) => {
+      m.inputFocused = true;
       if (b.modal === m) m.field = "message";
       cx.notify();
+    });
+    input.on("blur", () => {
+      m.inputFocused = false;
     });
     input.on("submit", (_e, cx) => startModal.start(b, cx));
     b.modal = m;
@@ -153,7 +160,7 @@ export const startModal = {
     const agent = m.agents[m.agent];
     return backdrop(
       t,
-      "start-layer",
+      "start-backdrop",
       v_flex()
         .id("start-dialog")
         .w(600)

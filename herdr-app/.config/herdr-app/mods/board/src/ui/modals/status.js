@@ -11,7 +11,7 @@ export const statusModal = {
     const m = b.modal;
     return backdrop(
       t,
-      "status-layer",
+      "status-backdrop",
       v_flex()
         .id("status-menu")
         .w(280)
