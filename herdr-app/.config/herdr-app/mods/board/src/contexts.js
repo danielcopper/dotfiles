@@ -5,10 +5,11 @@
 
 import { TEAM_VIEWS, githubViews } from "./config.js";
 
-// The sources in the toggle's order.
+// The sources in the toggle's order; with none remembered, the board shows
+// the first one there is.
 export const SOURCES = [
-  { id: "azure", name: "Azure" },
   { id: "github", name: "GitHub" },
+  { id: "azure", name: "Azure" },
 ];
 
 // A team view's name, as the switch shows it.

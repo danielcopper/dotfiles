@@ -584,10 +584,11 @@ export const kindOf = (view) => KINDS[viewKind(view)] ?? null;
 // context is a team, with its views (Sprint, Backlog), or a project's pull
 // requests; on GitHub each view of views.json is one.
 
-// The sources in the toggle's order.
+// The sources in the toggle's order; with none remembered, the board shows
+// the first one there is.
 export const SOURCES = [
-  { id: "azure", name: "Azure" },
   { id: "github", name: "GitHub" },
+  { id: "azure", name: "Azure" },
 ];
 
 // A team view's name, as the switch shows it.

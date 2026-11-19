@@ -449,9 +449,9 @@ test("start settings: defaults < start < the view's start < the repo's entry", (
 
 // ---- The top bar's sources and contexts ----
 
-test("the sources come in the toggle's order, Azure first, each with its contexts in views.json's order", () => {
+test("the sources come in the toggle's order, GitHub first, each with its contexts in views.json's order", () => {
   const config = sampleConfig();
-  assert.deepEqual(board.sourcesOf(config).map((s) => s.id), ["azure", "github"]);
+  assert.deepEqual(board.sourcesOf(config).map((s) => s.id), ["github", "azure"]);
   assert.deepEqual(board.contextsOf(config, "azure").map((c) => [c.id, c.kind, c.name]), [
     ["azure:team:Example Project/Example Team", "team", "Example Team"],
     ["azure:prs:Example Project", "prs", "PRs · Example Project"],
@@ -485,7 +485,7 @@ test("each context shows one view, with an id and a kind; an Azure view's kind s
     { text: "Sprint-Ansicht folgt" }, { text: "Backlog folgt" }, { text: "PR-Ansicht folgt" }, { shape: "board" },
   ]);
   assert.deepEqual(board.viewsOf(config).map((v) => v.id), [
-    "azure:team:Example Project/Example Team:sprint", "azure:team:Example Project/Example Team:backlog", "azure:prs:Example Project", "mine", "prs", "other",
+    "mine", "prs", "other", "azure:team:Example Project/Example Team:sprint", "azure:team:Example Project/Example Team:backlog", "azure:prs:Example Project",
   ]);
   assert.equal(board.kindOf({ source: "jira", layout: "board" }), null);
 });
@@ -1654,8 +1654,15 @@ async function press(b, cx, k, extra) {
 const shiftL = { char: "L", modifiers: { shift: true } };
 const confirmed = (id) => ok(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id } } } }));
 
-test("UI: on the shipped views.json the board opens on Azure, its team's Sprint first, and runs nothing", async () => {
+test("UI: on the shipped views.json, with nothing remembered, the board opens on GitHub, its first view", async () => {
   const { b, host } = await bootBoard({ config: shippedConfig(), stored: {} });
+  assert.deepEqual([b.source().id, b.context().id], ["github", "github:mine"]);
+  assert.equal(host.open("gh").length, 1, "and loads it");
+  assert.deepEqual(byId(b.render(), "source").kids.map((k) => k.with.id[0]), ["source-github", "source-azure"], "the toggle's order");
+});
+
+test("UI: on the shipped views.json with Azure remembered, the board opens on its team's Sprint and runs nothing", async () => {
+  const { b, host } = await bootBoard({ config: shippedConfig(), stored: { source: "azure" } });
   assert.deepEqual([b.source().id, b.context().kind, b.teamViewOf(b.context())], ["azure", "team", "sprint"]);
   assert.deepEqual(b.contexts().map((c) => c.kind), ["team", "prs"]);
   assert.deepEqual([host.calls, host.asked], [[], []], "no gh and no az");

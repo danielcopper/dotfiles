@@ -277,7 +277,7 @@ herdr-app`. Which files of the package git tracks is set in the root
   repo) tests what the leader binds and what Tab, shift-Tab and Esc then
   do, in the leader and on their way to tmux. It needs node.
 - **The board (`mods/board/`) shows my own work.** A top bar toggles between
-  its sources, Azure and GitHub, and shows one tab per context of the shown
+  its sources, GitHub and Azure, and shows one tab per context of the shown
   source, as `mods/board/views.json` sets them: on Azure my team, with a
   switch between its Sprint and its Backlog, and the pull requests of its
   project; on GitHub "Meine Aufgaben" (my issues on the Tender project's
