@@ -37,7 +37,7 @@ implementer's N-th fix dispatch; a change gets at most five. A fix round reviews
 with the user first (`git range-diff`). Every agent starts fresh.
 
 The **findings to judge** are those the fix-round task sent to the implementer, plus earlier ones a verdict left not or
-partially addressed — not those the user ruled later or drop, or has not ruled yet.
+partially addressed — not those waiting on the user's list.
 
 Rounds 1 and 2:
 
@@ -49,9 +49,9 @@ Rounds 1 and 2:
 - A specialist — when its trigger hits the delta.
 
 From round 3 each prompt says **verify only**: an agent gives a verdict on the findings to judge that are its own to
-verify and reports Critical or Important breakage in the lines the fix wrote; anything else it notices goes on the
-user's list. `reviewer` always runs and verifies every finding `architecture-reviewer` and `prose-reviewer` did not
-raise; those two run only for their own findings; specialists do not run.
+verify and reports Critical or Important breakage in the lines the fix wrote; anything else it notices goes under
+`### Noticed` and is routed like any finding. `reviewer` always runs and verifies every finding `architecture-reviewer`
+and `prose-reviewer` did not raise; those two run only for their own findings; specialists do not run.
 
 After round 5 the loop stops: every open finding goes on the user's list with the lead's recommendation. One the user
 rules fix now gets one fix dispatch and one verify-only pass by `reviewer` alone; whatever that leaves open goes back on
@@ -66,26 +66,29 @@ is a task with the lead's recommendation, and no re-review runs unless the user 
 Merge all findings into one list, each tagged with its agent. Every agent grades on one scale — Critical, Important
 or Minor, with a score from 0 to 100 and nothing below 50 reported — as its definition under `agents/` sets.
 
-Each finding is routed:
+On a change of our own, the lead checks each finding at its artifact — the cited file:line, quoted text or command —
+and it is fixed as recommended, without asking the user; fix rounds run without a go. Only what needs the user goes on
+**the user's list**:
 
-- **Critical or Important on the change** → the implementer and a fix round (after the cap, the user's list), once the
-  lead has checked it at the artifact — the cited file:line, quoted text or command. One that does not hold there, or
-  cannot be confirmed, goes on the user's list, marked "not confirmed".
-- **Minor on the change** → the user's list: fix now, later, or drop.
+- **On the change** (Critical, Important or Minor) → the implementer and the next fix round (after the cap, the user's
+  list). It goes on the user's list instead when its fix changes behaviour or touches a decision recorded in the issue,
+  or when the lead recommends deferring or dropping it, with the reason; one that does not hold at its artifact, or
+  cannot be confirmed, is listed marked "not confirmed".
 - **By-catch** (tagged `pre-existing`, or listed by the implementer) goes by its class, as
   [`agents/implementer.md`](agents/implementer.md), "## Scope", defines small:
   - **Small** → fixed in this change as its own commit; the PR body names it in one sentence.
-  - **Changes behaviour** → ask the user, recommending a fix here; a yes becomes a decision of the issue.
+  - **Changes behaviour** → the user's list, recommending a fix here; a yes becomes a decision of the issue.
   - **Large** → the user's list: fix here, open an issue, or drop. Nobody proposes an issue by default.
 
-Whatever the user rules fix now — a Minor, a not-confirmed finding, a behaviour change they said yes to, a large
-by-catch ruled fix here — goes to the implementer as an Important finding does.
+The user's list is one list, each entry with the lead's recommendation, handed to the user when the review loop ends;
+it stops the run earlier only when the work cannot go on without an answer. Whatever the user rules fix now goes to the
+implementer as a fix dispatch, and its delta is reviewed as the next fix round, or after the cap as "Fix rounds" says.
 
-Findings become tasks in groups: those sent to the implementer, one task per fix round; plain Minor findings and
-`### Noticed` items, one task per theme, deduplicated, ruled as a whole or split; large by-catch, behaviour-changing
-by-catch, not-confirmed findings and the cap's leftovers, each a group of its own with its own choices. A group names
-each finding on a line of its own; every finding stays in its saved file (`skills/implement/dispatch.md`). None is
-dropped.
+Findings become tasks in groups: those sent to the implementer, one task per fix round; on the user's list, findings
+the lead recommends deferring or dropping, one task per theme, deduplicated, ruled as a whole or split; findings whose
+fix changes behaviour or touches a decision, not-confirmed findings, behaviour-changing by-catch, large by-catch and the
+cap's leftovers, each a group of its own with its own choices. A group names each finding on a line of its own; every
+finding stays in its saved file (`skills/implement/dispatch.md`). None is dropped.
 
 **Someone else's PR** (`/pr-review`) has no implementer: every finding, `pre-existing` included, is a task on the
 user's list, and a `pre-existing` finding's comment asks the contributor whether they fix it in their PR.

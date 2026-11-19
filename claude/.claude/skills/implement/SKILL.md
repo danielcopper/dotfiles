@@ -64,11 +64,12 @@ into the issue as `repo-config.md`, "Questions and decisions in an issue", says,
 ## 6. Review
 
 Run the review agents [`review-agents.md`](../../review-agents.md) names, per `dispatch.md`. Re-read `review-agents.md`
-before each round: it routes the findings, including the check of each Critical or Important one at its artifact, and
-sets the fix rounds and their cap.
+before each round: it routes the findings, including the check of each one at its artifact, and sets the fix rounds
+and their cap. Fix rounds run without the user's go. The user's list goes to the user when the loop ends, and the run
+goes on while it waits; a ruling to fix is dispatched as `review-agents.md` says.
 
-*Done when:* every finding sent to the implementer is addressed or, after the round cap, on the user's list, and the
-user has ruled on that list.
+*Done when:* every finding sent to the implementer is addressed or, after the round cap, on the user's list, and that
+list is with the user.
 
 ## 7. Gate evidence, once
 
@@ -106,10 +107,11 @@ change, and send it as one message the user runs start to finish: the starting s
 result after each step, and what to report back. Then stop for the user's verdict. *(convention)* Then add one
 sentence with the result to the PR body, written as `public_text_drafts` says.
 
-Once the user gate has passed, hand the PR over to the owner, who merges it (`merge_policy`, `repo-config.md`), and
-stop.
+Once the user gate has passed and the user has ruled on the user's list (step 6), its fixes in, hand the PR over to
+the owner, who merges it (`merge_policy`, `repo-config.md`), and stop.
 
-*Done when:* green, the user gate passed *(convention)* with its result in the PR body, and the PR handed over.
+*Done when:* green, the user gate passed *(convention)* with its result in the PR body, the user's list ruled with its
+fixes in, and the PR handed over.
 
 ## 10. Close the loop
 

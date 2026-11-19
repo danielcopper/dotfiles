@@ -38,6 +38,7 @@ Execute the implement pipeline steps 2–10 with these epic-mode adjustments:
 
 - **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user. In a convention repo "no open questions" means no open question under `## To decide`. Step 3's `/grill-with-docs` offer still applies to the sub-issue.
 - **Merge between issues**: the sub-issue's PR reaches green and merges (per merge policy) **before** the next sub-issue starts — the next worktree branches from updated main. PRs stay small; every merge leaves main runnable.
+- **Review findings** follow implement step 6: the user's list is no question that stops the line; it holds only the issue's handover, as the user gate does.
 - **Issues needing the user** (the step-2 split): prepare everything up to the blocking point, present exactly what's needed (one verification, one decision), and continue with the next autonomous sub-issue while waiting where the order allows.
 
 Between issues: reconcile the board where there is one, give the user a one-line status ("#N merged, next: #M"), and continue.
