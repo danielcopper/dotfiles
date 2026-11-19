@@ -57,6 +57,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import traceback
 from pathlib import Path
 from typing import NamedTuple
 
@@ -130,6 +131,8 @@ def frontmatter(path):
 def repo_skills():
     """All skill directory names, and the model-invoked ones among them."""
     every, model = [], []
+    if not SKILLS.is_dir():
+        raise Stop(f"no such directory: {SKILLS}")
     for d in sorted(SKILLS.iterdir()):
         skill_md = d / "SKILL.md"
         if not skill_md.is_file():
@@ -156,6 +159,9 @@ def load_cases(model):
     fires_in = {s: [] for s in model}
     quiet_in = {s: [] for s in model}
     for i, case in enumerate(cases, 1):
+        if not isinstance(case, dict):
+            problems.append(f"case #{i}: not a table")
+            continue
         name = case.get("name")
         where = f"case {name!r}" if isinstance(name, str) else f"case #{i}"
         extra = set(case) - {"name", "prompt", "fires", "quiet"}
@@ -172,7 +178,9 @@ def load_cases(model):
         quiet = case.get("quiet", [])
         if fires is None and not quiet:
             problems.append(f"{where}: names neither fires nor quiet")
-        if fires is not None:
+        if fires is not None and not isinstance(fires, str):
+            problems.append(f'{where}: fires must be a skill name or "none"')
+        elif fires is not None:
             if fires != "none" and fires not in known:
                 problems.append(f"{where}: fires {fires!r} is no model-invoked skill")
             elif fires in fires_in:
@@ -313,14 +321,18 @@ def isolation_probe(every, binary):
     try:
         env = box.env()
         script = 'printf "%s\\n" "$HOME"; ls -A "$1"; echo ---; env; : > "$1/$2"'
-        proc = subprocess.run(
-            box.argv(["/bin/sh", "-c", script, "sh", str(box.real_home), canary]),
-            check=False,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        try:
+            proc = subprocess.run(
+                box.argv(["/bin/sh", "-c", script, "sh", str(box.real_home), canary]),
+                check=False,
+                env=env,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            raise Stop("isolation probe timed out after 30s") from None
         if proc.returncode != 0:
             raise Stop(
                 f"isolation probe exited {proc.returncode}: {proc.stderr.strip()}"
@@ -482,12 +494,15 @@ def run_case(case, every, binary, args):
                 env=box.env(creds),
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=args.timeout,
                 stdin=subprocess.DEVNULL,
             )
             out, err, code = proc.stdout, proc.stderr, proc.returncode
         except subprocess.TimeoutExpired as e:
-            out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+            out = e.stdout or ""
+            if isinstance(out, bytes):
+                out = out.decode(errors="replace")
             err, code = f"after {args.timeout}s", None
         verdict = grade(out.splitlines(), case, every, code, err)
         written = box.written()
@@ -539,6 +554,11 @@ def main():
                 f"{TASK}: {len(cases)} cases cover {len(model)} model-invoked skills; isolation probe passed"
             )
             return 0
+        if args.keep:
+            try:
+                args.keep.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise Stop(f"--keep: {e}") from None
         _, source = credential_env()
         version = subprocess.run(
             [str(binary), "--version"], check=False, capture_output=True, text=True
@@ -547,8 +567,6 @@ def main():
             f"{TASK}: {len(chosen)} of {len(cases)} cases, {args.runs} run(s) each, claude {version}, "
             f"--model {args.model}, credential: {source}"
         )
-        if args.keep:
-            args.keep.mkdir(parents=True, exist_ok=True)
         failed, total_cost, unknown_cost, resolved = [], 0.0, 0, set()
         for case in chosen:
             passes, notes = 0, []
@@ -559,9 +577,12 @@ def main():
                 else:
                     total_cost += verdict.cost
                 if args.keep:
-                    (args.keep / f"{case['name']}-{n}.jsonl").write_text(
-                        out, encoding="utf-8"
-                    )
+                    try:
+                        (args.keep / f"{case['name']}-{n}.jsonl").write_text(
+                            out, encoding="utf-8"
+                        )
+                    except OSError as e:
+                        raise Stop(f"--keep: {e}") from None
                 resolved.add(verdict.model)
                 if verdict.status == ISOLATION:
                     raise Stop(f"{case['name']}: isolation broken: {verdict.note}")
@@ -602,6 +623,18 @@ def main():
         return 0
     except Stop as e:
         print(f"{TASK}: {e}", file=sys.stderr)
+        return 2
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+    ):
+        # Exit 1 means a case failed; a crash must not read as one.
+        traceback.print_exc()
+        print(f"{TASK}: stopped by an unexpected error", file=sys.stderr)
         return 2
 
 
