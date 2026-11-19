@@ -49,7 +49,8 @@ class RoutesRetiredAgents(unittest.TestCase):
         for retired, replacement in ROUTED.items():
             with self.subTest(retired=retired):
                 out = spawn(retired)
-                self.assertIsNotNone(out)
+                assert out is not None, f"{retired} was not denied"
+                self.assertEqual(out["hookEventName"], "PreToolUse")
                 self.assertEqual(out["permissionDecision"], "deny")
                 self.assertIn(f'subagent_type "{replacement}"', out["permissionDecisionReason"])
 
