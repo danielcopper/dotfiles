@@ -98,9 +98,10 @@ rebase onto a moved main, `git -C <wt> push --force-with-lease`. *(convention)* 
 a missing `## Decisions` or an open question is fixed in the linked issue, and editing it re-runs the check; the other
 rules are fixed in the PR.
 
-At green, run the profile's `user_gate` where it applies: prepare it fully (state, exact steps, expected result) and stop
-for the user's verdict. *(convention)* Then add one sentence with the result to the PR body, drafted as
-`public_text_drafts` says.
+At green, run the profile's `user_gate` where it applies. Prepare it in full from the issue, its decisions and the
+change, and send it as one message the user runs start to finish: the starting state, the exact steps, the expected
+result after each step, and what to report back. Then stop for the user's verdict. *(convention)* Then add one
+sentence with the result to the PR body, drafted as `public_text_drafts` says.
 
 Merging follows `merge_policy` (`repo-config.md`), and only after the user gate.
 
