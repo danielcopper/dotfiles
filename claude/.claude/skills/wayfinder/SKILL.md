@@ -14,7 +14,7 @@ Every session ends in a decision, never a deliverable. The map is done when the 
 
 ## The map
 
-The map is one file per effort: `~/Memory/<repo>/wayfinder-<slug>.md`, `<repo>` as `~/.claude/skills/implement/repo-config.md` defines it. It never becomes GitHub issues. Its front matter follows `~/Memory/global/README.md`, like the other working files in `~/Memory/<repo>/`, and the repo index `~/Memory/<repo>/MEMORY.md` carries one line for it while the effort runs.
+The map is one file per effort: `~/Memory/<repo>/wayfinder-<slug>.md`, `<repo>` as `~/.claude/skills/implement/repo-config.md` defines it. It never becomes GitHub issues. Its front matter follows `~/Memory/global/README.md`, and the repo index `~/Memory/<repo>/MEMORY.md` carries one line for it with the marker `TIME-BOUND, delete when the PRD is published` (README, "TTL marker"); once `/to-prd` publishes the PRD, it archives the map.
 
 The map is read top-down: the low-resolution sections first, then a question's entry when you zoom in. A decision lives in exactly one place, its question's **Answer**; **Decisions so far** is the index that gists it by the question's title.
 
@@ -104,7 +104,7 @@ The user invokes with a loose idea.
 
 1. **Name the destination.** Grill with `grill-with-docs` to pin down what this map is finding its way to: the spec, decision, or change. Keep it bounded (one epic, not "all of V1"): a map scoped too wide plans questions that earlier answers invalidate. The destination fixes the scope, so it's settled first.
 2. **Map the frontier.** Grill again, **breadth-first** this time: across the whole space rather than deep on any one thread, still one question per message, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** (the way is already clear, the whole journey small enough for one session), there is no map to chart: stop and say the effort fits one session — `/grill-with-docs`, then `/to-prd` → `/to-issues`.
-3. **Write the map file**: Destination and Notes filled in, Decisions so far empty, the fog sketched into **Not yet specified**; add its line to the repo index.
+3. **Write the map file**: Destination and Notes filled in, Decisions so far empty, the fog sketched into **Not yet specified**; add its `TIME-BOUND` line to the repo index.
 4. **Add the questions you can specify now**, each with its type and what it is blocked by. Everything you can't yet specify stays in **Not yet specified**.
 5. **Fire the research.** Call the Skill tool with `research` for each research question; as each note lands, record its Answer and its line in Decisions so far.
 6. Stop: charting resolves no other question.
