@@ -11,6 +11,10 @@ Ask the questions one at a time, waiting for my feedback before continuing. Aski
 
 If a _fact_ can be found by exploring the environment — the codebase, the filesystem, the tools — look it up rather than asking me. The _decisions_, though, are mine — put each one to me and wait for my answer.
 
+When my answer sounds like a buzzword or a "should", ask what I would want if I did not have to justify it to anyone.
+
+We have reached a shared understanding when you can predict my answer to each of the next three questions you would ask. If after many questions you still cannot, stop: tell me something foundational is missing and offer to step back to it.
+
 Do not act on the plan until I confirm we have reached a shared understanding.
 
 </what-to-do>
