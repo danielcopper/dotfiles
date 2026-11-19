@@ -284,6 +284,15 @@ test("a bound key whose handling throws says so in a toast and goes no further",
   assert.deepEqual(host.closed, ["mod-leader"]);
 });
 
+test("a bound key whose handling throws outside its key's command says so in one toast too", async () => {
+  const { leader, cx, host } = await openLeader();
+  host.closeOverlay = () => {
+    throw new Error("closeOverlay broke");
+  };
+  await pressBound(leader, cx, "escape");
+  assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: Esc failed", "closeOverlay broke", "error"]]);
+});
+
 // A layout with a board layer showing `active` ("tab" or "b"), the
 // stack and its children named as no layout here names them.
 const layerLayout = (active) => ({ id: "root", type: "row", children: [{ id: "work", type: "column", children: [

@@ -1906,9 +1906,11 @@ test("UI: Esc closes the details, then the notice, then clears the filter, and t
   assert.deepEqual([host.runs.splice(0), b.filterText], [[], ""], "the filter");
   await press(b, cx, "escape");
   assert.deepEqual(host.runs.splice(0), SHOW_TAB, "the tab's content");
-  const inTab = await openBoard({ tree: layerLayout("main") });
-  await press(inTab.b, inTab.cx, "escape");
-  assert.deepEqual(inTab.host.runs, [], "a Board tab's board stays");
+  for (const active of ["main", "board"]) {
+    const inTab = await openBoard({ tree: layerLayout(active) });
+    await press(inTab.b, inTab.cx, "escape");
+    assert.deepEqual(inTab.host.runs, [], `a Board tab's board stays, the layer showing ${active}`);
+  }
 });
 
 test("UI: a press outside the shown layer's board shows the tab's content after the press, any button, with the keyboard back only if the board had it; a press inside, or one in a tab's board, does not", async () => {
@@ -2008,6 +2010,28 @@ test("UI: while the layer's board shows, a focus on another space, tab or pane s
   assert.equal(cx.later.length, 1, "a switch is queued");
   host.tree = layerLayout("main");
   assert.deepEqual(await after(), [], "and goes only where the layer still shows the board");
+});
+
+test("UI: a focus change leaves the layer only from the layer's copy; a Board tab's copy does nothing", async () => {
+  const { b, cx, host } = await openBoard({ tree: layerLayout("board") });
+  b.render(cx);
+  host.focus = { ...host.focus, tab: "t2", pane: "p2" };
+  b.render(cx);
+  await cx.fire();
+  assert.deepEqual(host.runs, []);
+});
+
+test("UI: a copy started under herdr-app check takes no keyboard when it draws", async () => {
+  memory.clear();
+  const host = fakeHost({ shown: true });
+  host.checking = () => true;
+  globalThis.__boardHost = host;
+  const b = new board.default();
+  const cx = fakeCx();
+  b.init({}, cx);
+  b.render(cx);
+  await cx.fire();
+  assert.equal(host.focusCalls, 0);
 });
 
 test("UI: no focus at all is never the one compared with; before a first focus, the first focus becomes it", async () => {
