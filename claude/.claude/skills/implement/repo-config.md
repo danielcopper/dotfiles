@@ -26,24 +26,32 @@ Each holds in every repo unless its profile departs from it under `defaults`.
 
 - **`merge_policy: user`** — the owner merges every PR, and this policy has no departure. Two layers block the merge
   paths a session reaches by shell:
-  - The hook `hooks/block_pr_merge.py`, a coarse filter that fails closed. It splits each Bash command into simple
-    commands at shell operators and newlines, and also checks the bodies of `bash -c` and the other shells, `eval`,
-    command substitutions and heredoc bodies. A simple command that names `gh`, `az`, `curl` or `wget` — also inside
-    a quoted string — is denied when a word in it mentions `merge`, `completed` or `auto-complete`, or `alias` with
-    `set` or `import`; when a word still expands at run time (an unquoted or double-quoted `$` or backtick, an
-    unquoted `{`, `*`, `?` or `[`, any backslash; gh's `{owner}`, `{repo}` and `{branch}` placeholders are fine); or
-    when it reads a request body from a file or stdin (an `@file` value, `--input`, `-T`). The read-only gh forms —
-    `pr view`, `list`, `status`, `checks` and `diff`, `issue view` and `list`, `search`, `run`, and `api` with no
-    method but GET and no fields — pass despite such a word, as long as gh is the command run (after wrappers such
-    as `env` or `timeout`), no other `gh`, `az`, `curl` or `wget` appears beside it, and nothing in them expands. `xargs` or
-    `parallel` in front of those commands is denied, and so is a command nested too deep, too long or holding too
-    many substitutions to check. False denials are accepted.
+  - The hook `hooks/block_pr_merge.py`, a coarse filter that fails closed. It judges the whole Bash command as one
+    text: backslash-newlines joined, every quote, backslash and `$'`/`$"` prefix removed, lowercased; it does not
+    split the command or read any tool's flags. It first lets through a whole command that is exactly one read-only
+    gh form — optional `VAR=value`, `env` and `timeout N`, then `gh` with an optional `-R`/`--repo`, then `pr view`,
+    `list`, `status`, `checks` or `diff`, `issue view` or `list`, `search <word>` or `run <word>`, followed by plain
+    words — with no shell syntax, quote or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command
+    is denied when its text
+    - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge or auto-merge
+      mutation);
+    - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
+      (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
+    - names `gh`, `az`, `curl` or `wget` (also as a path's last part) and reads a request from a file (an `@`, an
+      `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i` option),
+      mentions `merge`, or runs them through `xargs` or `parallel`;
+    - holds a construct the shell expands at run time (a `$`, a backtick, a `{a,b}` or `{a..b}` brace, a `*`, `?` or
+      `[` next to a letter) next to a mention of `merge`, `complet` or `alias`, or next to `gh`, `az`, `curl` or
+      `wget`;
+    - is nested too deep, too long or holds too many substitutions to check.
+
+    False denials are accepted: a merge mentioned in a message next to one of those tools is denied like a call.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
     `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions
     one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of
     commit messages.
 
-  What the shell builds at run time, another interpreter, a script file or gh's own config stays out of both layers'
+  A renamed gh, another interpreter, a script file or a config file the command reads stays out of both layers'
   sight; this policy alone rules those out.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
