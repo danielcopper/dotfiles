@@ -48,6 +48,11 @@ PASSES = [
     "gh --repo=o/r pr view 3",
     "env GH_HOST=example.com timeout 30 gh pr list --state merged",
     "env GH_HOST=x timeout 30 gh pr list",
+    # opening and editing a PR, quoted values allowed
+    "gh pr create --title x --body-file body.md",
+    'gh pr create --title "fix(hooks): merge the two lists" --body-file body.md',
+    "gh -R o/r pr create --title 'feat: x' --body-file b.md --base main",
+    "gh pr edit 12 --body-file body.md",
     # commands that mention a merge without gh, az, curl or wget
     "git log --merges --oneline",
     "git merge --ff-only origin/main",
@@ -221,7 +226,14 @@ DENIED = [
     "gh api repos/o/r/pulls/12/merged_by",
     "gh api -X GET repos/o/r/pulls/12/merge",
     "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=1",
-    "gh pr create --title x --body-file body.md",
+    # opening or editing a PR with anything beyond flags and plain quoted values
+    'gh pr create --title "$(cat title.txt)" --body-file b.md',
+    "gh pr create --body-file b; gh pr merge 1",
+    "gh pr edit 12 --add-label x | gh pr merge 12",
+    'gh pr create --title "a\\"; gh pr merge 1"',
+    "gh pr create --title x; /tmp/g pr merge 1",
+    'gh pr create --title "$(/tmp/g pr merge 1)"',
+    "gh pr edit 12 --body-file b.md curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
 ]
 
 REASONS = {

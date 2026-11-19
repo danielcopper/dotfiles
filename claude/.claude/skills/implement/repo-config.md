@@ -31,8 +31,11 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     split the command or read any tool's flags. It first lets through a whole command that is exactly one read-only
     gh form — optional `VAR=value`, `env` and `timeout N`, then `gh` with an optional `-R`/`--repo`, then `pr view`,
     `list`, `status`, `checks` or `diff`, `issue view` or `list`, `search <word>` or `run <word>`, followed by plain
-    words — with no shell syntax, quote or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command
-    is denied when its text
+    words — with no shell syntax, quote or backslash, and no second `gh`, `az`, `curl` or `wget`. It also lets through
+    `gh` (optional `-R`/`--repo`) `pr create` or `pr edit` followed by flags and values, `--body-file <path>`
+    included, where quoted strings may be values: outside the quotes no shell syntax or backslash, inside double
+    quotes no `$`, backtick or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command is denied
+    when its text
     - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge or auto-merge
       mutation);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request

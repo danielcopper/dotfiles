@@ -43,6 +43,11 @@ READ_ONLY = re.compile(
     r"(?:pr\s+(?:view|list|status|checks|diff)|issue\s+(?:view|list)|(?:search|run)\s+\S+)"
     r"(?:\s+\S+)*"
 )
+PR_WRITE_FORBIDDEN = set(";&|<>$`(){}\n\r\\")
+PR_WRITE = re.compile(
+    r"gh(?:\s+(?:-R|--repo)\s+\S+|\s+--repo=\S+)?\s+pr\s+(?:create|edit)(?:\s+\S+)*"
+)
+QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 REASON = (
     "Merging a pull request is the owner's alone (merge_policy in "
@@ -75,11 +80,25 @@ def read_only(command: str) -> bool:
     return len(NETWORK.findall(lower)) == 1 and PR_MERGE.search(lower) is None
 
 
+def pr_write(command: str) -> bool:
+    """Whether *command* is, as a whole, `gh pr create` or `gh pr edit` with flags and values,
+    quoted values allowed: no shell syntax outside the quotes, nothing the shell expands inside
+    double quotes, and no second gh, az, curl or wget."""
+    text = command.strip()
+    for quoted in QUOTED.findall(text):
+        if quoted.startswith('"') and set(quoted) & set("$`\\"):
+            return False
+    rest = QUOTED.sub("Q", text)
+    if set(rest) & (PR_WRITE_FORBIDDEN | set("'\"")) or PR_WRITE.fullmatch(rest) is None:
+        return False
+    return len(NETWORK.findall(text.lower())) == 1
+
+
 def check(command: str) -> str | None:
     """What makes *command* a possible merge, or None."""
     if len(command) > MAX_LENGTH:
         return "is too long to check"
-    if read_only(command):
+    if read_only(command) or pr_write(command):
         return None
     plain = stripped(command)
     lower = plain.lower()
