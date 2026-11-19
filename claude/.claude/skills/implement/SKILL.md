@@ -108,11 +108,13 @@ sentence with the result to the PR body.
 Later edits to the body — that sentence, or a change a fix after the push needs — are written directly, without asking
 and without another `prose-reviewer` pass: update `~/Memory/<repo>/pr-body-<N>.md` and the PR with it.
 
-Once the user gate has passed and the user has ruled on the user's list (step 6), its fixes in, hand the PR over to
-the owner, who merges it (`merge_policy`, `repo-config.md`), and stop.
+Once the user gate has passed and the user has ruled on the user's list (step 6), its fixes in, re-read the PR body
+sentence by sentence against the final branch. Where the repo squash-merges with the PR body as the message, also
+compare the PR title and body with the branch's commit message (`git -C <wt> log -1 --format=%B`), word by word, and
+bring them in line. Then hand the PR over to the owner, who merges it (`merge_policy`, `repo-config.md`), and stop.
 
 *Done when:* green, the user gate passed *(convention)* with its result in the PR body, the user's list ruled with its
-fixes in, and the PR handed over.
+fixes in, the body re-read against the final branch, and the PR handed over.
 
 ## 10. Close the loop
 
