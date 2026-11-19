@@ -5,9 +5,11 @@ stand-in runs, and the isolation probe with one part of the wrapper broken at
 a time (skipped without bwrap).
 
 HOME points at a temporary directory for the whole file, set before run.py
-is loaded. An audit hook records every open, listing and change of a path
-below the real home; only this repo and the Python installation are exempt,
-and a recorded path fails the run after the tests.
+is loaded. An audit hook records the events named in AUDITED (opens, listings
+and changes) whose path lies below the real home; only this repo and the
+Python installation are exempt, and a recorded path fails the run after the
+tests. It sees this process only: what bwrap and the shells it starts do is
+up to the probe tests, which point them at the temporary HOME.
 
 usage: python3 -I run-test.py [unittest option...]
   RUN_PY=<path>/run.py runs the tests against that copy of run.py instead of
@@ -47,7 +49,7 @@ AUDITED = {
     "os.remove": 1,
     "os.rmdir": 1,
     "os.symlink": None,
-    "os.link": None,
+    "os.link": 2,
     "os.chmod": 2,
     "os.truncate": None,
     "os.utime": 3,
@@ -456,7 +458,7 @@ RUN_USER = run.run_user_dir()
 class Probe(Swapping):
     """The isolation probe with one part of the wrapper broken at a time.
 
-    The home it guards is this file's temporary HOME, so a broken mount
+    The home it guards is this file's temporary HOME, so a broken home mount
     exposes and writes only there.
     """
 

@@ -9,8 +9,9 @@ refuses a file that does not, before anything runs.
 Each run is one headless `claude -p` with the case's prompt, its stream-json
 read for Skill tool calls. Tools are Skill, Read, Glob and Grep; the run stops
 after --max-turns turns or --max-budget-usd. Only a run that ends cleanly is
-graded on its skills (grade() says what counts); any other is an ERROR and
-does not pass.
+graded on its skills (grade() says what counts); any other does not pass:
+an ERROR, or a STOP that ends the whole run when no later run would get past
+its error.
 
 Isolation. Each run gets a fresh temporary directory holding HOME (with a copy
 of the repo's skills in ~/.claude/skills and nothing else), the working
@@ -22,9 +23,10 @@ memory, plugins or MCP servers load. A file the child writes below the real
 home's path lands in that empty directory; such a write fails the run. Every
 run also checks the session's init event: all repo skills listed, no plugin
 but Claude Code's built-in ones, no MCP server. --check runs the isolation
-probe through the same wrapper without a model call: HOME, the real home and
-/run/user/<uid> listed empty, no variable beyond the allowlist, and a canary
-write below the real home that the write check must catch.
+probe through the same wrapper without a model call: HOME set to the
+temporary home, the real home and /run/user/<uid> listed empty, no variable
+beyond the allowlist, and a canary write below the real home that the write
+check must catch.
 
 Credentials. CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the
 environment is passed on when set. Otherwise the access token of the saved
@@ -97,7 +99,10 @@ ALLOWED_VARS = set(OWN_VARS + PASSED_ON + TOKEN_VARS + SHELL_VARS)
 PASS = "PASS"  # the skills fired as the case says
 FAIL = "FAIL"  # a skill fired that must stay quiet, or the one that must fire did not
 ERROR = "ERROR"  # the run did not finish cleanly, so it says nothing about the skills
-ISOLATION = "ISOLATION"  # the session saw more than the sandbox; stops the whole run
+# The session saw more or less than the sandbox holds: a plugin other than the
+# built-in ones or an MCP server loaded, a repo skill missing, or a file written
+# below the real home. Stops the whole run.
+ISOLATION = "ISOLATION"
 STOP = "STOP"  # every run would fail the same way (see STOP_KINDS); stops the whole run
 
 # API error kinds no later run gets past: the credential or account is refused,
@@ -396,7 +401,9 @@ def grade(lines, case, every, exit_code: int | None, stderr: str):
     exit_code None means the run timed out. Only a run that ended cleanly is
     graded on its skills: a result event with subtype success and is_error
     false, or the turn cap of error_max_turns, and no API error on the way.
-    Anything else is an ERROR, which says nothing about the skills.
+    Anything else is an ERROR, which says nothing about the skills, or a STOP
+    for an API error of a kind in STOP_KINDS; a session that saw more or less
+    than the sandbox is an ISOLATION before any of that.
     """
     init, result, fired, replied, api_errors = None, None, [], False, []
     for line in lines:
