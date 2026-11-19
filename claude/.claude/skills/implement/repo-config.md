@@ -24,10 +24,10 @@ owner. Before a skill writes about a repo, it states **"own repo"** or **"foreig
 
 Each holds in every repo unless its profile departs from it under `defaults`.
 
-- **`merge_policy: user`** — the owner merges, or the lead on the owner's request for that merge. Full-auto is only an
-  explicit grant for one run, never stored, so this policy has no departure.
+- **`merge_policy: user`** — the owner merges every PR. The harness denies merging to every session, so this policy has
+  no departure.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
-  0 unresolved issues the PR introduced. Green is not a merge go.
+  0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Exception:
   an issue edit that records a decision the owner made — in their own issue or the maintainer section of someone
   else's — is written directly in the format below and named to the owner in one line; ask first only when the wording

@@ -103,19 +103,18 @@ change, and send it as one message the user runs start to finish: the starting s
 result after each step, and what to report back. Then stop for the user's verdict. *(convention)* Then add one
 sentence with the result to the PR body, drafted as `public_text_drafts` says.
 
-Merging follows `merge_policy` (`repo-config.md`), and only after the user gate.
+Once the user gate has passed, hand the PR over to the owner, who merges it (`merge_policy`, `repo-config.md`), and
+stop.
 
-*Done when:* green, the user gate passed *(convention)* with its result in the PR body, and the PR handed over or merged
-as `merge_policy` allows.
+*Done when:* green, the user gate passed *(convention)* with its result in the PR body, and the PR handed over.
 
 ## 10. Close the loop
 
-After the merge: check the issue closed and, where there is a board, reached Done (the epic stays In Progress while
-siblings are open); remove worktree and branch per the `worktree` skill; move the issue's working files
+This step runs once the owner says the PR is merged. Check the issue closed and, where there is a board, reached Done
+(the epic stays In Progress while siblings are open); remove worktree and branch per the `worktree` skill; move the issue's working files
 (`~/Memory/<repo>/<kind>-<N>[-<suffix>].md`) to `archive/<N>-<slug>/`, each with this line first after its front matter:
 `Historical — working notes for #N, merged <date>. Not current. What holds now: the issue, the PR body, docs/ and ADRs.`
 File the issues the user chose for large by-catch as `public_text_drafts` says, in the Planned change shape (`## Today`,
 `## Wanted`, `## To decide`, `## Done when`), with generic data shapes and glossary terms.
 
-*Done when:* the board is consistent, those issues are filed, and the working files are archived (a run that ends
-before the merge skips this).
+*Done when:* the board is consistent, those issues are filed, and the working files are archived.
