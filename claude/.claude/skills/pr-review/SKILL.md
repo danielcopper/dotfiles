@@ -72,9 +72,10 @@ verdict per thread in the shape of `reviewer.md`, "## Re-review". `code-simplifi
 reaches the PR as `architecture-reviewer` findings.
 
 **The PR's code runs only on the user's yes.** The first pass is read-only: every prompt says the user has not allowed
-running the PR's code, so `test-reviewer` and `failure-reviewer` report their runs as not run. Once the user has seen
-the diff, offer those runs, naming what each would run in its scratch export (the test command, the mutation probes,
-the reviewed tool's checks); on the user's yes, dispatch them with that permission in the prompt.
+running the PR's code, so `reviewer`, `test-reviewer` and `failure-reviewer` report their runs as not run. Once the
+user has seen the diff, offer those runs, naming what each would run (`reviewer`'s linter and type checker, the test
+command, the mutation probes, the reviewed tool's checks); on the user's yes, dispatch them with that permission in
+the prompt.
 
 ## Phase 3 - Build the task list
 
@@ -92,12 +93,14 @@ steps 1–2 for every task without waiting, records each Outcome with your lean,
 recommended comment as a draft with its anchor, and every finding you recommend dropping with its reason. The user's
 ruling on that list replaces step 3 for all tasks.
 
-1. Running PR code needs the review worktree: create it once from the head commit, detached —
+1. Running PR code needs the user's yes, asked once before the review worktree exists: name the install command and
+   the test or probe commands, and say that the install runs the PR's own scripts. On the yes, create the worktree
+   once from the head commit, detached —
    `git worktree add --detach <repo-parent>/<repo>.worktrees/review/<PR#>-<short-slug> "$HEAD_SHA"` — and install
-   dependencies once.
-2. **Validate empirically**: run, mutate, probe, cite source lines and exit codes; read the installed library source
-   rather than trusting memory. `cmd | tail` returns `tail`'s exit code (use `${PIPESTATUS[0]}`); force flaky failures
-   to repeat (e.g. `--testTimeout=1`). A real code path is not a reachable one
+   dependencies once. Without the yes, validate by reading.
+2. **Validate empirically**: run, mutate and probe (with step 1's yes), cite source lines and exit codes; read the
+   installed library source rather than trusting memory. `cmd | tail` returns `tail`'s exit code (use
+   `${PIPESTATUS[0]}`); force flaky failures to repeat (e.g. `--testTimeout=1`). A real code path is not a reachable one
    (`~/Memory/global/verification-reachability.md`).
 3. Report the evidence with your lean (post / skip), then wait: post, skip, shorter, more proof, or a draft to show
    first.
