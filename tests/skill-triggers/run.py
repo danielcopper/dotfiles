@@ -92,6 +92,7 @@ PASS = "PASS"  # the skills fired as the case says
 FAIL = "FAIL"  # a skill fired that must stay quiet, or the one that must fire did not
 ERROR = "ERROR"  # the run did not finish cleanly, so it says nothing about the skills
 ISOLATION = "ISOLATION"  # the session saw more than the sandbox; stops the whole run
+AUTH = "AUTH"  # the credential was refused; stops the whole run
 
 
 class Verdict(NamedTuple):
@@ -346,13 +347,21 @@ def isolation_probe(every, binary):
         box.remove()
 
 
-def grade(lines, case, every):
-    """The Verdict on one run, from its stream-json lines."""
-    init, result, fired, assistant = None, None, [], False
+def grade(lines, case, every, exit_code=0, stderr=""):
+    """The Verdict on one run, from its stream-json lines, exit code and stderr.
+
+    exit_code None means the run timed out. Only a run that ended cleanly is
+    graded on its skills: a result event with subtype success and is_error
+    false, or the turn cap of error_max_turns, and no API error on the way.
+    Anything else is an ERROR, which says nothing about the skills.
+    """
+    init, result, fired, replied, api_errors = None, None, [], False, []
     for line in lines:
         try:
             event = json.loads(line)
         except ValueError:
+            continue
+        if not isinstance(event, dict):
             continue
         kind = event.get("type")
         if kind == "system" and event.get("subtype") == "init" and init is None:
@@ -360,15 +369,36 @@ def grade(lines, case, every):
         elif kind == "result":
             result = event
         elif kind == "assistant":
-            assistant = True
-            for block in event.get("message", {}).get("content", []) or []:
+            content = (event.get("message") or {}).get("content") or []
+            error = event.get("error")
+            if (
+                error
+                or event.get("is_api_error_message")
+                or event.get("isApiErrorMessage")
+            ):
+                text = " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)
+                )
+                api_errors.append((str(error or "api_error"), text.strip()))
+                continue
+            replied = True
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
                 if block.get("type") == "tool_use" and block.get("name") == "Skill":
                     skill = str((block.get("input") or {}).get("skill", ""))
                     fired.append(skill.split(":")[-1])
     cost = (result or {}).get("total_cost_usd") or 0.0
+    model = (init or {}).get("model")
+    tail = stderr.strip().splitlines()[-1][:200] if stderr.strip() else ""
+
+    def error(reason):
+        return Verdict(
+            ERROR, fired, cost, f"{reason}: {tail}" if tail else reason, model
+        )
+
     if init is None:
-        return Verdict(ERROR, fired, cost, "no init event")
-    model = init.get("model")
+        return error("no init event")
     missing = sorted(set(every) - set(init.get("skills") or []))
     foreign = [
         p.get("name") for p in init.get("plugins") or [] if p.get("path") != "builtin"
@@ -384,11 +414,27 @@ def grade(lines, case, every):
         )
     if leaks:
         return Verdict(ISOLATION, fired, cost, "; ".join(leaks), model)
-    if not assistant:
-        reason = (
-            (result or {}).get("result") or (result or {}).get("subtype") or "no reply"
+    if any(kind == "authentication_failed" for kind, _ in api_errors):
+        text = next(
+            text for kind, text in api_errors if kind == "authentication_failed"
         )
-        return Verdict(ERROR, fired, cost, str(reason)[:200], model)
+        return Verdict(AUTH, fired, cost, text[:200] or "authentication_failed", model)
+    if api_errors:
+        kind, text = api_errors[0]
+        return error(f"API error {kind}" + (f" ({text[:200]})" if text else ""))
+    if exit_code is None:
+        return error("timed out")
+    if result is None:
+        return error("no result event")
+    subtype = result.get("subtype")
+    capped = subtype == "error_max_turns"
+    if not capped and (subtype != "success" or result.get("is_error")):
+        reason = result.get("result") or "; ".join(map(str, result.get("errors") or []))
+        return error(f"[{subtype}] {str(reason)[:200]}".rstrip())
+    if exit_code != 0 and not capped:
+        return error(f"exited {exit_code}")
+    if not replied:
+        return error("no reply")
     fires, quiet = case.get("fires"), case.get("quiet", [])
     problems = []
     if fires == "none" and fired:
@@ -399,8 +445,8 @@ def grade(lines, case, every):
     if loud:
         problems.append(f"{', '.join(loud)} must stay quiet")
     note = "; ".join(problems)
-    if result and result.get("subtype") not in (None, "success"):
-        note = f"{note} [{result['subtype']}]" if note else f"[{result['subtype']}]"
+    if capped:
+        note = f"{note} [{subtype}]" if note else f"[{subtype}]"
     return Verdict(FAIL if problems else PASS, fired, cost, note, model)
 
 
@@ -439,15 +485,11 @@ def run_case(case, every, binary, args):
                 timeout=args.timeout,
                 stdin=subprocess.DEVNULL,
             )
-            out, err = proc.stdout, proc.stderr
+            out, err, code = proc.stdout, proc.stderr, proc.returncode
         except subprocess.TimeoutExpired as e:
             out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
-            err = f"timed out after {args.timeout}s"
-        verdict = grade(out.splitlines(), case, every)
-        if verdict.status == ERROR and err.strip():
-            verdict = verdict._replace(
-                note=f"{verdict.note}: {err.strip().splitlines()[-1][:200]}"
-            )
+            err, code = f"after {args.timeout}s", None
+        verdict = grade(out.splitlines(), case, every, code, err)
         written = box.written()
         if written:
             verdict = verdict._replace(
@@ -520,6 +562,10 @@ def main():
                 resolved.add(verdict.model)
                 if verdict.status == ISOLATION:
                     raise Stop(f"{case['name']}: isolation broken: {verdict.note}")
+                if verdict.status == AUTH:
+                    raise Stop(
+                        f"{case['name']}: the credential was refused: {verdict.note}"
+                    )
                 if verdict.status == PASS:
                     passes += 1
                 shown = ", ".join(verdict.fired) or "none"
