@@ -278,9 +278,45 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
-// ---- openBoard: the same in leader/main.js and board-button/main.js ----
+// ---- board: the same in leader/main.js and board-button/main.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that both copies match.)
+// layouts/personal.json shows the board as a layer of the work area: the
+// stack BOARD_STACK holds the shown tab's content (TAB_CHILD) and the board
+// (BOARD_CHILD), and layout.select switches it. The board reads the same
+// ids (boardShown, mods/board/src/ui/helpers.js).
+const BOARD_STACK = "work-stack";
+const BOARD_CHILD = "board";
+const TAB_CHILD = "main";
+
+// The work area's stack in the shown layout, or null in a layout without it.
+function boardStack(node = layout()) {
+  if (!node || typeof node !== "object") return null;
+  if (node.id === BOARD_STACK) return node;
+  for (const child of node.children ?? []) {
+    const found = boardStack(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Shows the shown tab's content in the work area again.
+function showTab() {
+  run("layout.select", { stack: BOARD_STACK, child: TAB_CHILD });
+}
+
+// Shows the board in the work area and gives it the keyboard (its "focus"
+// command; layout.select leaves the keyboard where it was), or the tab's
+// content again when the board shows. A layout without the stack shows the
+// board's tab instead (openBoard).
+function toggleBoard() {
+  const stack = boardStack();
+  if (!stack) return openBoard();
+  if (stack.active === BOARD_CHILD) return showTab();
+  run("layout.select", { stack: BOARD_STACK, child: BOARD_CHILD });
+  run("board.focus");
+}
+
 // Shows the board's tab ("Board", the board mod as its only pane) wherever
 // it is, found by its pane, so a renamed tab is found too; or opens one in
 // the shown space. pane.focus also shows its space and tab; a pane zoomed in
@@ -295,7 +331,7 @@ function openBoard() {
   if (zoomed && zoomed.pane !== board.pane) run("pane.zoom", { pane: zoomed.pane });
   run("pane.focus", { pane: board.pane });
 }
-// ---- end openBoard ----
+// ---- end board ----
 
 function findNode(node, id) {
   if (!node || typeof node !== "object") return null;
@@ -398,7 +434,7 @@ const ACTIONS = [
   ["S", "pick", "Spaces", "mod.open", { name: "picker" }],
   ["a", "sidebar", "View", "layout.toggle", { id: "sidebar" }],
   ["Z", "wide panel", "View", togglePanelWidth, {}],
-  ["b", "board", "View", openBoard, {}],
+  ["b", "board", "View", toggleBoard, {}],
   ["f", "+files", "View", FILES, {}],
 ];
 // S and c are aliases of s and t; the list shows each action once.

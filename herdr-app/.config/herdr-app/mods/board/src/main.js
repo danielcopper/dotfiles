@@ -1,6 +1,8 @@
-// The board, in its tab "Board": one's own work from GitHub (issues and pull
-// requests on a Projects v2 board, open pull requests) and Azure DevOps, as
-// mods/board/views.json sets them. The leader's `b` shows or opens its tab.
+// The board: one's own work from GitHub (issues and pull requests on a
+// Projects v2 board, open pull requests) and Azure DevOps, as
+// mods/board/views.json sets them. In the personal layout it is a layer of
+// the work area, which the leader's `b` and the board button switch to and
+// back; in another layout it is a tab "Board", which they show or open.
 // What it shows, its keys and behaviour: README, "herdr app".
 //
 // views.json:
@@ -126,8 +128,8 @@ export default class Board extends View {
     });
     this.filterInput.on("submit", () => this.handle.focus());
     if (checking()) return;
-    // A copy that is not shown (a reload of a background tab) leaves the
-    // keyboard where it is.
+    // A copy that is not shown (a reload of a background tab or of the
+    // hidden layer) leaves the keyboard where it is.
     if (boardShown()) {
       this.handle.focus();
       cx.timer.after(300, () => this.handle.focus());

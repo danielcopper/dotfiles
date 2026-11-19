@@ -1,8 +1,10 @@
 // Built from src/ by `mise run herdr-board-build`; edit the modules there, not this file.
 
-// The board, in its tab "Board": one's own work from GitHub (issues and pull
-// requests on a Projects v2 board, open pull requests) and Azure DevOps, as
-// mods/board/views.json sets them. The leader's `b` shows or opens its tab.
+// The board: one's own work from GitHub (issues and pull requests on a
+// Projects v2 board, open pull requests) and Azure DevOps, as
+// mods/board/views.json sets them. In the personal layout it is a layer of
+// the work area, which the leader's `b` and the board button switch to and
+// back; in another layout it is a tab "Board", which they show or open.
 // What it shows, its keys and behaviour: README, "herdr app".
 //
 // views.json:
@@ -50,7 +52,7 @@
 
 import { View, div } from "gpui-kit";
 import { Input, InputState, ScrollHandle, h_flex, v_flex } from "gpui-base";
-import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, panes, readTextFile, run, settings, spaces, theme } from "herdr";
+import { appHome, checking, exec, knownAgents, layout, machines, nextCommand, notify, panes, readTextFile, run, settings, spaces, theme } from "herdr";
 
 // ==== src/shared.js ====
 
@@ -1430,8 +1432,27 @@ export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
-// Whether a board pane is in the shown tab of the shown space.
+// layouts/personal.json shows the board as a layer of the work area: the
+// stack LAYER_STACK, whose child LAYER_CHILD is the board; the leader and the
+// board button switch it (their marked copies of toggleBoard).
+const LAYER_STACK = "work-stack";
+const LAYER_CHILD = "board";
+
+// The node with that id in a layout tree, or null.
+function layoutNode(node, id) {
+  if (!node || typeof node !== "object") return null;
+  if (node.id === id) return node;
+  for (const child of node.children ?? []) {
+    const found = layoutNode(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Whether the board shows: as the layer of the work area in the shown
+// layout, or as a pane in the shown tab of the shown space.
 export function boardShown() {
+  if (layoutNode(layout(), LAYER_STACK)?.active === LAYER_CHILD) return true;
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }
@@ -2323,8 +2344,8 @@ export default class Board extends View {
     });
     this.filterInput.on("submit", () => this.handle.focus());
     if (checking()) return;
-    // A copy that is not shown (a reload of a background tab) leaves the
-    // keyboard where it is.
+    // A copy that is not shown (a reload of a background tab or of the
+    // hidden layer) leaves the keyboard where it is.
     if (boardShown()) {
       this.handle.focus();
       cx.timer.after(300, () => this.handle.focus());

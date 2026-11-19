@@ -112,33 +112,47 @@
           "type": "row",
           "children": [
             {
-              "id": "main",
-              "type": "block",
-              "content": {
-                "tab": "active",
-                "pane": {
-                  "header": {
-                    "content": {
-                      "mod": "pane"
-                    },
-                    "reveal": "always",
-                    "height": 30,
-                    "position": "top"
-                  },
-                  "background": "background",
-                  "border": {
-                    "width": 1,
-                    "color": "border"
-                  },
-                  "focus": {
-                    "width": 1,
-                    "color": "accent"
-                  },
-                  "radius": 10,
-                  "gap": 8,
-                  "lone": true
+              "id": "work-stack",
+              "type": "stack",
+              "children": [
+                {
+                  "id": "main",
+                  "type": "block",
+                  "content": {
+                    "tab": "active",
+                    "pane": {
+                      "header": {
+                        "content": {
+                          "mod": "pane"
+                        },
+                        "reveal": "always",
+                        "height": 30,
+                        "position": "top"
+                      },
+                      "background": "background",
+                      "border": {
+                        "width": 1,
+                        "color": "border"
+                      },
+                      "focus": {
+                        "width": 1,
+                        "color": "accent"
+                      },
+                      "radius": 10,
+                      "gap": 8,
+                      "lone": true
+                    }
+                  }
+                },
+                {
+                  "id": "board",
+                  "type": "block",
+                  "content": {
+                    "mod": "board"
+                  }
                 }
-              }
+              ],
+              "active": "main"
             },
             {
               "id": "panel",

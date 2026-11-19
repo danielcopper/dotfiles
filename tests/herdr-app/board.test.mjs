@@ -1518,8 +1518,10 @@ function element(kind) {
 // which(tool, on) (a path, "" for not found, an Error, or exec's result;
 // by default gh is found and az is not) and recorded in asked. spaces() is
 // spaceList, which a test may change.
+// layout() is `tree` (the shown layout; none by default), which a test may
+// change.
 const found = (tool) => `/opt/fake/bin/${tool}`;
-function fakeHost({ config = testConfig(), shown = true, which = (tool) => (tool === "az" ? "" : found(tool)) } = {}) {
+function fakeHost({ config = testConfig(), shown = true, tree = null, which = (tool) => (tool === "az" ? "" : found(tool)) } = {}) {
   const calls = [];
   const host = {
     calls,
@@ -1550,6 +1552,8 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => (tool
     notify: (n) => host.notes.push(n),
     run: (name, args) => host.runs.push([name, args]),
     panes: () => (shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []),
+    tree,
+    layout: () => host.tree,
     machines: () => [{ name: null, layout: "ready" }, { name: "server", layout: "ready" }],
     knownAgents: async () => [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }],
     settings: () => ({}),
@@ -1703,6 +1707,26 @@ test("UI: a board copy that is not shown does not take the keyboard", async () =
   new board.default().init({}, fakeCx());
   await settle();
   assert.equal(host.focused, 0);
+});
+
+test("UI: the board as the shown layer of the work area takes the keyboard when it starts and refreshes; behind the tab's content it does neither", async () => {
+  for (const [active, takes] of [["board", true], ["main", false]]) {
+    memory.clear();
+    const host = fakeHost({ shown: false, tree: layerLayout(active) });
+    globalThis.__boardHost = host;
+    new board.default().init({}, fakeCx());
+    await settle();
+    assert.equal(host.focused > 0, takes, `the layer showing ${active}`);
+  }
+  const { cx, host } = await openBoard({ shown: false, tree: layerLayout("board") });
+  advance(3 * 60000);
+  await cx.tick();
+  assert.equal(host.open("gh").length, 1, "it refreshes while it shows");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  host.tree = layerLayout("main");
+  advance(10 * 60000);
+  await cx.tick();
+  assert.equal(host.open("gh").length, 0, "not behind the tab's content");
 });
 
 test("UI: number keys beyond the views do nothing; [ and ] go back and forth, also with Control+Alt, not with Control alone", async () => {
@@ -2932,30 +2956,48 @@ test("UI: „nur meine“ over data without the viewer's login shows nothing and
 // ---- The board button (mods/board-button/) ----
 
 const buttonDir = resolve(modDir, "../board-button");
-// The text between a file's openBoard markers.
-const openBoardCopy = (file) => {
+// The text between a file's board markers.
+const boardCopy = (file) => {
   const src = readFileSync(file, "utf8");
-  const at = src.indexOf("// ---- openBoard:");
-  return at < 0 ? null : src.slice(at, src.indexOf("// ---- end openBoard ----", at));
+  const at = src.indexOf("// ---- board:");
+  return at < 0 ? null : src.slice(at, src.indexOf("// ---- end board ----", at));
 };
+const findNode = (node, id) => (node?.id === id ? node : (node?.children ?? []).map((c) => findNode(c, id)).find(Boolean) ?? null);
+const personalLayout = () => JSON.parse(readFileSync(resolve(modDir, "../../layouts/personal.json"), "utf8"));
+// The personal layout as layout() gives it, its work area showing `active`
+// ("main": the tab's content, "board": the board).
+const layerLayout = (active) => {
+  const tree = personalLayout();
+  findNode(tree, "work-stack").active = active;
+  return tree;
+};
+const SHOW_BOARD = [["layout.select", { stack: "work-stack", child: "board" }], ["board.focus", undefined]];
+const SHOW_TAB = [["layout.select", { stack: "work-stack", child: "main" }]];
 
-test("the board button shows the board with the leader's own openBoard, the same text in both", () => {
-  const button = openBoardCopy(join(buttonDir, "main.js"));
-  assert.ok(button?.includes("function openBoard() {"), "the button has the marked copy");
-  assert.equal(openBoardCopy(resolve(modDir, "../leader/main.js")), button, "the leader's copy is the same");
-});
-
-test("UI: a click on the board button shows the board's tab wherever it is, else opens one named Board", async () => {
+// A board button on a fake host whose layout() is `tree()` and whose
+// focused() is `focus()`; render() draws it as herdr does after a change.
+async function boardButton({ tree = () => null, focus = () => ({ space: "s1", tab: "t1", pane: "p1", terminal: "t1" }) } = {}) {
   const { default: BoardButton } = await import(pathToFileURL(join(buttonDir, "main.js")).href);
   const host = fakeHost();
+  host.layout = () => tree();
+  host.focused = () => focus();
+  host.theme = () => ({ chrome: "#chrome", border: "#border", muted: "#muted", foreground: "#fg", hover: "#hover", selected: "#selected" });
   globalThis.__boardHost = host;
-  const click = () => {
-    const view = new BoardButton();
-    view.init({}, fakeCx());
-    const el = byId(view.render(), "board-open");
-    assert.ok(el, "the button is drawn");
-    el.with.on_click[0]({}, fakeCx());
-  };
+  const view = new BoardButton();
+  view.init({}, fakeCx());
+  const render = () => view.render();
+  const click = () => byId(render(), "board-open").with.on_click[0]({}, fakeCx());
+  return { host, view, render, click };
+}
+
+test("the board button shows the board with the leader's own toggleBoard and openBoard, the same text in both", () => {
+  const button = boardCopy(join(buttonDir, "main.js"));
+  assert.ok(button?.includes("function toggleBoard() {") && button.includes("function openBoard() {"), "the button has the marked copy");
+  assert.equal(boardCopy(resolve(modDir, "../leader/main.js")), button, "the leader's copy is the same");
+});
+
+test("UI: in a layout without the board layer a click on the board button shows the board's tab wherever it is, else opens one named Board", async () => {
+  const { host, click } = await boardButton();
   host.panes = () => [];
   click();
   assert.deepEqual(host.runs.splice(0), [["tab.new", { name: "Board", mod: "board" }]]);
@@ -2965,6 +3007,85 @@ test("UI: a click on the board button shows the board's tab wherever it is, else
   host.panes = () => [{ pane: "p2", tab: "t1", zoomed: true }, { pane: "p1", mod: "board", tab: "t1" }];
   click();
   assert.deepEqual(host.runs.splice(0), [["pane.zoom", { pane: "p2" }], ["pane.focus", { pane: "p1" }]]);
+});
+
+test("UI: in the personal layout a click on the board button shows the board in the work area and gives it the keyboard, a second click the tab again", async () => {
+  let active = "main";
+  const { host, click } = await boardButton({ tree: () => layerLayout(active) });
+  click();
+  assert.deepEqual(host.runs.splice(0), SHOW_BOARD, "no Board tab");
+  active = "board";
+  click();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB);
+});
+
+test("UI: the board button is highlighted while the board shows in the work area, and plain otherwise", async () => {
+  let tree = () => layerLayout("main");
+  const { render } = await boardButton({ tree: () => tree() });
+  const look = () => {
+    const el = byId(render(), "board-open");
+    return [el.with.bg?.[0] ?? null, el.with.text_color[0]];
+  };
+  assert.deepEqual(look(), [null, "#muted"], "the tab's content shows");
+  tree = () => layerLayout("board");
+  assert.deepEqual(look(), ["#selected", "#fg"], "the board shows");
+  tree = () => null;
+  assert.deepEqual(look(), [null, "#muted"], "a layout without the layer");
+});
+
+test("UI: while the board shows, a change of focus shows the tab again; the focus it was shown with, and any focus while the tab shows, do not", async () => {
+  let active = "main";
+  let focus = { space: "s1", tab: "t1", pane: "p1", terminal: "t1" };
+  const { host, render } = await boardButton({ tree: () => layerLayout(active), focus: () => focus });
+  render();
+  focus = { ...focus, tab: "t2", pane: "p2", terminal: "t2" };
+  render();
+  assert.deepEqual(host.runs.splice(0), [], "the tab's content shows");
+  active = "board";
+  render();
+  render();
+  assert.deepEqual(host.runs.splice(0), [], "the focus the board was shown with");
+  for (const change of [{ tab: "t1", pane: "p1", terminal: "t1" }, { space: "s2" }, { pane: "p3" }, { terminal: "t9" }]) {
+    focus = { ...focus, ...change };
+    render();
+    assert.deepEqual(host.runs.splice(0), SHOW_TAB, `on a change of ${Object.keys(change).join(", ")}`);
+    render();
+    assert.deepEqual(host.runs.splice(0), [], "once");
+  }
+  focus = null;
+  render();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "no focus at all is a change too");
+  active = "main";
+  render();
+  active = "board";
+  render();
+  focus = { space: "s1", tab: "t1", pane: "p1", terminal: "t1" };
+  render();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "shown again, the board takes the focus of that moment");
+});
+
+test("UI: while the board shows, a press in the tab bar right of the board button shows the tab again; a press elsewhere does not", async () => {
+  let active = "board";
+  const { host, render } = await boardButton({ tree: () => layerLayout(active) });
+  const root = byId(render(), "board-button");
+  assert.ok(root, "the button's block");
+  const [pressOut] = root.with.on_mouse_down_out;
+  const bounds = { x: 323, y: 0, width: 43, height: 49 };
+  // Where herdr reported presses: a tab (89, 24), the board (317, 400), the sidebar (-173, 300).
+  const press = (x, y) => pressOut({ button: "left", position: { x: x + 323, y }, local_position: { x, y }, bounds });
+  for (const [x, y] of [[89, 24], [43, 0], [900, 48.9]]) {
+    press(x, y);
+    assert.deepEqual(host.runs.splice(0), SHOW_TAB, `a press at ${x}, ${y}`);
+  }
+  for (const [x, y] of [[317, 400], [89, 49], [-173, 300], [-173, 24], [42.9, 24], [89, -1]]) {
+    press(x, y);
+    assert.deepEqual(host.runs.splice(0), [], `no switch on a press at ${x}, ${y}`);
+  }
+  pressOut({ button: "left", position: { x: 412, y: 24 } });
+  assert.deepEqual(host.runs.splice(0), [], "nor without the block's place");
+  active = "main";
+  press(89, 24);
+  assert.deepEqual(host.runs.splice(0), [], "nor while the tab's content shows");
 });
 
 test("UI: the board button is an icon, named Board for the pointer and screen readers, that keeps its press", async () => {
@@ -2993,4 +3114,19 @@ test("the personal layout puts the board button left of the tabs, in a row as hi
     ["tabs", "tabs", { weight: 1 }, true],
   ], "both move the window, as the tab bar did");
   assert.equal(find(layout, "work").children[0], row, "first in the work column");
+});
+
+test("the personal layout's work area is a stack of the shown tab's content and the board, the tab first; the mods name its ids", () => {
+  const layout = personalLayout();
+  const stack = findNode(layout, "work-stack");
+  assert.equal(findNode(layout, "work-body").children[0], stack, "where the tab's content was");
+  assert.deepEqual([stack.type, stack.active], ["stack", "main"]);
+  assert.deepEqual(stack.children.map((c) => [c.id, c.type, c.content?.tab ?? c.content?.mod]), [
+    ["main", "block", "active"],
+    ["board", "block", "board"],
+  ]);
+  const copy = boardCopy(join(buttonDir, "main.js"));
+  for (const line of ['const BOARD_STACK = "work-stack";', 'const BOARD_CHILD = "board";', 'const TAB_CHILD = "main";']) assert.ok(copy.includes(line), line);
+  const helpers = readFileSync(join(modDir, "src/ui/helpers.js"), "utf8");
+  for (const line of ['const LAYER_STACK = "work-stack";', 'const LAYER_CHILD = "board";']) assert.ok(helpers.includes(line), line);
 });

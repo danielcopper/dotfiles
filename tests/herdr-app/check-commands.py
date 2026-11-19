@@ -50,7 +50,7 @@ KEYS = REPO / "herdr-app/.config/herdr-app/keys.json"
 
 # Shaped like commands but none: shared-state keys, and the mod commands
 # that mods send with run().
-NOT_COMMANDS = {"focus.history", "leader.state", "workspace.panels", "leader.send_prefix"}
+NOT_COMMANDS = {"focus.history", "leader.state", "workspace.panels", "leader.send_prefix", "board.focus"}
 # File names in the prose (keys.json, mod.json) are no commands.
 FILE_TYPES = {"js", "json", "md", "svg", "png", "ts", "toml"}
 

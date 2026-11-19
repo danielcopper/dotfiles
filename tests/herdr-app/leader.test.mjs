@@ -284,6 +284,22 @@ test("a bound key whose handling throws says so in a toast and goes no further",
   assert.deepEqual(host.closed, ["mod-leader"]);
 });
 
+test("b shows the board in the work area, or the tab again, where the layout has the board layer, else the board's tab, and closes the leader", async () => {
+  const B = { key: "b", keystroke: "b", key_char: "b", modifiers: PLAIN };
+  for (const [active, runs] of [
+    ["main", [["layout.select", { stack: "work-stack", child: "board" }], ["board.focus", undefined]]],
+    ["board", [["layout.select", { stack: "work-stack", child: "main" }]]],
+    [null, [["tab.new", { name: "Board", mod: "board" }]]],
+  ]) {
+    const { leader, cx, host } = await openLeader();
+    const stack = { id: "work-stack", type: "stack", active, children: [{ id: "main" }, { id: "board" }] };
+    host.layout = () => (active ? { id: "root", type: "row", children: [{ id: "work", type: "column", children: [stack] }] } : null);
+    await pressRaw(leader, cx, B);
+    assert.deepEqual(host.runs, runs, `the layer showing ${active}`);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  }
+});
+
 test("keys.json still hands the leader a second ctrl-space and Esc", () => {
   const section = JSON.parse(readFileSync(keysPath, "utf8"))["mod:leader"];
   assert.equal(section?.["ctrl-space"], "leader.send_prefix");
