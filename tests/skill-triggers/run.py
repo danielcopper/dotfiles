@@ -374,7 +374,7 @@ def isolation_probe(every, binary):
         box.remove()
 
 
-def grade(lines, case, every, exit_code=0, stderr=""):
+def grade(lines, case, every, exit_code: int | None = 0, stderr: str = ""):
     """The Verdict on one run, from its stream-json lines, exit code and stderr.
 
     exit_code None means the run timed out. Only a run that ended cleanly is
@@ -397,16 +397,16 @@ def grade(lines, case, every, exit_code=0, stderr=""):
             result = event
         elif kind == "assistant":
             content = (event.get("message") or {}).get("content") or []
-            error = event.get("error")
+            api_error = event.get("error")
             if (
-                error
+                api_error
                 or event.get("is_api_error_message")
                 or event.get("isApiErrorMessage")
             ):
                 text = " ".join(
                     b.get("text", "") for b in content if isinstance(b, dict)
                 )
-                api_errors.append((str(error or "api_error"), text.strip()))
+                api_errors.append((str(api_error or "api_error"), text.strip()))
                 continue
             replied = True
             for block in content:

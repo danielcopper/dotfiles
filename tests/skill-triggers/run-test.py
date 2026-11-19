@@ -22,6 +22,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -83,11 +85,16 @@ def audit(event, args):
 
 sys.addaudithook(audit)
 sys.dont_write_bytecode = True
-_spec = importlib.util.spec_from_file_location(
-    "run", os.environ.get("RUN_PY") or HERE / "run.py"
-)
-run = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(run)
+if TYPE_CHECKING:
+    import run
+else:
+    _spec = importlib.util.spec_from_file_location(
+        "run", os.environ.get("RUN_PY") or HERE / "run.py"
+    )
+    if _spec is None or _spec.loader is None:
+        raise SystemExit("run-test.py: cannot load run.py")
+    run = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(run)
 
 EVERY = ["alpha", "beta", "gamma"]  # gamma is user-invoked only
 MODEL_INVOKED = ["alpha", "beta"]
@@ -134,7 +141,7 @@ def lines(*events):
     return [json.dumps(e) for e in events]
 
 
-def grade(events, case, exit_code=0, stderr=""):
+def grade(events, case, exit_code: int | None = 0, stderr: str = ""):
     if exit_code == 0 and not stderr:
         return run.grade(lines(*events), case, EVERY)
     return run.grade(lines(*events), case, EVERY, exit_code, stderr)
@@ -285,17 +292,26 @@ quiet = ["alpha"]
 """
 
 
-class LoadCases(unittest.TestCase):
+class Swapping(unittest.TestCase):
+    """A test case that swaps attributes for the length of one test."""
+
+    def swap(self, name, value, target=None):
+        patcher = mock.patch.object(run if target is None else target, name, value)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def temporary(self, prefix):
+        path = Path(tempfile.mkdtemp(prefix=prefix))
+        self.addCleanup(shutil.rmtree, path, True)
+        return path
+
+
+class LoadCases(Swapping):
     """One broken cases file per guard; each must stop with its message."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-cases-"))
-        self.saved = run.CASES
-        run.CASES = self.tmp / "cases.toml"
-
-    def tearDown(self):
-        run.CASES = self.saved
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.tmp = self.temporary("skill-trigger-cases-")
+        self.swap("CASES", self.tmp / "cases.toml")
 
     def load(self, toml):
         run.CASES.write_text(toml)
@@ -386,14 +402,9 @@ class LoadCases(unittest.TestCase):
         )
 
 
-class RepoFiles(unittest.TestCase):
+class RepoFiles(Swapping):
     def setUp(self):
-        self.saved = run.SKILLS, run.CASES
-        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-skills-"))
-
-    def tearDown(self):
-        run.SKILLS, run.CASES = self.saved
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.tmp = self.temporary("skill-trigger-skills-")
 
     def test_model_invoked_skills_come_from_the_frontmatter(self):
         for name, flag in (("alpha", ""), ("beta", "'false'"), ("gamma", "true")):
@@ -401,12 +412,12 @@ class RepoFiles(unittest.TestCase):
             line = f"disable-model-invocation: {flag}\n" if flag else ""
             (self.tmp / name / "SKILL.md").write_text(f"---\nname: {name}\n{line}---\n")
         (self.tmp / "no-skill").mkdir()
-        run.SKILLS = self.tmp
+        self.swap("SKILLS", self.tmp)
         self.assertEqual(run.repo_skills(), (EVERY, MODEL_INVOKED))
 
     def test_repo_cases_cover_the_repo_skills(self):
-        run.SKILLS = REPO / "claude" / ".claude" / "skills"
-        run.CASES = HERE / "cases.toml"
+        self.swap("SKILLS", REPO / "claude" / ".claude" / "skills")
+        self.swap("CASES", HERE / "cases.toml")
         _, model = run.repo_skills()
         self.assertTrue(run.load_cases(model))
 
@@ -416,24 +427,22 @@ RUN_USER = Path(f"/run/user/{os.getuid()}")
 
 
 @unittest.skipUnless(BWRAP, "bwrap is not on PATH")
-class Probe(unittest.TestCase):
+class Probe(Swapping):
     """The isolation probe with one part of the wrapper broken at a time.
 
     The home it guards is this file's temporary HOME, so a broken mount
     exposes and writes only there.
     """
 
+    argv = staticmethod(run.Sandbox.argv)
+    env = staticmethod(run.Sandbox.env)
+
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-probe-"))
+        self.tmp = self.temporary("skill-trigger-probe-")
         (self.tmp / "alpha").mkdir()
         (self.tmp / "alpha" / "SKILL.md").write_text("---\nname: alpha\n---\n")
         Path(FAKE_HOME, "marker").write_text("x")
-        self.saved = run.SKILLS, run.Sandbox.argv, run.Sandbox.env
-        run.SKILLS = self.tmp
-
-    def tearDown(self):
-        run.SKILLS, run.Sandbox.argv, run.Sandbox.env = self.saved
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.swap("SKILLS", self.tmp)
 
     def probe(self):
         run.isolation_probe(["alpha"], Path("/bin/true").resolve())
@@ -445,7 +454,7 @@ class Probe(unittest.TestCase):
 
     def drop(self, flag, value):
         """Remove one wrapper option and its arguments from the bwrap command."""
-        argv = self.saved[1]
+        argv = self.argv
         width = {"--tmpfs": 2, "--bind": 3}[flag]
 
         def without(box, command):
@@ -455,7 +464,7 @@ class Probe(unittest.TestCase):
                     return wrap[:i] + wrap[i + width :]
             raise AssertionError(f"{flag} {value} not in the wrapper")
 
-        run.Sandbox.argv = without
+        self.swap("argv", without, run.Sandbox)
 
     def test_intact_wrapper_passes(self):
         self.probe()
@@ -467,7 +476,7 @@ class Probe(unittest.TestCase):
 
     def test_write_check_watches_the_mount_over_home(self):
         # Home stays hidden, but behind a directory the write check does not read.
-        argv, elsewhere = self.saved[1], self.tmp / "elsewhere"
+        argv, elsewhere = self.argv, self.tmp / "elsewhere"
         elsewhere.mkdir()
 
         def other_dir(box, command):
@@ -475,7 +484,7 @@ class Probe(unittest.TestCase):
                 str(elsewhere) if a == str(box.guard) else a for a in argv(box, command)
             ]
 
-        run.Sandbox.argv = other_dir
+        self.swap("argv", other_dir, run.Sandbox)
         self.assertProbeStops("the write check saw [], not the canary")
 
     @unittest.skipUnless(
@@ -486,21 +495,29 @@ class Probe(unittest.TestCase):
         self.assertProbeStops(f"{RUN_USER} shows")
 
     def test_variable_beyond_the_allowlist(self):
-        env = self.saved[2]
-        run.Sandbox.env = lambda box, extra=None: {**env(box, extra), "CLAUDECODE": "1"}
+        env = self.env
+        self.swap(
+            "env",
+            lambda box, extra=None: {**env(box, extra), "CLAUDECODE": "1"},
+            run.Sandbox,
+        )
         self.assertProbeStops("variables beyond the allowlist: ['CLAUDECODE']")
 
     def test_home_not_swapped(self):
-        env = self.saved[2]
-        run.Sandbox.env = lambda box, extra=None: {**env(box, extra), "HOME": FAKE_HOME}
+        env = self.env
+        self.swap(
+            "env",
+            lambda box, extra=None: {**env(box, extra), "HOME": FAKE_HOME},
+            run.Sandbox,
+        )
         self.assertProbeStops("HOME is")
 
 
-class Summary(unittest.TestCase):
+class Summary(Swapping):
     """main() around stand-in runs: no sandbox, no model call."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-summary-"))
+        self.tmp = self.temporary("skill-trigger-summary-")
         skills = self.tmp / "skills"
         for name in EVERY:
             (skills / name).mkdir(parents=True)
@@ -511,28 +528,15 @@ class Summary(unittest.TestCase):
             '[[case]]\nname = "a"\nprompt = "p"\nfires = "alpha"\nquiet = ["beta"]\n'
             '[[case]]\nname = "b"\nprompt = "p"\nfires = "beta"\nquiet = ["alpha"]\n'
         )
-        self.saved = {
-            k: getattr(run, k)
-            for k in (
-                "SKILLS",
-                "CASES",
-                "run_case",
-                "isolation_probe",
-                "credential_env",
-                "claude_binary",
-            )
-        }
-        run.SKILLS, run.CASES = skills, cases
-        run.claude_binary = lambda: Path("/bin/true")
-        run.isolation_probe = lambda every, binary: None
-        run.credential_env = lambda: ({}, "a stand-in")
+        self.swap("SKILLS", skills)
+        self.swap("CASES", cases)
+        self.swap("claude_binary", lambda: Path("/bin/true"))
+        self.swap("isolation_probe", lambda every, binary: None)
+        self.swap("credential_env", lambda: ({}, "a stand-in"))
         self.verdicts = []
-        run.run_case = lambda case, every, binary, args: (self.verdicts.pop(0), "")
-
-    def tearDown(self):
-        for k, v in self.saved.items():
-            setattr(run, k, v)
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.swap(
+            "run_case", lambda case, every, binary, args: (self.verdicts.pop(0), "")
+        )
 
     def main(self, *argv):
         out, err = io.StringIO(), io.StringIO()
