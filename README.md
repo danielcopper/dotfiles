@@ -237,7 +237,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   is a link out of the mod folder, which every stowed file is, as it refuses
   one from another mod's folder. So `mods/file-popup/` keeps its listers in
   `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
-  own marked copy of the leader's `toggleBoard` and `openBoard`. An icon is no module:
+  own marked copies of the leader's board layer block and board toggle; the
+  board's `src/ui/layer.js` holds the layer block too. An icon is no module:
   `mods/board-button/board.svg` draws through its link. The board is
   written as modules in `mods/board/src/` and built into its `main.js` by
   `mise run herdr-board-build`; the header of `mods/board/build.mjs` says
@@ -281,16 +282,21 @@ herdr-app`. Which files of the package git tracks is set in the root
   repo) tests what the leader binds and what Tab, shift-Tab and Esc then
   do, in the leader and on their way to tmux. It needs node.
 - **The board (`mods/board/`) shows my own work.** In the personal layout it
-  is a layer of the work area, not a tab: the board button left of the tabs
-  and the leader's `b` show it in place of the shown tab's content, and the
-  button is highlighted while it shows. The tab's content comes back on a
-  second click or `b`, on any press in the tab bar (herdr tells a mod of no
-  click on a tab, so a press on `+`, Files, Changes, the window buttons or
-  an empty stretch of the bar counts too), and when the focus moves to
-  another tab, space or pane, for example to the agent the board just
-  started. herdr's tab bar keeps highlighting the last shown tab while the
-  board shows. In a layout without that stack, the button and `b` show the
-  board's "Board" tab, or open one. A top bar toggles between
+  is a layer of the work area, not a tab: a stack in the layout with the
+  shown tab's content and a board block whose props say `layer`. The board
+  button left of the tabs and the leader's `b` show the board in place of
+  the tab's content and give it the keyboard; the button is highlighted
+  while it shows. The tab's content comes back, with the keyboard, on a
+  second press of the button or `b`, on `Esc` when the board has nothing
+  else to close (details, a notice, the filter), on `Enter` to an item's
+  session, on any press outside the board but the button's (the tab bar,
+  the sidebar, the right panel; any mouse button), and when the focus moves
+  to another space, tab or pane, for example to the agent the board just
+  started; a new program in the same pane keeps the board. herdr's tab bar
+  keeps highlighting the last shown tab while the board shows. The board
+  layer is found by its shape, not by ids. Without one, the button and `b`
+  show the board's "Board" tab or open one, except in the personal
+  layout, where they say the layer is missing. A top bar toggles between
   its sources, GitHub and Azure, and shows one tab per context of the shown
   source, as `mods/board/views.json` sets them: on Azure each of my teams,
   with a switch between its Sprint and its Backlog, followed by the pull
