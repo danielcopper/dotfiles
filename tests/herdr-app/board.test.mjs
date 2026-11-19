@@ -892,7 +892,7 @@ test("a section missing from GitHub's answer is an error, explained by the error
 
 // ---- Tools that cannot run ----
 
-test("a tool that cannot run, or runs out of time, says so; only a missing az makes its view unavailable", () => {
+test("a tool that cannot run, or runs out of time, says so; only a missing az is marked unavailable, for the Azure views", () => {
   const missing = board.execRejection("az", notRun("az"), 60000, null);
   assert.deepEqual([missing.message, missing.unavailable], ["az ist nicht installiert", true]);
   const gh = board.execRejection("gh", notThere("gh"), 30000, "server");
@@ -966,7 +966,7 @@ test("a program's path is asked of the shell: interactive here, also login on an
   assert.deepEqual(there.calls[0].options, { on: "server", timeout: 60000 });
 });
 
-test("a program the shell does not find is not installed; only a missing az makes its view unavailable", async () => {
+test("a program the shell does not find is not installed; only a missing az is marked unavailable, for the Azure views", async () => {
   const gh = await board.findTool(fakeRun(answered("")).run, "gh", null, 30000).catch((e) => e);
   assert.deepEqual([gh instanceof board.BoardError, gh.message, gh.unavailable], [true, "gh ist nicht installiert", false]);
   const az = await board.findTool(fakeRun(answered("")).run, "az", "server", 60000).catch((e) => e);
@@ -1204,7 +1204,7 @@ test("with $SHELL unset under dash the path script asks the account's shell", { 
   inShellHome((run, want) => assert.equal(run("board-rc-tool", null, null, dash).answer, want.rc));
 });
 
-test("az's failures: login and a missing extension make the view unavailable, others are errors without az's WARNING lines", () => {
+test("az's failures: login and a missing extension are marked unavailable, for the Azure views; others are errors without az's WARNING lines", () => {
   const login = board.azFailure({ code: 1, stderr: "WARNING: a notice\nERROR: Before you can run Azure DevOps commands, you need to run the login command(az login if using AAD/MSA identity else az devops login if using PAT token) to setup credentials." });
   assert.deepEqual([login.unavailable, login.message], [true, "az ist nicht angemeldet (az login oder az devops login)"]);
   for (const err of ["ERROR: 'boards' is misspelled or not recognized by the system.", "ERROR: az: 'devops' is not in the 'az' command group."]) {
@@ -1491,6 +1491,7 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => (tool
     runs: [],
     notes: [],
     focused: 0,
+    inputs: [],
     config,
     spaceList: [{ id: "s1", name: "x", folder: "/r/tender", machine: null, branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Board", active: true }] }],
     spaces: () => host.spaceList,
@@ -1516,9 +1517,17 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => (tool
     knownAgents: async () => [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }],
     settings: () => ({}),
     theme: () => ({}),
+    // An input whose focus() tells its "focus" handler, and whose "blur"
+    // handler hears when the board takes the keyboard back, as herdr's do.
     "InputState.new": (opts) => {
       let value = opts?.value ?? "";
-      return { on: () => true, value: () => value, set_value: (v) => (value = v), focus: () => {} };
+      const on = {};
+      const input = {
+        on: (event, fn) => ((on[event] = fn), true), value: () => value, set_value: (v) => (value = v),
+        focus: () => on.focus?.({}, { notify() {} }), blur: () => on.blur?.({}, { notify() {} }),
+      };
+      host.inputs.push(input);
+      return input;
     },
     "ScrollHandle.new": () => ({ scroll_to_item() {} }),
     div: () => element("div"),
@@ -1551,7 +1560,12 @@ function fakeCx() {
   const cx = {
     later: [],
     every: [],
-    focus_handle: () => ({ focus: () => globalThis.__boardHost.focused++ }),
+    focus_handle: () => ({
+      focus: () => {
+        globalThis.__boardHost.focused++;
+        for (const input of globalThis.__boardHost.inputs ?? []) input.blur();
+      },
+    }),
     spawn: (fn) => Promise.resolve().then(() => fn(cx)),
     timer: {
       after: (ms, fn) => cx.later.push(fn),
@@ -2497,6 +2511,39 @@ test("UI: a team with one view shows it without a switch; a config with one sour
   await press(b, cx, "q");
   await press(b, cx, "v");
   assert.deepEqual([b.source().id, b.teamViewOf(b.context())], ["azure", "backlog"]);
+});
+
+test("UI: while one types in the filter, m, q, v and digits are text, not keys", async () => {
+  const { b, cx } = await bootBoard({ stored: { source: "azure" } });
+  await press(b, cx, "/");
+  assert.equal(b.filtering, true);
+  for (const k of ["m", "q", "v", "2", "]"]) await press(b, cx, k);
+  assert.deepEqual([b.mine, b.source().id, b.teamViewOf(b.context()), b.context().kind], [false, "azure", "sprint", "team"]);
+  await press(b, cx, "escape");
+  await press(b, cx, "m");
+  assert.equal(b.mine, true, "after Esc they are keys again");
+});
+
+test("UI: the shown GitHub view refreshes every refreshMinutes while the board shows; an Azure tab and a hidden board read nothing", async () => {
+  let shown = true;
+  const { b, cx, host } = await openBoard();
+  host.panes = () => (shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []);
+  advance(2 * 60000);
+  await cx.tick();
+  assert.equal(host.open("gh").length, 0, "not before refreshMinutes");
+  advance(60000);
+  await cx.tick();
+  assert.equal(host.open("gh").length, 1, "after refreshMinutes");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  shown = false;
+  advance(10 * 60000);
+  await cx.tick();
+  assert.equal(host.open("gh").length, 0, "not while the board is not shown");
+  shown = true;
+  await press(b, cx, "q");
+  advance(10 * 60000);
+  await cx.tick();
+  assert.deepEqual([host.open("gh").length, host.open("az").length], [0, 0], "an Azure tab reads nothing");
 });
 
 test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
