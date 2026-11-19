@@ -74,6 +74,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 
 | Hook                    | Event            | Purpose                                             |
 | ----------------------- | ---------------- | --------------------------------------------------- |
+| `block_pr_merge.py`     | PreToolUse (Bash) | Denies every command that would merge a pull request — see [Guard hooks](#guard-hooks) |
 | `block_disk_wipe.py`    | PreToolUse (Bash) | Denies mkfs, wipefs, dd onto a device node and redirects onto a block device — the one destruction the auto-mode classifier does not name. Every other deletion (`rm`, `git reset --hard`, `checkout -- path`, `branch -D`, force push) is the classifier's call |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
 | `session_worktree.py`   | PostToolUse (Bash) | Records the worktree a `mise run worktree-new` call in this session reported ready in `$XDG_RUNTIME_DIR/statusline-session-wt/<session_id>` (else under `~/.cache/claude/`; a private directory, refused when a symlink or owned by someone else), so `statusline.sh` shows that branch |
@@ -138,6 +139,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
 | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
 | `block_ai_attribution.py` | global (`settings.json`)                          | `git commit`, `gh pr`/`issue`/`release`, `gh api` and `az repos pr` commands whose message or published text carries AI attribution markers |
 | `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` while a protected branch (main/master, develop, release/*) is checked out, unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `echo`, `cat`, a `gh pr`/`issue`/`release` publishing verb or `az repos pr create`/`update`, runs nothing else but `cd` or a bare assignment, and carries no backtick, `${`, `$$` or `$'` outside single quotes passes |
+| `block_pr_merge.py`       | global (`settings.json`)                          | Merging a pull request from a session: the commands `merge_policy` in `skills/implement/repo-config.md` lists, parsed from the command, also behind `sudo`, `bash -c`, `eval` or a command substitution; the settings' text deny rules are the second layer |
 | `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's code-reviewer, test, silent-failure or type-design analyzer — denied with a redirect to `reviewer`, `test-reviewer`, `failure-reviewer` or `type-reviewer` |
 
 ## Directory Structure
@@ -158,6 +160,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
     ├── block_ai_attribution.py   # Commit guard: no AI attribution
     ├── lint_published_markdown.py  # Publish guard: no issue reference in a list item
     ├── block_commit_on_main.py   # Commit guard: worktree branches only
+    ├── block_pr_merge.py         # Merge guard: the owner merges every PR
     ├── block_plugin_code_reviewer.py  # Agent guard: route retired plugin reviewers to own agents
     ├── pre_tool_use.py           # Security guard (fail-closed)
     ├── post_tool_use.py          # Error detection

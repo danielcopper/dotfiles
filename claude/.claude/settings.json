@@ -89,6 +89,7 @@
       "Bash(*enablePullRequestAutoMerge*)",
       "Bash(*gh api *repos/*/merges*)",
       "Bash(*gh alias set*)",
+      "Bash(*gh alias import*)",
       "Bash(*az repos pr update*--status*completed*)",
       "Bash(*az repos pr update*--auto-complete*)"
     ],
@@ -174,6 +175,11 @@
           {
             "type": "command",
             "command": "python3 $HOME/.claude/hooks/block_disk_wipe.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 $HOME/.claude/hooks/block_pr_merge.py",
             "timeout": 10
           }
         ]
