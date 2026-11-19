@@ -88,10 +88,10 @@ where to start) or **batch** (you validate every task, then hand over one list).
 
 ## Phase 4 - Validate
 
-**One at a time** runs steps 1–4 per task, in the user's order (or one after another when they say so). **Batch** runs
-steps 1–2 for every task without waiting, records each Outcome with your lean, then presents one list: every
-recommended comment as a draft with its anchor, and every finding you recommend dropping with its reason. The user's
-ruling on that list replaces step 3 for all tasks.
+**One at a time** runs steps 1–4 per task, in the user's order (or one after another when they say so). **Batch** asks
+step 1's yes when the user picks it, then runs steps 1–2 for every task without waiting, records each Outcome with
+your lean, then presents one list: every recommended comment as a draft with its anchor, and every finding you
+recommend dropping with its reason. The user's ruling on that list replaces step 3 for all tasks.
 
 1. Running PR code needs the user's yes, asked once before the review worktree exists: name the install command and
    the test or probe commands, and say that the install runs the PR's own scripts. On the yes, create the worktree
@@ -99,7 +99,8 @@ ruling on that list replaces step 3 for all tasks.
    `git worktree add --detach <repo-parent>/<repo>.worktrees/review/<PR#>-<short-slug> "$HEAD_SHA"` — and install
    dependencies once. Without the yes, validate by reading.
 2. **Validate empirically**: run, mutate and probe (with step 1's yes), cite source lines and exit codes; read the
-   installed library source rather than trusting memory. `cmd | tail` returns `tail`'s exit code (use
+   installed library source rather than trusting memory — without the yes, the version the lockfile pins, read from
+   the upstream source. `cmd | tail` returns `tail`'s exit code (use
    `${PIPESTATUS[0]}`); force flaky failures to repeat (e.g. `--testTimeout=1`). A real code path is not a reachable one
    (`~/Memory/global/verification-reachability.md`).
 3. Report the evidence with your lean (post / skip), then wait: post, skip, shorter, more proof, or a draft to show
@@ -118,4 +119,4 @@ with ELSPROBLEMS"), no filler, no AI mention.
 ## Phase 6 - Wrap up
 
 Once the user has closed every task (on GitHub, with the batch submitted), print `# | outcome | comment link`. Leave
-the review worktree in place and name its path.
+the review worktree in place, where one was created, and name its path.
