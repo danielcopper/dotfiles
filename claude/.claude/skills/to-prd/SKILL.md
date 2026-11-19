@@ -96,5 +96,5 @@ Any further notes about the feature.
    ```
    Capture the returned issue URL.
 3. Put the issue on the board in Ready, as `repo-config.md`, "Board", says — on a `github` board with the commands under "GitHub commands", which also set its approved priority.
-4. When a wayfinder map was a source, archive it: move it to `~/Memory/<repo>/archive/`, with this line first after its front matter: `Historical — wayfinder map, published as PRD #N on <date>. Not current. What holds now: the PRD #N.` Then delete its `TIME-BOUND` line from `~/Memory/<repo>/MEMORY.md`.
+4. When a wayfinder map was a source, archive it: move it to `~/Memory/<repo>/archive/<N>-<slug>/`, `<N>` the PRD's issue number, like implement step 10, with this line first after its front matter: `Historical — wayfinder map, published as PRD #N on <date>. Not current. What holds now: the PRD #N.` Then delete its `TIME-BOUND` line from `~/Memory/<repo>/MEMORY.md`.
 5. Report the issue URL to the user.
