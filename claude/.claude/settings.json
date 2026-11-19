@@ -81,7 +81,10 @@
       "Bash(*scp */srv/secrets/*)",
       "Bash(*scp */mnt/cache/appdata/matrix/*)",
       "ScheduleWakeup",
-      "ReportFindings"
+      "ReportFindings",
+      "Bash(gh pr merge:*)",
+      "Bash(*gh pr merge*)",
+      "Bash(*gh api *pulls/*/merge*)"
     ],
     "defaultMode": "auto",
     "ask": [
