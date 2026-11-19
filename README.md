@@ -279,35 +279,45 @@ herdr-app`. Which files of the package git tracks is set in the root
   (without mise, `node --test tests/herdr-app/leader.test.mjs` from the
   repo) tests what the leader binds and what Tab, shift-Tab and Esc then
   do, in the leader and on their way to tmux. It needs node.
-- **The board (`mods/board/`) shows my own work.** As `mods/board/views.json`
-  sets them, its views are "Meine Aufgaben" (my issues on the Tender project's
-  board, in the columns of its Status field), "PRs" (pull requests I opened or
-  am asked to review, with checks and review state) and "Azure" (work items
-  assigned to me, in the columns of their states). A view is a filter: adding
-  one to `views.json` adds it to the board, and `r` reads the file again. The
-  code holds nothing of mine; the header of `mods/board/main.js` describes the
-  file's fields and when Azure shows. Keys: `1 2 3` or `[ ]` switch the view,
-  `h/l j/k` move, `H/L` move a card one column (`s` picks from a menu, or drag
-  the card onto a column), `x` hides or shows a column (views.json sets which
-  start hidden), `/` filters, `o` opens the item in the browser, `r` refreshes
-  (the shown view also refreshes every few minutes while the tab is shown),
-  `Esc` closes. `Enter` opens the details, a second `Enter` goes to the item's
-  session or starts one: a new space or tab on the chosen machine, in the
-  repo's checkout, whose agent gets the first message views.json sets
-  (`/implement <n>`, `/pr-review <n>` for a pull request) and makes its own
-  worktree. The session is named after the item (`romm-tender#2845 …`, `AB#456
-  …`), which is how the board finds it again. A status change shows at once
-  and is written to GitHub or Azure; a refusal moves the card back with the
-  error, and a write without a clear answer refreshes the board and then says
-  where the card is. It runs gh and az by the path my shell gives on their
-  machine, since herdr's own PATH lacks Homebrew and mise; on another
-  machine where herdr cannot start sh (Windows) it runs them by name. Known
-  limit, not tried: az on Windows is `az.cmd`, which a start by bare name
-  may not find. `mise run herdr-board-test`
-  (without mise, `node --test tests/herdr-app/board.test.mjs` from the repo)
-  tests its data functions and a few of its key paths against sample answers
-  of gh, GitHub and az; the test file's header says which are recorded, which
-  built by hand and which written from az's documentation. It needs node.
+- **The board (`mods/board/`) shows my own work.** A top bar toggles
+  between its sources, Azure and GitHub, and shows one tab per context of
+  the shown source, as `mods/board/views.json` sets them: on Azure my team,
+  with a switch between its Sprint and its Backlog, and the pull requests
+  of its project; on GitHub "Meine Aufgaben" (my issues on the
+  Tender project's board, in the columns of its Status field) and "PRs"
+  (pull requests I opened or am asked to review, with checks and review
+  state). The Azure tabs read nothing yet; each says which view it will
+  hold. "nur meine" narrows whatever shows to my own items (on GitHub:
+  assigned to me, or opened by me) without reading anything again. A
+  context or view added to `views.json` adds a tab, and `r` reads the file
+  again; the board remembers the source, tab and team view shown last. The
+  code holds nothing of mine; the header of `mods/board/src/main.js`
+  describes the file's fields. Keys: `q` switches the source, `1 2 3` or
+  `[ ]` the tab, `v` a team's Sprint and Backlog, `m` turns "nur meine" on
+  and off (the toggle, the tabs, the switch and "nur meine" take clicks
+  too), `/` filters, `r` refreshes (the shown view also refreshes every few
+  minutes while the tab is shown), `Esc` closes. On a GitHub view `h/l j/k`
+  move, `H/L` move a card one column (`s` picks from a menu, or drag the
+  card onto a column), `x` hides or shows a column (views.json sets which
+  start hidden), `o` opens the item in the browser. `Enter` opens the
+  details, a second `Enter` goes to the item's session or starts one: a new
+  space or tab on the chosen machine, in the repo's checkout, whose agent
+  gets the first message views.json sets (`/implement <n>`, `/pr-review
+  <n>` for a pull request) and makes its own worktree. The session is named
+  after the item (`romm-tender#2845 …`, `AB#456 …` for a work item), which
+  is how the board finds it again. A status change shows at once and is
+  written to GitHub; a refusal moves the card back with the error, and a
+  write without a clear answer refreshes the board and then says where the
+  card is. It runs gh by the path my shell gives on its machine, since
+  herdr's own PATH lacks Homebrew and mise; on another machine where herdr
+  cannot start sh (Windows) a program runs by its name. Known limit, not
+  tried: az on Windows is `az.cmd`, which a start by bare name may not
+  find, once the Azure views run az. `mise run herdr-board-test` (without
+  mise, `node --test tests/herdr-app/board.test.mjs` from the repo) tests
+  that `main.js` is built from its sources, its data functions and a few of
+  its key paths against sample answers of gh, GitHub and az; the test
+  file's header says which are recorded, which built by hand and which
+  written from az's documentation. It needs node.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
