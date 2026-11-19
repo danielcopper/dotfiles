@@ -162,6 +162,37 @@ program_dirs=(
   host-steamdeck:.config/systemd/user/app.slice.d
 )
 
+# package_dirs <package>: the package's directories, relative to it, without
+# those its .stow-local-ignore names and everything below them. Stow links
+# nothing there, so nothing there is to be made real. The patterns are Perl
+# regular expressions as stow reads them: one with a / is matched against the
+# path below the package with a leading /, one without against the last
+# component.
+package_dirs() {
+  find "$1" -mindepth 1 -type d -printf '%P\n' |
+    perl -e '
+      my @pats;
+      if (open my $fh, "<", shift) {
+        while (<$fh>) {
+          chomp;
+          s/^\s+|\s+$//g;
+          next if $_ eq "" || /^#/;
+          push @pats, $_;
+        }
+      }
+      LINE: while (my $path = <STDIN>) {
+        chomp $path;
+        my @parts = split m{/}, $path;
+        for my $i (0 .. $#parts) {
+          my $sub = "/" . join "/", @parts[0 .. $i];
+          for my $pat (@pats) {
+            next LINE if $pat =~ m{/} ? $sub =~ /$pat/ : $parts[$i] =~ /$pat/;
+          }
+        }
+        print "$path\n";
+      }' "$1/.stow-local-ignore"
+}
+
 # The directories to make real: those that more than one of the given
 # packages fills, every directory of a package stowed without folding, the
 # ones listed above, and the parents of each, parents first.
@@ -169,11 +200,11 @@ list_real_dirs() {
   local pkg entry d
   {
     for pkg in "${pkgs[@]}"; do
-      find "$pkg" -mindepth 1 -type d -printf '%P\n'
+      package_dirs "$pkg"
     done | LC_ALL=C sort | uniq -d
     for pkg in "${pkgs[@]}"; do
       if in_list "$pkg" "${no_folding_pkgs[@]}"; then
-        find "$pkg" -mindepth 1 -type d -printf '%P\n'
+        package_dirs "$pkg"
       fi
     done
     for entry in "${program_dirs[@]}"; do

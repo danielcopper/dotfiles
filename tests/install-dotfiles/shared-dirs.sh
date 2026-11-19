@@ -167,6 +167,9 @@
 #       alone and not backed up
 #   s90 with --backup, a run that stops before the backup on a staging
 #       directory beside a fold says of no link that it goes into the backup
+#   s91 a directory of a package stowed without folding that its
+#       .stow-local-ignore names (herdr-app's mods/board/src) is not made in
+#       the home, nor any directory below it
 #   a1  run again from a directory holding a file named
 #       s41_trailing_slash_accepted, the suite takes that name for the case
 #       s41, not for the installer
@@ -223,7 +226,7 @@ CASES=(s1_fold_undone_on_debian s2_fold_undone_on_arch s3_fold_elsewhere_kept s4
   s85_dangling_link_beside_stage_where_dir_belongs s86_own_fold_listing_failure_says_what_to_do
   s87_own_fold_app_file_staged_too_merged s88_backup_names_link_into_unreadable_worktree
   s89_backup_keeps_link_into_repo_left_alone s90_backup_line_only_where_the_backup_runs
-  a1_shared_dirs_case_beside_file)
+  s91_ignored_dirs_not_made a1_shared_dirs_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -1539,6 +1542,15 @@ s90_backup_line_only_where_the_backup_runs() {
   check "says nothing goes into the backup" eq "$(grep -c 'goes into the backup' <<<"$OUT")" 0
   check ".bashrc left as it is" eq "$(readlink -- "$HOME/.bashrc")" "$ROOT/elsewhere/file"
   check "nothing backed up" eq "$(find "$HOME" -maxdepth 1 -name '.dotfiles-pre-stow.*')" ""
+}
+
+s91_ignored_dirs_not_made() {
+  local board=.config/herdr-app/mods/board
+  run_relink herdr-app
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the package has the ignored directory" test -d "$COPY/herdr-app/$board/src"
+  check "main.js linked" linked_to "$board/main.js" "$COPY/herdr-app/$board/main.js"
+  check "no src in the home" test ! -e "$HOME/$board/src"
 }
 
 # expect_case_beside_file <case> [arg ...]: this suite, run again from a
