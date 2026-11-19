@@ -2,10 +2,9 @@
 
 // The board: one's own work from GitHub (issues and pull requests on a
 // Projects v2 board, open pull requests) and Azure DevOps, as
-// mods/board/views.json sets them. In the personal layout it is a layer of
-// the work area, which the leader's `b` and the board button switch to and
-// back; in another layout it is a tab "Board", which they show or open.
-// What it shows, its keys and behaviour: README, "herdr app".
+// mods/board/views.json sets them, as the board layer of the layout
+// (props { layer: true }) or in a tab "Board". What it shows, where, its
+// keys and behaviour: README, "herdr app".
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
@@ -44,7 +43,8 @@
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), select.js (filter, "nur
 // meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
-// az), actions/start.js (starting a session), ui/helpers.js, ui/shapes/
+// az), actions/start.js (starting a session), ui/helpers.js, ui/layer.js
+// (the board layer, a block the leader and the board button share), ui/shapes/
 // (how a view's data is drawn and worked: board, prs, placeholder) and this
 // one, the Board, which looks the shape up. Their data logic is
 // plain exported functions, tested with a few UI paths by
@@ -52,7 +52,7 @@
 
 import { View, div } from "gpui-kit";
 import { Input, InputState, ScrollHandle, h_flex, v_flex } from "gpui-base";
-import { appHome, checking, exec, knownAgents, layout, machines, nextCommand, notify, panes, readTextFile, run, settings, spaces, theme } from "herdr";
+import { appHome, checking, exec, focused, knownAgents, layout, machines, nextCommand, notify, panes, readTextFile, run, settings, spaces, theme } from "herdr";
 
 // ==== src/shared.js ====
 
@@ -1387,6 +1387,61 @@ export function makeGithub(paths) {
 
 export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGithub(paths) });
 
+// ==== src/ui/layer.js ====
+
+// The board layer: how the board finds the stack that shows it in place of
+// the shown tab's content, and how it shows that content again. The leader
+// and the board button hold the same block.
+
+// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
+// (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
+// that the copies match.)
+// The board layer (README, "herdr app") is a stack in the layout with a
+// block that shows the board mod and a block that shows the shown tab. It
+// is found by that shape, so its ids live in the layout alone.
+
+// The first node of a layout tree, depth first, that `test` accepts, or
+// null.
+function findNode(node, test) {
+  if (!node || typeof node !== "object") return null;
+  if (test(node)) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, test);
+    if (found) return found;
+  }
+  return null;
+}
+
+// The board layer of a layout tree as { stack, board, tab, shown }: the
+// stack's id, its board child's and its tab child's, and whether it shows
+// the board; null for a layout without one.
+function boardLayer(root) {
+  const isBoard = (n) => n.content?.mod === "board";
+  const isTab = (n) => n.content?.tab === "active";
+  const stack = findNode(root, (n) => n.type === "stack" && (n.children ?? []).some(isBoard) && n.children.some(isTab));
+  if (!stack) return null;
+  const board = stack.children.find(isBoard).id;
+  return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
+}
+
+// Shows the shown tab's content in place of the board and gives the
+// keyboard back to the focused pane, since layout.select leaves the
+// keyboard where it was. A failure says which stack and child.
+function showTab(layer) {
+  try {
+    run("layout.select", { stack: layer.stack, child: layer.tab });
+    const pane = focused()?.pane;
+    if (pane) run("pane.focus", { pane });
+  } catch (e) {
+    notify({ title: `Could not show "${layer.tab}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+  }
+}
+// ---- end layer ----
+
+// The block's functions for the board's other modules. In main.js all
+// modules share one scope; run from src/ each module is one of its own.
+export const layers = { boardLayer, showTab };
+
 // ==== src/ui/helpers.js ====
 
 // UI helpers: lasting settings, colors and machine names, whether the board
@@ -1432,27 +1487,15 @@ export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
-// layouts/personal.json shows the board as a layer of the work area: the
-// stack LAYER_STACK, whose child LAYER_CHILD is the board; the leader and the
-// board button switch it (their marked copies of toggleBoard).
-const LAYER_STACK = "work-stack";
-const LAYER_CHILD = "board";
-
-// The node with that id in a layout tree, or null.
-function layoutNode(node, id) {
-  if (!node || typeof node !== "object") return null;
-  if (node.id === id) return node;
-  for (const child of node.children ?? []) {
-    const found = layoutNode(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-// Whether the board shows: as the layer of the work area in the shown
-// layout, or as a pane in the shown tab of the shown space.
-export function boardShown() {
-  if (layoutNode(layout(), LAYER_STACK)?.active === LAYER_CHILD) return true;
+// Whether this copy of the board shows. The layer's copy (`layer`) shows
+// while the board layer shows the board. A copy in a tab shows while a
+// board pane is in the shown tab of the shown space, and no board layer
+// covers that tab's content. herdr tells a pane mod no id of its own pane,
+// so two Board tabs would count as one.
+export function boardShown(layer) {
+  const found = layers.boardLayer(layout());
+  if (layer) return Boolean(found?.shown);
+  if (found?.shown) return false;
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }
@@ -2305,7 +2348,10 @@ const TICK_MS = 30000;
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 
 export default class Board extends View {
-  init(_props, cx) {
+  init(props, cx) {
+    // The board layer's copy (its block's props in the layout), not one in
+    // a tab.
+    this.isLayer = props?.layer === true;
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
@@ -2344,9 +2390,9 @@ export default class Board extends View {
     });
     this.filterInput.on("submit", () => this.handle.focus());
     if (checking()) return;
-    // A copy that is not shown (a reload of a background tab or of the
-    // hidden layer) leaves the keyboard where it is.
-    if (boardShown()) {
+    // A copy that is not shown (a reload of a background tab, or the layer's
+    // copy behind the tab's content) leaves the keyboard where it is.
+    if (boardShown(this.isLayer)) {
       this.handle.focus();
       cx.timer.after(300, () => this.handle.focus());
     }
@@ -2514,7 +2560,7 @@ export default class Board extends View {
   // Every TICK_MS while the board shows: the shown view once refreshMinutes
   // have passed since it was last tried.
   tick(cx) {
-    if (!this.config || !boardShown()) return;
+    if (!this.config || !boardShown(this.isLayer)) return;
     const every = this.config.refreshMinutes * 60000;
     const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
@@ -2655,8 +2701,30 @@ export default class Board extends View {
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
     const session = linkedSession(item, spaces());
     if (!session) return MODALS.start.open(this, view, item, cx);
+    // The session may be the tab behind the board layer, which selecting
+    // it does not show.
+    this.leaveLayer();
     run("space.select", { id: session.space });
     if (session.tab) run("tab.select", { id: session.tab });
+  }
+
+  // As the board layer's shown board: shows the tab's content again.
+  leaveLayer() {
+    if (!this.isLayer) return;
+    const layer = layers.boardLayer(layout());
+    if (layer?.shown) layers.showTab(layer);
+  }
+
+  // A press anywhere outside the board while it shows as the layer's board
+  // shows the tab's content again (README, "herdr app"). herdr tells a mod
+  // of no click on a tab, and a click on the shown tab changes nothing a
+  // mod sees, so every press outside counts. The board button's press
+  // arrives here too, and the button switches on it by itself; so the
+  // switch waits until after the press, and goes only where the layer still
+  // shows the board.
+  pressOutside(cx) {
+    if (!this.isLayer || !layers.boardLayer(layout())?.shown) return;
+    cx.timer.after(0, () => this.leaveLayer());
   }
 
   closeModal(cx) {
@@ -2712,7 +2780,7 @@ export default class Board extends View {
       else if (this.filterText) {
         this.filterInput.set_value("");
         this.filterText = "";
-      }
+      } else this.leaveLayer();
       return done();
     }
     if (!view) return;
@@ -2763,6 +2831,7 @@ export default class Board extends View {
       .text_color(t.foreground)
       .text_size(13)
       .on_key_down((e, cx) => this.key(e, cx))
+      .on_mouse_down_out((_e, cx) => this.pressOutside(cx))
       .on_mouse_down("left", () => {
         if (!this.filtering && !this.modal) this.handle.focus();
       })

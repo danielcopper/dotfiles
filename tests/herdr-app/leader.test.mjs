@@ -284,20 +284,44 @@ test("a bound key whose handling throws says so in a toast and goes no further",
   assert.deepEqual(host.closed, ["mod-leader"]);
 });
 
-test("b shows the board in the work area, or the tab again, where the layout has the board layer, else the board's tab, and closes the leader", async () => {
-  const B = { key: "b", keystroke: "b", key_char: "b", modifiers: PLAIN };
-  for (const [active, runs] of [
-    ["main", [["layout.select", { stack: "work-stack", child: "board" }], ["board.focus", undefined]]],
-    ["board", [["layout.select", { stack: "work-stack", child: "main" }]]],
-    [null, [["tab.new", { name: "Board", mod: "board" }]]],
+// A layout with a board layer showing `active` ("tab" or "board"), the
+// stack and its children named as no layout here names them.
+const layerLayout = (active) => ({ id: "root", type: "row", children: [{ id: "work", type: "column", children: [
+  { id: "layer", type: "stack", active, children: [{ id: "tab", type: "block", content: { tab: "active" } }, { id: "board", type: "block", content: { mod: "board", props: { layer: true } } }] },
+] }] });
+const B = { key: "b", keystroke: "b", key_char: "b", modifiers: PLAIN };
+
+test("b shows the board layer's board, or the tab's content with the keyboard back, else the board's tab, and closes the leader", async () => {
+  for (const [what, layout, runs] of [
+    ["the layer showing the tab", layerLayout("tab"), [["layout.select", { stack: "layer", child: "board" }], ["board.focus", undefined]]],
+    ["the layer showing the board", layerLayout("board"), [["layout.select", { stack: "layer", child: "tab" }], ["pane.focus", { pane: "p1" }]]],
+    ["no layer", null, [["tab.new", { name: "Board", mod: "board" }]]],
   ]) {
     const { leader, cx, host } = await openLeader();
-    const stack = { id: "work-stack", type: "stack", active, children: [{ id: "main" }, { id: "board" }] };
-    host.layout = () => (active ? { id: "root", type: "row", children: [{ id: "work", type: "column", children: [stack] }] } : null);
+    host.layout = () => layout;
     await pressRaw(leader, cx, B);
-    assert.deepEqual(host.runs, runs, `the layer showing ${active}`);
-    assert.deepEqual(host.closed, ["mod-leader"]);
+    assert.deepEqual(host.runs, runs, what);
+    assert.deepEqual(host.closed, ["mod-leader"], what);
   }
+});
+
+test("b in the personal layout without a board layer says so and opens no Board tab", async () => {
+  const { leader, cx, host } = await openLeader();
+  host.setShared("layout", "personal");
+  await pressRaw(leader, cx, B);
+  assert.deepEqual(host.runs, []);
+  assert.deepEqual(host.notes.map((n) => [n.title, n.level]), [["The personal layout has no board layer", "error"]]);
+});
+
+test("a raw key whose command fails says so in a toast; a failed switch of the board layer names its stack and child", async () => {
+  const opened = await openLeader({ failRun: "tab.new" });
+  await pressRaw(opened.leader, opened.cx, B);
+  assert.deepEqual(opened.host.notes.map((n) => [n.title, n.body, n.level]), [["Leader: b failed", "tab.new broke", "error"]]);
+  assert.deepEqual(opened.host.closed, ["mod-leader"]);
+  const layered = await openLeader({ failRun: "layout.select" });
+  layered.host.layout = () => layerLayout("tab");
+  await pressRaw(layered.leader, layered.cx, B);
+  assert.deepEqual(layered.host.notes.map((n) => [n.title, n.body]), [['Could not show "board" in "layer"', "layout.select broke"]]);
 });
 
 test("keys.json still hands the leader a second ctrl-space and Esc", () => {

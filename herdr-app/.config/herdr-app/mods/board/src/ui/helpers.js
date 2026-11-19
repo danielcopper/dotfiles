@@ -8,6 +8,7 @@ import { v_flex } from "gpui-base";
 import { layout, panes, spaces } from "herdr";
 import { MOD, BoardError, errorText } from "../shared.js";
 import { githubContextId } from "../contexts.js";
+import { layers } from "./layer.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -47,27 +48,15 @@ export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
-// layouts/personal.json shows the board as a layer of the work area: the
-// stack LAYER_STACK, whose child LAYER_CHILD is the board; the leader and the
-// board button switch it (their marked copies of toggleBoard).
-const LAYER_STACK = "work-stack";
-const LAYER_CHILD = "board";
-
-// The node with that id in a layout tree, or null.
-function layoutNode(node, id) {
-  if (!node || typeof node !== "object") return null;
-  if (node.id === id) return node;
-  for (const child of node.children ?? []) {
-    const found = layoutNode(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-// Whether the board shows: as the layer of the work area in the shown
-// layout, or as a pane in the shown tab of the shown space.
-export function boardShown() {
-  if (layoutNode(layout(), LAYER_STACK)?.active === LAYER_CHILD) return true;
+// Whether this copy of the board shows. The layer's copy (`layer`) shows
+// while the board layer shows the board. A copy in a tab shows while a
+// board pane is in the shown tab of the shown space, and no board layer
+// covers that tab's content. herdr tells a pane mod no id of its own pane,
+// so two Board tabs would count as one.
+export function boardShown(layer) {
+  const found = layers.boardLayer(layout());
+  if (layer) return Boolean(found?.shown);
+  if (found?.shown) return false;
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }

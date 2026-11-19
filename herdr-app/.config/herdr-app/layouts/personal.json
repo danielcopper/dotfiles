@@ -148,7 +148,10 @@
                   "id": "board",
                   "type": "block",
                   "content": {
-                    "mod": "board"
+                    "mod": "board",
+                    "props": {
+                      "layer": true
+                    }
                   }
                 }
               ],

@@ -278,43 +278,79 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
-// ---- board: the same in leader/main.js and board-button/main.js ----
+// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
-// that both copies match.)
-// layouts/personal.json shows the board as a layer of the work area: the
-// stack BOARD_STACK holds the shown tab's content (TAB_CHILD) and the board
-// (BOARD_CHILD), and layout.select switches it. The board reads the same
-// ids (boardShown, mods/board/src/ui/helpers.js).
-const BOARD_STACK = "work-stack";
-const BOARD_CHILD = "board";
-const TAB_CHILD = "main";
+// that the copies match.)
+// The board layer (README, "herdr app") is a stack in the layout with a
+// block that shows the board mod and a block that shows the shown tab. It
+// is found by that shape, so its ids live in the layout alone.
 
-// The work area's stack in the shown layout, or null in a layout without it.
-function boardStack(node = layout()) {
+// The first node of a layout tree, depth first, that `test` accepts, or
+// null.
+function findNode(node, test) {
   if (!node || typeof node !== "object") return null;
-  if (node.id === BOARD_STACK) return node;
+  if (test(node)) return node;
   for (const child of node.children ?? []) {
-    const found = boardStack(child);
+    const found = findNode(child, test);
     if (found) return found;
   }
   return null;
 }
 
-// Shows the shown tab's content in the work area again.
-function showTab() {
-  run("layout.select", { stack: BOARD_STACK, child: TAB_CHILD });
+// The board layer of a layout tree as { stack, board, tab, shown }: the
+// stack's id, its board child's and its tab child's, and whether it shows
+// the board; null for a layout without one.
+function boardLayer(root) {
+  const isBoard = (n) => n.content?.mod === "board";
+  const isTab = (n) => n.content?.tab === "active";
+  const stack = findNode(root, (n) => n.type === "stack" && (n.children ?? []).some(isBoard) && n.children.some(isTab));
+  if (!stack) return null;
+  const board = stack.children.find(isBoard).id;
+  return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
 
-// Shows the board in the work area and gives it the keyboard (its "focus"
-// command; layout.select leaves the keyboard where it was), or the tab's
-// content again when the board shows. A layout without the stack shows the
-// board's tab instead (openBoard).
+// Shows the shown tab's content in place of the board and gives the
+// keyboard back to the focused pane, since layout.select leaves the
+// keyboard where it was. A failure says which stack and child.
+function showTab(layer) {
+  try {
+    run("layout.select", { stack: layer.stack, child: layer.tab });
+    const pane = focused()?.pane;
+    if (pane) run("pane.focus", { pane });
+  } catch (e) {
+    notify({ title: `Could not show "${layer.tab}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+  }
+}
+// ---- end layer ----
+
+// ---- board: the same in leader/main.js and board-button/main.js ----
+// (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
+// that both copies match.)
+
+// Shows the board layer's board, or the tab's content again when it shows
+// the board. The personal layout without a board layer says so; another
+// layout shows the board's tab instead (openBoard).
 function toggleBoard() {
-  const stack = boardStack();
-  if (!stack) return openBoard();
-  if (stack.active === BOARD_CHILD) return showTab();
-  run("layout.select", { stack: BOARD_STACK, child: BOARD_CHILD });
-  run("board.focus");
+  const layer = boardLayer(layout());
+  if (layer?.shown) return showTab(layer);
+  if (layer) return showBoard(layer);
+  if (shared("layout") === "personal") {
+    notify({ title: "The personal layout has no board layer", body: "layouts/personal.json needs a stack with the board and the shown tab", level: "error" });
+    return;
+  }
+  openBoard();
+}
+
+// Shows the board in place of the tab's content and gives it the keyboard
+// (its "focus" command), since layout.select leaves the keyboard where it
+// was. A failure says which stack and child.
+function showBoard(layer) {
+  try {
+    run("layout.select", { stack: layer.stack, child: layer.board });
+    run("board.focus");
+  } catch (e) {
+    notify({ title: `Could not show "${layer.board}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+  }
 }
 
 // Shows the board's tab ("Board", the board mod as its only pane) wherever
@@ -333,23 +369,13 @@ function openBoard() {
 }
 // ---- end board ----
 
-function findNode(node, id) {
-  if (!node || typeof node !== "object") return null;
-  if (node.id === id) return node;
-  for (const child of node.children ?? []) {
-    const found = findNode(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
 // Shows the right panel on one of its tabs ("files" or "changes"), or hides
 // it when it already shows that tab, as the tab bar's Files and Changes
 // buttons do; the shown tab is the stack's `active` in the layout. A tab the
 // person turned off (shared "workspace.panels", which the tab bar honours
 // too) is left alone.
 function togglePanelTab(child, label) {
-  const root = layout(), panel = findNode(root, PANEL), body = findNode(root, PANEL_BODY);
+  const root = layout(), panel = findNode(root, (n) => n.id === PANEL), body = findNode(root, (n) => n.id === PANEL_BODY);
   if (!panel || !body) {
     notify({ title: "This layout has no panel", level: "info" });
     return;
@@ -373,7 +399,7 @@ function togglePanelTab(child, label) {
 // width is not), so the toggle stays right after the panel is hidden and
 // shown again or dragged by hand. A hidden panel is shown wide.
 function togglePanelWidth() {
-  const panel = findNode(layout(), PANEL);
+  const panel = findNode(layout(), (n) => n.id === PANEL);
   if (!panel) {
     notify({ title: "This layout has no panel", level: "info" });
     return;
@@ -654,6 +680,18 @@ export default class Leader extends View {
     closeOverlay(props().overlay);
   }
 
+  // Runs a key's command, or its function; a failure says so in a toast,
+  // as one of a bound key does (render).
+  act(key, command, args) {
+    try {
+      if (typeof command === "function") command();
+      else run(command, args);
+    } catch (e) {
+      console.log(e?.stack ?? String(e));
+      notify({ title: `Leader: ${key} failed`, body: String(e?.message ?? e), level: "error" });
+    }
+  }
+
   press(e, cx) {
     const p = this.passing;
     if (p) {
@@ -688,11 +726,10 @@ export default class Leader extends View {
     }
     if (!repeats) {
       this.close();
-      if (typeof command === "function") command();
-      else run(command, args);
+      this.act(key, command, args);
       return;
     }
-    run(command, args);
+    this.act(key, command, args);
     this.repeating = command;
     const generation = ++this.generation;
     cx.timer.after(REPEAT_MS, () => {
