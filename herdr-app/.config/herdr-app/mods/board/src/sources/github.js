@@ -1,7 +1,9 @@
 // GitHub: the queries for a Projects v2 board and a pull request list, their
-// parsing, the status mutation, and what gh's answers and failures mean.
+// parsing, the status mutation, what gh's answers and failures mean, and the
+// source as the board uses it (makeGithub).
 
 import { CONFIG_NAME, BoardError, failure, firstLine } from "../shared.js";
+import { GH_TIMEOUT, call } from "../tools.js";
 
 // Theme colors for a Projects v2 option color.
 const GITHUB_COLORS = {
@@ -329,4 +331,35 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
   if (status >= 500 || SERVER_TIMEOUT.test(err)) throw failure(`GitHub antwortete mit ${said}`, { write, unclear: true });
   const text = firstLine(errors[0]?.message) || said || `gh endete mit ${code}`;
   throw failure(text, { write, unclear: !(status >= 400) });
+}
+
+const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
+
+// The GitHub source for the board: the name of the site `o` opens, what
+// "nur meine" says when GitHub did not name the login, and per layout of a
+// GitHub view how it loads (`hiddenFor(view)` gives its hidden columns) and
+// how a board writes a move. gh runs by the path `paths` (toolPaths) finds.
+export function makeGithub(paths) {
+  return {
+    site: "GitHub",
+    noViewer: "„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist",
+    views: {
+      board: {
+        async load(view, hiddenFor) {
+          const hidden = hiddenFor(view);
+          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden));
+          return { data: parseGithubBoard(json, view, hidden, errors), warnings };
+        },
+        async move(view, data, card, column) {
+          checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
+        },
+      },
+      list: {
+        async load(view) {
+          const { json, warnings, errors } = await gh(paths, githubListArgs(view));
+          return { data: parseGithubList(json, view, errors), warnings };
+        },
+      },
+    },
+  };
 }

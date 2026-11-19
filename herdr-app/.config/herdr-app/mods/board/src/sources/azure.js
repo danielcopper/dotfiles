@@ -1,6 +1,6 @@
-// Azure DevOps: work item types and their states, and what az's failures
-// mean. What the Azure views read and write comes with each view; these
-// stay for them.
+// Azure DevOps: work item types and their states, what az's failures mean,
+// and the source as the board uses it (makeAzure). What the Azure views read
+// and write comes with each view; these stay for them.
 
 import { BoardError, failure } from "../shared.js";
 
@@ -62,4 +62,10 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   }
   if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
+}
+
+// The Azure source for the board, as makeGithub's: no view of it reads
+// anything yet, so each shows what its kind says (KINDS).
+export function makeAzure() {
+  return { site: "Azure", views: {} };
 }

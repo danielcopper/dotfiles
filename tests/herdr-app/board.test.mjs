@@ -453,10 +453,24 @@ test("a remembered choice falls back to the first one when views.json no longer 
   assert.deepEqual([board.teamView(team, "backlog"), board.teamView(team, null), board.teamView({ views: ["backlog"] }, "sprint")], ["backlog", "sprint", "backlog"]);
 });
 
-test("an Azure tab says which view it will hold", () => {
-  const [team, prs] = board.contextsOf(sampleConfig(), "azure");
-  assert.deepEqual([board.placeholder(team, "sprint"), board.placeholder(team, "backlog"), board.placeholder(prs, null)],
-    ["Sprint-Ansicht folgt", "Backlog folgt", "PR-Ansicht folgt"]);
+test("each context shows one view, with an id and a kind; an Azure view's kind says which view it will be", () => {
+  const config = sampleConfig();
+  const [team, prs] = board.contextsOf(config, "azure");
+  const [mine] = board.contextsOf(config, "github");
+  const views = [board.viewOf(team, "sprint"), board.viewOf(team, "backlog"), board.viewOf(prs), board.viewOf(mine)];
+  assert.deepEqual(views.map((v) => [v.id, board.viewKind(v)]), [
+    ["azure:team:Example Project/Example Team:sprint", "azure sprint"],
+    ["azure:team:Example Project/Example Team:backlog", "azure backlog"],
+    ["azure:prs:Example Project", "azure prs"],
+    ["mine", "github board"],
+  ]);
+  assert.deepEqual(views.map((v) => board.kindOf(v)), [
+    { text: "Sprint-Ansicht folgt" }, { text: "Backlog folgt" }, { text: "PR-Ansicht folgt" }, { shape: "board" },
+  ]);
+  assert.deepEqual(board.viewsOf(config).map((v) => v.id), [
+    "azure:team:Example Project/Example Team:sprint", "azure:team:Example Project/Example Team:backlog", "azure:prs:Example Project", "mine", "prs", "other",
+  ]);
+  assert.equal(board.kindOf({ source: "jira", layout: "board" }), null);
 });
 
 // ---- Hidden columns ----
@@ -2306,7 +2320,7 @@ test("UI: the board, its stubs and the detail beside it start at the top", async
   const column = pathTo(root, (s) => s === name);
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
-  const at = b.columns(b.view()).findIndex((c) => c.hidden);
+  const at = b.navColumns(b.view()).findIndex((c) => c.hidden);
   const stub = chainTo(root, hasId(`col-${at}`));
   assert.ok(stub, "a stub");
   assert.deepEqual(centring(stub), [], "no row centres a stub");
@@ -2327,7 +2341,7 @@ const heightFrom = (parent, child) => {
 test("UI: a column's card list takes its height from the board, step by step, and scrolls in it", async () => {
   const { b } = await openBoard();
   const root = b.render();
-  const at = b.columns(b.view()).findIndex((c) => !c.hidden && c.shown.length);
+  const at = b.navColumns(b.view()).findIndex((c) => !c.hidden && c.shown.length);
   assert.ok(root.styles.includes("size_full"), "the board fills its block");
   const chain = chainTo(root, hasId(`cards-${at}`));
   assert.ok(chain, "a card list");
@@ -2507,9 +2521,9 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
   const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(data) });
-  const cards = () => b.columns(b.view()).flatMap((c) => c.shown.map((x) => x.number));
+  const cards = () => b.navColumns(b.view()).flatMap((c) => c.shown.map((x) => x.number));
   assert.equal(cards().length, 6);
-  b.select(b.view(), { col: b.columns(b.view()).findIndex((c) => c.name === "In progress"), key: "PVTI_rec1" });
+  b.select(b.view(), { col: b.navColumns(b.view()).findIndex((c) => c.name === "In progress"), key: "PVTI_rec1" });
   assert.ok(texts(byId(b.render(), "mine")).includes("nur meine"));
   await press(b, cx, "m");
   assert.equal(cards().includes(3000), false);
@@ -2520,9 +2534,9 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection leaves the card no longer shown");
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
-  assert.deepEqual(b.rows(b.view()).map((r) => r.number), [77], "the list: only what sample-user opened");
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [77], "the list: only what sample-user opened");
   await press(b, cx, "m");
-  assert.deepEqual(b.rows(b.view()).map((r) => r.number), [2820, 1921, 808, 77]);
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
 });
 
 test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {
@@ -2530,7 +2544,7 @@ test("UI: „nur meine“ over data without the viewer's login shows nothing and
   delete data.data.viewer;
   const { b, cx } = await openBoard({ answer: JSON.stringify(data) });
   await press(b, cx, "m");
-  assert.equal(b.columns(b.view()).flatMap((c) => c.shown).length, 0);
+  assert.equal(b.navColumns(b.view()).flatMap((c) => c.shown).length, 0);
   assert.ok(texts(b.render()).includes("„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist"));
 });
 

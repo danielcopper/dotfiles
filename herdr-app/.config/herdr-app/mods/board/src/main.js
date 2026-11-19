@@ -52,17 +52,21 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
 import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, readTextFile, run, settings, spaces, theme } from "herdr";
 import { MOD, CONFIG_NAME, BoardError, firstLine, lastLine, errorText, itemKey, itemLabel, updatedLabel, ageLabel } from "./shared.js";
-import { viewKind, readConfig, startSettings, githubViews } from "./config.js";
-import { readStoredHidden, hiddenColumns, toggleHidden, unknownHidden, findCard, moveCard, rollback, isDue, pendingMoves, applyMoves, canDrop, targetsFor, stepTarget, withHidden, shows, shownColumns, navigate, selectionAfter } from "./kinds/board.js";
-import { teamViewName, contextsOf, sourcesOf, pick, teamView, placeholder } from "./contexts.js";
-import { toolPaths } from "./tools.js";
+import { viewKind, readConfig, startSettings } from "./config.js";
+import { readStoredHidden, hiddenColumns, toggleHidden, unknownHidden, findCard, moveCard, rollback, isDue, pendingMoves, applyMoves, canDrop, targetsFor, stepTarget, withHidden, shownColumns } from "./kinds/board.js";
+import { kindOf } from "./kinds/index.js";
+import { shows, navigate, selectionAfter } from "./select.js";
+import { teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf } from "./contexts.js";
+import { toolPaths, call } from "./tools.js";
 import { sessionName, linkedSession, AGENT_STATUS, renderTemplate, templateVars, checkoutArgs, spaceForTab, startCommand } from "./actions/start.js";
-import { call, makeSources } from "./sources/index.js";
+import { makeSources } from "./sources/index.js";
 import { store, migrateShownView, tint, machineName, onMachine, boardShown, report } from "./ui/helpers.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
 export * from "./kinds/board.js";
+export * from "./kinds/index.js";
+export * from "./select.js";
 export * from "./sources/github.js";
 export * from "./sources/azure.js";
 export * from "./tools.js";
@@ -76,15 +80,97 @@ const CHECKOUT_TIMEOUT = 30000;
 const SESSION_CHECKS = [1000, 2000, 3000];
 const TICK_MS = 30000;
 const SCROLLS = 24;
-// What "nur meine" says over data that does not name the login it was read as.
-const NO_VIEWER = "„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist";
+// What "nur meine" says over data that does not name the login it was read
+// as, where its source has no words of its own (noViewer).
+const NO_VIEWER = "„nur meine“ zeigt nichts: die Quelle hat nicht gesagt, als wer sie gelesen wurde";
+
+// "<shown> von <total>" where a filter or "nur meine" hides some, else the
+// total.
+const shownOf = (shown, total) => (shown < total ? `${shown} von ${total}` : String(total));
+
+// How a view's data is drawn and worked with, by shape: data carries the
+// shape it was read in (data.kind); before any, the view's kind names it
+// (KINDS), and a view its source reads nothing for has the placeholder. Each
+// shape: nav (the columns that keyboard movement and selection walk, a list
+// as one), selected (the selected item), scrollTo, count ({ shown, total }
+// items, or null), render, hints (the view's own keys), dirs (the arrow
+// directions that move), keys (the view's own keys; true when one was
+// taken), received (the data as kept after a refresh), warnings, settles
+// (whether a refresh tells where unclear writes ended up) and column (an
+// item's column, for its detail).
+const SHAPES = {
+  board: {
+    nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
+    selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
+    scrollTo: (b, view, sel, row) => b.scrolls[sel.col % SCROLLS].scroll_to_item(row),
+    count(b, data) {
+      const cols = shownColumns(data, b.filterText, b.mine).filter((c) => !c.hidden);
+      return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
+    },
+    render: (b, t, mono, view, st) =>
+      st.data.columns.length ? b.board(t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge"),
+    hints: [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+    dirs: ["up", "down", "left", "right"],
+    keys(b, view, st, { k, ch, mod }, cx) {
+      if (!st.data) return false;
+      const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
+      if (upper === "H" || upper === "L") {
+        const target = st.sel?.key && stepTarget(st.data, b.navColumns(view), st.sel?.key, upper === "H" ? -1 : 1);
+        if (target) b.moveTo(view, st.sel?.key, target.id, cx);
+        return true;
+      }
+      if (k === "s") return b.openStatusMenu(view), true;
+      if (k === "x") {
+        const col = b.navColumns(view)[st.sel?.col];
+        if (col) b.toggleColumn(view, col, cx);
+        return true;
+      }
+      return false;
+    },
+    received: (data, st) => applyMoves(data, st.moves),
+    warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
+    settles: true,
+    column: (data, item) => findCard(data, item.key)?.column ?? null,
+  },
+  list: {
+    nav: (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => s.rows.filter((r) => b.visible(r, st.data))) }],
+    selected: (b, st) => SHAPES.list.nav(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
+    scrollTo: (b, view, sel) => b.scrollList(view, sel.key),
+    count(b, data) {
+      const rows = data.sections.flatMap((s) => s.rows);
+      return { shown: rows.filter((r) => b.visible(r, data)).length, total: rows.length };
+    },
+    render: (b, t, mono, view, st) => b.list(t, mono, view, st),
+    hints: [["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"]],
+    dirs: ["up", "down"],
+    keys: () => false,
+    received: (data) => data,
+    warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
+    settles: false,
+    column: () => null,
+  },
+  placeholder: {
+    nav: () => [],
+    selected: () => null,
+    scrollTo() {},
+    count: () => null,
+    render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text ?? "Diese Ansicht gibt es noch nicht"),
+    hints: [],
+    dirs: [],
+    keys: () => false,
+    received: (data) => data,
+    warnings: () => [],
+    settles: false,
+    column: () => null,
+  },
+};
 
 export default class Board extends View {
   init(_props, cx) {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    this.views = {}; // per GitHub view id, see state()
+    this.views = {}; // per view id, see state()
     // What the top bar shows, as last chosen: the source, its tab (a context
     // id) per source, the view per team context, and "nur meine".
     migrateShownView();
@@ -143,7 +229,7 @@ export default class Board extends View {
 
   // ---- data ----
 
-  // A GitHub view's state: data and error, loading (again: one more refresh
+  // A view's state: data and error, loading (again: one more refresh
   // after this one), at (last success) and tried (last start), warnings,
   // moves (laid over refreshes, see pendingMoves), pending (card keys being
   // written), unclear ({ key, label, to, at } of writes whose outcome is
@@ -180,9 +266,32 @@ export default class Board extends View {
     return teamView(context, this.teamViews[context.id]);
   }
 
-  // The GitHub view the shown tab holds, or null.
+  // The view a context shows (a team: the view it shows).
+  viewFor(context) {
+    return viewOf(context, context.kind === "team" ? this.teamViewOf(context) : null);
+  }
+
+  // The view the shown tab holds, or null.
   view() {
-    return this.context()?.view ?? null;
+    const context = this.context();
+    return context ? this.viewFor(context) : null;
+  }
+
+  // A view as views.json has it now, by id; null when it is gone.
+  viewById(id) {
+    return viewsOf(this.config).find((v) => v.id === id) ?? null;
+  }
+
+  // How a view loads and writes ({ load, move? }); null for a view its
+  // source reads nothing for (yet).
+  loader(view) {
+    return this.sources[view.source]?.views?.[view.layout] ?? null;
+  }
+
+  // The view's shape (SHAPES).
+  shape(view) {
+    const data = this.state(view.id).data;
+    return SHAPES[data?.kind ?? (this.loader(view) ? kindOf(view)?.shape : null) ?? "placeholder"];
   }
 
   hiddenFor(view) {
@@ -205,7 +314,7 @@ export default class Board extends View {
       if (!this.config) return;
       // Open outcomes of a view that is gone, or is now of another kind than
       // in the last valid views.json, are dropped.
-      const kinds = new Map(githubViews(this.config).map((v) => [v.id, viewKind(v)]));
+      const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
       // Before the first valid views.json no view has a state to compare.
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
@@ -216,6 +325,8 @@ export default class Board extends View {
   }
 
   refresh(view, cx) {
+    const loader = this.loader(view);
+    if (!loader) return;
     const st = this.state(view.id);
     // A refresh asked for while one runs (a column shown or hidden) follows it.
     if (st.loading) return void (st.again = true);
@@ -225,10 +336,10 @@ export default class Board extends View {
     const started = st.tried;
     cx.spawn(async (cx) => {
       try {
-        const { data, warnings } = await this.sources[view.source].load(view, (v) => this.hiddenFor(v));
+        const { data, warnings } = await loader.load(view, (v) => this.hiddenFor(v));
         st.moves = pendingMoves(st.moves, started);
-        st.data = data.kind === "board" ? applyMoves(data, st.moves) : data;
-        st.warnings = [...warnings, ...this.dataWarnings(view, data)];
+        st.data = SHAPES[data.kind].received(data, st);
+        st.warnings = [...warnings, ...SHAPES[data.kind].warnings(view, data)];
         st.error = null;
         st.at = Date.now();
         this.keepSelection(view);
@@ -242,19 +353,12 @@ export default class Board extends View {
       } finally {
         st.loading = false;
         // The follow-up refresh reads the view from the config as it is now.
-        const fresh = githubViews(this.config).find((v) => v.id === view.id);
+        const fresh = this.viewById(view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
         cx.notify();
       }
     });
     cx.notify();
-  }
-
-  dataWarnings(view, data) {
-    if (data.kind === "list") {
-      return data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`);
-    }
-    return unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`);
   }
 
   // After a refresh that succeeded: where the cards of unclear writes are
@@ -272,7 +376,7 @@ export default class Board extends View {
     if (!due.length) return;
     st.unclear = st.unclear.filter((u) => !due.includes(u));
     // A view that is no board any more has no columns to tell.
-    if (data?.kind !== "board") return;
+    if (!SHAPES[data?.kind]?.settles) return;
     const lines = due.map((u) => {
       const now = findCard(data, u.key)?.column;
       if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };
@@ -322,7 +426,7 @@ export default class Board extends View {
     this.say(`${label} → ${to.name} …`, "info", cx);
     cx.spawn(async (cx) => {
       try {
-        await this.sources[view.source].move(view, st.data, found.card, to);
+        await this.loader(view).move(view, st.data, found.card, to);
         move.confirmedAt = Date.now();
         // A new move that landed replaces the open outcome of an earlier one.
         st.unclear = st.unclear.filter((u) => u.key !== key);
@@ -334,7 +438,7 @@ export default class Board extends View {
         // kind (as the last valid views.json says; an invalid one in between
         // keeps it).
         const followed = this.kinds?.get(view.id) === viewKind(view);
-        const current = githubViews(this.config).find((v) => v.id === view.id);
+        const current = this.viewById(view.id);
         if (e instanceof BoardError && e.unclear) {
           if (followed) st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
           const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
@@ -372,27 +476,15 @@ export default class Board extends View {
     return shows(item, this.filterText, this.mine, data.viewer);
   }
 
-  columns(view) {
-    const st = this.state(view.id);
-    return st.data?.kind === "board" ? shownColumns(st.data, this.filterText, this.mine) : [];
-  }
-
-  rows(view) {
-    const st = this.state(view.id);
-    if (st.data?.kind !== "list") return [];
-    return st.data.sections.flatMap((s) => s.rows.filter((r) => this.visible(r, st.data)));
-  }
-
-  // The board's columns, or a list as one column, as navigate takes them.
+  // The view's columns as navigate takes them (a list as one).
   navColumns(view) {
-    return this.state(view.id).data?.kind === "list" ? [{ shown: this.rows(view) }] : this.columns(view);
+    return this.shape(view).nav(this, this.state(view.id));
   }
 
   selected(view) {
     const st = this.state(view.id);
     if (!st.sel?.key) return null;
-    if (st.data?.kind === "board") return findCard(st.data, st.sel?.key)?.card ?? null;
-    return this.rows(view).find((r) => r.key === st.sel?.key) ?? null;
+    return this.shape(view).selected(this, st);
   }
 
   keepSelection(view) {
@@ -406,8 +498,7 @@ export default class Board extends View {
     const cols = this.navColumns(view);
     const row = cols[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
     if (row < 0) return;
-    if (st.data?.kind === "board") this.scrolls[sel.col % SCROLLS].scroll_to_item(row);
-    else this.scrollList(view, sel.key);
+    this.shape(view).scrollTo(this, view, sel, row);
   }
 
   // Shows the tab at `index` of the shown source; none there does nothing.
@@ -435,8 +526,8 @@ export default class Board extends View {
     if (list.length > 1) this.switchSource(list[(at + 1) % list.length].id, cx);
   }
 
-  // After another tab came up: the notice goes, and a GitHub view without
-  // data, or older than refreshMinutes, loads.
+  // After another tab came up: the notice goes, and its view, without data
+  // or older than refreshMinutes, loads (where its source reads it).
   showContext(cx) {
     this.notice = null;
     const v = this.view();
@@ -475,7 +566,7 @@ export default class Board extends View {
 
   toggleColumn(view, col, cx) {
     const st = this.state(view.id);
-    if (st.data?.kind !== "board") return;
+    if (!st.data?.columns) return;
     if (!col.target) return this.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
     st.stored = toggleHidden(view, st.stored, col);
     st.hidden = hiddenColumns(view, st.stored);
@@ -685,25 +776,13 @@ export default class Board extends View {
       return done();
     }
     if (!view) return;
+    const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (st.data.kind === "board" || dir === "up" || dir === "down") this.select(view, navigate(this.navColumns(view), st.sel, dir));
+      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
-    if (st.data?.kind === "board") {
-      const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
-      if (upper === "H" || upper === "L") {
-        const target = st.sel?.key && stepTarget(st.data, this.columns(view), st.sel?.key, upper === "H" ? -1 : 1);
-        if (target) this.moveTo(view, st.sel?.key, target.id, cx);
-        return done();
-      }
-      if (k === "s") return this.openStatusMenu(view), done();
-      if (k === "x") {
-        const col = this.columns(view)[st.sel?.col];
-        if (col) this.toggleColumn(view, col, cx);
-        return done();
-      }
-    }
+    if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
     if (k === "enter") return this.enter(view, cx), done();
     if (k === "o") return this.open(this.selected(view), cx), done();
   }
@@ -723,7 +802,7 @@ export default class Board extends View {
   openStatusMenu(view) {
     const st = this.state(view.id);
     const card = this.selected(view);
-    if (!card || st.data?.kind !== "board") return;
+    if (!card || !st.data?.columns) return;
     const targets = targetsFor(st.data, card);
     const at = Math.max(0, targets.findIndex((c) => c.id === findCard(st.data, card.key)?.column.id));
     this.modal = { kind: "status", view, key: card.key, targets, at };
@@ -807,7 +886,7 @@ export default class Board extends View {
           .child(this.main(t, mono, view, st))
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
       )
-      .child(this.hints(t, st));
+      .child(this.hints(t, view));
     if (this.modal?.kind === "status") out = out.child(this.statusMenu(t));
     if (this.modal?.kind === "start") out = out.child(this.startDialog(t));
     return out;
@@ -925,17 +1004,15 @@ export default class Board extends View {
       );
   }
 
-  // The shown source's tabs: number, name and, for a GitHub view with data,
-  // how many items it holds ("…" while it loads).
+  // The shown source's tabs: number, name and, for a view with data, how
+  // many items it holds ("…" while it loads; "<shown> von <total>" while
+  // the filter or "nur meine" hides some).
   tabs(t, context) {
     const count = (c) => {
-      if (!c.view) return "";
-      const st = this.state(c.view.id);
+      const st = this.state(this.viewFor(c).id);
       if (st.loading) return "…";
-      const d = st.data;
-      if (!d) return "";
-      if (d.kind === "list") return String(d.sections.reduce((n, s) => n + s.rows.length, 0));
-      return String(d.columns.filter((col) => !col.hidden).reduce((n, col) => n + col.cards.length, 0));
+      const n = st.data ? SHAPES[st.data.kind].count(this, st.data) : null;
+      return n ? shownOf(n.shown, n.total) : "";
     };
     // Too narrow for all, the names give way first (cut with …).
     return h_flex()
@@ -1008,24 +1085,26 @@ export default class Board extends View {
     const box = v_flex().flex_1().min_w(0).min_h(0);
     const message = (text) => box.child(div().p(20).text_color(t.muted).child(text));
     if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
-    const context = this.context();
-    if (context?.source === "azure") return message(placeholder(context, context.kind === "team" ? this.teamViewOf(context) : null));
     if (!view) return message("Keine Ansicht verfügbar");
+    const shape = this.shape(view);
+    if (shape === SHAPES.placeholder) return box.child(shape.render(this, t, mono, view, st));
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
-    const warnings = [...st.warnings, ...(this.mine && st.data && !st.data.viewer ? [NO_VIEWER] : [])];
+    const noViewer = this.mine && st.data && !st.data.viewer ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
+    const warnings = [...st.warnings, ...noViewer];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;
-    if (st.data.kind === "board" && !st.data.columns.length) return shown.child(div().p(20).text_color(t.muted).child("Keine Einträge"));
-    return shown.child(st.data.kind === "board" ? this.board(t, mono, view, st) : this.list(t, mono, view, st));
+    return shown.child(shape.render(this, t, mono, view, st));
   }
 
   board(t, mono, view, st) {
-    const cols = this.columns(view);
+    const cols = this.navColumns(view);
     const allSpaces = spaces();
     const dragged = this.drag ? findCard(st.data, this.drag.key)?.card : null;
     const columnEl = (col, ci) => {
+      // Cards the filter or "nur meine" hides in this column.
+      const filtered = col.hidden ? 0 : col.cards.length - col.shown.length;
       const focusedCol = st.sel?.col === ci;
       const target = Boolean(dragged) && this.over === ci && this.drag.from !== col.id && canDrop(st.data, dragged, col);
       const base = (el) =>
@@ -1066,7 +1145,7 @@ export default class Board extends View {
       // The row's full height (the row lines its columns up at the top, so
       // a stub keeps its own), in which a long column scrolls its cards.
       return base(v_flex().flex_1().min_w(0).min_h(0).h_full().gap(8))
-        .child(head.child(div().text_size(12).text_color(t.muted).child(String(col.count ?? col.shown.length))))
+        .child(head.child(div().text_size(12).text_color(t.muted).child(filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length))))
         .child(
           v_flex()
             .id(`cards-${ci}`)
@@ -1076,7 +1155,7 @@ export default class Board extends View {
             .overflow_y_scrollbar()
             .track_scroll(this.scrolls[ci % SCROLLS])
             .children(col.shown.map((card) => this.card(t, mono, view, st, card, ci, allSpaces)))
-            .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child("keine Karten"))),
+            .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
         );
     };
     return v_flex()
@@ -1176,11 +1255,11 @@ export default class Board extends View {
     };
     const children = [];
     for (const s of st.data.sections) {
-      children.push(
-        div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted)
-          .child(`${s.name.toUpperCase()} · ${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`),
-      );
-      children.push(...s.rows.filter((r) => this.visible(r, st.data)).map(row));
+      const rows = s.rows.filter((r) => this.visible(r, st.data));
+      // While the filter or "nur meine" hides rows, the count is of those loaded.
+      const count = rows.length < s.rows.length ? shownOf(rows.length, s.rows.length) : `${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`;
+      children.push(div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted).child(`${s.name.toUpperCase()} · ${count}`));
+      children.push(...rows.map(row));
     }
     return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(this.listScroll).children(children);
   }
@@ -1188,7 +1267,7 @@ export default class Board extends View {
   detail(t, mono, view, item) {
     const st = this.state(view.id);
     const session = linkedSession(item, spaces());
-    const column = st.data?.kind === "board" ? findCard(st.data, item.key)?.column : null;
+    const column = st.data ? SHAPES[st.data.kind].column(st.data, item) : null;
     const section = (title, ...kids) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border)
       .child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
     const settings = startSettings(this.config, view, item.repo);
@@ -1296,18 +1375,14 @@ export default class Board extends View {
       );
   }
 
-  // The keys of what shows: the top bar's, then those of the shown view.
-  hints(t, st) {
+  // The keys of what shows: the top bar's (a team's v), then those of the
+  // shown view's shape.
+  hints(t, view) {
     const context = this.context();
     const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
+    const switches = context?.kind === "team" && context.views.length > 1 ? [["v", "Sprint/Backlog"]] : [];
     const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
-    let own = [];
-    if (context?.kind === "team") own = context.views.length > 1 ? [["v", "Sprint/Backlog"]] : [];
-    else if (st?.data?.kind === "list") own = [["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"]];
-    else if (context?.kind === "view") {
-      own = [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"], ["o", "öffnen"]];
-    }
-    const keys = [...bar, ...own, ...always];
+    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...always];
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

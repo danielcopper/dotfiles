@@ -1,0 +1,52 @@
+// What shows and what is selected, whatever a view's shape: the text filter,
+// "nur meine", and keyboard movement over columns (a list is one column).
+
+import { itemKey } from "./shared.js";
+
+// Cards whose text holds every word of the filter, case-insensitive.
+export function matches(card, text) {
+  const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
+    ...(card.labels ?? []), ...(card.assignees ?? [])].filter(Boolean).join("\n").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+// Whether an item is one's own, for "nur meine": `me` (the login the data
+// was read as; null when the source did not say) is one of its assignees or
+// its author.
+export const isMine = (item, me) => Boolean(me) && ((item.assignees ?? []).includes(me) || item.author === me);
+
+// Whether an item shows in data read as `viewer`: it matches the filter and,
+// with `mine` on, it is one's own.
+export const shows = (item, filter, mine, viewer) => matches(item, filter) && (!mine || isMine(item, viewer));
+
+// Keyboard movement: sel = { col, key } (key null on a stub or an empty
+// column) → the next sel. "up"/"down" move within the column, "left"/"right"
+// to the next column (stubs too), keeping the row where they can. A list is
+// one column.
+export function navigate(columns, sel, dir) {
+  if (!columns.length) return { col: 0, key: null };
+  let ci = Math.min(Math.max(sel?.col ?? 0, 0), columns.length - 1);
+  const cards = (i) => columns[i].shown;
+  let row = Math.max(0, cards(ci).findIndex((c) => c.key === sel?.key));
+  if (dir === "up" || dir === "down") {
+    const list = cards(ci);
+    if (!list.length) return { col: ci, key: null };
+    row = Math.min(Math.max(row + (dir === "up" ? -1 : 1), 0), list.length - 1);
+    return { col: ci, key: list[row].key };
+  }
+  if (dir === "left" || dir === "right") ci = Math.min(Math.max(ci + (dir === "left" ? -1 : 1), 0), columns.length - 1);
+  const list = cards(ci);
+  return { col: ci, key: list.length ? list[Math.min(row, list.length - 1)].key : null };
+}
+
+// The selection after new data or a filter: its card's column again, else the
+// first card; a selected stub or empty column stays selected.
+export function selectionAfter(columns, sel) {
+  const at = columns.findIndex((c) => c.shown.some((card) => card.key === sel?.key));
+  if (at >= 0) return { col: at, key: sel.key };
+  if (!sel?.key && columns[sel?.col]) return sel;
+  const first = columns.findIndex((c) => c.shown.length);
+  return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
+}

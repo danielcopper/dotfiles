@@ -1,7 +1,12 @@
-// Running gh and az: what a program that could not run means, and finding
-// each program by the path the person's shell gives on its machine.
+// Running gh and az: one run of a program, what a program that could not
+// run means, and finding each program by the path the person's shell gives
+// on its machine.
 
+import { exec } from "herdr";
 import { BoardError, failure, firstLine, lastLine } from "./shared.js";
+
+// How long gh may take.
+export const GH_TIMEOUT = 30000;
 
 // exec's words for a program that is not there, and for a timeout: herdr
 // stops a program at its timeout with "<program> took longer than <n> s
@@ -164,4 +169,16 @@ export function toolPaths(execute) {
       known.clear();
     },
   };
+}
+
+// One run of a program: its result, or a BoardError when it could not run.
+// With `paths` (toolPaths) it runs by what that finds. `write` is for calls
+// that change something (see execRejection).
+export async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
+  const start = (program) => exec(program, args, { on, timeout });
+  try {
+    return await (paths ? paths.run(tool, on, timeout, start) : start(tool));
+  } catch (e) {
+    throw e instanceof BoardError ? e : execRejection(tool, e, timeout, on, { write });
+  }
 }
