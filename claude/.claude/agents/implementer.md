@@ -39,7 +39,7 @@ Done means the checks for what you changed pass on the final state of the code: 
 
 ## Commits
 
-Commit at every green checkpoint, in English. Never push — push, PR and merge are the lead's.
+Commit at every green checkpoint, in English. Never push — push and PR are the lead's; the owner merges.
 
 ## Report
 
