@@ -103,7 +103,7 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 | ------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **implement**            | `/implement <issue#> [--go]`, or offered when issue work starts in a chat (`CLAUDE.md`) | One issue end-to-end: read → align (questions one at a time; `--go` skips when nothing is unclear) → worktree + board → implementer → review agents loop → gate evidence → PR draft → watch CI to green → merge per policy → user gate if due |
 | **epic**                 | `/epic <epic#>`                | Assembly line over an epic's native sub-issues: align once on all issues, then the implement pipeline per issue, merging between issues (fresh worktree from updated main) |
-| **plan-epic**            | `/plan-epic [topic\|issue#]`   | Planning only, never code: discuss → slice (tracer bullets, or expand→contract for wide refactors) → drafts for approval → epic + native sub-issues in Ready |
+| **wayfinder**            | `/wayfinder [map]`, or offered when a chat turns into planning (`CLAUDE.md`) | Planning only, never code, for an effort larger than one session: a private map under `~/Memory/<repo>/` of open questions resolved one per session, handed to `/to-prd` → `/to-issues` once clear |
 | **writing-for-agents**   | model-invoked                  | Vendored from [mattpocock/skills](https://github.com/mattpocock/skills): how to write documents agents consume (skills, CLAUDE.md)                 |
 | **toolbox**              | `/toolbox`                     | Router: names every skill and when to reach for it — the entry point when unsure which skill fits                                                  |
 | **setup-repo**           | `/setup-repo`                  | Decides own or foreign repo, detects gate, worktree task and board, asks the rest; drafts the `CLAUDE.md` `## Pipeline` section (own repo) and writes `~/Memory/<repo>/repo-profile.md`; safe to run again |
@@ -126,7 +126,7 @@ Standing rules encoded in the skills, the agents and `review-agents.md` (not in 
 
 ### Per-repo config
 
-Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next`, `/plan-epic`, `/to-prd` and `/to-issues` stop and ask for `/setup-repo` when the profile is missing. Where `/grill-with-docs` and `/improve-codebase-architecture` write glossary terms and ADRs follows the repo's own-or-foreign verdict, as `skills/grill-with-docs/SKILL.md`, "Where they are written", says.
+Three homes, laid out in `skills/implement/repo-config.md`: the global defaults (`merge_policy`, `green_definition`, `public_text_drafts`) in that file; the repository facts (gate, review checks, worktree task, agent rules) in the repo's own `CLAUDE.md` under `## Pipeline`; the owner's facts per repo (ownership, an optional `github` or `azure-devops` board, the user gate, departures from a global default, and a foreign repo's repository facts) in `~/Memory/<repo>/repo-profile.md`. `/setup-repo` writes the profile and drafts the section; `/implement` (and `/epic` through it), `/next`, `/to-prd` and `/to-issues` stop and ask for `/setup-repo` when the profile is missing. Where `/grill-with-docs` and `/improve-codebase-architecture` write glossary terms and ADRs follows the repo's own-or-foreign verdict, as `skills/grill-with-docs/SKILL.md`, "Where they are written", says.
 
 ### Guard hooks
 
@@ -148,7 +148,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
 ├── settings.local.json           # Machine-local overrides
 ├── review-agents.md              # Which review agents run, fix rounds, finding routing
 ├── agents/                       # Custom subagents (Workflow system → Agents)
-├── skills/                       # User-invoked skills (implement, epic, plan-epic, …)
+├── skills/                       # User-invoked skills (implement, epic, wayfinder, …)
 └── hooks/
     ├── config.toml               # Hook toggles, TTS config, security
     ├── block_ai_attribution.py   # Commit guard: no AI attribution

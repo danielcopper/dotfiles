@@ -145,7 +145,7 @@ gh api graphql -f query="mutation { updateProjectV2ItemFieldValue(input: { proje
 
 Run it for the issue and for its parent epic (the epic move is idempotent — once per epic is enough).
 
-Putting a new issue on the board in Ready (`/plan-epic`, `/to-prd`, `/to-issues`) adds it to the project, then sets Status:
+Putting a new issue on the board in Ready (`/to-prd`, `/to-issues`) adds it to the project, then sets Status:
 
 ```bash
 item_id=$(gh project item-add <n> --owner <owner> --url <issue-url> --format json --jq .id)
@@ -153,7 +153,7 @@ item_id=$(gh project item-add <n> --owner <owner> --url <issue-url> --format jso
 gh project item-edit --id "$item_id" --project-id <project_id> --field-id <status_field_id> --single-select-option-id <ready_option_id>
 ```
 
-Priority (`/plan-epic`, `/to-prd`, `/to-issues`): the board's single-select field named `Priority`, read when the skill
+Priority (`/to-prd`, `/to-issues`): the board's single-select field named `Priority`, read when the skill
 reads the board; its option names are what the plan proposes from:
 
 ```bash

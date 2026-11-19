@@ -4,7 +4,7 @@ description: Router over my skills — names each one and when to reach for it. 
 disable-model-invocation: true
 ---
 
-Match the current situation against this index and recommend the right skill(s). User-invoked skills you can only point at — the user types them; `/implement` also runs from a chat on the user's yes, as the global `CLAUDE.md` says. Model-invoked skills you may fire directly once the user confirms.
+Match the current situation against this index and recommend the right skill(s). User-invoked skills you can only point at — the user types them; `/implement`, `/grill-with-docs` and `/wayfinder` also run from a chat on the user's yes, as the global `CLAUDE.md` says. Model-invoked skills you may fire directly once the user confirms.
 
 ## Issue & epic pipeline (user-invoked)
 
@@ -12,14 +12,15 @@ Match the current situation against this index and recommend the right skill(s).
 - `/next [hint]` — what to work on next: reads board + PRs + commits, commits to one recommendation
 - `/implement <N> [--go]` — one GitHub issue end-to-end: align → worktree + board → implementer → review agents → PR → watch to green → merge per policy
 - `/epic <N>` — assembly line over an epic's native sub-issues; merge between issues, fresh worktree from updated main
-- `/plan-epic [topic|N]` — idea → discussion → native sub-issues in Ready; produces a plan and issues, never code
 - `/handoff` — compact the session into a handoff doc (context nearly full, or the work continues in a fresh session)
 
 ## Planning & design
 
 - `/grill-me` — stress-test a plan by relentless interview, one question at a time
 - `/grill-with-docs` — the same, challenged against the glossary and ADRs, updating them where the repo's own-or-foreign verdict puts them as decisions crystallise
-- `/to-prd` — turn the current conversation into a PRD on the project board
+- `/wayfinder [map]` — plan an effort larger than one session whose route is unclear: a private map of open questions, one resolved per session; never code
+- `/prototype` — throwaway code that answers a design question: a logic walkthrough or several UI variants to try; model-invoked
+- `/to-prd` — turn the current conversation (or a cleared wayfinder map) into a PRD on the project board
 - `/to-issues` — break a plan/PRD into tracer-bullet issues on the board
 - `/improve-codebase-architecture` — find deepening and consolidation opportunities in a codebase
 - `/to-questionnaire` - turn a decision you cannot answer yourself into a questionnaire for the person who can (PO, client)
