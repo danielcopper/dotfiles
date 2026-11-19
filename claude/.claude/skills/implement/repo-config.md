@@ -28,10 +28,15 @@ Each holds in every repo unless its profile departs from it under `defaults`.
   no departure.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
-- **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Exception:
-  an issue edit that records a decision the owner made — in their own issue or the maintainer section of someone
-  else's — is written directly in the format below and named to the owner in one line; ask first only when the wording
-  would add something undecided. The other value, `waived`, posts directly.
+- **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two
+  exceptions are written directly:
+  - An issue edit that records a decision the owner made — in their own issue or the maintainer section of someone
+    else's — is written in the format below and named to the owner in one line; ask first only when the wording would
+    add something undecided.
+  - The lead's pull request, and later edits to its body: pushed and opened without asking, as `implement`, step 8,
+    says. The owner reads and edits the body in the PR before the merge.
+
+  The other value, `waived`, posts directly.
 
 ## Questions and decisions in an issue
 

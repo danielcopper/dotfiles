@@ -81,14 +81,17 @@ after the gate gets its affected commands re-run, by whoever changed it.
 ## 8. Pull request
 
 Draft the PR — conventional-commit title, `Closes #<N>`, one sentence per small by-catch fix, docs per the repo's policy
-(updated in the PR, or its opt-out with a reason) — post it as `public_text_drafts` in
-[`repo-config.md`](repo-config.md) says, then push and open it.
+(updated in the PR, or its opt-out with a reason) — and save the body to `~/Memory/<repo>/pr-body-<N>.md`. Dispatch
+`prose-reviewer` with the worktree, the branch's range (`<base SHA>..HEAD`) and the body's path in its prompt, to read
+the body sentence by sentence against the final tree; fix its findings in the body yourself. Once the gate evidence
+exists and the body has no open finding, push and open the PR without asking, as `public_text_drafts` in
+[`repo-config.md`](repo-config.md) says.
 
 *(convention)* The body becomes the squash commit: a prose summary, `## Decisions` one line each (a sub-issue: "See epic
 #N" plus its own), and `Closes #<N>`; one issue per PR. A fix without decisions takes the label `no-decisions` and keeps
 `## Decisions` with "None." — the text `decisions: none` is for outside contributors, who cannot set labels.
 
-*Done when:* the PR is open with approved text.
+*Done when:* the PR is open, with a body `prose-reviewer` read and no finding left open.
 
 ## 9. Watch to green
 
@@ -101,7 +104,7 @@ rules are fixed in the PR.
 At green, run the profile's `user_gate` where it applies. Prepare it in full from the issue, its decisions and the
 change, and send it as one message the user runs start to finish: the starting state, the exact steps, the expected
 result after each step, and what to report back. Then stop for the user's verdict. *(convention)* Then add one
-sentence with the result to the PR body, drafted as `public_text_drafts` says.
+sentence with the result to the PR body, written as `public_text_drafts` says.
 
 Once the user gate has passed, hand the PR over to the owner, who merges it (`merge_policy`, `repo-config.md`), and
 stop.
