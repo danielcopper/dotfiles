@@ -10,6 +10,10 @@ below the real home; only this repo and the Python installation are exempt,
 and a recorded path fails the run after the tests.
 
 usage: python3 -I run-test.py [unittest option...]
+  RUN_PY=<path>/run.py runs the tests against that copy of run.py instead of
+  the one beside this file, e.g. a copy with one guard broken on purpose to
+  see the test for it fail. The skills and cases the tests read come from
+  temporary directories or from this repo, never from beside that copy.
 """
 
 import contextlib
