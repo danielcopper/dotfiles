@@ -3057,11 +3057,14 @@ test("UI: while the board shows, a change of focus shows the tab again; the focu
   assert.deepEqual(host.runs.splice(0), SHOW_TAB, "no focus at all is a change too");
   active = "main";
   render();
-  active = "board";
-  render();
   focus = { space: "s1", tab: "t1", pane: "p1", terminal: "t1" };
   render();
-  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "shown again, the board takes the focus of that moment");
+  active = "board";
+  render();
+  assert.deepEqual(host.runs.splice(0), [], "shown again, the board takes the focus of that moment, not the one it left with");
+  focus = { ...focus, tab: "t2" };
+  render();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "and a change from it shows the tab");
 });
 
 test("UI: while the board shows, a press in the tab bar right of the board button shows the tab again; a press elsewhere does not", async () => {
