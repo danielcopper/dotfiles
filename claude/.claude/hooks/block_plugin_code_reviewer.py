@@ -39,7 +39,7 @@ def main() -> int:
                         f'instead: subagent_type "{replacement}" '
                         f"(~/.claude/agents/{replacement}.md); "
                         "~/.claude/review-agents.md says which review "
-                        "agents run and what each gets."
+                        "agents run."
                     ),
                 }
             }
