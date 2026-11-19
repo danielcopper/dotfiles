@@ -20,7 +20,7 @@ and start every agent whose trigger hits, in parallel in one message. The table 
 | `reviewer` | code changed | does the diff deliver the spec; correctness; project-guideline violations |
 | `architecture-reviewer` | production code changed | fit with the tree: reuse, one home per fact, sibling patterns, written rules and design practice, less code, no site left doing the old behaviour |
 | `prose-reviewer` | prose changed, or production code changed | is every sentence true at head and needed; in a first review, the comments already in the touched units too |
-| `test-reviewer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | do new tests pin the claimed behaviour? A mutation probe per new "Done when" test |
+| `test-reviewer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | do new tests pin the claimed behaviour? At most one mutation probe per new "Done when" test |
 | `failure-reviewer` | error handling changed (`try`/`catch`/`except`, `Result<>`, `.catch(`, fallback branches and defaults, retries, discarded exit codes) | swallowed failures, unasked fallbacks, fail-open paths, messages for the wrong audience |
 | `type-reviewer` | types added or their shapes changed | invariants stated, constructed, encapsulated and enforced; swappable parameters, overloaded empty values |
 | `security-reviewer` | the diff touches a shell or subprocess call, a delete, move or write on a path derived at runtime, an outbound URL, tokens or credentials, deserialising outside data, or model output used as input | exploitable paths from an untrusted source to a sink |
