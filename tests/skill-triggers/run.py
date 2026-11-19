@@ -286,8 +286,8 @@ class Sandbox:
             str(self.guard),
             str(self.real_home),
         ]
-        run_user = Path(f"/run/user/{os.getuid()}")
-        if run_user.is_dir():
+        run_user = run_user_dir()
+        if run_user:
             wrap += ["--tmpfs", str(run_user)]
         # After the real home is covered, so a TMPDIR below it stays reachable.
         wrap += [
@@ -312,6 +312,12 @@ class Sandbox:
         shutil.rmtree(self.root, ignore_errors=True)
 
 
+def run_user_dir():
+    """/run/user/<uid> where it exists: sockets of ssh-agent, gpg, dbus and the like."""
+    path = Path(f"/run/user/{os.getuid()}")
+    return path if path.is_dir() else None
+
+
 def isolation_probe(every, binary):
     """Run a shell through the wrapper and check what it sees; raise Stop on a leak."""
     if not shutil.which("bwrap"):
@@ -320,10 +326,15 @@ def isolation_probe(every, binary):
     canary = ".skill-trigger-canary"
     try:
         env = box.env()
-        script = 'printf "%s\\n" "$HOME"; ls -A "$1"; echo ---; env; : > "$1/$2"'
+        run_user = run_user_dir()
+        script = (
+            'printf "%s\\n" "$HOME"; ls -A "$1"; echo ---; '
+            'if [ -n "$3" ]; then ls -A "$3"; fi; echo ---; env; : > "$1/$2"'
+        )
+        args = [str(box.real_home), canary, str(run_user or "")]
         try:
             proc = subprocess.run(
-                box.argv(["/bin/sh", "-c", script, "sh", str(box.real_home), canary]),
+                box.argv(["/bin/sh", "-c", script, "sh", *args]),
                 check=False,
                 env=env,
                 capture_output=True,
@@ -337,13 +348,16 @@ def isolation_probe(every, binary):
             raise Stop(
                 f"isolation probe exited {proc.returncode}: {proc.stderr.strip()}"
             )
-        head, _, env_out = proc.stdout.partition("---\n")
+        head, _, rest = proc.stdout.partition("---\n")
+        run_user_out, _, env_out = rest.partition("---\n")
         lines = head.splitlines()
         problems = []
         if not lines or lines[0] != str(box.home):
             problems.append(f"HOME is {lines[0] if lines else None!r}, not {box.home}")
         if lines[1:]:
             problems.append(f"the real home shows {lines[1:]}")
+        if run_user_out.strip():
+            problems.append(f"{run_user} shows {run_user_out.splitlines()}")
         seen = {line.split("=", 1)[0] for line in env_out.splitlines() if "=" in line}
         leaked = seen - ALLOWED_VARS
         if leaked:

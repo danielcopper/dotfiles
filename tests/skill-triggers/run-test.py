@@ -1,5 +1,8 @@
 """Tests of run.py that make no model call: grade() on hand-written
-stream-json and the summary main() prints around stand-in runs.
+stream-json, load_cases() on one broken cases file per guard, the
+model-invoked skills read from frontmatter, the summary main() prints around
+stand-in runs, and the isolation probe with one part of the wrapper broken at
+a time (skipped without bwrap).
 
 HOME points at a temporary directory for the whole file, set before run.py
 is loaded. An audit hook records every open, listing and change of a path
@@ -406,6 +409,91 @@ class RepoFiles(unittest.TestCase):
         run.CASES = HERE / "cases.toml"
         _, model = run.repo_skills()
         self.assertTrue(run.load_cases(model))
+
+
+BWRAP = shutil.which("bwrap")
+RUN_USER = Path(f"/run/user/{os.getuid()}")
+
+
+@unittest.skipUnless(BWRAP, "bwrap is not on PATH")
+class Probe(unittest.TestCase):
+    """The isolation probe with one part of the wrapper broken at a time.
+
+    The home it guards is this file's temporary HOME, so a broken mount
+    exposes and writes only there.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-probe-"))
+        (self.tmp / "alpha").mkdir()
+        (self.tmp / "alpha" / "SKILL.md").write_text("---\nname: alpha\n---\n")
+        Path(FAKE_HOME, "marker").write_text("x")
+        self.saved = run.SKILLS, run.Sandbox.argv, run.Sandbox.env
+        run.SKILLS = self.tmp
+
+    def tearDown(self):
+        run.SKILLS, run.Sandbox.argv, run.Sandbox.env = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def probe(self):
+        run.isolation_probe(["alpha"], Path("/bin/true").resolve())
+
+    def assertProbeStops(self, words):
+        with self.assertRaises(run.Stop) as caught:
+            self.probe()
+        self.assertIn(words, str(caught.exception))
+
+    def drop(self, flag, value):
+        """Remove one wrapper option and its arguments from the bwrap command."""
+        argv = self.saved[1]
+        width = {"--tmpfs": 2, "--bind": 3}[flag]
+
+        def without(box, command):
+            wrap = argv(box, command)
+            for i, arg in enumerate(wrap):
+                if arg == flag and value in wrap[i + 1 : i + width]:
+                    return wrap[:i] + wrap[i + width :]
+            raise AssertionError(f"{flag} {value} not in the wrapper")
+
+        run.Sandbox.argv = without
+
+    def test_intact_wrapper_passes(self):
+        self.probe()
+
+    def test_real_home_not_covered(self):
+        self.drop("--bind", FAKE_HOME)
+        self.assertProbeStops("the real home shows")
+        self.assertFalse(Path(FAKE_HOME, ".skill-trigger-canary").exists())
+
+    def test_write_check_watches_the_mount_over_home(self):
+        # Home stays hidden, but behind a directory the write check does not read.
+        argv, elsewhere = self.saved[1], self.tmp / "elsewhere"
+        elsewhere.mkdir()
+
+        def other_dir(box, command):
+            return [
+                str(elsewhere) if a == str(box.guard) else a for a in argv(box, command)
+            ]
+
+        run.Sandbox.argv = other_dir
+        self.assertProbeStops("the write check saw [], not the canary")
+
+    @unittest.skipUnless(
+        RUN_USER.is_dir() and any(RUN_USER.iterdir()), "no /run/user entry"
+    )
+    def test_run_user_not_covered(self):
+        self.drop("--tmpfs", str(RUN_USER))
+        self.assertProbeStops(f"{RUN_USER} shows")
+
+    def test_variable_beyond_the_allowlist(self):
+        env = self.saved[2]
+        run.Sandbox.env = lambda box, extra=None: {**env(box, extra), "CLAUDECODE": "1"}
+        self.assertProbeStops("variables beyond the allowlist: ['CLAUDECODE']")
+
+    def test_home_not_swapped(self):
+        env = self.saved[2]
+        run.Sandbox.env = lambda box, extra=None: {**env(box, extra), "HOME": FAKE_HOME}
+        self.assertProbeStops("HOME is")
 
 
 class Summary(unittest.TestCase):
