@@ -17,6 +17,8 @@ Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skill
 
 Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the PRD, and respect any ADRs in the area you're touching.
 
+When the user points you at a wayfinder map (`~/Memory/<repo>/wayfinder-<slug>.md`), that file and the notes it links are a source alongside the conversation: its resolved Answers are confirmed decisions and become the PRD's `## Decisions`, written out in full, since the issue's readers cannot reach the private notes.
+
 ### 3. Sketch the test seams
 
 Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
