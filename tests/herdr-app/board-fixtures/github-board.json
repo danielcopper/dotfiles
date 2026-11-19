@@ -1,5 +1,8 @@
 {
  "data": {
+  "viewer": {
+   "login": "sample-user"
+  },
   "repositoryOwner": {
    "projectV2": {
     "id": "PVT_sample",

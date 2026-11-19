@@ -29,7 +29,8 @@ const ITEM_FIELDS = `
 
 // One GraphQL request for a board view: the project, its field's options and
 // the items of the shown columns, plus one count per hidden column (`h0`,
-// `h1`, … aliases, first: 0) for the stubs.
+// `h1`, … aliases, first: 0) for the stubs, and the login gh runs as (for
+// "nur meine").
 export function githubBoardArgs(view, hidden) {
   const { owner, number, field } = view.project;
   const names = [...hidden];
@@ -38,6 +39,7 @@ export function githubBoardArgs(view, hidden) {
   const counts = names.map((_, i) => `h${i}: items(first: 0, query: $h${i}) { totalCount }`).join("\n");
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
   const doc = `query($login: String!, $number: Int!, $field: String!, $filter: String!${vars}) {
+  viewer { login }
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -86,7 +88,8 @@ export function errorAt(errors, path) {
 
 // gh's answer for githubBoardArgs (and the GraphQL errors that came with its
 // data) → a board:
-// { kind: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited }.
+// { kind: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer }
+// (viewer: the login gh runs as, null when GitHub did not say).
 // A hidden column's cards are only those moved there since the last refresh;
 // its count is the server's plus those. Items without a status, or in an
 // option the field no longer has, go to "Ohne Status", which takes no drops.
@@ -143,6 +146,7 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     columns,
     total: project.items.totalCount,
     limited: project.items.pageInfo.hasNextPage,
+    viewer: json?.data?.viewer?.login ?? null,
   };
 }
 
@@ -182,11 +186,12 @@ const PR_FIELDS = `
     }
   }`;
 
-// One GraphQL request for a list view: one search per section (`s0`, `s1`, …).
+// One GraphQL request for a list view: one search per section (`s0`, `s1`,
+// …), and the login gh runs as.
 export function githubListArgs(view) {
   const searches = view.sections.map((_, i) => `s${i}: search(type: ISSUE, first: ${view.limit}, query: $q${i}) { ${PR_FIELDS} }`);
   const vars = view.sections.map((_, i) => `$q${i}: String!`).join(", ");
-  const doc = `query(${vars}) {\n${searches.join("\n")}\n}`;
+  const doc = `query(${vars}) {\nviewer { login }\n${searches.join("\n")}\n}`;
   return ["api", "graphql", "-f", `query=${doc}`, ...view.sections.flatMap((s, i) => ["-f", `q${i}=${s.query}`])];
 }
 
@@ -221,7 +226,7 @@ const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewün
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { kind: "list", sections: [{ name, count, limited, skipped, rows }] }.
+// data) → { kind: "list", sections: [{ name, count, limited, skipped, rows }], viewer }.
 // A pull request found by two sections shows in the first only; a result
 // that is no pull request is counted in skipped. A search missing from the
 // answer is explained by the error at its alias.
@@ -265,7 +270,7 @@ export function parseGithubList(json, view, errors = []) {
     }
     return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };
   });
-  return { kind: "list", sections };
+  return { kind: "list", sections, viewer: json?.data?.viewer?.login ?? null };
 }
 
 // gh's network failures, as Go's net package and gh word them. NOT_SENT: the

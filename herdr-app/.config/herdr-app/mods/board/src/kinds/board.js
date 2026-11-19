@@ -1,6 +1,6 @@
 // A board's columns and cards: hidden columns, moves and their rollback,
-// where a card may go, the filter, and keyboard selection (a list is
-// navigated as one column).
+// where a card may go, the filter and "nur meine", and keyboard selection (a
+// list is navigated as one column).
 
 import { isObject, textList, itemKey } from "../shared.js";
 
@@ -122,10 +122,19 @@ export function matches(card, text) {
   return words.every((w) => hay.includes(w));
 }
 
+// Whether an item is one's own, for "nur meine": `me` (the login the data
+// was read as; null when the source did not say) is one of its assignees or
+// its author.
+export const isMine = (item, me) => Boolean(me) && ((item.assignees ?? []).includes(me) || item.author === me);
+
+// Whether an item shows in data read as `viewer`: it matches the filter and,
+// with `mine` on, it is one's own.
+export const shows = (item, filter, mine, viewer) => matches(item, filter) && (!mine || isMine(item, viewer));
+
 // The columns as the board shows them: hidden ones as stubs (no cards), the
-// others with the filtered cards.
-export function shownColumns(board, filter) {
-  return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => matches(card, filter)) }));
+// others with the cards that show (`mine`: only one's own).
+export function shownColumns(board, filter, mine = false) {
+  return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }
 
 // Keyboard movement: sel = { col, key } (key null on a stub or an empty

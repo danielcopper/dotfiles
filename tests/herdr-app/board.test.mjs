@@ -25,7 +25,8 @@
 // - built by hand in the shapes GitHub returns: github-board-cases.json (a
 //   pull request, a draft, an item without access, an item in an option that
 //   is gone), github-list.json, github-move.json, github-rate-limited.json,
-//   github-scope-error.json;
+//   github-scope-error.json; the viewer's login in github-board.json,
+//   github-board-cases.json and github-list.json is added the same way;
 // - written from az's documentation (`az devops invoke` for work item
 //   types), not recorded: azure-types.json.
 
@@ -392,6 +393,35 @@ test("start settings: defaults < start < the view's start < the repo's entry", (
   assert.equal(board.startSettings(config, mine, "other/repo").checkout, null);
 });
 
+// ---- The top bar's sources and contexts ----
+
+test("the sources come in the toggle's order, Azure first, each with its contexts in views.json's order", () => {
+  const config = sampleConfig();
+  assert.deepEqual(board.sourcesOf(config).map((s) => s.id), ["azure", "github"]);
+  assert.deepEqual(board.contextsOf(config, "azure").map((c) => [c.id, c.kind, c.name]), [
+    ["azure:team:Example Project/Example Team", "team", "Example Team"],
+    ["azure:prs:Example Project", "prs", "PRs · Example Project"],
+  ]);
+  assert.deepEqual(board.contextsOf(config, "github").map((c) => [c.id, c.kind, c.name, c.view.id]), [
+    ["github:mine", "view", "Mine", "mine"], ["github:prs", "view", "PRs", "prs"], ["github:other", "view", "Other", "other"],
+  ]);
+  assert.deepEqual(board.sourcesOf({ ...config, azure: null }).map((s) => s.id), ["github"]);
+  assert.deepEqual([board.sourcesOf(null), board.contextsOf(null, "azure"), board.contextsOf(config, "jira")], [[], [], []]);
+});
+
+test("a remembered choice falls back to the first one when views.json no longer has it", () => {
+  const list = [{ id: "a" }, { id: "b" }];
+  assert.deepEqual([board.pick(list, "b"), board.pick(list, "gone"), board.pick(list, null), board.pick([], "a")], [list[1], list[0], list[0], null]);
+  const team = { views: ["sprint", "backlog"] };
+  assert.deepEqual([board.teamView(team, "backlog"), board.teamView(team, null), board.teamView({ views: ["backlog"] }, "sprint")], ["backlog", "sprint", "backlog"]);
+});
+
+test("an Azure tab says which view it will hold", () => {
+  const [team, prs] = board.contextsOf(sampleConfig(), "azure");
+  assert.deepEqual([board.placeholder(team, "sprint"), board.placeholder(team, "backlog"), board.placeholder(prs, null)],
+    ["Sprint-Ansicht folgt", "Backlog folgt", "PR-Ansicht folgt"]);
+});
+
 // ---- Hidden columns ----
 
 test("hidden columns: the view's hide plus what the person hid, minus what they showed", () => {
@@ -439,6 +469,7 @@ test("the board query leaves hidden columns out and counts them in the same requ
   assert.match(doc, /items\(first: 100, query: \$filter\)/);
   assert.match(doc, /\$h1: String!/);
   assert.doesNotMatch(board.githubBoardArgs({ ...githubView(), filter: "" }, new Set()).find((a) => a.startsWith("query=")), /\$h0/);
+  assert.match(doc, /^query\([^)]*\) \{\n  viewer \{ login \}\n/, "and who gh runs as, for „nur meine“");
 });
 
 test("columns come from the project's field options, in order, with theme colors", () => {
@@ -446,6 +477,17 @@ test("columns come from the project's field options, in order, with theme colors
   assert.deepEqual(names(b), ["Backlog", "Ready", "In progress", "In review", "Done"]);
   assert.deepEqual(b.columns.map((c) => c.color), ["ansi2", "ansi4", "ansi3", "ansi5", "ansi11"]);
   assert.deepEqual(b.meta, { projectId: "PVT_sample", fieldId: "PVTSSF_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7" });
+});
+
+test("a board and a list carry the login gh read them as, null when GitHub did not say", () => {
+  assert.equal(githubBoard().viewer, "sample-user");
+  assert.equal(board.parseGithubList(json("github-list.json"), listView()).viewer, "sample-user");
+  const without = json("github-board.json");
+  delete without.data.viewer;
+  assert.equal(board.parseGithubBoard(without, githubView(), HIDDEN).viewer, null);
+  const list = json("github-list.json");
+  delete list.data.viewer;
+  assert.equal(board.parseGithubList(list, listView()).viewer, null);
 });
 
 test("hidden columns carry the server's count; shown ones their cards", () => {
@@ -709,6 +751,22 @@ test("the filter keeps cards holding every word, in title, key, repo, labels or 
   assert.equal(all("").length, 6);
 });
 
+test("„nur meine“ keeps the items assigned to or opened by the login the data was read as, with the filter", () => {
+  const data = json("github-board.json");
+  data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
+  data.data.repositoryOwner.projectV2.items.nodes[1].content.assignees.nodes = [];
+  const b = board.parseGithubBoard(data, githubView(), HIDDEN);
+  const all = (text, mine) => board.shownColumns(b, text, mine).flatMap((c) => c.shown.map((x) => x.number));
+  assert.deepEqual(all("", true), [3004, 3005, 3007, 3003], "not 3000 (someone else's) nor 3001 (no one's)");
+  assert.deepEqual(all("BUG input", true), [3007], "with the filter");
+  assert.deepEqual(all("", false).length, 6);
+  const pr = { assignees: [], author: "sample-user" };
+  assert.deepEqual([board.isMine(pr, "sample-user"), board.isMine(pr, "other"), board.isMine({ assignees: ["x"] }, "x"), board.isMine({}, "x")], [true, false, true, false]);
+  assert.equal(board.isMine({ assignees: [null], author: null }, null), false, "without a login nothing is one's own");
+  assert.deepEqual([board.shows(pr, "", true, "sample-user"), board.shows(pr, "nothing", true, "sample-user"), board.shows(pr, "", true, null), board.shows(pr, "", false, null)],
+    [true, false, false, true]);
+});
+
 test("j/k move within a column, h/l across columns and stubs, keeping the row", () => {
   const cols = board.shownColumns(githubBoard(), "");
   // Columns: 0 Backlog (stub), 1 Ready, 2 In progress, 3 In review, 4 Done (stub).
@@ -742,6 +800,7 @@ test("the PR list is one GraphQL request with one search per section", () => {
   assert.match(args.find((a) => a.startsWith("query=")), /s0: search\(type: ISSUE, first: 50, query: \$q0\)[\s\S]*s1: search/);
   assert.ok(args.includes("q0=is:pr review-requested:@me"));
   assert.ok(args.includes("q1=is:pr author:@me"));
+  assert.match(args.find((a) => a.startsWith("query=")), /^query=query\([^)]*\) \{\nviewer \{ login \}\n/, "and who gh runs as");
 });
 
 test("PR sections hold their rows once, with checks, review state and branch", () => {
@@ -1462,9 +1521,12 @@ Object.defineProperty(globalThis, "localStorage", {
 
 const ok = (stdout) => ({ code: 0, stdout, stderr: "" });
 
-// A Board on the fake host, started, its calls not answered yet.
+// A Board on the fake host, started, its calls not answered yet. `stored`:
+// what the store holds before (by default the GitHub source as the one last
+// shown, so the board opens on its first view).
 async function bootBoard(options = {}) {
   memory.clear();
+  for (const [key, value] of Object.entries(options.stored ?? { source: "github" })) memory.set(key, JSON.stringify(value));
   clockOffset = 0;
   const host = fakeHost(options);
   globalThis.__boardHost = host;
@@ -1492,13 +1554,20 @@ async function press(b, cx, k, extra) {
 const shiftL = { char: "L", modifiers: { shift: true } };
 const confirmed = (id) => ok(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id } } } }));
 
-test("UI: on the shipped views.json the board loads its first GitHub view, and runs no az", async () => {
+test("UI: on the shipped views.json the board opens on Azure, its team's Sprint first, and runs nothing", async () => {
+  const { b, host } = await bootBoard({ config: shippedConfig(), stored: {} });
+  assert.deepEqual([b.source().id, b.context().kind, b.teamViewOf(b.context())], ["azure", "team", "sprint"]);
+  assert.deepEqual(b.contexts().map((c) => c.kind), ["team", "prs"]);
+  assert.deepEqual([host.calls, host.asked], [[], []], "no gh and no az");
+  assert.ok(host.focused > 0);
+});
+
+test("UI: on the shipped views.json the GitHub source loads its first view", async () => {
   const { b, st, host } = await openBoard({ config: shippedConfig() });
   assert.equal(st().data.columns.length, 5);
   assert.deepEqual(st().sel, { col: 1, key: "PVTI_rec4" });
-  assert.deepEqual(b.shownViews().map((v) => v.id), ["mine", "prs"]);
-  assert.deepEqual([host.open("az"), host.asked.filter((a) => a.tool === "az")], [[], []]);
-  assert.ok(host.focused > 0);
+  assert.deepEqual(b.contexts().map((c) => c.view.id), ["mine", "prs"]);
+  assert.deepEqual(host.asked.filter((a) => a.tool === "az"), []);
 });
 
 test("UI: a board copy that is not shown does not take the keyboard", async () => {
@@ -2163,17 +2232,18 @@ const centres = (parent, child) =>
 // The elements of a chain (root first) that centre the next one in it.
 const centring = (chain) => chain.slice(0, -1).filter((el, i) => centres(el, chain[i + 1])).map((el) => el.kind);
 
-test("UI: the views sidebar fills the height; the content and its error start at the top", async () => {
+test("UI: no sidebar: the content fills the width under the top bar, and it and its error start at the top", async () => {
   const { b, st } = await bootBoard({ which: (tool) => (tool === "gh" ? "" : "/opt/fake/bin/az") });
   assert.equal(st().error, "gh ist nicht installiert");
   const root = b.render();
-  for (const text of ["ANSICHTEN", "gh ist nicht installiert"]) {
-    const chain = pathTo(root, text);
-    assert.ok(chain, text);
-    assert.deepEqual(centring(chain), [], `no row centres „${text}“`);
-  }
-  const row = pathTo(root, "ANSICHTEN").filter((el) => el.kind === "h_flex").at(-1);
-  assert.equal(crossAlign(row), "items_stretch", "the sidebar's row stretches it to the full height");
+  assert.equal(pathTo(root, "ANSICHTEN"), null, "no sidebar");
+  const chain = pathTo(root, "gh ist nicht installiert");
+  assert.ok(chain);
+  assert.deepEqual(centring(chain), [], "no row centres the error");
+  const row = chain.filter((el) => el.kind === "h_flex").at(-1);
+  assert.equal(crossAlign(row), "items_stretch", "the content's row stretches it to the full height");
+  assert.equal(row.kids.length, 1, "the content alone in its row, without the detail");
+  assert.ok(chainTo(root, hasId("tabs")), "the tabs stand in the top bar");
 });
 
 test("UI: the board, its stubs and the detail beside it start at the top", async () => {
@@ -2221,6 +2291,175 @@ test("UI: a column's card list takes its height from the board, step by step, an
   const column = byId(root, `col-${at}`);
   assert.ok(chain.includes(column), "the list is in its column");
   assert.deepEqual(column.with.min_h, [0], "which may be lower than its content");
+});
+
+// ---- UI: the top bar ----
+
+// Every text under `el`, in order.
+const texts = (el) => (typeof el === "string" ? [el] : (el?.kids ?? []).flatMap(texts));
+// The hint line's keys, as it names them.
+const hintKeys = (b) => {
+  const line = b.render().kids.at(-1);
+  return line.kids.map((h) => texts(h)[0]);
+};
+// Clicks the element with the id `id` in what the board draws now.
+async function click(b, cx, id) {
+  const el = byId(b.render(), id);
+  assert.ok(el, `no ${id}`);
+  el.with.on_click[0]({}, cx);
+  await settle();
+}
+
+test("UI: the top bar has two rows, toggle, tabs and switch above, „nur meine“, filter and refresh below; the hint line wraps", async () => {
+  const { b } = await bootBoard({ stored: { source: "azure" } });
+  const root = b.render();
+  const bar = byId(root, "top-bar");
+  assert.equal(bar.kids.length, 2);
+  const [nav, tools] = bar.kids;
+  assert.deepEqual(nav.kids.map((k) => k.with.id?.[0]), ["source", "tabs", "team-view"]);
+  assert.deepEqual(tools.kids.map((k) => k.with.id?.[0]).filter(Boolean), ["mine", "filter", "refresh"]);
+  assert.ok(root.kids.at(-1).styles.includes("flex_wrap"), "a narrow screen wraps the keys rather than cut them off");
+});
+
+test("UI: q switches between Azure and GitHub, each keeping its tab, without reading a fresh view again", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "2");
+  assert.equal(b.context().id, "github:prs");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  await press(b, cx, "q");
+  assert.deepEqual([b.source().id, b.context().id], ["azure", "azure:team:Example Project/Example Team"]);
+  await press(b, cx, "]");
+  assert.equal(b.context().id, "azure:prs:Example Project");
+  await press(b, cx, "q");
+  assert.deepEqual([b.source().id, b.context().id], ["github", "github:prs"]);
+  assert.equal(host.open("gh").length, 0, "the list is fresh");
+  await press(b, cx, "q", { modifiers: { control: true } });
+  assert.equal(b.source().id, "github", "Control+q stays herdr's");
+  await press(b, cx, "q", { char: "Q", modifiers: { shift: true } });
+  assert.equal(b.source().id, "github", "Q does nothing");
+});
+
+test("UI: a new board opens on the source, tab and team view shown last; ones views.json no longer has fall back to the first", async () => {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" } });
+  await press(b, cx, "v");
+  await press(b, cx, "2");
+  const again = new board.default();
+  const cx2 = fakeCx();
+  again.init({}, cx2);
+  await settle();
+  assert.deepEqual([again.source().id, again.context().id], ["azure", "azure:prs:Example Project"]);
+  await press(again, cx2, "1");
+  assert.equal(again.teamViewOf(again.context()), "backlog");
+  assert.deepEqual(host.calls, [], "an Azure tab reads nothing");
+  memory.set("tab:azure", JSON.stringify("azure:team:Gone/Team"));
+  memory.set("teamView:azure:team:Example Project/Example Team", JSON.stringify("kanban"));
+  const third = new board.default();
+  third.init({}, fakeCx());
+  await settle();
+  assert.deepEqual([third.context().id, third.teamViewOf(third.context())], ["azure:team:Example Project/Example Team", "sprint"]);
+});
+
+test("UI: digits and [ ] pick the shown source's tabs; a digit beyond them does nothing", async () => {
+  const { b, cx } = await bootBoard({ stored: { source: "azure" } });
+  await press(b, cx, "3");
+  assert.equal(b.context().kind, "team", "3 names no Azure tab");
+  await press(b, cx, "[");
+  assert.equal(b.context().kind, "prs", "[ from the first tab wraps to the last");
+  await press(b, cx, "]");
+  assert.equal(b.context().kind, "team");
+});
+
+test("UI: an Azure team tab shows its Sprint or Backlog to come and v switches them; the PRs tab its list to come; the hints follow", async () => {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" } });
+  const shown = () => texts(b.render());
+  assert.ok(shown().includes("Sprint-Ansicht folgt"));
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "m", "/", "r", "Esc"]);
+  await press(b, cx, "v");
+  assert.ok(shown().includes("Backlog folgt"));
+  await press(b, cx, "v");
+  assert.ok(shown().includes("Sprint-Ansicht folgt"));
+  await click(b, cx, "team-view-backlog");
+  assert.ok(shown().includes("Backlog folgt"), "a click on the switch");
+  await press(b, cx, "2");
+  assert.ok(shown().includes("PR-Ansicht folgt"));
+  assert.equal(byId(b.render(), "team-view"), null, "no view switch on the PRs tab");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "m", "/", "r", "Esc"]);
+  await press(b, cx, "v");
+  assert.ok(shown().includes("PR-Ansicht folgt"), "v does nothing there");
+  await press(b, cx, "1");
+  assert.ok(shown().includes("Backlog folgt"), "the team kept its view");
+  assert.deepEqual(host.calls, []);
+});
+
+test("UI: a team with one view shows it without a switch; a config with one source has no source key", async () => {
+  const config = JSON.parse(testConfig());
+  config.sources.azure.contexts[0].views = ["backlog"];
+  delete config.sources.github;
+  const { b, cx } = await bootBoard({ config: JSON.stringify(config), stored: {} });
+  assert.ok(texts(b.render()).includes("Backlog folgt"));
+  assert.equal(byId(b.render(), "team-view"), null);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "m", "/", "r", "Esc"]);
+  await press(b, cx, "q");
+  await press(b, cx, "v");
+  assert.deepEqual([b.source().id, b.teamViewOf(b.context())], ["azure", "backlog"]);
+});
+
+test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
+  const { b, cx, host } = await openBoard();
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "H/L", "s", "x", "Enter", "o", "m", "/", "r", "Esc"]);
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "j/k", "Enter", "o", "m", "/", "r", "Esc"]);
+});
+
+test("UI: clicks on the source toggle, a tab and „nur meine“ do what their keys do, not while a dialog is open", async () => {
+  const { b, cx, host } = await openBoard();
+  await click(b, cx, "source-azure");
+  assert.equal(b.source().id, "azure");
+  await click(b, cx, "tab-azure:prs:Example Project");
+  assert.equal(b.context().kind, "prs");
+  await click(b, cx, "source-github");
+  await click(b, cx, "tab-github:other");
+  assert.equal(b.context().id, "github:other");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await click(b, cx, "mine");
+  assert.equal(b.mine, true);
+  await press(b, cx, "s");
+  assert.equal(b.modal?.kind, "status");
+  await click(b, cx, "mine");
+  await click(b, cx, "source-azure");
+  await click(b, cx, "tab-github:mine");
+  assert.deepEqual([b.mine, b.source().id, b.context().id], [true, "github", "github:other"], "the dialog keeps them");
+});
+
+test("UI: m shows only one's own items on a board and a list, without reading again, and says so in the top bar", async () => {
+  const data = json("github-board.json");
+  data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
+  const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(data) });
+  const cards = () => b.columns(b.view()).flatMap((c) => c.shown.map((x) => x.number));
+  assert.equal(cards().length, 6);
+  assert.ok(texts(byId(b.render(), "mine")).includes("nur meine"));
+  await press(b, cx, "m");
+  assert.equal(cards().includes(3000), false);
+  assert.equal(cards().length, 5);
+  assert.ok(texts(byId(b.render(), "mine")).includes("✓ nur meine"), "said when on");
+  assert.equal(host.open("gh").length, 0, "nothing read again");
+  assert.notEqual(st().sel.key, null);
+  assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection stays on a shown card");
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  assert.deepEqual(b.rows(b.view()).map((r) => r.number), [77], "the list: only what sample-user opened");
+  await press(b, cx, "m");
+  assert.deepEqual(b.rows(b.view()).map((r) => r.number), [2820, 1921, 808, 77]);
+});
+
+test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {
+  const data = json("github-board.json");
+  delete data.data.viewer;
+  const { b, cx } = await openBoard({ answer: JSON.stringify(data) });
+  await press(b, cx, "m");
+  assert.equal(b.columns(b.view()).flatMap((c) => c.shown).length, 0);
+  assert.ok(texts(b.render()).includes("„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist"));
 });
 
 // ---- The board button (mods/board-button/) ----

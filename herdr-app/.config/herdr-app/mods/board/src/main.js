@@ -28,9 +28,17 @@
 // Hidden columns are left out of the query; the same request counts them for
 // their stubs.
 //
+// The top bar toggles between the sources (Azure, GitHub) and shows a tab
+// per context of the shown one: on Azure a team, with its view switch
+// (Sprint, Backlog), or a project's pull requests; on GitHub a view. The
+// Azure tabs read nothing yet: each says which view it will hold. "nur
+// meine" filters what shows to one's own (on GitHub: assigned to, or opened
+// by, the login gh runs as), without reading anything again. The shown
+// source, its tab and a team's view last across reloads.
+//
 // Calls: a GitHub view costs one gh call per refresh. Finding gh costs one
 // sh call now and then (toolPaths says when). A view refreshes when the
-// board opens, on `r`, after `x`, when it is shown again older than
+// board opens on it, on `r`, after `x`, when it is shown again older than
 // refreshMinutes, and every refreshMinutes while its tab shows.
 //
 // The board is written as modules in src/ beside build.mjs, which builds
@@ -45,13 +53,15 @@ import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
 import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, readTextFile, run, settings, spaces, theme } from "herdr";
 import { MOD, CONFIG_NAME, BoardError, firstLine, lastLine, errorText, itemKey, itemLabel, updatedLabel, ageLabel } from "./shared.js";
 import { viewKind, readConfig, startSettings, githubViews } from "./config.js";
-import { readStoredHidden, hiddenColumns, toggleHidden, unknownHidden, findCard, moveCard, rollback, isDue, pendingMoves, applyMoves, canDrop, targetsFor, stepTarget, withHidden, matches, shownColumns, navigate, selectionAfter } from "./kinds/board.js";
+import { readStoredHidden, hiddenColumns, toggleHidden, unknownHidden, findCard, moveCard, rollback, isDue, pendingMoves, applyMoves, canDrop, targetsFor, stepTarget, withHidden, shows, shownColumns, navigate, selectionAfter } from "./kinds/board.js";
+import { TEAM_VIEW_NAMES, contextsOf, sourcesOf, pick, teamView, placeholder } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { sessionName, linkedSession, AGENT_STATUS, renderTemplate, templateVars, checkoutArgs, spaceForTab, startCommand } from "./actions/start.js";
 import { call, makeSources } from "./sources/index.js";
 import { store, tint, machineName, onMachine, boardShown, report } from "./ui/helpers.js";
 export * from "./shared.js";
 export * from "./config.js";
+export * from "./contexts.js";
 export * from "./kinds/board.js";
 export * from "./sources/github.js";
 export * from "./sources/azure.js";
@@ -66,14 +76,21 @@ const CHECKOUT_TIMEOUT = 30000;
 const SESSION_CHECKS = [1000, 2000, 3000];
 const TICK_MS = 30000;
 const SCROLLS = 24;
+// What "nur meine" says over data that does not name the login it was read as.
+const NO_VIEWER = "„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist";
 
 export default class Board extends View {
   init(_props, cx) {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    this.views = {}; // per view id, see state()
-    this.viewId = store.get("view");
+    this.views = {}; // per GitHub view id, see state()
+    // What the top bar shows, as last chosen: the source, its tab (a context
+    // id) per source, and the view per team context. "nur meine" starts off.
+    this.sourceId = store.get("source");
+    this.tabIds = { azure: store.get("tab:azure"), github: store.get("tab:github") };
+    this.teamViews = {};
+    this.mine = false;
     this.filterText = "";
     this.filtering = false;
     this.modal = null; // { kind: "status", … } or { kind: "start", … }
@@ -125,13 +142,13 @@ export default class Board extends View {
 
   // ---- data ----
 
-  // A view's state: data and error, loading (again: one more refresh after
-  // this one), at (last success) and tried (last start), warnings, moves (laid over refreshes, see
-  // pendingMoves), pending (card keys being written), unclear ({ key, label,
-  // to, at } of writes whose outcome is still open; see settleUnclear),
-  // stored/hidden (the
-  // person's toggles and the hidden set), sel ({ col, key }, null before
-  // the first data) and detail.
+  // A GitHub view's state: data and error, loading (again: one more refresh
+  // after this one), at (last success) and tried (last start), warnings,
+  // moves (laid over refreshes, see pendingMoves), pending (card keys being
+  // written), unclear ({ key, label, to, at } of writes whose outcome is
+  // still open; see settleUnclear), stored/hidden (the person's toggles and
+  // the hidden set), sel ({ col, key }, null before the first data) and
+  // detail.
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
@@ -140,13 +157,31 @@ export default class Board extends View {
     return this.views[id];
   }
 
-  shownViews() {
-    return githubViews(this.config);
+  // The source the top bar shows (null without a valid views.json), its
+  // contexts (one tab each) and the shown one.
+  source() {
+    return pick(sourcesOf(this.config), this.sourceId);
   }
 
+  contexts() {
+    const source = this.source();
+    return source ? contextsOf(this.config, source.id) : [];
+  }
+
+  context() {
+    const source = this.source();
+    return source ? pick(this.contexts(), this.tabIds[source.id]) : null;
+  }
+
+  // The view a team context shows (TEAM_VIEW_NAMES).
+  teamViewOf(context) {
+    this.teamViews[context.id] ??= store.get(`teamView:${context.id}`);
+    return teamView(context, this.teamViews[context.id]);
+  }
+
+  // The GitHub view the shown tab holds, or null.
   view() {
-    const shown = this.shownViews();
-    return shown.find((v) => v.id === this.viewId) ?? shown[0] ?? null;
+    return this.context()?.view ?? null;
   }
 
   hiddenFor(view) {
@@ -331,15 +366,21 @@ export default class Board extends View {
 
   // ---- what is shown ----
 
+  // Whether an item of `data` shows: it matches the filter and, with "nur
+  // meine" on, is one's own.
+  visible(item, data) {
+    return shows(item, this.filterText, this.mine, data.viewer);
+  }
+
   columns(view) {
     const st = this.state(view.id);
-    return st.data?.kind === "board" ? shownColumns(st.data, this.filterText) : [];
+    return st.data?.kind === "board" ? shownColumns(st.data, this.filterText, this.mine) : [];
   }
 
   rows(view) {
     const st = this.state(view.id);
     if (st.data?.kind !== "list") return [];
-    return st.data.sections.flatMap((s) => s.rows.filter((r) => matches(r, this.filterText)));
+    return st.data.sections.flatMap((s) => s.rows.filter((r) => this.visible(r, st.data)));
   }
 
   // The board's columns, or a list as one column, as navigate takes them.
@@ -369,14 +410,64 @@ export default class Board extends View {
     else this.scrollList(view, sel.key);
   }
 
-  switchView(index, cx) {
-    const v = this.shownViews()[index];
-    if (!v) return;
-    this.viewId = v.id;
-    store.set("view", v.id);
+  // Shows the tab at `index` of the shown source; none there does nothing.
+  switchTab(index, cx) {
+    const source = this.source();
+    const context = this.contexts()[index];
+    if (!context) return;
+    this.tabIds[source.id] = context.id;
+    store.set(`tab:${source.id}`, context.id);
+    this.showContext(cx);
+  }
+
+  // Shows another source with the tab it showed last.
+  switchSource(id, cx) {
+    if (!sourcesOf(this.config).some((s) => s.id === id)) return;
+    this.sourceId = id;
+    store.set("source", id);
+    this.showContext(cx);
+  }
+
+  // The next source in the toggle's order, after the last the first.
+  nextSource(cx) {
+    const list = sourcesOf(this.config);
+    const at = list.findIndex((s) => s.id === this.source()?.id);
+    if (list.length > 1) this.switchSource(list[(at + 1) % list.length].id, cx);
+  }
+
+  // After another tab came up: the notice goes, and a GitHub view without
+  // data, or older than refreshMinutes, loads.
+  showContext(cx) {
     this.notice = null;
-    const st = this.state(v.id);
-    if (!st.data || Date.now() - st.tried >= this.config.refreshMinutes * 60000) this.refresh(v, cx);
+    const v = this.view();
+    const st = v && this.state(v.id);
+    if (v && (!st.data || Date.now() - st.tried >= this.config.refreshMinutes * 60000)) this.refresh(v, cx);
+    cx.notify();
+  }
+
+  // Shows a view of the shown team context; one it does not have does
+  // nothing.
+  setTeamView(name, cx) {
+    const context = this.context();
+    if (context?.kind !== "team" || !context.views.includes(name)) return;
+    this.teamViews[context.id] = name;
+    store.set(`teamView:${context.id}`, name);
+    cx.notify();
+  }
+
+  // v: the shown team context's next view.
+  nextTeamView(cx) {
+    const context = this.context();
+    if (context?.kind !== "team") return;
+    const views = context.views;
+    this.setTeamView(views[(views.indexOf(this.teamViewOf(context)) + 1) % views.length], cx);
+  }
+
+  // m: "nur meine" on or off, over whatever shows; nothing is read again.
+  toggleMine(cx) {
+    this.mine = !this.mine;
+    const view = this.view();
+    if (view && this.state(view.id).data) this.keepSelection(view);
     cx.notify();
   }
 
@@ -568,18 +659,22 @@ export default class Board extends View {
     // Control+Alt; Control alone stays herdr's.
     const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
-      const shown = this.shownViews();
-      return this.switchView((shown.indexOf(view) + (ch === "[" ? -1 : 1) + shown.length) % shown.length, cx), done();
+      const tabs = this.contexts();
+      const at = tabs.findIndex((c) => c.id === this.context()?.id);
+      if (tabs.length) this.switchTab((at + (ch === "[" ? -1 : 1) + tabs.length) % tabs.length, cx);
+      return done();
     }
     if (typed && ch === "/") return this.filterInput.focus(), done();
     if (mod.control || mod.alt || mod.platform) return;
-    if (/^[1-9]$/.test(ch)) return this.switchView(Number(ch) - 1, cx), done();
-    if (k === "r" && !mod.shift) return this.reload(cx), done();
-    if (!view) return;
-    const st = this.state(view.id);
-    if (st.data) this.keepSelection(view);
+    if (/^[1-9]$/.test(ch)) return this.switchTab(Number(ch) - 1, cx), done();
+    if (!mod.shift) {
+      const action = { r: () => this.reload(cx), q: () => this.nextSource(cx), v: () => this.nextTeamView(cx), m: () => this.toggleMine(cx) }[k];
+      if (action) return action(), done();
+    }
+    const st = view ? this.state(view.id) : null;
+    if (st?.data) this.keepSelection(view);
     if (k === "escape") {
-      if (st.detail) st.detail = false;
+      if (st?.detail) st.detail = false;
       else if (this.notice) this.notice = null;
       else if (this.filterText) {
         this.filterInput.set_value("");
@@ -587,6 +682,7 @@ export default class Board extends View {
       }
       return done();
     }
+    if (!view) return;
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (st.data.kind === "board" || dir === "up" || dir === "down") this.select(view, navigate(this.navColumns(view), st.sel, dir));
@@ -615,7 +711,7 @@ export default class Board extends View {
     let child = 0;
     for (const s of st.data.sections) {
       child++; // the section's heading
-      for (const r of s.rows.filter((row) => matches(row, this.filterText))) {
+      for (const r of s.rows.filter((row) => this.visible(row, st.data))) {
         if (r.key === key) return this.listScroll.scroll_to_item(child);
         child++;
       }
@@ -700,13 +796,12 @@ export default class Board extends View {
     if (this.notice || this.configErrors.length) out = out.child(this.banner(t));
     out = out
       .child(
-        // h_flex centres its items; the sidebar, the content and the detail
-        // span the full height, each starting at the top.
+        // h_flex centres its items; the content and the detail span the
+        // full height, each starting at the top.
         h_flex()
           .flex_1()
           .min_h(0)
           .items_stretch()
-          .child(this.sidebar(t, view))
           .child(this.main(t, mono, view, st))
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
       )
@@ -747,17 +842,32 @@ export default class Board extends View {
     return { failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 }[state] ?? t.dim;
   }
 
+  // The top bar, two rows so that neither the tabs nor the filter have to
+  // give way on a small screen: the source toggle, a tab per context of the
+  // shown source and a team's view switch (where it has two); then "nur
+  // meine", the filter, when the shown view was read, and refresh. Without a
+  // valid views.json the first row holds only the board's name.
   toolbar(t, view, st) {
     const updated = st?.loading ? "lädt …" : st?.at ? `aktualisiert ${updatedLabel(st.at, Date.now())}` : "";
-    return h_flex()
-      .flex_none()
-      .gap(12)
-      .px(16)
-      .py(10)
-      .items_center()
-      .border_b(1)
-      .border_color(t.border)
-      .child(div().flex_none().text_size(15).font_semibold().child(view?.name ?? "Board"))
+    const source = this.source();
+    const context = this.context();
+    const row = () => h_flex().gap(12).px(16).items_center();
+    let nav = row().pt(8).pb(4);
+    if (!source) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
+    else {
+      const sources = sourcesOf(this.config).map((s) => ({ id: s.id, label: s.name }));
+      nav = nav
+        .child(this.segments(t, "source", sources, source.id, (id, cx) => this.switchSource(id, cx)))
+        .child(this.tabs(t, context))
+        .when(context?.kind === "team" && context.views.length > 1, (el) => {
+          const views = context.views.map((v) => ({ id: v, label: TEAM_VIEW_NAMES[v] }));
+          return el.child(this.segments(t, "team-view", views, this.teamViewOf(context), (name, cx) => this.setTeamView(name, cx)));
+        });
+    }
+    const tools = row()
+      .pt(4)
+      .pb(8)
+      .when(Boolean(source), (el) => el.child(this.mineToggle(t)))
       .child(
         h_flex()
           .flex_1()
@@ -778,6 +888,103 @@ export default class Board extends View {
       )
       .child(div().flex_none().text_size(12).text_color(t.muted).child(updated))
       .child(this.button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
+    return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
+  }
+
+  // A row of choices, the chosen one marked; a click picks one (`pick(id,
+  // cx)`). Each choice has the id `<id>-<choice id>`.
+  segments(t, id, choices, chosen, pick) {
+    return h_flex()
+      .id(id)
+      .flex_none()
+      .p(2)
+      .gap(2)
+      .rounded(7)
+      .border_1()
+      .border_color(t.border)
+      .bg(t.chrome)
+      .children(
+        choices.map((c) =>
+          div()
+            .id(`${id}-${c.id}`)
+            .px(10)
+            .py(4)
+            .rounded(5)
+            .text_size(12)
+            .cursor_pointer()
+            .text_color(c.id === chosen ? t.foreground : t.muted)
+            .when(c.id === chosen, (el) => el.bg(t.selected).font_semibold())
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => {
+              if (!this.modal) pick(c.id, cx);
+            })
+            .child(c.label),
+        ),
+      );
+  }
+
+  // The shown source's tabs: number, name and, for a GitHub view with data,
+  // how many items it holds ("…" while it loads).
+  tabs(t, context) {
+    const count = (c) => {
+      if (!c.view) return "";
+      const st = this.state(c.view.id);
+      if (st.loading) return "…";
+      const d = st.data;
+      if (!d) return "";
+      if (d.kind === "list") return String(d.sections.reduce((n, s) => n + s.rows.length, 0));
+      return String(d.columns.filter((col) => !col.hidden).reduce((n, col) => n + col.cards.length, 0));
+    };
+    // Too narrow for all, the names give way first (cut with …).
+    return h_flex()
+      .id("tabs")
+      .min_w(0)
+      .overflow_x_hidden()
+      .gap(2)
+      .children(
+        this.contexts().map((c, i) =>
+          h_flex()
+            .id(`tab-${c.id}`)
+            .min_w(0)
+            .px(10)
+            .py(5)
+            .gap(6)
+            .items_center()
+            .rounded(6)
+            .cursor_pointer()
+            .text_color(c.id === context?.id ? t.foreground : t.muted)
+            .when(c.id === context?.id, (el) => el.bg(t.selected).font_semibold())
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => {
+              if (!this.modal) this.switchTab(i, cx);
+            })
+            .child(div().flex_none().text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+            .child(div().min_w(0).truncate().child(c.name))
+            .child(div().flex_none().text_size(12).text_color(t.muted).child(count(c))),
+        ),
+      );
+  }
+
+  // "nur meine": when on, solid and checked.
+  mineToggle(t) {
+    return div()
+      .id("mine")
+      .flex_none()
+      .px(10)
+      .py(5)
+      .rounded(6)
+      .text_size(12)
+      .cursor_pointer()
+      .border_1()
+      .border_color(this.mine ? t.accent : t.border)
+      .bg(this.mine ? t.solid : t.chrome)
+      .text_color(this.mine ? t.solid_foreground : t.muted)
+      .when(this.mine, (el) => el.font_semibold())
+      .hover((s) => s.bg(this.mine ? t.accent : t.hover))
+      .on_click((_e, cx) => {
+        if (!this.modal) this.toggleMine(cx);
+      })
+      .child(this.mine ? "✓ nur meine" : "nur meine");
   }
 
   banner(t) {
@@ -795,56 +1002,18 @@ export default class Board extends View {
       .children(lines.map((l) => div().text_color(color[l.level] ?? t.muted).child(l.text)));
   }
 
-  sidebar(t, view) {
-    const shown = this.shownViews();
-    const count = (v) => {
-      const d = this.state(v.id).data;
-      if (!d) return "";
-      if (d.kind === "list") return String(d.sections.reduce((n, s) => n + s.rows.length, 0));
-      return String(d.columns.filter((c) => !c.hidden).reduce((n, c) => n + c.cards.length, 0));
-    };
-    return v_flex()
-      .w(200)
-      .flex_none()
-      .p(8)
-      .gap(3)
-      .bg(t.chrome)
-      .border_r(1)
-      .border_color(t.border)
-      .child(div().px(8).pt(2).pb(6).text_size(11).text_color(t.muted).child("ANSICHTEN"))
-      .children(
-        shown.map((v, i) =>
-          h_flex()
-            .id(`view-${v.id}`)
-            .px(8)
-            .py(7)
-            .gap(8)
-            .items_center()
-            .rounded(6)
-            .cursor_pointer()
-            .when(v === view, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => {
-              if (!this.modal) this.switchView(i, cx);
-            })
-            .child(div().w(22).text_size(11).text_color(t.dim).child(this.sources[v.source].tag(v)))
-            .child(div().flex_1().min_w(0).truncate().child(v.name))
-            .child(div().text_size(12).text_color(t.muted).child(this.state(v.id).loading ? "…" : count(v)))
-            .child(div().w(10).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : "")),
-        ),
-      )
-      .child(div().flex_1());
-  }
-
   main(t, mono, view, st) {
     const box = v_flex().flex_1().min_w(0).min_h(0);
     const message = (text) => box.child(div().p(20).text_color(t.muted).child(text));
     if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
+    const context = this.context();
+    if (context?.source === "azure") return message(placeholder(context, context.kind === "team" ? this.teamViewOf(context) : null));
     if (!view) return message("Keine Ansicht verfügbar");
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
-    if (st.warnings.length) shown = shown.children(st.warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
+    const warnings = [...st.warnings, ...(this.mine && st.data && !st.data.viewer ? [NO_VIEWER] : [])];
+    if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;
     if (st.data.kind === "board" && !st.data.columns.length) return shown.child(div().p(20).text_color(t.muted).child("Keine Einträge"));
     return shown.child(st.data.kind === "board" ? this.board(t, mono, view, st) : this.list(t, mono, view, st));
@@ -1009,7 +1178,7 @@ export default class Board extends View {
         div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted)
           .child(`${s.name.toUpperCase()} · ${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`),
       );
-      children.push(...s.rows.filter((r) => matches(r, this.filterText)).map(row));
+      children.push(...s.rows.filter((r) => this.visible(r, st.data)).map(row));
     }
     return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(this.listScroll).children(children);
   }
@@ -1125,14 +1294,24 @@ export default class Board extends View {
       );
   }
 
+  // The keys of what shows: the top bar's, then those of the shown view.
   hints(t, st) {
-    const keys = st?.data?.kind === "list"
-      ? [["1 2 3 [ ]", "Ansicht"], ["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]]
-      : [["1 2 3 [ ]", "Ansicht"], ["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"],
-        ["o", "öffnen"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
+    const context = this.context();
+    const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
+    const always = [["m", "nur meine"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
+    let own = [];
+    if (context?.kind === "team") own = context.views.length > 1 ? [["v", "Sprint/Backlog"]] : [];
+    else if (st?.data?.kind === "list") own = [["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"]];
+    else if (context?.kind === "view") {
+      own = [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"], ["o", "öffnen"]];
+    }
+    const keys = [...bar, ...own, ...always];
+    // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()
-      .gap(16)
+      .flex_wrap()
+      .gap_x(16)
+      .gap_y(4)
       .px(16)
       .py(7)
       .border_t(1)
