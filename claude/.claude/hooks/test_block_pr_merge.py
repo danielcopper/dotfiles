@@ -50,6 +50,8 @@ PASSES = [
     "gh api https://api.github.com/graphql -f query='query { viewer { login } }'",
     "echo $(date) $(whoami) `hostname`",
     "echo " + "$(true) " * 64,
+    "git commit -F - <<'EOF'\nfix: don't wait for the owner's review\nEOF",
+    "cat > notes.md <<EOF\nit's read with gh pr view 3\nEOF",
 ]
 
 DENIED = [
@@ -127,6 +129,13 @@ DENIED = [
     'gh pr "merge" 3 --body \'unclosed',
     "gh p\\r merge 3 'unclosed",
     'gh api "repos/o/r/pulls/$N/merge" \'unclosed',
+    # the attached forms of the file query and of auto-complete
+    "gh api graphql --input=body.json",
+    "az repos pr update --id 4 --auto-complete=true",
+    # heredocs whose apostrophes leave the quoting open
+    "bash <<'EOF'\ngh pr merge 3 # the owner's call\nEOF",
+    'bash <<EOF\necho it\'s done\ngh pr "merge" 3\nEOF',
+    "sh <<'EOF'\n# don't wait\ngh api graphql --input q.json\nEOF",
 ]
 
 
