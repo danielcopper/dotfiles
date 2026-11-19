@@ -158,7 +158,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
     ├── block_ai_attribution.py   # Commit guard: no AI attribution
     ├── lint_published_markdown.py  # Publish guard: no issue reference in a list item
     ├── block_commit_on_main.py   # Commit guard: worktree branches only
-    ├── block_plugin_code_reviewer.py  # Agent guard: route review to custom reviewer
+    ├── block_plugin_code_reviewer.py  # Agent guard: route retired plugin reviewers to own agents
     ├── pre_tool_use.py           # Security guard (fail-closed)
     ├── post_tool_use.py          # Error detection
     ├── session_worktree.py       # Statusline: the worktree this session created
