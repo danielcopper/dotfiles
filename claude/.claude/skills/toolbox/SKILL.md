@@ -1,6 +1,6 @@
 ---
 name: toolbox
-description: Router over my skills — names each one and when to reach for it. Start here when unsure which skill fits.
+description: Router over my skills — names the skills to reach for and when. Start here when unsure which skill fits.
 disable-model-invocation: true
 ---
 
