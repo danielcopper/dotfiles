@@ -261,6 +261,9 @@ class GradeErrors(unittest.TestCase):
         v = grade([init(), failed, result()], QUIET_BETA)
         self.assertError(v, "API Error: 500")
 
+    def test_clean_result_without_a_reply(self):
+        self.assertError(grade([init(), result()], QUIET_BETA), "no reply")
+
     def test_error_does_not_blame_a_fire_case(self):
         v = grade([init(), text()], FIRES_ALPHA)
         self.assertError(v, "no result event")
