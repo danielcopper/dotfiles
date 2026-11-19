@@ -246,12 +246,16 @@ test("the build script writes main.js only when the build succeeds", () => {
 
 // ---- views.json ----
 
-test("the shipped views.json is valid: an Azure team with Sprint and Backlog, its project's pull requests, and the two GitHub views", () => {
+test("the shipped views.json is valid: Azure teams with Sprint and Backlog, each followed by its project's pull requests, and the two GitHub views", () => {
   const { config, errors } = board.readConfig(shippedConfig());
   assert.deepEqual(errors, []);
   assert.match(config.azure.org, /^https:\/\/dev\.azure\.com\/[^/]+$/);
-  assert.deepEqual(config.azure.contexts.map((c) => [c.kind, c.views ?? null]), [["team", ["sprint", "backlog"]], ["prs", null]]);
-  assert.equal(config.azure.contexts[1].project, config.azure.contexts[0].project, "the pull requests of the team's project");
+  const contexts = config.azure.contexts;
+  assert.ok(contexts.length >= 2 && contexts.length % 2 === 0, "pairs of a team and its pull requests");
+  for (let i = 0; i < contexts.length; i += 2) {
+    assert.deepEqual([contexts[i].kind, contexts[i].views, contexts[i + 1].kind], ["team", ["sprint", "backlog"], "prs"]);
+    assert.equal(contexts[i + 1].project, contexts[i].project, "the pull requests of the team's project");
+  }
   assert.deepEqual(config.github.views.map((v) => [v.name, v.source, v.layout]), [
     ["Meine Aufgaben", "github", "board"],
     ["PRs", "github", "list"],
@@ -1664,7 +1668,7 @@ test("UI: on the shipped views.json, with nothing remembered, the board opens on
 test("UI: on the shipped views.json with Azure remembered, the board opens on its team's Sprint and runs nothing", async () => {
   const { b, host } = await bootBoard({ config: shippedConfig(), stored: { source: "azure" } });
   assert.deepEqual([b.source().id, b.context().kind, b.teamViewOf(b.context())], ["azure", "team", "sprint"]);
-  assert.deepEqual(b.contexts().map((c) => c.kind), ["team", "prs"]);
+  assert.deepEqual(b.contexts().map((c) => c.kind).slice(0, 2), ["team", "prs"]);
   assert.deepEqual([host.calls, host.asked], [[], []], "no gh and no az");
   assert.ok(host.focused > 0);
 });
