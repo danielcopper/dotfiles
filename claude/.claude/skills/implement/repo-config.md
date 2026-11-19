@@ -39,7 +39,7 @@ Each holds in every repo unless its profile departs from it under `defaults`.
   - An issue edit that records a decision the owner made — in their own issue or the maintainer section of someone
     else's — is written in the format below and named to the owner in one line; ask first only when the wording would
     add something undecided.
-  - The lead's pull request and later edits to its body, as `implement`, step 8, says.
+  - The lead's pull request and later edits to its body, as `implement`, steps 8 and 9, say.
 
   The other value, `waived`, posts directly.
 

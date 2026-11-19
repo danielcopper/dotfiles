@@ -103,7 +103,10 @@ rules are fixed in the PR.
 At green, run the profile's `user_gate` where it applies. Prepare it in full from the issue, its decisions and the
 change, and send it as one message the user runs start to finish: the starting state, the exact steps, the expected
 result after each step, and what to report back. Then stop for the user's verdict. *(convention)* Then add one
-sentence with the result to the PR body, written as `public_text_drafts` says.
+sentence with the result to the PR body.
+
+Later edits to the body — that sentence, or a change a fix after the push needs — are written directly, without asking
+and without another `prose-reviewer` pass: update `~/Memory/<repo>/pr-body-<N>.md` and the PR with it.
 
 Once the user gate has passed and the user has ruled on the user's list (step 6), its fixes in, hand the PR over to
 the owner, who merges it (`merge_policy`, `repo-config.md`), and stop.
