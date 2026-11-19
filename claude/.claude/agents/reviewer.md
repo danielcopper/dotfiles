@@ -29,7 +29,7 @@ When the dispatch gives a delta and earlier findings to judge, add `### Earlier 
 
 ## Do not trust the report
 
-Treat the report's claims, design rationales included, as unverified. Don't run the gate (it is the lead's); run the repo's linter and type checker on the changed files (the dispatch names them), and a focused test only for a specific doubt.
+Treat the report's claims, design rationales included, as unverified. Don't run the gate (it is the lead's); run the repo's linter and type checker on the changed files (the dispatch names them), and a focused test only for a specific doubt. For someone else's PR, run neither a test nor a tool whose config the PR can change (an `eslint.config.js` runs code) unless the dispatch says the owner allowed running the PR's code; otherwise judge by reading and say what you did not run.
 
 ## Part 1 — Spec compliance
 
