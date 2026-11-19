@@ -127,9 +127,10 @@ export function checkParses(text, run = spawnSync) {
   const line = Number(String(r.stderr).match(/\[stdin\]:(\d+)/)?.[1]) || null;
   const lines = text.split("\n").slice(0, line ?? 0);
   const at = lines.findLastIndex((l) => l.startsWith("// ==== src/"));
-  const where = !line ? "main.js" : at < 0 ? "main.js header" : lines[at].slice("// ==== ".length, -" ====".length);
-  const said = String(r.stderr).split("\n").find((l) => /Error:/.test(l)) ?? `node --check exited with ${r.status}`;
-  throw new BuildError(`${where}${line ? ` (main.js line ${line})` : ""}: ${said.trim()}`);
+  const said = String(r.stderr).split("\n").find((l) => /Error:/.test(l))?.trim() ?? `exit ${r.status}`;
+  if (!line) throw new BuildError(`node --check failed without naming a line: ${said}`);
+  const where = at < 0 ? "main.js header" : lines[at].slice("// ==== ".length, -" ====".length);
+  throw new BuildError(`${where} (main.js line ${line}): ${said}`);
 }
 
 // main.js's text from the modules under `src` (default: src/ beside this

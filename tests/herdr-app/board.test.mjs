@@ -198,7 +198,7 @@ test("a parse check that cannot run, or fails above the first module, says so pl
   refused({ error: new Error("spawn node ENOENT"), status: null }, /^Error: node --check did not run: spawn node ENOENT$/);
   refused({ signal: "SIGKILL", status: null }, /node --check did not run: stopped by SIGKILL$/);
   refused({ status: null }, /node --check did not run: no exit status$/);
-  refused({ status: 1, stderr: "something odd" }, /^Error: main\.js: node --check exited with 1$/);
+  refused({ status: 1, stderr: "something odd" }, /^Error: node --check failed without naming a line: exit 1$/);
   assert.throws(() => buildOf({ "main.js": '// Entry.\n\nimport { class } from "herdr";\n\nexport default class Board {}\n' }), /main\.js header \(main\.js line \d+\): SyntaxError/);
 });
 
