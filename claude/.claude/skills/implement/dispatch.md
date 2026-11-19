@@ -49,7 +49,8 @@ reviewed commit as `review-agents.md`, "Fix rounds", sets. Beyond that:
 
 - `reviewer` — the brief path, the saved report path and the repo's review checks
 - `architecture-reviewer` — the worktree, the brief path, and per decision the old behaviour it replaces
-- `prose-reviewer` — the worktree and the brief path
+- `prose-reviewer` — the worktree and the brief path; on the drafted PR body (`SKILL.md`, step 8), the worktree,
+  `<base SHA>..HEAD` and the body's path `~/Memory/<repo>/pr-body-<N>.md`
 - `test-reviewer` — the worktree, the brief path, the saved report path and the gate's test command
 - `failure-reviewer`, `type-reviewer`, `security-reviewer` — the worktree and the brief path
 
