@@ -50,8 +50,8 @@ usage: python3 -I run.py [options] [case ...]
 Without case names every case runs. A case passes when every run does,
 fails when a run failed, and is an ERROR when the runs that did not pass all
 ended in errors. Exit 0: all passed; 1: a case failed; 2: no case failed but
-one is an ERROR, or a usage, case file, isolation, credential or unexpected
-error.
+one is an ERROR, or a usage, case file, isolation, credential, account, model
+(STOP_KINDS) or unexpected error.
 """
 
 import argparse
@@ -638,7 +638,7 @@ def main():
                     f"run {n}: {verdict.status} fired {shown} {cost}"
                     + (f" ({verdict.note})" if verdict.note else "")
                 )
-            # A case whose runs did not pass only by error says nothing about its skills.
+            # A case whose runs that did not pass all ended in errors has no verdict.
             if passes == args.runs:
                 outcome = PASS
             elif failures:
@@ -665,7 +665,7 @@ def main():
         if failed:
             print(f"{TASK}: failed: {' '.join(failed)}")
         if errored:
-            print(f"{TASK}: no clean run to grade: {' '.join(errored)}")
+            print(f"{TASK}: no verdict, runs ended in errors: {' '.join(errored)}")
         if failed:
             return 1
         return 2 if errored else 0
