@@ -39,10 +39,22 @@ Is anything missing, extra (unrequested; a small by-catch fix in its own commit 
 
 Judge the code as a senior engineer would. You don't load the repo's CLAUDE.md, so read its rules at the reviewed head yourself — the root `CLAUDE.md`, any nearer one, and the `.claude/rules/` files that cover the changed files; identifiers are English everywhere. Breaking a written rule is at least Important; a style preference no rule names is no finding.
 
+## Weakened bar
+
+Hunt every hunk for a bar the change lowers to get past a check it would otherwise fail:
+
+- **Threshold moved** — a coverage floor, a timeout, a tolerance, a lint or complexity limit, a retry count, a size cap.
+- **Test made easier** — an assertion loosened or removed, a case dropped, a skip, `xfail` or `only` added, an expected value rewritten to match the output.
+- **Checker silenced** — an inline suppression (`eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `# noqa`, `istanbul ignore`, `Stryker disable`, `nosemgrep`, `gitleaks:allow`), a rule switched off in a checker's config, a path added to its exclude list.
+- **Work unfinished** — an empty catch, a stub or placeholder return, a `TODO` or `FIXME`, code commented out.
+- **New exception** — an allow-list entry, a special case for one input, a bypass flag.
+
+Tightening is silent: a raised bar needs no mention. Loosening is loud: name every one in the report, with the decision or the reason at its line that carries it. One that nothing carries is a finding, and an unjustified new suppression is Important.
+
 ## Findings
 
 Try to refute each finding before you report it, then score it 0–100 for how sure you are it is real and matters. Report every finding at 50 or above, with its score; finding nothing is a fine result. **Critical**: data loss, a security hole, or a user path that doesn't work. **Important**: the change can't be trusted until fixed — wrong or fragile behaviour, a missed requirement, a broken written rule, damage you would block a merge over. Anything below 80 is **Minor**. Tag a defect the diff did not introduce `pre-existing`.
 
 ## Output
 
-Send your report as a message to your lead, then end with one sentence (verdict and finding count). It holds: **Spec compliance** (✅ / ❌ with file:line / ⚠️ what you could not verify), **Findings** grouped Critical / Important / Minor (file:line, what is wrong, why, the fix if not obvious, score, `pre-existing` where it applies), and **Verdict**: Needs fixes when a finding on the change is Critical or Important, else Approved — with one sentence why.
+Send your report as a message to your lead, then end with one sentence (verdict and finding count). It holds: **Spec compliance** (✅ / ❌ with file:line / ⚠️ what you could not verify), **Loosened bar** (each loosening with what carries it, or "none"), **Findings** grouped Critical / Important / Minor (file:line, what is wrong, why, the fix if not obvious, score, `pre-existing` where it applies), and **Verdict**: Needs fixes when a finding on the change is Critical or Important, else Approved — with one sentence why.
