@@ -586,9 +586,38 @@ class Summary(Swapping):
             run.Verdict(run.PASS, ["beta"], 0.5, "", MODEL),
         ]
         code, out, _ = self.main()
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("run 1: ERROR fired none cost unknown", out)
         self.assertIn("cost at least $0.50 (1 run(s) reported none)", out)
+
+    def test_case_with_only_errors_is_an_error_and_exits_2(self):
+        self.verdicts = [
+            run.Verdict(run.PASS, ["alpha"], 0.1, "", MODEL),
+            run.Verdict(run.ERROR, [], 0.1, "timed out", MODEL),
+            run.Verdict(run.PASS, ["beta"], 0.1, "", MODEL),
+            run.Verdict(run.PASS, ["beta"], 0.1, "", MODEL),
+        ]
+        code, out, _ = self.main("--runs", "2")
+        self.assertEqual(code, 2)
+        self.assertIn("ERROR a 1/2:", out)
+        self.assertIn("PASS b 2/2:", out)
+        self.assertIn("1 of 2 cases passed", out)
+        self.assertIn("no clean run to grade: a", out)
+        self.assertNotIn("failed:", out)
+
+    def test_a_failure_beside_errors_fails_the_case(self):
+        self.verdicts = [
+            run.Verdict(run.FAIL, ["beta"], 0.1, "beta must stay quiet", MODEL),
+            run.Verdict(run.ERROR, [], 0.1, "timed out", MODEL),
+            run.Verdict(run.ERROR, [], 0.1, "timed out", MODEL),
+            run.Verdict(run.ERROR, [], 0.1, "timed out", MODEL),
+        ]
+        code, out, _ = self.main("--runs", "2")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL a 0/2:", out)
+        self.assertIn("ERROR b 0/2:", out)
+        self.assertIn("failed: a", out)
+        self.assertIn("no clean run to grade: b", out)
 
     def test_crash_exits_2(self):
         def crash(case, every, binary, args):

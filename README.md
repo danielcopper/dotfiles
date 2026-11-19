@@ -543,10 +543,13 @@ the file must cover. Each case is one headless `claude -p` run, read for the
 Skill tool calls it makes. The runs are model calls on your claude.ai login
 or API key, so run it by hand after a skill description changes, not per
 commit and never beside another heavy run; it prints each run's cost and the
-total, the CLI's list-price estimate. Run `--check` first: it validates the
-cases and the isolation without a model call. Name cases to run only those,
-and pass `--runs 3` to judge a description, since a skill does not fire the
-same way every time. Each run starts under bwrap with a throwaway home that
+total, the CLI's list-price estimate. A case whose runs did not pass only
+because they ended in errors (a timeout, an API error) is listed apart and
+counts as no result: with no failed case, such errors end the run with exit
+2 rather than 0. Run `--check` first: it validates the cases and the
+isolation without a model call. Name cases to run only those, and pass
+`--runs 3` to judge a description, since a skill does not fire the same way
+every time. Each run starts under bwrap with a throwaway home that
 holds a copy of the skills and nothing else of yours; the header of `run.py`
 says how it is isolated and authenticated and lists the options.
 `mise run skill-trigger-test --test` (without mise, `python3 -I

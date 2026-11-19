@@ -40,13 +40,16 @@ usage: python3 -I run.py [options] [case ...]
   --list                print the case names
   --check               validate cases.toml and run the isolation probe, no model call
   --model M             model for the runs (default: opus)
-  --runs N              runs per case (default: 1); a case passes when every run does
+  --runs N              runs per case (default: 1)
   --max-turns N         turn cap per run (default: 4)
   --max-budget-usd X    cost cap per run (default: 1.00)
   --timeout S           seconds per run (default: 600)
   --keep DIR            write each run's stream-json to DIR/<case>-<run>.jsonl
-Without case names every case runs. Exit 0: all passed; 1: a case failed;
-2: usage, case file, isolation, credential or unexpected error.
+Without case names every case runs. A case passes when every run does,
+fails when a run failed, and is an ERROR when the runs that did not pass all
+ended in errors. Exit 0: all passed; 1: a case failed; 2: no case failed but
+one is an ERROR, or a usage, case file, isolation, credential or unexpected
+error.
 """
 
 import argparse
@@ -595,9 +598,9 @@ def main():
             f"{TASK}: {len(chosen)} of {len(cases)} cases, {args.runs} run(s) each, claude {version}, "
             f"--model {args.model}, credential: {source}"
         )
-        failed, total_cost, unknown_cost, resolved = [], 0.0, 0, set()
+        failed, errored, total_cost, unknown_cost, resolved = [], [], 0.0, 0, set()
         for case in chosen:
-            passes, notes = 0, []
+            passes, failures, notes = 0, 0, []
             for n in range(1, args.runs + 1):
                 verdict, out = run_case(case, every, binary, args)
                 if verdict.cost is None:
@@ -618,6 +621,8 @@ def main():
                     raise Stop(f"{case['name']}: no run can go on: {verdict.note}")
                 if verdict.status == PASS:
                     passes += 1
+                elif verdict.status == FAIL:
+                    failures += 1
                 shown = ", ".join(verdict.fired) or "none"
                 cost = (
                     "cost unknown" if verdict.cost is None else f"${verdict.cost:.3f}"
@@ -626,9 +631,15 @@ def main():
                     f"run {n}: {verdict.status} fired {shown} {cost}"
                     + (f" ({verdict.note})" if verdict.note else "")
                 )
-            outcome = PASS if passes == args.runs else FAIL
-            if outcome == FAIL:
+            # A case whose runs did not pass only by error says nothing about its skills.
+            if passes == args.runs:
+                outcome = PASS
+            elif failures:
+                outcome = FAIL
                 failed.append(case["name"])
+            else:
+                outcome = ERROR
+                errored.append(case["name"])
             print(
                 f"{outcome} {case['name']} {passes}/{args.runs}: " + "; ".join(notes),
                 flush=True,
@@ -639,14 +650,18 @@ def main():
             cost = (
                 f"cost at least ${total_cost:.2f} ({unknown_cost} run(s) reported none)"
             )
+        passed = len(chosen) - len(failed) - len(errored)
         print(
-            f"{TASK}: {len(chosen) - len(failed)} of {len(chosen)} cases passed on {models}, "
+            f"{TASK}: {passed} of {len(chosen)} cases passed on {models}, "
             f"{cost}, the CLI's list-price estimate"
         )
         if failed:
             print(f"{TASK}: failed: {' '.join(failed)}")
+        if errored:
+            print(f"{TASK}: no clean run to grade: {' '.join(errored)}")
+        if failed:
             return 1
-        return 0
+        return 2 if errored else 0
     except Stop as e:
         print(f"{TASK}: {e}", file=sys.stderr)
         return 2
