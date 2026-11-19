@@ -59,14 +59,14 @@ prompt carries:
 
 - the PR's intent in one or two sentences, and the range as two SHAs (the agent fetches the diff)
 - the existing thread topics, so nothing is raised twice
-- findings as a flat list — file:line, claim, suggested fix, and the agent's own rating (`review-agents.md`, "Routing
-  the findings")
+- findings as a flat list — file:line, claim, suggested fix, severity and score
 - no cosmetic nits unless they harm reviewability, and verbatim: **"Do not spawn further agents and do not invoke any
   review skill."**
 
-`reviewer`'s prompt opens with **"This is a PR review."** and carries the full spec. `reviewer`, `architecture-reviewer`
-and `prose-reviewer` get the repo path; the latter two also get the spec's decisions, and `architecture-reviewer` per
-decision the old behaviour it replaces. A judging agent gets its threads (anchor, text, replies, status) and gives a
+`reviewer`'s prompt opens with **"This is a PR review."**; it and every specialist's prompt carry the full spec. Every
+agent gets the repo path; `architecture-reviewer` and `prose-reviewer` also get the spec's decisions, and
+`architecture-reviewer` per decision the old behaviour it replaces; `test-reviewer` also gets the repo's test command
+when its profile names one. A judging agent gets its threads (anchor, text, replies, status) and gives a
 verdict per thread in the shape of `reviewer.md`, "## Re-review". `code-simplifier` does not run: simplification
 reaches the PR as `architecture-reviewer` findings.
 

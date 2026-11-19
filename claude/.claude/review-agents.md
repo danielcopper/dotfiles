@@ -1,8 +1,8 @@
 # Review agents
 
 Which agents review a change, how a fix round is reviewed, and where each finding goes — for `/implement`, `/pr-review`
-and a plain session alike. The specialists' scales hold everywhere; routing and grouping are for a change of our own,
-and someone else's PR goes by the last paragraph.
+and a plain session alike. The scale holds everywhere; routing and grouping are for a change of our own, and someone
+else's PR goes by the last paragraph.
 
 ## Which agents run
 
@@ -20,11 +20,12 @@ and start every agent whose trigger hits, in parallel in one message. The table 
 | `reviewer` | code changed | does the diff deliver the spec; correctness; project-guideline violations |
 | `architecture-reviewer` | production code changed | fit with the tree: reuse, one home per fact, sibling patterns, written rules and design practice, less code, no site left doing the old behaviour |
 | `prose-reviewer` | prose changed, or production code changed | is every sentence true at head and needed; in a first review, the comments already in the touched units too |
-| `pr-review-toolkit:pr-test-analyzer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | do new tests pin the claimed behaviour? |
-| `pr-review-toolkit:silent-failure-hunter` | error handling changed (`try`/`catch`, `Result<>`, `.catch(`, fallback branches) | swallowed exceptions, silent fallbacks, missing logs |
-| `pr-review-toolkit:type-design-analyzer` | types added or their shapes changed | encapsulation, invariants, useful vs anaemic types |
+| `test-reviewer` | test files changed (`*Tests*`, `*.test.*`, `*.spec.*`, `tests/**`) | do new tests pin the claimed behaviour? A mutation probe per new "Done when" test |
+| `failure-reviewer` | error handling changed (`try`/`catch`/`except`, `Result<>`, `.catch(`, fallback branches and defaults, retries, discarded exit codes) | swallowed failures, unasked fallbacks, fail-open paths, messages for the wrong audience |
+| `type-reviewer` | types added or their shapes changed | invariants stated, constructed, encapsulated and enforced; swappable parameters, overloaded empty values |
+| `security-reviewer` | the diff touches a shell or subprocess call, a delete, move or write on a path derived at runtime, an outbound URL, tokens or credentials, deserialising outside data, or model output used as input | exploitable paths from an untrusted source to a sink |
 
-Exception: a single-file edit the lead writes itself that changes only docs written for humans or only comments gets
+The last four rows are the **specialists**. Exception: a single-file edit the lead writes itself that changes only docs written for humans or only comments gets
 `prose-reviewer` alone; an edit to an instruction file gets the table. For an unusually complex or critical change, the
 lead offers the user a Fable-model reviewer and starts it only on their yes.
 
@@ -62,13 +63,8 @@ is a task with the lead's recommendation, and no re-review runs unless the user 
 
 ## Routing the findings
 
-Merge all findings into one list, each tagged with its agent. A plugin specialist keeps its own scale; its top grade is
-Critical when the finding names what `reviewer` calls Critical, else Important:
-
-- `silent-failure-hunter` — CRITICAL → by that rule, HIGH → Important, MEDIUM → Minor.
-- `pr-test-analyzer` — 9–10 → by that rule, 7–8 → Important, 5–6 → Minor, 1–4 not reported; the rating decides, not
-  the section heading, and a finding without one is Minor.
-- `type-design-analyzer` — everything under Concerns and Recommended Improvements → Minor.
+Merge all findings into one list, each tagged with its agent. Every agent grades on one scale — Critical, Important
+or Minor, with a score from 0 to 100 and nothing below 50 reported — as its definition under `agents/` sets.
 
 Each finding is routed:
 

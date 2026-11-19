@@ -50,7 +50,8 @@ reviewed commit as `review-agents.md`, "Fix rounds", sets. Beyond that:
 - `reviewer` — the brief path, the saved report path and the repo's review checks
 - `architecture-reviewer` — the worktree, the brief path, and per decision the old behaviour it replaces
 - `prose-reviewer` — the worktree and the brief path
-- a specialist — the change's intent in one or two sentences
+- `test-reviewer` — the worktree, the brief path, the saved report path and the gate's test command
+- `failure-reviewer`, `type-reviewer`, `security-reviewer` — the worktree and the brief path
 
 Pass the scope and earlier findings without judging them — "don't flag X" or "treat Y as minor" corrupts the review.
 The lead checks only a finding's facts, as `review-agents.md`, "Routing the findings", says.
