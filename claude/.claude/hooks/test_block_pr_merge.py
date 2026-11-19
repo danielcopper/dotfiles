@@ -47,6 +47,7 @@ PASSES = [
     "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=1",
     'curl -sH "Authorization: Bearer $TOKEN" https://api.github.com/repos/o/r/pulls/12',
     "bash -o pipefail -c 'gh pr view 3 | head'",
+    "gh api https://api.github.com/graphql -f query='query { viewer { login } }'",
 ]
 
 DENIED = [
@@ -107,6 +108,14 @@ DENIED = [
     "bash -c -- 'gh pr merge 3'",
     "bash -c 'echo hi' 'gh pr merge 3'",
     "fish -c 'gh pr merge 3'",
+    # the GraphQL endpoint in any spelling, a query built at run time
+    "gh api https://api.github.com/graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
+    "gh api /graphql --input q.json",
+    "gh api graphql/ -F query=@q.graphql",
+    "gh api 'graphql?x=1' --input q.json",
+    "gh api https://ghe.example.com/api/graphql --input q.json",
+    'gh api graphql -f query="$(cat q.graphql)"',
+    "gh api graphql --raw-field=query=@q.graphql",
 ]
 
 

@@ -231,15 +231,38 @@ def gh_reason(args: list[Word]) -> str | None:
         return "the gh api endpoint is built at run time, so the hook cannot read it"
     if any(PULL_MERGE.search(e.text) or REPO_MERGES.search(e.text) for e in endpoints):
         return "gh api calls a merge endpoint"
-    if any(endpoint.text == "graphql" for endpoint in endpoints):
+    if any(normalised(endpoint.text) in ("graphql", "api/graphql") for endpoint in endpoints):
         if any(MERGE_MUTATION.search(arg.text) for arg in after_api):
             return "the GraphQL query merges or arms auto-merge"
-        if any(
-            arg.text == "--input" or arg.text.startswith("--input=") or "query=@" in arg.text
-            for arg in after_api
-        ):
+        if any(arg.text == "--input" or arg.text.startswith("--input=") for arg in after_api):
             return "the GraphQL query comes from a file the hook cannot check"
+        for query in field_values(after_api, "query"):
+            if query.text.startswith("@"):
+                return "the GraphQL query comes from a file the hook cannot check"
+            if query.opaque:
+                return "the GraphQL query is built at run time, so the hook cannot read it"
     return None
+
+
+def normalised(endpoint: str) -> str:
+    """A gh api endpoint without scheme, host, query string and outer slashes."""
+    path = re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/]*", "", endpoint)
+    return path.split("?", 1)[0].strip("/")
+
+
+def field_values(args: list[Word], name: str) -> list[Word]:
+    """The values gh api's -f/-F/--raw-field/--field options give the field *name*."""
+    values: list[Word] = []
+    for i, arg in enumerate(args):
+        if arg.text in ("-f", "-F", "--raw-field", "--field"):
+            given = args[i + 1 : i + 2]
+        else:
+            attached = re.match(r"(?:-[fF]|--raw-field=|--field=)(.*)", arg.text, re.DOTALL)
+            given = [Word(attached.group(1), arg.expands)] if attached else []
+        for field in given:
+            if field.text.startswith(f"{name}="):
+                values.append(Word(field.text[len(name) + 1 :], field.expands))
+    return values
 
 
 def az_reason(args: list[Word]) -> str | None:
