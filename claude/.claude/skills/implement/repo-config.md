@@ -34,7 +34,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     unquoted `{`, `*`, `?` or `[`, any backslash; gh's `{owner}`, `{repo}` and `{branch}` placeholders are fine); or
     when it reads a request body from a file or stdin (an `@file` value, `--input`, `-T`). The read-only gh forms —
     `pr view`, `list`, `status`, `checks` and `diff`, `issue view` and `list`, `search`, `run`, and `api` with no
-    method but GET and no fields — pass despite such a word, as long as nothing in them expands. `xargs` or
+    method but GET and no fields — pass despite such a word, as long as gh is the command run (after wrappers such
+    as `env` or `timeout`), no other `gh`, `az`, `curl` or `wget` appears beside it, and nothing in them expands. `xargs` or
     `parallel` in front of those commands is denied, and so is a command nested too deep, too long or holding too
     many substitutions to check. False denials are accepted.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not

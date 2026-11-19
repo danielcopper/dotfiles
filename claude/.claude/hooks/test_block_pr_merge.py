@@ -55,6 +55,7 @@ PASSES = [
     "gh run list --branch merge-fix",
     "gh api -X GET repos/o/r/pulls/12/merge",
     "gh -R o/r pr list --state merged",
+    "env GH_HOST=example.com timeout 30 gh pr list --state merged",
     "gh api https://api.github.com/graphql -f query='query { viewer { login } }'",
     "echo $(date) $(whoami) `hostname`",
     "echo " + "$(true) " * 64,
@@ -157,6 +158,12 @@ DENIED = [
     "gh --repo {o/r,pr} merge 3",
     "curl -d @body.json https://api.github.com/repos/o/r/pulls/12",
     "curl -sT body.json https://api.github.com/repos/o/r/pulls/12",
+    # the read-only exemption holds only for gh as the command word and the only such command
+    "curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge gh pr view 1",
+    "wget --method=PUT https://api.github.com/repos/o/r/pulls/12/merge gh pr list",
+    "az repos pr update --id 4 --status completed gh pr view 1",
+    "env curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge gh pr view 1",
+    "gh pr view 1 gh pr merge 1",
     # accepted false refusals: the filter cannot tell a mention from a call
     "echo 'gh pr merge 12'",
     "git commit -m 'docs: the owner runs gh pr merge'",

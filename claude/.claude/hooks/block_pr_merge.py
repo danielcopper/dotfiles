@@ -22,6 +22,7 @@ ALIAS_WORDS = re.compile(r"\balias\s+(set|import)\b", re.IGNORECASE)
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 FEEDERS = {"xargs", "parallel"}
 NETWORK = {"gh", "az", "curl", "wget"}
+WRAPPERS = {"env", "sudo", "doas", "timeout", "command", "nice", "nohup", "time", "exec", "stdbuf"}
 GH_VALUE_FLAGS = {"-R", "--repo", "--hostname"}
 GH_READ_ONLY = {
     ("pr", "view"), ("pr", "list"), ("pr", "status"), ("pr", "checks"), ("pr", "diff"),
@@ -202,11 +203,27 @@ def reads_file(word: Word) -> bool:
     return bool(re.fullmatch(r"-[A-Za-z]*T.*", text))
 
 
+def command_word(words: list[Word]) -> int | None:
+    """Index of the word a segment runs, past VAR=value assignments and known wrappers with their
+    options and numeric arguments."""
+    for i, word in enumerate(words):
+        text = word.text
+        if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", text) or text.startswith("-"):
+            continue
+        if os.path.basename(text) in WRAPPERS or re.fullmatch(r"\d+(\.\d+)?[smhd]?", text):
+            continue
+        return i
+    return None
+
+
 def gh_read_only(words: list[Word]) -> bool:
-    """Whether the segment runs gh in a read-only form: pr or issue view/list and the like,
-    search, run, or api with no method other than GET and no fields."""
-    at = next((i for i, word in enumerate(words) if os.path.basename(word.text) == "gh"), None)
-    if at is None:
+    """Whether the segment runs gh, as its command word and its only gh, az, curl or wget, in a
+    read-only form: pr or issue view/list and the like, search, run, or api with no method other
+    than GET and no fields."""
+    at = command_word(words)
+    if at is None or os.path.basename(words[at].text) != "gh":
+        return False
+    if sum(names_network(word) for word in words) != 1:
         return False
     args = [word.text for word in words[at + 1 :]]
     positional: list[str] = []
