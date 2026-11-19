@@ -32,8 +32,8 @@ State approach, scope and what stays untouched; ask open questions one at a time
 (or a standing grant) and no open question, go straight on — open questions always stop.
 
 When the issue still has open `## To decide` items, or its answers would coin a glossary term or meet the ADR criteria,
-the planning was skipped: offer a `/grill-with-docs` pass before aligning, and on the user's yes read
-`~/.claude/skills/grill-with-docs/SKILL.md` and follow it.
+offer a `/grill-with-docs` pass before aligning, and on the user's yes read `~/.claude/skills/grill-with-docs/SKILL.md`
+and follow it. The offer is a question, so `--go` stops for it too.
 
 *(convention)* The answers go into the issue before step 4, as `repo-config.md`, "Questions and decisions in an issue",
 says, plus `## Out of scope` when anything was ruled out (`## Decisions` with "None." when nothing was to decide);
