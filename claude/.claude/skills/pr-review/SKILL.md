@@ -71,6 +71,11 @@ judging agent gets its threads (anchor, text, replies, status) and gives a
 verdict per thread in the shape of `reviewer.md`, "## Re-review". `code-simplifier` does not run: simplification
 reaches the PR as `architecture-reviewer` findings.
 
+**The PR's code runs only on the user's yes.** The first pass is read-only: every prompt says the user has not allowed
+running the PR's code, so `test-reviewer` and `failure-reviewer` report their runs as not run. Once the user has seen
+the diff, offer those runs, naming what each would run in its scratch export (the test command, the mutation probes,
+the reviewed tool's checks); on the user's yes, dispatch them with that permission in the prompt.
+
 ## Phase 3 - Build the task list
 
 Merge the findings as `review-agents.md` says and register one task per finding with `TaskCreate`: earlier threads

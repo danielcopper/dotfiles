@@ -30,6 +30,7 @@ Your inputs are the repo path, the range as two commits (`git -C <repo> diff <ba
 
 The probe proves what reading can only suggest: invert one condition the change adds and watch whether the test notices.
 
+- **Someone else's PR.** Run anything only when the dispatch says the owner allowed running the PR's code; otherwise report every probe as not run.
 - **Export once.** `mkdir -p <scratch>/tree && git -C <repo> archive <head> | tar -x -C <scratch>/tree`. Everything below happens in that tree, never in the checkout or a worktree. When the tests need installed dependencies, link the checkout's dependency directories (`node_modules`, `.venv`) into the export or install them there; when the export still cannot run the tests, report the probes as not run with the reason.
 - **Budget.** At most one probe per new "Done when" test, and one test run at a time — never two in parallel, never the full suite. Each probe runs only the related tests: the test file, or the narrowest selector the test command takes. The baseline, the instrument check and a run that settles whether a mutant is equivalent do not count against the budget.
 - **Baseline.** Run the related tests unmutated first. Red at the head is a finding in itself (the change's own test fails), and that probe ends there.
