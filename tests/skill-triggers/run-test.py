@@ -450,6 +450,19 @@ class RepoFiles(Swapping):
         self.assertTrue(run.load_cases(model))
 
 
+class RunUserDir(Swapping):
+    """run_user_dir() against the path written out here, not taken from run.py."""
+
+    def test_names_this_users_run_dir(self):
+        expected = Path(f"/run/user/{os.getuid()}")
+        self.assertEqual(run.run_user_dir(), expected if expected.is_dir() else None)
+
+    def test_none_where_the_dir_is_missing(self):
+        self.swap("getuid", lambda: 4294967294, os)
+        self.assertFalse(Path("/run/user/4294967294").exists())
+        self.assertIsNone(run.run_user_dir())
+
+
 BWRAP = shutil.which("bwrap")
 RUN_USER = run.run_user_dir()
 
