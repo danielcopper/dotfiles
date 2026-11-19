@@ -445,7 +445,7 @@ class RepoFiles(Swapping):
 
 
 BWRAP = shutil.which("bwrap")
-RUN_USER = Path(f"/run/user/{os.getuid()}")
+RUN_USER = run.run_user_dir()
 
 
 @unittest.skipUnless(BWRAP, "bwrap is not on PATH")
@@ -510,9 +510,10 @@ class Probe(Swapping):
         self.assertProbeStops("the write check saw [], not the canary")
 
     @unittest.skipUnless(
-        RUN_USER.is_dir() and any(RUN_USER.iterdir()), "no /run/user entry"
+        RUN_USER is not None and any(RUN_USER.iterdir()), "no /run/user entry"
     )
     def test_run_user_not_covered(self):
+        assert RUN_USER is not None
         self.drop("--tmpfs", str(RUN_USER))
         self.assertProbeStops(f"{RUN_USER} shows")
 
