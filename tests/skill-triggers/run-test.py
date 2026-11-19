@@ -569,6 +569,16 @@ class Summary(Swapping):
         self.assertIn("run 1: ERROR fired none cost unknown", out)
         self.assertIn("cost at least $0.50 (1 run(s) reported none)", out)
 
+    def test_crash_exits_2(self):
+        def crash(case, every, binary, args):
+            raise LookupError("a bug in the runner")
+
+        self.swap("run_case", crash)
+        code, _, err = self.main("a")
+        self.assertEqual(code, 2)
+        self.assertIn("LookupError: a bug in the runner", err)
+        self.assertIn("stopped by an unexpected error", err)
+
     def test_refused_credential_stops_with_exit_2(self):
         self.verdicts = [
             run.Verdict(run.AUTH, [], None, "Failed to authenticate", MODEL)

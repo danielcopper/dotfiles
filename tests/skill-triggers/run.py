@@ -639,15 +639,7 @@ def main():
     except Stop as e:
         print(f"{TASK}: {e}", file=sys.stderr)
         return 2
-    except (
-        OSError,
-        subprocess.SubprocessError,
-        ValueError,
-        KeyError,
-        TypeError,
-        AttributeError,
-    ):
-        # Exit 1 means a case failed; a crash must not read as one.
+    except Exception:  # noqa: BLE001 - exit 1 means a case failed, a crash must not read as one
         traceback.print_exc()
         print(f"{TASK}: stopped by an unexpected error", file=sys.stderr)
         return 2
