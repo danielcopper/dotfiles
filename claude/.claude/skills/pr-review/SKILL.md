@@ -66,7 +66,8 @@ prompt carries:
 `reviewer`'s prompt opens with **"This is a PR review."**; it and every specialist's prompt carry the full spec. Every
 agent gets the repo path; `architecture-reviewer` and `prose-reviewer` also get the spec's decisions, and
 `architecture-reviewer` per decision the old behaviour it replaces; `test-reviewer` also gets the repo's test command
-when its profile names one. A judging agent gets its threads (anchor, text, replies, status) and gives a
+where the repo's `CLAUDE.md` `## Pipeline`, or a foreign repo's profile, names one (`implement/repo-config.md`). A
+judging agent gets its threads (anchor, text, replies, status) and gives a
 verdict per thread in the shape of `reviewer.md`, "## Re-review". `code-simplifier` does not run: simplification
 reaches the PR as `architecture-reviewer` findings.
 
