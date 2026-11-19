@@ -188,16 +188,17 @@ ctrl-space <key>` is for a tmux in the focused terminal, see below),
 `mods/focus-history/` (it remembers the previously focused pane for the
 leader's `Tab`), `mods/file-popup/` (a popup with the files of the focused
 pane's repo or folder, or with the repo's changed files, that opens the
-picked one in nvim in a new pane on the right), `mods/board/` (the "Board"
-tab the leader's `b` opens, see below) and `mods/board-button/` (a button
-at the start of the tab row that does the same), the layout
-`layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
-keeps focus-history running and the board button's block left of the tabs;
-its right panel has no maximum width) and the themes: `themes/copper-light.json`
-and `themes/copper-dark.json`, which `settings.json` picks by the system's light
-or dark mode, plus `themes/catppuccin-mocha.json`. The copper pair is copied
-unchanged from the copper-design release `v0.1.0` (`ports/herdr/`); on a new
-release, copy both files from its tag and update the tag here.
+picked one in nvim in a new pane on the right), `mods/board/` (the board
+the leader's `b` shows, see below) and `mods/board-button/` (a button at the
+start of the tab row that does the same), the layout `layouts/personal.json`
+(herdr's `main`, cloned, plus an empty block that keeps focus-history
+running, the board button's block left of the tabs, and the work area as a
+stack of the shown tab and the board; its right panel has no maximum width)
+and the themes: `themes/copper-light.json` and `themes/copper-dark.json`,
+which `settings.json` picks by the system's light or dark mode, plus
+`themes/catppuccin-mocha.json`. The copper pair is copied unchanged from the
+copper-design release `v0.1.0` (`ports/herdr/`); on a new release, copy both
+files from its tag and update the tag here.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its comment on
 `no_folding_pkgs`), so relink it
@@ -236,7 +237,7 @@ herdr-app`. Which files of the package git tracks is set in the root
   is a link out of the mod folder, which every stowed file is, as it refuses
   one from another mod's folder. So `mods/file-popup/` keeps its listers in
   `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
-  own marked copy of the leader's `openBoard`. An icon is no module:
+  own marked copy of the leader's `toggleBoard` and `openBoard`. An icon is no module:
   `mods/board-button/board.svg` draws through its link. The board is
   written as modules in `mods/board/src/` and built into its `main.js` by
   `mise run herdr-board-build`; the header of `mods/board/build.mjs` says
@@ -279,7 +280,17 @@ herdr-app`. Which files of the package git tracks is set in the root
   (without mise, `node --test tests/herdr-app/leader.test.mjs` from the
   repo) tests what the leader binds and what Tab, shift-Tab and Esc then
   do, in the leader and on their way to tmux. It needs node.
-- **The board (`mods/board/`) shows my own work.** A top bar toggles between
+- **The board (`mods/board/`) shows my own work.** In the personal layout it
+  is a layer of the work area, not a tab: the board button left of the tabs
+  and the leader's `b` show it in place of the shown tab's content, and the
+  button is highlighted while it shows. The tab's content comes back on a
+  second click or `b`, on any press in the tab bar (herdr tells a mod of no
+  click on a tab, so a press on `+`, Files, Changes, the window buttons or
+  an empty stretch of the bar counts too), and when the focus moves to
+  another tab, space or pane, for example to the agent the board just
+  started. herdr's tab bar keeps highlighting the last shown tab while the
+  board shows. In a layout without that stack, the button and `b` show the
+  board's "Board" tab, or open one. A top bar toggles between
   its sources, GitHub and Azure, and shows one tab per context of the shown
   source, as `mods/board/views.json` sets them: on Azure each of my teams,
   with a switch between its Sprint and its Backlog, followed by the pull
@@ -299,8 +310,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   Keys: `q` switches the source, `1 2 3` or `[ ]` the tab, `v` a team's
   Sprint and Backlog, `m` turns "nur meine" on and off (the toggle, the
   tabs, the switch and "nur meine" take clicks too), `/` filters, `r`
-  refreshes (the shown view also refreshes every few minutes while the tab
-  is shown), `Esc` closes. On a GitHub view `h/l j/k` move, `H/L` move a
+  refreshes (the shown view also refreshes every few minutes while the board
+  shows), `Esc` closes. On a GitHub view `h/l j/k` move, `H/L` move a
   card one column (`s` picks from a menu, or drag the card onto a column),
   `x` hides or shows a column (views.json sets which start hidden), `o`
   opens the item in the browser. `Enter` opens the details, a second `Enter`
@@ -321,8 +332,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   az's documentation. It needs node.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
-  a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
-  herdr's `layouts/.state/`.
+  a change shows up in `git diff`; clicks (sizes, shown or hidden, the child a
+  stack shows, such as the board layer) stay in herdr's `layouts/.state/`,
+  so the board still shows after a restart if it showed before.
 
 ## tmux agent sidebar
 
