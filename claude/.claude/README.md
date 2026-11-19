@@ -86,7 +86,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 | `block_ai_attribution.py` | PreToolUse (Bash) | Block commits, PR/issue/release text, `gh api` writes and `az repos pr` text carrying AI attribution markers |
 | `lint_published_markdown.py` | PreToolUse (Bash) | Block PR/issue/comment/release text and `gh api` writes whose markdown GitHub would render differently than intended — so far an issue reference (`#N`, `owner/repo#N`, `GH-N`, an issue, PR or discussion URL) inside a list item, which renders as a large title card. Reads the text through `hooks/utils/published_text.py` |
 | `block_commit_on_main.py` | PreToolUse (Bash) | Refuses writes to a protected branch — see [Guard hooks](#guard-hooks) |
-| `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's generic code-reviewer — routes to the custom `reviewer` agent |
+| `block_plugin_code_reviewer.py` | PreToolUse (Agent) | Deny pr-review-toolkit's code-reviewer and its test, silent-failure and type-design analyzers — names the own agent replacing each |
 | `worktree_create.sh`    | WorktreeCreate   | Creates worktrees at `<repo-parent>/<repo>.worktrees/<name>` instead of `.claude/worktrees/`; a `<type>/<slug>` name runs the `worktree-new` task script (branch + setup) |
 
 ### Debounce
@@ -119,8 +119,12 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 | **reviewer**    | Opus  | Fresh-context, read-only. Spec compliance first, then quality; confidence-scored findings, hard `Approved / Needs fixes` verdict |
 | **architecture-reviewer** | Opus | Read-only fit review against the tree at head: existing helpers to reuse, logic or facts duplicated elsewhere in code, sites still doing the behaviour a decision replaced, sibling patterns, written architecture rules and established design practice, the same behaviour with less code |
 | **prose-reviewer** | Opus | Read-only prose review: every sentence the diff writes, and in a change's first review the comments already in the units it touches, judged for whether it is true at head and whether it needs to stand there at all; corrects, moves or removes prose, never asks for more |
+| **test-reviewer** | Opus | Test review: would each new test go red if its behaviour broke? Reads for tautology, coupling and weak assertions, and runs one mutation probe per new "Done when" test in a scratch export of the head, never the checkout |
+| **failure-reviewer** | Opus | Read-only error-handling review: every handler, fallback, default, retry and discarded exit code the diff adds, judged for whether the failure stays visible to whoever must act on it |
+| **type-reviewer** | Opus | Read-only type-design review: each new or reshaped type's invariants, how it states, constructs, encapsulates and enforces them, and interface hazards such as swappable parameters |
+| **security-reviewer** | Opus | Read-only trust-boundary review: untrusted sources traced to sinks, each candidate refuted with an attacker-versus-victim model; reports only what is exploitable |
 
-Which of them run on a change, and which `pr-review-toolkit` specialists beside them, is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
+Which of them run on a change is decided by one table in `review-agents.md`, together with how a fix round is reviewed and where each finding goes. `/implement`, `/pr-review` and a plain session all use it.
 
 Standing rules encoded in the skills, the agents and `review-agents.md` (not in CLAUDE.md): the gate battery runs **once per code state** (green reports are trusted, nothing is ritually re-run); public text is drafted as `public_text_drafts` in `skills/implement/repo-config.md` says; review findings are routed as `review-agents.md` says; the issue **and** its parent epic go to In Progress on the board; the issue's `## To decide` and `## Decisions` format is in `skills/implement/repo-config.md`, the ADR format in `skills/grill-with-docs/ADR-FORMAT.md`. Tool names (linter, type checker) never live in the global agents — they come from the repo's `## Pipeline` section, or a foreign repo's profile, via the dispatch.
 
@@ -134,7 +138,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
 | ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
 | `block_ai_attribution.py` | global (`settings.json`)                          | `git commit`, `gh pr`/`issue`/`release`, `gh api` and `az repos pr` commands whose message or published text carries AI attribution markers |
 | `block_commit_on_main.py` | global (`settings.json`)                          | `git commit`, `rebase`, `cherry-pick` and `revert` while a protected branch (main/master, develop, release/*) is checked out, unless the repo is listed in `~/.githooks/commit-on-main-allowed` — denied; a line that only names one in quoted text it hands `echo`, `cat`, a `gh pr`/`issue`/`release` publishing verb or `az repos pr create`/`update`, runs nothing else but `cd` or a bare assignment, and carries no backtick, `${`, `$$` or `$'` outside single quotes passes |
-| `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's generic code-reviewer — denied with a redirect to the custom `reviewer` agent |
+| `block_plugin_code_reviewer.py` | global (`settings.json`)                    | Spawning pr-review-toolkit's code-reviewer, test, silent-failure or type-design analyzer — denied with a redirect to `reviewer`, `test-reviewer`, `failure-reviewer` or `type-reviewer` |
 
 ## Directory Structure
 
