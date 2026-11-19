@@ -12,7 +12,7 @@ const TIMED_OUT = /took longer than [\d.]+ s( on .+)? and was stopped|time(d)?[ 
 const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
 
 // A program that is not there, with a note on how that was found out. Only a
-// missing az makes its view unavailable.
+// missing az is marked unavailable (BoardError).
 const notInstalled = (tool, on, note = "") =>
   new BoardError(`${toolOn(tool, on)} ist nicht installiert${note ? ` (${note})` : ""}`, { unavailable: tool === "az" });
 

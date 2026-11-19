@@ -26,9 +26,8 @@
 //   pull request, a draft, an item without access, an item in an option that
 //   is gone), github-list.json, github-move.json, github-rate-limited.json,
 //   github-scope-error.json;
-// - written from az's documentation (`az boards query`, `az devops invoke`
-//   for work item types, `az devops configure --list`), not recorded:
-//   azure-items.json, azure-types.json, azure-defaults.txt.
+// - written from az's documentation (`az devops invoke` for work item
+//   types), not recorded: azure-types.json.
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -83,29 +82,40 @@ const fixture = (name) => readFileSync(join(here, "board-fixtures", name), "utf8
 const json = (name) => JSON.parse(fixture(name));
 const shippedConfig = () => readFileSync(join(modDir, "views.json"), "utf8");
 
-// A config with one view of each kind, for the functions that take views.
+// A config with an Azure team and its project's pull requests, and one
+// GitHub view of each kind plus one with its own start, for the functions
+// that take views.
 function sampleConfig() {
   const { config, errors } = board.validateConfig({
     start: { message: "/work {number}", review: "/look {number}" },
     repos: { "example/tender": { checkout: "~/src/tender", machine: "server" } },
-    views: [
-      { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter: "assignee:@me", hide: ["Backlog", "Done"] },
-      { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
-      { id: "az", name: "Azure", source: "azure", layout: "board", hideCategories: ["Completed", "Removed"], start: { checkout: "~/src/work", message: "AB {number}" } },
-    ],
+    sources: {
+      azure: { org: "https://dev.azure.com/example-org", contexts: [{ team: { project: "Example Project", team: "Example Team" } }, { prs: { project: "Example Project" } }] },
+      github: {
+        views: [
+          { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter: "assignee:@me", hide: ["Backlog", "Done"] },
+          { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
+          { id: "other", name: "Other", layout: "board", project: { owner: "sample-user", number: 8 }, start: { checkout: "~/src/work", message: "OT {number}" } },
+        ],
+      },
+    },
   });
   assert.deepEqual(errors, []);
   return config;
 }
 
-const githubView = () => sampleConfig().views[0];
-const listView = () => sampleConfig().views[1];
-const azureView = () => sampleConfig().views[2];
+const githubView = () => sampleConfig().github.views[0];
+const listView = () => sampleConfig().github.views[1];
+const otherView = () => sampleConfig().github.views[2];
 const HIDDEN = new Set(["Backlog", "Done"]);
 const githubBoard = () => board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN);
 const casesBoard = () => board.parseGithubBoard(json("github-board-cases.json"), githubView(), HIDDEN);
 const azureTypes = () => board.parseAzureTypes(fixture("azure-types.json"));
-const azureBoard = (hidden = new Set(["Done", "Removed"])) => board.parseAzureBoard(fixture("azure-items.json"), azureTypes(), hidden);
+// A work item as the Azure views will show one.
+const azureItem = () => ({
+  key: "w101", source: "azure", kind: "workitem", number: 101, repo: "Example Project", repoShort: "Example Project", title: "Write the sample importer",
+  url: null, labels: [], assignees: [], type: "Task", parent: null, sub: null, branch: null,
+});
 const names = (b) => b.columns.map((c) => c.name);
 const numbersIn = (b, name) => b.columns.find((c) => c.name === name).cards.map((c) => c.number);
 
@@ -198,29 +208,35 @@ test("the build refuses what main.js cannot hold: other import forms, imports be
 
 // ---- views.json ----
 
-test("the shipped views.json holds exactly the three default views, valid", () => {
+test("the shipped views.json is valid: an Azure team with Sprint and Backlog, its project's pull requests, and the two GitHub views", () => {
   const { config, errors } = board.readConfig(shippedConfig());
   assert.deepEqual(errors, []);
-  assert.deepEqual(config.views.map((v) => [v.name, v.source, v.layout]), [
+  assert.match(config.azure.org, /^https:\/\/dev\.azure\.com\/[^/]+$/);
+  assert.deepEqual(config.azure.contexts.map((c) => [c.kind, c.views ?? null]), [["team", ["sprint", "backlog"]], ["prs", null]]);
+  assert.equal(config.azure.contexts[1].project, config.azure.contexts[0].project, "the pull requests of the team's project");
+  assert.deepEqual(config.github.views.map((v) => [v.name, v.source, v.layout]), [
     ["Meine Aufgaben", "github", "board"],
     ["PRs", "github", "list"],
-    ["Azure", "azure", "board"],
   ]);
-  const [mine, prs, azure] = config.views;
+  const [mine, prs] = config.github.views;
   assert.deepEqual(mine.hide, ["Backlog", "Done"]);
   assert.match(prs.sections.map((s) => s.query).join(" "), /author:@me/);
   assert.match(prs.sections.map((s) => s.query).join(" "), /review-requested:@me/);
-  assert.match(azure.where, /@Me/);
 });
 
 test("no person-specific value of views.json appears in main.js", () => {
   const raw = JSON.parse(shippedConfig());
   const values = new Set();
   const add = (v) => typeof v === "string" && v.length > 3 && values.add(v);
-  for (const v of raw.views) {
+  for (const v of raw.sources.github.views) {
     add(v.project?.owner);
     if (v.project?.number) values.add(`number: ${v.project.number}`);
-    add(v.organization);
+  }
+  add(raw.sources.azure.org);
+  add(raw.sources.azure.org.split("/").pop());
+  for (const c of raw.sources.azure.contexts) {
+    add(c.team?.project ?? c.prs?.project);
+    add(c.team?.team);
   }
   for (const [repo, entry] of Object.entries(raw.repos ?? {})) {
     add(repo);
@@ -229,7 +245,7 @@ test("no person-specific value of views.json appears in main.js", () => {
   }
   for (const key of ["message", "review", "agent", "machine"]) add(raw.start?.[key]);
   const code = readFileSync(mainPath, "utf8");
-  assert.ok(values.size >= 5, "the config names the person's values");
+  assert.ok(values.size >= 8, "the config names the person's values");
   for (const value of values) assert.ok(!code.includes(value), `main.js holds ${JSON.stringify(value)}`);
 });
 
@@ -240,40 +256,116 @@ test("readConfig reports a missing file and invalid JSON", () => {
   assert.match(bad.errors[0], /kein gültiges JSON/);
 });
 
-test("validateConfig keeps valid views and names each problem of the others", () => {
+test("validateConfig keeps valid GitHub views and names each problem of the others", () => {
   const ok = { source: "github", layout: "list", sections: [{ name: "A", query: "is:pr" }] };
   const { config, errors } = board.validateConfig({
     refreshMinutes: 0,
     colour: "blue",
     start: { colour: "x", open: "window" },
-    views: [
+    sources: { github: { views: [
       { id: "ok", name: "Ok", ...ok },
       { id: "ok", name: "Twice", ...ok },
       { name: "No id", ...ok },
-      { id: "b", name: "Bad source", source: "jira", layout: "board" },
-      { id: "c", name: "No project", source: "github", layout: "board" },
-      { id: "d", name: "Azure list", source: "azure", layout: "list", sections: [{ name: "A", query: "x" }] },
+      { id: "b", name: "Bad source", source: "azure", layout: "board", project: { owner: "o", number: 1 } },
+      { id: "c", name: "No project", layout: "board" },
+      { id: "d", name: "Bad layout", layout: "table" },
       { id: "e", name: "No sections", source: "github", layout: "list" },
       { id: "f", name: "Bad hide", source: "github", layout: "board", project: { owner: "o", number: 1 }, hide: "Done" },
       { id: "g", name: "Typo", ...ok, hidden: ["Done"] },
-      { id: "h", name: "On", source: "github", layout: "board", project: { owner: "o", number: 1 }, on: "server" },
-    ],
+      { id: "h", name: "On", layout: "board", project: { owner: "o", number: 1 }, on: "server" },
+      { id: "i", name: "No source", layout: "board", project: { owner: "o", number: 1 } },
+    ] } },
   });
-  assert.deepEqual(config.views.map((v) => v.id), ["ok"]);
+  assert.deepEqual(config.github.views.map((v) => [v.id, v.source]), [["ok", "github"], ["i", "github"]]);
+  assert.equal(config.azure, null);
   assert.equal(config.refreshMinutes, 3);
   const text = errors.join("\n");
   for (const expected of [/refreshMinutes/, /„colour“ gibt es nicht/, /„start\.colour“ gibt es nicht/, /„start\.open“ ist "space" oder "tab"/,
-    /„id“ ok gibt es schon/, /Ansicht 3 \(„No id“\): „id“ fehlt/, /„source“/, /„project“ braucht/, /Azure-Ansichten sind Boards/,
-    /„sections“ braucht/, /„hide“ muss eine Liste/, /Ansicht 9 \(„Typo“\): „hidden“ gibt es nicht/, /„on“ gilt nur für Azure-Ansichten/]) {
+    /„id“ ok gibt es schon/, /GitHub-Ansicht 3 \(„No id“\): „id“ fehlt/, /GitHub-Ansicht 4 \(„Bad source“\): „source“ ist hier "github" oder fehlt/,
+    /„project“ braucht/, /GitHub-Ansicht 6 \(„Bad layout“\): „layout“ ist "board" oder "list"/,
+    /„sections“ braucht/, /„hide“ muss eine Liste/, /GitHub-Ansicht 9 \(„Typo“\): „hidden“ gibt es nicht/, /GitHub-Ansicht 10 \(„On“\): „on“ gibt es nicht/]) {
     assert.match(text, expected);
   }
+  assert.equal(errors.length, 13);
+});
+
+test("validateConfig reads sources.azure: contexts of a team, with its views, or of a project's pull requests, and names each problem", () => {
+  const team = (name, more = {}) => ({ team: { project: "P", team: name }, ...more });
+  const { config, errors } = board.validateConfig({ sources: { azure: { org: " https://dev.azure.com/example-org/ ", colour: 1, contexts: [
+    team("T"),
+    team("U", { views: ["backlog"] }),
+    team("Z", { views: ["backlog", "sprint"] }),
+    { prs: { project: "P" } },
+    team("T"),
+    { team: { project: "P" } },
+    { prs: { project: "P" }, team: { project: "P", team: "V" } },
+    {},
+    team("W", { views: ["kanban"] }),
+    team("X", { views: ["sprint", "sprint"] }),
+    team("X2", { views: [] }),
+    { prs: { project: "Q", repo: "r" } },
+    team("Y", { extra: true }),
+    "x",
+  ] } } });
+  assert.equal(config.azure.org, "https://dev.azure.com/example-org");
+  assert.deepEqual(config.azure.contexts.map((c) => [c.id, c.kind, c.views ?? null]), [
+    ["azure:team:P/T", "team", ["sprint", "backlog"]],
+    ["azure:team:P/U", "team", ["backlog"]],
+    ["azure:team:P/Z", "team", ["sprint", "backlog"]],
+    ["azure:prs:P", "prs", null],
+  ]);
+  assert.deepEqual([config.azure.contexts[0].project, config.azure.contexts[0].team, config.azure.contexts[3].project], ["P", "T", "P"]);
+  assert.equal(config.github, null);
+  const text = errors.join("\n");
+  for (const expected of [/„sources\.azure\.colour“ gibt es nicht/, /Azure-Kontext 5 \(„T“\): gibt es schon/, /Azure-Kontext 6: „team“ braucht „project“ und „team“ \(Text\)/,
+    /Azure-Kontext 7 \(„V“\): braucht genau eins von „team“ und „prs“/, /Azure-Kontext 8: braucht genau eins von „team“ und „prs“/,
+    /Azure-Kontext 9 \(„W“\): „views“ ist eine Liste aus "sprint" und "backlog", jede höchstens einmal/, /Azure-Kontext 10 \(„X“\): „views“ ist/,
+    /Azure-Kontext 11 \(„X2“\): „views“ ist/, /Azure-Kontext 12 \(„PRs · Q“\): „prs\.repo“ gibt es nicht/, /Azure-Kontext 13 \(„Y“\): „extra“ gibt es nicht/,
+    /Azure-Kontext 14: muss ein Objekt sein/]) {
+    assert.match(text, expected);
+  }
+  assert.equal(errors.length, 11);
+});
+
+test("without a valid org or any context nothing of sources.azure is used", () => {
+  const contexts = [{ prs: { project: "P" } }];
+  for (const org of [undefined, "", "dev.azure.com/example-org", "http://dev.azure.com/example-org", 7]) {
+    const { config, errors } = board.validateConfig({ sources: { azure: { org, contexts } } });
+    assert.equal(config, null, String(org));
+    assert.deepEqual(errors, ["„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>"]);
+  }
+  for (const bad of [undefined, [], "x"]) {
+    const { config, errors } = board.validateConfig({ sources: { azure: { org: "https://dev.azure.com/o", contexts: bad } } });
+    assert.equal(config, null);
+    assert.match(errors.join("\n"), /„sources\.azure\.contexts“ braucht mindestens einen Eintrag/);
+  }
+  assert.deepEqual(board.validateConfig({ sources: { azure: [] } }).errors, ["„sources.azure“ muss ein Objekt sein"]);
+  assert.deepEqual(board.validateConfig({ sources: { github: "x" } }).errors, ["„sources.github“ muss ein Objekt sein"]);
+});
+
+test("an old views.json with its views at the top is not read; the board says where they go now", () => {
+  const old = { refreshMinutes: 3, views: [{ id: "a", name: "A", source: "github", layout: "list", sections: [{ name: "A", query: "is:pr" }] }] };
+  const { config, errors } = board.validateConfig(old);
+  assert.equal(config, null);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in „sources\.github\.views“, Azure in „sources\.azure“ mit „org“ und „contexts“/);
+  assert.deepEqual(board.validateConfig({ ...old, sources: {} }).errors.slice(0, 1), ["„views“ gibt es nicht"], "beside sources, views is just unknown");
+});
+
+test("sources must be an object of azure and github, with at least one view", () => {
+  assert.deepEqual(board.validateConfig({}).errors, ["„sources“ fehlt: „sources.azure“ oder „sources.github“"]);
+  assert.deepEqual(board.validateConfig({ sources: [] }).errors, ["„sources“ muss ein Objekt sein"]);
+  assert.deepEqual(board.validateConfig({ sources: {} }).errors, ["„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“"]);
+  const { config, errors } = board.validateConfig({ sources: { jira: {}, azure: { org: "https://dev.azure.com/o", contexts: [{ prs: { project: "P" } }] } } });
+  assert.deepEqual(errors, ["„sources.jira“ gibt es nicht (nur „azure“ und „github“)"]);
+  assert.deepEqual(config.azure.contexts.map((c) => c.id), ["azure:prs:P"]);
 });
 
 test("validateConfig rejects the keys of the worktree start with a clear message", () => {
   const { config, errors } = board.validateConfig({
     start: { worktree: "{checkout}.worktrees/{branch}", branch: "{type}/{number}-{slug}", base: "main" },
     repos: { "o/r": { checkout: "~/r", worktree: "x" } },
-    views: [{ id: "a", name: "A", source: "github", layout: "board", project: { owner: "o", number: 1 }, startColumn: "In progress" }],
+    sources: { github: { views: [{ id: "a", name: "A", source: "github", layout: "board", project: { owner: "o", number: 1 }, startColumn: "In progress" }] } },
   });
   assert.equal(config, null);
   const text = errors.join("\n");
@@ -284,19 +376,20 @@ test("validateConfig rejects the keys of the worktree start with a clear message
 });
 
 test("validateConfig without any usable view gives no config", () => {
-  const { config, errors } = board.validateConfig({ views: [] });
+  const { config, errors } = board.validateConfig({ sources: { github: { views: [] } } });
   assert.equal(config, null);
-  assert.match(errors[0], /mindestens eine Ansicht/);
+  assert.deepEqual(errors, ["„sources.github.views“ braucht mindestens eine Ansicht"]);
 });
 
 test("start settings: defaults < start < the view's start < the repo's entry", () => {
   const config = sampleConfig();
-  const s = board.startSettings(config, config.views[0], "example/tender");
+  const [mine, , other] = config.github.views;
+  const s = board.startSettings(config, mine, "example/tender");
   assert.deepEqual([s.message, s.review, s.checkout, s.machine, s.open], ["/work {number}", "/look {number}", "~/src/tender", "server", "space"]);
-  assert.equal(board.startSettings(config, config.views[2], "Example Project").checkout, "~/src/work");
-  assert.equal(board.startSettings(config, config.views[2], "Example Project").message, "AB {number}");
-  assert.equal(board.startSettings(config, config.views[2], "example/tender").checkout, "~/src/tender", "the repo's entry wins over the view's start");
-  assert.equal(board.startSettings(config, config.views[0], "other/repo").checkout, null);
+  assert.equal(board.startSettings(config, other, "other/repo").checkout, "~/src/work");
+  assert.equal(board.startSettings(config, other, "other/repo").message, "OT {number}");
+  assert.equal(board.startSettings(config, other, "example/tender").checkout, "~/src/tender", "the repo's entry wins over the view's start");
+  assert.equal(board.startSettings(config, mine, "other/repo").checkout, null);
 });
 
 // ---- Hidden columns ----
@@ -318,32 +411,18 @@ test("toggling stores only the difference to the view's hide; a column that take
   const view = githubView();
   const cols = casesBoard().columns;
   const col = (name) => cols.find((c) => c.name === name);
-  let stored = board.toggleHidden(view, null, col("Done"), cols);
+  let stored = board.toggleHidden(view, null, col("Done"));
   assert.deepEqual(stored, { hide: [], show: ["Done"] });
-  stored = board.toggleHidden(view, stored, col("Done"), cols);
+  stored = board.toggleHidden(view, stored, col("Done"));
   assert.deepEqual(stored, { hide: [], show: [] });
-  stored = board.toggleHidden(view, stored, col("Ready"), cols);
+  stored = board.toggleHidden(view, stored, col("Ready"));
   assert.deepEqual(stored, { hide: ["Ready"], show: [] });
-  assert.equal(board.toggleHidden(view, stored, col("Ohne Status"), cols), stored);
+  assert.equal(board.toggleHidden(view, stored, col("Ohne Status")), stored);
 });
 
-test("Azure hides the states of the view's hidden categories", () => {
-  assert.deepEqual([...board.hiddenColumns(azureView(), null, azureTypes().states)].sort(), ["Done", "Inactive", "Removed"]);
-});
-
-test("names in hide or hideCategories that match no column are reported", () => {
-  const view = { ...githubView(), hide: ["Backlog", "Doen"], hideCategories: [] };
+test("names in hide that match no column are reported", () => {
+  const view = { ...githubView(), hide: ["Backlog", "Doen"] };
   assert.deepEqual(board.unknownHidden(view, githubBoard().columns), ["Doen"]);
-  const az = { ...azureView(), hideCategories: ["Completed", "Closed"] };
-  assert.deepEqual(board.unknownHidden(az, azureBoard().meta.states), ["Closed"]);
-});
-
-test("Azure's hide and hideCategories are checked against all the project's states, even on an empty board", () => {
-  const shipped = board.readConfig(shippedConfig()).config.views.find((v) => v.source === "azure");
-  const empty = board.parseAzureBoard("", azureTypes(), new Set());
-  assert.deepEqual(board.unknownHidden(shipped, empty.meta.states), []);
-  assert.deepEqual(board.unknownHidden({ ...shipped, hide: ["Inactive"] }, empty.meta.states), [], "a state of a type no item has");
-  assert.deepEqual(board.unknownHidden({ ...shipped, hide: ["Closed"] }, empty.meta.states), ["Closed"]);
 });
 
 // ---- GitHub board ----
@@ -586,22 +665,35 @@ test("a move stays laid over refreshes until it is confirmed and a refresh start
   assert.equal(board.findCard(b, "PVTI_rec1").column.name, "Ready");
 });
 
-test("Azure cards can only go to the states of their own type", () => {
-  const b = azureBoard();
-  const task = board.findCard(b, "az-101").card;
-  assert.deepEqual(board.targetsFor(b, task).map((c) => c.name), ["To Do", "In Progress", "Done", "Removed"]);
+// A board whose meta names the states of each type: a task may go to To
+// Do, In Progress and Done, a bug to New, Committed and Done (hidden).
+function typedBoard() {
+  const card = (key, type, column) => ({ key, source: "azure", number: Number(key.slice(1)), type, title: key, labels: [], assignees: [], column });
+  const col = (name, cards, hidden = false) => ({ id: name, name, color: "muted", hidden, count: hidden ? null : cards.length, target: true, cards });
+  return {
+    kind: "board",
+    meta: { types: { Task: ["To Do", "In Progress", "Done"], Bug: ["New", "Committed", "Done"] } },
+    columns: [col("To Do", []), col("New", [card("w102", "Bug", "New")]), col("In Progress", [card("w101", "Task", "In Progress")]), col("Committed", []), col("Done", [], true)],
+    total: 2,
+    limited: false,
+  };
+}
+
+test("where a board names its types' states, a card can only go to its own type's", () => {
+  const b = typedBoard();
+  const task = board.findCard(b, "w101").card;
+  assert.deepEqual(board.targetsFor(b, task).map((c) => c.name), ["To Do", "In Progress", "Done"]);
   assert.equal(board.canDrop(b, task, b.columns.find((c) => c.name === "Committed")), false);
   const cases = casesBoard();
   assert.equal(board.canDrop(cases, board.findCard(cases, "PVTI_case1").card, cases.columns[0]), false, "never into Ohne Status");
 });
 
 test("H/L step to the next column the card may go to, stubs included", () => {
-  const b = azureBoard();
+  const b = typedBoard();
   const cols = board.shownColumns(b, "");
-  assert.deepEqual(names(b), ["To Do", "New", "Approved", "In Progress", "Committed", "Done", "Removed"]);
-  assert.equal(board.stepTarget(b, cols, "az-101", 1)?.name, "Done");
-  assert.equal(board.stepTarget(b, cols, "az-101", -1)?.name, "To Do");
-  assert.equal(board.stepTarget(b, cols, "az-102", -1), null, "nothing left of the first state");
+  assert.equal(board.stepTarget(b, cols, "w101", 1)?.name, "Done", "Committed is skipped, the stub taken");
+  assert.equal(board.stepTarget(b, cols, "w101", -1)?.name, "To Do", "New is skipped");
+  assert.equal(board.stepTarget(b, cols, "w102", -1), null, "nothing left of the first state");
   const gh = casesBoard();
   assert.equal(board.stepTarget(gh, board.shownColumns(gh, ""), "PVTI_case3", -1)?.name, "Backlog", "Ohne Status is skipped");
 });
@@ -1002,12 +1094,10 @@ test("az's failures: login and a missing extension make the view unavailable, ot
   const other = board.azFailure({ code: 1, stderr: "WARNING: The behavior of this command will change\nERROR: TF401232: Work item 9 does not exist." });
   assert.deepEqual([other.unavailable, other.message], [false, "TF401232: Work item 9 does not exist."]);
   assert.equal(board.azFailure({ code: 1, stderr: "WARNING: The behavior of this command will change\nThe request failed" }).message, "The request failed");
-  assert.equal(board.azFailure({ code: 1, stderr: "ERROR: --project must be specified. The value can be passed at command line or set using 'az devops configure --defaults project=<name>'." }).message,
-    "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…");
   assert.equal(board.azFailure({ code: 1, stderr: "ERROR: TF200016: The following project does not exist: Nope." }).message,
     "Azure-Projekt unbekannt: TF200016: The following project does not exist: Nope.");
   const wiql = "ERROR: TF51005: The query references a field that does not exist. The error is caused by «[System.Project]».";
-  assert.equal(board.azFailure({ code: 1, stderr: wiql }).message, wiql.slice(7), "a WIQL error naming a project field is no missing project");
+  assert.equal(board.azFailure({ code: 1, stderr: wiql }).message, wiql.slice(7), "a WIQL error naming a project field is no unknown project");
   assert.equal(board.azFailure({ code: 1, stderr: "ERROR: boom" }, "server").message, "az auf server: boom");
 });
 
@@ -1083,11 +1173,6 @@ test("on a write, only az's known refusal forms are refusals; any other failure 
 
 // ---- Azure ----
 
-test("az's configured defaults give the organization and project", () => {
-  assert.deepEqual(board.parseAzureDefaults(fixture("azure-defaults.txt")), { organization: "https://dev.azure.com/example-org/", project: "Example Project" });
-  assert.deepEqual(board.parseAzureDefaults("[defaults]\n"), { organization: null, project: null });
-});
-
 test("Azure states come from the work item types, in category order", () => {
   const { states, types } = azureTypes();
   assert.deepEqual(states.map((s) => s.name), ["To Do", "New", "Approved", "In Planning", "In Progress", "Committed", "Active", "Done", "Inactive", "Removed"]);
@@ -1100,53 +1185,15 @@ test("work item types without a list are an error, not an empty board", () => {
   assert.throws(() => board.parseAzureTypes('{"value":{}}'), { message: "Azure lieferte keine Work-Item-Typen" });
 });
 
-test("the WIQL query asks for @Me's items without the hidden states, quotes escaped", () => {
-  const args = board.azureQueryArgs({ ...azureView(), where: "[System.AssignedTo] = @Me" }, new Set(["Done", "Won't fix"]));
-  const wiql = args[args.indexOf("--wiql") + 1];
-  assert.match(wiql, /^SELECT \[System\.Id\], \[System\.Title\], \[System\.State\]/);
-  assert.match(wiql, /WHERE \(\[System\.AssignedTo\] = @Me\) AND \[System\.State\] NOT IN \('Done', 'Won''t fix'\)/);
-  assert.deepEqual(args.slice(args.indexOf("--detect"), args.indexOf("--detect") + 2), ["--detect", "false"]);
-  assert.ok(!args.includes("--org"), "no organization flag where the view names none");
-  const scoped = board.azureQueryArgs({ ...azureView(), organization: "https://dev.azure.com/o", project: "P" }, new Set());
-  assert.deepEqual(scoped.slice(-4), ["--org", "https://dev.azure.com/o", "--project", "P"]);
-  assert.doesNotMatch(scoped[scoped.indexOf("--wiql") + 1], /NOT IN/);
-});
-
-test("Azure columns are the states of the types found, hidden ones as stubs; others' states stay out", () => {
-  const b = azureBoard();
-  assert.deepEqual(b.columns.map((c) => [c.name, c.hidden]), [
-    ["To Do", false], ["New", false], ["Approved", false], ["In Progress", false], ["Committed", false], ["Done", true], ["Removed", true],
-  ]);
-  const task = board.findCard(b, "az-101");
-  assert.deepEqual([task.column.name, task.card.assignees, task.card.type, task.card.repoShort], ["In Progress", ["Sample Person"], "Task", "Example Project"]);
-  assert.equal(task.card.url, "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/101");
-  const bug = board.findCard(b, "az-102").card;
-  assert.deepEqual([bug.assignees, bug.labels, bug.url], [["Sample Person"], ["import", "data"], "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/102"]);
-  assert.equal(b.columns.find((c) => c.name === "Done").count, null, "Azure stubs have no count");
-});
-
-test("az printing nothing means no work items and no columns, not an error", () => {
-  const b = board.parseAzureBoard("", azureTypes(), new Set());
-  assert.deepEqual([b.total, b.columns.length], [0, 0]);
-});
-
-test("an Azure state change is az boards work-item update --state", () => {
-  const b = azureBoard();
-  const card = board.findCard(b, "az-102").card;
-  const args = board.azureMoveArgs(azureView(), card, b.columns.find((c) => c.name === "Committed"));
-  assert.deepEqual(args.slice(0, 7), ["boards", "work-item", "update", "--id", "102", "--state", "Committed"]);
-  assert.ok(args.includes("--detect"));
-});
-
 // ---- Sessions ----
 
 test("an item's key names it on every source; a draft has none", () => {
   assert.equal(board.itemKey(board.findCard(githubBoard(), "PVTI_rec1").card), "tender#3000");
-  assert.equal(board.itemKey(board.findCard(azureBoard(), "az-101").card), "AB#101");
+  assert.equal(board.itemKey(azureItem()), "AB#101");
   const draft = board.findCard(casesBoard(), "PVTI_case2").card;
   assert.equal(board.itemKey(draft), null);
   assert.equal(board.itemLabel(draft), "Entwurf");
-  assert.equal(board.itemLabel(board.findCard(azureBoard(), "az-101").card), "AB#101");
+  assert.equal(board.itemLabel(azureItem()), "AB#101");
 });
 
 test("a session is named after its item, the title cut to fit", () => {
@@ -1174,8 +1221,7 @@ test("an item's session is the tab or space named after it; a branch with its nu
   assert.deepEqual(board.linkedSession(card, branch), { space: "s4", tab: null, status: "idle", label: "feat/3000-x" });
   const elsewhere = [{ id: "s5", name: "x", folder: "/r/atlas.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [] }];
   assert.equal(board.linkedSession(card, elsewhere), null, "the same number in another repo is not this item's");
-  const az = board.findCard(azureBoard(), "az-101").card;
-  assert.equal(board.linkedSession(az, [{ id: "s6", name: "w", folder: "/w", branch: null, status: null, tabs: [tab("t6", "AB#101 Write the sample importer", "blocked")] }]).tab, "t6");
+  assert.equal(board.linkedSession(azureItem(), [{ id: "s6", name: "w", folder: "/w", branch: null, status: null, tabs: [tab("t6", "AB#101 Write the sample importer", "blocked")] }]).tab, "t6");
   const pr = board.parseGithubList(json("github-list.json"), listView()).sections[0].rows[0];
   assert.equal(board.linkedSession(pr, [{ id: "p", name: "p", folder: "/x", branch: "pr/summary-card", status: "idle", tabs: [] }]).space, "p");
 });
@@ -1185,7 +1231,7 @@ test("templates take the item's number, title, url, owner, repo and key", () => 
   const vars = board.templateVars(card);
   assert.deepEqual(vars, { number: 3004, title: card.title, url: "https://github.com/example/tender/issues/3004", owner: "example", repo: "tender", key: "tender#3004" });
   assert.equal(board.renderTemplate("/implement {number} {nope}", vars), "/implement 3004 {nope}");
-  assert.equal(board.templateVars(board.findCard(azureBoard(), "az-101").card).repo, "Example Project");
+  assert.equal(board.templateVars(azureItem()).repo, "Example Project");
 });
 
 test("the checkout script expands ~ on the machine, checks the folder and prints it", () => {
@@ -1253,22 +1299,32 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// The UI tests' own views.json: three GitHub views and an Azure one.
-// hide: the first view's hidden columns; azureStart: the Azure view's start
-// (null: none); repos: more repos entries.
-function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "Done"], azureStart = { checkout: "~/src/work" }, repos = {} } = {}) {
-  const azure = { id: "azure", name: "Azure", source: "azure", layout: "board", hide: ["Inactive"], hideCategories: ["Completed", "Removed"] };
+// The UI tests' own views.json: on Azure a team and its project's pull
+// requests, and three GitHub views. hide: the first view's hidden columns;
+// repos: more repos entries.
+function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "Done"], repos = {} } = {}) {
   return JSON.stringify({
     refreshMinutes: 3,
     start: { agent: "claude", message: "/work {number}", review: "/look {number}", ...start },
     repos: { "example/tender": { checkout: "~/src/tender" }, ...repos },
-    views: [
-      { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter, hide },
-      { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
-      { id: "other", name: "Other", source: "github", layout: "board", project: { owner: "sample-user", number: 8 }, hide: ["Done"] },
-      azureStart ? { ...azure, start: azureStart } : azure,
-    ],
+    sources: {
+      azure: { org: "https://dev.azure.com/example-org", contexts: [{ team: { project: "Example Project", team: "Example Team" } }, { prs: { project: "Example Project" } }] },
+      github: {
+        views: [
+          { id: "mine", name: "Mine", source: "github", layout: "board", project: { owner: "sample-user", number: 7 }, filter, hide },
+          { id: "prs", name: "PRs", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
+          { id: "other", name: "Other", source: "github", layout: "board", project: { owner: "sample-user", number: 8 }, hide: ["Done"] },
+        ],
+      },
+    },
   });
+}
+
+// testConfig without the view "mine".
+function withoutMine() {
+  const config = JSON.parse(testConfig());
+  config.sources.github.views = config.sources.github.views.filter((v) => v.id !== "mine");
+  return JSON.stringify(config);
 }
 
 // A clock the tests can move: the mod reads Date.now().
@@ -1420,7 +1476,7 @@ async function bootBoard(options = {}) {
 }
 
 // A Board on the fake host, its first view loaded from github-board.json
-// (or `answer`), the Azure view unavailable (no az, as fakeHost's which has it).
+// (or `answer`).
 async function openBoard(options = {}) {
   const { b, cx, host } = await bootBoard(options);
   await host.answer("gh", ok(options.answer ?? fixture("github-board.json")));
@@ -1436,12 +1492,12 @@ async function press(b, cx, k, extra) {
 const shiftL = { char: "L", modifiers: { shift: true } };
 const confirmed = (id) => ok(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id } } } }));
 
-test("UI: on the shipped views.json the board loads its first view and hides Azure without az", async () => {
+test("UI: on the shipped views.json the board loads its first GitHub view, and runs no az", async () => {
   const { b, st, host } = await openBoard({ config: shippedConfig() });
   assert.equal(st().data.columns.length, 5);
   assert.deepEqual(st().sel, { col: 1, key: "PVTI_rec4" });
-  assert.equal(b.views.azure.unavailable, "az ist nicht installiert");
   assert.deepEqual(b.shownViews().map((v) => v.id), ["mine", "prs"]);
+  assert.deepEqual([host.open("az"), host.asked.filter((a) => a.tool === "az")], [[], []]);
   assert.ok(host.focused > 0);
 });
 
@@ -1465,7 +1521,7 @@ test("UI: number keys beyond the views do nothing; [ and ] go back and forth, al
   await press(b, cx, "]", { modifiers: { control: true, alt: true } });
   assert.equal(b.view().id, "prs");
   await press(b, cx, "4");
-  assert.equal(b.view().id, "prs", "4 names no view while Azure is unavailable");
+  assert.equal(b.view().id, "prs", "4 names no view");
   await press(b, cx, "9");
   assert.equal(b.view().id, "prs");
   await press(b, cx, "3");
@@ -1645,7 +1701,7 @@ test("UI: a write under way while r makes its view a list leaves nothing open", 
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
   const config = JSON.parse(testConfig());
-  config.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
+  config.sources.github.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
   host.config = JSON.stringify(config);
   await press(b, cx, "r");
   await host.answer("gh", ok(fixture("github-list.json")), "search(");
@@ -1659,7 +1715,7 @@ test("UI: a write under way while r makes its view a list leaves nothing open", 
 test("UI: a write under way while r removes its view promises no follow-up", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
-  host.config = JSON.stringify({ ...JSON.parse(testConfig()), views: JSON.parse(testConfig()).views.filter((v) => v.id !== "mine") });
+  host.config = withoutMine();
   await press(b, cx, "r");
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s");
@@ -1738,7 +1794,7 @@ test("UI: open outcomes of a view that is no board any more are dropped without 
   st.data = board.parseGithubList(json("github-list.json"), listView());
   st.unclear = [{ key: "PVTI_rec4", label: "tender#3004", to: { id: "opt-in-progress", name: "In progress" }, at: 0 }];
   b.notice = null;
-  b.settleUnclear(b.config.views[0], 1, st.data, cx);
+  b.settleUnclear(b.config.github.views[0], 1, st.data, cx);
   assert.deepEqual([st.unclear, b.notice], [[], null]);
 });
 
@@ -1747,7 +1803,7 @@ test("UI: r drops the open outcomes of a view that became a list", async () => {
   await press(b, cx, "l", shiftL);
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   const config = JSON.parse(testConfig());
-  config.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
+  config.sources.github.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
   host.config = JSON.stringify(config);
   await press(b, cx, "r");
   assert.deepEqual(b.views.mine.unclear, []);
@@ -1795,7 +1851,7 @@ test("UI: r forgets the open outcomes of views no longer in views.json", async (
   await press(b, cx, "l", shiftL);
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.views.mine.unclear.length, 1);
-  host.config = JSON.stringify({ ...JSON.parse(testConfig()), views: JSON.parse(testConfig()).views.filter((v) => v.id !== "mine") });
+  host.config = withoutMine();
   await press(b, cx, "r");
   assert.deepEqual(b.views.mine.unclear, []);
 });
@@ -1971,73 +2027,13 @@ test("UI: agents asked of a machine no longer chosen are ignored, also when the 
   await settle();
   assert.equal(b.modal.agents.length, 1);
 });
-// Brings the Azure view back: az is installed now, the timer tries it once
-// refreshMinutes have passed, and az answers its defaults, types and work
-// items.
-async function azureBack(cx, host) {
-  host.which = found;
-  advance(3 * 60000);
-  await cx.tick();
-  await host.answer("az", ok(fixture("azure-defaults.txt")), "configure");
-  await host.answer("az", ok(fixture("azure-types.json")), "workitemtypes");
-  await host.answer("az", ok(fixture("azure-items.json")), "--wiql");
-}
+// ---- UI: gh by the shell's path ----
 
-test("UI: the timer tries an unavailable view again only after refreshMinutes", async () => {
-  const { b, cx, host } = await openBoard();
-  assert.ok(b.views.azure.unavailable);
-  host.which = found;
-  advance(2 * 60000);
-  await cx.tick();
-  assert.equal(host.open("az").length, 0, "not before refreshMinutes");
-  advance(60000);
-  await cx.tick();
-  assert.equal(host.open("az").length, 1);
-});
-
-test("UI: an Azure view loads its defaults and types once and again after r", async () => {
-  const { b, cx, host } = await openBoard();
-  await azureBack(cx, host);
-  assert.equal(b.views.azure.unavailable, null);
-  assert.equal(b.views.azure.data.columns.length, 7);
-  assert.deepEqual(b.views.azure.warnings, [], "Inactive is a state of the project's types, though no item has it");
-  b.refresh(b.config.views.find((v) => v.id === "azure"), cx);
-  await settle();
-  assert.deepEqual(host.open("az").map((c) => c.args[1]), ["query"], "a refresh asks for the work items only");
-  await host.answer("az", ok(fixture("azure-items.json")), "--wiql");
-  await press(b, cx, "r");
-  assert.ok(host.open("az").some((c) => c.args.includes("configure")), "r reads az's defaults and the types anew");
-});
-test("UI: an Azure card without a checkout names where to set one", async () => {
-  const { b, cx, host } = await openBoard({ config: testConfig({ azureStart: null }) });
-  await azureBack(cx, host);
-  await press(b, cx, "4");
-  assert.equal(b.view().id, "azure");
-  await press(b, cx, "enter");
-  await press(b, cx, "enter");
-  assert.equal(b.modal, null);
-  assert.equal(b.notice.text, "Für Example Project steht kein „checkout“ in views.json: „repos“ → „Example Project“ oder „start.checkout“ der Ansicht „Azure“");
-});
-
-test("UI: an Azure card starts from its project's entry in repos", async () => {
-  const { b, cx, host } = await openBoard({ config: testConfig({ azureStart: null, repos: { "Example Project": { checkout: "~/src/example" } } }) });
-  await azureBack(cx, host);
-  await press(b, cx, "4");
-  await openStart(b, cx);
-  assert.equal(b.messageInput.value(), "/work 102", "the first card, in New");
-  b.startAgent(cx);
-  await settle();
-  assert.deepEqual(host.open("sh")[0].args.slice(-1), ["~/src/example"]);
-});
-
-// ---- UI: gh and az by the shell's path ----
-
-test("UI: gh and az run by the path the shell gives, asked once per machine until r", async () => {
+test("UI: gh runs by the path the shell gives, asked once per machine until r", async () => {
   const which = (tool) => (tool === "gh" ? "/home/linuxbrew/.linuxbrew/bin/gh" : "/opt/az/bin/az");
   const { b, cx, host, st } = await bootBoard({ which });
-  await host.answer("az", ok(fixture("azure-defaults.txt")), "configure");
   await host.answer("gh", ok(fixture("github-board.json")));
-  assert.deepEqual([...new Set(host.calls.map((c) => c.tool))].sort(), ["/home/linuxbrew/.linuxbrew/bin/gh", "/opt/az/bin/az"]);
+  assert.deepEqual([...new Set(host.calls.map((c) => c.tool))], ["/home/linuxbrew/.linuxbrew/bin/gh"]);
   assert.deepEqual(host.asked.filter((a) => a.tool === "gh"), [{ tool: "gh", on: null, timeout: 30000 }]);
   assert.ok(st().data, "loaded");
   b.refresh(b.view(), cx);
@@ -2049,31 +2045,10 @@ test("UI: gh and az run by the path the shell gives, asked once per machine unti
   assert.equal(host.open("gh")[0].tool, "/home/linuxbrew/.linuxbrew/bin/gh");
 });
 
-test("UI: az for a view on another machine is asked for and run there", async () => {
-  const config = JSON.parse(testConfig());
-  config.views[3].on = "server";
-  const { host } = await bootBoard({ config: JSON.stringify(config), which: (tool, on) => `/opt/${on ?? "here"}/bin/${tool}` });
-  assert.deepEqual(host.asked.filter((a) => a.tool === "az"), [{ tool: "az", on: "server", timeout: 60000 }]);
-  assert.deepEqual(host.open("az").map((c) => [c.tool, c.options.on]), [["/opt/server/bin/az", "server"]]);
-});
-
-test("UI: az on a machine where herdr cannot start sh runs by its bare name; missing there, its view is left out without asking again", async () => {
-  const config = JSON.parse(testConfig());
-  config.views[3].on = "win";
-  const which = (tool, on) => (on === "win" ? new Error("cannot start sh: program not found") : found(tool));
-  const { b, host } = await bootBoard({ config: JSON.stringify(config), which });
-  assert.deepEqual(host.open("az").map((c) => [c.tool, c.options.on]), [["az", "win"]]);
-  await host.answer("az", notThere("az"));
-  assert.equal(b.views.azure.unavailable, "az auf win ist nicht installiert");
-  assert.equal(host.asked.filter((a) => a.tool === "az").length, 1, "asked once");
-  assert.equal(host.open("az").length, 0, "and not run again");
-});
-
-test("UI: gh and az that the shell does not find are not installed; the Azure view is left out", async () => {
-  const { b, host, st } = await bootBoard({ which: () => "" });
+test("UI: gh that the shell does not find is not installed", async () => {
+  const { host, st } = await bootBoard({ which: () => "" });
   assert.deepEqual(host.calls, [], "nothing runs");
   assert.equal(st().error, "gh ist nicht installiert");
-  assert.equal(b.views.azure.unavailable, "az ist nicht installiert");
 });
 
 test("UI: a shell that cannot be asked says so, not that gh is missing", async () => {
@@ -2108,12 +2083,13 @@ test("UI: a program gone from the path found is asked for again and run in the s
 
 test("UI: a program the shell no longer finds is not installed at once; one it finds but that does not start says so", async () => {
   const { b, cx, host } = await openBoard();
-  await azureBack(cx, host);
-  host.which = (tool) => (tool === "az" ? "" : found(tool));
-  b.refresh(b.config.views.find((v) => v.id === "azure"), cx);
+  host.which = () => "";
+  b.refresh(b.view(), cx);
   await settle();
-  await host.answer("az", notRun(found("az")), "--wiql");
-  assert.equal(b.views.azure.unavailable, "az ist nicht installiert", "left out now, not after the timer");
+  await host.answer("gh", notRun(found("gh")));
+  assert.equal(b.views.mine.error, "gh ist nicht installiert");
+  assert.equal(host.open("gh").length, 0, "not run again");
+  host.which = found;
   b.refresh(b.view(), cx);
   await settle();
   await host.answer("gh", notRun(found("gh")));

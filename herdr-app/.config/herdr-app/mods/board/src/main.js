@@ -1,44 +1,37 @@
 // The board, in its tab "Board": one's own work from GitHub (issues and pull
-// requests on a Projects v2 board, open pull requests) and Azure Boards (work
-// items), in the views that views.json beside this file defines. The
-// leader's `b` shows or opens its tab. Keys and behaviour: README, "herdr
-// app".
+// requests on a Projects v2 board, open pull requests) and Azure DevOps, as
+// views.json beside this file sets them. The leader's `b` shows or opens its
+// tab. Keys and behaviour: README, "herdr app".
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
-// - views: [{ id, name, source: "github" | "azure", layout: "board" | "list",
-//   hide?: [column names], limit?, start? }], and by kind (VIEW_KINDS):
-//   a GitHub board has project { owner, number, field? ("Status") } and
-//   filter? (a Projects filter such as "assignee:@me"); its columns are the
-//   options of that single-select field. A GitHub list has sections
-//   [{ name, query }], one GitHub search for pull requests each. An Azure
-//   board has where? (a WIQL condition, default assigned to @Me),
-//   hideCategories? (state categories to hide), organization? and project?
-//   (az's configured defaults where missing) and on? (the machine az runs
-//   on); its columns are the states of the work item types it finds. An Azure
-//   view is listed only where az runs, is signed in and has the azure-devops
-//   extension; otherwise the sidebar says why.
+// - sources: what the board shows, by source.
+//   - azure: { org (https://dev.azure.com/<org>), contexts: [...] }, a
+//     context either { team: { project, team }, views?: ["sprint",
+//     "backlog"] (both when missing) } or { prs: { project } }.
+//   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
+//     names], limit?, start? }] }, and by kind (VIEW_KINDS): a board has
+//     project { owner, number, field? ("Status") } and filter? (a Projects
+//     filter such as "assignee:@me"); its columns are the options of that
+//     single-select field. A list has sections [{ name, query }], one GitHub
+//     search for pull requests each. A view may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
 //   in; ~ is that machine's home), message (the first message for issues and
 //   work items) and review (for pull requests). Templates take {number}
 //   {title} {url} {owner} {repo} {key}.
-// - repos: { "<owner>/<repo>" (on Azure: the project): { any start field } }.
-//   startSettings says which start applies; an Azure card starts from its
-//   project's entry or from its view's start.checkout.
+// - repos: { "<owner>/<repo>": { any start field } }. startSettings says
+//   which start applies.
+// An older views.json with its views at the top is not read; the board says
+// where they go now.
 //
-// Hidden columns are left out of the query; on GitHub the same request counts
-// them for their stubs (Azure stubs show no count).
+// Hidden columns are left out of the query; the same request counts them for
+// their stubs.
 //
-// Calls: a GitHub view costs one gh call per refresh, an Azure view one az
-// call, plus up to two more (az's defaults and the work item types) on its
-// first load and after each `r`. Finding gh or az on a machine costs one sh
-// call now and then (toolPaths says when). A view refreshes when the board
-// opens, on `r`, after `x`, when it is shown again older than
-// refreshMinutes, and every refreshMinutes while its tab shows. Opening the
-// board and `r` also try the Azure views not shown, to learn whether they
-// are available, and the timer tries an unavailable view again every
-// refreshMinutes.
+// Calls: a GitHub view costs one gh call per refresh. Finding gh costs one
+// sh call now and then (toolPaths says when). A view refreshes when the
+// board opens, on `r`, after `x`, when it is shown again older than
+// refreshMinutes, and every refreshMinutes while its tab shows.
 //
 // The board is written as modules in src/ beside build.mjs, which builds
 // them into the one main.js a stowed mod is (README, "herdr app"): shared
@@ -51,7 +44,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
 import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, readTextFile, run, settings, spaces, theme } from "herdr";
 import { MOD, CONFIG_NAME, BoardError, firstLine, lastLine, errorText, itemKey, itemLabel, updatedLabel, ageLabel } from "./shared.js";
-import { viewKind, readConfig, startSettings } from "./config.js";
+import { viewKind, readConfig, startSettings, githubViews } from "./config.js";
 import { readStoredHidden, hiddenColumns, toggleHidden, unknownHidden, findCard, moveCard, rollback, isDue, pendingMoves, applyMoves, canDrop, targetsFor, stepTarget, withHidden, matches, shownColumns, navigate, selectionAfter } from "./kinds/board.js";
 import { toolPaths } from "./tools.js";
 import { sessionName, linkedSession, AGENT_STATUS, renderTemplate, templateVars, checkoutArgs, spaceForTab, startCommand } from "./actions/start.js";
@@ -133,8 +126,7 @@ export default class Board extends View {
   // ---- data ----
 
   // A view's state: data and error, loading (again: one more refresh after
-  // this one), at (last success) and tried (last start), unavailable (why the
-  // view is not listed), warnings, moves (laid over refreshes, see
+  // this one), at (last success) and tried (last start), warnings, moves (laid over refreshes, see
   // pendingMoves), pending (card keys being written), unclear ({ key, label,
   // to, at } of writes whose outcome is still open; see settleUnclear),
   // stored/hidden (the
@@ -142,14 +134,14 @@ export default class Board extends View {
   // the first data) and detail.
   state(id) {
     this.views[id] ??= {
-      data: null, error: null, loading: false, again: false, at: 0, tried: 0, unavailable: null, warnings: [], moves: [], pending: {}, unclear: [],
+      data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, detail: false,
     };
     return this.views[id];
   }
 
   shownViews() {
-    return (this.config?.views ?? []).filter((v) => !this.state(v.id).unavailable);
+    return githubViews(this.config);
   }
 
   view() {
@@ -157,9 +149,9 @@ export default class Board extends View {
     return shown.find((v) => v.id === this.viewId) ?? shown[0] ?? null;
   }
 
-  hiddenFor(view, columns) {
+  hiddenFor(view) {
     const st = this.state(view.id);
-    st.hidden = hiddenColumns(view, st.stored, columns);
+    st.hidden = hiddenColumns(view, st.stored);
     return st.hidden;
   }
 
@@ -178,14 +170,12 @@ export default class Board extends View {
       if (!this.config) return;
       // Open outcomes of a view that is gone, or is now of another kind than
       // in the last valid views.json, are dropped.
-      const kinds = new Map(this.config.views.map((v) => [v.id, viewKind(v)]));
+      const kinds = new Map(githubViews(this.config).map((v) => [v.id, viewKind(v)]));
       // Before the first valid views.json no view has a state to compare.
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
       this.kinds = kinds;
-      for (const v of this.config.views) this.state(v.id).unavailable = null;
       const shown = this.view();
-      for (const v of this.config.views) if (this.sources[v.source].probe && v !== shown) this.refresh(v, cx);
       if (shown) this.refresh(shown, cx);
     });
   }
@@ -200,18 +190,16 @@ export default class Board extends View {
     const started = st.tried;
     cx.spawn(async (cx) => {
       try {
-        const { data, warnings } = await this.sources[view.source].load(view, (v, columns) => this.hiddenFor(v, columns));
+        const { data, warnings } = await this.sources[view.source].load(view, (v) => this.hiddenFor(v));
         st.moves = pendingMoves(st.moves, started);
         st.data = data.kind === "board" ? applyMoves(data, st.moves) : data;
         st.warnings = [...warnings, ...this.dataWarnings(view, data)];
         st.error = null;
-        st.unavailable = null;
         st.at = Date.now();
         this.keepSelection(view);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
-        if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
-        else st.error = report(e);
+        st.error = report(e);
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
           this.say(`${open.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
@@ -219,12 +207,8 @@ export default class Board extends View {
       } finally {
         st.loading = false;
         // The follow-up refresh reads the view from the config as it is now.
-        const fresh = this.config?.views.find((v) => v.id === view.id);
+        const fresh = githubViews(this.config).find((v) => v.id === view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
-        // A view that takes the place of one just found unavailable loads now.
-        const next = this.view();
-        const waiting = next && next !== view && !this.state(next.id).data && !this.state(next.id).loading;
-        if (st.unavailable && waiting) this.refresh(next, cx);
         cx.notify();
       }
     });
@@ -235,7 +219,7 @@ export default class Board extends View {
     if (data.kind === "list") {
       return data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`);
     }
-    return unknownHidden(view, data.meta?.states ?? data.columns).map((n) => `„${n}“ aus hide oder hideCategories passt zu keiner Spalte`);
+    return unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`);
   }
 
   // After a refresh that succeeded: where the cards of unclear writes are
@@ -271,15 +255,14 @@ export default class Board extends View {
     if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
   }
 
-  // Every TICK_MS while the board shows: the shown view and the unavailable
-  // ones once refreshMinutes have passed since they were last tried.
+  // Every TICK_MS while the board shows: the shown view once refreshMinutes
+  // have passed since it was last tried.
   tick(cx) {
     if (!this.config || !boardShown()) return;
     const every = this.config.refreshMinutes * 60000;
     const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
     if (shown && due(shown)) this.refresh(shown, cx);
-    for (const v of this.config.views) if (this.state(v.id).unavailable && due(v)) this.refresh(v, cx);
     cx.notify();
   }
 
@@ -316,7 +299,7 @@ export default class Board extends View {
         // kind (as the last valid views.json says; an invalid one in between
         // keeps it).
         const followed = this.kinds?.get(view.id) === viewKind(view);
-        const current = this.config?.views.find((v) => v.id === view.id);
+        const current = githubViews(this.config).find((v) => v.id === view.id);
         if (e instanceof BoardError && e.unclear) {
           if (followed) st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
           const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
@@ -401,8 +384,8 @@ export default class Board extends View {
     const st = this.state(view.id);
     if (st.data?.kind !== "board") return;
     if (!col.target) return this.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
-    st.stored = toggleHidden(view, st.stored, col, st.data.columns);
-    st.hidden = hiddenColumns(view, st.stored, st.data.columns);
+    st.stored = toggleHidden(view, st.stored, col);
+    st.hidden = hiddenColumns(view, st.stored);
     store.set(`hidden:${view.id}`, st.stored);
     st.data = withHidden(st.data, st.hidden);
     // What a column holds comes from the query, which leaves hidden ones out.
@@ -814,7 +797,6 @@ export default class Board extends View {
 
   sidebar(t, view) {
     const shown = this.shownViews();
-    const missing = (this.config?.views ?? []).filter((v) => this.state(v.id).unavailable);
     const count = (v) => {
       const d = this.state(v.id).data;
       if (!d) return "";
@@ -851,8 +833,7 @@ export default class Board extends View {
             .child(div().w(10).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : "")),
         ),
       )
-      .child(div().flex_1())
-      .children(missing.map((v) => div().px(8).py(4).text_size(11).text_color(t.dim).child(`${v.name}: ${this.state(v.id).unavailable}`)));
+      .child(div().flex_1());
   }
 
   main(t, mono, view, st) {

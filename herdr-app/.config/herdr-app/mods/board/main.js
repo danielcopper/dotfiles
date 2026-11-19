@@ -1,46 +1,39 @@
 // Built from src/ by `mise run herdr-board-build`; edit the modules there, not this file.
 
 // The board, in its tab "Board": one's own work from GitHub (issues and pull
-// requests on a Projects v2 board, open pull requests) and Azure Boards (work
-// items), in the views that views.json beside this file defines. The
-// leader's `b` shows or opens its tab. Keys and behaviour: README, "herdr
-// app".
+// requests on a Projects v2 board, open pull requests) and Azure DevOps, as
+// views.json beside this file sets them. The leader's `b` shows or opens its
+// tab. Keys and behaviour: README, "herdr app".
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
-// - views: [{ id, name, source: "github" | "azure", layout: "board" | "list",
-//   hide?: [column names], limit?, start? }], and by kind (VIEW_KINDS):
-//   a GitHub board has project { owner, number, field? ("Status") } and
-//   filter? (a Projects filter such as "assignee:@me"); its columns are the
-//   options of that single-select field. A GitHub list has sections
-//   [{ name, query }], one GitHub search for pull requests each. An Azure
-//   board has where? (a WIQL condition, default assigned to @Me),
-//   hideCategories? (state categories to hide), organization? and project?
-//   (az's configured defaults where missing) and on? (the machine az runs
-//   on); its columns are the states of the work item types it finds. An Azure
-//   view is listed only where az runs, is signed in and has the azure-devops
-//   extension; otherwise the sidebar says why.
+// - sources: what the board shows, by source.
+//   - azure: { org (https://dev.azure.com/<org>), contexts: [...] }, a
+//     context either { team: { project, team }, views?: ["sprint",
+//     "backlog"] (both when missing) } or { prs: { project } }.
+//   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
+//     names], limit?, start? }] }, and by kind (VIEW_KINDS): a board has
+//     project { owner, number, field? ("Status") } and filter? (a Projects
+//     filter such as "assignee:@me"); its columns are the options of that
+//     single-select field. A list has sections [{ name, query }], one GitHub
+//     search for pull requests each. A view may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
 //   in; ~ is that machine's home), message (the first message for issues and
 //   work items) and review (for pull requests). Templates take {number}
 //   {title} {url} {owner} {repo} {key}.
-// - repos: { "<owner>/<repo>" (on Azure: the project): { any start field } }.
-//   startSettings says which start applies; an Azure card starts from its
-//   project's entry or from its view's start.checkout.
+// - repos: { "<owner>/<repo>": { any start field } }. startSettings says
+//   which start applies.
+// An older views.json with its views at the top is not read; the board says
+// where they go now.
 //
-// Hidden columns are left out of the query; on GitHub the same request counts
-// them for their stubs (Azure stubs show no count).
+// Hidden columns are left out of the query; the same request counts them for
+// their stubs.
 //
-// Calls: a GitHub view costs one gh call per refresh, an Azure view one az
-// call, plus up to two more (az's defaults and the work item types) on its
-// first load and after each `r`. Finding gh or az on a machine costs one sh
-// call now and then (toolPaths says when). A view refreshes when the board
-// opens, on `r`, after `x`, when it is shown again older than
-// refreshMinutes, and every refreshMinutes while its tab shows. Opening the
-// board and `r` also try the Azure views not shown, to learn whether they
-// are available, and the timer tries an unavailable view again every
-// refreshMinutes.
+// Calls: a GitHub view costs one gh call per refresh. Finding gh costs one
+// sh call now and then (toolPaths says when). A view refreshes when the
+// board opens, on `r`, after `x`, when it is shown again older than
+// refreshMinutes, and every refreshMinutes while its tab shows.
 //
 // The board is written as modules in src/ beside build.mjs, which builds
 // them into the one main.js a stowed mod is (README, "herdr app"): shared
@@ -63,9 +56,9 @@ export const MOD = "board";
 export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
-  // unavailable: the view's tool is missing, not signed in or without its
-  // extension, so the view is left out of the list rather than shown with an
-  // error. unclear: a write may or may not have landed.
+  // unavailable: az is missing, not signed in or without its extension,
+  // something to set up rather than a failure of the view. unclear: a write
+  // may or may not have landed.
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
@@ -131,7 +124,10 @@ const START_KEYS = Object.keys(START_DEFAULTS);
 const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
-const TOP_KEYS = ["refreshMinutes", "start", "repos", "views"];
+const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
+// What an old views.json, with its views at the top, is told.
+const OLD_SHAPE = "views.json hat noch die alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in " +
+  "„sources.github.views“, Azure in „sources.azure“ mit „org“ und „contexts“ (README, „herdr app“)";
 
 function startProblems(start, where) {
   if (start === undefined) return [];
@@ -148,10 +144,11 @@ function startProblems(start, where) {
 
 const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
 
-// Keys every view may have; each kind adds its own (VIEW_KINDS).
+// Keys every GitHub view may have; each kind adds its own (VIEW_KINDS).
+// "source" may stay from views.json's first form, as "github".
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
-// Per view kind ("<source> <layout>"): its own keys, what is wrong with them,
+// Per GitHub view kind ("github <layout>"): its own keys, what is wrong with them,
 // and its fields with their defaults filled in.
 const VIEW_KINDS = {
   "github board": {
@@ -178,18 +175,6 @@ const VIEW_KINDS = {
         : ["„sections“ braucht Einträge mit „name“ und „query“"],
     defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query })), limit: v.limit ?? 50 }),
   },
-  "azure board": {
-    keys: ["where", "hideCategories", "organization", "project", "on"],
-    problems: (v) => textProblems(v, ["where", "organization", "project", "on"]),
-    defaults: (v) => ({
-      where: v.where ?? "[System.AssignedTo] = @Me",
-      hideCategories: v.hideCategories ?? [],
-      organization: v.organization ?? null,
-      project: v.project ?? null,
-      on: v.on ?? null,
-      limit: v.limit ?? 100,
-    }),
-  },
 };
 
 // A view's kind, the key of VIEW_KINDS.
@@ -200,31 +185,107 @@ function viewProblems(v) {
   const out = [];
   if (!isText(v.id)) out.push("„id“ fehlt");
   if (!isText(v.name)) out.push("„name“ fehlt");
-  if (v.source !== "github" && v.source !== "azure") out.push("„source“ ist \"github\" oder \"azure\"");
+  if (v.source !== undefined && v.source !== "github") out.push("„source“ ist hier \"github\" oder fehlt");
   if (v.layout !== "board" && v.layout !== "list") out.push("„layout“ ist \"board\" oder \"list\"");
-  if (v.source === "azure" && v.layout === "list") out.push("Azure-Ansichten sind Boards (\"layout\": \"board\")");
-  const kind = VIEW_KINDS[viewKind(v)];
+  const kind = VIEW_KINDS[`github ${v.layout}`];
   if (!kind) return out;
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
-    else if (key === "on" && v.source === "github") out.push("„on“ gilt nur für Azure-Ansichten");
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
-  for (const key of ["hide", "hideCategories"]) {
-    if (v[key] !== undefined && !textList(v[key])) out.push(`„${key}“ muss eine Liste von Texten sein`);
-  }
+  if (v.hide !== undefined && !textList(v.hide)) out.push("„hide“ muss eine Liste von Texten sein");
   if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= 100)) out.push("„limit“ ist eine ganze Zahl von 1 bis 100");
   return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 
 function normalizeView(v) {
-  const common = { id: v.id, name: v.name, source: v.source, layout: v.layout, hide: v.hide ?? [], start: v.start ?? {}, hideCategories: [], on: null };
-  return { ...common, ...VIEW_KINDS[viewKind(v)].defaults(v) };
+  const common = { id: v.id, name: v.name, source: "github", layout: v.layout, hide: v.hide ?? [], start: v.start ?? {} };
+  return { ...common, ...VIEW_KINDS[`github ${v.layout}`].defaults(v) };
 }
 
-// views.json as text (null: there is none) → { config, errors }. A view with
-// problems is left out and each problem is listed; config is null only when
-// nothing usable is left.
+// sources.github → { github: { views } or null, errors }. A view with
+// problems is left out and each problem is listed.
+function readGithub(raw) {
+  if (!isObject(raw)) return { github: null, errors: ["„sources.github“ muss ein Objekt sein"] };
+  const errors = Object.keys(raw).filter((k) => k !== "views").map((k) => `„sources.github.${k}“ gibt es nicht`);
+  if (!Array.isArray(raw.views) || !raw.views.length) errors.push("„sources.github.views“ braucht mindestens eine Ansicht");
+  const views = [];
+  const ids = new Set();
+  (Array.isArray(raw.views) ? raw.views : []).forEach((v, i) => {
+    const where = `GitHub-Ansicht ${i + 1}${isText(v?.name) ? ` („${v.name}“)` : ""}`;
+    const problems = viewProblems(v);
+    if (!problems.length && ids.has(v.id)) problems.push(`„id“ ${v.id} gibt es schon`);
+    if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
+    ids.add(v.id);
+    views.push(normalizeView(v));
+  });
+  return { github: views.length ? { views } : null, errors };
+}
+
+// The views a team context may show, in the order of its switch.
+export const TEAM_VIEWS = ["sprint", "backlog"];
+const TEAM_VIEWS_TEXT = TEAM_VIEWS.map((v) => `"${v}"`).join(" und ");
+
+// What is wrong with an entry of sources.azure.contexts: { "team": {
+// project, team }, "views"?: [...] } or { "prs": { project } }.
+function contextProblems(c) {
+  if (!isObject(c)) return ["muss ein Objekt sein"];
+  const kinds = ["team", "prs"].filter((k) => c[k] !== undefined);
+  if (kinds.length !== 1) return ["braucht genau eins von „team“ und „prs“"];
+  const kind = kinds[0];
+  const keys = kind === "team" ? ["team", "views"] : ["prs"];
+  const fields = kind === "team" ? ["project", "team"] : ["project"];
+  const out = Object.keys(c).filter((k) => !keys.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  const inner = c[kind];
+  if (!isObject(inner) || !fields.every((f) => isText(inner[f]))) out.push(`„${kind}“ braucht ${fields.map((f) => `„${f}“`).join(" und ")} (Text)`);
+  else out.push(...Object.keys(inner).filter((k) => !fields.includes(k)).map((k) => `„${kind}.${k}“ gibt es nicht`));
+  const views = c.views;
+  if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEWS.includes(v)) && new Set(views).size === views.length)) {
+    out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
+  }
+  return out;
+}
+
+// A context as the board uses it: { id, source: "azure", kind: "team",
+// project, team, views } or { id, source: "azure", kind: "prs", project };
+// views in the switch's order.
+function normalizeContext(c) {
+  if (c.team) {
+    const views = c.views ?? TEAM_VIEWS;
+    const { project, team } = c.team;
+    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", project, team, views: TEAM_VIEWS.filter((v) => views.includes(v)) };
+  }
+  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", project: c.prs.project };
+}
+
+// sources.azure → { azure: { org, contexts } or null, errors }. Without a
+// valid org nothing of it is usable; a context with problems is left out and
+// each problem is listed.
+function readAzure(raw) {
+  if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
+  const errors = Object.keys(raw).filter((k) => k !== "org" && k !== "contexts").map((k) => `„sources.azure.${k}“ gibt es nicht`);
+  const org = isText(raw.org) && /^https:\/\/\S+$/.test(raw.org.trim()) ? raw.org.trim().replace(/\/+$/, "") : null;
+  if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
+  if (!Array.isArray(raw.contexts) || !raw.contexts.length) {
+    errors.push("„sources.azure.contexts“ braucht mindestens einen Eintrag: { \"team\": { \"project\", \"team\" } } oder { \"prs\": { \"project\" } }");
+  }
+  const contexts = [];
+  (Array.isArray(raw.contexts) ? raw.contexts : []).forEach((c, i) => {
+    const name = isObject(c?.team) && isText(c.team.team) ? c.team.team : isObject(c?.prs) && isText(c.prs.project) ? `PRs · ${c.prs.project}` : "";
+    const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
+    const problems = contextProblems(c);
+    const context = problems.length ? null : normalizeContext(c);
+    if (context && contexts.some((x) => x.id === context.id)) problems.push("gibt es schon");
+    if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
+    contexts.push(context);
+  });
+  return { azure: org && contexts.length ? { org, contexts } : null, errors };
+}
+
+// views.json as text (null: there is none) → { config, errors }: config is
+// { refreshMinutes, start, repos, azure: { org, contexts } or null, github:
+// { views } or null }. A view or context with problems is left out and each
+// problem is listed; config is null only when nothing usable is left.
 export function readConfig(text) {
   if (text === null || text === undefined) return { config: null, errors: [`${CONFIG_NAME}.json fehlt im Ordner der Mod`] };
   let raw;
@@ -238,7 +299,9 @@ export function readConfig(text) {
 
 export function validateConfig(raw) {
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
-  const errors = Object.keys(raw).filter((k) => !TOP_KEYS.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  const old = raw.views !== undefined && raw.sources === undefined;
+  const errors = old ? [OLD_SHAPE] : [];
+  errors.push(...Object.keys(raw).filter((k) => !TOP_KEYS.includes(k) && !(old && k === "views")).map((k) => `„${k}“ gibt es nicht`));
   let refreshMinutes = raw.refreshMinutes ?? 3;
   if (typeof refreshMinutes !== "number" || !(refreshMinutes >= 1)) {
     errors.push("„refreshMinutes“ ist eine Zahl ab 1");
@@ -253,190 +316,34 @@ export function validateConfig(raw) {
     if (problems.length) errors.push(...problems);
     else repos[name] = entry;
   }
-  const views = [];
-  if (!Array.isArray(raw.views) || !raw.views.length) errors.push("„views“ braucht mindestens eine Ansicht");
-  const ids = new Set();
-  (Array.isArray(raw.views) ? raw.views : []).forEach((v, i) => {
-    const where = `Ansicht ${i + 1}${isText(v?.name) ? ` („${v.name}“)` : ""}`;
-    const problems = viewProblems(v);
-    if (!problems.length && ids.has(v.id)) problems.push(`„id“ ${v.id} gibt es schon`);
-    if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    ids.add(v.id);
-    views.push(normalizeView(v));
-  });
+  let azure = null;
+  let github = null;
+  if (isObject(raw.sources)) {
+    const sources = raw.sources;
+    errors.push(...Object.keys(sources).filter((k) => k !== "azure" && k !== "github").map((k) => `„sources.${k}“ gibt es nicht (nur „azure“ und „github“)`));
+    if (sources.azure !== undefined) {
+      const read = readAzure(sources.azure);
+      azure = read.azure;
+      errors.push(...read.errors);
+    }
+    if (sources.github !== undefined) {
+      const read = readGithub(sources.github);
+      github = read.github;
+      errors.push(...read.errors);
+    }
+  } else if (!old) errors.push(raw.sources === undefined ? "„sources“ fehlt: „sources.azure“ oder „sources.github“" : "„sources“ muss ein Objekt sein");
+  if (!azure && !github && !errors.length) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
   const start = startErrors.length ? {} : raw.start ?? {};
-  return { config: views.length ? { refreshMinutes, start, repos, views } : null, errors };
+  return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }
+
+// The GitHub views of a config (none without one).
+export const githubViews = (config) => config?.github?.views ?? [];
 
 // The start for an item: the defaults, then views.json's start, then the
 // view's start, then the repo's entry in repos; a later one wins.
 export function startSettings(config, view, repo) {
   return { ...START_DEFAULTS, ...config.start, ...view.start, ...(config.repos[repo] ?? {}) };
-}
-
-// ==== src/sources/azure.js ====
-
-// Azure DevOps: work item types and states, the WIQL board, the state
-// change, and what az's failures mean.
-
-// Theme colors and column order for Azure's state categories.
-export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
-const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
-
-// The fields read here are all `System.` ones; they are read through this so
-// the prefix stays in one place.
-const SYSTEM = "System.";
-const field = (fields, name) => fields?.[SYSTEM + name];
-const FIELDS = ["Id", "Title", "State", "WorkItemType", "AssignedTo", "Tags", "TeamProject"].map((f) => `[${SYSTEM}${f}]`).join(", ");
-
-// --detect false: use az's configured defaults, never the git remote of
-// whatever folder herdr runs az in.
-const azScope = (view, withProject = true) => [
-  "--detect", "false",
-  ...(view.organization ? ["--org", view.organization] : []),
-  ...(withProject && view.project ? ["--project", view.project] : []),
-];
-
-export const azureDefaultsArgs = () => ["devops", "configure", "--list"];
-
-// `az devops configure --list` → { organization, project } (null when unset).
-export function parseAzureDefaults(stdout) {
-  const value = (name) => String(stdout ?? "").match(new RegExp(`^\\s*${name}\\s*=\\s*(.*?)\\s*$`, "m"))?.[1] || null;
-  return { organization: value("organization"), project: value("project") };
-}
-
-export function azureTypesArgs(view, project) {
-  return ["devops", "invoke", "--area", "wit", "--resource", "workitemtypes", "--route-parameters", `project=${project}`,
-    "-o", "json", ...azScope(view, false)];
-}
-
-// The work item types' answer → { states: [{ id, name, category, color }] in
-// category order, types: { [type]: [state names] } }.
-export function parseAzureTypes(stdout) {
-  const types = {};
-  const states = new Map();
-  const value = JSON.parse(stdout)?.value;
-  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
-  for (const type of value) {
-    types[type.name] = (type.states ?? []).map((s) => s.name);
-    for (const s of type.states ?? []) {
-      if (!states.has(s.name)) states.set(s.name, { id: s.name, name: s.name, category: s.category, color: CATEGORY_COLORS[s.category] ?? "muted" });
-    }
-  }
-  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
-  return { states: [...states.values()].sort((a, b) => order(a) - order(b)), types };
-}
-
-const wiqlText = (value) => `'${value.replace(/'/g, "''")}'`;
-
-export function azureQueryArgs(view, hidden) {
-  const names = [...hidden];
-  const without = names.length ? ` AND [${SYSTEM}State] NOT IN (${names.map(wiqlText).join(", ")})` : "";
-  const wiql = `SELECT ${FIELDS} FROM WorkItems WHERE (${view.where})${without} ORDER BY [${SYSTEM}ChangedDate] DESC`;
-  return ["boards", "query", "--wiql", wiql, "-o", "json", ...azScope(view)];
-}
-
-// The web page of a work item from its API url and project:
-// https://dev.azure.com/<org>[/<project id>]/_apis/wit/workItems/<id>
-// → https://dev.azure.com/<org>/<project>/_workitems/edit/<id>.
-export function azureWebUrl(apiUrl, project, id) {
-  if (!apiUrl || !apiUrl.includes("/_apis/")) return null;
-  const base = apiUrl.split("/_apis/")[0].replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "");
-  return `${base}/${encodeURIComponent(project)}/_workitems/edit/${id}`;
-}
-
-const personName = (who) => (typeof who === "string" ? who.replace(/\s*<[^>]*>$/, "") : who?.displayName ?? null);
-
-// `az boards query` output → a board whose columns are the states of the work
-// item types it found, in category order; without work items it has none. az
-// prints nothing at all when nothing matches. meta.types holds each type's
-// states, the columns its cards may go to; meta.states all the types' states.
-export function parseAzureBoard(stdout, types, hidden) {
-  const items = String(stdout ?? "").trim() ? JSON.parse(stdout) : [];
-  const cards = items.map((item) => {
-    const f = item.fields ?? {};
-    const project = field(f, "TeamProject") ?? "";
-    const id = field(f, "Id") ?? item.id;
-    return {
-      key: `az-${id}`,
-      source: "azure",
-      kind: "workitem",
-      number: id,
-      repo: project,
-      repoShort: project,
-      title: field(f, "Title") ?? "",
-      url: azureWebUrl(item.url, project, id),
-      labels: String(field(f, "Tags") ?? "").split(";").map((s) => s.trim()).filter(Boolean),
-      assignees: [personName(field(f, "AssignedTo"))].filter(Boolean),
-      type: field(f, "WorkItemType") ?? null,
-      parent: null,
-      sub: null,
-      branch: null,
-      column: field(f, "State") ?? "",
-    };
-  });
-  const present = new Set(cards.map((c) => c.type));
-  const wanted = new Set(Object.entries(types.types).filter(([t]) => present.has(t)).flatMap(([, s]) => s));
-  const columns = types.states
-    .filter((s) => wanted.has(s.name))
-    .map((s) => ({ ...s, hidden: hidden.has(s.name), count: hidden.has(s.name) ? null : 0, target: true, cards: [] }));
-  const byName = new Map(columns.map((c) => [c.name, c]));
-  for (const card of cards) {
-    let col = byName.get(card.column);
-    if (!col) {
-      col = { id: card.column, name: card.column, category: null, color: "muted", hidden: false, count: 0, target: true, cards: [] };
-      columns.push(col);
-      byName.set(col.name, col);
-    }
-    col.cards.push(card);
-    if (!col.hidden) col.count++;
-  }
-  return { kind: "board", meta: { types: types.types, states: types.states }, columns, total: cards.length, limited: false };
-}
-
-export function azureMoveArgs(view, card, column) {
-  return ["boards", "work-item", "update", "--id", String(card.number), "--state", column.name, "-o", "json", ...azScope(view, false)];
-}
-
-export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…";
-// az's words for a request that may have reached Azure but got no clear
-// answer: msrest's "Error occurred in request., <requests exception>: …"
-// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
-const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
-// Azure's answers that it failed itself: the Azure DevOps client's
-// "Operation returned a 5xx status code.", TF400898 (an internal error), and
-// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
-// error responses"), which also names "Max retries" and is tested first.
-const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
-// ERROR: answers that are a refusal: rule errors (TF401320), something that
-// does not exist, az's own argument errors, and 4xx status lines.
-const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
-
-// What went wrong with an az call that ran, from its ERROR: line (WARNING:
-// lines are left out; without an ERROR: line, from all it printed). Missing
-// sign-in or extension make the view unavailable rather than an error. With
-// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
-// sign-in, extension and project answers below; anything else (a request
-// without a clear answer, a server error, az's own crash or interrupt, a
-// failure without an ERROR: line) leaves open whether the change landed.
-export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
-  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const errorLine = lines.find((l) => /^ERROR:/.test(l));
-  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
-  const az = on ? `az auf ${on}` : "az";
-  // A crash's traceback may hold any words; az's own line says what failed.
-  const subject = errorLine ? said : lines.join("\n");
-  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
-  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
-  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
-    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
-  }
-  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
-    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
-  }
-  if (/^--project must be specified/.test(said)) return new BoardError(AZ_NO_PROJECT);
-  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
-  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
 // ==== src/kinds/board.js ====
@@ -451,11 +358,10 @@ export function readStoredHidden(value) {
   return isObject(value) && textList(value.hide) && textList(value.show) ? { hide: [...value.hide], show: [...value.show] } : null;
 }
 
-// The hidden columns: the view's hide (and on Azure the columns of a category
-// in hideCategories), plus what the person hid, minus what they showed.
-export function hiddenColumns(view, stored, columns = []) {
+// The hidden columns: the view's hide, plus what the person hid, minus what
+// they showed.
+export function hiddenColumns(view, stored) {
   const hidden = new Set(view.hide);
-  for (const c of columns) if (c.category && view.hideCategories.includes(c.category)) hidden.add(c.name);
   const own = readStoredHidden(stored);
   for (const name of own?.hide ?? []) hidden.add(name);
   for (const name of own?.show ?? []) hidden.delete(name);
@@ -465,22 +371,20 @@ export function hiddenColumns(view, stored, columns = []) {
 // The stored toggles after hiding or showing a column: only what differs from
 // the view's defaults, so a later edit to hide takes effect. A column that
 // takes no drops ("Ohne Status") cannot be hidden: unchanged.
-export function toggleHidden(view, stored, column, columns) {
+export function toggleHidden(view, stored, column) {
   if (!column?.target) return stored;
   const own = readStoredHidden(stored) ?? { hide: [], show: [] };
-  const byDefault = hiddenColumns(view, null, columns).has(column.name);
-  const hideNow = !hiddenColumns(view, own, columns).has(column.name);
+  const byDefault = hiddenColumns(view, null).has(column.name);
+  const hideNow = !hiddenColumns(view, own).has(column.name);
   const next = { hide: own.hide.filter((n) => n !== column.name), show: own.show.filter((n) => n !== column.name) };
   if (hideNow !== byDefault) (hideNow ? next.hide : next.show).push(column.name);
   return next;
 }
 
-// Names in a view's hide that match none of `columns` (on Azure: every state
-// of the project's work item types, shown or not), and names in
-// hideCategories that are no Azure state category.
+// Names in a view's hide that match none of `columns`.
 export function unknownHidden(view, columns) {
   const names = new Set(columns.map((c) => c.name));
-  return [...view.hide.filter((n) => !names.has(n)), ...view.hideCategories.filter((c) => !CATEGORIES.includes(c))];
+  return view.hide.filter((n) => !names.has(n));
 }
 
 const cloneBoard = (board) => ({ ...board, columns: board.columns.map((c) => ({ ...c, cards: [...c.cards] })) });
@@ -616,7 +520,7 @@ const TIMED_OUT = /took longer than [\d.]+ s( on .+)? and was stopped|time(d)?[ 
 const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
 
 // A program that is not there, with a note on how that was found out. Only a
-// missing az makes its view unavailable.
+// missing az is marked unavailable (BoardError).
 const notInstalled = (tool, on, note = "") =>
   new BoardError(`${toolOn(tool, on)} ist nicht installiert${note ? ` (${note})` : ""}`, { unavailable: tool === "az" });
 
@@ -1176,11 +1080,10 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
 
 // ==== src/sources/index.js ====
 
-// The sources as the Board uses them: one run of a program, gh and az by
-// the paths found, and per source loading a view and writing a move.
+// The sources as the Board uses them: one run of a program, gh by the path
+// found, and per source loading a view and writing a move.
 
 const GH_TIMEOUT = 30000;
-const AZ_TIMEOUT = 60000;
 
 // One run of a program: its result, or a BoardError when it could not run.
 // With `paths` (toolPaths) it runs by what that finds. `write` is for calls
@@ -1196,58 +1099,27 @@ export async function call(tool, args, on, timeout, { write = false, paths = nul
 
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
-async function az(paths, view, args, options = {}) {
-  const r = await call("az", args, view.on, AZ_TIMEOUT, { ...options, paths });
-  if (r.code !== 0) throw azFailure(r, view.on, options);
-  return r.stdout;
-}
-
-// What differs between GitHub and Azure, one set per Board: loading a view
-// (`hiddenFor(view, columns)` gives its hidden columns), writing a move, the
-// sidebar's tag, the name of the site `o` opens, whether `r` and opening the
-// board try its views while not shown (`probe`), and what `r` forgets
-// (`reset`). Azure keeps each view's work item types (parseAzureTypes) until
-// then. gh and az run by the paths `paths` (toolPaths) finds.
+// What a source does for the Board, one set per Board: loading a view
+// (`hiddenFor(view)` gives its hidden columns), writing a move, the
+// sidebar's tag, the name of the site `o` opens, and what `r` forgets
+// (`reset`). gh runs by the path `paths` (toolPaths) finds.
 export function makeSources(paths) {
-  let azureTypes = {};
   return {
     github: {
       tag: (view) => (view.layout === "list" ? "PR" : "GH"),
       site: "GitHub",
-      probe: false,
       reset() {},
       async load(view, hiddenFor) {
         if (view.layout === "list") {
           const { json, warnings, errors } = await gh(paths, githubListArgs(view));
           return { data: parseGithubList(json, view, errors), warnings };
         }
-        const hidden = hiddenFor(view, []);
+        const hidden = hiddenFor(view);
         const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden));
         return { data: parseGithubBoard(json, view, hidden, errors), warnings };
       },
       async move(view, data, card, column) {
         checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
-      },
-    },
-    azure: {
-      tag: () => "AZ",
-      site: "Azure",
-      probe: true,
-      reset() {
-        azureTypes = {};
-      },
-      async load(view, hiddenFor) {
-        if (!azureTypes[view.id]) {
-          const project = view.project ?? parseAzureDefaults(await az(paths, view, azureDefaultsArgs())).project;
-          if (!project) throw new BoardError(AZ_NO_PROJECT);
-          azureTypes[view.id] = parseAzureTypes(await az(paths, view, azureTypesArgs(view, project)));
-        }
-        const types = azureTypes[view.id];
-        const hidden = hiddenFor(view, types.states);
-        return { data: parseAzureBoard(await az(paths, view, azureQueryArgs(view, hidden)), types, hidden), warnings: [] };
-      },
-      async move(view, _data, card, column) {
-        await az(paths, view, azureMoveArgs(view, card, column), { write: true });
       },
     },
   };
@@ -1293,6 +1165,72 @@ export function boardShown() {
 export function report(e) {
   if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
   return errorText(e);
+}
+
+// ==== src/sources/azure.js ====
+
+// Azure DevOps: work item types and their states, and what az's failures
+// mean. What the Azure views read and write comes with each view; these
+// stay for them.
+
+// Theme colors and column order for Azure's state categories.
+export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
+const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
+
+// The work item types' answer → { states: [{ id, name, category, color }] in
+// category order, types: { [type]: [state names] } }.
+export function parseAzureTypes(stdout) {
+  const types = {};
+  const states = new Map();
+  const value = JSON.parse(stdout)?.value;
+  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
+  for (const type of value) {
+    types[type.name] = (type.states ?? []).map((s) => s.name);
+    for (const s of type.states ?? []) {
+      if (!states.has(s.name)) states.set(s.name, { id: s.name, name: s.name, category: s.category, color: CATEGORY_COLORS[s.category] ?? "muted" });
+    }
+  }
+  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
+  return { states: [...states.values()].sort((a, b) => order(a) - order(b)), types };
+}
+
+// az's words for a request that may have reached Azure but got no clear
+// answer: msrest's "Error occurred in request., <requests exception>: …"
+// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
+const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
+// Azure's answers that it failed itself: the Azure DevOps client's
+// "Operation returned a 5xx status code.", TF400898 (an internal error), and
+// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
+// error responses"), which also names "Max retries" and is tested first.
+const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
+// ERROR: answers that are a refusal: rule errors (TF401320), something that
+// does not exist, az's own argument errors, and 4xx status lines.
+const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+
+// What went wrong with an az call that ran, from its ERROR: line (WARNING:
+// lines are left out; without an ERROR: line, from all it printed). Missing
+// sign-in or extension are marked unavailable (BoardError). With
+// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
+// sign-in, extension and project answers below; anything else (a request
+// without a clear answer, a server error, az's own crash or interrupt, a
+// failure without an ERROR: line) leaves open whether the change landed.
+export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
+  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const errorLine = lines.find((l) => /^ERROR:/.test(l));
+  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const az = on ? `az auf ${on}` : "az";
+  // A crash's traceback may hold any words; az's own line says what failed.
+  const subject = errorLine ? said : lines.join("\n");
+  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
+  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
+  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
+    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
+  }
+  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
+    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
+  }
+  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
+  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
 // ==== src/main.js ====
@@ -1363,8 +1301,7 @@ export default class Board extends View {
   // ---- data ----
 
   // A view's state: data and error, loading (again: one more refresh after
-  // this one), at (last success) and tried (last start), unavailable (why the
-  // view is not listed), warnings, moves (laid over refreshes, see
+  // this one), at (last success) and tried (last start), warnings, moves (laid over refreshes, see
   // pendingMoves), pending (card keys being written), unclear ({ key, label,
   // to, at } of writes whose outcome is still open; see settleUnclear),
   // stored/hidden (the
@@ -1372,14 +1309,14 @@ export default class Board extends View {
   // the first data) and detail.
   state(id) {
     this.views[id] ??= {
-      data: null, error: null, loading: false, again: false, at: 0, tried: 0, unavailable: null, warnings: [], moves: [], pending: {}, unclear: [],
+      data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, detail: false,
     };
     return this.views[id];
   }
 
   shownViews() {
-    return (this.config?.views ?? []).filter((v) => !this.state(v.id).unavailable);
+    return githubViews(this.config);
   }
 
   view() {
@@ -1387,9 +1324,9 @@ export default class Board extends View {
     return shown.find((v) => v.id === this.viewId) ?? shown[0] ?? null;
   }
 
-  hiddenFor(view, columns) {
+  hiddenFor(view) {
     const st = this.state(view.id);
-    st.hidden = hiddenColumns(view, st.stored, columns);
+    st.hidden = hiddenColumns(view, st.stored);
     return st.hidden;
   }
 
@@ -1408,14 +1345,12 @@ export default class Board extends View {
       if (!this.config) return;
       // Open outcomes of a view that is gone, or is now of another kind than
       // in the last valid views.json, are dropped.
-      const kinds = new Map(this.config.views.map((v) => [v.id, viewKind(v)]));
+      const kinds = new Map(githubViews(this.config).map((v) => [v.id, viewKind(v)]));
       // Before the first valid views.json no view has a state to compare.
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
       this.kinds = kinds;
-      for (const v of this.config.views) this.state(v.id).unavailable = null;
       const shown = this.view();
-      for (const v of this.config.views) if (this.sources[v.source].probe && v !== shown) this.refresh(v, cx);
       if (shown) this.refresh(shown, cx);
     });
   }
@@ -1430,18 +1365,16 @@ export default class Board extends View {
     const started = st.tried;
     cx.spawn(async (cx) => {
       try {
-        const { data, warnings } = await this.sources[view.source].load(view, (v, columns) => this.hiddenFor(v, columns));
+        const { data, warnings } = await this.sources[view.source].load(view, (v) => this.hiddenFor(v));
         st.moves = pendingMoves(st.moves, started);
         st.data = data.kind === "board" ? applyMoves(data, st.moves) : data;
         st.warnings = [...warnings, ...this.dataWarnings(view, data)];
         st.error = null;
-        st.unavailable = null;
         st.at = Date.now();
         this.keepSelection(view);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
-        if (e instanceof BoardError && e.unavailable) st.unavailable = e.message;
-        else st.error = report(e);
+        st.error = report(e);
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
           this.say(`${open.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
@@ -1449,12 +1382,8 @@ export default class Board extends View {
       } finally {
         st.loading = false;
         // The follow-up refresh reads the view from the config as it is now.
-        const fresh = this.config?.views.find((v) => v.id === view.id);
+        const fresh = githubViews(this.config).find((v) => v.id === view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
-        // A view that takes the place of one just found unavailable loads now.
-        const next = this.view();
-        const waiting = next && next !== view && !this.state(next.id).data && !this.state(next.id).loading;
-        if (st.unavailable && waiting) this.refresh(next, cx);
         cx.notify();
       }
     });
@@ -1465,7 +1394,7 @@ export default class Board extends View {
     if (data.kind === "list") {
       return data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`);
     }
-    return unknownHidden(view, data.meta?.states ?? data.columns).map((n) => `„${n}“ aus hide oder hideCategories passt zu keiner Spalte`);
+    return unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`);
   }
 
   // After a refresh that succeeded: where the cards of unclear writes are
@@ -1501,15 +1430,14 @@ export default class Board extends View {
     if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
   }
 
-  // Every TICK_MS while the board shows: the shown view and the unavailable
-  // ones once refreshMinutes have passed since they were last tried.
+  // Every TICK_MS while the board shows: the shown view once refreshMinutes
+  // have passed since it was last tried.
   tick(cx) {
     if (!this.config || !boardShown()) return;
     const every = this.config.refreshMinutes * 60000;
     const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
     if (shown && due(shown)) this.refresh(shown, cx);
-    for (const v of this.config.views) if (this.state(v.id).unavailable && due(v)) this.refresh(v, cx);
     cx.notify();
   }
 
@@ -1546,7 +1474,7 @@ export default class Board extends View {
         // kind (as the last valid views.json says; an invalid one in between
         // keeps it).
         const followed = this.kinds?.get(view.id) === viewKind(view);
-        const current = this.config?.views.find((v) => v.id === view.id);
+        const current = githubViews(this.config).find((v) => v.id === view.id);
         if (e instanceof BoardError && e.unclear) {
           if (followed) st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
           const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
@@ -1631,8 +1559,8 @@ export default class Board extends View {
     const st = this.state(view.id);
     if (st.data?.kind !== "board") return;
     if (!col.target) return this.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
-    st.stored = toggleHidden(view, st.stored, col, st.data.columns);
-    st.hidden = hiddenColumns(view, st.stored, st.data.columns);
+    st.stored = toggleHidden(view, st.stored, col);
+    st.hidden = hiddenColumns(view, st.stored);
     store.set(`hidden:${view.id}`, st.stored);
     st.data = withHidden(st.data, st.hidden);
     // What a column holds comes from the query, which leaves hidden ones out.
@@ -2044,7 +1972,6 @@ export default class Board extends View {
 
   sidebar(t, view) {
     const shown = this.shownViews();
-    const missing = (this.config?.views ?? []).filter((v) => this.state(v.id).unavailable);
     const count = (v) => {
       const d = this.state(v.id).data;
       if (!d) return "";
@@ -2081,8 +2008,7 @@ export default class Board extends View {
             .child(div().w(10).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : "")),
         ),
       )
-      .child(div().flex_1())
-      .children(missing.map((v) => div().px(8).py(4).text_size(11).text_color(t.dim).child(`${v.name}: ${this.state(v.id).unavailable}`)));
+      .child(div().flex_1());
   }
 
   main(t, mono, view, st) {

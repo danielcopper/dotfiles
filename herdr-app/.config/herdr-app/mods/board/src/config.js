@@ -10,7 +10,10 @@ const START_KEYS = Object.keys(START_DEFAULTS);
 const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
-const TOP_KEYS = ["refreshMinutes", "start", "repos", "views"];
+const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
+// What an old views.json, with its views at the top, is told.
+const OLD_SHAPE = "views.json hat noch die alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in " +
+  "„sources.github.views“, Azure in „sources.azure“ mit „org“ und „contexts“ (README, „herdr app“)";
 
 function startProblems(start, where) {
   if (start === undefined) return [];
@@ -27,10 +30,11 @@ function startProblems(start, where) {
 
 const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
 
-// Keys every view may have; each kind adds its own (VIEW_KINDS).
+// Keys every GitHub view may have; each kind adds its own (VIEW_KINDS).
+// "source" may stay from views.json's first form, as "github".
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
-// Per view kind ("<source> <layout>"): its own keys, what is wrong with them,
+// Per GitHub view kind ("github <layout>"): its own keys, what is wrong with them,
 // and its fields with their defaults filled in.
 const VIEW_KINDS = {
   "github board": {
@@ -57,18 +61,6 @@ const VIEW_KINDS = {
         : ["„sections“ braucht Einträge mit „name“ und „query“"],
     defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query })), limit: v.limit ?? 50 }),
   },
-  "azure board": {
-    keys: ["where", "hideCategories", "organization", "project", "on"],
-    problems: (v) => textProblems(v, ["where", "organization", "project", "on"]),
-    defaults: (v) => ({
-      where: v.where ?? "[System.AssignedTo] = @Me",
-      hideCategories: v.hideCategories ?? [],
-      organization: v.organization ?? null,
-      project: v.project ?? null,
-      on: v.on ?? null,
-      limit: v.limit ?? 100,
-    }),
-  },
 };
 
 // A view's kind, the key of VIEW_KINDS.
@@ -79,31 +71,107 @@ function viewProblems(v) {
   const out = [];
   if (!isText(v.id)) out.push("„id“ fehlt");
   if (!isText(v.name)) out.push("„name“ fehlt");
-  if (v.source !== "github" && v.source !== "azure") out.push("„source“ ist \"github\" oder \"azure\"");
+  if (v.source !== undefined && v.source !== "github") out.push("„source“ ist hier \"github\" oder fehlt");
   if (v.layout !== "board" && v.layout !== "list") out.push("„layout“ ist \"board\" oder \"list\"");
-  if (v.source === "azure" && v.layout === "list") out.push("Azure-Ansichten sind Boards (\"layout\": \"board\")");
-  const kind = VIEW_KINDS[viewKind(v)];
+  const kind = VIEW_KINDS[`github ${v.layout}`];
   if (!kind) return out;
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
-    else if (key === "on" && v.source === "github") out.push("„on“ gilt nur für Azure-Ansichten");
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
-  for (const key of ["hide", "hideCategories"]) {
-    if (v[key] !== undefined && !textList(v[key])) out.push(`„${key}“ muss eine Liste von Texten sein`);
-  }
+  if (v.hide !== undefined && !textList(v.hide)) out.push("„hide“ muss eine Liste von Texten sein");
   if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= 100)) out.push("„limit“ ist eine ganze Zahl von 1 bis 100");
   return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 
 function normalizeView(v) {
-  const common = { id: v.id, name: v.name, source: v.source, layout: v.layout, hide: v.hide ?? [], start: v.start ?? {}, hideCategories: [], on: null };
-  return { ...common, ...VIEW_KINDS[viewKind(v)].defaults(v) };
+  const common = { id: v.id, name: v.name, source: "github", layout: v.layout, hide: v.hide ?? [], start: v.start ?? {} };
+  return { ...common, ...VIEW_KINDS[`github ${v.layout}`].defaults(v) };
 }
 
-// views.json as text (null: there is none) → { config, errors }. A view with
-// problems is left out and each problem is listed; config is null only when
-// nothing usable is left.
+// sources.github → { github: { views } or null, errors }. A view with
+// problems is left out and each problem is listed.
+function readGithub(raw) {
+  if (!isObject(raw)) return { github: null, errors: ["„sources.github“ muss ein Objekt sein"] };
+  const errors = Object.keys(raw).filter((k) => k !== "views").map((k) => `„sources.github.${k}“ gibt es nicht`);
+  if (!Array.isArray(raw.views) || !raw.views.length) errors.push("„sources.github.views“ braucht mindestens eine Ansicht");
+  const views = [];
+  const ids = new Set();
+  (Array.isArray(raw.views) ? raw.views : []).forEach((v, i) => {
+    const where = `GitHub-Ansicht ${i + 1}${isText(v?.name) ? ` („${v.name}“)` : ""}`;
+    const problems = viewProblems(v);
+    if (!problems.length && ids.has(v.id)) problems.push(`„id“ ${v.id} gibt es schon`);
+    if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
+    ids.add(v.id);
+    views.push(normalizeView(v));
+  });
+  return { github: views.length ? { views } : null, errors };
+}
+
+// The views a team context may show, in the order of its switch.
+export const TEAM_VIEWS = ["sprint", "backlog"];
+const TEAM_VIEWS_TEXT = TEAM_VIEWS.map((v) => `"${v}"`).join(" und ");
+
+// What is wrong with an entry of sources.azure.contexts: { "team": {
+// project, team }, "views"?: [...] } or { "prs": { project } }.
+function contextProblems(c) {
+  if (!isObject(c)) return ["muss ein Objekt sein"];
+  const kinds = ["team", "prs"].filter((k) => c[k] !== undefined);
+  if (kinds.length !== 1) return ["braucht genau eins von „team“ und „prs“"];
+  const kind = kinds[0];
+  const keys = kind === "team" ? ["team", "views"] : ["prs"];
+  const fields = kind === "team" ? ["project", "team"] : ["project"];
+  const out = Object.keys(c).filter((k) => !keys.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  const inner = c[kind];
+  if (!isObject(inner) || !fields.every((f) => isText(inner[f]))) out.push(`„${kind}“ braucht ${fields.map((f) => `„${f}“`).join(" und ")} (Text)`);
+  else out.push(...Object.keys(inner).filter((k) => !fields.includes(k)).map((k) => `„${kind}.${k}“ gibt es nicht`));
+  const views = c.views;
+  if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEWS.includes(v)) && new Set(views).size === views.length)) {
+    out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
+  }
+  return out;
+}
+
+// A context as the board uses it: { id, source: "azure", kind: "team",
+// project, team, views } or { id, source: "azure", kind: "prs", project };
+// views in the switch's order.
+function normalizeContext(c) {
+  if (c.team) {
+    const views = c.views ?? TEAM_VIEWS;
+    const { project, team } = c.team;
+    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", project, team, views: TEAM_VIEWS.filter((v) => views.includes(v)) };
+  }
+  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", project: c.prs.project };
+}
+
+// sources.azure → { azure: { org, contexts } or null, errors }. Without a
+// valid org nothing of it is usable; a context with problems is left out and
+// each problem is listed.
+function readAzure(raw) {
+  if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
+  const errors = Object.keys(raw).filter((k) => k !== "org" && k !== "contexts").map((k) => `„sources.azure.${k}“ gibt es nicht`);
+  const org = isText(raw.org) && /^https:\/\/\S+$/.test(raw.org.trim()) ? raw.org.trim().replace(/\/+$/, "") : null;
+  if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
+  if (!Array.isArray(raw.contexts) || !raw.contexts.length) {
+    errors.push("„sources.azure.contexts“ braucht mindestens einen Eintrag: { \"team\": { \"project\", \"team\" } } oder { \"prs\": { \"project\" } }");
+  }
+  const contexts = [];
+  (Array.isArray(raw.contexts) ? raw.contexts : []).forEach((c, i) => {
+    const name = isObject(c?.team) && isText(c.team.team) ? c.team.team : isObject(c?.prs) && isText(c.prs.project) ? `PRs · ${c.prs.project}` : "";
+    const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
+    const problems = contextProblems(c);
+    const context = problems.length ? null : normalizeContext(c);
+    if (context && contexts.some((x) => x.id === context.id)) problems.push("gibt es schon");
+    if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
+    contexts.push(context);
+  });
+  return { azure: org && contexts.length ? { org, contexts } : null, errors };
+}
+
+// views.json as text (null: there is none) → { config, errors }: config is
+// { refreshMinutes, start, repos, azure: { org, contexts } or null, github:
+// { views } or null }. A view or context with problems is left out and each
+// problem is listed; config is null only when nothing usable is left.
 export function readConfig(text) {
   if (text === null || text === undefined) return { config: null, errors: [`${CONFIG_NAME}.json fehlt im Ordner der Mod`] };
   let raw;
@@ -117,7 +185,9 @@ export function readConfig(text) {
 
 export function validateConfig(raw) {
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
-  const errors = Object.keys(raw).filter((k) => !TOP_KEYS.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  const old = raw.views !== undefined && raw.sources === undefined;
+  const errors = old ? [OLD_SHAPE] : [];
+  errors.push(...Object.keys(raw).filter((k) => !TOP_KEYS.includes(k) && !(old && k === "views")).map((k) => `„${k}“ gibt es nicht`));
   let refreshMinutes = raw.refreshMinutes ?? 3;
   if (typeof refreshMinutes !== "number" || !(refreshMinutes >= 1)) {
     errors.push("„refreshMinutes“ ist eine Zahl ab 1");
@@ -132,20 +202,29 @@ export function validateConfig(raw) {
     if (problems.length) errors.push(...problems);
     else repos[name] = entry;
   }
-  const views = [];
-  if (!Array.isArray(raw.views) || !raw.views.length) errors.push("„views“ braucht mindestens eine Ansicht");
-  const ids = new Set();
-  (Array.isArray(raw.views) ? raw.views : []).forEach((v, i) => {
-    const where = `Ansicht ${i + 1}${isText(v?.name) ? ` („${v.name}“)` : ""}`;
-    const problems = viewProblems(v);
-    if (!problems.length && ids.has(v.id)) problems.push(`„id“ ${v.id} gibt es schon`);
-    if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    ids.add(v.id);
-    views.push(normalizeView(v));
-  });
+  let azure = null;
+  let github = null;
+  if (isObject(raw.sources)) {
+    const sources = raw.sources;
+    errors.push(...Object.keys(sources).filter((k) => k !== "azure" && k !== "github").map((k) => `„sources.${k}“ gibt es nicht (nur „azure“ und „github“)`));
+    if (sources.azure !== undefined) {
+      const read = readAzure(sources.azure);
+      azure = read.azure;
+      errors.push(...read.errors);
+    }
+    if (sources.github !== undefined) {
+      const read = readGithub(sources.github);
+      github = read.github;
+      errors.push(...read.errors);
+    }
+  } else if (!old) errors.push(raw.sources === undefined ? "„sources“ fehlt: „sources.azure“ oder „sources.github“" : "„sources“ muss ein Objekt sein");
+  if (!azure && !github && !errors.length) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
   const start = startErrors.length ? {} : raw.start ?? {};
-  return { config: views.length ? { refreshMinutes, start, repos, views } : null, errors };
+  return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }
+
+// The GitHub views of a config (none without one).
+export const githubViews = (config) => config?.github?.views ?? [];
 
 // The start for an item: the defaults, then views.json's start, then the
 // view's start, then the repo's entry in repos; a later one wins.

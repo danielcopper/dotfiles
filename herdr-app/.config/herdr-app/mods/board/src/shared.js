@@ -8,9 +8,9 @@ export const MOD = "board";
 export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
-  // unavailable: the view's tool is missing, not signed in or without its
-  // extension, so the view is left out of the list rather than shown with an
-  // error. unclear: a write may or may not have landed.
+  // unavailable: az is missing, not signed in or without its extension,
+  // something to set up rather than a failure of the view. unclear: a write
+  // may or may not have landed.
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;

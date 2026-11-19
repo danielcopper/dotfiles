@@ -3,7 +3,6 @@
 // navigated as one column).
 
 import { isObject, textList, itemKey } from "../shared.js";
-import { CATEGORIES } from "../sources/azure.js";
 
 // The stored toggles of a view, { hide: [names], show: [names] }, or null when
 // what was stored is not that.
@@ -11,11 +10,10 @@ export function readStoredHidden(value) {
   return isObject(value) && textList(value.hide) && textList(value.show) ? { hide: [...value.hide], show: [...value.show] } : null;
 }
 
-// The hidden columns: the view's hide (and on Azure the columns of a category
-// in hideCategories), plus what the person hid, minus what they showed.
-export function hiddenColumns(view, stored, columns = []) {
+// The hidden columns: the view's hide, plus what the person hid, minus what
+// they showed.
+export function hiddenColumns(view, stored) {
   const hidden = new Set(view.hide);
-  for (const c of columns) if (c.category && view.hideCategories.includes(c.category)) hidden.add(c.name);
   const own = readStoredHidden(stored);
   for (const name of own?.hide ?? []) hidden.add(name);
   for (const name of own?.show ?? []) hidden.delete(name);
@@ -25,22 +23,20 @@ export function hiddenColumns(view, stored, columns = []) {
 // The stored toggles after hiding or showing a column: only what differs from
 // the view's defaults, so a later edit to hide takes effect. A column that
 // takes no drops ("Ohne Status") cannot be hidden: unchanged.
-export function toggleHidden(view, stored, column, columns) {
+export function toggleHidden(view, stored, column) {
   if (!column?.target) return stored;
   const own = readStoredHidden(stored) ?? { hide: [], show: [] };
-  const byDefault = hiddenColumns(view, null, columns).has(column.name);
-  const hideNow = !hiddenColumns(view, own, columns).has(column.name);
+  const byDefault = hiddenColumns(view, null).has(column.name);
+  const hideNow = !hiddenColumns(view, own).has(column.name);
   const next = { hide: own.hide.filter((n) => n !== column.name), show: own.show.filter((n) => n !== column.name) };
   if (hideNow !== byDefault) (hideNow ? next.hide : next.show).push(column.name);
   return next;
 }
 
-// Names in a view's hide that match none of `columns` (on Azure: every state
-// of the project's work item types, shown or not), and names in
-// hideCategories that are no Azure state category.
+// Names in a view's hide that match none of `columns`.
 export function unknownHidden(view, columns) {
   const names = new Set(columns.map((c) => c.name));
-  return [...view.hide.filter((n) => !names.has(n)), ...view.hideCategories.filter((c) => !CATEGORIES.includes(c))];
+  return view.hide.filter((n) => !names.has(n));
 }
 
 const cloneBoard = (board) => ({ ...board, columns: board.columns.map((c) => ({ ...c, cards: [...c.cards] })) });
