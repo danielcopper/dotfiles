@@ -101,6 +101,7 @@ class Verdict(NamedTuple):
     fired: list
     cost: float
     note: str
+    model: str | None = None  # as the session's init event names it
 
 
 class Stop(Exception):
@@ -367,6 +368,7 @@ def grade(lines, case, every):
     cost = (result or {}).get("total_cost_usd") or 0.0
     if init is None:
         return Verdict(ERROR, fired, cost, "no init event")
+    model = init.get("model")
     missing = sorted(set(every) - set(init.get("skills") or []))
     foreign = [
         p.get("name") for p in init.get("plugins") or [] if p.get("path") != "builtin"
@@ -381,12 +383,12 @@ def grade(lines, case, every):
             f"MCP servers loaded: {[s.get('name') for s in init['mcp_servers']]}"
         )
     if leaks:
-        return Verdict(ISOLATION, fired, cost, "; ".join(leaks))
+        return Verdict(ISOLATION, fired, cost, "; ".join(leaks), model)
     if not assistant:
         reason = (
             (result or {}).get("result") or (result or {}).get("subtype") or "no reply"
         )
-        return Verdict(ERROR, fired, cost, str(reason)[:200])
+        return Verdict(ERROR, fired, cost, str(reason)[:200], model)
     fires, quiet = case.get("fires"), case.get("quiet", [])
     problems = []
     if fires == "none" and fired:
@@ -399,7 +401,7 @@ def grade(lines, case, every):
     note = "; ".join(problems)
     if result and result.get("subtype") not in (None, "success"):
         note = f"{note} [{result['subtype']}]" if note else f"[{result['subtype']}]"
-    return Verdict(FAIL if problems else PASS, fired, cost, note)
+    return Verdict(FAIL if problems else PASS, fired, cost, note, model)
 
 
 def run_case(case, every, binary, args):
@@ -515,9 +517,7 @@ def main():
                     (args.keep / f"{case['name']}-{n}.jsonl").write_text(
                         out, encoding="utf-8"
                     )
-                for line in out.splitlines()[:5]:
-                    if '"subtype":"init"' in line:
-                        resolved.add(json.loads(line).get("model"))
+                resolved.add(verdict.model)
                 if verdict.status == ISOLATION:
                     raise Stop(f"{case['name']}: isolation broken: {verdict.note}")
                 if verdict.status == PASS:
