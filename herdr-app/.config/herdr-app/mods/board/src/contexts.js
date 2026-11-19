@@ -4,6 +4,7 @@
 // requests; on GitHub each view of views.json is one.
 
 import { TEAM_VIEWS, githubViews } from "./config.js";
+import { viewDefaults } from "./kinds/index.js";
 
 // The sources in the toggle's order; with none remembered, the board shows
 // the first one there is.
@@ -44,10 +45,6 @@ export const pick = (list, id) => list.find((x) => x.id === id) ?? list[0] ?? nu
 // its first.
 export const teamView = (context, remembered) => (context.views.includes(remembered) ? remembered : context.views[0]);
 
-// What an Azure view carries for the shapes and the start, as a GitHub view
-// does: no columns hidden by default, no start of its own.
-const AZURE_VIEW_FIELDS = { hide: [], start: {} };
-
 // The view a context shows (a team: its view `teamViewId`): a GitHub view
 // as views.json has it, an Azure one { id, source: "azure", layout:
 // "sprint" | "backlog" | "prs", name, context, hide, start }. Its kind is
@@ -55,9 +52,9 @@ const AZURE_VIEW_FIELDS = { hide: [], start: {} };
 export function viewOf(context, teamViewId) {
   if (context.kind === "view") return context.view;
   if (context.kind === "team") {
-    return { id: `${context.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), context, ...AZURE_VIEW_FIELDS };
+    return { id: `${context.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), context, ...viewDefaults() };
   }
-  return { id: context.id, source: "azure", layout: "prs", name: context.name, context, ...AZURE_VIEW_FIELDS };
+  return { id: context.id, source: "azure", layout: "prs", name: context.name, context, ...viewDefaults() };
 }
 
 // Every view of a config: one per context, one per view of a team.

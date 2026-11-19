@@ -1,6 +1,10 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
-// shows, and an error's text for the UI.
+// shows, an error's text for the UI, and the pieces that the Board, its
+// shapes and its modals draw alike (a button, a layer for a dialog, a detail
+// section, a check's color).
 
+import { div } from "gpui-kit";
+import { v_flex } from "gpui-base";
 import { panes, spaces } from "herdr";
 import { MOD, BoardError, errorText } from "../shared.js";
 import { githubContextId } from "../contexts.js";
@@ -58,3 +62,45 @@ export function report(e) {
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
 export const shownOf = (shown, total) => (shown < total ? `${shown}/${total}` : String(total));
+
+// A button; `primary` is the solid one. A disabled one ignores clicks.
+export function button(t, id, label, primary, action, disabled = false) {
+  return div()
+    .id(id)
+    .px(12)
+    .py(7)
+    .rounded(6)
+    .text_size(12)
+    .cursor_pointer()
+    .opacity(disabled ? 0.5 : 1)
+    .bg(primary ? t.solid : t.raised)
+    .text_color(primary ? t.solid_foreground : t.foreground)
+    .when(primary, (el) => el.font_semibold())
+    .hover((s) => s.bg(primary ? t.accent : t.hover))
+    .on_click((_e, cx) => {
+      if (!disabled) action(cx);
+    })
+    .child(label);
+}
+
+// A layer over the whole board that swallows presses, with a panel on it.
+export function layer(t, id, panel) {
+  return div()
+    .id(id)
+    .absolute()
+    .inset_0()
+    .flex()
+    .items_center()
+    .justify_center()
+    .bg(tint(t.background, "b3"))
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
+    .child(panel);
+}
+
+// A section of the detail panel: a title over its rows.
+export const detailSection = (t, title, ...kids) =>
+  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+
+// The theme color of a check state.
+export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 })[state] ?? t.dim;

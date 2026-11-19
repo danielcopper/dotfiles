@@ -45,7 +45,8 @@ export function renderTemplate(template, vars) {
 }
 
 export function templateVars(item) {
-  const [owner, repo] = item.repo.includes("/") ? item.repo.split("/") : ["", item.repo];
+  const name = item.repo ?? "";
+  const [owner, repo] = name.includes("/") ? name.split("/") : ["", name];
   return { number: item.number ?? "", title: item.title, url: item.url ?? "", owner, repo, key: itemKey(item) ?? "" };
 }
 

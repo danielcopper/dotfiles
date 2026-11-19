@@ -2,6 +2,7 @@
 // an item.
 
 import { CONFIG_NAME, isObject, isText, textList } from "./shared.js";
+import { viewDefaults, viewKind } from "./kinds/index.js";
 
 export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
@@ -73,7 +74,7 @@ function viewProblems(v) {
   if (!isText(v.id)) out.push("„id“ fehlt");
   if (!isText(v.name)) out.push("„name“ fehlt");
   if (v.source !== undefined && v.source !== "github") out.push("„source“ ist hier \"github\" oder fehlt");
-  const kind = VIEW_KINDS[`github ${v.layout}`];
+  const kind = VIEW_KINDS[viewKind({ source: "github", layout: v.layout })];
   if (!kind) return [...out, `„layout“ ist ${GITHUB_LAYOUTS.map((l) => `"${l}"`).join(" oder ")}`];
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
@@ -85,8 +86,10 @@ function viewProblems(v) {
 }
 
 function normalizeView(v) {
-  const common = { id: v.id, name: v.name, source: "github", layout: v.layout, hide: v.hide ?? [], start: v.start ?? {} };
-  return { ...common, ...VIEW_KINDS[`github ${v.layout}`].defaults(v) };
+  const common = { ...viewDefaults(), id: v.id, name: v.name, source: "github", layout: v.layout };
+  if (v.hide !== undefined) common.hide = v.hide;
+  if (v.start !== undefined) common.start = v.start;
+  return { ...common, ...VIEW_KINDS[viewKind(common)].defaults(v) };
 }
 
 // sources.github → { github: { views } or null, errors }. A view with

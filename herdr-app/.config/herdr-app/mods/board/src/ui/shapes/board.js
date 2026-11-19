@@ -1,26 +1,32 @@
 // The board shape: a view's data as columns of cards, which a card moves
 // between (H/L, the status menu, a drag), a column hidden or shown (x). The
 // data: { shape: "board", meta, columns: [{ id, name, color, hidden, count,
-// target, cards }], total, limited, viewer } (parseGithubBoard). View fields
-// it reads: id, hide (the columns hidden by default; none when missing) and,
-// when the data is cut (limited), limit.
+// target, cards }], total, limited, viewer, limit } (parseGithubBoard). View
+// fields it reads: id, source, layout, hide (the columns hidden by default)
+// and, where the data does not name its own, limit.
 
 import { div } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
+import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { notify, spaces } from "herdr";
 import { BoardError, itemLabel } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hiddenColumns, moveCard, rollback, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
 import { viewKind } from "../../kinds/index.js";
 import { AGENT_STATUS, linkedSession } from "../../actions/start.js";
-import { report, shownOf, store } from "../helpers.js";
+import { button, report, shownOf, store } from "../helpers.js";
 
 // How many columns keep their own scroll position.
-export const SCROLLS = 24;
+const SCROLLS = 24;
+
+// The board shape's own state on a Board, made when first needed: one
+// scroll handle per column (SCROLLS, reused beyond).
+const boardState = (b) => (b.shapeState.board ??= { scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) });
 
 export const boardShape = {
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
-  scrollTo: (b, view, sel, row) => b.scrolls[sel.col % SCROLLS].scroll_to_item(row),
+  scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
+  // All items, whatever the filter: the cards of the shown columns.
+  items: (data) => data.columns.filter((c) => !c.hidden).flatMap((c) => c.cards),
   count(b, data) {
     const cols = shownColumns(data, b.filterText, b.mine).filter((c) => !c.hidden);
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
@@ -28,7 +34,7 @@ export const boardShape = {
   render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
   hints: [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
-  items: true,
+  loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
     if (!st.data) return false;
     const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
@@ -37,7 +43,7 @@ export const boardShape = {
       if (target) b.moveTo(view, st.sel?.key, target.id, cx);
       return true;
     }
-    if (k === "s") return b.openStatusMenu(view), true;
+    if (k === "s") return b.openStatusMenu(view, cx), true;
     if (k === "x") {
       const col = b.navColumns(view)[st.sel?.col];
       if (col) b.toggleColumn(view, col, cx);
@@ -52,6 +58,32 @@ export const boardShape = {
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
+  // The detail panel's rows of a card: its column as a pill, and Status s.
+  detailParts(b, t, view, item) {
+    const st = b.state(view.id);
+    const column = st.data ? findCard(st.data, item.key)?.column : null;
+    if (!column) return {};
+    const openStatus = (cx) => {
+      if (!b.modal) b.openStatusMenu(view, cx);
+    };
+    return {
+      chips: [
+        div()
+          .id("status-pill")
+          .px(10)
+          .py(2)
+          .rounded(12)
+          .text_size(12)
+          .font_semibold()
+          .cursor_pointer()
+          .bg(t[column.color] ?? t.muted)
+          .text_color(t.background)
+          .on_click((_e, cx) => openStatus(cx))
+          .child(`${column.name} ▾`),
+      ],
+      buttons: [button(t, "act-status", "Status s", false, openStatus)],
+    };
+  },
 };
 
 function drawBoard(b, t, mono, view, st) {
@@ -59,7 +91,7 @@ function drawBoard(b, t, mono, view, st) {
   const allSpaces = spaces();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const columnEl = (col, ci) => {
-    // Cards the filter or "nur meine" hides in b column.
+    // Cards the filter or "nur meine" hides in this column.
     const filtered = col.hidden ? 0 : col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
@@ -109,7 +141,7 @@ function drawBoard(b, t, mono, view, st) {
           .min_h(0)
           .gap(6)
           .overflow_y_scrollbar()
-          .track_scroll(b.scrolls[ci % SCROLLS])
+          .track_scroll(boardState(b).scrolls[ci % SCROLLS])
           .children(col.shown.map((card) => drawCard(b, t, mono, view, st, card, ci, allSpaces)))
           .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
@@ -120,7 +152,7 @@ function drawBoard(b, t, mono, view, st) {
     .child(h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl)))
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(t.ansi3)
-        .child(`Nur die ersten ${view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+        .child(`Nur die ersten ${st.data.limit ?? view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );
 }
 

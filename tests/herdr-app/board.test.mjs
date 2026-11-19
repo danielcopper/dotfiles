@@ -2068,7 +2068,7 @@ async function openStart(b, cx) {
 test("UI: Enter in the dialog opens the session in the checkout; Esc does nothing while it starts", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
-  assert.equal(b.messageInput.value(), "/work 3004");
+  assert.equal(b.modal.input.value(), "/work 3004");
   await press(b, cx, "tab");
   assert.equal(b.modal.field, "agent");
   await press(b, cx, "enter");
@@ -2091,7 +2091,7 @@ test("UI: Enter in the dialog opens the session in the checkout; Esc does nothin
 test("UI: a session that does not appear is warned about after the last check only", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
-  b.startAgent(cx);
+  board.startModal.start(b, cx);
   await settle();
   await host.answer("sh", ok("/home/me/src/tender\n"));
   const notes = host.notes.length;
@@ -2106,14 +2106,14 @@ test("UI: a session that does not appear is warned about after the last check on
 test("UI: a checkout that is missing, or no space for a tab, is said in the dialog, which stays", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
-  b.startAgent(cx);
+  board.startModal.start(b, cx);
   await settle();
   await host.answer("sh", { code: 3, stdout: "", stderr: "Kein Checkout unter /home/me/src/tender\n" });
   assert.equal(b.modal?.kind, "start");
   assert.equal(b.modal.error, "Kein Checkout unter /home/me/src/tender");
   assert.equal(b.modal.busy, null);
   assert.equal(host.runs.length, 0);
-  b.startAgent(cx);
+  board.startModal.start(b, cx);
   await settle();
   await host.answer("sh", ok(""));
   assert.equal(b.modal.error, "Checkout-Ordner nicht gelesen");
@@ -2550,7 +2550,7 @@ test("UI: a team with one view shows it without a switch; a config with one sour
   assert.deepEqual([b.source().id, b.teamViewOf(b.context())], ["azure", "backlog"]);
 });
 
-test("UI: an Azure view drawn as a board has what the board shape reads, and draws without an error", async () => {
+test("UI: an Azure view drawn as a board has what the board shape and the start read, and draws without an error", async () => {
   const { b } = await bootBoard({ stored: { source: "azure" } });
   const view = b.view();
   assert.deepEqual([view.hide, view.start], [[], {}]);
@@ -2571,22 +2571,36 @@ test("UI: switching a team's view loads the view now shown, where its source rea
   assert.equal(loads.length, 1, "not again while it is fresh");
 });
 
-test("UI: on a view without items Enter, o and the arrows stay herdr's", async () => {
+test("UI: on a shape without items (the placeholder) Enter, o and the arrows stay herdr's", async () => {
   const { b, cx } = await bootBoard({ stored: { source: "azure" } });
   for (const k of ["enter", "o", "j", "down"]) await press(b, cx, k);
   assert.equal(cx.stopped, 0, "none was taken");
   assert.equal(b.notice, null, "no „Dazu gibt es keine Seite“");
 });
 
-test("UI: Alt with [ or ] stays herdr's (alt-[ and alt-] are its tab keys); AltGr as Control+Alt is typed", async () => {
+// Key events as the board logged them in herdr 0.1.16 (gpui on Linux,
+// xdotool into an isolated window): a key herdr binds with Alt (alt-9,
+// alt-h, alt-[, alt-]) never arrived; an unbound one did, with Alt set.
+const LOGGED = {
+  altQ: { key: "q", key_char: "q", keystroke: "alt-q", modifiers: { shift: false, control: false, alt: true, platform: false, function: false } },
+  ctrlAlt9: { key: "9", key_char: "9", keystroke: "ctrl-alt-9", modifiers: { shift: false, control: true, alt: true, platform: false, function: false } },
+};
+
+test("UI: [ and ] are typed however AltGr comes (as Alt, or Control+Alt on Windows); Control alone, and a letter with Alt, stay herdr's", async () => {
   const { b, cx } = await openBoard();
+  b.key(LOGGED.altQ, cx);
+  await settle();
+  assert.deepEqual([b.source().id, cx.stopped], ["github", 0], "alt-q: neither q nor taken");
   await press(b, cx, "]", { modifiers: { alt: true } });
-  assert.deepEqual([b.context().id, cx.stopped], ["github:mine", 0]);
-  await press(b, cx, "]", { modifiers: { control: true, alt: true } });
-  assert.equal(b.context().id, "github:prs");
+  assert.equal(b.context().id, "github:prs", "AltGr reported as Alt");
+  await press(b, cx, "[", { modifiers: { ...LOGGED.ctrlAlt9.modifiers } });
+  assert.equal(b.context().id, "github:mine", "AltGr reported as Control+Alt");
+  const stopped = cx.stopped;
+  await press(b, cx, "]", { modifiers: { control: true } });
+  assert.deepEqual([b.context().id, cx.stopped], ["github:mine", stopped], "Control alone");
 });
 
-test("the GitHub tab ids and a team's switch hint have one home", () => {
+test("the GitHub tab id, a team's switch and its hint: githubContextId, hasViewSwitch, viewSwitchHint", () => {
   assert.equal(board.githubContextId("mine"), "github:mine");
   const [team] = board.contextsOf(sampleConfig(), "azure");
   assert.deepEqual([board.hasViewSwitch(team), board.viewSwitchHint(team)], [true, "Sprint/Backlog"]);
@@ -2683,6 +2697,38 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
 });
 
+test("a search of one's own is one with author, assignee or (user-)review-requested set to @me, not negated", () => {
+  const own = (q) => board.ownSearch(q);
+  for (const q of ["is:pr author:@me", "is:pr assignee:@me", "is:pr review-requested:@me archived:false", "user-review-requested:@me is:open", "is:pr Author:@me"]) {
+    assert.equal(own(q), true, q);
+  }
+  for (const q of ["is:pr -author:@me", "is:pr NOT author:@me", "is:pr not review-requested:@me", "involves:@me", "mentions:@me", "commenter:@me",
+    "reviewed-by:@me", "user:@me", "is:pr author:someone", "is:pr", "", "author:@meow"]) {
+    assert.equal(own(q), false, q);
+  }
+  assert.equal(own("NOT author:@me assignee:@me"), true, "one positive qualifier is enough");
+});
+
+test("a list section counts the rows it holds: each pull request once; GitHub's cut carries how many it sent", () => {
+  const list = board.parseGithubList(json("github-list.json"), listView());
+  const mine = list.sections[1];
+  assert.deepEqual([mine.count, mine.fetched, mine.rows.length, mine.limited], [4, 4, 3, false], "one pull request is the first section's");
+  assert.equal(board.sectionCount(mine, 3), "3");
+  assert.equal(board.sectionCount(mine, 1), "1/3");
+  const cut = { ...mine, count: 120, limited: true };
+  assert.deepEqual([board.sectionCount(cut, 3), board.sectionCount(cut, 2)], ["3 · erste 4 von 120", "2/3 · erste 4 von 120"]);
+});
+
+test("a board pull request asking only for one's review counts as one's own; an empty review request node names no one", () => {
+  const data = json("github-board-cases.json");
+  const node = data.data.repositoryOwner.projectV2.items.nodes.find((n) => n.id === "PVTI_case1");
+  node.content.assignees.nodes = [];
+  node.content.author = { login: "someone-else" };
+  node.content.reviewRequests.nodes = [null, { requestedReviewer: { login: "sample-user" } }];
+  const pr = board.findCard(board.parseGithubBoard(data, githubView(), HIDDEN), "PVTI_case1").card;
+  assert.deepEqual([pr.assignees, pr.reviewers, board.isMine(pr, "sample-user")], [[], ["sample-user"], true]);
+});
+
 test("„nur meine“ counts a search of one's own whole, and a pull request on a board that asks one's review", () => {
   const list = board.parseGithubList(json("github-list.json"), listView());
   assert.deepEqual(list.sections.map((s) => s.rows.map((r) => r.ownByQuery)), [[true], [true, true, true]], "review-requested:@me, author:@me");
@@ -2721,7 +2767,7 @@ test("UI: what the filter or „nur meine“ hides is said: in the column, its c
   assert.deepEqual(column("Ready").slice(1, 2), ["1/3"]);
 });
 
-test("UI: without the viewer's login, „nur meine“ on a list still shows a search of one's own, and says nothing is missing", async () => {
+test("UI: without the viewer's login, „nur meine“ on a list still shows a search of one's own, and does not say it shows nothing", async () => {
   const data = json("github-list.json");
   delete data.data.viewer;
   const { b, cx, host } = await openBoard();
@@ -2732,6 +2778,102 @@ test("UI: without the viewer's login, „nur meine“ on a list still shows a se
   assert.equal(texts(b.render()).some((s) => s.startsWith("„nur meine“ zeigt nichts")), false);
 });
 
+test("UI: without the viewer's login, „nur meine“ says what it cannot tell whenever it hides an item for that, but not when the filter empties the view", async () => {
+  const data = json("github-list.json");
+  delete data.data.viewer;
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[1].sections[1] = { name: "Mine", query: "is:pr repo:example/tender" };
+  const { b, cx, host } = await openBoard({ config: JSON.stringify(config) });
+  await press(b, cx, "2");
+  await host.answer("gh", ok(JSON.stringify(data)));
+  await press(b, cx, "m");
+  const warning = () => texts(b.render()).filter((s) => s.startsWith("„nur meine“"));
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820], "only the search of one's own");
+  assert.deepEqual(warning(), ["„nur meine“ zeigt nur Treffer eigener Suchen: GitHub hat nicht gesagt, als wer gh angemeldet ist"]);
+  b.filterText = "release";
+  assert.deepEqual(warning(), ["„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist"], "the filter leaves only rows it cannot tell");
+  b.filterText = "summary";
+  assert.deepEqual(warning(), [], "the filter leaves only the search of one's own");
+  b.filterText = "no such words";
+  assert.deepEqual(warning(), [], "the filter alone empties the view");
+});
+
+test("UI: Enter and o with nothing selected stay herdr's: while loading, on an empty view", async () => {
+  const { b, cx, host } = await bootBoard();
+  for (const k of ["enter", "o"]) await press(b, cx, k);
+  assert.deepEqual([cx.stopped, b.notice], [0, null], "loading");
+  await host.answer("gh", ok(JSON.stringify({ data: { viewer: { login: "sample-user" }, repositoryOwner: { projectV2: { ...json("github-board.json").data.repositoryOwner.projectV2, items: { totalCount: 0, pageInfo: { hasNextPage: false }, nodes: [] } } } } })));
+  assert.equal(b.selected(b.view()), null);
+  for (const k of ["enter", "o"]) await press(b, cx, k);
+  assert.deepEqual([cx.stopped, b.notice], [0, null], "empty");
+});
+
+test("UI: a column operation on a view without columns is said; a status menu of a view that changed kind closes on r", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  const list = b.view();
+  b.moveTo(list, "x", "y", cx);
+  assert.equal(b.notice.text, "Die Karte oder Spalte gibt es nicht mehr");
+  b.toggleColumn(list, { name: "x" }, cx);
+  assert.equal(b.notice.text, "Diese Ansicht hat keine Spalten");
+  b.openStatusMenu(list, cx);
+  assert.deepEqual([b.notice.text, b.modal], ["Hier gibt es keinen Status zu ändern", null]);
+  await press(b, cx, "1");
+  await press(b, cx, "s");
+  assert.equal(b.modal?.kind, "status");
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[0] = { ...config.sources.github.views[1], id: "mine", name: "Mine" };
+  host.config = JSON.stringify(config);
+  b.reload(cx);
+  await settle();
+  assert.equal(b.modal, null, "closed: its view is a list now");
+});
+
+test("UI: an Azure-like item without a repo has its key, its parent's label, and a detail that draws", async () => {
+  const item = { ...azureItem(), parent: 7 };
+  delete item.repo;
+  assert.deepEqual(board.templateVars(item), { number: 101, title: item.title, url: "", owner: "", repo: "", key: "AB#101" });
+  assert.deepEqual([board.parentLabel(item), board.itemKey({ ...item, kind: "pr" }), board.parentLabel({ ...githubBoard().columns[2].cards[0], parent: 3002 })],
+    ["AB#7", "!101", "tender#3002"]);
+  const { b } = await bootBoard({ stored: { source: "azure" } });
+  const view = b.view();
+  const data = typedBoard();
+  data.columns[2].cards[0] = { ...data.columns[2].cards[0], parent: 7, url: null };
+  delete data.columns[2].cards[0].repo;
+  b.state(view.id).data = data;
+  b.state(view.id).sel = { col: 2, key: "w101" };
+  b.state(view.id).detail = true;
+  const shown = texts(b.render());
+  assert.ok(shown.includes("Teil von AB#7"), "the parent's label");
+  assert.ok(shown.some((s) => s.startsWith("In Progress")), "the board's status pill");
+  assert.ok(byId(b.render(), "act-status"), "and its Status button");
+});
+
+test("UI: a prs row draws without checks or author; a draft mark is its own cell; the board cut names its limit from the data", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "2");
+  const data = json("github-list.json");
+  await host.answer("gh", ok(JSON.stringify(data)));
+  const st = b.views.prs;
+  const row = st.data.sections[0].rows[0];
+  st.data.sections[0].rows[0] = { ...row, checks: null, author: null, draft: true };
+  const cells = byId(b.render(), `row-${row.key}`).kids.map((k) => texts(k).join(""));
+  assert.equal(cells.length, 4, "label, title, draft mark, age");
+  assert.deepEqual(cells.slice(0, 3), ["tender#2820", "build(ui): draw the summary card", "Entwurf"]);
+  assert.equal(texts(b.render()).some((s) => s.includes("undefined")), false);
+  assert.equal(board.parseGithubBoard(json("github-board.json"), { ...githubView(), limit: 3 }, HIDDEN).limit, 3, "the cut names the data's own limit");
+});
+
+test("every view gets its own default fields; the Board imports no shape module but the index", () => {
+  const [a, b2] = [board.viewDefaults(), board.viewDefaults()];
+  assert.notEqual(a.hide, b2.hide);
+  const [team] = board.contextsOf(sampleConfig(), "azure");
+  assert.notEqual(board.viewOf(team, "sprint").hide, board.viewOf(team, "backlog").hide);
+  const main = readFileSync(join(modDir, "src/main.js"), "utf8");
+  assert.deepEqual(main.match(/^import .* from "\.\/ui\/shapes\/[^"]+";$/gm), ['import { SHAPES } from "./ui/shapes/index.js";']);
+});
+
 test("UI: a capped list section keeps its true total while the filter or „nur meine“ thins it", async () => {
   const data = json("github-list.json");
   data.data.s1.issueCount = 120;
@@ -2740,9 +2882,9 @@ test("UI: a capped list section keeps its true total while the filter or „nur 
   const { b, cx, host } = await openBoard({ config: JSON.stringify(config) });
   await press(b, cx, "2");
   await host.answer("gh", ok(JSON.stringify(data)));
-  assert.ok(texts(b.render()).includes("MINE · 120 (erste 3)"));
+  assert.ok(texts(b.render()).includes("MINE · 3 · erste 4 von 120"), "held (each pull request once), and sent of found");
   await press(b, cx, "m");
-  assert.ok(texts(b.render()).includes("MINE · 2/3 · erste 3 von 120"), "shown of held, and held of found");
+  assert.ok(texts(b.render()).includes("MINE · 2/3 · erste 4 von 120"), "shown of held, and sent of found");
 });
 
 test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {

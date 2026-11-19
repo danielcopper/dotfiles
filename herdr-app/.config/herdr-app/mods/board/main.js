@@ -89,14 +89,20 @@ export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
 
-// An item's key: `<repo>#<number>` on GitHub, `AB#<id>` on Azure (Azure
-// Boards' own way to name a work item), null for a draft.
+// An item's key: `<repo>#<number>` on GitHub; on Azure `AB#<id>` for a work
+// item (Azure Boards' own way to name one) and `!<id>` for a pull request
+// (Azure Repos' own); null for a draft.
 export function itemKey(item) {
   if (item.number === null || item.number === undefined) return null;
-  return item.source === "azure" ? `AB#${item.number}` : `${item.repoShort}#${item.number}`;
+  if (item.source === "azure") return item.kind === "pr" ? `!${item.number}` : `AB#${item.number}`;
+  return `${item.repoShort}#${item.number}`;
 }
 
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
+
+// The label of an item's parent, an issue or work item of the same source
+// and repo: "tender#3002", "AB#7".
+export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
 
 export function updatedLabel(at, now) {
   if (!at) return "";
@@ -117,6 +123,34 @@ export function ageLabel(iso, now) {
   if (days < 7) return `vor ${days} Tagen`;
   return `${then.getDate()}.${then.getMonth() + 1}.`;
 }
+
+// ==== src/kinds/index.js ====
+
+// View kinds, "<source> <layout>" (viewKind), and what the board shows for
+// a view of each: `shape`, how its data is drawn and walked (ui/shapes/),
+// or for a view whose source reads nothing for it yet the `text` it shows.
+// A new view kind is: an entry here; its loading in its source's module
+// (make<Source>().views[layout]); for a GitHub view, what views.json may say
+// about it (VIEW_KINDS in config.js); for an Azure team view, its entry in
+// TEAM_VIEWS (config.js); and for a new way to draw, a shape.
+
+// A view's kind: the key of KINDS (and of VIEW_KINDS for a GitHub view).
+export const viewKind = (v) => `${v.source} ${v.layout}`;
+
+// What every view carries with its defaults, fresh for each view: the
+// columns hidden by default (none) and its own start settings (none).
+export const viewDefaults = () => ({ hide: [], start: {} });
+
+export const KINDS = {
+  "github board": { shape: "board" },
+  "github list": { shape: "prs" },
+  "azure sprint": { text: "Sprint-Ansicht folgt" },
+  "azure backlog": { text: "Backlog folgt" },
+  "azure prs": { text: "PR-Ansicht folgt" },
+};
+
+// A view's entry in KINDS (null for a kind it does not have).
+export const kindOf = (view) => KINDS[viewKind(view)] ?? null;
 
 // ==== src/config.js ====
 
@@ -193,7 +227,7 @@ function viewProblems(v) {
   if (!isText(v.id)) out.push("„id“ fehlt");
   if (!isText(v.name)) out.push("„name“ fehlt");
   if (v.source !== undefined && v.source !== "github") out.push("„source“ ist hier \"github\" oder fehlt");
-  const kind = VIEW_KINDS[`github ${v.layout}`];
+  const kind = VIEW_KINDS[viewKind({ source: "github", layout: v.layout })];
   if (!kind) return [...out, `„layout“ ist ${GITHUB_LAYOUTS.map((l) => `"${l}"`).join(" oder ")}`];
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
@@ -205,8 +239,10 @@ function viewProblems(v) {
 }
 
 function normalizeView(v) {
-  const common = { id: v.id, name: v.name, source: "github", layout: v.layout, hide: v.hide ?? [], start: v.start ?? {} };
-  return { ...common, ...VIEW_KINDS[`github ${v.layout}`].defaults(v) };
+  const common = { ...viewDefaults(), id: v.id, name: v.name, source: "github", layout: v.layout };
+  if (v.hide !== undefined) common.hide = v.hide;
+  if (v.start !== undefined) common.start = v.start;
+  return { ...common, ...VIEW_KINDS[viewKind(common)].defaults(v) };
 }
 
 // sources.github → { github: { views } or null, errors }. A view with
@@ -448,7 +484,7 @@ export function readStoredHidden(value) {
 // The hidden columns: the view's hide, plus what the person hid, minus what
 // they showed.
 export function hiddenColumns(view, stored) {
-  const hidden = new Set(view.hide ?? []);
+  const hidden = new Set(view.hide);
   const own = readStoredHidden(stored);
   for (const name of own?.hide ?? []) hidden.add(name);
   for (const name of own?.show ?? []) hidden.delete(name);
@@ -471,7 +507,7 @@ export function toggleHidden(view, stored, column) {
 // Names in a view's hide that match none of `columns`.
 export function unknownHidden(view, columns) {
   const names = new Set(columns.map((c) => c.name));
-  return (view.hide ?? []).filter((n) => !names.has(n));
+  return view.hide.filter((n) => !names.has(n));
 }
 
 const cloneBoard = (board) => ({ ...board, columns: board.columns.map((c) => ({ ...c, cards: [...c.cards] })) });
@@ -554,29 +590,6 @@ export function shownColumns(board, filter, mine = false) {
   return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }
 
-// ==== src/kinds/index.js ====
-
-// View kinds, "<source> <layout>" (viewKind), and what the board shows for
-// a view of each: `shape`, how its data is drawn and walked (ui/shapes/),
-// or for a view whose source reads nothing for it yet the `text` it shows.
-// A new view kind is: an entry here; its loading in its source's module
-// (make<Source>().views[layout]); for a GitHub view, what views.json may say
-// about it (VIEW_KINDS in config.js); and for a new way to draw, a shape.
-
-// A view's kind: the key of KINDS (and of VIEW_KINDS for a GitHub view).
-export const viewKind = (v) => `${v.source} ${v.layout}`;
-
-export const KINDS = {
-  "github board": { shape: "board" },
-  "github list": { shape: "prs" },
-  "azure sprint": { text: "Sprint-Ansicht folgt" },
-  "azure backlog": { text: "Backlog folgt" },
-  "azure prs": { text: "PR-Ansicht folgt" },
-};
-
-// A view's entry in KINDS (null for a kind it does not have).
-export const kindOf = (view) => KINDS[viewKind(view)] ?? null;
-
 // ==== src/contexts.js ====
 
 // The top bar's order of things: the sources it toggles between, the
@@ -623,10 +636,6 @@ export const pick = (list, id) => list.find((x) => x.id === id) ?? list[0] ?? nu
 // its first.
 export const teamView = (context, remembered) => (context.views.includes(remembered) ? remembered : context.views[0]);
 
-// What an Azure view carries for the shapes and the start, as a GitHub view
-// does: no columns hidden by default, no start of its own.
-const AZURE_VIEW_FIELDS = { hide: [], start: {} };
-
 // The view a context shows (a team: its view `teamViewId`): a GitHub view
 // as views.json has it, an Azure one { id, source: "azure", layout:
 // "sprint" | "backlog" | "prs", name, context, hide, start }. Its kind is
@@ -634,9 +643,9 @@ const AZURE_VIEW_FIELDS = { hide: [], start: {} };
 export function viewOf(context, teamViewId) {
   if (context.kind === "view") return context.view;
   if (context.kind === "team") {
-    return { id: `${context.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), context, ...AZURE_VIEW_FIELDS };
+    return { id: `${context.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), context, ...viewDefaults() };
   }
-  return { id: context.id, source: "azure", layout: "prs", name: context.name, context, ...AZURE_VIEW_FIELDS };
+  return { id: context.id, source: "azure", layout: "prs", name: context.name, context, ...viewDefaults() };
 }
 
 // Every view of a config: one per context, one per view of a team.
@@ -876,7 +885,8 @@ export function renderTemplate(template, vars) {
 }
 
 export function templateVars(item) {
-  const [owner, repo] = item.repo.includes("/") ? item.repo.split("/") : ["", item.repo];
+  const name = item.repo ?? "";
+  const [owner, repo] = name.includes("/") ? name.split("/") : ["", name];
   return { number: item.number ?? "", title: item.title, url: item.url ?? "", owner, repo, key: itemKey(item) ?? "" };
 }
 
@@ -1075,7 +1085,7 @@ export function errorAt(errors, path) {
 
 // gh's answer for githubBoardArgs (and the GraphQL errors that came with its
 // data) → a board:
-// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer }
+// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer, limit }
 // (viewer: the login gh runs as, null when GitHub did not say).
 // A hidden column's cards are only those moved there since the last refresh;
 // its count is the server's plus those. Items without a status, or in an
@@ -1134,6 +1144,7 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     total: project.items.totalCount,
     limited: project.items.pageInfo.hasNextPage,
     viewer: json?.data?.viewer?.login ?? null,
+    limit: view.limit,
   };
 }
 
@@ -1215,16 +1226,24 @@ const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewün
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, count, limited, skipped, rows }], viewer }.
+// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
 // A pull request found by two sections shows in the first only; a result
 // that is no pull request is counted in skipped. A search missing from the
 // answer is explained by the error at its alias.
+// Whether a search holds only one's own pull requests, as "nur meine" counts
+// them: it has author, assignee, review-requested or user-review-requested
+// set to @me, not negated (by a leading - or NOT). A review asked of a team
+// one is in shows only in such a search; the answer names no person for it.
+// involves, mentions, commenter, reviewed-by and the like do not count.
+export function ownSearch(query) {
+  const words = String(query ?? "").split(/\s+/);
+  return words.some((w, i) => /^(author|assignee|review-requested|user-review-requested):@me$/i.test(w) && words[i - 1]?.toUpperCase() !== "NOT");
+}
+
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
-    // A search narrowed to the viewer (@me) holds only their pull requests,
-    // also those a team they are in is asked to review.
-    const own = /@me\b/.test(s.query);
+    const own = ownSearch(s.query);
     const found = json?.data?.[`s${i}`];
     if (!Array.isArray(found?.nodes)) {
       const e = errorAt(errors, [`s${i}`]);
@@ -1262,7 +1281,9 @@ export function parseGithubList(json, view, errors = []) {
         ownByQuery: own,
       });
     }
-    return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };
+    // count: how many GitHub found; fetched: how many it sent; rows: those
+    // held, each pull request once (in its first section), no other result.
+    return { name: s.name, count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length, skipped, rows };
   });
   return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
 }
@@ -1327,14 +1348,15 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
 
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
-// The GitHub source for the board: the name of the site `o` opens, what
-// "nur meine" says when GitHub did not name the login, and per layout of a
+// The GitHub source for the board: the name of the site `o` opens, why
+// "nur meine" cannot tell one's own items when GitHub did not name the
+// login, and per layout of a
 // GitHub view how it loads (`hiddenFor(view)` gives its hidden columns) and
 // how a board writes a move. gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
-    noViewer: "„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist",
+    noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     views: {
       board: {
         async load(view, hiddenFor) {
@@ -1366,7 +1388,9 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // ==== src/ui/helpers.js ====
 
 // UI helpers: lasting settings, colors and machine names, whether the board
-// shows, and an error's text for the UI.
+// shows, an error's text for the UI, and the pieces that the Board, its
+// shapes and its modals draw alike (a button, a layer for a dialog, a detail
+// section, a check's color).
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -1422,22 +1446,70 @@ export function report(e) {
 // total.
 export const shownOf = (shown, total) => (shown < total ? `${shown}/${total}` : String(total));
 
+// A button; `primary` is the solid one. A disabled one ignores clicks.
+export function button(t, id, label, primary, action, disabled = false) {
+  return div()
+    .id(id)
+    .px(12)
+    .py(7)
+    .rounded(6)
+    .text_size(12)
+    .cursor_pointer()
+    .opacity(disabled ? 0.5 : 1)
+    .bg(primary ? t.solid : t.raised)
+    .text_color(primary ? t.solid_foreground : t.foreground)
+    .when(primary, (el) => el.font_semibold())
+    .hover((s) => s.bg(primary ? t.accent : t.hover))
+    .on_click((_e, cx) => {
+      if (!disabled) action(cx);
+    })
+    .child(label);
+}
+
+// A layer over the whole board that swallows presses, with a panel on it.
+export function layer(t, id, panel) {
+  return div()
+    .id(id)
+    .absolute()
+    .inset_0()
+    .flex()
+    .items_center()
+    .justify_center()
+    .bg(tint(t.background, "b3"))
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
+    .child(panel);
+}
+
+// A section of the detail panel: a title over its rows.
+export const detailSection = (t, title, ...kids) =>
+  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+
+// The theme color of a check state.
+export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 })[state] ?? t.dim;
+
 // ==== src/ui/shapes/board.js ====
 
 // The board shape: a view's data as columns of cards, which a card moves
 // between (H/L, the status menu, a drag), a column hidden or shown (x). The
 // data: { shape: "board", meta, columns: [{ id, name, color, hidden, count,
-// target, cards }], total, limited, viewer } (parseGithubBoard). View fields
-// it reads: id, hide (the columns hidden by default; none when missing) and,
-// when the data is cut (limited), limit.
+// target, cards }], total, limited, viewer, limit } (parseGithubBoard). View
+// fields it reads: id, source, layout, hide (the columns hidden by default)
+// and, where the data does not name its own, limit.
 
 // How many columns keep their own scroll position.
-export const SCROLLS = 24;
+const SCROLLS = 24;
+
+// The board shape's own state on a Board, made when first needed: one
+// scroll handle per column (SCROLLS, reused beyond).
+const boardState = (b) => (b.shapeState.board ??= { scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) });
 
 export const boardShape = {
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
-  scrollTo: (b, view, sel, row) => b.scrolls[sel.col % SCROLLS].scroll_to_item(row),
+  scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
+  // All items, whatever the filter: the cards of the shown columns.
+  items: (data) => data.columns.filter((c) => !c.hidden).flatMap((c) => c.cards),
   count(b, data) {
     const cols = shownColumns(data, b.filterText, b.mine).filter((c) => !c.hidden);
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
@@ -1445,7 +1517,7 @@ export const boardShape = {
   render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
   hints: [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
-  items: true,
+  loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
     if (!st.data) return false;
     const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
@@ -1454,7 +1526,7 @@ export const boardShape = {
       if (target) b.moveTo(view, st.sel?.key, target.id, cx);
       return true;
     }
-    if (k === "s") return b.openStatusMenu(view), true;
+    if (k === "s") return b.openStatusMenu(view, cx), true;
     if (k === "x") {
       const col = b.navColumns(view)[st.sel?.col];
       if (col) b.toggleColumn(view, col, cx);
@@ -1469,6 +1541,32 @@ export const boardShape = {
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
+  // The detail panel's rows of a card: its column as a pill, and Status s.
+  detailParts(b, t, view, item) {
+    const st = b.state(view.id);
+    const column = st.data ? findCard(st.data, item.key)?.column : null;
+    if (!column) return {};
+    const openStatus = (cx) => {
+      if (!b.modal) b.openStatusMenu(view, cx);
+    };
+    return {
+      chips: [
+        div()
+          .id("status-pill")
+          .px(10)
+          .py(2)
+          .rounded(12)
+          .text_size(12)
+          .font_semibold()
+          .cursor_pointer()
+          .bg(t[column.color] ?? t.muted)
+          .text_color(t.background)
+          .on_click((_e, cx) => openStatus(cx))
+          .child(`${column.name} ▾`),
+      ],
+      buttons: [button(t, "act-status", "Status s", false, openStatus)],
+    };
+  },
 };
 
 function drawBoard(b, t, mono, view, st) {
@@ -1476,7 +1574,7 @@ function drawBoard(b, t, mono, view, st) {
   const allSpaces = spaces();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const columnEl = (col, ci) => {
-    // Cards the filter or "nur meine" hides in b column.
+    // Cards the filter or "nur meine" hides in this column.
     const filtered = col.hidden ? 0 : col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
@@ -1526,7 +1624,7 @@ function drawBoard(b, t, mono, view, st) {
           .min_h(0)
           .gap(6)
           .overflow_y_scrollbar()
-          .track_scroll(b.scrolls[ci % SCROLLS])
+          .track_scroll(boardState(b).scrolls[ci % SCROLLS])
           .children(col.shown.map((card) => drawCard(b, t, mono, view, st, card, ci, allSpaces)))
           .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
@@ -1537,7 +1635,7 @@ function drawBoard(b, t, mono, view, st) {
     .child(h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl)))
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(t.ansi3)
-        .child(`Nur die ersten ${view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+        .child(`Nur die ersten ${st.data.limit ?? view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );
 }
 
@@ -1709,9 +1807,10 @@ export const placeholderShape = {
   scrollTo() {},
   count: () => null,
   render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text ?? "Diese Ansicht gibt es noch nicht"),
+  items: () => [],
   hints: [],
   dirs: [],
-  items: false,
+  loads: false,
   keys: () => false,
   received: (data) => data,
   warnings: () => [],
@@ -1721,9 +1820,13 @@ export const placeholderShape = {
 // ==== src/ui/shapes/prs.js ====
 
 // The prs shape: a list of pull requests in sections, walked as one column.
-// The data: { shape: "prs", sections: [{ name, count, limited, skipped,
-// rows }], viewer } (parseGithubList); a row's author, draft and checks
-// show where it has them. View fields it reads: id.
+// The data: { shape: "prs", sections: [{ name, count, fetched, limited,
+// skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
+// and checks show where it has them. View fields it reads: id.
+
+// The prs shape's own state on a Board, made when first needed: the list's
+// scroll handle.
+const prsState = (b) => (b.shapeState.prs ??= { scroll: ScrollHandle.new() });
 
 // The rows that show, as one column.
 const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => s.rows.filter((r) => b.visible(r, st.data))) }];
@@ -1732,6 +1835,8 @@ export const prsShape = {
   nav: prsRows,
   selected: (b, st) => prsRows(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
   scrollTo: (b, view, sel) => scrollToRow(b, view, sel.key),
+  // All items, whatever the filter: every section's rows.
+  items: (data) => data.sections.flatMap((s) => s.rows),
   count(b, data) {
     const rows = data.sections.flatMap((s) => s.rows);
     return { shown: rows.filter((r) => b.visible(r, data)).length, total: rows.length };
@@ -1739,12 +1844,25 @@ export const prsShape = {
   render: (b, t, mono, view, st) => drawPrs(b, t, mono, view, st),
   hints: [["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"]],
   dirs: ["up", "down"],
-  items: true,
+  loads: true,
   keys: () => false,
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
   column: () => null,
+  // The detail panel's rows of a pull request: its checks, where it has them.
+  detailParts: (b, t, view, item) =>
+    item.checks ? { sections: [detailSection(t, "CHECKS", div().text_color(checkColor(t, item.checks.state)).child(item.checks.text))] } : {},
 };
+
+// A section's count: the rows it holds (each pull request once, in its first
+// section; results that are no pull request left out), "<shown>/<held>"
+// while the filter or "nur meine" hides some; a section GitHub cut adds how
+// many it sent of how many it found.
+export function sectionCount(section, shown) {
+  const held = section.rows.length;
+  const cut = section.limited ? ` · erste ${section.fetched} von ${section.count}` : "";
+  return `${shownOf(shown, held)}${cut}`;
+}
 
 function drawPrs(b, t, mono, view, st) {
   const now = Date.now();
@@ -1771,23 +1889,18 @@ function drawPrs(b, t, mono, view, st) {
       })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
-      .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.draft ? `${r.author} · Entwurf` : r.author)))
-      .when(Boolean(r.checks), (el) => el.child(div().w(70).flex_none().text_size(12).text_color(b.checkColor(t, r.checks?.state)).child(r.checks?.short ?? "")))
+      .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
+      .when(Boolean(r.draft), (el) => el.child(div().w(60).flex_none().text_size(12).text_color(t.muted).child("Entwurf")))
+      .when(Boolean(r.checks), (el) => el.child(div().w(70).flex_none().text_size(12).text_color(checkColor(t, r.checks?.state)).child(r.checks?.short ?? "")))
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
   };
   const children = [];
   for (const s of st.data.sections) {
     const rows = s.rows.filter((r) => b.visible(r, st.data));
-    // While the filter or "nur meine" hides rows, the count is of the rows
-    // the section holds (each pull request once, in its first section); a
-    // capped section adds how many it holds of how many GitHub found.
-    const count = rows.length < s.rows.length
-      ? `${shownOf(rows.length, s.rows.length)}${s.limited ? ` · erste ${s.rows.length} von ${s.count}` : ""}`
-      : `${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`;
-    children.push(div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted).child(`${s.name.toUpperCase()} · ${count}`));
+    children.push(div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted).child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`));
     children.push(...rows.map(row));
   }
-  return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(b.listScroll).children(children);
+  return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
 }
 
 function scrollToRow(b, view, key) {
@@ -1796,7 +1909,7 @@ function scrollToRow(b, view, key) {
   for (const s of st.data.sections) {
     child++; // the section's heading
     for (const r of s.rows.filter((row) => b.visible(row, st.data))) {
-      if (r.key === key) return b.listScroll.scroll_to_item(child);
+      if (r.key === key) return prsState(b).scroll.scroll_to_item(child);
       child++;
     }
   }
@@ -1807,29 +1920,364 @@ function scrollToRow(b, view, key) {
 // The shapes a view's data is drawn and worked in, by name: data carries
 // the shape it was read in (data.shape); before any, the view's kind names
 // it (KINDS), and a view its source reads nothing for has the placeholder.
-// Each shape, taking the Board as `b`: nav (the columns keyboard movement
-// and selection walk, a list as one), selected (the selected item),
-// scrollTo, count ({ shown, total } items, or null), render, hints (the
-// hint line's entries), dirs (the arrow directions that move), items
-// (whether it has any; without, Enter, o and the arrows stay herdr's), keys
-// (handles the shape's own keys; true when it took one), received (the data
-// as kept after a refresh), warnings and column (an item's column, for its
-// detail); and where it has them, settle (says where the cards of unclear
-// writes ended up), moveTo, toggleColumn and openStatusMenu. A new way to
-// draw is a module here and its entry in SHAPES.
+// Each shape, taking the Board as `b`: nav (the columns that keyboard
+// movement and selection walk, a list as one), selected (the selected
+// item), scrollTo, items (every item of the data, whatever the filter; a
+// shape without items, the placeholder, leaves Enter, o and the arrows to
+// herdr), count ({ shown, total } items, or null), render, hints (the hint
+// line's entries), dirs (the arrow directions that move), loads (false for
+// the placeholder, which draws without data), keys (handles the shape's own
+// keys; true when it took one), received (the data as kept after a
+// refresh), warnings and column (an item's column, for its detail); and
+// where it has them, detailParts (its rows in the detail panel), settle
+// (says where the cards of unclear writes ended up), moveTo, toggleColumn
+// and openStatusMenu. A shape keeps its own state per Board in
+// b.shapeState. A new way to draw is a module here and its entry in SHAPES.
 
 export const SHAPES = { board: boardShape, prs: prsShape, placeholder: placeholderShape };
 
-// ==== src/main.js ====
+// ==== src/ui/modals/start.js ====
+
+// The start dialog: opens an item's session in its checkout, on a machine
+// and with an agent chosen here, as a new space or tab, with a first message
+// to edit. It is b.modal = { kind: "start", view, item, settings, input
+// (the message's InputState, made for this dialog), field, agents, agent,
+// agentsError, machines, machine, machineNote, agentNote, notes, open,
+// busy, error }.
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
+// The fields Tab walks, in order.
+const FIELDS = ["message", "agent", "machine", "open"];
+
+export const startModal = {
+  // Opens the dialog for an item, or says where its checkout is missing.
+  open(b, view, item, cx) {
+    const settings = startSettings(b.config, view, item.repo);
+    if (!settings.checkout) {
+      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
+      return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
+    }
+    const input = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
+    const template = item.kind === "pr" ? settings.review : settings.message;
+    input.set_value(renderTemplate(template, templateVars(item)));
+    const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
+    const list = listed.length ? listed : [null];
+    let machine = list.indexOf(settings.machine ?? null);
+    const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
+    if (machine < 0) machine = 0;
+    const m = {
+      kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
+    };
+    input.on("focus", (_e, cx) => {
+      if (b.modal === m) m.field = "message";
+      cx.notify();
+    });
+    input.on("submit", (_e, cx) => startModal.start(b, cx));
+    b.modal = m;
+    input.focus();
+    loadAgents(b, cx);
+    cx.notify();
+  },
+
+  // Opens the item's session in its checkout on the chosen machine: finds the
+  // checkout's folder there, then runs space.new or tab.new. run() answers
+  // nothing, so the board says the session is being opened and watches for a
+  // space or tab of its name (watchSession). The dialog stays until the
+  // folder is known or the start failed; a failure that comes after the
+  // dialog went shows in the banner and as a toast.
+  start(b, cx) {
+    const m = b.modal;
+    if (m?.kind !== "start" || m.busy) return;
+    const agent = m.agents[m.agent];
+    if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
+    const on = m.machines[m.machine];
+    const task = m.input.value().trim();
+    const name = sessionName(m.item);
+    m.busy = "Sitzung wird geöffnet …";
+    m.error = null;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
+        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
+        const folder = lastLine(r.stdout);
+        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
+        let space = null;
+        if (m.open === "tab") {
+          space = spaceForTab(spaces(), on, folder);
+          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
+        }
+        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
+        if (b.modal === m) {
+          b.modal = null;
+          b.handle.focus();
+        }
+        b.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
+        watchSession(b, name, cx);
+      } catch (e) {
+        const why = report(e);
+        if (b.modal === m) m.error = why;
+        else {
+          b.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
+          notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
+        }
+      } finally {
+        m.busy = null;
+        cx.notify();
+      }
+    });
+    cx.notify();
+  },
+
+  // Every key but Esc (the Board's): Tab walks the fields; h/l or the
+  // arrows change a choice, Enter starts. Typing goes to the message.
+  key(b, e, cx) {
+    const m = b.modal;
+    const k = e.key;
+    if (k === "tab") {
+      cx.stop_propagation();
+      const at = FIELDS.indexOf(m.field);
+      m.field = FIELDS[(at + (e.modifiers?.shift ? -1 : 1) + FIELDS.length) % FIELDS.length];
+      if (m.field === "message") m.input.focus();
+      else b.handle.focus();
+      return cx.notify();
+    }
+    if (m.field === "message") return;
+    cx.stop_propagation();
+    if (k === "enter") return startModal.start(b, cx);
+    if (k === "h" || k === "left") return cycle(b, m.field, -1, cx);
+    if (k === "l" || k === "right" || k === "space") return cycle(b, m.field, 1, cx);
+  },
+
+  render(b, t) {
+    const m = b.modal;
+    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
+    const frame = (field, inner) =>
+      h_flex()
+        .h(34)
+        .px(10)
+        .items_center()
+        .rounded(6)
+        .border_1()
+        .border_color(m.field === field ? t.accent : t.input)
+        .bg(t.background)
+        .child(inner);
+    const choice = (field, title, value) =>
+      v_flex()
+        .flex_1()
+        .min_w(0)
+        .gap(6)
+        .child(label(title))
+        .child(
+          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
+            .on_click((_e, cx) => {
+              m.field = field;
+              b.handle.focus();
+              cycle(b, field, 1, cx);
+            })
+            .child(div().flex_1().min_w(0).truncate().child(value))
+            .child(div().text_color(t.dim).child("◂ ▸"))),
+        );
+    const agent = m.agents[m.agent];
+    return layer(
+      t,
+      "start-layer",
+      v_flex()
+        .id("start-dialog")
+        .w(600)
+        .rounded(12)
+        .border_1()
+        .border_color(t.input)
+        .bg(t.popover)
+        .shadow_lg()
+        .child(
+          v_flex()
+            .px(20)
+            .py(16)
+            .gap(4)
+            .border_b(1)
+            .border_color(t.border)
+            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${itemLabel(m.item)}`))
+            .child(div().text_size(12).text_color(t.muted).truncate().child(m.item.title)),
+        )
+        .child(
+          v_flex()
+            .px(20)
+            .py(16)
+            .gap(14)
+            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
+            .child(
+              h_flex()
+                .gap(12)
+                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
+                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
+                .child(choice("open", "Öffnen als", m.open === "tab" ? "neuer Tab" : "neuer Space")),
+            )
+            .child(
+              v_flex()
+                .gap(6)
+                .child(label("Erste Nachricht"))
+                .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
+            )
+            .children(m.notes.map((n) => div().text_size(12).text_color(t.ansi3).child(n)))
+            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
+        )
+        .child(
+          h_flex()
+            .px(20)
+            .py(12)
+            .gap(8)
+            .items_center()
+            .border_t(1)
+            .border_color(t.border)
+            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
+            .child(button(t, "start-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx), Boolean(m.busy)))
+            .child(button(t, "start-go", "Starten ↵", true, (cx) => startModal.start(b, cx), Boolean(m.busy))),
+        ),
+    );
+  },
+};
+
+function loadAgents(b, cx) {
+  const m = b.modal;
+  const on = m.machines[m.machine];
+  m.agents = [];
+  m.agentsError = null;
+  m.agentNote = null;
+  cx.spawn(async (cx) => {
+    try {
+      const agents = (await knownAgents({ on })).filter((a) => a.installed);
+      if (b.modal !== m || m.machines[m.machine] !== on) return;
+      m.agents = agents;
+      const wanted = m.settings.agent;
+      m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
+      if (!agents.length) m.agentsError = "Kein Agent installiert";
+      else if (wanted && !agents.some((a) => a.key === wanted)) {
+        m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
+      }
+    } catch (e) {
+      if (b.modal !== m || m.machines[m.machine] !== on) return;
+      m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+    }
+    m.notes = [m.machineNote, m.agentNote].filter(Boolean);
+    cx.notify();
+  });
+}
+
+function cycle(b, field, by, cx) {
+  const m = b.modal;
+  if (m.busy) return;
+  if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
+  if (field === "machine") {
+    m.machine = (m.machine + by + m.machines.length) % m.machines.length;
+    m.machineNote = null;
+    loadAgents(b, cx);
+  }
+  if (field === "open") m.open = m.open === "space" ? "tab" : "space";
+  cx.notify();
+}
+
+// Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
+// says so when it appears, warns when it has not after the last.
+function watchSession(b, name, cx, at = 0) {
+  cx.timer.after(SESSION_CHECKS[at], (cx) => {
+    const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
+    if (there) return b.say(`Sitzung geöffnet: ${name}`, "success", cx);
+    if (at + 1 < SESSION_CHECKS.length) return watchSession(b, name, cx, at + 1);
+    b.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
+    notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
+  });
+}
+
+// ==== src/ui/modals/status.js ====
+
+// The status menu: the columns a card may go to, picked with j/k and Enter,
+// a digit, or a click. A shape with columns opens it (openStatusMenu) as
+// b.modal = { kind: "status", view, key, targets, at }.
+
+export const statusModal = {
+  render(b, t) {
+    const m = b.modal;
+    return layer(
+      t,
+      "status-layer",
+      v_flex()
+        .id("status-menu")
+        .w(280)
+        .p(8)
+        .gap(2)
+        .rounded(10)
+        .border_1()
+        .border_color(t.input)
+        .bg(t.popover)
+        .shadow_lg()
+        .child(div().px(8).py(6).text_size(12).text_color(t.muted).child("Status ändern · j/k Enter · Esc"))
+        .children(
+          m.targets.map((c, i) =>
+            h_flex()
+              .id(`status-${i}`)
+              .px(8)
+              .py(6)
+              .gap(8)
+              .items_center()
+              .rounded(6)
+              .cursor_pointer()
+              .when(i === m.at, (el) => el.bg(t.selected))
+              .hover((s) => s.bg(t.hover))
+              .on_click((_e, cx) => {
+                b.closeModal(cx);
+                b.moveTo(m.view, m.key, c.id, cx);
+              })
+              .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+              .child(div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted))
+              .child(div().flex_1().child(c.name))
+              .when(Boolean(c.hidden), (el) => el.child(div().text_size(11).text_color(t.dim).child("ausgeblendet"))),
+          ),
+        ),
+    );
+  },
+
+  // Every key but Esc (the Board's): j/k or the arrows move, Enter or a
+  // digit picks; all are taken.
+  key(b, e, cx) {
+    const m = b.modal;
+    const k = e.key;
+    const ch = e.key_char ?? "";
+    cx.stop_propagation();
+    let commit = k === "enter";
+    if (k === "j" || k === "down") m.at = Math.min(m.at + 1, m.targets.length - 1);
+    else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
+    else if (/^[1-9]$/.test(ch)) {
+      // A digit beyond the rows does nothing.
+      if (!m.targets[Number(ch) - 1]) return cx.notify();
+      m.at = Number(ch) - 1;
+      commit = true;
+    }
+    if (!commit) return cx.notify();
+    b.closeModal(cx);
+    b.moveTo(m.view, m.key, m.targets[m.at].id, cx);
+  },
+};
+
+// ==== src/ui/modals/index.js ====
+
+// The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
+// and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
+// on Esc unless it is busy). A dialog keeps its state, and makes the inputs
+// it needs, in b.modal. A new dialog is a module here and its entry in
+// MODALS.
+
+export const MODALS = { start: startModal, status: statusModal };
+
+// ==== src/main.js ====
+
 const TICK_MS = 30000;
-// What "nur meine" says over data that does not name the login it was read
-// as, where its source has no words of its own (noViewer).
-const NO_VIEWER = "„nur meine“ zeigt nichts: die Quelle hat nicht gesagt, als wer sie gelesen wurde";
+// Why "nur meine" cannot tell one's own items, where the source has no words
+// of its own for it (noViewer): it did not name the login it read as.
+const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 
 export default class Board extends View {
   init(_props, cx) {
@@ -1846,15 +2294,14 @@ export default class Board extends View {
     this.mine = store.get("mine") === true;
     this.filterText = "";
     this.filtering = false;
-    this.modal = null; // { kind: "status", … } or { kind: "start", … }
+    this.modal = null; // a dialog: { kind, … }, its kind a key of MODALS
     this.notice = null; // { text, level }
     this.drag = null; // { key, from }
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
-    this.scrolls = Array.from({ length: SCROLLS }, () => ScrollHandle.new());
-    this.listScroll = ScrollHandle.new();
+    this.shapeState = {}; // what each shape keeps per Board, by shape name
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -1869,12 +2316,6 @@ export default class Board extends View {
       cx.notify();
     });
     this.filterInput.on("submit", () => this.handle.focus());
-    this.messageInput = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
-    this.messageInput.on("focus", (_e, cx) => {
-      if (this.modal?.kind === "start") this.modal.field = "message";
-      cx.notify();
-    });
-    this.messageInput.on("submit", (_e, cx) => this.startAgent(cx));
     if (checking()) return;
     // A copy that is not shown (a reload of a background tab) leaves the
     // keyboard where it is.
@@ -1985,6 +2426,9 @@ export default class Board extends View {
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
       this.kinds = kinds;
+      // A status menu of a view that is gone or of another kind now closes.
+      const m = this.modal;
+      if (m?.kind === "status" && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
       const shown = this.view();
       if (shown) this.refresh(shown, cx);
     });
@@ -2053,9 +2497,11 @@ export default class Board extends View {
 
   // ---- moves ----
 
-  // Moves a card to a column, where the shown view's shape has columns.
+  // Moves a card to a column, where the view's shape has columns.
   moveTo(view, key, columnId, cx) {
-    this.shape(view).moveTo?.(this, view, key, columnId, cx);
+    const move = this.shape(view).moveTo;
+    if (!move) return this.say("Die Karte oder Spalte gibt es nicht mehr", "warning", cx);
+    move(this, view, key, columnId, cx);
   }
 
   say(text, level, cx) {
@@ -2160,7 +2606,9 @@ export default class Board extends View {
   }
 
   toggleColumn(view, col, cx) {
-    this.shape(view).toggleColumn?.(this, view, col, cx);
+    const toggle = this.shape(view).toggleColumn;
+    if (!toggle) return this.say("Diese Ansicht hat keine Spalten", "info", cx);
+    toggle(this, view, col, cx);
   }
 
   open(item, cx) {
@@ -2179,133 +2627,9 @@ export default class Board extends View {
     }
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
     const session = linkedSession(item, spaces());
-    if (!session) return this.openStart(view, item, cx);
+    if (!session) return MODALS.start.open(this, view, item, cx);
     run("space.select", { id: session.space });
     if (session.tab) run("tab.select", { id: session.tab });
-  }
-
-  // ---- the start dialog ----
-
-  openStart(view, item, cx) {
-    const settings = startSettings(this.config, view, item.repo);
-    if (!settings.checkout) {
-      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
-      return this.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
-    }
-    const template = item.kind === "pr" ? settings.review : settings.message;
-    this.messageInput.set_value(renderTemplate(template, templateVars(item)));
-    const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
-    const list = listed.length ? listed : [null];
-    let machine = list.indexOf(settings.machine ?? null);
-    const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
-    if (machine < 0) machine = 0;
-    this.modal = {
-      kind: "start", view, item, settings, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
-    };
-    this.messageInput.focus();
-    this.loadAgents(cx);
-    cx.notify();
-  }
-
-  loadAgents(cx) {
-    const m = this.modal;
-    const on = m.machines[m.machine];
-    m.agents = [];
-    m.agentsError = null;
-    m.agentNote = null;
-    cx.spawn(async (cx) => {
-      try {
-        const agents = (await knownAgents({ on })).filter((a) => a.installed);
-        if (this.modal !== m || m.machines[m.machine] !== on) return;
-        m.agents = agents;
-        const wanted = m.settings.agent;
-        m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
-        if (!agents.length) m.agentsError = "Kein Agent installiert";
-        else if (wanted && !agents.some((a) => a.key === wanted)) {
-          m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
-        }
-      } catch (e) {
-        if (this.modal !== m || m.machines[m.machine] !== on) return;
-        m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
-      }
-      m.notes = [m.machineNote, m.agentNote].filter(Boolean);
-      cx.notify();
-    });
-  }
-
-  cycle(field, by, cx) {
-    const m = this.modal;
-    if (m.busy) return;
-    if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
-    if (field === "machine") {
-      m.machine = (m.machine + by + m.machines.length) % m.machines.length;
-      m.machineNote = null;
-      this.loadAgents(cx);
-    }
-    if (field === "open") m.open = m.open === "space" ? "tab" : "space";
-    cx.notify();
-  }
-
-  // Opens the item's session in its checkout on the chosen machine: finds the
-  // checkout's folder there, then runs space.new or tab.new. run() answers
-  // nothing, so the board says the session is being opened and watches for a
-  // space or tab of its name (watchSession). The dialog stays until the
-  // folder is known or the start failed; a failure that comes after the
-  // dialog went shows in the banner and as a toast.
-  startAgent(cx) {
-    const m = this.modal;
-    if (m?.kind !== "start" || m.busy) return;
-    const agent = m.agents[m.agent];
-    if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
-    const on = m.machines[m.machine];
-    const task = this.messageInput.value().trim();
-    const name = sessionName(m.item);
-    m.busy = "Sitzung wird geöffnet …";
-    m.error = null;
-    cx.spawn(async (cx) => {
-      try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
-        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
-        const folder = lastLine(r.stdout);
-        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
-        let space = null;
-        if (m.open === "tab") {
-          space = spaceForTab(spaces(), on, folder);
-          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
-        }
-        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
-        if (this.modal === m) {
-          this.modal = null;
-          this.handle.focus();
-        }
-        this.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
-        this.watchSession(name, cx);
-      } catch (e) {
-        const why = report(e);
-        if (this.modal === m) m.error = why;
-        else {
-          this.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
-          notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
-        }
-      } finally {
-        m.busy = null;
-        cx.notify();
-      }
-    });
-    cx.notify();
-  }
-
-  // Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
-  // says so when it appears, warns when it has not after the last.
-  watchSession(name, cx, at = 0) {
-    cx.timer.after(SESSION_CHECKS[at], (cx) => {
-      const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
-      if (there) return this.say(`Sitzung geöffnet: ${name}`, "success", cx);
-      if (at + 1 < SESSION_CHECKS.length) return this.watchSession(name, cx, at + 1);
-      this.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
-      notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
-    });
   }
 
   closeModal(cx) {
@@ -2336,9 +2660,10 @@ export default class Board extends View {
       cx.notify();
     };
     // [ ] and / may come with Shift, or AltGr, which Windows reports as
-    // Control+Alt; Control alone and Alt alone stay herdr's (it binds alt-[,
-    // alt-] and alt-digits).
-    const typed = Boolean(mod.control) === Boolean(mod.alt) && !mod.platform;
+    // Control+Alt; Control alone stays herdr's. A key herdr binds (alt-[,
+    // alt-], alt-digits) never reaches a mod, so Alt need not be refused
+    // here, where it may stand for AltGr.
+    const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
       const at = tabs.findIndex((c) => c.id === this.context()?.id);
@@ -2365,62 +2690,35 @@ export default class Board extends View {
     }
     if (!view) return;
     const shape = this.shape(view);
-    // A view without items leaves Enter, o and the arrows to herdr.
-    if (!shape.items) return;
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
-    if (k === "enter") return this.enter(view, cx), done();
-    if (k === "o") return this.open(this.selected(view), cx), done();
+    // With nothing selected (loading, failed, empty, a placeholder) Enter
+    // and o stay herdr's.
+    const item = this.selected(view);
+    if (k === "enter" && item) return this.enter(view, cx), done();
+    if (k === "o" && item) return this.open(item, cx), done();
   }
 
-  openStatusMenu(view) {
-    this.shape(view).openStatusMenu?.(this, view);
+  openStatusMenu(view, cx) {
+    const open = this.shape(view).openStatusMenu;
+    if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
+    open(this, view);
+    cx.notify();
   }
 
+  // Esc closes a dialog that is not busy; every other key is the dialog's.
   modalKey(e, cx) {
-    const m = this.modal;
-    const k = e.key;
-    const ch = e.key_char ?? "";
-    if (k === "escape") {
+    if (e.key === "escape") {
       cx.stop_propagation();
       return this.closeModal(cx);
     }
-    if (m.kind === "status") {
-      cx.stop_propagation();
-      let commit = k === "enter";
-      if (k === "j" || k === "down") m.at = Math.min(m.at + 1, m.targets.length - 1);
-      else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
-      else if (/^[1-9]$/.test(ch)) {
-        // A digit beyond the rows does nothing.
-        if (!m.targets[Number(ch) - 1]) return cx.notify();
-        m.at = Number(ch) - 1;
-        commit = true;
-      }
-      if (!commit) return cx.notify();
-      this.closeModal(cx);
-      return this.moveTo(m.view, m.key, m.targets[m.at].id, cx);
-    }
-    // The start dialog: Tab walks the fields; h/l or the arrows change a
-    // choice, Enter starts. Typing goes to the message.
-    const fields = ["message", "agent", "machine", "open"];
-    if (k === "tab") {
-      cx.stop_propagation();
-      const at = fields.indexOf(m.field);
-      m.field = fields[(at + (e.modifiers?.shift ? -1 : 1) + fields.length) % fields.length];
-      if (m.field === "message") this.messageInput.focus();
-      else this.handle.focus();
-      return cx.notify();
-    }
-    if (m.field === "message") return;
-    cx.stop_propagation();
-    if (k === "enter") return this.startAgent(cx);
-    if (k === "h" || k === "left") return this.cycle(m.field, -1, cx);
-    if (k === "l" || k === "right" || k === "space") return this.cycle(m.field, 1, cx);
+    MODALS[this.modal.kind].key(this, e, cx);
   }
+
 
   // ---- drawing ----
 
@@ -2460,8 +2758,7 @@ export default class Board extends View {
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
       )
       .child(this.hints(t, view));
-    if (this.modal?.kind === "status") out = out.child(this.statusMenu(t));
-    if (this.modal?.kind === "start") out = out.child(this.startDialog(t));
+    if (this.modal) out = out.child(MODALS[this.modal.kind].render(this, t));
     return out;
   }
 
@@ -2470,30 +2767,6 @@ export default class Board extends View {
     this.drag = null;
     this.over = null;
     cx.notify();
-  }
-
-  // A button; `primary` is the solid one. A disabled one ignores clicks.
-  button(t, id, label, primary, action, disabled = false) {
-    return div()
-      .id(id)
-      .px(12)
-      .py(7)
-      .rounded(6)
-      .text_size(12)
-      .cursor_pointer()
-      .opacity(disabled ? 0.5 : 1)
-      .bg(primary ? t.solid : t.raised)
-      .text_color(primary ? t.solid_foreground : t.foreground)
-      .when(primary, (el) => el.font_semibold())
-      .hover((s) => s.bg(primary ? t.accent : t.hover))
-      .on_click((_e, cx) => {
-        if (!disabled) action(cx);
-      })
-      .child(label);
-  }
-
-  checkColor(t, state) {
-    return { failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 }[state] ?? t.dim;
   }
 
   // The top bar, two rows so that neither the tabs nor the filter have to
@@ -2541,7 +2814,7 @@ export default class Board extends View {
           .child(Input.new(this.filterInput).flex_1().text_size(12.5).text_color(t.foreground)),
       )
       .child(div().flex_none().text_size(12).text_color(t.muted).child(updated))
-      .child(this.button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
+      .child(button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
     return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
   }
 
@@ -2578,8 +2851,8 @@ export default class Board extends View {
   }
 
   // The shown source's tabs: number, name and, for a view with data, how
-  // many items it holds ("…" while it loads; "<shown> von <total>" while
-  // the filter or "nur meine" hides some).
+  // many items it holds ("…" while it loads; shownOf while the filter or
+  // "nur meine" hides some).
   tabs(t, context) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
@@ -2660,31 +2933,35 @@ export default class Board extends View {
     if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
-    if (shape === SHAPES.placeholder) return box.child(shape.render(this, t, mono, view, st));
+    if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
-    const hidesAll = this.mine && st.data && !st.data.viewer && shape.count(this, st.data)?.shown === 0;
-    const noViewer = hidesAll ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
-    const warnings = [...st.warnings, ...noViewer];
+    const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
   }
 
+  // With "nur meine" on and no login the data was read as: what the text
+  // filter leaves but "nur meine" hides only for want of that login (not
+  // from a search of one's own) is said, with what still shows.
+  noViewerWarning(view, st, shape) {
+    if (!this.mine || !st.data || st.data.viewer) return [];
+    const left = shape.items(st.data).filter((i) => matches(i, this.filterText));
+    if (!left.some((i) => !i.ownByQuery)) return [];
+    const what = left.some((i) => i.ownByQuery) ? "nur Treffer eigener Suchen" : "nichts";
+    return [`„nur meine“ zeigt ${what}: ${this.sources[view.source].noViewer ?? NO_VIEWER}`];
+  }
+
   detail(t, mono, view, item) {
     const st = this.state(view.id);
     const session = linkedSession(item, spaces());
-    const column = st.data ? SHAPES[st.data.shape].column(st.data, item) : null;
-    const section = (title, ...kids) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border)
-      .child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+    // The shape's own rows: chips beside the author, sections, buttons.
+    const parts = this.shape(view).detailParts?.(this, t, view, item) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
     const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
-    const openStatus = (cx) => {
-      this.openStatusMenu(view);
-      cx.notify();
-    };
     return v_flex()
       .w(360)
       .flex_none()
@@ -2712,26 +2989,9 @@ export default class Board extends View {
               .gap(8)
               .flex_wrap()
               .items_center()
-              .when(Boolean(column), (el) =>
-                el.child(
-                  div()
-                    .id("status-pill")
-                    .px(10)
-                    .py(2)
-                    .rounded(12)
-                    .text_size(12)
-                    .font_semibold()
-                    .cursor_pointer()
-                    .bg(t[column?.color] ?? t.muted)
-                    .text_color(t.background)
-                    .on_click((_e, cx) => {
-                      if (!this.modal) openStatus(cx);
-                    })
-                    .child(`${column?.name} ▾`),
-                ),
-              )
+              .children(parts.chips ?? [])
               .when(Boolean(item.author), (el) => el.child(div().text_size(12).text_color(t.muted).child([`von ${item.author}`, item.review].filter(Boolean).join(" · "))))
-              .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von #${item.parent}`)))
+              .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von ${parentLabel(item)}`)))
               .when(Boolean(item.sub), (el) => el.child(div().text_size(12).text_color(t.muted).child(`◔ ${item.sub?.done}/${item.sub?.total} erledigt`))),
           )
           .when((item.labels ?? []).length > 0 || Boolean(item.type), (el) =>
@@ -2739,9 +2999,10 @@ export default class Board extends View {
           )
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
-      .when(Boolean(item.checks), (el) => el.child(section("CHECKS", div().text_color(this.checkColor(t, item.checks?.state)).child(item.checks?.text ?? ""))))
+      .children(parts.sections ?? [])
       .child(
-        section(
+        detailSection(
+          t,
           "SITZUNG",
           session
             ? h_flex()
@@ -2769,15 +3030,13 @@ export default class Board extends View {
           .flex_wrap()
           .border_t(1)
           .border_color(t.border)
-          .child(this.button(t, "act-start", startLabel, true, (cx) => {
+          .child(button(t, "act-start", startLabel, true, (cx) => {
             if (this.modal) return;
             st.detail = true;
             this.enter(view, cx);
           }))
-          .when(Boolean(column), (el) => el.child(this.button(t, "act-status", "Status s", false, (cx) => {
-            if (!this.modal) openStatus(cx);
-          })))
-          .child(this.button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
+          .children(parts.buttons ?? [])
+          .child(button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
             if (!this.modal) this.open(item, cx);
           })),
       );
@@ -2807,147 +3066,4 @@ export default class Board extends View {
       .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))));
   }
 
-  // A layer over the whole board that swallows presses, with a panel on it.
-  layer(t, id, panel) {
-    return div()
-      .id(id)
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(tint(t.background, "b3"))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
-      .child(panel);
-  }
-
-  statusMenu(t) {
-    const m = this.modal;
-    return this.layer(
-      t,
-      "status-layer",
-      v_flex()
-        .id("status-menu")
-        .w(280)
-        .p(8)
-        .gap(2)
-        .rounded(10)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(div().px(8).py(6).text_size(12).text_color(t.muted).child("Status ändern · j/k Enter · Esc"))
-        .children(
-          m.targets.map((c, i) =>
-            h_flex()
-              .id(`status-${i}`)
-              .px(8)
-              .py(6)
-              .gap(8)
-              .items_center()
-              .rounded(6)
-              .cursor_pointer()
-              .when(i === m.at, (el) => el.bg(t.selected))
-              .hover((s) => s.bg(t.hover))
-              .on_click((_e, cx) => {
-                this.closeModal(cx);
-                this.moveTo(m.view, m.key, c.id, cx);
-              })
-              .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
-              .child(div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted))
-              .child(div().flex_1().child(c.name))
-              .when(Boolean(c.hidden), (el) => el.child(div().text_size(11).text_color(t.dim).child("ausgeblendet"))),
-          ),
-        ),
-    );
-  }
-
-  startDialog(t) {
-    const m = this.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex()
-        .h(34)
-        .px(10)
-        .items_center()
-        .rounded(6)
-        .border_1()
-        .border_color(m.field === field ? t.accent : t.input)
-        .bg(t.background)
-        .child(inner);
-    const choice = (field, title, value) =>
-      v_flex()
-        .flex_1()
-        .min_w(0)
-        .gap(6)
-        .child(label(title))
-        .child(
-          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
-            .on_click((_e, cx) => {
-              m.field = field;
-              this.handle.focus();
-              this.cycle(field, 1, cx);
-            })
-            .child(div().flex_1().min_w(0).truncate().child(value))
-            .child(div().text_color(t.dim).child("◂ ▸"))),
-        );
-    const agent = m.agents[m.agent];
-    return this.layer(
-      t,
-      "start-layer",
-      v_flex()
-        .id("start-dialog")
-        .w(600)
-        .rounded(12)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(
-          v_flex()
-            .px(20)
-            .py(16)
-            .gap(4)
-            .border_b(1)
-            .border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${itemLabel(m.item)}`))
-            .child(div().text_size(12).text_color(t.muted).truncate().child(m.item.title)),
-        )
-        .child(
-          v_flex()
-            .px(20)
-            .py(16)
-            .gap(14)
-            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
-            .child(
-              h_flex()
-                .gap(12)
-                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
-                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen als", m.open === "tab" ? "neuer Tab" : "neuer Space")),
-            )
-            .child(
-              v_flex()
-                .gap(6)
-                .child(label("Erste Nachricht"))
-                .child(frame("message", Input.new(this.messageInput).flex_1().text_size(12).text_color(t.foreground))),
-            )
-            .children(m.notes.map((n) => div().text_size(12).text_color(t.ansi3).child(n)))
-            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
-        )
-        .child(
-          h_flex()
-            .px(20)
-            .py(12)
-            .gap(8)
-            .items_center()
-            .border_t(1)
-            .border_color(t.border)
-            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
-            .child(this.button(t, "start-cancel", "Abbrechen Esc", false, (cx) => this.closeModal(cx), Boolean(m.busy)))
-            .child(this.button(t, "start-go", "Starten ↵", true, (cx) => this.startAgent(cx), Boolean(m.busy))),
-        ),
-    );
-  }
 }

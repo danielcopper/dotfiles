@@ -35,14 +35,20 @@ export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
 
-// An item's key: `<repo>#<number>` on GitHub, `AB#<id>` on Azure (Azure
-// Boards' own way to name a work item), null for a draft.
+// An item's key: `<repo>#<number>` on GitHub; on Azure `AB#<id>` for a work
+// item (Azure Boards' own way to name one) and `!<id>` for a pull request
+// (Azure Repos' own); null for a draft.
 export function itemKey(item) {
   if (item.number === null || item.number === undefined) return null;
-  return item.source === "azure" ? `AB#${item.number}` : `${item.repoShort}#${item.number}`;
+  if (item.source === "azure") return item.kind === "pr" ? `!${item.number}` : `AB#${item.number}`;
+  return `${item.repoShort}#${item.number}`;
 }
 
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
+
+// The label of an item's parent, an issue or work item of the same source
+// and repo: "tender#3002", "AB#7".
+export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
 
 export function updatedLabel(at, now) {
   if (!at) return "";

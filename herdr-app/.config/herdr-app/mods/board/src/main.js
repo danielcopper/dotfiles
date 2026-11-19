@@ -47,20 +47,20 @@
 // tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
-import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, readTextFile, run, settings, spaces, theme } from "herdr";
-import { MOD, CONFIG_NAME, BoardError, firstLine, lastLine, errorText, itemKey, itemLabel, updatedLabel, ageLabel } from "./shared.js";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { appHome, checking, exec, nextCommand, notify, readTextFile, run, settings, spaces, theme } from "herdr";
+import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel, updatedLabel } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
-import { shows, navigate, selectionAfter } from "./select.js";
+import { matches, shows, navigate, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
-import { toolPaths, call } from "./tools.js";
-import { sessionName, linkedSession, AGENT_STATUS, renderTemplate, templateVars, checkoutArgs, spaceForTab, startCommand } from "./actions/start.js";
+import { toolPaths } from "./tools.js";
+import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
-import { store, migrateShownView, tint, machineName, onMachine, boardShown, report, shownOf } from "./ui/helpers.js";
+import { store, migrateShownView, boardShown, shownOf, button, detailSection, report } from "./ui/helpers.js";
 import { SHAPES } from "./ui/shapes/index.js";
-import { SCROLLS } from "./ui/shapes/board.js";
+import { MODALS } from "./ui/modals/index.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -77,15 +77,14 @@ export * from "./ui/shapes/index.js";
 export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
 export * from "./ui/shapes/placeholder.js";
+export * from "./ui/modals/index.js";
+export * from "./ui/modals/start.js";
+export * from "./ui/modals/status.js";
 
-const CHECKOUT_TIMEOUT = 30000;
-// How long watchSession waits before each check for a session it opened, in
-// ms (1, 3 and 6 s after the start).
-const SESSION_CHECKS = [1000, 2000, 3000];
 const TICK_MS = 30000;
-// What "nur meine" says over data that does not name the login it was read
-// as, where its source has no words of its own (noViewer).
-const NO_VIEWER = "„nur meine“ zeigt nichts: die Quelle hat nicht gesagt, als wer sie gelesen wurde";
+// Why "nur meine" cannot tell one's own items, where the source has no words
+// of its own for it (noViewer): it did not name the login it read as.
+const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 
 export default class Board extends View {
   init(_props, cx) {
@@ -102,15 +101,14 @@ export default class Board extends View {
     this.mine = store.get("mine") === true;
     this.filterText = "";
     this.filtering = false;
-    this.modal = null; // { kind: "status", … } or { kind: "start", … }
+    this.modal = null; // a dialog: { kind, … }, its kind a key of MODALS
     this.notice = null; // { text, level }
     this.drag = null; // { key, from }
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
-    this.scrolls = Array.from({ length: SCROLLS }, () => ScrollHandle.new());
-    this.listScroll = ScrollHandle.new();
+    this.shapeState = {}; // what each shape keeps per Board, by shape name
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -125,12 +123,6 @@ export default class Board extends View {
       cx.notify();
     });
     this.filterInput.on("submit", () => this.handle.focus());
-    this.messageInput = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
-    this.messageInput.on("focus", (_e, cx) => {
-      if (this.modal?.kind === "start") this.modal.field = "message";
-      cx.notify();
-    });
-    this.messageInput.on("submit", (_e, cx) => this.startAgent(cx));
     if (checking()) return;
     // A copy that is not shown (a reload of a background tab) leaves the
     // keyboard where it is.
@@ -241,6 +233,9 @@ export default class Board extends View {
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
       this.kinds = kinds;
+      // A status menu of a view that is gone or of another kind now closes.
+      const m = this.modal;
+      if (m?.kind === "status" && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
       const shown = this.view();
       if (shown) this.refresh(shown, cx);
     });
@@ -309,9 +304,11 @@ export default class Board extends View {
 
   // ---- moves ----
 
-  // Moves a card to a column, where the shown view's shape has columns.
+  // Moves a card to a column, where the view's shape has columns.
   moveTo(view, key, columnId, cx) {
-    this.shape(view).moveTo?.(this, view, key, columnId, cx);
+    const move = this.shape(view).moveTo;
+    if (!move) return this.say("Die Karte oder Spalte gibt es nicht mehr", "warning", cx);
+    move(this, view, key, columnId, cx);
   }
 
   say(text, level, cx) {
@@ -416,7 +413,9 @@ export default class Board extends View {
   }
 
   toggleColumn(view, col, cx) {
-    this.shape(view).toggleColumn?.(this, view, col, cx);
+    const toggle = this.shape(view).toggleColumn;
+    if (!toggle) return this.say("Diese Ansicht hat keine Spalten", "info", cx);
+    toggle(this, view, col, cx);
   }
 
   open(item, cx) {
@@ -435,133 +434,9 @@ export default class Board extends View {
     }
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
     const session = linkedSession(item, spaces());
-    if (!session) return this.openStart(view, item, cx);
+    if (!session) return MODALS.start.open(this, view, item, cx);
     run("space.select", { id: session.space });
     if (session.tab) run("tab.select", { id: session.tab });
-  }
-
-  // ---- the start dialog ----
-
-  openStart(view, item, cx) {
-    const settings = startSettings(this.config, view, item.repo);
-    if (!settings.checkout) {
-      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
-      return this.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
-    }
-    const template = item.kind === "pr" ? settings.review : settings.message;
-    this.messageInput.set_value(renderTemplate(template, templateVars(item)));
-    const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
-    const list = listed.length ? listed : [null];
-    let machine = list.indexOf(settings.machine ?? null);
-    const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
-    if (machine < 0) machine = 0;
-    this.modal = {
-      kind: "start", view, item, settings, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
-    };
-    this.messageInput.focus();
-    this.loadAgents(cx);
-    cx.notify();
-  }
-
-  loadAgents(cx) {
-    const m = this.modal;
-    const on = m.machines[m.machine];
-    m.agents = [];
-    m.agentsError = null;
-    m.agentNote = null;
-    cx.spawn(async (cx) => {
-      try {
-        const agents = (await knownAgents({ on })).filter((a) => a.installed);
-        if (this.modal !== m || m.machines[m.machine] !== on) return;
-        m.agents = agents;
-        const wanted = m.settings.agent;
-        m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
-        if (!agents.length) m.agentsError = "Kein Agent installiert";
-        else if (wanted && !agents.some((a) => a.key === wanted)) {
-          m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
-        }
-      } catch (e) {
-        if (this.modal !== m || m.machines[m.machine] !== on) return;
-        m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
-      }
-      m.notes = [m.machineNote, m.agentNote].filter(Boolean);
-      cx.notify();
-    });
-  }
-
-  cycle(field, by, cx) {
-    const m = this.modal;
-    if (m.busy) return;
-    if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
-    if (field === "machine") {
-      m.machine = (m.machine + by + m.machines.length) % m.machines.length;
-      m.machineNote = null;
-      this.loadAgents(cx);
-    }
-    if (field === "open") m.open = m.open === "space" ? "tab" : "space";
-    cx.notify();
-  }
-
-  // Opens the item's session in its checkout on the chosen machine: finds the
-  // checkout's folder there, then runs space.new or tab.new. run() answers
-  // nothing, so the board says the session is being opened and watches for a
-  // space or tab of its name (watchSession). The dialog stays until the
-  // folder is known or the start failed; a failure that comes after the
-  // dialog went shows in the banner and as a toast.
-  startAgent(cx) {
-    const m = this.modal;
-    if (m?.kind !== "start" || m.busy) return;
-    const agent = m.agents[m.agent];
-    if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
-    const on = m.machines[m.machine];
-    const task = this.messageInput.value().trim();
-    const name = sessionName(m.item);
-    m.busy = "Sitzung wird geöffnet …";
-    m.error = null;
-    cx.spawn(async (cx) => {
-      try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
-        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
-        const folder = lastLine(r.stdout);
-        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
-        let space = null;
-        if (m.open === "tab") {
-          space = spaceForTab(spaces(), on, folder);
-          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
-        }
-        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
-        if (this.modal === m) {
-          this.modal = null;
-          this.handle.focus();
-        }
-        this.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
-        this.watchSession(name, cx);
-      } catch (e) {
-        const why = report(e);
-        if (this.modal === m) m.error = why;
-        else {
-          this.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
-          notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
-        }
-      } finally {
-        m.busy = null;
-        cx.notify();
-      }
-    });
-    cx.notify();
-  }
-
-  // Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
-  // says so when it appears, warns when it has not after the last.
-  watchSession(name, cx, at = 0) {
-    cx.timer.after(SESSION_CHECKS[at], (cx) => {
-      const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
-      if (there) return this.say(`Sitzung geöffnet: ${name}`, "success", cx);
-      if (at + 1 < SESSION_CHECKS.length) return this.watchSession(name, cx, at + 1);
-      this.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
-      notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
-    });
   }
 
   closeModal(cx) {
@@ -592,9 +467,10 @@ export default class Board extends View {
       cx.notify();
     };
     // [ ] and / may come with Shift, or AltGr, which Windows reports as
-    // Control+Alt; Control alone and Alt alone stay herdr's (it binds alt-[,
-    // alt-] and alt-digits).
-    const typed = Boolean(mod.control) === Boolean(mod.alt) && !mod.platform;
+    // Control+Alt; Control alone stays herdr's. A key herdr binds (alt-[,
+    // alt-], alt-digits) never reaches a mod, so Alt need not be refused
+    // here, where it may stand for AltGr.
+    const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
       const at = tabs.findIndex((c) => c.id === this.context()?.id);
@@ -621,62 +497,35 @@ export default class Board extends View {
     }
     if (!view) return;
     const shape = this.shape(view);
-    // A view without items leaves Enter, o and the arrows to herdr.
-    if (!shape.items) return;
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
-    if (k === "enter") return this.enter(view, cx), done();
-    if (k === "o") return this.open(this.selected(view), cx), done();
+    // With nothing selected (loading, failed, empty, a placeholder) Enter
+    // and o stay herdr's.
+    const item = this.selected(view);
+    if (k === "enter" && item) return this.enter(view, cx), done();
+    if (k === "o" && item) return this.open(item, cx), done();
   }
 
-  openStatusMenu(view) {
-    this.shape(view).openStatusMenu?.(this, view);
+  openStatusMenu(view, cx) {
+    const open = this.shape(view).openStatusMenu;
+    if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
+    open(this, view);
+    cx.notify();
   }
 
+  // Esc closes a dialog that is not busy; every other key is the dialog's.
   modalKey(e, cx) {
-    const m = this.modal;
-    const k = e.key;
-    const ch = e.key_char ?? "";
-    if (k === "escape") {
+    if (e.key === "escape") {
       cx.stop_propagation();
       return this.closeModal(cx);
     }
-    if (m.kind === "status") {
-      cx.stop_propagation();
-      let commit = k === "enter";
-      if (k === "j" || k === "down") m.at = Math.min(m.at + 1, m.targets.length - 1);
-      else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
-      else if (/^[1-9]$/.test(ch)) {
-        // A digit beyond the rows does nothing.
-        if (!m.targets[Number(ch) - 1]) return cx.notify();
-        m.at = Number(ch) - 1;
-        commit = true;
-      }
-      if (!commit) return cx.notify();
-      this.closeModal(cx);
-      return this.moveTo(m.view, m.key, m.targets[m.at].id, cx);
-    }
-    // The start dialog: Tab walks the fields; h/l or the arrows change a
-    // choice, Enter starts. Typing goes to the message.
-    const fields = ["message", "agent", "machine", "open"];
-    if (k === "tab") {
-      cx.stop_propagation();
-      const at = fields.indexOf(m.field);
-      m.field = fields[(at + (e.modifiers?.shift ? -1 : 1) + fields.length) % fields.length];
-      if (m.field === "message") this.messageInput.focus();
-      else this.handle.focus();
-      return cx.notify();
-    }
-    if (m.field === "message") return;
-    cx.stop_propagation();
-    if (k === "enter") return this.startAgent(cx);
-    if (k === "h" || k === "left") return this.cycle(m.field, -1, cx);
-    if (k === "l" || k === "right" || k === "space") return this.cycle(m.field, 1, cx);
+    MODALS[this.modal.kind].key(this, e, cx);
   }
+
 
   // ---- drawing ----
 
@@ -716,8 +565,7 @@ export default class Board extends View {
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
       )
       .child(this.hints(t, view));
-    if (this.modal?.kind === "status") out = out.child(this.statusMenu(t));
-    if (this.modal?.kind === "start") out = out.child(this.startDialog(t));
+    if (this.modal) out = out.child(MODALS[this.modal.kind].render(this, t));
     return out;
   }
 
@@ -726,30 +574,6 @@ export default class Board extends View {
     this.drag = null;
     this.over = null;
     cx.notify();
-  }
-
-  // A button; `primary` is the solid one. A disabled one ignores clicks.
-  button(t, id, label, primary, action, disabled = false) {
-    return div()
-      .id(id)
-      .px(12)
-      .py(7)
-      .rounded(6)
-      .text_size(12)
-      .cursor_pointer()
-      .opacity(disabled ? 0.5 : 1)
-      .bg(primary ? t.solid : t.raised)
-      .text_color(primary ? t.solid_foreground : t.foreground)
-      .when(primary, (el) => el.font_semibold())
-      .hover((s) => s.bg(primary ? t.accent : t.hover))
-      .on_click((_e, cx) => {
-        if (!disabled) action(cx);
-      })
-      .child(label);
-  }
-
-  checkColor(t, state) {
-    return { failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 }[state] ?? t.dim;
   }
 
   // The top bar, two rows so that neither the tabs nor the filter have to
@@ -797,7 +621,7 @@ export default class Board extends View {
           .child(Input.new(this.filterInput).flex_1().text_size(12.5).text_color(t.foreground)),
       )
       .child(div().flex_none().text_size(12).text_color(t.muted).child(updated))
-      .child(this.button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
+      .child(button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
     return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
   }
 
@@ -834,8 +658,8 @@ export default class Board extends View {
   }
 
   // The shown source's tabs: number, name and, for a view with data, how
-  // many items it holds ("…" while it loads; "<shown> von <total>" while
-  // the filter or "nur meine" hides some).
+  // many items it holds ("…" while it loads; shownOf while the filter or
+  // "nur meine" hides some).
   tabs(t, context) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
@@ -916,31 +740,35 @@ export default class Board extends View {
     if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
-    if (shape === SHAPES.placeholder) return box.child(shape.render(this, t, mono, view, st));
+    if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
-    const hidesAll = this.mine && st.data && !st.data.viewer && shape.count(this, st.data)?.shown === 0;
-    const noViewer = hidesAll ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
-    const warnings = [...st.warnings, ...noViewer];
+    const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
   }
 
+  // With "nur meine" on and no login the data was read as: what the text
+  // filter leaves but "nur meine" hides only for want of that login (not
+  // from a search of one's own) is said, with what still shows.
+  noViewerWarning(view, st, shape) {
+    if (!this.mine || !st.data || st.data.viewer) return [];
+    const left = shape.items(st.data).filter((i) => matches(i, this.filterText));
+    if (!left.some((i) => !i.ownByQuery)) return [];
+    const what = left.some((i) => i.ownByQuery) ? "nur Treffer eigener Suchen" : "nichts";
+    return [`„nur meine“ zeigt ${what}: ${this.sources[view.source].noViewer ?? NO_VIEWER}`];
+  }
+
   detail(t, mono, view, item) {
     const st = this.state(view.id);
     const session = linkedSession(item, spaces());
-    const column = st.data ? SHAPES[st.data.shape].column(st.data, item) : null;
-    const section = (title, ...kids) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border)
-      .child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+    // The shape's own rows: chips beside the author, sections, buttons.
+    const parts = this.shape(view).detailParts?.(this, t, view, item) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
     const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
-    const openStatus = (cx) => {
-      this.openStatusMenu(view);
-      cx.notify();
-    };
     return v_flex()
       .w(360)
       .flex_none()
@@ -968,26 +796,9 @@ export default class Board extends View {
               .gap(8)
               .flex_wrap()
               .items_center()
-              .when(Boolean(column), (el) =>
-                el.child(
-                  div()
-                    .id("status-pill")
-                    .px(10)
-                    .py(2)
-                    .rounded(12)
-                    .text_size(12)
-                    .font_semibold()
-                    .cursor_pointer()
-                    .bg(t[column?.color] ?? t.muted)
-                    .text_color(t.background)
-                    .on_click((_e, cx) => {
-                      if (!this.modal) openStatus(cx);
-                    })
-                    .child(`${column?.name} ▾`),
-                ),
-              )
+              .children(parts.chips ?? [])
               .when(Boolean(item.author), (el) => el.child(div().text_size(12).text_color(t.muted).child([`von ${item.author}`, item.review].filter(Boolean).join(" · "))))
-              .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von #${item.parent}`)))
+              .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von ${parentLabel(item)}`)))
               .when(Boolean(item.sub), (el) => el.child(div().text_size(12).text_color(t.muted).child(`◔ ${item.sub?.done}/${item.sub?.total} erledigt`))),
           )
           .when((item.labels ?? []).length > 0 || Boolean(item.type), (el) =>
@@ -995,9 +806,10 @@ export default class Board extends View {
           )
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
-      .when(Boolean(item.checks), (el) => el.child(section("CHECKS", div().text_color(this.checkColor(t, item.checks?.state)).child(item.checks?.text ?? ""))))
+      .children(parts.sections ?? [])
       .child(
-        section(
+        detailSection(
+          t,
           "SITZUNG",
           session
             ? h_flex()
@@ -1025,15 +837,13 @@ export default class Board extends View {
           .flex_wrap()
           .border_t(1)
           .border_color(t.border)
-          .child(this.button(t, "act-start", startLabel, true, (cx) => {
+          .child(button(t, "act-start", startLabel, true, (cx) => {
             if (this.modal) return;
             st.detail = true;
             this.enter(view, cx);
           }))
-          .when(Boolean(column), (el) => el.child(this.button(t, "act-status", "Status s", false, (cx) => {
-            if (!this.modal) openStatus(cx);
-          })))
-          .child(this.button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
+          .children(parts.buttons ?? [])
+          .child(button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
             if (!this.modal) this.open(item, cx);
           })),
       );
@@ -1063,147 +873,4 @@ export default class Board extends View {
       .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))));
   }
 
-  // A layer over the whole board that swallows presses, with a panel on it.
-  layer(t, id, panel) {
-    return div()
-      .id(id)
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(tint(t.background, "b3"))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
-      .child(panel);
-  }
-
-  statusMenu(t) {
-    const m = this.modal;
-    return this.layer(
-      t,
-      "status-layer",
-      v_flex()
-        .id("status-menu")
-        .w(280)
-        .p(8)
-        .gap(2)
-        .rounded(10)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(div().px(8).py(6).text_size(12).text_color(t.muted).child("Status ändern · j/k Enter · Esc"))
-        .children(
-          m.targets.map((c, i) =>
-            h_flex()
-              .id(`status-${i}`)
-              .px(8)
-              .py(6)
-              .gap(8)
-              .items_center()
-              .rounded(6)
-              .cursor_pointer()
-              .when(i === m.at, (el) => el.bg(t.selected))
-              .hover((s) => s.bg(t.hover))
-              .on_click((_e, cx) => {
-                this.closeModal(cx);
-                this.moveTo(m.view, m.key, c.id, cx);
-              })
-              .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
-              .child(div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted))
-              .child(div().flex_1().child(c.name))
-              .when(Boolean(c.hidden), (el) => el.child(div().text_size(11).text_color(t.dim).child("ausgeblendet"))),
-          ),
-        ),
-    );
-  }
-
-  startDialog(t) {
-    const m = this.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex()
-        .h(34)
-        .px(10)
-        .items_center()
-        .rounded(6)
-        .border_1()
-        .border_color(m.field === field ? t.accent : t.input)
-        .bg(t.background)
-        .child(inner);
-    const choice = (field, title, value) =>
-      v_flex()
-        .flex_1()
-        .min_w(0)
-        .gap(6)
-        .child(label(title))
-        .child(
-          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
-            .on_click((_e, cx) => {
-              m.field = field;
-              this.handle.focus();
-              this.cycle(field, 1, cx);
-            })
-            .child(div().flex_1().min_w(0).truncate().child(value))
-            .child(div().text_color(t.dim).child("◂ ▸"))),
-        );
-    const agent = m.agents[m.agent];
-    return this.layer(
-      t,
-      "start-layer",
-      v_flex()
-        .id("start-dialog")
-        .w(600)
-        .rounded(12)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(
-          v_flex()
-            .px(20)
-            .py(16)
-            .gap(4)
-            .border_b(1)
-            .border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${itemLabel(m.item)}`))
-            .child(div().text_size(12).text_color(t.muted).truncate().child(m.item.title)),
-        )
-        .child(
-          v_flex()
-            .px(20)
-            .py(16)
-            .gap(14)
-            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
-            .child(
-              h_flex()
-                .gap(12)
-                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
-                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen als", m.open === "tab" ? "neuer Tab" : "neuer Space")),
-            )
-            .child(
-              v_flex()
-                .gap(6)
-                .child(label("Erste Nachricht"))
-                .child(frame("message", Input.new(this.messageInput).flex_1().text_size(12).text_color(t.foreground))),
-            )
-            .children(m.notes.map((n) => div().text_size(12).text_color(t.ansi3).child(n)))
-            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
-        )
-        .child(
-          h_flex()
-            .px(20)
-            .py(12)
-            .gap(8)
-            .items_center()
-            .border_t(1)
-            .border_color(t.border)
-            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
-            .child(this.button(t, "start-cancel", "Abbrechen Esc", false, (cx) => this.closeModal(cx), Boolean(m.busy)))
-            .child(this.button(t, "start-go", "Starten ↵", true, (cx) => this.startAgent(cx), Boolean(m.busy))),
-        ),
-    );
-  }
 }

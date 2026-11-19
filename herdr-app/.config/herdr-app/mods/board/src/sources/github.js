@@ -97,7 +97,7 @@ export function errorAt(errors, path) {
 
 // gh's answer for githubBoardArgs (and the GraphQL errors that came with its
 // data) → a board:
-// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer }
+// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer, limit }
 // (viewer: the login gh runs as, null when GitHub did not say).
 // A hidden column's cards are only those moved there since the last refresh;
 // its count is the server's plus those. Items without a status, or in an
@@ -156,6 +156,7 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     total: project.items.totalCount,
     limited: project.items.pageInfo.hasNextPage,
     viewer: json?.data?.viewer?.login ?? null,
+    limit: view.limit,
   };
 }
 
@@ -237,16 +238,24 @@ const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewün
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, count, limited, skipped, rows }], viewer }.
+// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
 // A pull request found by two sections shows in the first only; a result
 // that is no pull request is counted in skipped. A search missing from the
 // answer is explained by the error at its alias.
+// Whether a search holds only one's own pull requests, as "nur meine" counts
+// them: it has author, assignee, review-requested or user-review-requested
+// set to @me, not negated (by a leading - or NOT). A review asked of a team
+// one is in shows only in such a search; the answer names no person for it.
+// involves, mentions, commenter, reviewed-by and the like do not count.
+export function ownSearch(query) {
+  const words = String(query ?? "").split(/\s+/);
+  return words.some((w, i) => /^(author|assignee|review-requested|user-review-requested):@me$/i.test(w) && words[i - 1]?.toUpperCase() !== "NOT");
+}
+
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
-    // A search narrowed to the viewer (@me) holds only their pull requests,
-    // also those a team they are in is asked to review.
-    const own = /@me\b/.test(s.query);
+    const own = ownSearch(s.query);
     const found = json?.data?.[`s${i}`];
     if (!Array.isArray(found?.nodes)) {
       const e = errorAt(errors, [`s${i}`]);
@@ -284,7 +293,9 @@ export function parseGithubList(json, view, errors = []) {
         ownByQuery: own,
       });
     }
-    return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };
+    // count: how many GitHub found; fetched: how many it sent; rows: those
+    // held, each pull request once (in its first section), no other result.
+    return { name: s.name, count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length, skipped, rows };
   });
   return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
 }
@@ -349,14 +360,15 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
 
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
-// The GitHub source for the board: the name of the site `o` opens, what
-// "nur meine" says when GitHub did not name the login, and per layout of a
+// The GitHub source for the board: the name of the site `o` opens, why
+// "nur meine" cannot tell one's own items when GitHub did not name the
+// login, and per layout of a
 // GitHub view how it loads (`hiddenFor(view)` gives its hidden columns) and
 // how a board writes a move. gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
-    noViewer: "„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist",
+    noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     views: {
       board: {
         async load(view, hiddenFor) {
