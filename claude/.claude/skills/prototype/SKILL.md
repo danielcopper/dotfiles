@@ -18,7 +18,7 @@ The two branches produce very different artifacts, so getting this wrong wastes 
 
 ## Rules for both
 
-1. **Throwaway, in its own worktree.** Create it with `mise run worktree-new prototype <slug>`: branch `prototype/<slug>`, worktree at the convention path the `worktree` skill gives. Inside it, put the code next to the module or page it prototypes for, named so a casual reader sees it is a prototype; a throwaway route follows the project's routing convention.
+1. **Throwaway, in its own worktree.** Create it for branch `prototype/<slug>` with the repo's worktree task, else at the path the `worktree` skill gives, as implement step 4 does. Inside it, put the code next to the module or page it prototypes for, named so a casual reader sees it is a prototype; a throwaway route follows the project's routing convention.
 2. **Trivial to run.** One command starts it: the project's task runner, `python <path>`, `bun <path>`, or, for a logic page, the static server "Show it" points to.
 3. **No persistence by default.** State lives in memory. If the question explicitly involves a database, hit a scratch DB or a local file with a clear "PROTOTYPE, wipe me" name.
 4. **Skip the polish.** No tests, no error handling beyond what makes the prototype _runnable_, no abstractions. The point is to learn something fast.
