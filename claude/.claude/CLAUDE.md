@@ -15,6 +15,8 @@
 
 ## Memory
 
+**Memory is written only when I ask for it.** A correction during a session changes that session, nothing more. At the end of a piece of work, propose what is worth keeping — each with its scope (none, this repo, global) and whether a check, hook or skill change would carry it better than a note — and write only what I pick. Repo scope is the default; global only when I say so. Working notes a skill writes (briefs, reports, reviews, research notes) are not covered by this; they follow their skill.
+
 All memory lives under `~/Memory/` (auto memory is off); how it is laid out, where a note goes and its format: `~/Memory/global/README.md` — read it before writing a note. Never write to `~/.claude/projects/*/memory/` or `~/Notes/`. Before researching from scratch, search memex (or `~/memex/daniel/wiki/_master-index.md`).
 
 Global memory index: @~/Memory/global/MEMORY.md
