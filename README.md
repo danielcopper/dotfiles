@@ -285,11 +285,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   opened or am asked to review, with checks and review state). The Azure
   tabs read nothing yet; each says which view it will hold. "nur meine"
   narrows whatever shows to my own items (on GitHub: assigned to me, opened
-  by me, or asking for my review) without reading anything again. A context
+  by me, or asking for my review; a list section of my own search, one with
+  @me in its query, counts whole) without reading anything again. A context
   or view added to `views.json` adds a tab, and `r` reads the file again;
   the board remembers the source, tab and team view shown last, and "nur
   meine". A count in a tab, a column or a list section that the filter or
-  "nur meine" thins says so ("1 von 4"). The code holds nothing of mine; the
+  "nur meine" thins says so ("1/4"). The code holds nothing of mine; the
   header of `mods/board/src/main.js` describes the file's fields. Keys: `q`
   switches the source, `1 2 3` or `[ ]` the tab, `v` a team's Sprint and
   Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
@@ -311,10 +312,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   herdr-board-test` (without mise, `node --test
   tests/herdr-app/board.test.mjs` from the repo) tests that `main.js` is
   built from its sources, its data functions and a few of its key paths
-  against sample answers of gh, GitHub and az, once against `main.js` and
-  once against its sources; the test file's header says which answers are
-  recorded, which built by hand and which written from az's documentation.
-  It needs node.
+  against sample answers of gh, GitHub and az; the test file's header says
+  which answers are recorded, which built by hand and which written from
+  az's documentation. It needs node.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden) stay in
