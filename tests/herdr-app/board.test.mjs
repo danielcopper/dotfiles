@@ -1855,6 +1855,7 @@ test("UI: a write under way while r makes its view a list leaves nothing open", 
   config.sources.github.views[0] = { id: "mine", name: "Mine", source: "github", layout: "list", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] };
   host.config = JSON.stringify(config);
   await press(b, cx, "r");
+  assert.ok(texts(b.render()).includes("In progress"), "until the list is read, the board's data is drawn as a board");
   await host.answer("gh", ok(fixture("github-list.json")), "search(");
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s", "no follow-up promised");
@@ -2602,6 +2603,7 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
     "the list: asked to review, assigned, opened by sample-user; not the bot's own 1921");
   assert.ok(texts(b.render()).includes("REVIEW · 1"), "the review section keeps its row");
   assert.ok(texts(b.render()).includes("MINE · 2 von 3"), "and says what is hidden");
+  assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3 von 4", "so does the tab");
   await press(b, cx, "m");
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
 });
