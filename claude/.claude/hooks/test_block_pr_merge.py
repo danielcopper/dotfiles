@@ -239,6 +239,8 @@ DENIED = [
     "gh pr create --title x; /tmp/g pr merge 1",
     'gh pr create --title "$(/tmp/g pr merge 1)"',
     "gh pr edit 12 --body-file b.md curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
+    # a long open brace before a brace-built word
+    ": {" + "a," * 40_000 + " ; gh pr {m..m}erge 3",
 ]
 
 REASONS = {
@@ -257,6 +259,10 @@ PATHOLOGICAL = [
     "gh " + "pr " * 33_000,
     "a=" * 49_500,
     "curl " + "-" * 98_000,
+    "{" + "a," * 49_000,
+    "{a" + "," * 98_000,
+    "{" + "a.." * 33_000,
+    ": {" + "a," * 40_000 + " ; gh pr {m..m}erge 3",
 ]
 
 

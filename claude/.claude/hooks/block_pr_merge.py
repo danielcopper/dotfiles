@@ -37,7 +37,8 @@ DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
 FILE_FLAGS = re.compile(r"@|--input|--upload-file|--config|--post-file|--body-file|--in-file")
 FILE_SHORT_FLAGS = re.compile(r"(?<!\S)-[A-Za-z]*[TK]|(?<!\S)-i(?!\S)")  # case-sensitive
 MENTION = re.compile(r"merge|complet|alias")
-BRACE_EXPANSION = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+# The part before the first comma or `..` cannot hold one, so a long open brace is scanned once.
+BRACE_EXPANSION = re.compile(r"\{(?:[^{}\s,.]|\.(?!\.))*(?:,|\.\.)[^{}\s]*\}")
 GLOB_NEXT_TO_LETTER = re.compile(r"[A-Za-z][*?\[]|[*?\[][A-Za-z]")
 
 READ_ONLY_FORBIDDEN = set(";&|<>$`(){}\n\r'\"\\")
