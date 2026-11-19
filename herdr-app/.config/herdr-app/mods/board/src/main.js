@@ -460,8 +460,9 @@ export default class Board extends View {
     if (!session) return MODALS.start.open(this, view, item, cx);
     // The session may be the tab behind the board layer, which selecting
     // it does not show; leaving the layer first keeps its pane.focus from
-    // undoing the selection.
-    if (this.isLayer()) layers.leaveLayer();
+    // undoing the selection. (A copy in a tab gets keys only while the
+    // layer does not cover it, so there this does nothing.)
+    layers.leaveLayer();
     try {
       run("space.select", { id: session.space });
       if (session.tab) run("tab.select", { id: session.tab });
@@ -532,15 +533,15 @@ export default class Board extends View {
   // At every look (a render, which herdr runs only while the copy shows,
   // and the WATCH_MS timer, which runs while it is hidden too): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
-  // after the look and only where it still shows; the layer's board starts
-  // a new focus to compare with (followFocus).
+  // after the look and only where it still shows. While hidden, the layer's
+  // board forgets the focus it compared with (followFocus), so it starts
+  // anew when it shows.
   watchShown(cx) {
     const shown = boardShown(this.isLayer());
     const was = this.wasShown;
     this.wasShown = shown;
     if (!shown) this.seen = null;
     if (!shown || was !== false) return;
-    this.seen = null;
     cx.timer.after(0, () => this.guarded("Tastatur", () => {
       if (boardShown(this.isLayer())) this.takeKeyboard();
     }));
@@ -617,7 +618,7 @@ export default class Board extends View {
       else if (this.filterText) {
         this.filterInput.set_value("");
         this.filterText = "";
-      } else if (this.isLayer()) layers.leaveLayer();
+      } else layers.leaveLayer();
       return done();
     }
     if (!view) return;

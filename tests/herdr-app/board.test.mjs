@@ -1858,8 +1858,15 @@ test("UI: a throw while the board handles a command, or in its timer, is said on
   };
   await cx.look();
   await cx.look();
-  const said = host.notes.filter((n) => n.title === "Board: Anzeige fehlgeschlagen");
-  assert.deepEqual(said.map((n) => /layout broke/.test(n.body)), [true], "the timer, said once");
+  const said = () => host.notes.filter((n) => n.title === "Board: Anzeige fehlgeschlagen").length;
+  assert.equal(said(), 1, "the timer, said once");
+  host.layout = () => null;
+  await cx.look();
+  host.layout = () => {
+    throw new Error("layout broke");
+  };
+  await cx.look();
+  assert.equal(said(), 2, "and again after a look that worked");
 });
 
 test("UI: herdr's props() say which copy is the layer's; the props init got stand in only where it gives none", async () => {
@@ -2021,11 +2028,9 @@ test("UI: Esc closes the details, then the notice, then clears the filter, and t
   assert.deepEqual([host.runs.splice(0), b.filterText], [[], ""], "the filter");
   await press(b, cx, "escape");
   assert.deepEqual(host.runs.splice(0), SHOW_TAB, "the tab's content");
-  for (const active of ["main", "board"]) {
-    const inTab = await openBoard({ tree: layerLayout(active) });
-    await press(inTab.b, inTab.cx, "escape");
-    assert.deepEqual(inTab.host.runs, [], `a Board tab's board stays, the layer showing ${active}`);
-  }
+  const inTab = await openBoard({ tree: layerLayout("main") });
+  await press(inTab.b, inTab.cx, "escape");
+  assert.deepEqual(inTab.host.runs, [], "a Board tab's board stays");
 });
 
 test("UI: a press outside the shown layer's board shows the tab's content after the press, any button; the pane gets the keyboard if the board still has it then", async () => {
@@ -2049,6 +2054,10 @@ test("UI: a press outside the shown layer's board shows the tab's content after 
   press();
   await cx.fire();
   assert.deepEqual(host.runs.splice(0), SHOW_TAB, "the start dialog's message having it (a press on the tab bar)");
+  b.modal.input.blur();
+  press();
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [SHOW_TAB[0]], "the start dialog's message, left before the press: what took it keeps it");
   b.modal = null;
   b.handle.focus();
   press();
