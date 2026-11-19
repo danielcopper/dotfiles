@@ -1,6 +1,6 @@
 ---
 name: deps-triage
-description: Triage open dependency and chore PRs — CI state, breaking-change check, safe-to-merge classification with reasoning. The user rules on the list; merging the safe ones follows their OK. Argument: none, or "merge" to pre-request merge of everything classified safe.
+description: Triage open dependency and chore PRs — CI state, breaking-change check, safe-to-merge classification with reasoning. The user rules on the list, and the safe bucket goes to the owner to merge.
 disable-model-invocation: true
 ---
 
@@ -29,6 +29,6 @@ Three buckets, each PR with a one-line reasoning:
 - **LOOK** — major bump, breaking notes, runtime reach, or anything you couldn't verify
 - **STUCK** — auto-merge armed but not progressing; include the unstick action
 
-Present the table and wait for the user's ruling. With their OK (or the `merge` argument as the pre-given OK), merge the SAFE bucket per the repo's merge method and report each result.
+Present the table and wait for the user's ruling. Then hand the SAFE bucket, as the user ruled it, to the owner to merge — one line per PR with its link; every merge is the owner's (`merge_policy`, `~/.claude/skills/implement/repo-config.md`).
 
-*Done when:* every open dependency PR is merged, deliberately left open with a named reason, or handed to the user.
+*Done when:* the user has ruled on the list, and every open dependency PR is either in the SAFE bucket handed to the owner or left open with a named reason or its unstick action.

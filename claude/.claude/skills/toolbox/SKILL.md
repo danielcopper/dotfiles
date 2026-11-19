@@ -40,7 +40,7 @@ Match the current situation against this index and recommend the right skill(s).
 
 ## Maintenance
 
-- `/deps-triage [merge]` — classify open dependency/chore PRs: SAFE / LOOK / STUCK, with reasoning; merges the safe ones on OK
+- `/deps-triage` — classify open dependency/chore PRs: SAFE / LOOK / STUCK, with reasoning; hands the safe ones the user ruled to the owner to merge
 - `/find-session <term>` — find past sessions by issue number or topic, with resume commands
 
 ## Meta & recurring

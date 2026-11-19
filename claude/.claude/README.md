@@ -108,7 +108,7 @@ GitHub-issue work runs through skills (user-invoked, except where the table says
 | **toolbox**              | `/toolbox`                     | Router: names the skills to reach for and when — the entry point when unsure which skill fits                                                  |
 | **setup-repo**           | `/setup-repo`                  | Decides own or foreign repo, detects gate, worktree task and board, asks the rest; drafts the `CLAUDE.md` `## Pipeline` section (own repo) and writes `~/Memory/<repo>/repo-profile.md`; safe to run again |
 | **next**                 | `/next [hint]`                 | Board picker: reads Ready + In Progress, open PRs, and recent commits, then commits to one recommendation for what to work on next                 |
-| **deps-triage**          | `/deps-triage [merge]`         | Classify open dependency/chore PRs (SAFE / LOOK / STUCK) with reasoning; merges the safe bucket on OK                                              |
+| **deps-triage**          | `/deps-triage`                 | Classify open dependency/chore PRs (SAFE / LOOK / STUCK) with reasoning; hands the safe bucket the user ruled to the owner to merge                |
 | **find-session**         | `/find-session <term>`         | Find past sessions by issue number or topic across all project dirs (incl. worktrees), with resume commands                                        |
 
 ### Agents (`agents/`)
