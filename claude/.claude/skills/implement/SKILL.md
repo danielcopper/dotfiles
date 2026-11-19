@@ -65,8 +65,8 @@ into the issue as `repo-config.md`, "Questions and decisions in an issue", says,
 
 Run the review agents [`review-agents.md`](../../review-agents.md) names, per `dispatch.md`. Re-read `review-agents.md`
 before each round: it routes the findings, including the check of each one at its artifact, and sets the fix rounds
-and their cap. Fix rounds run without the user's go. The user's list goes to the user when the loop ends, and the run
-goes on while it waits; a ruling to fix is dispatched as `review-agents.md` says.
+and their cap. The user's list goes to the user when the loop ends, and the run goes on while it waits; a ruling to
+fix is dispatched as `review-agents.md` says.
 
 *Done when:* every finding sent to the implementer is addressed or, after the round cap, on the user's list, and that
 list is with the user.
