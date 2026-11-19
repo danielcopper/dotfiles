@@ -20,7 +20,7 @@ Present to the user:
 - The split into **runs autonomously** vs **needs the user** — a verification the profile's `user_gate` names, a decision only they can make, or a step only they can perform
 - Your questions about any issue — asked **one at a time**, before any work starts
 
-When the epic or any of its sub-issues still has open `## To decide` items, or the answers would coin a glossary term or meet the ADR criteria, offer a `/grill-with-docs` pass first, as implement step 3 does.
+When the epic or any of its sub-issues meets implement step 3's `/grill-with-docs` triggers, offer the pass first, as that step does.
 
 In a convention repo (see `implement`), epic-level answers go into the epic body's `## Decisions`, written directly as `public_text_drafts` in `~/.claude/skills/implement/repo-config.md` says, and each sub-issue's `## Decisions` reads "See epic #N", plus its own answers.
 
