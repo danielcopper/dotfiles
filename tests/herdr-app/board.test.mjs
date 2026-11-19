@@ -781,7 +781,7 @@ function typedBoard() {
   const card = (key, type, column) => ({ key, source: "azure", number: Number(key.slice(1)), type, title: key, labels: [], assignees: [], column });
   const col = (name, cards, hidden = false) => ({ id: name, name, color: "muted", hidden, count: hidden ? null : cards.length, target: true, cards });
   return {
-    kind: "board",
+    shape: "board",
     meta: { types: { Task: ["To Do", "In Progress", "Done"], Bug: ["New", "Committed", "Done"] } },
     columns: [col("To Do", []), col("New", [card("w102", "Bug", "New")]), col("In Progress", [card("w101", "Task", "In Progress")]), col("Committed", []), col("Done", [], true)],
     total: 2,
@@ -1971,7 +1971,7 @@ test("UI: r drops the open outcomes of a view that became a list", async () => {
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
   await host.answer("gh", ok(fixture("github-list.json")), "search(");
   assert.equal(b.views.mine.error, null);
-  assert.equal(b.views.mine.data.kind, "list");
+  assert.equal(b.views.mine.data.shape, "prs");
 });
 
 test("UI: a refresh settles the outcomes that came before it started and keeps the later ones for the next", async () => {
@@ -2528,6 +2528,23 @@ test("UI: a team with one view shows it without a switch; a config with one sour
   await press(b, cx, "q");
   await press(b, cx, "v");
   assert.deepEqual([b.source().id, b.teamViewOf(b.context())], ["azure", "backlog"]);
+});
+
+test("UI: an Azure view drawn as a board has what the board shape reads, and draws without an error", async () => {
+  const { b } = await bootBoard({ stored: { source: "azure" } });
+  const view = b.view();
+  assert.deepEqual([view.hide, view.start], [[], {}]);
+  b.state(view.id).data = typedBoard();
+  const root = b.render();
+  assert.ok(texts(root).includes("In Progress"), "the board's columns");
+  assert.equal(b.shape(view), board.SHAPES.board, "the data's shape wins over the placeholder");
+});
+
+test("the GitHub tab ids and a team's switch hint have one home", () => {
+  assert.equal(board.githubContextId("mine"), "github:mine");
+  const [team] = board.contextsOf(sampleConfig(), "azure");
+  assert.deepEqual([board.hasViewSwitch(team), board.viewSwitchHint(team)], [true, "Sprint/Backlog"]);
+  assert.deepEqual([board.hasViewSwitch({ ...team, views: ["backlog"] }), board.hasViewSwitch({ kind: "prs" }), board.hasViewSwitch(null)], [false, false, false]);
 });
 
 test("UI: while one types in the filter, m, q, v and digits are text, not keys", async () => {

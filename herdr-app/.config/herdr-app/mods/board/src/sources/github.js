@@ -91,7 +91,7 @@ export function errorAt(errors, path) {
 
 // gh's answer for githubBoardArgs (and the GraphQL errors that came with its
 // data) → a board:
-// { kind: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer }
+// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer }
 // (viewer: the login gh runs as, null when GitHub did not say).
 // A hidden column's cards are only those moved there since the last refresh;
 // its count is the server's plus those. Items without a status, or in an
@@ -144,7 +144,7 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     if (!col.hidden) col.count++;
   }
   return {
-    kind: "board",
+    shape: "board",
     meta: { projectId: project.id, fieldId: field.id, title: project.title, url: project.url },
     columns,
     total: project.items.totalCount,
@@ -231,7 +231,7 @@ const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewün
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { kind: "list", sections: [{ name, count, limited, skipped, rows }], viewer }.
+// data) → { shape: "prs", sections: [{ name, count, limited, skipped, rows }], viewer }.
 // A pull request found by two sections shows in the first only; a result
 // that is no pull request is counted in skipped. A search missing from the
 // answer is explained by the error at its alias.
@@ -277,7 +277,7 @@ export function parseGithubList(json, view, errors = []) {
     }
     return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };
   });
-  return { kind: "list", sections, viewer: json?.data?.viewer?.login ?? null };
+  return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
 }
 
 // gh's network failures, as Go's net package and gh word them. NOT_SENT: the

@@ -1,15 +1,16 @@
 // View kinds, "<source> <layout>" (viewKind), and what the board shows for
-// a view of each: `shape`, how its data is drawn and walked (SHAPES in
-// src/main.js), or for a view whose source reads nothing for it yet the
-// `text` it shows.
-// A new view is an entry here, its loading in its source's module
-// (make<Source>().views[layout]) and, for a new way to draw, a shape.
+// a view of each: `shape`, how its data is drawn and walked (ui/shapes/),
+// or for a view whose source reads nothing for it yet the `text` it shows.
+// A new view kind is: an entry here; its loading in its source's module
+// (make<Source>().views[layout]); for a GitHub view, what views.json may say
+// about it (VIEW_KINDS in config.js); and for a new way to draw, a shape.
 
-import { viewKind } from "../config.js";
+// A view's kind: the key of KINDS (and of VIEW_KINDS for a GitHub view).
+export const viewKind = (v) => `${v.source} ${v.layout}`;
 
 export const KINDS = {
   "github board": { shape: "board" },
-  "github list": { shape: "list" },
+  "github list": { shape: "prs" },
   "azure sprint": { text: "Sprint-Ansicht folgt" },
   "azure backlog": { text: "Backlog folgt" },
   "azure prs": { text: "PR-Ansicht folgt" },

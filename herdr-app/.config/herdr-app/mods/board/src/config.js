@@ -34,7 +34,8 @@ const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] 
 // "source" may stay from views.json's first form, as "github".
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
-// Per GitHub view kind ("github <layout>"): its own keys, what is wrong with them,
+// Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
+// kinds/index.js, says how it shows): its own keys, what is wrong with them,
 // and its fields with their defaults filled in.
 const VIEW_KINDS = {
   "github board": {
@@ -63,8 +64,8 @@ const VIEW_KINDS = {
   },
 };
 
-// A view's kind, the key of VIEW_KINDS.
-export const viewKind = (v) => `${v.source} ${v.layout}`;
+// The layouts a GitHub view may have, from VIEW_KINDS.
+const GITHUB_LAYOUTS = Object.keys(VIEW_KINDS).map((k) => k.slice("github ".length));
 
 function viewProblems(v) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
@@ -72,9 +73,8 @@ function viewProblems(v) {
   if (!isText(v.id)) out.push("„id“ fehlt");
   if (!isText(v.name)) out.push("„name“ fehlt");
   if (v.source !== undefined && v.source !== "github") out.push("„source“ ist hier \"github\" oder fehlt");
-  if (v.layout !== "board" && v.layout !== "list") out.push("„layout“ ist \"board\" oder \"list\"");
   const kind = VIEW_KINDS[`github ${v.layout}`];
-  if (!kind) return out;
+  if (!kind) return [...out, `„layout“ ist ${GITHUB_LAYOUTS.map((l) => `"${l}"`).join(" oder ")}`];
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);

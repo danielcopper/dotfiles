@@ -3,6 +3,7 @@
 
 import { panes, spaces } from "herdr";
 import { MOD, BoardError, errorText } from "../shared.js";
+import { githubContextId } from "../contexts.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -33,7 +34,7 @@ export function migrateShownView() {
   const view = store.get("view");
   if (typeof view !== "string") return;
   if (store.get("source") === null) store.set("source", "github");
-  if (store.get("tab:github") === null) store.set("tab:github", `github:${view}`);
+  if (store.get("tab:github") === null) store.set("tab:github", githubContextId(view));
   store.set("view", null);
 }
 
@@ -53,3 +54,7 @@ export function report(e) {
   if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
   return errorText(e);
 }
+
+// "<shown> von <total>" where the filter or "nur meine" hides some, else the
+// total.
+export const shownOf = (shown, total) => (shown < total ? `${shown} von ${total}` : String(total));

@@ -13,7 +13,7 @@ export function readStoredHidden(value) {
 // The hidden columns: the view's hide, plus what the person hid, minus what
 // they showed.
 export function hiddenColumns(view, stored) {
-  const hidden = new Set(view.hide);
+  const hidden = new Set(view.hide ?? []);
   const own = readStoredHidden(stored);
   for (const name of own?.hide ?? []) hidden.add(name);
   for (const name of own?.show ?? []) hidden.delete(name);
@@ -36,7 +36,7 @@ export function toggleHidden(view, stored, column) {
 // Names in a view's hide that match none of `columns`.
 export function unknownHidden(view, columns) {
   const names = new Set(columns.map((c) => c.name));
-  return view.hide.filter((n) => !names.has(n));
+  return (view.hide ?? []).filter((n) => !names.has(n));
 }
 
 const cloneBoard = (board) => ({ ...board, columns: board.columns.map((c) => ({ ...c, cards: [...c.cards] })) });

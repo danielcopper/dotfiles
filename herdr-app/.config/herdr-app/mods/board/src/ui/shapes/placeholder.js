@@ -1,0 +1,21 @@
+// The placeholder shape: what a view whose source reads nothing for it yet
+// shows, the text of its kind (KINDS). View fields it reads: source,
+// layout.
+
+import { div } from "gpui-kit";
+import { kindOf } from "../../kinds/index.js";
+
+export const placeholderShape = {
+  nav: () => [],
+  selected: () => null,
+  scrollTo() {},
+  count: () => null,
+  render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text ?? "Diese Ansicht gibt es noch nicht"),
+  hints: [],
+  dirs: [],
+  items: false,
+  keys: () => false,
+  received: (data) => data,
+  warnings: () => [],
+  column: () => null,
+};
