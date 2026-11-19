@@ -32,7 +32,7 @@ Pick whichever shape best fits the question being asked, _not_ whichever is easi
 
 ### 3. Build the HTML page
 
-One file, plain HTML/CSS/JS: no framework, no bundler, no backend, everything inline, so the static server in the [SKILL](SKILL.md)'s "Show it" hands it out as-is.
+One file, plain HTML/CSS/JS: no framework, no bundler, no backend, everything inline, so the static server the [SKILL](SKILL.md)'s "Show it" points to hands it out as-is.
 
 Every label is in **domain language**, not code (the glossary's terms where the repo has one): buttons and state read like the domain, not the reducer. Explain in plain words what's happening.
 
