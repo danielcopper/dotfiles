@@ -284,17 +284,20 @@ herdr-app`. Which files of the package git tracks is set in the root
 - **The board (`mods/board/`) shows my own work.** In the personal layout it
   is a layer of the work area, not a tab: a stack in the layout with the
   shown tab's content and a board block whose props say `layer`. The board
-  button left of the tabs and the leader's `b` show the board in place of
-  the tab's content and give it the keyboard; the button is highlighted
-  while it shows. The tab's content comes back, with the keyboard, on a
-  second press of the button or `b`, on `Esc` when the board has nothing
-  else to close (details, a notice, the filter), on `Enter` to an item's
-  session, on any press outside the board but the button's (the tab bar,
-  the sidebar, the right panel; any mouse button), and when the focus moves
-  to another space, tab or pane, for example to the agent the board just
-  started; a new program in the same pane keeps the board. herdr's tab bar
-  keeps highlighting the last shown tab while the board shows. The board
-  layer is found by its shape, not by ids. Without one, the button and `b`
+  button left of the tabs (a press of any mouse button) and the leader's
+  `b` show the board in place of the tab's content; the button is
+  highlighted while it shows. The board takes the keyboard whenever it
+  comes to show, there or in a Board tab, unless its dialog or filter has
+  it. The tab's content comes back, with the keyboard, on a second press of
+  the button or `b`, on `Esc` when the board has nothing else to close
+  (details, a notice, the filter), on `Enter` to an item's session, and
+  when the focus moves to another space, tab or pane, for example to the
+  agent the board just started; a new program in the same pane keeps the
+  board. Any press outside the board, except one on the button (the tab
+  bar, the sidebar, the right panel; any mouse button), brings it back,
+  with the keyboard only if the board had it; otherwise what was pressed
+  keeps it. herdr's tab bar keeps highlighting the last shown tab while the
+  board shows. The board layer is found by its shape, not by ids. Without one, the button and `b`
   show the board's "Board" tab or open one, except in the personal
   layout, where they say the layer is missing. A top bar toggles between
   its sources, GitHub and Azure, and shows one tab per context of the shown
