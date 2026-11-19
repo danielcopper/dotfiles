@@ -31,6 +31,10 @@ explore the code far enough to know the blast radius.
 State approach, scope and what stays untouched; ask open questions one at a time; start on the user's go. With `--go`
 (or a standing grant) and no open question, go straight on — open questions always stop.
 
+When the issue still has open `## To decide` items, or its answers would coin a glossary term or meet the ADR criteria,
+the planning was skipped: offer a `/grill-with-docs` pass before aligning, and on the user's yes read
+`~/.claude/skills/grill-with-docs/SKILL.md` and follow it.
+
 *(convention)* The answers go into the issue before step 4, as `repo-config.md`, "Questions and decisions in an issue",
 says, plus `## Out of scope` when anything was ruled out (`## Decisions` with "None." when nothing was to decide);
 `--go` also needs an issue with no open question. A decision meeting the ADR criteria gets an ADR where
