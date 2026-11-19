@@ -22,6 +22,21 @@
      "author": {
       "login": "sample-contributor"
      },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       },
+       {
+        "requestedReviewer": {}
+       }
+      ]
+     },
      "commits": {
       "nodes": [
        {
@@ -72,6 +87,12 @@
      "author": {
       "login": "sample-release-bot"
      },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
      "commits": {
       "nodes": [
        {
@@ -113,6 +134,16 @@
      "author": {
       "login": "sample-release-bot"
      },
+     "assignees": {
+      "nodes": [
+       {
+        "login": "sample-user"
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
      "commits": {
       "nodes": [
        {
@@ -138,6 +169,21 @@
      },
      "author": {
       "login": "sample-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       },
+       {
+        "requestedReviewer": {}
+       }
+      ]
      },
      "commits": {
       "nodes": [
@@ -175,6 +221,12 @@
      },
      "author": {
       "login": "sample-user"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
      },
      "commits": {
       "nodes": [

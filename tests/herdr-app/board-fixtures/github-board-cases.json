@@ -53,6 +53,9 @@
        },
        "content": {
         "__typename": "PullRequest",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3050,
         "title": "feat(api): retry a failed request once",
         "url": "https://github.com/example/tender/pull/3050",
@@ -77,6 +80,9 @@
        "fieldValueByName": null,
        "content": {
         "__typename": "DraftIssue",
+        "creator": {
+         "login": "sample-contributor"
+        },
         "title": "Draft: sort the release notes",
         "assignees": {
          "nodes": []
@@ -99,6 +105,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3060,
         "title": "chore: an item in an option that no longer exists",
         "url": "https://github.com/example/tender/issues/3060",

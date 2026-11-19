@@ -21,12 +21,12 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
   content {
     __typename
-    ... on Issue { number title url issueType { name } repository { nameWithOwner }
+    ... on Issue { number title url issueType { name } repository { nameWithOwner } author { login }
       labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
       parent { number } subIssuesSummary { total completed } }
-    ... on PullRequest { number title url headRefName repository { nameWithOwner }
+    ... on PullRequest { number title url headRefName repository { nameWithOwner } author { login }
       labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } } }
-    ... on DraftIssue { title assignees(first: 5) { nodes { login } } }
+    ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login } } }
   }`;
 
 // One GraphQL request for a board view: the project, its field's options and
@@ -75,6 +75,7 @@ function githubCard(node) {
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
     assignees: (c.assignees?.nodes ?? []).map((a) => a.login),
+    author: c.author?.login ?? c.creator?.login ?? null,
     type: c.issueType?.name ?? null,
     parent: c.parent?.number ?? null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
@@ -183,6 +184,8 @@ const PR_FIELDS = `
     ... on PullRequest {
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
+      assignees(first: 10) { nodes { login } }
+      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
         checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
     }
@@ -267,7 +270,9 @@ export function parseGithubList(json, view, errors = []) {
         createdAt: pr.createdAt,
         branch: pr.headRefName,
         labels: [],
-        assignees: [],
+        assignees: (pr.assignees?.nodes ?? []).map((a) => a.login),
+        // Requested reviewers that are people; a team's request names no login.
+        reviewers: (pr.reviewRequests?.nodes ?? []).map((r) => r.requestedReviewer?.login).filter(Boolean),
       });
     }
     return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };

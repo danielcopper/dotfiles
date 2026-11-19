@@ -552,11 +552,17 @@ test("hidden columns carry the server's count; shown ones their cards", () => {
   assert.equal(b.limited, false);
 });
 
-test("a card carries repo, number, title, labels, assignees, parent and sub-issues", () => {
+test("a card carries repo, number, title, labels, assignees, author, parent and sub-issues", () => {
   const b = githubBoard();
   const epic = board.findCard(b, "PVTI_rec1").card;
-  assert.deepEqual([epic.repo, epic.repoShort, epic.labels, epic.assignees, epic.sub], ["example/tender", "tender", ["enhancement", "area:architecture", "epic"], ["sample-user"], { total: 22, done: 15 }]);
+  assert.deepEqual([epic.repo, epic.repoShort, epic.labels, epic.assignees, epic.author, epic.sub],
+    ["example/tender", "tender", ["enhancement", "area:architecture", "epic"], ["sample-user"], "sample-contributor", { total: 22, done: 15 }]);
   assert.equal(board.findCard(b, "PVTI_rec2").card.parent, 3002);
+  const cases = casesBoard();
+  assert.deepEqual(["PVTI_case1", "PVTI_case2"].map((k) => board.findCard(cases, k).card.author), ["sample-contributor", "sample-contributor"], "a pull request's author, a draft's creator");
+  const doc = board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query="));
+  assert.equal(doc.match(/author \{ login \}/g).length, 2, "asked of issues and pull requests");
+  assert.match(doc, /DraftIssue \{ title creator \{ login \}/);
 });
 
 test("items without a status, or in an option that is gone, share a column that takes no drops", () => {
@@ -802,18 +808,22 @@ test("the filter keeps cards holding every word, in title, key, repo, labels or 
   assert.equal(all("").length, 6);
 });
 
-test("„nur meine“ keeps the items assigned to or opened by the login the data was read as, with the filter", () => {
+test("„nur meine“ keeps the items assigned to, opened by or asking a review of the login the data was read as, with the filter", () => {
   const data = json("github-board.json");
-  data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
-  data.data.repositoryOwner.projectV2.items.nodes[1].content.assignees.nodes = [];
+  const nodes = data.data.repositoryOwner.projectV2.items.nodes;
+  nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
+  nodes[1].content.assignees.nodes = [];
+  nodes[2].content.assignees.nodes = [];
+  nodes[2].content.author.login = "sample-user";
   const b = board.parseGithubBoard(data, githubView(), HIDDEN);
   const all = (text, mine) => board.shownColumns(b, text, mine).flatMap((c) => c.shown.map((x) => x.number));
-  assert.deepEqual(all("", true), [3004, 3005, 3007, 3003], "not 3000 (someone else's) nor 3001 (no one's)");
+  assert.deepEqual(all("", true), [3004, 3005, 3007, 3003], "not 3000 (someone else's) nor 3001 (no one's); 3003 unassigned but opened by sample-user");
   assert.deepEqual(all("BUG input", true), [3007], "with the filter");
   assert.deepEqual(all("", false).length, 6);
   const pr = { assignees: [], author: "sample-user" };
   assert.deepEqual([board.isMine(pr, "sample-user"), board.isMine(pr, "other"), board.isMine({ assignees: ["x"] }, "x"), board.isMine({}, "x")], [true, false, true, false]);
   assert.equal(board.isMine({ assignees: [null], author: null }, null), false, "without a login nothing is one's own");
+  assert.deepEqual([board.isMine({ reviewers: ["x"] }, "x"), board.isMine({ reviewers: ["y"] }, "x")], [true, false], "a reviewer asked for");
   assert.deepEqual([board.shows(pr, "", true, "sample-user"), board.shows(pr, "nothing", true, "sample-user"), board.shows(pr, "", true, null), board.shows(pr, "", false, null)],
     [true, false, false, true]);
 });
@@ -2534,9 +2544,31 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection leaves the card no longer shown");
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
-  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [77], "the list: only what sample-user opened");
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 808, 77],
+    "the list: asked to review, assigned, opened by sample-user; not the bot's own 1921");
+  assert.ok(texts(b.render()).includes("REVIEW · 1"), "the review section keeps its row");
+  assert.ok(texts(b.render()).includes("MINE · 2 von 3"), "and says what is hidden");
   await press(b, cx, "m");
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
+});
+
+test("UI: what the filter or „nur meine“ hides is said: in the column, its count and the tab's", async () => {
+  const data = json("github-board.json");
+  for (const n of data.data.repositoryOwner.projectV2.items.nodes) {
+    if (n.fieldValueByName.name === "In progress") n.content.assignees.nodes = [{ login: "someone-else" }];
+  }
+  const { b, cx } = await openBoard({ answer: JSON.stringify(data) });
+  const tab = () => texts(byId(b.render(), "tab-github:mine"));
+  const column = (name) => texts(byId(b.render(), `col-${b.navColumns(b.view()).findIndex((c) => c.name === name)}`));
+  assert.deepEqual([tab().at(-1), column("In progress")[1]], ["6", "3"]);
+  await press(b, cx, "m");
+  assert.equal(tab().at(-1), "3 von 6");
+  assert.deepEqual(column("In progress").slice(1), ["0 von 3", "keine Karten (3 ausgeblendet)"]);
+  assert.deepEqual(column("Ready").slice(1, 2), ["3"], "nothing hidden: the count alone");
+  await press(b, cx, "m");
+  b.filterText = "input";
+  assert.equal(tab().at(-1), "1 von 6", "the text filter too");
+  assert.deepEqual(column("Ready").slice(1, 2), ["1 von 3"]);
 });
 
 test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {

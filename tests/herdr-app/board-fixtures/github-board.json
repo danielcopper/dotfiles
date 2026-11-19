@@ -53,6 +53,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3000,
         "title": "[Epic] sample tool rollout",
         "url": "https://github.com/example/tender/issues/3000",
@@ -95,6 +98,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3001,
         "title": "fix(cache): keep the last entry when a refresh fails",
         "url": "https://github.com/example/tender/issues/3001",
@@ -129,6 +135,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3003,
         "title": "feat(cli): add a dry-run flag",
         "url": "https://github.com/example/tender/issues/3003",
@@ -165,6 +174,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3004,
         "title": "feat(api): page through long lists",
         "url": "https://github.com/example/tender/issues/3004",
@@ -201,6 +213,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3005,
         "title": "docs(readme): say how the sample tool starts",
         "url": "https://github.com/example/tender/issues/3005",
@@ -235,6 +250,9 @@
        },
        "content": {
         "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
         "number": 3007,
         "title": "fix(input): pass the key map to the viewer",
         "url": "https://github.com/example/tender/issues/3007",
