@@ -2558,6 +2558,8 @@ test("UI: an Azure view drawn as a board has what the board shape and the start 
   const root = b.render();
   assert.ok(texts(root).includes("In Progress"), "the board's columns");
   assert.equal(b.shape(view), board.SHAPES.board, "the data's shape wins over the placeholder");
+  b.state(view.id).data = { ...typedBoard(), limited: true, total: 9, limit: 5 };
+  assert.ok(texts(b.render()).some((s) => s.startsWith("Nur die ersten 5 von 9 Einträgen")), "the cut names the data's limit; the view has none");
 });
 
 test("UI: switching a team's view loads the view now shown, where its source reads one", async () => {
