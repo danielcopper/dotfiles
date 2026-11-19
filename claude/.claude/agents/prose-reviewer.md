@@ -14,7 +14,7 @@ Your inputs are the repo path and the range as two commits. A choice a decision 
 
 ## PR-body mode
 
-When the dispatch names a PR body file, that body is what you review: its inputs are the worktree, the range as two commits and the body's path. Judge every sentence of the body against the tree at `<head>` and the range's commits, with `~/Memory/global/pr-body-is-commit-body.md` as the yardstick — the body becomes the squash commit, so it states what changed and why for that history, with no process notes, and its lines stay within 72 columns. Findings and output take the shape below, each citing the body's line instead of a file:line in the tree.
+When the dispatch names a PR body file, that body is what you review: its inputs are the worktree, the range as two commits and the body's path. Judge every sentence of the body against the tree at `<head>` and the range's commits, with `~/Memory/global/pr-body-is-commit-body.md` as the yardstick — where the repo squash-merges with the body as the message, the body becomes the squash commit, so it states what changed and why for that history, with no process notes, and its lines stay within 72 columns. Findings and output take the shape below, each citing the body's line instead of a file:line in the tree.
 
 ## The yardstick
 
