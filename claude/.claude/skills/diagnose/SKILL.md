@@ -67,7 +67,7 @@ If you catch yourself reading code to build a theory before this command exists,
 
 ## Phase 2: Reproduce + minimise
 
-Run the loop. Watch it go red as the bug appears. If you forced the red by mutating code or a fixture, `diff` against a pristine copy to prove the mutation landed before you trust it.
+Run the loop. Watch it go red as the bug appears.
 
 Confirm:
 
@@ -122,7 +122,7 @@ A correct seam is one where the test exercises the **real bug pattern** as it oc
 If a correct seam exists:
 
 1. Turn the minimised repro into a failing test at that seam.
-2. Watch it fail.
+2. Watch it fail. If you forced the red by changing code or a fixture, `diff` the changed file against an untouched copy to prove the change landed before you trust the red.
 3. Apply the fix.
 4. Watch it pass.
 5. Re-run the Phase 1 feedback loop against the original (un-minimised) scenario.
