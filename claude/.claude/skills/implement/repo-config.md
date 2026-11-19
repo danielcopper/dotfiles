@@ -24,8 +24,12 @@ owner. Before a skill writes about a repo, it states **"own repo"** or **"foreig
 
 Each holds in every repo unless its profile departs from it under `defaults`.
 
-- **`merge_policy: user`** — the owner merges every PR. The harness denies merging to every session, so this policy has
-  no departure.
+- **`merge_policy: user`** — the owner merges every PR, and this policy has no departure. The `deny` list in
+  `~/.claude/settings.json` blocks the merge paths a session reaches by shell: `gh pr merge`, defining a `gh` alias,
+  the REST merge endpoints, the GraphQL merge and auto-merge mutations, and `az repos pr update` completing a PR or
+  setting auto-complete. Any other way to merge is ruled out by this policy alone. The rules match the whole command
+  text, so a Bash call that only mentions one of these commands (a `grep`, a heredoc, a commit message) is denied too:
+  write such text with an edit tool and keep it out of commit messages.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two

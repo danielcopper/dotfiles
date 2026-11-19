@@ -84,12 +84,15 @@
       "ReportFindings",
       "Bash(gh pr merge:*)",
       "Bash(*gh pr merge*)",
-      "Bash(*gh api *pulls/*/merge*)"
+      "Bash(*gh api *pulls/*/merge*)",
+      "Bash(*mergePullRequest*)",
+      "Bash(*enablePullRequestAutoMerge*)",
+      "Bash(*gh api *repos/*/merges*)",
+      "Bash(*gh alias set*)",
+      "Bash(*az repos pr update*--status*completed*)",
+      "Bash(*az repos pr update*--auto-complete*)"
     ],
-    "defaultMode": "auto",
-    "ask": [
-      "Bash(gh pr merge *)"
-    ]
+    "defaultMode": "auto"
   },
   "model": "opus",
   "hooks": {
