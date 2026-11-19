@@ -237,11 +237,6 @@ export function checksSummary(rollup) {
 const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewünscht", REVIEW_REQUIRED: "noch kein Review" };
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
-// gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
-// A pull request found by two sections shows in the first only; a result
-// that is no pull request is counted in skipped. A search missing from the
-// answer is explained by the error at its alias.
 // Whether a search holds only one's own pull requests, as "nur meine" counts
 // them: it has author, assignee, review-requested or user-review-requested
 // set to @me, not negated (by a leading - or NOT). A review asked of a team
@@ -252,6 +247,11 @@ export function ownSearch(query) {
   return words.some((w, i) => /^(author|assignee|review-requested|user-review-requested):@me$/i.test(w) && words[i - 1]?.toUpperCase() !== "NOT");
 }
 
+// gh's answer for githubListArgs (and the GraphQL errors that came with its
+// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
+// A pull request found by two sections shows in the first only; a result
+// that is no pull request is counted in skipped. A search missing from the
+// answer is explained by the error at its alias.
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
@@ -362,9 +362,9 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 
 // The GitHub source for the board: the name of the site `o` opens, why
 // "nur meine" cannot tell one's own items when GitHub did not name the
-// login, and per layout of a
-// GitHub view how it loads (`hiddenFor(view)` gives its hidden columns) and
-// how a board writes a move. gh runs by the path `paths` (toolPaths) finds.
+// login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
+// gives its hidden columns) and how a board writes a move. gh runs by the
+// path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",

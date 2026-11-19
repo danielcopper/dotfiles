@@ -8,9 +8,8 @@ import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, itemLabel } from "../../shared.js";
 import { checkColor, detailSection, shownOf } from "../helpers.js";
 
-// The prs shape's own state on a Board (made by state() when the Board
-// starts: herdr refuses a ScrollHandle made while drawing): the list's
-// scroll handle.
+// The prs shape's own state on a Board (state(), shapes/index.js): the
+// list's scroll handle.
 const prsState = (b) => b.shapeState.prs;
 
 // The rows that show, as one column.
@@ -34,7 +33,6 @@ export const prsShape = {
   keys: () => false,
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
-  column: () => null,
   // The detail panel's rows of a pull request: its checks, where it has them.
   detailParts: (b, t, view, item) =>
     item.checks ? { sections: [detailSection(t, "CHECKS", div().text_color(checkColor(t, item.checks.state)).child(item.checks.text))] } : {},
@@ -76,7 +74,8 @@ function drawPrs(b, t, mono, view, st) {
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
       .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
-      .when(Boolean(r.draft), (el) => el.child(div().w(60).flex_none().text_size(12).text_color(t.muted).child("Entwurf")))
+      // Every row keeps the draft cell, so the columns after it line up.
+      .child(div().w(60).flex_none().text_size(12).text_color(t.muted).child(r.draft ? "Entwurf" : ""))
       .when(Boolean(r.checks), (el) => el.child(div().w(70).flex_none().text_size(12).text_color(checkColor(t, r.checks?.state)).child(r.checks?.short ?? "")))
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
   };

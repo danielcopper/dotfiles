@@ -1225,11 +1225,6 @@ export function checksSummary(rollup) {
 const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewünscht", REVIEW_REQUIRED: "noch kein Review" };
 export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
 
-// gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
-// A pull request found by two sections shows in the first only; a result
-// that is no pull request is counted in skipped. A search missing from the
-// answer is explained by the error at its alias.
 // Whether a search holds only one's own pull requests, as "nur meine" counts
 // them: it has author, assignee, review-requested or user-review-requested
 // set to @me, not negated (by a leading - or NOT). A review asked of a team
@@ -1240,6 +1235,11 @@ export function ownSearch(query) {
   return words.some((w, i) => /^(author|assignee|review-requested|user-review-requested):@me$/i.test(w) && words[i - 1]?.toUpperCase() !== "NOT");
 }
 
+// gh's answer for githubListArgs (and the GraphQL errors that came with its
+// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
+// A pull request found by two sections shows in the first only; a result
+// that is no pull request is counted in skipped. A search missing from the
+// answer is explained by the error at its alias.
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
@@ -1350,9 +1350,9 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 
 // The GitHub source for the board: the name of the site `o` opens, why
 // "nur meine" cannot tell one's own items when GitHub did not name the
-// login, and per layout of a
-// GitHub view how it loads (`hiddenFor(view)` gives its hidden columns) and
-// how a board writes a move. gh runs by the path `paths` (toolPaths) finds.
+// login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
+// gives its hidden columns) and how a board writes a move. gh runs by the
+// path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
@@ -1500,9 +1500,8 @@ export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, pa
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
 
-// The board shape's own state on a Board (made by state() when the Board
-// starts: herdr refuses a ScrollHandle made while drawing): one scroll
-// handle per column (SCROLLS, reused beyond).
+// The board shape's own state on a Board (state(), shapes/index.js): one
+// scroll handle per column (SCROLLS, reused beyond).
 const boardState = (b) => b.shapeState.board;
 
 export const boardShape = {
@@ -1538,7 +1537,6 @@ export const boardShape = {
   },
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
-  column: (data, item) => findCard(data, item.key)?.column ?? null,
   settle: (b, due, data, cx) => tellUnclear(b, due, data, cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
@@ -1816,7 +1814,6 @@ export const placeholderShape = {
   keys: () => false,
   received: (data) => data,
   warnings: () => [],
-  column: () => null,
 };
 
 // ==== src/ui/shapes/prs.js ====
@@ -1826,9 +1823,8 @@ export const placeholderShape = {
 // skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
 // and checks show where it has them. View fields it reads: id.
 
-// The prs shape's own state on a Board (made by state() when the Board
-// starts: herdr refuses a ScrollHandle made while drawing): the list's
-// scroll handle.
+// The prs shape's own state on a Board (state(), shapes/index.js): the
+// list's scroll handle.
 const prsState = (b) => b.shapeState.prs;
 
 // The rows that show, as one column.
@@ -1852,7 +1848,6 @@ export const prsShape = {
   keys: () => false,
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
-  column: () => null,
   // The detail panel's rows of a pull request: its checks, where it has them.
   detailParts: (b, t, view, item) =>
     item.checks ? { sections: [detailSection(t, "CHECKS", div().text_color(checkColor(t, item.checks.state)).child(item.checks.text))] } : {},
@@ -1894,7 +1889,8 @@ function drawPrs(b, t, mono, view, st) {
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
       .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
-      .when(Boolean(r.draft), (el) => el.child(div().w(60).flex_none().text_size(12).text_color(t.muted).child("Entwurf")))
+      // Every row keeps the draft cell, so the columns after it line up.
+      .child(div().w(60).flex_none().text_size(12).text_color(t.muted).child(r.draft ? "Entwurf" : ""))
       .when(Boolean(r.checks), (el) => el.child(div().w(70).flex_none().text_size(12).text_color(checkColor(t, r.checks?.state)).child(r.checks?.short ?? "")))
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
   };
@@ -1926,19 +1922,19 @@ function scrollToRow(b, view, key) {
 // it (KINDS), and a view its source reads nothing for has the placeholder.
 // Each shape, taking the Board as `b`: nav (the columns that keyboard
 // movement and selection walk, a list as one), selected (the selected
-// item), scrollTo, items (every item of the data, whatever the filter; a
-// shape without items, the placeholder, leaves Enter, o and the arrows to
-// herdr), count ({ shown, total } items, or null), render, hints (the hint
-// line's entries), dirs (the arrow directions that move), loads (false for
-// the placeholder, which draws without data), keys (handles the shape's own
-// keys; true when it took one), received (the data as kept after a
-// refresh), warnings and column (an item's column, for its detail); and
+// item), scrollTo, items (every item the shape draws, whatever the filter:
+// on a board, the cards of its shown columns; a shape without items, the
+// placeholder, leaves Enter, o and the arrows to herdr), count ({ shown,
+// total } items, or null), render, hints (the hint line's entries), dirs
+// (the arrow directions that move), loads (false for the placeholder, which
+// draws without data), keys (handles the shape's own keys; true when it
+// took one), received (the data as kept after a refresh) and warnings; and
 // where it has them, detailParts (its rows in the detail panel), settle
 // (says where the cards of unclear writes ended up), moveTo, toggleColumn
 // and openStatusMenu. A shape keeps its own state per Board in
-// b.shapeState[name], which its state() makes when the Board starts (herdr
-// refuses a ScrollHandle made while drawing). A new way to draw is a module
-// here and its entry in SHAPES.
+// b.shapeState[name], which its state() makes once, when the Board starts:
+// herdr refuses a ScrollHandle made while a view draws ("cannot run during
+// render"). A new way to draw is a module here and its entry in SHAPES.
 
 export const SHAPES = { board: boardShape, prs: prsShape, placeholder: placeholderShape };
 
@@ -2273,8 +2269,9 @@ export const statusModal = {
 // The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
 // and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
 // on Esc unless it is busy). A dialog keeps its state, and makes the inputs
-// it needs, in b.modal. A new dialog is a module here and its entry in
-// MODALS.
+// it needs, in b.modal; one that belongs to a view keeps it as b.modal.view,
+// and r closes it when views.json no longer has that view of that kind. A
+// new dialog is a module here and its entry in MODALS.
 
 export const MODALS = { start: startModal, status: statusModal };
 
@@ -2307,8 +2304,8 @@ export default class Board extends View {
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
-    // What each shape keeps per Board, by shape name, made now: herdr
-    // refuses some of it (a ScrollHandle) while drawing.
+    // What each shape keeps per Board, by shape name (state(),
+    // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
@@ -2434,9 +2431,9 @@ export default class Board extends View {
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
       this.kinds = kinds;
-      // A status menu of a view that is gone or of another kind now closes.
+      // A dialog of a view that is gone, or of another kind now, closes.
       const m = this.modal;
-      if (m?.kind === "status" && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+      if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
       const shown = this.view();
       if (shown) this.refresh(shown, cx);
     });
@@ -2667,10 +2664,10 @@ export default class Board extends View {
       cx.stop_propagation();
       cx.notify();
     };
-    // [ ] and / may come with Shift, or AltGr, which Windows reports as
-    // Control+Alt; Control alone stays herdr's. A key herdr binds (alt-[,
-    // alt-], alt-digits) never reaches a mod, so Alt need not be refused
-    // here, where it may stand for AltGr.
+    // [ ] and / may come with Shift, or with Control+Alt (AltGr on
+    // Windows); Control alone stays herdr's. Alt alone is let through: a key
+    // herdr binds with Alt never reaches a mod (logged), so this costs herdr
+    // nothing; how AltGr arrives on a German layout is untested.
     const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
@@ -2726,7 +2723,6 @@ export default class Board extends View {
     }
     MODALS[this.modal.kind].key(this, e, cx);
   }
-
 
   // ---- drawing ----
 

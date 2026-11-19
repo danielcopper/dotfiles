@@ -108,8 +108,8 @@ export default class Board extends View {
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
-    // What each shape keeps per Board, by shape name, made now: herdr
-    // refuses some of it (a ScrollHandle) while drawing.
+    // What each shape keeps per Board, by shape name (state(),
+    // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
@@ -235,9 +235,9 @@ export default class Board extends View {
       const before = this.kinds ?? kinds;
       for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
       this.kinds = kinds;
-      // A status menu of a view that is gone or of another kind now closes.
+      // A dialog of a view that is gone, or of another kind now, closes.
       const m = this.modal;
-      if (m?.kind === "status" && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+      if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
       const shown = this.view();
       if (shown) this.refresh(shown, cx);
     });
@@ -468,10 +468,10 @@ export default class Board extends View {
       cx.stop_propagation();
       cx.notify();
     };
-    // [ ] and / may come with Shift, or AltGr, which Windows reports as
-    // Control+Alt; Control alone stays herdr's. A key herdr binds (alt-[,
-    // alt-], alt-digits) never reaches a mod, so Alt need not be refused
-    // here, where it may stand for AltGr.
+    // [ ] and / may come with Shift, or with Control+Alt (AltGr on
+    // Windows); Control alone stays herdr's. Alt alone is let through: a key
+    // herdr binds with Alt never reaches a mod (logged), so this costs herdr
+    // nothing; how AltGr arrives on a German layout is untested.
     const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
@@ -527,7 +527,6 @@ export default class Board extends View {
     }
     MODALS[this.modal.kind].key(this, e, cx);
   }
-
 
   // ---- drawing ----
 

@@ -17,9 +17,8 @@ import { button, report, shownOf, store } from "../helpers.js";
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
 
-// The board shape's own state on a Board (made by state() when the Board
-// starts: herdr refuses a ScrollHandle made while drawing): one scroll
-// handle per column (SCROLLS, reused beyond).
+// The board shape's own state on a Board (state(), shapes/index.js): one
+// scroll handle per column (SCROLLS, reused beyond).
 const boardState = (b) => b.shapeState.board;
 
 export const boardShape = {
@@ -55,7 +54,6 @@ export const boardShape = {
   },
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
-  column: (data, item) => findCard(data, item.key)?.column ?? null,
   settle: (b, due, data, cx) => tellUnclear(b, due, data, cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),

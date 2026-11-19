@@ -18,5 +18,4 @@ export const placeholderShape = {
   keys: () => false,
   received: (data) => data,
   warnings: () => [],
-  column: () => null,
 };

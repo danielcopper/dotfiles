@@ -2603,18 +2603,18 @@ const LOGGED = {
   ctrlAlt9: { key: "9", key_char: "9", keystroke: "ctrl-alt-9", modifiers: { shift: false, control: true, alt: true, platform: false, function: false } },
 };
 
-test("UI: [ and ] are typed however AltGr comes (as Alt, or Control+Alt on Windows); Control alone, and a letter with Alt, stay herdr's", async () => {
+test("UI: Alt+] and Control+Alt+[ switch tabs; Control+] and the logged alt-q stay herdr's", async () => {
   const { b, cx } = await openBoard();
   b.key(LOGGED.altQ, cx);
   await settle();
   assert.deepEqual([b.source().id, cx.stopped], ["github", 0], "alt-q: neither q nor taken");
   await press(b, cx, "]", { modifiers: { alt: true } });
-  assert.equal(b.context().id, "github:prs", "AltGr reported as Alt");
+  assert.equal(b.context().id, "github:prs", "Alt+]");
   await press(b, cx, "[", { modifiers: { ...LOGGED.ctrlAlt9.modifiers } });
-  assert.equal(b.context().id, "github:mine", "AltGr reported as Control+Alt");
+  assert.equal(b.context().id, "github:mine", "Control+Alt+[");
   const stopped = cx.stopped;
   await press(b, cx, "]", { modifiers: { control: true } });
-  assert.deepEqual([b.context().id, cx.stopped], ["github:mine", stopped], "Control alone");
+  assert.deepEqual([b.context().id, cx.stopped], ["github:mine", stopped], "Control+]");
 });
 
 test("the GitHub tab id, a team's switch and its hint: githubContextId, hasViewSwitch, viewSwitchHint", () => {
@@ -2825,7 +2825,7 @@ test("UI: Enter and o with nothing selected stay herdr's: while loading, on an e
   assert.deepEqual([cx.stopped, b.notice], [0, null], "empty");
 });
 
-test("UI: a column operation on a view without columns is said; a status menu of a view that changed kind closes on r", async () => {
+test("UI: a column operation on a view without columns is said; a dialog of a view that changed kind or went closes on r", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
@@ -2844,7 +2844,18 @@ test("UI: a column operation on a view without columns is said; a status menu of
   host.config = JSON.stringify(config);
   b.reload(cx);
   await settle();
-  assert.equal(b.modal, null, "closed: its view is a list now");
+  assert.equal(b.modal, null, "the status menu closed: its view is a list now");
+  host.config = testConfig();
+  b.reload(cx);
+  await settle();
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await press(b, cx, "enter");
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "start");
+  host.config = withoutMine();
+  b.reload(cx);
+  await settle();
+  assert.equal(b.modal, null, "the start dialog closed: its view is gone");
 });
 
 test("UI: an Azure-like item without a repo has its key, its parent's label, and a detail that draws", async () => {
@@ -2878,6 +2889,11 @@ test("UI: a prs row draws without checks or author; a draft mark is its own cell
   const cells = byId(b.render(), `row-${row.key}`).kids.map((k) => texts(k).join(""));
   assert.equal(cells.length, 4, "label, title, draft mark, age");
   assert.deepEqual(cells.slice(0, 3), ["tender#2820", "build(ui): draw the summary card", "Entwurf"]);
+  // Rows with and without the mark keep their cells in line.
+  const widths = (r) => byId(b.render(), `row-${r.key}`).kids.map((k) => k.with.w?.[0] ?? null);
+  const [plain, draft] = [st.data.sections[1].rows[0], st.data.sections[1].rows.find((r) => r.draft)];
+  assert.deepEqual(widths(plain), widths(draft), "the same cells on a draft row and on another");
+  assert.equal(texts(byId(b.render(), `row-${plain.key}`)).includes("Entwurf"), false);
   assert.equal(texts(b.render()).some((s) => s.includes("undefined")), false);
   assert.equal(board.parseGithubBoard(json("github-board.json"), { ...githubView(), limit: 3 }, HIDDEN).limit, 3, "the cut names the data's own limit");
 });
