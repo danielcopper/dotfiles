@@ -108,7 +108,9 @@ export default class Board extends View {
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
-    this.shapeState = {}; // what each shape keeps per Board, by shape name
+    // What each shape keeps per Board, by shape name, made now: herdr
+    // refuses some of it (a ScrollHandle) while drawing.
+    this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();

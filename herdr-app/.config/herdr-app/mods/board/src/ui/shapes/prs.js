@@ -8,14 +8,16 @@ import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, itemLabel } from "../../shared.js";
 import { checkColor, detailSection, shownOf } from "../helpers.js";
 
-// The prs shape's own state on a Board, made when first needed: the list's
+// The prs shape's own state on a Board (made by state() when the Board
+// starts: herdr refuses a ScrollHandle made while drawing): the list's
 // scroll handle.
-const prsState = (b) => (b.shapeState.prs ??= { scroll: ScrollHandle.new() });
+const prsState = (b) => b.shapeState.prs;
 
 // The rows that show, as one column.
 const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => s.rows.filter((r) => b.visible(r, st.data))) }];
 
 export const prsShape = {
+  state: () => ({ scroll: ScrollHandle.new() }),
   nav: prsRows,
   selected: (b, st) => prsRows(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
   scrollTo: (b, view, sel) => scrollToRow(b, view, sel.key),

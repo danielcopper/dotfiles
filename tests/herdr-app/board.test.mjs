@@ -83,6 +83,17 @@ registerHooks({
 });
 
 const board = await import(pathToFileURL(mainPath).href);
+// Every render marks the fake host as drawing, as herdr does (ScrollHandle).
+const realRender = board.default.prototype.render;
+board.default.prototype.render = function render(...args) {
+  const host = globalThis.__boardHost;
+  if (host) host.drawing = true;
+  try {
+    return realRender.apply(this, args);
+  } finally {
+    if (host) host.drawing = false;
+  }
+};
 const fixture = (name) => readFileSync(join(here, "board-fixtures", name), "utf8");
 const json = (name) => JSON.parse(fixture(name));
 const shippedConfig = () => readFileSync(join(modDir, "views.json"), "utf8");
@@ -1555,7 +1566,11 @@ function fakeHost({ config = testConfig(), shown = true, which = (tool) => (tool
       host.inputs.push(input);
       return input;
     },
-    "ScrollHandle.new": () => ({ scroll_to_item() {} }),
+    // herdr refuses a ScrollHandle made while a view draws.
+    "ScrollHandle.new": () => {
+      if (host.drawing) throw new Error("ScrollHandle.new() cannot run during render; create state in init() or in an event handler and keep it on the view");
+      return { scroll_to_item() {} };
+    },
     div: () => element("div"),
     h_flex: () => element("h_flex"),
     v_flex: () => element("v_flex"),

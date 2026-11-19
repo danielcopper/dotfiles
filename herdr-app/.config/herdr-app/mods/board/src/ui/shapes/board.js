@@ -17,11 +17,13 @@ import { button, report, shownOf, store } from "../helpers.js";
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
 
-// The board shape's own state on a Board, made when first needed: one
-// scroll handle per column (SCROLLS, reused beyond).
-const boardState = (b) => (b.shapeState.board ??= { scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) });
+// The board shape's own state on a Board (made by state() when the Board
+// starts: herdr refuses a ScrollHandle made while drawing): one scroll
+// handle per column (SCROLLS, reused beyond).
+const boardState = (b) => b.shapeState.board;
 
 export const boardShape = {
+  state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),

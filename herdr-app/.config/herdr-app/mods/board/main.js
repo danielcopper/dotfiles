@@ -1500,11 +1500,13 @@ export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, pa
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
 
-// The board shape's own state on a Board, made when first needed: one
-// scroll handle per column (SCROLLS, reused beyond).
-const boardState = (b) => (b.shapeState.board ??= { scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) });
+// The board shape's own state on a Board (made by state() when the Board
+// starts: herdr refuses a ScrollHandle made while drawing): one scroll
+// handle per column (SCROLLS, reused beyond).
+const boardState = (b) => b.shapeState.board;
 
 export const boardShape = {
+  state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
@@ -1824,14 +1826,16 @@ export const placeholderShape = {
 // skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
 // and checks show where it has them. View fields it reads: id.
 
-// The prs shape's own state on a Board, made when first needed: the list's
+// The prs shape's own state on a Board (made by state() when the Board
+// starts: herdr refuses a ScrollHandle made while drawing): the list's
 // scroll handle.
-const prsState = (b) => (b.shapeState.prs ??= { scroll: ScrollHandle.new() });
+const prsState = (b) => b.shapeState.prs;
 
 // The rows that show, as one column.
 const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => s.rows.filter((r) => b.visible(r, st.data))) }];
 
 export const prsShape = {
+  state: () => ({ scroll: ScrollHandle.new() }),
   nav: prsRows,
   selected: (b, st) => prsRows(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
   scrollTo: (b, view, sel) => scrollToRow(b, view, sel.key),
@@ -1932,7 +1936,9 @@ function scrollToRow(b, view, key) {
 // where it has them, detailParts (its rows in the detail panel), settle
 // (says where the cards of unclear writes ended up), moveTo, toggleColumn
 // and openStatusMenu. A shape keeps its own state per Board in
-// b.shapeState. A new way to draw is a module here and its entry in SHAPES.
+// b.shapeState[name], which its state() makes when the Board starts (herdr
+// refuses a ScrollHandle made while drawing). A new way to draw is a module
+// here and its entry in SHAPES.
 
 export const SHAPES = { board: boardShape, prs: prsShape, placeholder: placeholderShape };
 
@@ -2301,7 +2307,9 @@ export default class Board extends View {
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
     this.kinds = null; // view id → viewKind in the last valid views.json
-    this.shapeState = {}; // what each shape keeps per Board, by shape name
+    // What each shape keeps per Board, by shape name, made now: herdr
+    // refuses some of it (a ScrollHandle) while drawing.
+    this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();

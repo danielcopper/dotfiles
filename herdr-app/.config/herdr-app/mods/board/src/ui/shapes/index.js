@@ -13,7 +13,9 @@
 // where it has them, detailParts (its rows in the detail panel), settle
 // (says where the cards of unclear writes ended up), moveTo, toggleColumn
 // and openStatusMenu. A shape keeps its own state per Board in
-// b.shapeState. A new way to draw is a module here and its entry in SHAPES.
+// b.shapeState[name], which its state() makes when the Board starts (herdr
+// refuses a ScrollHandle made while drawing). A new way to draw is a module
+// here and its entry in SHAPES.
 
 import { boardShape } from "./board.js";
 import { placeholderShape } from "./placeholder.js";
