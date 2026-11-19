@@ -84,7 +84,10 @@ after the gate gets its affected commands re-run, by whoever changed it.
 Draft the PR — conventional-commit title, `Closes #<N>`, one sentence per small by-catch fix, docs per the repo's policy
 (updated in the PR, or its opt-out with a reason) — and save the body to `~/Memory/<repo>/pr-body-<N>.md`. Dispatch
 `prose-reviewer` on the body as [`dispatch.md`](dispatch.md) says, and fix its findings in the body yourself. Once the
-gate evidence exists and the body has no open finding, push and open the PR without asking.
+gate evidence exists and the body has no open finding, push and open the PR without asking. Open it, and edit it
+later, with `gh pr create` or `gh pr edit` as a Bash call of its own — the title in quotes, the body as
+`--body-file <path>`, `-R <owner>/<repo>` or the worktree as the call's working directory, no `cd … &&` chain or other
+command around it: the merge hook (`merge_policy`, `repo-config.md`) lets only that form through.
 
 *(convention)* The body becomes the squash commit: a prose summary, `## Decisions` one line each (a sub-issue: "See epic
 #N" plus its own), and `Closes #<N>`; one issue per PR. A fix without decisions takes the label `no-decisions` and keeps
