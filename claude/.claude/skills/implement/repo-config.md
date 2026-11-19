@@ -25,17 +25,25 @@ owner. Before a skill writes about a repo, it states **"own repo"** or **"foreig
 Each holds in every repo unless its profile departs from it under `defaults`.
 
 - **`merge_policy: user`** — the owner merges every PR, and this policy has no departure. Two layers block the merge
-  paths a session reaches by shell. The hook `hooks/block_pr_merge.py` parses each Bash command and denies `gh pr
-  merge`, `gh alias set` and `gh alias import`, `gh api` on a pull request's merge or the repository merges endpoint,
-  `gh api graphql` naming the merge or auto-merge mutation or reading its query from a file, `az repos pr update`
-  completing a PR or setting auto-complete, and `curl` or `wget` on a pull request's merge URL — also behind `sudo`,
-  `bash -c`, `eval` or a command substitution. It judges the command as written: a word that decides its verdict and
-  that the shell would still expand (a variable, a glob, a backslash) is denied, and so is what nests too deep or runs
-  too long to check; what the shell builds at run time, another interpreter, a script file or gh's own config it
-  cannot see. The `deny` list in `~/.claude/settings.json` matches the plain spellings of the same commands as text —
-  not `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only
-  mentions one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it
-  out of commit messages. Everything else is ruled out by this policy alone.
+  paths a session reaches by shell:
+  - The hook `hooks/block_pr_merge.py`, a coarse filter that fails closed. It splits each Bash command into simple
+    commands at shell operators and newlines, and also checks the bodies of `bash -c` and the other shells, `eval`,
+    command substitutions and heredoc bodies. A simple command that names `gh`, `az`, `curl` or `wget` — also inside
+    a quoted string — is denied when a word in it mentions `merge`, `completed` or `auto-complete`, or `alias` with
+    `set` or `import`; when a word still expands at run time (an unquoted or double-quoted `$` or backtick, an
+    unquoted `{`, `*`, `?` or `[`, any backslash; gh's `{owner}`, `{repo}` and `{branch}` placeholders are fine); or
+    when it reads a request body from a file or stdin (an `@file` value, `--input`, `-T`). The read-only gh forms —
+    `pr view`, `list`, `status`, `checks` and `diff`, `issue view` and `list`, `search`, `run`, and `api` with no
+    method but GET and no fields — pass despite such a word, as long as nothing in them expands. `xargs` or
+    `parallel` in front of those commands is denied, and so is a command nested too deep, too long or holding too
+    many substitutions to check. False denials are accepted.
+  - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
+    `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions
+    one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of
+    commit messages.
+
+  What the shell builds at run time, another interpreter, a script file or gh's own config stays out of both layers'
+  sight; this policy alone rules those out.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two

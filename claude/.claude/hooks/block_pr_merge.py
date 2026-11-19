@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) hook: a coarse, fail-closed filter against merging a pull request.
 
-What it refuses, and what is left to the policy, is written once in
-`merge_policy` (~/.claude/skills/implement/repo-config.md). In short: the
-command is split into simple commands at shell operators and newlines,
-with `bash -c` (and the other shells), `eval`, command substitutions and
-heredoc bodies checked as commands too. A simple command that names gh,
-az, curl or wget is refused when a word in it mentions a merge, a
-completion or a gh alias definition, still expands at run time, or reads
-a request body from a file - unless it is one of the read-only gh forms.
-False refusals are accepted; the owner merges anyway.
+What it refuses, what passes, and what is left to the policy is written
+once, in `merge_policy` (~/.claude/skills/implement/repo-config.md).
 """
 
 import json
