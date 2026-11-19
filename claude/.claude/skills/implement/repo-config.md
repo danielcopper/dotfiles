@@ -57,8 +57,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of
     commit messages.
 
-  A renamed gh, another interpreter, a script file or a config file the command reads stays out of both layers'
-  sight; this policy alone rules those out.
+  A renamed gh, another interpreter, a script file, a config file the command reads, or a word the shell builds at
+  run time from text that spells neither `gh`, `az`, `curl` or `wget` nor a merge (such as `{g..g}h pr {m..m}erge`)
+  stays out of both layers' sight; this policy alone rules those out.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two
