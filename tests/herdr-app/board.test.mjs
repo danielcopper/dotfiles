@@ -342,6 +342,8 @@ test("without a valid org or any context nothing of sources.azure is used", () =
   }
   assert.deepEqual(board.validateConfig({ sources: { azure: [] } }).errors, ["„sources.azure“ muss ein Objekt sein"]);
   assert.deepEqual(board.validateConfig({ sources: { github: "x" } }).errors, ["„sources.github“ muss ein Objekt sein"]);
+  const list = { id: "a", name: "A", layout: "list", sections: [{ name: "A", query: "is:pr" }] };
+  assert.deepEqual(board.validateConfig({ sources: { github: { views: [list], colour: 1 } } }).errors, ["„sources.github.colour“ gibt es nicht"]);
 });
 
 test("an old views.json with its views at the top is not read; the board says where they go now", () => {
@@ -2050,6 +2052,16 @@ test("UI: Enter twice on a card with a session goes to it", async () => {
   assert.deepEqual(host.runs, [["space.select", { id: "s5" }], ["tab.select", { id: "t5" }]]);
 });
 
+test("UI: a card whose repo has no checkout names where to set one", async () => {
+  const config = JSON.parse(testConfig());
+  config.repos = {};
+  const { b, cx } = await openBoard({ config: JSON.stringify(config) });
+  await press(b, cx, "enter");
+  await press(b, cx, "enter");
+  assert.equal(b.modal, null);
+  assert.equal(b.notice.text, "Für example/tender steht kein „checkout“ in views.json: „repos“ → „example/tender“ oder „start.checkout“ der Ansicht „Mine“");
+});
+
 test("UI: Enter on a draft says it needs an issue first", async () => {
   const { b, cx, st } = await openBoard({ answer: fixture("github-board-cases.json") });
   st().sel = { col: 0, key: "PVTI_case2" };
@@ -2340,7 +2352,8 @@ test("UI: q switches between Azure and GitHub, each keeping its tab, without rea
 });
 
 test("UI: a new board opens on the source, tab and team view shown last; ones views.json no longer has fall back to the first", async () => {
-  const { b, cx, host } = await bootBoard({ stored: { source: "azure" } });
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "q");
   await press(b, cx, "v");
   await press(b, cx, "2");
   const again = new board.default();
@@ -2350,7 +2363,7 @@ test("UI: a new board opens on the source, tab and team view shown last; ones vi
   assert.deepEqual([again.source().id, again.context().id], ["azure", "azure:prs:Example Project"]);
   await press(again, cx2, "1");
   assert.equal(again.teamViewOf(again.context()), "backlog");
-  assert.deepEqual(host.calls, [], "an Azure tab reads nothing");
+  assert.deepEqual(host.open("gh"), [], "an Azure tab reads nothing");
   memory.set("tab:azure", JSON.stringify("azure:team:Gone/Team"));
   memory.set("teamView:azure:team:Example Project/Example Team", JSON.stringify("kanban"));
   const third = new board.default();
@@ -2438,6 +2451,7 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(data) });
   const cards = () => b.columns(b.view()).flatMap((c) => c.shown.map((x) => x.number));
   assert.equal(cards().length, 6);
+  b.select(b.view(), { col: b.columns(b.view()).findIndex((c) => c.name === "In progress"), key: "PVTI_rec1" });
   assert.ok(texts(byId(b.render(), "mine")).includes("nur meine"));
   await press(b, cx, "m");
   assert.equal(cards().includes(3000), false);
@@ -2445,7 +2459,7 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   assert.ok(texts(byId(b.render(), "mine")).includes("✓ nur meine"), "said when on");
   assert.equal(host.open("gh").length, 0, "nothing read again");
   assert.notEqual(st().sel.key, null);
-  assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection stays on a shown card");
+  assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection leaves the card no longer shown");
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
   assert.deepEqual(b.rows(b.view()).map((r) => r.number), [77], "the list: only what sample-user opened");

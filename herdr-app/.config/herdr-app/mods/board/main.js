@@ -1166,13 +1166,12 @@ export async function call(tool, args, on, timeout, { write = false, paths = nul
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
 // What a source does for the Board, one set per Board: loading a view
-// (`hiddenFor(view)` gives its hidden columns), writing a move, the name of
-// the site `o` opens, and what `r` forgets (`reset`). gh runs by the path `paths` (toolPaths) finds.
+// (`hiddenFor(view)` gives its hidden columns), writing a move, and the
+// name of the site `o` opens. gh runs by the path `paths` (toolPaths) finds.
 export function makeSources(paths) {
   return {
     github: {
       site: "GitHub",
-      reset() {},
       async load(view, hiddenFor) {
         if (view.layout === "list") {
           const { json, warnings, errors } = await gh(paths, githubListArgs(view));
@@ -1428,7 +1427,6 @@ export default class Board extends View {
         return undefined;
       });
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
-      for (const source of Object.values(this.sources)) source.reset();
       this.paths.reset();
       cx.notify();
       if (!this.config) return;

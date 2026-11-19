@@ -199,7 +199,6 @@ export default class Board extends View {
         return undefined;
       });
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
-      for (const source of Object.values(this.sources)) source.reset();
       this.paths.reset();
       cx.notify();
       if (!this.config) return;
