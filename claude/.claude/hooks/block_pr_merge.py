@@ -3,15 +3,18 @@
 
 The owner merges every PR (`merge_policy` in
 ~/.claude/skills/implement/repo-config.md). The text deny rules in
-settings.json match any command that mentions a merge command; this hook
-parses the command instead, so a merge spelled differently is caught too:
+settings.json match the plain spellings of a merge command only - not
+curl or wget, not a GraphQL query from a file, not a gh flag before `pr`.
+This hook parses the command instead, so a merge spelled differently is
+caught too:
 
 - `gh pr merge`, and `gh alias set` / `gh alias import`, which could name
   a merge under another word;
 - `gh api` on a pulls/<n>/merge or repos/.../merges path;
-- `gh api graphql` whose query names mergePullRequest or
-  enablePullRequestAutoMerge, or comes from a file (`query=@...`,
-  `--input`), where the hook cannot read it;
+- `gh api` on the GraphQL endpoint in any spelling (`graphql`,
+  `api/graphql`, a full URL) whose query names mergePullRequest or
+  enablePullRequestAutoMerge, comes from a file (`query=@...`, `--input`)
+  or is built at run time;
 - `az repos pr update` with `--status completed` or `--auto-complete`;
 - `curl` or `wget` on a pulls/<n>/merge URL.
 
@@ -32,7 +35,12 @@ and, for `az repos pr update`, every argument; curl's and wget's URLs) and
 that the shell would still expand - an unquoted or double-quoted `$` or
 backtick, an unquoted `{`, `*`, `?` or `[`, or any backslash - is refused,
 because the hook cannot read what it will become. gh's own `{owner}`,
-`{repo}` and `{branch}` placeholders are fine.
+`{repo}` and `{branch}` placeholders are fine. Quoting that does not parse
+is read with its quotes and backslashes dropped and every expanding
+character counted as expanding; a command nested too deep, too long or
+holding too many substitutions is refused. What the shell builds at run
+time, another interpreter, a script file or gh's own config stays out of
+the hook's sight: the policy alone rules those out.
 """
 
 import json

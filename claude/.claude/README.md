@@ -74,7 +74,7 @@ Configured in `settings.json`, toggled in `hooks/config.toml`.
 
 | Hook                    | Event            | Purpose                                             |
 | ----------------------- | ---------------- | --------------------------------------------------- |
-| `block_pr_merge.py`     | PreToolUse (Bash) | Denies every command that would merge a pull request — see [Guard hooks](#guard-hooks) |
+| `block_pr_merge.py`     | PreToolUse (Bash) | Denies the merge commands `merge_policy` lists — see [Guard hooks](#guard-hooks) |
 | `block_disk_wipe.py`    | PreToolUse (Bash) | Denies mkfs, wipefs, dd onto a device node and redirects onto a block device — the one destruction the auto-mode classifier does not name. Every other deletion (`rm`, `git reset --hard`, `checkout -- path`, `branch -D`, force push) is the classifier's call |
 | `post_tool_use.py`      | PostToolUse      | Detect and announce errors                          |
 | `session_worktree.py`   | PostToolUse (Bash) | Records the worktree a `mise run worktree-new` call in this session reported ready in `$XDG_RUNTIME_DIR/statusline-session-wt/<session_id>` (else under `~/.cache/claude/`; a private directory, refused when a symlink or owned by someone else), so `statusline.sh` shows that branch |
