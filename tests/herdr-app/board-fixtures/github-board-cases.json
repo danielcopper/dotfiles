@@ -56,6 +56,18 @@
         "author": {
          "login": "sample-contributor"
         },
+        "reviewRequests": {
+         "nodes": [
+          {
+           "requestedReviewer": {
+            "login": "sample-user"
+           }
+          },
+          {
+           "requestedReviewer": null
+          }
+         ]
+        },
         "number": 3050,
         "title": "feat(api): retry a failed request once",
         "url": "https://github.com/example/tender/pull/3050",
@@ -105,9 +117,7 @@
        },
        "content": {
         "__typename": "Issue",
-        "author": {
-         "login": "sample-contributor"
-        },
+        "author": null,
         "number": 3060,
         "title": "chore: an item in an option that no longer exists",
         "url": "https://github.com/example/tender/issues/3060",

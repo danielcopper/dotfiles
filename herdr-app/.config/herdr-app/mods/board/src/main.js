@@ -920,7 +920,8 @@ export default class Board extends View {
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
-    const noViewer = this.mine && st.data && !st.data.viewer ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
+    const hidesAll = this.mine && st.data && !st.data.viewer && shape.count(this, st.data)?.shown === 0;
+    const noViewer = hidesAll ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
     const warnings = [...st.warnings, ...noViewer];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;

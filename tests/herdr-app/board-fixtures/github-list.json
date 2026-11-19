@@ -142,7 +142,11 @@
       ]
      },
      "reviewRequests": {
-      "nodes": []
+      "nodes": [
+       {
+        "requestedReviewer": null
+       }
+      ]
      },
      "commits": {
       "nodes": [

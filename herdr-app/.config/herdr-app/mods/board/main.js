@@ -392,11 +392,13 @@ export function matches(card, text) {
   return words.every((w) => hay.includes(w));
 }
 
-// Whether an item is one's own, for "nur meine": `me` (the login the data
-// was read as; null when the source did not say) is one of its assignees,
-// its author, or a reviewer asked for.
+// Whether an item is one's own, for "nur meine": it came from a search of
+// one's own (ownByQuery), or `me` (the login the data was read as; null
+// when the source did not say) is one of its assignees, its author, or a
+// reviewer asked for.
 export const isMine = (item, me) =>
-  Boolean(me) && ((item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me));
+  item.ownByQuery === true ||
+  (Boolean(me) && ((item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
 
 // Whether an item shows in data read as `viewer`: it matches the filter and,
 // with `mine` on, it is one's own.
@@ -1000,7 +1002,8 @@ const ITEM_FIELDS = `
       labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
       parent { number } subIssuesSummary { total completed } }
     ... on PullRequest { number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } } }
+      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
+      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login } } }
   }`;
 
@@ -1035,6 +1038,10 @@ export function githubBoardArgs(view, hidden) {
   ];
 }
 
+// The logins of the people a pull request asks to review; a team's request,
+// or one whose reviewer is gone, names no one.
+const reviewerLogins = (requests) => (requests?.nodes ?? []).map((r) => r?.requestedReviewer?.login).filter(Boolean);
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
@@ -1051,6 +1058,7 @@ function githubCard(node) {
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
     assignees: (c.assignees?.nodes ?? []).map((a) => a.login),
     author: c.author?.login ?? c.creator?.login ?? null,
+    reviewers: reviewerLogins(c.reviewRequests),
     type: c.issueType?.name ?? null,
     parent: c.parent?.number ?? null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
@@ -1213,6 +1221,9 @@ export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[deci
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
+    // A search narrowed to the viewer (@me) holds only their pull requests,
+    // also those a team they are in is asked to review.
+    const own = /@me\b/.test(s.query);
     const found = json?.data?.[`s${i}`];
     if (!Array.isArray(found?.nodes)) {
       const e = errorAt(errors, [`s${i}`]);
@@ -1246,8 +1257,8 @@ export function parseGithubList(json, view, errors = []) {
         branch: pr.headRefName,
         labels: [],
         assignees: (pr.assignees?.nodes ?? []).map((a) => a.login),
-        // Requested reviewers that are people; a team's request names no login.
-        reviewers: (pr.reviewRequests?.nodes ?? []).map((r) => r.requestedReviewer?.login).filter(Boolean),
+        reviewers: reviewerLogins(pr.reviewRequests),
+        ownByQuery: own,
       });
     }
     return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };
@@ -2648,7 +2659,8 @@ export default class Board extends View {
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
-    const noViewer = this.mine && st.data && !st.data.viewer ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
+    const hidesAll = this.mine && st.data && !st.data.viewer && shape.count(this, st.data)?.shown === 0;
+    const noViewer = hidesAll ? [this.sources[view.source].noViewer ?? NO_VIEWER] : [];
     const warnings = [...st.warnings, ...noViewer];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
     if (!st.data) return shown;

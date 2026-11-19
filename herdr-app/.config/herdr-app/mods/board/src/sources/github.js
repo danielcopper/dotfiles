@@ -25,7 +25,8 @@ const ITEM_FIELDS = `
       labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
       parent { number } subIssuesSummary { total completed } }
     ... on PullRequest { number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } } }
+      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
+      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login } } }
   }`;
 
@@ -60,6 +61,10 @@ export function githubBoardArgs(view, hidden) {
   ];
 }
 
+// The logins of the people a pull request asks to review; a team's request,
+// or one whose reviewer is gone, names no one.
+const reviewerLogins = (requests) => (requests?.nodes ?? []).map((r) => r?.requestedReviewer?.login).filter(Boolean);
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
@@ -76,6 +81,7 @@ function githubCard(node) {
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
     assignees: (c.assignees?.nodes ?? []).map((a) => a.login),
     author: c.author?.login ?? c.creator?.login ?? null,
+    reviewers: reviewerLogins(c.reviewRequests),
     type: c.issueType?.name ?? null,
     parent: c.parent?.number ?? null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
@@ -238,6 +244,9 @@ export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[deci
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const sections = view.sections.map((s, i) => {
+    // A search narrowed to the viewer (@me) holds only their pull requests,
+    // also those a team they are in is asked to review.
+    const own = /@me\b/.test(s.query);
     const found = json?.data?.[`s${i}`];
     if (!Array.isArray(found?.nodes)) {
       const e = errorAt(errors, [`s${i}`]);
@@ -271,8 +280,8 @@ export function parseGithubList(json, view, errors = []) {
         branch: pr.headRefName,
         labels: [],
         assignees: (pr.assignees?.nodes ?? []).map((a) => a.login),
-        // Requested reviewers that are people; a team's request names no login.
-        reviewers: (pr.reviewRequests?.nodes ?? []).map((r) => r.requestedReviewer?.login).filter(Boolean),
+        reviewers: reviewerLogins(pr.reviewRequests),
+        ownByQuery: own,
       });
     }
     return { name: s.name, count: found.issueCount, limited: found.issueCount > found.nodes.length, skipped, rows };

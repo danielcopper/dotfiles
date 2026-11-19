@@ -27,8 +27,10 @@
 //   is gone), github-list.json, github-move.json, github-rate-limited.json,
 //   github-scope-error.json; added the same way: the viewer's login in
 //   github-board.json, github-board-cases.json and github-list.json, the
-//   items' authors (a draft's creator) in the first two, and the pull
-//   requests' assignees and review requests in github-list.json;
+//   items' authors (a draft's creator) in the first two, the pull requests'
+//   assignees and review requests in github-list.json and the pull
+//   request's in github-board-cases.json, a review request whose reviewer
+//   is gone (null) and an issue whose author is gone (null);
 // - written from az's documentation (`az devops invoke` for work item
 //   types), not recorded: azure-types.json.
 
@@ -2644,7 +2646,10 @@ test("UI: clicks on the source toggle, a tab and „nur meine“ do what their k
 test("UI: m shows only one's own items on a board and a list, without reading again, and says so in the top bar", async () => {
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
-  const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(data) });
+  // The list's second section searches without @me: its rows count one by one.
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[1].sections[1] = { name: "Mine", query: "is:pr repo:example/tender" };
+  const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(data), config: JSON.stringify(config) });
   const cards = () => b.navColumns(b.view()).flatMap((c) => c.shown.map((x) => x.number));
   assert.equal(cards().length, 6);
   b.select(b.view(), { col: b.navColumns(b.view()).findIndex((c) => c.name === "In progress"), key: "PVTI_rec1" });
@@ -2659,12 +2664,29 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 808, 77],
-    "the list: asked to review, assigned, opened by sample-user; not the bot's own 1921");
-  assert.ok(texts(b.render()).includes("REVIEW · 1"), "the review section keeps its row");
+    "the list: from a search of one's own, assigned, opened by sample-user; not the bot's own 1921");
+  assert.ok(texts(b.render()).includes("REVIEW · 1"), "the review section, a search of one's own, keeps its row");
   assert.ok(texts(b.render()).includes("MINE · 2 von 3"), "and says what is hidden");
   assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3 von 4", "so does the tab");
   await press(b, cx, "m");
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
+});
+
+test("„nur meine“ counts a search of one's own whole, and a pull request on a board that asks one's review", () => {
+  const list = board.parseGithubList(json("github-list.json"), listView());
+  assert.deepEqual(list.sections.map((s) => s.rows.map((r) => r.ownByQuery)), [[true], [true, true, true]], "review-requested:@me, author:@me");
+  const other = { ...listView(), sections: [{ name: "A", query: "is:pr repo:example/tender" }, { name: "B", query: "is:pr repo:example/atlas" }] };
+  const rows = board.parseGithubList(json("github-list.json"), other).sections.flatMap((s) => s.rows);
+  assert.deepEqual(rows.map((r) => [r.number, r.ownByQuery, board.isMine(r, "sample-user")]), [[2820, false, true], [1921, false, false], [808, false, true], [77, false, true]]);
+  assert.deepEqual(rows.find((r) => r.number === 808).reviewers, [], "a reviewer that is gone names no one");
+  assert.equal(board.isMine({ ownByQuery: true }, null), true, "also without the viewer's login");
+  const cases = casesBoard();
+  const pr = board.findCard(cases, "PVTI_case1").card;
+  assert.deepEqual([pr.reviewers, board.isMine(pr, "sample-user")], [["sample-user"], true], "a pull request on the board asking sample-user's review");
+  const issue = cases.columns.flatMap((c) => c.cards).find((c) => c.kind === "issue" && c.author === null);
+  assert.ok(issue, "an issue whose author is gone");
+  assert.equal(board.isMine(issue, "sample-user"), issue.assignees.includes("sample-user"));
+  assert.match(board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query=")), /PullRequest \{[^}]*\}[^]*?reviewRequests\(first: 20\)/);
 });
 
 test("UI: what the filter or „nur meine“ hides is said: in the column, its count and the tab's", async () => {
