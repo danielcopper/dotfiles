@@ -4,8 +4,10 @@
 import { panes, spaces } from "herdr";
 import { MOD, BoardError, errorText } from "../shared.js";
 
-// Settings that last across reloads (the shown view, hidden columns). A full
-// or missing localStorage keeps them for this session only.
+// Settings that last across reloads: the shown source ("source"), each
+// source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
+// "nur meine" ("mine") and each view's hidden columns ("hidden:<view>"). A
+// full or missing localStorage keeps them for this session only.
 export const store = {
   get(key) {
     try {
@@ -23,6 +25,17 @@ export const store = {
     }
   },
 };
+
+// The shown view a board before the top bar kept ("view": a GitHub view's
+// id) becomes the GitHub source and that tab, once; what is set already
+// stays.
+export function migrateShownView() {
+  const view = store.get("view");
+  if (typeof view !== "string") return;
+  if (store.get("source") === null) store.set("source", "github");
+  if (store.get("tab:github") === null) store.set("tab:github", `github:${view}`);
+  store.set("view", null);
+}
 
 export const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
 export const machineName = (name) => name ?? "Dieser Rechner";

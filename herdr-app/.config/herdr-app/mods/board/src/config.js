@@ -108,9 +108,14 @@ function readGithub(raw) {
   return { github: views.length ? { views } : null, errors };
 }
 
-// The views a team context may show, in the order of its switch.
-export const TEAM_VIEWS = ["sprint", "backlog"];
-const TEAM_VIEWS_TEXT = TEAM_VIEWS.map((v) => `"${v}"`).join(" und ");
+// The views a team context may show, in the order of its switch: the id
+// views.json names, and the name the switch shows.
+export const TEAM_VIEWS = [
+  { id: "sprint", name: "Sprint" },
+  { id: "backlog", name: "Backlog" },
+];
+const TEAM_VIEW_IDS = TEAM_VIEWS.map((v) => v.id);
+const TEAM_VIEWS_TEXT = TEAM_VIEW_IDS.map((v) => `"${v}"`).join(" und ");
 
 // What is wrong with an entry of sources.azure.contexts: { "team": {
 // project, team }, "views"?: [...] } or { "prs": { project } }.
@@ -126,38 +131,53 @@ function contextProblems(c) {
   if (!isObject(inner) || !fields.every((f) => isText(inner[f]))) out.push(`„${kind}“ braucht ${fields.map((f) => `„${f}“`).join(" und ")} (Text)`);
   else out.push(...Object.keys(inner).filter((k) => !fields.includes(k)).map((k) => `„${kind}.${k}“ gibt es nicht`));
   const views = c.views;
-  if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEWS.includes(v)) && new Set(views).size === views.length)) {
+  if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEW_IDS.includes(v)) && new Set(views).size === views.length)) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
   return out;
 }
 
+// The name of a context's tab, from an entry of sources.azure.contexts as
+// it stands ("" when it names neither): the team, or "PRs · <project>".
+function contextName(c) {
+  if (isObject(c?.team) && isText(c.team.team)) return c.team.team;
+  return isObject(c?.prs) && isText(c.prs.project) ? `PRs · ${c.prs.project}` : "";
+}
+
 // A context as the board uses it: { id, source: "azure", kind: "team",
-// project, team, views } or { id, source: "azure", kind: "prs", project };
-// views in the switch's order.
+// name, project, team, views } or { id, source: "azure", kind: "prs", name,
+// project }; views in the switch's order.
 function normalizeContext(c) {
+  const name = contextName(c);
   if (c.team) {
-    const views = c.views ?? TEAM_VIEWS;
+    const views = c.views ?? TEAM_VIEW_IDS;
     const { project, team } = c.team;
-    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", project, team, views: TEAM_VIEWS.filter((v) => views.includes(v)) };
+    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
   }
-  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", project: c.prs.project };
+  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, project: c.prs.project };
+}
+
+// An organisation's address: https://<host>/<organisation>, a trailing /
+// dropped; null for anything else.
+function orgUrl(value) {
+  const url = isText(value) ? value.trim().replace(/\/+$/, "") : "";
+  return /^https:\/\/[^/\s]+\/[^/\s]+$/.test(url) ? url : null;
 }
 
 // sources.azure → { azure: { org, contexts } or null, errors }. Without a
-// valid org nothing of it is usable; a context with problems is left out and
+// valid org (orgUrl) nothing of it is usable; a context with problems is left out and
 // each problem is listed.
 function readAzure(raw) {
   if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
   const errors = Object.keys(raw).filter((k) => k !== "org" && k !== "contexts").map((k) => `„sources.azure.${k}“ gibt es nicht`);
-  const org = isText(raw.org) && /^https:\/\/\S+$/.test(raw.org.trim()) ? raw.org.trim().replace(/\/+$/, "") : null;
+  const org = orgUrl(raw.org);
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
   if (!Array.isArray(raw.contexts) || !raw.contexts.length) {
     errors.push("„sources.azure.contexts“ braucht mindestens einen Eintrag: { \"team\": { \"project\", \"team\" } } oder { \"prs\": { \"project\" } }");
   }
   const contexts = [];
   (Array.isArray(raw.contexts) ? raw.contexts : []).forEach((c, i) => {
-    const name = isObject(c?.team) && isText(c.team.team) ? c.team.team : isObject(c?.prs) && isText(c.prs.project) ? `PRs · ${c.prs.project}` : "";
+    const name = contextName(c);
     const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
     const problems = contextProblems(c);
     const context = problems.length ? null : normalizeContext(c);
@@ -165,6 +185,10 @@ function readAzure(raw) {
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
     contexts.push(context);
   });
+  // Teams of one name in different projects: their tabs name the project.
+  for (const c of contexts) {
+    if (c.kind === "team" && contexts.some((x) => x !== c && x.kind === "team" && x.team === c.team)) c.name = `${c.team} · ${c.project}`;
+  }
   return { azure: org && contexts.length ? { org, contexts } : null, errors };
 }
 
@@ -185,9 +209,10 @@ export function readConfig(text) {
 
 export function validateConfig(raw) {
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
-  const old = raw.views !== undefined && raw.sources === undefined;
+  // Views at the top are views.json's old form, also beside sources.
+  const old = raw.views !== undefined;
   const errors = old ? [OLD_SHAPE] : [];
-  errors.push(...Object.keys(raw).filter((k) => !TOP_KEYS.includes(k) && !(old && k === "views")).map((k) => `„${k}“ gibt es nicht`));
+  errors.push(...Object.keys(raw).filter((k) => !TOP_KEYS.includes(k) && k !== "views").map((k) => `„${k}“ gibt es nicht`));
   let refreshMinutes = raw.refreshMinutes ?? 3;
   if (typeof refreshMinutes !== "number" || !(refreshMinutes >= 1)) {
     errors.push("„refreshMinutes“ ist eine Zahl ab 1");
@@ -217,8 +242,8 @@ export function validateConfig(raw) {
       github = read.github;
       errors.push(...read.errors);
     }
+    if (!azure && !github) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
   } else if (!old) errors.push(raw.sources === undefined ? "„sources“ fehlt: „sources.azure“ oder „sources.github“" : "„sources“ muss ein Objekt sein");
-  if (!azure && !github && !errors.length) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
   const start = startErrors.length ? {} : raw.start ?? {};
   return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }

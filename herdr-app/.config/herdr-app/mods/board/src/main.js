@@ -54,11 +54,11 @@ import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, re
 import { MOD, CONFIG_NAME, BoardError, firstLine, lastLine, errorText, itemKey, itemLabel, updatedLabel, ageLabel } from "./shared.js";
 import { viewKind, readConfig, startSettings, githubViews } from "./config.js";
 import { readStoredHidden, hiddenColumns, toggleHidden, unknownHidden, findCard, moveCard, rollback, isDue, pendingMoves, applyMoves, canDrop, targetsFor, stepTarget, withHidden, shows, shownColumns, navigate, selectionAfter } from "./kinds/board.js";
-import { TEAM_VIEW_NAMES, contextsOf, sourcesOf, pick, teamView, placeholder } from "./contexts.js";
+import { teamViewName, contextsOf, sourcesOf, pick, teamView, placeholder } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { sessionName, linkedSession, AGENT_STATUS, renderTemplate, templateVars, checkoutArgs, spaceForTab, startCommand } from "./actions/start.js";
 import { call, makeSources } from "./sources/index.js";
-import { store, tint, machineName, onMachine, boardShown, report } from "./ui/helpers.js";
+import { store, migrateShownView, tint, machineName, onMachine, boardShown, report } from "./ui/helpers.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -86,11 +86,12 @@ export default class Board extends View {
     this.configErrors = [];
     this.views = {}; // per GitHub view id, see state()
     // What the top bar shows, as last chosen: the source, its tab (a context
-    // id) per source, and the view per team context. "nur meine" starts off.
+    // id) per source, the view per team context, and "nur meine".
+    migrateShownView();
     this.sourceId = store.get("source");
     this.tabIds = { azure: store.get("tab:azure"), github: store.get("tab:github") };
     this.teamViews = {};
-    this.mine = false;
+    this.mine = store.get("mine") === true;
     this.filterText = "";
     this.filtering = false;
     this.modal = null; // { kind: "status", … } or { kind: "start", … }
@@ -173,7 +174,7 @@ export default class Board extends View {
     return source ? pick(this.contexts(), this.tabIds[source.id]) : null;
   }
 
-  // The view a team context shows (TEAM_VIEW_NAMES).
+  // The view a team context shows (one of TEAM_VIEWS).
   teamViewOf(context) {
     this.teamViews[context.id] ??= store.get(`teamView:${context.id}`);
     return teamView(context, this.teamViews[context.id]);
@@ -464,7 +465,9 @@ export default class Board extends View {
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
   toggleMine(cx) {
+    if (!this.source()) return;
     this.mine = !this.mine;
+    store.set("mine", this.mine);
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);
     cx.notify();
@@ -859,7 +862,7 @@ export default class Board extends View {
         .child(this.segments(t, "source", sources, source.id, (id, cx) => this.switchSource(id, cx)))
         .child(this.tabs(t, context))
         .when(context?.kind === "team" && context.views.length > 1, (el) => {
-          const views = context.views.map((v) => ({ id: v, label: TEAM_VIEW_NAMES[v] }));
+          const views = context.views.map((v) => ({ id: v, label: teamViewName(v) }));
           return el.child(this.segments(t, "team-view", views, this.teamViewOf(context), (name, cx) => this.setTeamView(name, cx)));
         });
     }
@@ -1297,7 +1300,7 @@ export default class Board extends View {
   hints(t, st) {
     const context = this.context();
     const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
-    const always = [["m", "nur meine"], ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
+    const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
     let own = [];
     if (context?.kind === "team") own = context.views.length > 1 ? [["v", "Sprint/Backlog"]] : [];
     else if (st?.data?.kind === "list") own = [["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"]];

@@ -3,7 +3,7 @@
 // views (Sprint, Backlog), or a project's pull requests; on GitHub each view
 // of views.json is one.
 
-import { githubViews } from "./config.js";
+import { TEAM_VIEWS, githubViews } from "./config.js";
 
 // The sources in the toggle's order.
 export const SOURCES = [
@@ -11,16 +11,14 @@ export const SOURCES = [
   { id: "github", name: "GitHub" },
 ];
 
-// A team context's views by name, as its switch shows them.
-export const TEAM_VIEW_NAMES = { sprint: "Sprint", backlog: "Backlog" };
+// A team view's name, as the switch shows it.
+export const teamViewName = (id) => TEAM_VIEWS.find((v) => v.id === id)?.name ?? id;
 
 // The contexts of a source in a config, in views.json's order: { id, source,
 // kind: "team" | "prs" | "view", name, … } (a team's fields, a project's, or
 // the GitHub view as `view`).
 export function contextsOf(config, source) {
-  if (source === "azure") {
-    return (config?.azure?.contexts ?? []).map((c) => ({ ...c, name: c.kind === "team" ? c.team : `PRs · ${c.project}` }));
-  }
+  if (source === "azure") return config?.azure?.contexts ?? [];
   if (source === "github") return githubViews(config).map((v) => ({ id: `github:${v.id}`, source: "github", kind: "view", name: v.name, view: v }));
   return [];
 }

@@ -352,20 +352,22 @@ test("validateConfig reads sources.azure: contexts of a team, with its views, or
   assert.equal(errors.length, 11);
 });
 
-test("without a valid org or any context nothing of sources.azure is used", () => {
+test("without a valid org or any context nothing of sources.azure is used, and the board says why", () => {
   const contexts = [{ prs: { project: "P" } }];
-  for (const org of [undefined, "", "dev.azure.com/example-org", "http://dev.azure.com/example-org", 7]) {
+  const none = "„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“";
+  for (const org of [undefined, "", "dev.azure.com/example-org", "http://dev.azure.com/example-org", "https://dev.azure.com", "https://dev.azure.com/o/p", 7]) {
     const { config, errors } = board.validateConfig({ sources: { azure: { org, contexts } } });
     assert.equal(config, null, String(org));
-    assert.deepEqual(errors, ["„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>"]);
+    assert.deepEqual(errors, ["„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>", none], String(org));
   }
+  assert.equal(board.validateConfig({ sources: { azure: { org: "https://dev.azure.com/o/", contexts } } }).config.azure.org, "https://dev.azure.com/o");
   for (const bad of [undefined, [], "x"]) {
     const { config, errors } = board.validateConfig({ sources: { azure: { org: "https://dev.azure.com/o", contexts: bad } } });
     assert.equal(config, null);
     assert.match(errors.join("\n"), /„sources\.azure\.contexts“ braucht mindestens einen Eintrag/);
   }
-  assert.deepEqual(board.validateConfig({ sources: { azure: [] } }).errors, ["„sources.azure“ muss ein Objekt sein"]);
-  assert.deepEqual(board.validateConfig({ sources: { github: "x" } }).errors, ["„sources.github“ muss ein Objekt sein"]);
+  assert.deepEqual(board.validateConfig({ sources: { azure: [] } }).errors, ["„sources.azure“ muss ein Objekt sein", none]);
+  assert.deepEqual(board.validateConfig({ sources: { github: "x" } }).errors, ["„sources.github“ muss ein Objekt sein", none]);
   const list = { id: "a", name: "A", layout: "list", sections: [{ name: "A", query: "is:pr" }] };
   assert.deepEqual(board.validateConfig({ sources: { github: { views: [list], colour: 1 } } }).errors, ["„sources.github.colour“ gibt es nicht"]);
 });
@@ -376,7 +378,9 @@ test("an old views.json with its views at the top is not read; the board says wh
   assert.equal(config, null);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in „sources\.github\.views“, Azure in „sources\.azure“ mit „org“ und „contexts“/);
-  assert.deepEqual(board.validateConfig({ ...old, sources: {} }).errors.slice(0, 1), ["„views“ gibt es nicht"], "beside sources, views is just unknown");
+  const beside = board.validateConfig({ ...old, sources: { azure: { org: "https://dev.azure.com/o", contexts: [{ prs: { project: "P" } }] } } });
+  assert.deepEqual(beside.errors, [errors[0]], "beside sources too, views gets the same message");
+  assert.deepEqual(beside.config.azure.contexts.map((c) => c.id), ["azure:prs:P"]);
 });
 
 test("sources must be an object of azure and github, with at least one view", () => {
@@ -405,7 +409,14 @@ test("validateConfig rejects the keys of the worktree start with a clear message
 test("validateConfig without any usable view gives no config", () => {
   const { config, errors } = board.validateConfig({ sources: { github: { views: [] } } });
   assert.equal(config, null);
-  assert.deepEqual(errors, ["„sources.github.views“ braucht mindestens eine Ansicht"]);
+  assert.deepEqual(errors, ["„sources.github.views“ braucht mindestens eine Ansicht", "„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“"]);
+});
+
+test("tabs carry their names from views.json: a team's, or PRs · <project>; teams of one name name their projects", () => {
+  const team = (project, name) => ({ team: { project, team: name } });
+  const { config } = board.validateConfig({ sources: { azure: { org: "https://dev.azure.com/o", contexts: [team("P", "T"), team("Q", "T"), team("P", "U"), { prs: { project: "P" } }] } } });
+  assert.deepEqual(board.contextsOf(config, "azure").map((c) => c.name), ["T · P", "T · Q", "U", "PRs · P"]);
+  assert.deepEqual(board.TEAM_VIEWS.map((v) => [v.id, board.teamViewName(v.id)]), [["sprint", "Sprint"], ["backlog", "Backlog"]]);
 });
 
 test("start settings: defaults < start < the view's start < the repo's entry", () => {
@@ -2394,6 +2405,29 @@ test("UI: a new board opens on the source, tab and team view shown last; ones vi
   third.init({}, fakeCx());
   await settle();
   assert.deepEqual([third.context().id, third.teamViewOf(third.context())], ["azure:team:Example Project/Example Team", "sprint"]);
+});
+
+test("UI: a board that kept the old shown view opens on that GitHub view, once; later choices stay", async () => {
+  const { b, host } = await bootBoard({ stored: { view: "prs" } });
+  assert.deepEqual([b.source().id, b.context().id], ["github", "github:prs"]);
+  await host.answer("gh", ok(fixture("github-list.json")));
+  assert.equal(memory.get("view"), "null", "migrated once");
+  const { b: kept } = await bootBoard({ stored: { view: "prs", source: "azure", "tab:github": "github:other" } });
+  assert.equal(kept.source().id, "azure", "a source chosen since stays");
+  assert.equal(JSON.parse(memory.get("tab:github")), "github:other");
+});
+
+test("UI: „nur meine“ lasts across reloads; without a valid views.json m does nothing and has no hint", async () => {
+  const { b, cx } = await bootBoard({ stored: { source: "azure" } });
+  await press(b, cx, "m");
+  const again = new board.default();
+  again.init({}, fakeCx());
+  await settle();
+  assert.equal(again.mine, true);
+  const { b: broken, cx: cx2 } = await bootBoard({ config: "{" });
+  await press(broken, cx2, "m");
+  assert.equal(broken.mine, false);
+  assert.equal(hintKeys(broken).includes("m"), false);
 });
 
 test("UI: digits and [ ] pick the shown source's tabs; a digit beyond them does nothing", async () => {
