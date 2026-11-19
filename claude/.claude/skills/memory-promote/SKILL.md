@@ -37,7 +37,8 @@ If $ARGUMENTS is empty, ask for both source and destination.
 2. **Identify the target destination** from the second argument. If the destination is `repo/...` and cwd isn't in a git repo, abort with a clear message.
 
 3. **Validate** against the routing rules:
-   - "Would this fact still be true in a different project tomorrow?" → if yes but destination is repo, warn.
+   - Scope: repo by default; a global destination the owner has not named as global gets a warning (global
+     `CLAUDE.md`, "Memory").
    - **Trust ladder**: only user-confirmed or repeatedly-observed facts get promoted — for a single observation, warn
      and suggest it stay in the daily.
    - Wiki destination: reference knowledge only; warn if the entry is an agent operating rule or still provisional.
