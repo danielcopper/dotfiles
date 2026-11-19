@@ -34,7 +34,7 @@ Move the **epic** to In Progress on the board (once), as implement step 4 does. 
 
 ## 4. Per sub-issue
 
-Execute the implement pipeline steps 2–10 with these epic-mode adjustments:
+Execute implement steps 2–9 per sub-issue with these epic-mode adjustments. Step 10 runs for a sub-issue once the owner reports its merge, while later sub-issues go on.
 
 - **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user. In a convention repo "no open questions" means no open question under `## To decide`. Step 3's `/grill-with-docs` offer still applies to the sub-issue.
 - **Merge between issues**: the owner merges each sub-issue's PR (`merge_policy`). A sub-issue that depends on an earlier one starts only after that merge, its worktree branching from updated main; meanwhile the line moves on to sub-issues that do not depend on it. PRs stay small; every merge leaves main runnable.
@@ -47,6 +47,6 @@ Between issues: reconcile the board where there is one, give the user a one-line
 
 ## 5. Close the epic
 
-When the last sub-issue is Done: verify that all sub-issues are closed and, on a board, in Done as its kind says (`repo-config.md`, "Board"), summarize what shipped, and ask the user to confirm closing the epic — closing decisions stay with the user.
+When every sub-issue has been through implement step 10: verify that all sub-issues are closed and, on a board, in Done as its kind says (`repo-config.md`, "Board"), summarize what shipped, and ask the user to confirm closing the epic — closing decisions stay with the user.
 
 If context runs low anywhere in the line, write `/handoff` — where the line stopped, open PRs, pending tests/decisions, board state where there is a board — and tell the user to compact.
