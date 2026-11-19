@@ -61,6 +61,7 @@ PASSES = [
     # api, rest and the like as plain words, not in the subcommand position
     'gh issue create --title "fix the api client" --body-file b.md',
     "gh issue comment 3 --body-file /tmp/api/c.md",
+    "gh -R o/r issue comment 3 --body-file c.md",
     'az boards work-item create --title "rest client" --description @d.md',
     # commands that mention a merge without gh, az, curl or wget
     "git log --merges --oneline",
@@ -252,6 +253,16 @@ DENIED = [
     "az --only-show-errors rest --method put --uri u --body @b.json",
     "az -o json devops invoke --in-file m.json",
     "gh " + "-x " * 60 + "api --input q.json",
+    # a redirection or a quoted option value with spaces before the subcommand
+    "gh 2>/dev/null api graphql --input q.json",
+    "gh 2>&1 api graphql --input q.json",
+    "gh <q.json api graphql --input -",
+    "gh &>/dev/null api graphql --input q.json",
+    "az 2>/dev/null rest --method patch --uri u --body @b.json",
+    "az >o devops invoke --in-file m.json",
+    'gh --repo "a b" api graphql --input q.json',
+    "gh -R 'o/r x' api graphql --input q.json",
+    'az --query "[0] | x" rest --method patch --uri u --body @b.json',
     # the subcommand spelled with quotes or a backslash, read after normalising
     "gh 'a'pi -X PUT repos/o/r/pulls/1/merge",
     "gh a\\pi graphql --input q.json",

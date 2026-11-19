@@ -24,6 +24,66 @@ EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
 BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
 TOKEN_SPLIT = re.compile(r"[\s;&|()<>`]+")
 MAX_OPTION_WALK = 50
+# gh's top-level commands other than api, as `gh help` lists them (gh 2.x, 2026-11), plus help
+# and version. A word in the subcommand position outside this list fails closed.
+GH_SUBCOMMANDS = frozenset(
+    [
+        "agent-task",
+        "alias",
+        "attestation",
+        "auth",
+        "browse",
+        "cache",
+        "co",
+        "codespace",
+        "completion",
+        "config",
+        "copilot",
+        "discussion",
+        "event",
+        "extension",
+        "gist",
+        "gpg-key",
+        "help",
+        "issue",
+        "label",
+        "licenses",
+        "org",
+        "pr",
+        "preview",
+        "project",
+        "release",
+        "repo",
+        "ruleset",
+        "run",
+        "search",
+        "secret",
+        "skill",
+        "ssh-key",
+        "status",
+        "variable",
+        "version",
+        "workflow",
+    ]
+)
+# az's top-level groups the filter lets past, a conservative list (az is not installed here to
+# read them from); rest, devops invoke and repos pr are checked before this list.
+AZ_SUBCOMMANDS = frozenset(
+    [
+        "account",
+        "boards",
+        "devops",
+        "extension",
+        "group",
+        "login",
+        "logout",
+        "pipelines",
+        "repos",
+        "resource",
+        "storage",
+        "version",
+    ]
+)
 PR_WORD = re.compile(r"\bpr\b")
 MERGE_WORD = re.compile(r"\bmerge\b")
 
@@ -101,35 +161,40 @@ def pr_write(command: str) -> bool:
     return len(NETWORK.findall(text.lower())) == 1
 
 
-def subcommand_positions(tokens: list[str], at: int) -> list[int] | None:
+def subcommand_positions(tokens: list[str], at: int) -> tuple[list[int], bool] | None:
     """Indexes of the words that can be the subcommand of the tool at *tokens[at]*, past its
-    options: a word right after an option may be that option's value or the subcommand, so both
-    count. None when the options run past MAX_OPTION_WALK words, where the walk gives up."""
+    options, and whether the last of them is the first word not right after an option. A word
+    right after an option may be that option's value or the subcommand, so both count. None when
+    the options run past MAX_OPTION_WALK words, where the walk gives up."""
     found: list[int] = []
     after_option = False
     end = min(len(tokens), at + 1 + MAX_OPTION_WALK)
     for i in range(at + 1, end):
+        if not tokens[i]:
+            continue
         if tokens[i].startswith("-"):
             after_option = True
             continue
         found.append(i)
         if not after_option:
-            return found
+            return found, True
         after_option = False
-    return found if end == len(tokens) else None
+    return (found, False) if end == len(tokens) else None
 
 
 def body_subcommand(lower: str) -> bool:
-    """Whether gh runs `api`, or az runs `rest`, `devops invoke` or `repos pr`, in the position
-    of their subcommand, past any options: there a request body can merge."""
+    """Whether gh or az may run a subcommand whose request body can merge: gh `api`, az `rest`,
+    `devops invoke` or `repos pr` in the subcommand position, past any options - or a word there
+    that is no known subcommand, or options too long to walk, both of which fail closed."""
     tokens = TOKEN_SPLIT.split(lower)
     for at, token in enumerate(tokens):
         tool = token.rsplit("/", 1)[-1]
         if tool not in ("gh", "az"):
             continue
-        positions = subcommand_positions(tokens, at)
-        if positions is None:
+        walked = subcommand_positions(tokens, at)
+        if walked is None:
             return True
+        positions, has_final = walked
         for i in positions:
             pair = (tokens[i], tokens[i + 1] if i + 1 < len(tokens) else "")
             if tool == "gh" and pair[0] == "api":
@@ -138,6 +203,9 @@ def body_subcommand(lower: str) -> bool:
                 pair[0] == "rest" or pair in (("devops", "invoke"), ("repos", "pr"))
             ):
                 return True
+        known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
+        if has_final and tokens[positions[-1]] not in known:
+            return True
     return False
 
 
