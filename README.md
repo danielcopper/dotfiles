@@ -12,7 +12,7 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
-The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-build`, `herdr-board-test`, `herdr-leader-test`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
+The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-build`, `herdr-board-test`, `herdr-leader-test`, `memex-sync-test`, `install-dotfiles-test`, `shell-test` and `skill-trigger-test` use it unless `DOTFILES_DIR` is set.
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving what is in the way of a package file into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`, as below.
 
@@ -45,7 +45,7 @@ A `mise install` that fails does not stop the steps after it: the run ends with 
 | `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), stows the given packages and seeds missing live files of reference copies; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the bash startup (`tests/bash/startup.sh`), and the herdr app's command check and board mod (`tests/herdr-app/`); `tests/run-listed.sh` hands each named case to the test file that lists it. Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the bash startup (`tests/bash/startup.sh`), the herdr app's command check and board mod (`tests/herdr-app/`), and whether the Claude Code skills fire on the right prompts (`tests/skill-triggers/`); `tests/run-listed.sh` hands each named case to the test file that lists it. Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -532,6 +532,24 @@ wrappers around the real tools, so no herdr or tmux server is asked and no
 real keyring daemon starts. Each file's header lists its cases, `--list`
 prints their names, and naming cases runs only those. It needs jq, timeout,
 flock and python3.
+
+`mise run skill-trigger-test` (without mise, `python3 -I
+tests/skill-triggers/run.py`) checks that the skills under
+`claude/.claude/skills` that Claude may start on its own, those without
+`disable-model-invocation: true`, start on the prompts in
+`tests/skill-triggers/cases.toml` and stay quiet on the ones meant for
+another skill. Each case is one headless `claude -p` run, read for the Skill
+tool calls it makes, and every such skill needs one case where it must fire
+and one where it must not. The runs are model calls on your claude.ai login
+or API key, so it runs by hand after a skill description changes, not per
+commit and never beside another heavy run; it prints each run's cost and the
+total, the CLI's list-price estimate. Each run starts under bwrap with a
+throwaway home that holds a copy of the skills and nothing else of yours; the
+header of `run.py` says how it is isolated and authenticated. `--check`
+validates the cases and the isolation without a model call, `--list` prints
+the case names, naming cases runs only those, and `--runs 3` repeats each
+case, since a skill does not fire the same way every time. It needs python3
+(3.11 or later), bwrap and claude.
 
 ## Memory protection on the Steam Deck
 

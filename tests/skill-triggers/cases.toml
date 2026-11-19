@@ -1,0 +1,297 @@
+# Prompts for run.py. Each [[case]] has:
+#   name    letters, digits and _ (what --list prints and the command line takes)
+#   prompt  sent verbatim as the run's only message; the run starts in an empty directory
+#   fires   the skill that must be called, or "none" for no skill call at all (optional)
+#   quiet   skills that must not be called (optional; one of fires and quiet is required)
+# Skill names are the directory names under claude/.claude/skills. Every
+# model-invoked skill must fire in one case and stay quiet in another; run.py
+# refuses the file otherwise. Keep prompts generic: nothing from a real
+# project, host or person.
+
+# --- diagnose vs tdd ---------------------------------------------------------
+
+[[case]]
+name = "diagnose_fires_on_what_broke"
+fires = "diagnose"
+quiet = ["tdd"]
+prompt = """
+The orders page test started failing right after this change: it expects 20 rows and gets 19. What broke?
+
+```diff
+-module.exports = { listOrders };
++function pageOrders(db, page, size) {
++  const rows = db.query('SELECT * FROM orders ORDER BY created_at DESC');
++  const start = (page - 1) * size;
++  return rows.slice(start, start + size - 1);
++}
++
++module.exports = { listOrders, pageOrders };
+```
+"""
+
+[[case]]
+name = "diagnose_fires_on_slow_endpoint"
+fires = "diagnose"
+quiet = ["tdd", "prototype"]
+prompt = """
+Since yesterday's deploy the search endpoint takes about four seconds per request instead of 200 ms. Nothing in the search code changed. Help me find out why it got slow.
+"""
+
+[[case]]
+name = "tdd_fires_on_test_first"
+fires = "tdd"
+quiet = ["diagnose"]
+prompt = """
+Let's build a slugify(title) function test-first: red, green, refactor. It should lowercase, turn runs of non-alphanumerics into a single dash and trim dashes at both ends.
+"""
+
+[[case]]
+name = "tdd_fires_on_integration_tests"
+fires = "tdd"
+quiet = ["diagnose", "prototype"]
+prompt = """
+I want to add a rate limiter to our HTTP client and drive it with integration tests from the start: write the failing test first, then the code.
+"""
+
+[[case]]
+name = "diagnose_and_tdd_quiet_on_feature"
+quiet = ["diagnose", "tdd"]
+prompt = """
+Add a --verbose flag to this argument parser that sets the log level to DEBUG.
+
+```python
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog="sync")
+    parser.add_argument("source")
+    parser.add_argument("target")
+    return parser.parse_args(argv)
+```
+"""
+
+# --- grill-me vs grill-with-docs vs prototype vs research --------------------
+
+[[case]]
+name = "grill_me_fires_on_plan"
+fires = "grill-me"
+quiet = ["grill-with-docs", "prototype", "research"]
+prompt = """
+Grill me on this plan before I start: I want to move the nightly backup job from cron to a systemd timer, keep the last seven archives locally and push every Sunday's archive to object storage. Poke holes in it.
+"""
+
+[[case]]
+name = "grill_with_docs_fires_on_glossary_and_adrs"
+fires = "grill-with-docs"
+quiet = ["grill-me", "research"]
+prompt = """
+Stress-test this plan against our glossary and the decisions in our ADRs, and update the glossary as we settle terms: we want to call a customer's saved cart a "draft order" and let it expire after 30 days.
+"""
+
+[[case]]
+name = "prototype_fires_on_state_model"
+fires = "prototype"
+quiet = ["grill-me", "research"]
+prompt = """
+I can't decide between two state models for the upload queue: one status enum, or separate flags for queued, running and failed. Talking about it isn't settling it. Build something throwaway so I can feel which one holds up.
+"""
+
+[[case]]
+name = "prototype_fires_on_tui_look"
+fires = "prototype"
+quiet = ["grill-me", "grill-with-docs"]
+prompt = """
+Before we decide on the layout, show me what a terminal UI for the job list could look like: a list on the left, the selected job's log on the right. Something quick I can run and look at, not the real thing.
+"""
+
+[[case]]
+name = "research_fires_on_vendor_question"
+fires = "research"
+quiet = ["grill-me", "prototype"]
+prompt = """
+Research how systemd timers with Persistent=true behave when the machine was off at the scheduled time, and whether RandomizedDelaySec still applies to the catch-up run. I want primary sources for each claim.
+"""
+
+[[case]]
+name = "research_fires_on_german_request"
+fires = "research"
+quiet = ["grill-with-docs", "prototype"]
+prompt = """
+Recherchiere, ob GitHub Actions bei einem geplanten Workflow (schedule/cron) verpasste Läufe nachholt, wenn GitHub zu dem Zeitpunkt überlastet war. Mit Quellen bitte.
+"""
+
+[[case]]
+name = "research_quiet_on_definition"
+fires = "none"
+quiet = ["research", "grill-me", "worktree", "handoff"]
+prompt = """
+In two sentences: what is the difference between git merge and git rebase?
+"""
+
+# --- writing-for-agents -------------------------------------------------------
+
+[[case]]
+name = "writing_for_agents_fires_on_new_skill"
+fires = "writing-for-agents"
+quiet = ["to-prd"]
+prompt = """
+Write a new skill for me that formats SQL migration files consistently: the SKILL.md with a description that makes it trigger at the right time.
+"""
+
+[[case]]
+name = "writing_for_agents_fires_on_claude_md"
+fires = "writing-for-agents"
+quiet = ["grill-me"]
+prompt = """
+Add a rule to my CLAUDE.md that commit messages must follow Conventional Commits, and word it so the agent actually follows it.
+"""
+
+[[case]]
+name = "writing_for_agents_quiet_on_readme"
+quiet = ["writing-for-agents"]
+prompt = """
+Write a short README section for humans that explains how to install this command-line tool with pipx and how to run it the first time.
+"""
+
+# --- to-prd vs to-issues ------------------------------------------------------
+
+[[case]]
+name = "to_prd_fires_on_agreed_feature"
+fires = "to-prd"
+quiet = ["to-issues", "grill-me"]
+prompt = """
+Here is what we settled on: users can export their reading list as CSV or JSON from the settings page; the export runs in the background and they get a download link by email; exports older than seven days are deleted. Turn this into a PRD and publish it as an issue.
+"""
+
+[[case]]
+name = "to_issues_fires_on_plan_breakdown"
+fires = "to-issues"
+quiet = ["to-prd"]
+prompt = """
+Break this plan into GitHub issues we can pick up one at a time: 1. store exports in a new table, 2. background job that writes the CSV and JSON files, 3. email with the download link, 4. nightly cleanup of exports older than seven days, 5. button on the settings page.
+"""
+
+# --- pr-review -----------------------------------------------------------------
+
+[[case]]
+name = "pr_review_fires_on_pr_url"
+fires = "pr-review"
+quiet = ["diagnose"]
+prompt = """
+Let's do a review of this PR together: https://github.com/example/shop/pull/42
+"""
+
+[[case]]
+name = "pr_review_quiet_on_commit_message"
+quiet = ["pr-review"]
+prompt = """
+Write a commit message for this change:
+
+```diff
+-const TIMEOUT_MS = 5000;
++const TIMEOUT_MS = 15000;
+```
+"""
+
+# --- azure-devops-boards ------------------------------------------------------
+
+[[case]]
+name = "azure_devops_boards_fires_on_work_item"
+fires = "azure-devops-boards"
+quiet = ["to-issues"]
+prompt = """
+Move task 1234 on our Azure DevOps board to In Progress, I'm starting on it now.
+"""
+
+[[case]]
+name = "azure_devops_boards_quiet_on_github_issue"
+quiet = ["azure-devops-boards"]
+prompt = """
+Close GitHub issue 17 in example/shop with a comment saying it was fixed by the last release.
+"""
+
+# --- handoff ------------------------------------------------------------------
+
+[[case]]
+name = "handoff_fires_on_next_agent"
+fires = "handoff"
+quiet = ["to-prd", "memory-promote"]
+prompt = """
+I'm stopping for today. Write up where we are so another agent can pick this up tomorrow without asking me anything.
+"""
+
+# --- improve-codebase-architecture -------------------------------------------
+
+[[case]]
+name = "architecture_fires_on_coupling"
+fires = "improve-codebase-architecture"
+quiet = ["diagnose"]
+prompt = """
+Go through this codebase and find refactoring opportunities: modules that are too tightly coupled, shallow wrappers, places that are hard to test.
+"""
+
+[[case]]
+name = "architecture_quiet_on_one_function"
+quiet = ["improve-codebase-architecture"]
+prompt = """
+Rename the variable tmp to totalCents in this function:
+
+```js
+function sum(items) {
+  let tmp = 0;
+  for (const item of items) tmp += item.cents;
+  return tmp;
+}
+```
+"""
+
+# --- local-sql-server ---------------------------------------------------------
+
+[[case]]
+name = "local_sql_server_fires_on_sqlcmd"
+fires = "local-sql-server"
+quiet = ["research"]
+prompt = """
+Count the rows in dbo.Orders on the local SQL Server dev container with sqlcmd.
+"""
+
+[[case]]
+name = "local_sql_server_quiet_on_postgres"
+quiet = ["local-sql-server"]
+prompt = """
+Write a PostgreSQL query that returns the five customers with the highest total order value.
+"""
+
+# --- memory skills ------------------------------------------------------------
+
+[[case]]
+name = "memory_dream_fires_on_daily_triage"
+fires = "memory-dream"
+quiet = ["memory-consolidate"]
+prompt = """
+Triage my daily memory logs and propose which entries should be promoted to durable memory and which old dailies can be archived.
+"""
+
+[[case]]
+name = "memory_consolidate_fires_on_full_sweep"
+fires = "memory-consolidate"
+quiet = ["memory-promote"]
+prompt = """
+Do a full memory sweep: dedupe and merge the durable notes and refresh the indexes.
+"""
+
+[[case]]
+name = "memory_promote_fires_on_one_entry"
+fires = "memory-promote"
+quiet = ["memory-dream"]
+prompt = """
+Move the entry about the sqlcmd quoting trick from today's daily log into durable memory under tools.
+"""
+
+# --- worktree -----------------------------------------------------------------
+
+[[case]]
+name = "worktree_fires_on_new_feature_branch"
+fires = "worktree"
+quiet = ["to-issues"]
+prompt = """
+Set up a new branch and worktree for adding the CSV export feature, then I'll start coding there.
+"""
