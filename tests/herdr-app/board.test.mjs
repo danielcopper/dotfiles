@@ -2710,6 +2710,17 @@ test("UI: what the filter or „nur meine“ hides is said: in the column, its c
   assert.deepEqual(column("Ready").slice(1, 2), ["1/3"]);
 });
 
+test("UI: without the viewer's login, „nur meine“ on a list still shows a search of one's own, and says nothing is missing", async () => {
+  const data = json("github-list.json");
+  delete data.data.viewer;
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "2");
+  await host.answer("gh", ok(JSON.stringify(data)));
+  await press(b, cx, "m");
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
+  assert.equal(texts(b.render()).some((s) => s.startsWith("„nur meine“ zeigt nichts")), false);
+});
+
 test("UI: a capped list section keeps its true total while the filter or „nur meine“ thins it", async () => {
   const data = json("github-list.json");
   data.data.s1.issueCount = 120;
