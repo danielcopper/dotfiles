@@ -19,7 +19,7 @@ Before writing code, write down what state model and what question you're protot
 
 ### 2. Isolate the logic in a portable module
 
-Put the actual logic (the bit that's answering the question) in a single `<script>` block written as a small, pure module that the implementation may later lift from the prototype branch into the real codebase. The page around it is throwaway; the module is the part worth lifting.
+Put the actual logic (the bit that's answering the question) in a single `<script>` block written as a small, pure module. The page around it is throwaway; the module is the part worth keeping.
 
 The right shape depends on the question:
 
@@ -28,7 +28,7 @@ The right shape depends on the question:
 - **A small set of pure functions** over a plain data type. Good when there's no implicit current state, just transformations.
 - **A class or module with a clear method surface** when the logic genuinely owns ongoing internal state.
 
-Pick whichever shape best fits the question being asked, _not_ whichever is easiest to wire to a page. Keep it pure: no DOM, no `document`, no button handlers reaching inside it. The page calls into it; nothing flows the other direction. This is what makes the prototype useful past its own lifetime: the implementation may lift the validated reducer / machine / function set from the prototype branch on its own.
+Pick whichever shape best fits the question being asked, _not_ whichever is easiest to wire to a page. Keep it pure: no DOM, no `document`, no button handlers reaching inside it. The page calls into it; nothing flows the other direction. This is what makes the module liftable past the prototype's lifetime.
 
 ### 3. Build the HTML page
 
@@ -53,7 +53,7 @@ Show it and let the user pick, as the [SKILL](SKILL.md)'s "Show it" and "The use
 
 ### 5. Capture the answer and the prototype
 
-Once the user has answered the question, capture both the way the [SKILL](SKILL.md)'s "Capture" says. The decision names the validated model (its shape and the cases it settled); the page and its module stay on the prototype branch, where the single file remains trivially re-runnable and the implementation may lift the module from.
+Once the user has answered the question, capture both the way the [SKILL](SKILL.md)'s "Capture" says. The decision names the validated model (its shape and the cases it settled); the page and its module stay on the prototype branch, where the single file remains trivially re-runnable.
 
 ## Anti-patterns
 
