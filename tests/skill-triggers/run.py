@@ -1,17 +1,16 @@
 """Check that the model-invoked skills under claude/.claude/skills fire on the
-prompts they should and stay quiet on the ones they should not.
+prompts in cases.toml and stay quiet where those say.
 
 The skills come from the frontmatter: every directory with a SKILL.md that
-does not set `disable-model-invocation: true` is model-invoked. cases.toml
-holds the prompts; each case names the skill that must fire (or "none": no
-skill at all) and the skills that must stay quiet. Before anything runs, every
-model-invoked skill must fire in one case and stay quiet in another, and a
-case may name only model-invoked skills.
+does not set `disable-model-invocation: true` is model-invoked. The header of
+cases.toml says what a case holds and what the file must cover; load_cases()
+refuses a file that does not, before anything runs.
 
 Each run is one headless `claude -p` with the case's prompt, its stream-json
 read for Skill tool calls. Tools are Skill, Read, Glob and Grep; the run stops
-after --max-turns turns or --max-budget-usd. Runs are model calls on your
-account: run this after changing a skill description, one run at a time.
+after --max-turns turns or --max-budget-usd. Only a run that ends cleanly is
+graded on its skills (grade() says what counts); any other is an ERROR and
+does not pass.
 
 Isolation. Each run gets a fresh temporary directory holding HOME (with a copy
 of the repo's skills in ~/.claude/skills and nothing else), the working
@@ -23,8 +22,9 @@ memory, plugins or MCP servers load. A file the child writes below the real
 home's path lands in that empty directory; such a write fails the run. Every
 run also checks the session's init event: all repo skills listed, no plugin
 but Claude Code's built-in ones, no MCP server. --check runs the isolation
-probe through the same wrapper without a model call, including a canary write
-below the real home that the write check must catch.
+probe through the same wrapper without a model call: HOME, the real home and
+/run/user/<uid> listed empty, no variable beyond the allowlist, and a canary
+write below the real home that the write check must catch.
 
 Credentials. CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY from the
 environment is passed on when set. Otherwise the access token of the saved
@@ -32,7 +32,8 @@ claude.ai login (~/.claude/.credentials.json, or below CLAUDE_CONFIG_DIR) is
 read for each run and handed to the child as CLAUDE_CODE_OAUTH_TOKEN; its
 refresh token never leaves the file. An access token close to expiry stops
 the run: open an interactive claude session to renew it, or set
-CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`.
+CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. A credential the API
+refuses stops the run too.
 
 usage: python3 -I run.py [options] [case ...]
   --list                print the case names
@@ -44,7 +45,7 @@ usage: python3 -I run.py [options] [case ...]
   --timeout S           seconds per run (default: 600)
   --keep DIR            write each run's stream-json to DIR/<case>-<run>.jsonl
 Without case names every case runs. Exit 0: all passed; 1: a case failed;
-2: usage, case file, isolation or credential error.
+2: usage, case file, isolation, credential or unexpected error.
 """
 
 import argparse

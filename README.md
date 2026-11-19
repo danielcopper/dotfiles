@@ -538,18 +538,20 @@ tests/skill-triggers/run.py`) checks that the skills under
 `claude/.claude/skills` that Claude may start on its own, those without
 `disable-model-invocation: true`, start on the prompts in
 `tests/skill-triggers/cases.toml` and stay quiet on the ones meant for
-another skill. Each case is one headless `claude -p` run, read for the Skill
-tool calls it makes, and every such skill needs one case where it must fire
-and one where it must not. The runs are model calls on your claude.ai login
-or API key, so it runs by hand after a skill description changes, not per
+another skill; the header of `cases.toml` says what a case holds and what
+the file must cover. Each case is one headless `claude -p` run, read for the
+Skill tool calls it makes. The runs are model calls on your claude.ai login
+or API key, so run it by hand after a skill description changes, not per
 commit and never beside another heavy run; it prints each run's cost and the
-total, the CLI's list-price estimate. Each run starts under bwrap with a
-throwaway home that holds a copy of the skills and nothing else of yours; the
-header of `run.py` says how it is isolated and authenticated. `--check`
-validates the cases and the isolation without a model call, `--list` prints
-the case names, naming cases runs only those, and `--runs 3` repeats each
-case, since a skill does not fire the same way every time. It needs python3
-(3.11 or later), bwrap and claude.
+total, the CLI's list-price estimate. Run `--check` first: it validates the
+cases and the isolation without a model call. Name cases to run only those,
+and pass `--runs 3` to judge a description, since a skill does not fire the
+same way every time. Each run starts under bwrap with a throwaway home that
+holds a copy of the skills and nothing else of yours; the header of `run.py`
+says how it is isolated and authenticated and lists the options.
+`mise run skill-trigger-test --test` (without mise, `python3 -I
+tests/skill-triggers/run-test.py`) runs the runner's own tests, which make no
+model call. It needs python3 (3.11 or later), bwrap and claude.
 
 ## Memory protection on the Steam Deck
 

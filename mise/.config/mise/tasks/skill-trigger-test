@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# Global mise task: check from the dotfiles repo that the model-invoked skills
-# under claude/.claude/skills fire on the prompts in
-# tests/skill-triggers/cases.toml and stay quiet where those say; the header
-# of tests/skill-triggers/run.py says how a run is isolated and authenticated.
-# Every run is a headless claude call on your account: run it by hand after
-# changing a skill description, never alongside another heavy run.
+# Global mise task: run the skill trigger check of the dotfiles repo; README,
+# "Tests", says when and how.
 #
-# Usage: mise run skill-trigger-test [option...] [case...]   (defaults to all)
-#   --list, --check (no model call), --model, --runs, --max-turns,
-#   --max-budget-usd, --timeout, --keep DIR
+# Usage: mise run skill-trigger-test [run.py option...] [case...]
+#        mise run skill-trigger-test --test [unittest option...]
 set -euo pipefail
 
 dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
