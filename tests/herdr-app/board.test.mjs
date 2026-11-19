@@ -1,8 +1,10 @@
-// Tests for the herdr board mod (herdr-app/.config/herdr-app/mods/board/main.js):
-// its data functions, and a few UI paths driven through the Board class with
-// a fake herdr; also the board button (mods/board-button/) and its place in
-// layouts/personal.json. Run with `mise run herdr-board-test` (README, "herdr app"),
-// or from the repo root with `node --test tests/herdr-app/board.test.mjs`.
+// Tests for the herdr board mod (herdr-app/.config/herdr-app/mods/board/main.js,
+// built from its modules in src/ by build.mjs): the build, the mod's data
+// functions, and a few UI paths driven through the Board class with a fake
+// herdr; also the board button (mods/board-button/) and its place in
+// layouts/personal.json. They import the built main.js, the file herdr
+// loads. Run with `mise run herdr-board-test` (README, "herdr app"), or from
+// the repo root with `node --test tests/herdr-app/board.test.mjs`.
 //
 // The mod imports "gpui-kit", "gpui-base" and "herdr", which only herdr
 // provides. A resolve/load hook hands node a stand-in for each that exports
@@ -12,7 +14,7 @@
 // at an empty temporary folder before the mod is imported (removed after the
 // run). BOARD_MAIN points
 // the tests at another copy of main.js (to see a test fail against a broken
-// one).
+// one, or to run them against src/main.js).
 //
 // Fixtures in board-fixtures/:
 // - recorded from gh 2.96 and GitHub's GraphQL API, then reduced to six items
@@ -124,6 +126,74 @@ test("under mise run herdr-board-test nothing of the real home outside the repo 
   assert.equal(process.permission.has("fs.write", realHome), false);
   assert.equal(process.permission.has("fs.write", modDir), false, "the mod's folder is read-only");
   assert.equal(process.permission.has("fs.read", mainPath), true);
+});
+
+// ---- The build (mods/board/build.mjs) ----
+
+const builder = await import(pathToFileURL(join(modDir, "build.mjs")).href);
+
+test("main.js is what build.mjs builds from src/", () => {
+  const shipped = readFileSync(join(modDir, "main.js"), "utf8");
+  const fresh = builder.build();
+  const a = shipped.split("\n"), b = fresh.split("\n");
+  const at = a.findIndex((line, i) => line !== b[i]);
+  assert.ok(shipped === fresh, `main.js differs from a fresh build at line ${(at < 0 ? a.length : at) + 1}: mise run herdr-board-build`);
+});
+
+test("src/main.js exports what main.js does", async () => {
+  const fromSource = await import(pathToFileURL(join(modDir, "src/main.js")).href);
+  assert.deepEqual(Object.keys(fromSource).sort(), Object.keys(board).sort());
+});
+
+// A src/ folder in the temporary folder with the given modules (name → text).
+function sourceTree(files) {
+  const dir = mkdtempSync(join(tmpdir(), "board-src-"));
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), text);
+  }
+  return dir;
+}
+const buildOf = (files) => {
+  const dir = sourceTree(files);
+  try {
+    return builder.build(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+test("the build puts the entry's comment first, merges the host imports and lists each module after those it imports", () => {
+  const out = buildOf({
+    "main.js": '// The board.\n\nimport { div } from "gpui-kit";\nimport { a } from "./x/a.js";\nimport { b } from "./b.js";\nexport * from "./b.js";\n\nexport default class Board {}\n',
+    "x/a.js": '// Module a.\n\nimport { exec } from "herdr";\nimport { b } from "../b.js";\n\nexport const a = () => b + exec;\n',
+    "b.js": 'import { div, View } from "gpui-kit";\nimport { run } from "herdr";\n\nexport const b = 1;\n',
+  });
+  assert.equal(out, [
+    builder.BANNER, "", "// The board.", "",
+    'import { View, div } from "gpui-kit";', 'import { exec, run } from "herdr";', "",
+    "// ==== src/b.js ====", "", "export const b = 1;", "",
+    "// ==== src/x/a.js ====", "", "// Module a.", "", "export const a = () => b + exec;", "",
+    "// ==== src/main.js ====", "", "export default class Board {}", "",
+  ].join("\n"));
+});
+
+test("the build refuses what main.js cannot hold: other import forms, imports below the top, names not exported, cycles, export * or default outside the entry", () => {
+  const entry = (body) => ({ "main.js": `// Entry.\n\n${body}\nexport default class Board {}\n` });
+  const refused = (files, message) => assert.throws(() => buildOf(files), message);
+  refused({ ...entry('import { a as b } from "./a.js";'), "a.js": "export const a = 1;\n" }, /plain names only/);
+  refused(entry('import x from "./a.js";'), /in the forms build\.mjs names/);
+  refused(entry('import { a } from "node:fs";'), /only modules in src\/ and gpui-kit, gpui-base, herdr/);
+  refused(entry('import { a } from "./a";'), /name the file with its \.js/);
+  refused(entry('import { a } from "../a.js";'), /leaves src\//);
+  refused(entry('import { a } from "./missing.js";'), /src\/missing\.js: not readable/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": "export const b = 1;\n" }, /src\/a\.js does not export a/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": 'import { b } from "./b.js";\nexport const a = 1;\n', "b.js": 'import { a } from "./a.js";\nexport const b = 1;\n' },
+    /import cycle: src\/a\.js → src\/b\.js → src\/a\.js/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": 'export const a = 1;\nimport { b } from "./b.js";\n' }, /imports belong at the top/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": 'export * from "./b.js";\nexport const a = 1;\n', "b.js": "export const b = 1;\n" }, /export \* only in the entry/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": "export const a = 1;\nexport default 2;\n" }, /export default only in the entry/);
+  refused({ "main.js": "export default class Board {}\r\n" }, /CRLF/);
 });
 
 // ---- views.json ----

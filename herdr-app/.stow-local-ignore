@@ -1,1 +1,3 @@
 ^settings\.json$
+# The board's sources and their build: main.js is built from them.
+^/\.config/herdr-app/mods/board/(src|build\.mjs)$

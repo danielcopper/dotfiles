@@ -12,7 +12,7 @@ cd ~/dotfiles
 
 Where `<class>` is one of `arch`, `debian`, `steamdeck`, `wsl-arch`. A `debian` host clones over HTTPS and has steps of its own ("Debian server" below).
 
-The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-test`, `herdr-leader-test`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
+The clone has to live at `~/dotfiles`: the commit-on-main allowlist (`git/.githooks/commit-on-main-allowed`) and, on wsl-arch, the personal git identity (`includeIf "gitdir:~/dotfiles/"` in `host-wsl-arch/.gitconfig.local`) match that path, and the mise tasks `dotfiles-pull`, `dotfiles-relink`, `herdr-app-check`, `herdr-board-build`, `herdr-board-test`, `herdr-leader-test`, `memex-sync-test`, `install-dotfiles-test` and `shell-test` use it unless `DOTFILES_DIR` is set.
 
 `bootstrap.sh` is the only command needed — same call on a fresh machine and after pulling changes. The whole pipeline is idempotent: pacman runs with `--needed`, apt leaves installed packages alone unless a newer version is available, brew skips already-installed packages and `upgrade`s new versions, flatpak's `--noninteractive` is a no-op on installed apps, and stow re-links while moving what is in the way of a package file into a timestamped backup under `~/.dotfiles-pre-stow.<ts>/`, as below.
 
@@ -234,7 +234,13 @@ herdr-app`. Which files of the package git tracks is set in the root
   one from another mod's folder. So `mods/file-popup/` keeps its listers in
   `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
   own marked copy of the leader's `openBoard`. An icon is no module:
-  `mods/board-button/board.svg` draws through its link.
+  `mods/board-button/board.svg` draws through its link. The board is
+  written as modules in `mods/board/src/`, which `mise run
+  herdr-board-build` (`mods/board/build.mjs`; without mise, `node
+  build.mjs` there) builds into the committed `main.js`; neither is stowed
+  (`.stow-local-ignore`). Its header says what the modules may and may not
+  do; `mise run herdr-board-test` fails while `main.js` differs from a
+  fresh build.
 - **herdr's `run` answers ok for a command it does not know,** so a mod
   that runs a misspelt one fails without a word. `mise run herdr-app-check`
   checks the commands this package's mods and `keys.json` use against the

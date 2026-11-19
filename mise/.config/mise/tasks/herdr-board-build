@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Global mise task: build the herdr board mod's main.js from its modules in
+# src/ in the dotfiles repo; the header of mods/board/build.mjs says how and
+# why. tests/herdr-app/board.test.mjs fails while main.js differs from a
+# fresh build.
+#
+# Usage: mise run herdr-board-build
+set -euo pipefail
+
+dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
+build="$dotfiles/herdr-app/.config/herdr-app/mods/board/build.mjs"
+[ -f "$build" ] || { echo "herdr-board-build: no such file: $build" >&2; exit 1; }
+exec node "$build"

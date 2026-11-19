@@ -1,3 +1,5 @@
+// Built from src/ by `mise run herdr-board-build`; edit the modules there, not this file.
+
 // The board, in its tab "Board": one's own work from GitHub (issues and pull
 // requests on a Projects v2 board, open pull requests) and Azure Boards (work
 // items), in the views that views.json beside this file defines. The
@@ -40,24 +42,25 @@
 // are available, and the timer tries an unavailable view again every
 // refreshMinutes.
 //
-// The data logic is plain exported functions at the top, tested by
-// tests/herdr-app/board.test.mjs with node; it lives in this file because a
-// stowed mod is one main.js (README, "herdr app").
+// The board is written as modules in src/ beside build.mjs, which builds
+// them into the one main.js a stowed mod is (README, "herdr app"): shared
+// helpers, views.json, the sources (GitHub, Azure, and running gh and az),
+// the board's columns and cards, starting a session, and the UI, this
+// module. Its data logic is plain exported functions, tested with a few UI
+// paths by tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
-import {
-  appHome, checking, exec, knownAgents, machines, nextCommand, notify, panes, readTextFile, run, settings, spaces, theme,
-} from "herdr";
+import { Input, InputState, ScrollHandle, h_flex, v_flex } from "gpui-base";
+import { appHome, checking, exec, knownAgents, machines, nextCommand, notify, panes, readTextFile, run, settings, spaces, theme } from "herdr";
+
+// ==== src/shared.js ====
+
+// What every part of the board uses: its names, its error and how one is shown,
+// small checks and text helpers, an item's key, and labels for times.
 
 export const MOD = "board";
 // The config's base name; the extension is added where the path is built.
-const CONFIG_NAME = "views";
-
-// ---------------------------------------------------------------------------
-// Data: config, queries, parsing, board state. No host calls until the UI
-// section.
-// ---------------------------------------------------------------------------
+export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
   // unavailable: the view's tool is missing, not signed in or without its
@@ -77,17 +80,49 @@ export function failure(text, { write = false, unclear = false } = {}) {
   return write && unclear ? new BoardError(`Ergebnis unklar: ${text}`, { unclear: true }) : new BoardError(text);
 }
 
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const isText = (v) => typeof v === "string" && v.trim() !== "";
-const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
-const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
-const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
+export const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+export const isText = (v) => typeof v === "string" && v.trim() !== "";
+export const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+export const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
+export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 
 // The message to show for an error: a BoardError's own, else marked as
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
 
-// ---- views.json ------------------------------------------------------------
+// An item's key: `<repo>#<number>` on GitHub, `AB#<id>` on Azure (Azure
+// Boards' own way to name a work item), null for a draft.
+export function itemKey(item) {
+  if (item.number === null || item.number === undefined) return null;
+  return item.source === "azure" ? `AB#${item.number}` : `${item.repoShort}#${item.number}`;
+}
+
+export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
+
+export function updatedLabel(at, now) {
+  if (!at) return "";
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 60) return `vor ${s} s`;
+  if (s < 3600) return `vor ${Math.floor(s / 60)} min`;
+  return `vor ${Math.floor(s / 3600)} h`;
+}
+
+// A day label for a past moment, by local calendar days.
+export function ageLabel(iso, now) {
+  const then = new Date(iso), today = new Date(now);
+  if (Number.isNaN(then.getTime())) return "";
+  const day = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const days = Math.round((day(today) - day(then)) / 86400000);
+  if (days <= 0) return "heute";
+  if (days === 1) return "gestern";
+  if (days < 7) return `vor ${days} Tagen`;
+  return `${then.getDate()}.${then.getMonth() + 1}.`;
+}
+
+// ==== src/config.js ====
+
+// views.json: reading it, what is wrong with it, and the start settings for
+// an item.
 
 export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
@@ -239,7 +274,176 @@ export function startSettings(config, view, repo) {
   return { ...START_DEFAULTS, ...config.start, ...view.start, ...(config.repos[repo] ?? {}) };
 }
 
-// ---- Hidden columns --------------------------------------------------------
+// ==== src/sources/azure.js ====
+
+// Azure DevOps: work item types and states, the WIQL board, the state
+// change, and what az's failures mean.
+
+// Theme colors and column order for Azure's state categories.
+export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
+const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
+
+// The fields read here are all `System.` ones; they are read through this so
+// the prefix stays in one place.
+const SYSTEM = "System.";
+const field = (fields, name) => fields?.[SYSTEM + name];
+const FIELDS = ["Id", "Title", "State", "WorkItemType", "AssignedTo", "Tags", "TeamProject"].map((f) => `[${SYSTEM}${f}]`).join(", ");
+
+// --detect false: use az's configured defaults, never the git remote of
+// whatever folder herdr runs az in.
+const azScope = (view, withProject = true) => [
+  "--detect", "false",
+  ...(view.organization ? ["--org", view.organization] : []),
+  ...(withProject && view.project ? ["--project", view.project] : []),
+];
+
+export const azureDefaultsArgs = () => ["devops", "configure", "--list"];
+
+// `az devops configure --list` → { organization, project } (null when unset).
+export function parseAzureDefaults(stdout) {
+  const value = (name) => String(stdout ?? "").match(new RegExp(`^\\s*${name}\\s*=\\s*(.*?)\\s*$`, "m"))?.[1] || null;
+  return { organization: value("organization"), project: value("project") };
+}
+
+export function azureTypesArgs(view, project) {
+  return ["devops", "invoke", "--area", "wit", "--resource", "workitemtypes", "--route-parameters", `project=${project}`,
+    "-o", "json", ...azScope(view, false)];
+}
+
+// The work item types' answer → { states: [{ id, name, category, color }] in
+// category order, types: { [type]: [state names] } }.
+export function parseAzureTypes(stdout) {
+  const types = {};
+  const states = new Map();
+  const value = JSON.parse(stdout)?.value;
+  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
+  for (const type of value) {
+    types[type.name] = (type.states ?? []).map((s) => s.name);
+    for (const s of type.states ?? []) {
+      if (!states.has(s.name)) states.set(s.name, { id: s.name, name: s.name, category: s.category, color: CATEGORY_COLORS[s.category] ?? "muted" });
+    }
+  }
+  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
+  return { states: [...states.values()].sort((a, b) => order(a) - order(b)), types };
+}
+
+const wiqlText = (value) => `'${value.replace(/'/g, "''")}'`;
+
+export function azureQueryArgs(view, hidden) {
+  const names = [...hidden];
+  const without = names.length ? ` AND [${SYSTEM}State] NOT IN (${names.map(wiqlText).join(", ")})` : "";
+  const wiql = `SELECT ${FIELDS} FROM WorkItems WHERE (${view.where})${without} ORDER BY [${SYSTEM}ChangedDate] DESC`;
+  return ["boards", "query", "--wiql", wiql, "-o", "json", ...azScope(view)];
+}
+
+// The web page of a work item from its API url and project:
+// https://dev.azure.com/<org>[/<project id>]/_apis/wit/workItems/<id>
+// → https://dev.azure.com/<org>/<project>/_workitems/edit/<id>.
+export function azureWebUrl(apiUrl, project, id) {
+  if (!apiUrl || !apiUrl.includes("/_apis/")) return null;
+  const base = apiUrl.split("/_apis/")[0].replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "");
+  return `${base}/${encodeURIComponent(project)}/_workitems/edit/${id}`;
+}
+
+const personName = (who) => (typeof who === "string" ? who.replace(/\s*<[^>]*>$/, "") : who?.displayName ?? null);
+
+// `az boards query` output → a board whose columns are the states of the work
+// item types it found, in category order; without work items it has none. az
+// prints nothing at all when nothing matches. meta.types holds each type's
+// states, the columns its cards may go to; meta.states all the types' states.
+export function parseAzureBoard(stdout, types, hidden) {
+  const items = String(stdout ?? "").trim() ? JSON.parse(stdout) : [];
+  const cards = items.map((item) => {
+    const f = item.fields ?? {};
+    const project = field(f, "TeamProject") ?? "";
+    const id = field(f, "Id") ?? item.id;
+    return {
+      key: `az-${id}`,
+      source: "azure",
+      kind: "workitem",
+      number: id,
+      repo: project,
+      repoShort: project,
+      title: field(f, "Title") ?? "",
+      url: azureWebUrl(item.url, project, id),
+      labels: String(field(f, "Tags") ?? "").split(";").map((s) => s.trim()).filter(Boolean),
+      assignees: [personName(field(f, "AssignedTo"))].filter(Boolean),
+      type: field(f, "WorkItemType") ?? null,
+      parent: null,
+      sub: null,
+      branch: null,
+      column: field(f, "State") ?? "",
+    };
+  });
+  const present = new Set(cards.map((c) => c.type));
+  const wanted = new Set(Object.entries(types.types).filter(([t]) => present.has(t)).flatMap(([, s]) => s));
+  const columns = types.states
+    .filter((s) => wanted.has(s.name))
+    .map((s) => ({ ...s, hidden: hidden.has(s.name), count: hidden.has(s.name) ? null : 0, target: true, cards: [] }));
+  const byName = new Map(columns.map((c) => [c.name, c]));
+  for (const card of cards) {
+    let col = byName.get(card.column);
+    if (!col) {
+      col = { id: card.column, name: card.column, category: null, color: "muted", hidden: false, count: 0, target: true, cards: [] };
+      columns.push(col);
+      byName.set(col.name, col);
+    }
+    col.cards.push(card);
+    if (!col.hidden) col.count++;
+  }
+  return { kind: "board", meta: { types: types.types, states: types.states }, columns, total: cards.length, limited: false };
+}
+
+export function azureMoveArgs(view, card, column) {
+  return ["boards", "work-item", "update", "--id", String(card.number), "--state", column.name, "-o", "json", ...azScope(view, false)];
+}
+
+export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…";
+// az's words for a request that may have reached Azure but got no clear
+// answer: msrest's "Error occurred in request., <requests exception>: …"
+// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
+const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
+// Azure's answers that it failed itself: the Azure DevOps client's
+// "Operation returned a 5xx status code.", TF400898 (an internal error), and
+// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
+// error responses"), which also names "Max retries" and is tested first.
+const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
+// ERROR: answers that are a refusal: rule errors (TF401320), something that
+// does not exist, az's own argument errors, and 4xx status lines.
+const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+
+// What went wrong with an az call that ran, from its ERROR: line (WARNING:
+// lines are left out; without an ERROR: line, from all it printed). Missing
+// sign-in or extension make the view unavailable rather than an error. With
+// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
+// sign-in, extension and project answers below; anything else (a request
+// without a clear answer, a server error, az's own crash or interrupt, a
+// failure without an ERROR: line) leaves open whether the change landed.
+export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
+  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const errorLine = lines.find((l) => /^ERROR:/.test(l));
+  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const az = on ? `az auf ${on}` : "az";
+  // A crash's traceback may hold any words; az's own line says what failed.
+  const subject = errorLine ? said : lines.join("\n");
+  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
+  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
+  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
+    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
+  }
+  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
+    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
+  }
+  if (/^--project must be specified/.test(said)) return new BoardError(AZ_NO_PROJECT);
+  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
+  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
+}
+
+// ==== src/kinds/board.js ====
+
+// A board's columns and cards: hidden columns, moves and their rollback,
+// where a card may go, the filter, and keyboard selection (a list is
+// navigated as one column).
 
 // The stored toggles of a view, { hide: [names], show: [names] }, or null when
 // what was stored is not that.
@@ -279,7 +483,373 @@ export function unknownHidden(view, columns) {
   return [...view.hide.filter((n) => !names.has(n)), ...view.hideCategories.filter((c) => !CATEGORIES.includes(c))];
 }
 
-// ---- GitHub ----------------------------------------------------------------
+const cloneBoard = (board) => ({ ...board, columns: board.columns.map((c) => ({ ...c, cards: [...c.cards] })) });
+
+export function findCard(board, key) {
+  for (const col of board?.columns ?? []) {
+    const card = col.cards.find((c) => c.key === key);
+    if (card) return { card, column: col };
+  }
+  return null;
+}
+
+// A new board with the card in another column; counts follow (a hidden
+// column's count, where it has one, is the server's plus what was moved in).
+// Unchanged when the card or column is unknown, or the card is there already.
+export function moveCard(board, key, columnId) {
+  const found = findCard(board, key);
+  if (!found || !board.columns.some((c) => c.id === columnId) || found.column.id === columnId) return board;
+  const next = cloneBoard(board);
+  const from = next.columns.find((c) => c.id === found.column.id);
+  const to = next.columns.find((c) => c.id === columnId);
+  from.cards = from.cards.filter((c) => c.key !== key);
+  if (from.count !== null) from.count--;
+  to.cards.push({ ...found.card, column: columnId });
+  if (to.count !== null) to.count++;
+  return next;
+}
+
+// A failed move undone: the card goes back to move.from, unless it has moved
+// on since.
+export function rollback(board, move) {
+  return findCard(board, move.key)?.column.id === move.to ? moveCard(board, move.key, move.from) : board;
+}
+
+// Whether an open outcome is due for a refresh that started at `started`: it
+// came before that refresh started, and its card has no write under way
+// (that write decides first).
+export const isDue = (st, started) => (u) => u.at <= started && !st.pending[u.key];
+
+// Moves laid over every refresh: those still being written, and confirmed
+// ones until a refresh that started after the confirmation shows them.
+export function pendingMoves(moves, started) {
+  return moves.filter((m) => !m.confirmedAt || m.confirmedAt >= started);
+}
+
+export function applyMoves(board, moves) {
+  return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
+}
+
+// Whether a card may go to a column: one that takes drops and, where the
+// board knows its types' states (Azure; GitHub boards carry none), a state of
+// the card's own type.
+export function canDrop(board, card, column) {
+  if (!column?.target) return false;
+  const states = board.meta?.types?.[card.type];
+  return !states || states.includes(column.name);
+}
+
+export const targetsFor = (board, card) => board.columns.filter((c) => canDrop(board, card, c));
+
+// The column H (step -1) or L (+1) moves a card to: the next shown column,
+// stubs included, the card may go to; null at the edge.
+export function stepTarget(board, columns, key, step) {
+  const found = findCard(board, key);
+  if (!found) return null;
+  for (let i = columns.findIndex((c) => c.id === found.column.id) + step; i >= 0 && i < columns.length; i += step) {
+    if (canDrop(board, found.card, columns[i])) return columns[i];
+  }
+  return null;
+}
+
+// A view's columns with the person's hidden set applied.
+export function withHidden(board, hidden) {
+  return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hidden.has(c.name) })) };
+}
+
+// Cards whose text holds every word of the filter, case-insensitive.
+export function matches(card, text) {
+  const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
+    ...(card.labels ?? []), ...(card.assignees ?? [])].filter(Boolean).join("\n").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+// The columns as the board shows them: hidden ones as stubs (no cards), the
+// others with the filtered cards.
+export function shownColumns(board, filter) {
+  return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => matches(card, filter)) }));
+}
+
+// Keyboard movement: sel = { col, key } (key null on a stub or an empty
+// column) → the next sel. "up"/"down" move within the column, "left"/"right"
+// to the next column (stubs too), keeping the row where they can. A list is
+// one column.
+export function navigate(columns, sel, dir) {
+  if (!columns.length) return { col: 0, key: null };
+  let ci = Math.min(Math.max(sel?.col ?? 0, 0), columns.length - 1);
+  const cards = (i) => columns[i].shown;
+  let row = Math.max(0, cards(ci).findIndex((c) => c.key === sel?.key));
+  if (dir === "up" || dir === "down") {
+    const list = cards(ci);
+    if (!list.length) return { col: ci, key: null };
+    row = Math.min(Math.max(row + (dir === "up" ? -1 : 1), 0), list.length - 1);
+    return { col: ci, key: list[row].key };
+  }
+  if (dir === "left" || dir === "right") ci = Math.min(Math.max(ci + (dir === "left" ? -1 : 1), 0), columns.length - 1);
+  const list = cards(ci);
+  return { col: ci, key: list.length ? list[Math.min(row, list.length - 1)].key : null };
+}
+
+// The selection after new data or a filter: its card's column again, else the
+// first card; a selected stub or empty column stays selected.
+export function selectionAfter(columns, sel) {
+  const at = columns.findIndex((c) => c.shown.some((card) => card.key === sel?.key));
+  if (at >= 0) return { col: at, key: sel.key };
+  if (!sel?.key && columns[sel?.col]) return sel;
+  const first = columns.findIndex((c) => c.shown.length);
+  return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
+}
+
+// ==== src/tools.js ====
+
+// Running gh and az: what a program that could not run means, and finding
+// each program by the path the person's shell gives on its machine.
+
+// exec's words for a program that is not there, and for a timeout: herdr
+// stops a program at its timeout with "<program> took longer than <n> s
+// and was stopped" (" on <machine>" before "and" on another machine);
+// "timed out" stays for other wordings of the same.
+const NOT_INSTALLED = /program not found|no such file or directory|command not found|not installed|ENOENT/i;
+const TIMED_OUT = /took longer than [\d.]+ s( on .+)? and was stopped|time(d)?[ -]?out/i;
+const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
+
+// A program that is not there, with a note on how that was found out. Only a
+// missing az makes its view unavailable.
+const notInstalled = (tool, on, note = "") =>
+  new BoardError(`${toolOn(tool, on)} ist nicht installiert${note ? ` (${note})` : ""}`, { unavailable: tool === "az" });
+
+// A program that would not start, with exec's words for why.
+const notStarted = (tool, on, msg) => new BoardError(`${toolOn(tool, on)} ließ sich nicht starten: ${msg}`);
+
+// An exec that could not run at all (exec rejected). An unreachable machine
+// or a failed start is an error; a missing program is notInstalled. With
+// `write`, a timeout, or any other failure of a call on another machine,
+// leaves open whether the change landed; a program that is not installed
+// changed nothing.
+export function execRejection(tool, error, timeoutMs, on = null, { write = false } = {}) {
+  const msg = firstLine(error?.message ?? error);
+  const who = toolOn(tool, on);
+  if (NOT_INSTALLED.test(msg)) return notInstalled(tool, on);
+  if (TIMED_OUT.test(msg)) return failure(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { write, unclear: true });
+  if (write && on) return failure(`${who}: ${msg}`, { write, unclear: true });
+  return notStarted(tool, on, msg);
+}
+
+// herdr runs a program with the PATH it was started with, which may lack
+// what the person's shell adds (Homebrew, mise). So gh and az run by the
+// absolute path that shell gives on their machine, the way herdr starts
+// agents (AGENTS.md, programs.json): interactive here, login and interactive
+// on another machine. Its startup files may print anything (a banner), so
+// each answer stands between markers.
+export const WHICH_START = "<<board-which>>";
+export const WHICH_END = "<</board-which>>";
+export const SHELL_START = "<<board-shell>>";
+export const SHELL_END = "<</board-shell>>";
+
+// Prints the shell it asks and the person's own (tab apart, between the
+// shell markers), then the path of the program named in $1 (a name of this
+// file's own, never one from views.json) as that shell's PATH finds it,
+// between the path markers; "login" in $2 starts that shell as a login
+// shell too. The person's shell is $SHELL, else (unset or empty) the
+// account's; sh, bash, zsh, dash, ksh and fish run as themselves, any other
+// (or none) as /bin/sh with the same flags. A plain sh in that shell looks
+// the program up, so an alias or function of the same name does not count.
+export const WHICH_SCRIPT = [
+  'wanted=${SHELL:-$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)}',
+  "shell=$wanted",
+  "case ${shell##*/} in sh|bash|zsh|dash|ksh|fish) ;; *) shell=/bin/sh ;; esac",
+  `printf '${SHELL_START}%s\\t%s${SHELL_END}' "$shell" "$wanted"`,
+  'if [ "$2" = login ]; then set -- "$1" -l -i; else set -- "$1" -i; fi',
+  "tool=$1",
+  "shift",
+  `exec "$shell" "$@" -c "printf '%s' '${WHICH_START}'; command sh -c 'command -v $tool'; printf '%s' '${WHICH_END}'"`,
+].join("\n");
+
+export const whichArgs = (tool, on) => ["-c", WHICH_SCRIPT, "board-which", tool, on ? "login" : ""];
+
+// The text between the last pair of `start` and `end` markers, or null.
+function between(stdout, start, end) {
+  const text = String(stdout ?? "");
+  const to = text.lastIndexOf(end);
+  const from = to < 0 ? -1 : text.lastIndexOf(start, to);
+  return from < 0 ? null : text.slice(from + start.length, to);
+}
+
+// The shell's answer from what it printed, trimmed ("" when it does not find
+// the program), or null when there is none.
+export const readWhich = (stdout) => between(stdout, WHICH_START, WHICH_END)?.trim() ?? null;
+
+// The shell the script asked and the person's own ("" when none is known),
+// or null when the script did not say.
+export function readShell(stdout) {
+  const said = between(stdout, SHELL_START, SHELL_END);
+  if (said === null) return null;
+  const [asked, own = ""] = said.split("\t");
+  return { asked, own };
+}
+
+// What herdr says when it cannot start sh on another machine: a Windows
+// machine (as herdr's own Files mod reads it).
+const NO_SH = "cannot start sh: program not found";
+// The lines an interactive bash without a terminal prints on every start.
+const JOB_CONTROL = /cannot set terminal process group|no job control in this shell/;
+
+// A program on a machine (on: null here), asked of the shell there with
+// `execute` (herdr's exec): { program: its absolute path, bare: false }. Not
+// there: notInstalled, noting /bin/sh when it was asked in place of the
+// person's shell. A shell that could not be asked, or gave no answer or no
+// path, says so instead. Another machine where herdr cannot start sh
+// (Windows) runs the program by its bare name, from the PATH herdr runs it
+// with there: { program: tool, bare: true }.
+export async function findTool(execute, tool, on, timeoutMs) {
+  const unknown = `Pfad von ${toolOn(tool, on)} nicht ermittelt`;
+  let r;
+  try {
+    r = await execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs });
+  } catch (e) {
+    const msg = firstLine(e?.message ?? e);
+    if (on && String(e?.message ?? e).includes(NO_SH)) return { program: tool, bare: true };
+    throw new BoardError(TIMED_OUT.test(msg) ? `${unknown}: die Shell antwortete nicht in ${Math.round(timeoutMs / 1000)} s` : `${unknown}: ${msg}`);
+  }
+  const shell = readShell(r.stdout);
+  const answer = readWhich(r.stdout);
+  if (answer === null) {
+    // The last line that is not bash's own job control notice is the one
+    // that says what ended the shell.
+    const said = lastLine(String(r.stderr ?? "").split("\n").filter((l) => !JOB_CONTROL.test(l)).join("\n"));
+    throw new BoardError(`${unknown}: ${shell?.asked ?? "die Shell"} endete mit ${r.code} ohne Antwort${said ? ` (${said})` : ""}`);
+  }
+  if (answer === "") {
+    const standIn = shell && shell.asked !== shell.own;
+    const own = shell?.own ? ` statt ${shell.own.split("/").pop()}` : ", keine Shell eingetragen";
+    throw notInstalled(tool, on, standIn ? `gefragt: ${shell.asked}${own}` : "");
+  }
+  if (!answer.startsWith("/")) throw new BoardError(`${unknown}: die Shell kennt nur „${firstLine(answer)}“, kein Programm`);
+  return { program: answer, bare: false };
+}
+
+// Runs gh and az by what findTool finds, per machine and program. A found
+// program is kept until reset (on `r`); runs at the same time share one
+// lookup per machine and program, and one that fails is not kept, so the
+// next run asks again. When a run finds the program gone from its path
+// (exec's words for a missing program), that lookup is forgotten (a newer
+// one that has taken its place is kept) and the run starts again from the
+// current lookup, asking the shell if there is none: the program never
+// started, so even a write may run again. Gone a second time, the run fails
+// and the next run asks again; a bare name is not asked for again.
+export function toolPaths(execute) {
+  const known = new Map();
+  return {
+    // start(program) runs the program; its rejection passes on unchanged,
+    // but for the second time it is gone.
+    async run(tool, on, timeoutMs, start) {
+      const key = `${on ?? ""}\n${tool}`;
+      for (let again = false; ; again = true) {
+        if (!known.has(key)) {
+          const fresh = findTool(execute, tool, on, timeoutMs);
+          known.set(key, fresh);
+          fresh.catch(() => known.get(key) === fresh && known.delete(key));
+        }
+        const lookup = known.get(key);
+        const { program, bare } = await lookup;
+        try {
+          return await start(program);
+        } catch (e) {
+          const msg = firstLine(e?.message ?? e);
+          if (bare || !NOT_INSTALLED.test(msg)) throw e;
+          if (known.get(key) === lookup) known.delete(key);
+          if (again) throw notStarted(tool, on, msg);
+        }
+      }
+    },
+    reset() {
+      known.clear();
+    },
+  };
+}
+
+// ==== src/actions/start.js ====
+
+// Starting an item's session: its name, finding it again, the first
+// message, the checkout and the command that opens it.
+
+const NAME_MAX = 60;
+
+// The name of the tab and space a session starts in: the item's key and title,
+// cut to NAME_MAX characters. linkedSession finds the session by it.
+export function sessionName(item) {
+  const key = itemKey(item);
+  const full = key ? `${key} ${item.title}` : item.title;
+  return full.length <= NAME_MAX ? full : `${full.slice(0, NAME_MAX - 1)}…`;
+}
+
+const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
+
+// An item's session: a tab or space whose name starts with its key, the most
+// urgent first; failing that, on GitHub a space on its branch (a pull
+// request's head branch, or `<type>/<number>-…` in a folder of its repo).
+// → { space, tab (null for a space), status, label } or null.
+export function linkedSession(item, allSpaces) {
+  const key = itemKey(item);
+  const named = (name) => Boolean(key) && (name === key || String(name ?? "").startsWith(`${key} `));
+  let hits = [];
+  for (const s of allSpaces) {
+    for (const t of s.tabs ?? []) if (named(t.name)) hits.push({ space: s.id, tab: t.id, status: t.status ?? null, label: t.name });
+    if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
+  }
+  if (!hits.length && item.source === "github" && key) {
+    const own = new RegExp(`(^|/)${item.number}(-|$)`);
+    hits = allSpaces
+      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : own.test(s.branch) && (s.folder ?? "").includes(item.repoShort)))
+      .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
+  }
+  hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
+  return hits[0] ?? null;
+}
+
+export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
+
+// `{name}` placeholders filled from vars; unknown ones stay.
+export function renderTemplate(template, vars) {
+  return String(template ?? "").replace(/\{(\w+)\}/g, (all, name) => (vars[name] !== undefined && vars[name] !== null ? String(vars[name]) : all));
+}
+
+export function templateVars(item) {
+  const [owner, repo] = item.repo.includes("/") ? item.repo.split("/") : ["", item.repo];
+  return { number: item.number ?? "", title: item.title, url: item.url ?? "", owner, repo, key: itemKey(item) ?? "" };
+}
+
+// Prints the checkout's folder on the chosen machine ($1; a leading ~ is that
+// machine's home), or exits 3 when there is none.
+export const CHECKOUT_SCRIPT = [
+  "case $1 in \\~) dir=$HOME ;; \\~/*) dir=$HOME/${1#\\~/} ;; *) dir=$1 ;; esac",
+  '[ -d "$dir" ] || { echo "Kein Checkout unter $dir" >&2; exit 3; }',
+  'cd "$dir" && pwd',
+].join("\n");
+
+export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
+
+// The space a new tab goes into: one on that machine in the checkout or
+// below it, else the shown space when it is on that machine.
+export function spaceForTab(allSpaces, on, repoFolder) {
+  const here = allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
+  return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}/`))) ?? here.find((s) => s.active) ?? null;
+}
+
+// The app command that opens a session: [name, args]. A new space and its
+// first tab both carry the session's name.
+export function startCommand({ open, on, folder, argv, task, name, space }) {
+  const common = { folder, argv, ...(task ? { task } : {}) };
+  if (open === "tab") return ["tab.new", { name, space, ...common }];
+  return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
+}
+
+// ==== src/sources/github.js ====
+
+// GitHub: the queries for a Projects v2 board and a pull request list, their
+// parsing, the status mutation, and what gh's answers and failures mean.
 
 // Theme colors for a Projects v2 option color.
 const GITHUB_COLORS = {
@@ -604,575 +1174,18 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
   throw failure(text, { write, unclear: !(status >= 400) });
 }
 
-// ---- Azure -----------------------------------------------------------------
+// ==== src/sources/index.js ====
 
-// Theme colors and column order for Azure's state categories.
-const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
-const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
-
-// The fields read here are all `System.` ones; they are read through this so
-// the prefix stays in one place.
-const SYSTEM = "System.";
-const field = (fields, name) => fields?.[SYSTEM + name];
-const FIELDS = ["Id", "Title", "State", "WorkItemType", "AssignedTo", "Tags", "TeamProject"].map((f) => `[${SYSTEM}${f}]`).join(", ");
-
-// --detect false: use az's configured defaults, never the git remote of
-// whatever folder herdr runs az in.
-const azScope = (view, withProject = true) => [
-  "--detect", "false",
-  ...(view.organization ? ["--org", view.organization] : []),
-  ...(withProject && view.project ? ["--project", view.project] : []),
-];
-
-export const azureDefaultsArgs = () => ["devops", "configure", "--list"];
-
-// `az devops configure --list` → { organization, project } (null when unset).
-export function parseAzureDefaults(stdout) {
-  const value = (name) => String(stdout ?? "").match(new RegExp(`^\\s*${name}\\s*=\\s*(.*?)\\s*$`, "m"))?.[1] || null;
-  return { organization: value("organization"), project: value("project") };
-}
-
-export function azureTypesArgs(view, project) {
-  return ["devops", "invoke", "--area", "wit", "--resource", "workitemtypes", "--route-parameters", `project=${project}`,
-    "-o", "json", ...azScope(view, false)];
-}
-
-// The work item types' answer → { states: [{ id, name, category, color }] in
-// category order, types: { [type]: [state names] } }.
-export function parseAzureTypes(stdout) {
-  const types = {};
-  const states = new Map();
-  const value = JSON.parse(stdout)?.value;
-  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
-  for (const type of value) {
-    types[type.name] = (type.states ?? []).map((s) => s.name);
-    for (const s of type.states ?? []) {
-      if (!states.has(s.name)) states.set(s.name, { id: s.name, name: s.name, category: s.category, color: CATEGORY_COLORS[s.category] ?? "muted" });
-    }
-  }
-  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
-  return { states: [...states.values()].sort((a, b) => order(a) - order(b)), types };
-}
-
-const wiqlText = (value) => `'${value.replace(/'/g, "''")}'`;
-
-export function azureQueryArgs(view, hidden) {
-  const names = [...hidden];
-  const without = names.length ? ` AND [${SYSTEM}State] NOT IN (${names.map(wiqlText).join(", ")})` : "";
-  const wiql = `SELECT ${FIELDS} FROM WorkItems WHERE (${view.where})${without} ORDER BY [${SYSTEM}ChangedDate] DESC`;
-  return ["boards", "query", "--wiql", wiql, "-o", "json", ...azScope(view)];
-}
-
-// The web page of a work item from its API url and project:
-// https://dev.azure.com/<org>[/<project id>]/_apis/wit/workItems/<id>
-// → https://dev.azure.com/<org>/<project>/_workitems/edit/<id>.
-export function azureWebUrl(apiUrl, project, id) {
-  if (!apiUrl || !apiUrl.includes("/_apis/")) return null;
-  const base = apiUrl.split("/_apis/")[0].replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "");
-  return `${base}/${encodeURIComponent(project)}/_workitems/edit/${id}`;
-}
-
-const personName = (who) => (typeof who === "string" ? who.replace(/\s*<[^>]*>$/, "") : who?.displayName ?? null);
-
-// `az boards query` output → a board whose columns are the states of the work
-// item types it found, in category order; without work items it has none. az
-// prints nothing at all when nothing matches. meta.types holds each type's
-// states, the columns its cards may go to; meta.states all the types' states.
-export function parseAzureBoard(stdout, types, hidden) {
-  const items = String(stdout ?? "").trim() ? JSON.parse(stdout) : [];
-  const cards = items.map((item) => {
-    const f = item.fields ?? {};
-    const project = field(f, "TeamProject") ?? "";
-    const id = field(f, "Id") ?? item.id;
-    return {
-      key: `az-${id}`,
-      source: "azure",
-      kind: "workitem",
-      number: id,
-      repo: project,
-      repoShort: project,
-      title: field(f, "Title") ?? "",
-      url: azureWebUrl(item.url, project, id),
-      labels: String(field(f, "Tags") ?? "").split(";").map((s) => s.trim()).filter(Boolean),
-      assignees: [personName(field(f, "AssignedTo"))].filter(Boolean),
-      type: field(f, "WorkItemType") ?? null,
-      parent: null,
-      sub: null,
-      branch: null,
-      column: field(f, "State") ?? "",
-    };
-  });
-  const present = new Set(cards.map((c) => c.type));
-  const wanted = new Set(Object.entries(types.types).filter(([t]) => present.has(t)).flatMap(([, s]) => s));
-  const columns = types.states
-    .filter((s) => wanted.has(s.name))
-    .map((s) => ({ ...s, hidden: hidden.has(s.name), count: hidden.has(s.name) ? null : 0, target: true, cards: [] }));
-  const byName = new Map(columns.map((c) => [c.name, c]));
-  for (const card of cards) {
-    let col = byName.get(card.column);
-    if (!col) {
-      col = { id: card.column, name: card.column, category: null, color: "muted", hidden: false, count: 0, target: true, cards: [] };
-      columns.push(col);
-      byName.set(col.name, col);
-    }
-    col.cards.push(card);
-    if (!col.hidden) col.count++;
-  }
-  return { kind: "board", meta: { types: types.types, states: types.states }, columns, total: cards.length, limited: false };
-}
-
-export function azureMoveArgs(view, card, column) {
-  return ["boards", "work-item", "update", "--id", String(card.number), "--state", column.name, "-o", "json", ...azScope(view, false)];
-}
-
-export const AZ_NO_PROJECT = "Azure-Projekt fehlt: „project“ in der Ansicht oder az devops configure --defaults project=…";
-// az's words for a request that may have reached Azure but got no clear
-// answer: msrest's "Error occurred in request., <requests exception>: …"
-// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
-const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
-// Azure's answers that it failed itself: the Azure DevOps client's
-// "Operation returned a 5xx status code.", TF400898 (an internal error), and
-// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
-// error responses"), which also names "Max retries" and is tested first.
-const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
-// ERROR: answers that are a refusal: rule errors (TF401320), something that
-// does not exist, az's own argument errors, and 4xx status lines.
-const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
-
-// What went wrong with an az call that ran, from its ERROR: line (WARNING:
-// lines are left out; without an ERROR: line, from all it printed). Missing
-// sign-in or extension make the view unavailable rather than an error. With
-// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
-// sign-in, extension and project answers below; anything else (a request
-// without a clear answer, a server error, az's own crash or interrupt, a
-// failure without an ERROR: line) leaves open whether the change landed.
-export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
-  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const errorLine = lines.find((l) => /^ERROR:/.test(l));
-  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
-  const az = on ? `az auf ${on}` : "az";
-  // A crash's traceback may hold any words; az's own line says what failed.
-  const subject = errorLine ? said : lines.join("\n");
-  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
-  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
-  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
-    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
-  }
-  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
-    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
-  }
-  if (/^--project must be specified/.test(said)) return new BoardError(AZ_NO_PROJECT);
-  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
-  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
-}
-
-// exec's words for a program that is not there, and for a timeout: herdr
-// stops a program at its timeout with "<program> took longer than <n> s
-// and was stopped" (" on <machine>" before "and" on another machine);
-// "timed out" stays for other wordings of the same.
-const NOT_INSTALLED = /program not found|no such file or directory|command not found|not installed|ENOENT/i;
-const TIMED_OUT = /took longer than [\d.]+ s( on .+)? and was stopped|time(d)?[ -]?out/i;
-const toolOn = (tool, on) => (on ? `${tool} auf ${on}` : tool);
-
-// A program that is not there, with a note on how that was found out. Only a
-// missing az makes its view unavailable.
-const notInstalled = (tool, on, note = "") =>
-  new BoardError(`${toolOn(tool, on)} ist nicht installiert${note ? ` (${note})` : ""}`, { unavailable: tool === "az" });
-
-// A program that would not start, with exec's words for why.
-const notStarted = (tool, on, msg) => new BoardError(`${toolOn(tool, on)} ließ sich nicht starten: ${msg}`);
-
-// An exec that could not run at all (exec rejected). An unreachable machine
-// or a failed start is an error; a missing program is notInstalled. With
-// `write`, a timeout, or any other failure of a call on another machine,
-// leaves open whether the change landed; a program that is not installed
-// changed nothing.
-export function execRejection(tool, error, timeoutMs, on = null, { write = false } = {}) {
-  const msg = firstLine(error?.message ?? error);
-  const who = toolOn(tool, on);
-  if (NOT_INSTALLED.test(msg)) return notInstalled(tool, on);
-  if (TIMED_OUT.test(msg)) return failure(`${who} antwortete nicht in ${Math.round(timeoutMs / 1000)} s`, { write, unclear: true });
-  if (write && on) return failure(`${who}: ${msg}`, { write, unclear: true });
-  return notStarted(tool, on, msg);
-}
-
-// ---- Finding gh and az -----------------------------------------------------
-
-// herdr runs a program with the PATH it was started with, which may lack
-// what the person's shell adds (Homebrew, mise). So gh and az run by the
-// absolute path that shell gives on their machine, the way herdr starts
-// agents (AGENTS.md, programs.json): interactive here, login and interactive
-// on another machine. Its startup files may print anything (a banner), so
-// each answer stands between markers.
-export const WHICH_START = "<<board-which>>";
-export const WHICH_END = "<</board-which>>";
-export const SHELL_START = "<<board-shell>>";
-export const SHELL_END = "<</board-shell>>";
-
-// Prints the shell it asks and the person's own (tab apart, between the
-// shell markers), then the path of the program named in $1 (a name of this
-// file's own, never one from views.json) as that shell's PATH finds it,
-// between the path markers; "login" in $2 starts that shell as a login
-// shell too. The person's shell is $SHELL, else (unset or empty) the
-// account's; sh, bash, zsh, dash, ksh and fish run as themselves, any other
-// (or none) as /bin/sh with the same flags. A plain sh in that shell looks
-// the program up, so an alias or function of the same name does not count.
-export const WHICH_SCRIPT = [
-  'wanted=${SHELL:-$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)}',
-  "shell=$wanted",
-  "case ${shell##*/} in sh|bash|zsh|dash|ksh|fish) ;; *) shell=/bin/sh ;; esac",
-  `printf '${SHELL_START}%s\\t%s${SHELL_END}' "$shell" "$wanted"`,
-  'if [ "$2" = login ]; then set -- "$1" -l -i; else set -- "$1" -i; fi',
-  "tool=$1",
-  "shift",
-  `exec "$shell" "$@" -c "printf '%s' '${WHICH_START}'; command sh -c 'command -v $tool'; printf '%s' '${WHICH_END}'"`,
-].join("\n");
-
-export const whichArgs = (tool, on) => ["-c", WHICH_SCRIPT, "board-which", tool, on ? "login" : ""];
-
-// The text between the last pair of `start` and `end` markers, or null.
-function between(stdout, start, end) {
-  const text = String(stdout ?? "");
-  const to = text.lastIndexOf(end);
-  const from = to < 0 ? -1 : text.lastIndexOf(start, to);
-  return from < 0 ? null : text.slice(from + start.length, to);
-}
-
-// The shell's answer from what it printed, trimmed ("" when it does not find
-// the program), or null when there is none.
-export const readWhich = (stdout) => between(stdout, WHICH_START, WHICH_END)?.trim() ?? null;
-
-// The shell the script asked and the person's own ("" when none is known),
-// or null when the script did not say.
-export function readShell(stdout) {
-  const said = between(stdout, SHELL_START, SHELL_END);
-  if (said === null) return null;
-  const [asked, own = ""] = said.split("\t");
-  return { asked, own };
-}
-
-// What herdr says when it cannot start sh on another machine: a Windows
-// machine (as herdr's own Files mod reads it).
-const NO_SH = "cannot start sh: program not found";
-// The lines an interactive bash without a terminal prints on every start.
-const JOB_CONTROL = /cannot set terminal process group|no job control in this shell/;
-
-// A program on a machine (on: null here), asked of the shell there with
-// `execute` (herdr's exec): { program: its absolute path, bare: false }. Not
-// there: notInstalled, noting /bin/sh when it was asked in place of the
-// person's shell. A shell that could not be asked, or gave no answer or no
-// path, says so instead. Another machine where herdr cannot start sh
-// (Windows) runs the program by its bare name, from the PATH herdr runs it
-// with there: { program: tool, bare: true }.
-export async function findTool(execute, tool, on, timeoutMs) {
-  const unknown = `Pfad von ${toolOn(tool, on)} nicht ermittelt`;
-  let r;
-  try {
-    r = await execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs });
-  } catch (e) {
-    const msg = firstLine(e?.message ?? e);
-    if (on && String(e?.message ?? e).includes(NO_SH)) return { program: tool, bare: true };
-    throw new BoardError(TIMED_OUT.test(msg) ? `${unknown}: die Shell antwortete nicht in ${Math.round(timeoutMs / 1000)} s` : `${unknown}: ${msg}`);
-  }
-  const shell = readShell(r.stdout);
-  const answer = readWhich(r.stdout);
-  if (answer === null) {
-    // The last line that is not bash's own job control notice is the one
-    // that says what ended the shell.
-    const said = lastLine(String(r.stderr ?? "").split("\n").filter((l) => !JOB_CONTROL.test(l)).join("\n"));
-    throw new BoardError(`${unknown}: ${shell?.asked ?? "die Shell"} endete mit ${r.code} ohne Antwort${said ? ` (${said})` : ""}`);
-  }
-  if (answer === "") {
-    const standIn = shell && shell.asked !== shell.own;
-    const own = shell?.own ? ` statt ${shell.own.split("/").pop()}` : ", keine Shell eingetragen";
-    throw notInstalled(tool, on, standIn ? `gefragt: ${shell.asked}${own}` : "");
-  }
-  if (!answer.startsWith("/")) throw new BoardError(`${unknown}: die Shell kennt nur „${firstLine(answer)}“, kein Programm`);
-  return { program: answer, bare: false };
-}
-
-// Runs gh and az by what findTool finds, per machine and program. A found
-// program is kept until reset (on `r`); runs at the same time share one
-// lookup per machine and program, and one that fails is not kept, so the
-// next run asks again. When a run finds the program gone from its path
-// (exec's words for a missing program), that lookup is forgotten (a newer
-// one that has taken its place is kept) and the run starts again from the
-// current lookup, asking the shell if there is none: the program never
-// started, so even a write may run again. Gone a second time, the run fails
-// and the next run asks again; a bare name is not asked for again.
-export function toolPaths(execute) {
-  const known = new Map();
-  return {
-    // start(program) runs the program; its rejection passes on unchanged,
-    // but for the second time it is gone.
-    async run(tool, on, timeoutMs, start) {
-      const key = `${on ?? ""}\n${tool}`;
-      for (let again = false; ; again = true) {
-        if (!known.has(key)) {
-          const fresh = findTool(execute, tool, on, timeoutMs);
-          known.set(key, fresh);
-          fresh.catch(() => known.get(key) === fresh && known.delete(key));
-        }
-        const lookup = known.get(key);
-        const { program, bare } = await lookup;
-        try {
-          return await start(program);
-        } catch (e) {
-          const msg = firstLine(e?.message ?? e);
-          if (bare || !NOT_INSTALLED.test(msg)) throw e;
-          if (known.get(key) === lookup) known.delete(key);
-          if (again) throw notStarted(tool, on, msg);
-        }
-      }
-    },
-    reset() {
-      known.clear();
-    },
-  };
-}
-
-// ---- Board state -----------------------------------------------------------
-
-const cloneBoard = (board) => ({ ...board, columns: board.columns.map((c) => ({ ...c, cards: [...c.cards] })) });
-
-export function findCard(board, key) {
-  for (const col of board?.columns ?? []) {
-    const card = col.cards.find((c) => c.key === key);
-    if (card) return { card, column: col };
-  }
-  return null;
-}
-
-// A new board with the card in another column; counts follow (a hidden
-// column's count, where it has one, is the server's plus what was moved in).
-// Unchanged when the card or column is unknown, or the card is there already.
-export function moveCard(board, key, columnId) {
-  const found = findCard(board, key);
-  if (!found || !board.columns.some((c) => c.id === columnId) || found.column.id === columnId) return board;
-  const next = cloneBoard(board);
-  const from = next.columns.find((c) => c.id === found.column.id);
-  const to = next.columns.find((c) => c.id === columnId);
-  from.cards = from.cards.filter((c) => c.key !== key);
-  if (from.count !== null) from.count--;
-  to.cards.push({ ...found.card, column: columnId });
-  if (to.count !== null) to.count++;
-  return next;
-}
-
-// A failed move undone: the card goes back to move.from, unless it has moved
-// on since.
-export function rollback(board, move) {
-  return findCard(board, move.key)?.column.id === move.to ? moveCard(board, move.key, move.from) : board;
-}
-
-// Whether an open outcome is due for a refresh that started at `started`: it
-// came before that refresh started, and its card has no write under way
-// (that write decides first).
-export const isDue = (st, started) => (u) => u.at <= started && !st.pending[u.key];
-
-// Moves laid over every refresh: those still being written, and confirmed
-// ones until a refresh that started after the confirmation shows them.
-export function pendingMoves(moves, started) {
-  return moves.filter((m) => !m.confirmedAt || m.confirmedAt >= started);
-}
-
-export function applyMoves(board, moves) {
-  return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
-}
-
-// Whether a card may go to a column: one that takes drops and, where the
-// board knows its types' states (Azure; GitHub boards carry none), a state of
-// the card's own type.
-export function canDrop(board, card, column) {
-  if (!column?.target) return false;
-  const states = board.meta?.types?.[card.type];
-  return !states || states.includes(column.name);
-}
-
-export const targetsFor = (board, card) => board.columns.filter((c) => canDrop(board, card, c));
-
-// The column H (step -1) or L (+1) moves a card to: the next shown column,
-// stubs included, the card may go to; null at the edge.
-export function stepTarget(board, columns, key, step) {
-  const found = findCard(board, key);
-  if (!found) return null;
-  for (let i = columns.findIndex((c) => c.id === found.column.id) + step; i >= 0 && i < columns.length; i += step) {
-    if (canDrop(board, found.card, columns[i])) return columns[i];
-  }
-  return null;
-}
-
-// A view's columns with the person's hidden set applied.
-export function withHidden(board, hidden) {
-  return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hidden.has(c.name) })) };
-}
-
-// Cards whose text holds every word of the filter, case-insensitive.
-export function matches(card, text) {
-  const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
-  const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
-    ...(card.labels ?? []), ...(card.assignees ?? [])].filter(Boolean).join("\n").toLowerCase();
-  return words.every((w) => hay.includes(w));
-}
-
-// The columns as the board shows them: hidden ones as stubs (no cards), the
-// others with the filtered cards.
-export function shownColumns(board, filter) {
-  return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => matches(card, filter)) }));
-}
-
-// Keyboard movement: sel = { col, key } (key null on a stub or an empty
-// column) → the next sel. "up"/"down" move within the column, "left"/"right"
-// to the next column (stubs too), keeping the row where they can. A list is
-// one column.
-export function navigate(columns, sel, dir) {
-  if (!columns.length) return { col: 0, key: null };
-  let ci = Math.min(Math.max(sel?.col ?? 0, 0), columns.length - 1);
-  const cards = (i) => columns[i].shown;
-  let row = Math.max(0, cards(ci).findIndex((c) => c.key === sel?.key));
-  if (dir === "up" || dir === "down") {
-    const list = cards(ci);
-    if (!list.length) return { col: ci, key: null };
-    row = Math.min(Math.max(row + (dir === "up" ? -1 : 1), 0), list.length - 1);
-    return { col: ci, key: list[row].key };
-  }
-  if (dir === "left" || dir === "right") ci = Math.min(Math.max(ci + (dir === "left" ? -1 : 1), 0), columns.length - 1);
-  const list = cards(ci);
-  return { col: ci, key: list.length ? list[Math.min(row, list.length - 1)].key : null };
-}
-
-// The selection after new data or a filter: its card's column again, else the
-// first card; a selected stub or empty column stays selected.
-export function selectionAfter(columns, sel) {
-  const at = columns.findIndex((c) => c.shown.some((card) => card.key === sel?.key));
-  if (at >= 0) return { col: at, key: sel.key };
-  if (!sel?.key && columns[sel?.col]) return sel;
-  const first = columns.findIndex((c) => c.shown.length);
-  return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
-}
-
-// ---- Times -----------------------------------------------------------------
-
-export function updatedLabel(at, now) {
-  if (!at) return "";
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 60) return `vor ${s} s`;
-  if (s < 3600) return `vor ${Math.floor(s / 60)} min`;
-  return `vor ${Math.floor(s / 3600)} h`;
-}
-
-// A day label for a past moment, by local calendar days.
-export function ageLabel(iso, now) {
-  const then = new Date(iso), today = new Date(now);
-  if (Number.isNaN(then.getTime())) return "";
-  const day = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  const days = Math.round((day(today) - day(then)) / 86400000);
-  if (days <= 0) return "heute";
-  if (days === 1) return "gestern";
-  if (days < 7) return `vor ${days} Tagen`;
-  return `${then.getDate()}.${then.getMonth() + 1}.`;
-}
-
-// ---- Sessions --------------------------------------------------------------
-
-// An item's key: `<repo>#<number>` on GitHub, `AB#<id>` on Azure (Azure
-// Boards' own way to name a work item), null for a draft.
-export function itemKey(item) {
-  if (item.number === null || item.number === undefined) return null;
-  return item.source === "azure" ? `AB#${item.number}` : `${item.repoShort}#${item.number}`;
-}
-
-export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
-
-const NAME_MAX = 60;
-
-// The name of the tab and space a session starts in: the item's key and title,
-// cut to NAME_MAX characters. linkedSession finds the session by it.
-export function sessionName(item) {
-  const key = itemKey(item);
-  const full = key ? `${key} ${item.title}` : item.title;
-  return full.length <= NAME_MAX ? full : `${full.slice(0, NAME_MAX - 1)}…`;
-}
-
-const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
-
-// An item's session: a tab or space whose name starts with its key, the most
-// urgent first; failing that, on GitHub a space on its branch (a pull
-// request's head branch, or `<type>/<number>-…` in a folder of its repo).
-// → { space, tab (null for a space), status, label } or null.
-export function linkedSession(item, allSpaces) {
-  const key = itemKey(item);
-  const named = (name) => Boolean(key) && (name === key || String(name ?? "").startsWith(`${key} `));
-  let hits = [];
-  for (const s of allSpaces) {
-    for (const t of s.tabs ?? []) if (named(t.name)) hits.push({ space: s.id, tab: t.id, status: t.status ?? null, label: t.name });
-    if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
-  }
-  if (!hits.length && item.source === "github" && key) {
-    const own = new RegExp(`(^|/)${item.number}(-|$)`);
-    hits = allSpaces
-      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : own.test(s.branch) && (s.folder ?? "").includes(item.repoShort)))
-      .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
-  }
-  hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
-  return hits[0] ?? null;
-}
-
-export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
-
-// `{name}` placeholders filled from vars; unknown ones stay.
-export function renderTemplate(template, vars) {
-  return String(template ?? "").replace(/\{(\w+)\}/g, (all, name) => (vars[name] !== undefined && vars[name] !== null ? String(vars[name]) : all));
-}
-
-export function templateVars(item) {
-  const [owner, repo] = item.repo.includes("/") ? item.repo.split("/") : ["", item.repo];
-  return { number: item.number ?? "", title: item.title, url: item.url ?? "", owner, repo, key: itemKey(item) ?? "" };
-}
-
-// Prints the checkout's folder on the chosen machine ($1; a leading ~ is that
-// machine's home), or exits 3 when there is none.
-export const CHECKOUT_SCRIPT = [
-  "case $1 in \\~) dir=$HOME ;; \\~/*) dir=$HOME/${1#\\~/} ;; *) dir=$1 ;; esac",
-  '[ -d "$dir" ] || { echo "Kein Checkout unter $dir" >&2; exit 3; }',
-  'cd "$dir" && pwd',
-].join("\n");
-
-export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
-
-// The space a new tab goes into: one on that machine in the checkout or
-// below it, else the shown space when it is on that machine.
-export function spaceForTab(allSpaces, on, repoFolder) {
-  const here = allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
-  return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}/`))) ?? here.find((s) => s.active) ?? null;
-}
-
-// The app command that opens a session: [name, args]. A new space and its
-// first tab both carry the session's name.
-export function startCommand({ open, on, folder, argv, task, name, space }) {
-  const common = { folder, argv, ...(task ? { task } : {}) };
-  if (open === "tab") return ["tab.new", { name, space, ...common }];
-  return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
-}
-
-// ---------------------------------------------------------------------------
-// UI
-// ---------------------------------------------------------------------------
+// The sources as the Board uses them: one run of a program, gh and az by
+// the paths found, and per source loading a view and writing a move.
 
 const GH_TIMEOUT = 30000;
 const AZ_TIMEOUT = 60000;
-const CHECKOUT_TIMEOUT = 30000;
-// How long watchSession waits before each check for a session it opened, in
-// ms (1, 3 and 6 s after the start).
-const SESSION_CHECKS = [1000, 2000, 3000];
-const TICK_MS = 30000;
-const SCROLLS = 24;
 
 // One run of a program: its result, or a BoardError when it could not run.
 // With `paths` (toolPaths) it runs by what that finds. `write` is for calls
 // that change something (see execRejection).
-async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
+export async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
   const start = (program) => exec(program, args, { on, timeout });
   try {
     return await (paths ? paths.run(tool, on, timeout, start) : start(tool));
@@ -1195,7 +1208,7 @@ async function az(paths, view, args, options = {}) {
 // board try its views while not shown (`probe`), and what `r` forgets
 // (`reset`). Azure keeps each view's work item types (parseAzureTypes) until
 // then. gh and az run by the paths `paths` (toolPaths) finds.
-function makeSources(paths) {
+export function makeSources(paths) {
   let azureTypes = {};
   return {
     github: {
@@ -1240,9 +1253,14 @@ function makeSources(paths) {
   };
 }
 
+// ==== src/ui/helpers.js ====
+
+// UI helpers: lasting settings, colors and machine names, whether the board
+// shows, and an error's text for the UI.
+
 // Settings that last across reloads (the shown view, hidden columns). A full
 // or missing localStorage keeps them for this session only.
-const store = {
+export const store = {
   get(key) {
     try {
       const v = localStorage.getItem(key);
@@ -1260,22 +1278,31 @@ const store = {
   },
 };
 
-const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
-const machineName = (name) => name ?? "Dieser Rechner";
+export const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
+export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
-const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
+export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
 // Whether a board pane is in the shown tab of the shown space.
-function boardShown() {
+export function boardShown() {
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }
 
 // An error's message for the UI; an unexpected one is logged with its stack.
-function report(e) {
+export function report(e) {
   if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
   return errorText(e);
 }
+
+// ==== src/main.js ====
+
+const CHECKOUT_TIMEOUT = 30000;
+// How long watchSession waits before each check for a session it opened, in
+// ms (1, 3 and 6 s after the start).
+const SESSION_CHECKS = [1000, 2000, 3000];
+const TICK_MS = 30000;
+const SCROLLS = 24;
 
 export default class Board extends View {
   init(_props, cx) {
