@@ -1,46 +1,15 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) hook: commands that merge a pull request are refused.
+"""PreToolUse(Bash) hook: a coarse, fail-closed filter against merging a pull request.
 
-The owner merges every PR (`merge_policy` in
-~/.claude/skills/implement/repo-config.md). The text deny rules in
-settings.json match the plain spellings of a merge command only - not
-curl or wget, not a GraphQL query from a file, not a gh flag before `pr`.
-This hook parses the command instead, so a merge spelled differently is
-caught too:
-
-- `gh pr merge`, and `gh alias set` / `gh alias import`, which could name
-  a merge under another word;
-- `gh api` on a pulls/<n>/merge or repos/.../merges path;
-- `gh api` on the GraphQL endpoint in any spelling (`graphql`,
-  `api/graphql`, a full URL) whose query names mergePullRequest or
-  enablePullRequestAutoMerge, comes from a file (`query=@...`, `--input`)
-  or is built at run time;
-- `az repos pr update` with `--status completed` or `--auto-complete`;
-- `curl` or `wget` on a pulls/<n>/merge URL.
-
-The command is split into words with the shell's quoting rules and cut at
-shell operators and newlines. In each segment, every word naming gh, az,
-curl, wget, a shell or eval is checked with the words after it, so
-wrappers such as sudo, env or timeout and their options need no list; a
-quoted argument stays one word, so a merge command mentioned inside a
-message passes here (the text deny rules catch that). `xargs` or
-`parallel` in front of gh, az, curl or wget is refused, since they supply
-words the hook cannot see. `bash -c`, `eval` and the like are checked
-recursively, command substitutions as their own text. Heredoc bodies are
-checked as commands too, since `bash <<EOF` runs them.
-
-The hook judges the command as written. A word that decides the verdict
-(gh's first two positional words and its api endpoint; az's command words
-and, for `az repos pr update`, every argument; curl's and wget's URLs) and
-that the shell would still expand - an unquoted or double-quoted `$` or
-backtick, an unquoted `{`, `*`, `?` or `[`, or any backslash - is refused,
-because the hook cannot read what it will become. gh's own `{owner}`,
-`{repo}` and `{branch}` placeholders are fine. Quoting that does not parse
-is read with its quotes and backslashes dropped and every expanding
-character counted as expanding; a command nested too deep, too long or
-holding too many substitutions is refused. What the shell builds at run
-time, another interpreter, a script file or gh's own config stays out of
-the hook's sight: the policy alone rules those out.
+What it refuses, and what is left to the policy, is written once in
+`merge_policy` (~/.claude/skills/implement/repo-config.md). In short: the
+command is split into simple commands at shell operators and newlines,
+with `bash -c` (and the other shells), `eval`, command substitutions and
+heredoc bodies checked as commands too. A simple command that names gh,
+az, curl or wget is refused when a word in it mentions a merge, a
+completion or a gh alias definition, still expands at run time, or reads
+a request body from a file - unless it is one of the read-only gh forms.
+False refusals are accepted; the owner merges anyway.
 """
 
 import json
@@ -51,29 +20,19 @@ from dataclasses import dataclass
 
 OPERATOR_CHARS = ";&|()<>"
 UNQUOTED_EXPANSION = set("$`{*?[")
-PULL_MERGE = re.compile(r"pulls/[^/\s]+/merge(?![\w-])")
-REPO_MERGES = re.compile(r"repos/\S*/merges(?![\w-])")
-MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge", re.IGNORECASE)
 GH_PLACEHOLDER = re.compile(r"\{(owner|repo|branch)\}")
 SHELL_C_OPTION = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+COMMAND_PIECES = re.compile(r"[\s;&|()<>`$]+")
+MERGE_WORDS = re.compile(r"merge", re.IGNORECASE)
+COMPLETE_WORDS = re.compile(r"completed|auto-?complete", re.IGNORECASE)
+ALIAS_WORDS = re.compile(r"\balias\s+(set|import)\b", re.IGNORECASE)
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 FEEDERS = {"xargs", "parallel"}
 NETWORK = {"gh", "az", "curl", "wget"}
 GH_VALUE_FLAGS = {"-R", "--repo", "--hostname"}
-GH_API_VALUE_FLAGS = {
-    "-X", "--method", "-H", "--header", "-f", "--raw-field", "-F", "--field",
-    "-q", "--jq", "-t", "--template", "--input", "--hostname", "--cache",
-    "-p", "--preview",
-}  # fmt: skip
-CURL_VALUE_FLAGS = {
-    "-H", "--header", "-d", "--data", "--data-raw", "--data-binary", "--data-urlencode",
-    "-u", "--user", "-o", "--output", "-X", "--request", "-A", "--user-agent",
-    "-e", "--referer", "-b", "--cookie", "-c", "--cookie-jar", "-F", "--form",
-    "-T", "--upload-file", "--oauth2-bearer", "-w", "--write-out", "-m", "--max-time",
-}  # fmt: skip
-WGET_VALUE_FLAGS = {
-    "--header", "-O", "--output-document", "--user", "--password", "--method",
-    "--body-data", "--post-data", "-o", "--output-file", "-U", "--user-agent",
+GH_READ_ONLY = {
+    ("pr", "view"), ("pr", "list"), ("pr", "status"), ("pr", "checks"), ("pr", "diff"),
+    ("issue", "view"), ("issue", "list"),
 }  # fmt: skip
 MAX_DEPTH = 5
 MAX_LENGTH = 100_000
@@ -83,6 +42,7 @@ REASON = (
     "Merging a pull request is the owner's alone (merge_policy in "
     "~/.claude/skills/implement/repo-config.md): {what}. Hand the PR over instead."
 )
+SEEN = "a gh, az, curl or wget command"
 
 
 @dataclass(frozen=True)
@@ -94,7 +54,10 @@ class Word:
 
     @property
     def opaque(self) -> bool:
-        return bool(self.expands)
+        """Whether the shell would still expand the word; gh's own placeholders do not count."""
+        if self.expands - {"{"}:
+            return True
+        return "{" in self.expands and "{" in GH_PLACEHOLDER.sub("", self.text)
 
 
 Token = Word | str  # a str is an operator
@@ -199,13 +162,14 @@ def rough_segments(text: str) -> list[list[Word]]:
     ]
 
 
-def substitutions(text: str) -> list[str]:
-    """Text that runs inside $( ... ) or backticks, found in one pass; an open one runs to the end."""
-    found: list[str] = []
+def substitution_spans(text: str) -> list[tuple[int, int]]:
+    """Where $( ... ) and backtick substitutions sit in *text*, found in one pass; an open one
+    runs to the end. Stops once more than MAX_SUBSTITUTIONS are found."""
+    found: list[tuple[int, int]] = []
     opened: list[int | None] = []  # start of each open $( ), None for a plain (
     backtick: int | None = None
     i = 0
-    while i < len(text):
+    while i < len(text) and len(found) <= MAX_SUBSTITUTIONS:
         c = text[i]
         if c == "$" and text[i + 1 : i + 2] == "(":
             opened.append(i + 2)
@@ -216,178 +180,132 @@ def substitutions(text: str) -> list[str]:
         elif c == ")" and opened:
             start = opened.pop()
             if start is not None:
-                found.append(text[start:i])
+                found.append((start, i))
         elif c == "`":
             if backtick is None:
                 backtick = i + 1
             else:
-                found.append(text[backtick:i])
+                found.append((backtick, i))
                 backtick = None
         i += 1
-    found += [text[start:] for start in opened if start is not None]
+    found += [(start, len(text)) for start in opened if start is not None]
     if backtick is not None:
-        found.append(text[backtick:])
+        found.append((backtick, len(text)))
     return found
 
 
-def takes_value(flag: str, value_flags: set[str]) -> bool:
-    """Whether *flag*, alone or ending a cluster of short flags, takes the next word as its value."""
-    if flag in value_flags:
+def names_network(word: Word) -> bool:
+    """Whether *word*, or a command inside it when it is a quoted string, names gh, az, curl or wget."""
+    return any(os.path.basename(piece) in NETWORK for piece in COMMAND_PIECES.split(word.text))
+
+
+def reads_file(word: Word) -> bool:
+    """Whether *word* hands a request body or query over from a file or stdin."""
+    text = word.text
+    if re.search(r"(^|=)@", text):
         return True
-    return bool(re.fullmatch(r"-[A-Za-z]{2,}", flag)) and f"-{flag[-1]}" in value_flags
+    if text == "--input" or text.startswith(("--input=", "--upload-file")):
+        return True
+    return bool(re.fullmatch(r"-[A-Za-z]*T.*", text))
 
 
-def positional(args: list[Word], value_flags: set[str]) -> list[Word]:
-    """The non-flag words of *args*, skipping the value of each flag in *value_flags*."""
-    words: list[Word] = []
+def gh_read_only(words: list[Word]) -> bool:
+    """Whether the segment runs gh in a read-only form: pr or issue view/list and the like,
+    search, run, or api with no method other than GET and no fields."""
+    at = next((i for i, word in enumerate(words) if os.path.basename(word.text) == "gh"), None)
+    if at is None:
+        return False
+    args = [word.text for word in words[at + 1 :]]
+    positional: list[str] = []
     skip = False
     for arg in args:
         if skip:
             skip = False
-        elif takes_value(arg.text, value_flags):
+        elif arg in GH_VALUE_FLAGS:
             skip = True
-        elif not arg.text.startswith("-"):
-            words.append(arg)
-    return words
-
-
-def gh_opaque(word: Word) -> bool:
-    """Whether *word* still expands once gh's own placeholders are set aside."""
-    if word.expands - {"{"}:
+        elif not arg.startswith("-"):
+            positional.append(arg)
+    if positional[:1] in (["search"], ["run"]) or tuple(positional[:2]) in GH_READ_ONLY:
         return True
-    return "{" in word.expands and "{" in GH_PLACEHOLDER.sub("", word.text)
-
-
-def gh_reason(args: list[Word]) -> str | None:
-    words = positional(args, GH_VALUE_FLAGS)
-    if any(gh_opaque(word) for word in words[:2]):
-        return "gh's subcommand is built at run time, so the hook cannot read it"
-    texts = [word.text for word in words]
-    if texts[:2] == ["pr", "merge"]:
-        return "gh pr merge merges it"
-    if texts[:1] == ["alias"] and texts[1:2] in (["set"], ["import"]):
-        return "a gh alias can run a merge under another name"
-    if texts[:1] != ["api"]:
-        return None
-    after_api = args[next(i for i, arg in enumerate(args) if arg is words[0]) + 1 :]
-    endpoints = positional(after_api, GH_API_VALUE_FLAGS)
-    if any(gh_opaque(endpoint) for endpoint in endpoints):
-        return "the gh api endpoint is built at run time, so the hook cannot read it"
-    if any(PULL_MERGE.search(e.text) or REPO_MERGES.search(e.text) for e in endpoints):
-        return "gh api calls a merge endpoint"
-    if any(normalised(endpoint.text) in ("graphql", "api/graphql") for endpoint in endpoints):
-        if any(MERGE_MUTATION.search(arg.text) for arg in after_api):
-            return "the GraphQL query merges or arms auto-merge"
-        if any(arg.text == "--input" or arg.text.startswith("--input=") for arg in after_api):
-            return "the GraphQL query comes from a file the hook cannot check"
-        for query in field_values(after_api, "query"):
-            if query.text.startswith("@"):
-                return "the GraphQL query comes from a file the hook cannot check"
-            if query.opaque:
-                return "the GraphQL query is built at run time, so the hook cannot read it"
-    return None
-
-
-def normalised(endpoint: str) -> str:
-    """A gh api endpoint without scheme, host, query string and outer slashes."""
-    path = re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/]*", "", endpoint)
-    return path.split("?", 1)[0].strip("/")
-
-
-def field_values(args: list[Word], name: str) -> list[Word]:
-    """The values gh api's -f/-F/--raw-field/--field options give the field *name*."""
-    values: list[Word] = []
+    if positional[:1] != ["api"]:
+        return False
     for i, arg in enumerate(args):
-        if arg.text in ("-f", "-F", "--raw-field", "--field"):
-            given = args[i + 1 : i + 2]
-        else:
-            attached = re.match(r"(?:-[fF]|--raw-field=|--field=)(.*)", arg.text, re.DOTALL)
-            given = [Word(attached.group(1), arg.expands)] if attached else []
-        for field in given:
-            if field.text.startswith(f"{name}="):
-                values.append(Word(field.text[len(name) + 1 :], field.expands))
-    return values
+        if arg.startswith(("--field", "--raw-field", "--input")):
+            return False
+        if arg.startswith("--method"):
+            value = arg.split("=", 1)[1] if "=" in arg else "".join(args[i + 1 : i + 2])
+            if value.upper() != "GET":
+                return False
+        elif re.match(r"-[A-Za-z]", arg):
+            letters = arg[1:]
+            if "f" in letters or "F" in letters:
+                return False
+            if "X" in letters:
+                after = letters.split("X", 1)[1] or "".join(args[i + 1 : i + 2])
+                if after.upper() != "GET":
+                    return False
+    return True
 
 
-def az_reason(args: list[Word]) -> str | None:
-    if any(word.opaque for word in positional(args, set())[:3]):
-        return "az's command is built at run time, so the hook cannot read it"
-    texts = [arg.text for arg in args]
-    if not any(texts[i : i + 3] == ["repos", "pr", "update"] for i in range(len(texts))):
+def network_reason(words: list[Word]) -> str | None:
+    """The reason to refuse a segment that names gh, az, curl or wget, or None."""
+    if any(word.opaque for word in words):
+        return f"{SEEN} builds a word at run time"
+    said = " ".join(word.text for word in words)
+    if any(reads_file(word) for word in words):
+        what = "reads its body from a file"
+    elif ALIAS_WORDS.search(said):
+        what = "defines a gh alias"
+    elif MERGE_WORDS.search(said):
+        what = "mentions a merge"
+    elif COMPLETE_WORDS.search(said):
+        what = "mentions completing a pull request"
+    else:
         return None
-    if any(arg.opaque for arg in args):
-        return "an argument of az repos pr update is built at run time"
-    lowered = [text.lower() for text in texts]
-    for i, arg in enumerate(lowered):
-        if arg == "--status" and lowered[i + 1 : i + 2] == ["completed"]:
-            return "az completes the PR"
-        if arg == "--status=completed":
-            return "az completes the PR"
-        if arg == "--auto-complete" or arg.startswith("--auto-complete="):
-            return "az sets the PR to auto-complete"
-    return None
+    return None if gh_read_only(words) else f"{SEEN} {what}"
 
 
-def url_reason(name: str, args: list[Word]) -> str | None:
-    flags = CURL_VALUE_FLAGS if name == "curl" else WGET_VALUE_FLAGS
-    urls = positional(args, flags)
-    urls += [Word(a.text.split("=", 1)[1], a.expands) for a in args if a.text.startswith("--url=")]
-    if any(url.opaque for url in urls):
-        return f"a {name} URL is built at run time, so the hook cannot read it"
-    if any(PULL_MERGE.search(url.text) for url in urls):
-        return f"{name} calls a merge endpoint"
-    return None
-
-
-def segment_reason(tokens: list[Word], depth: int) -> str | None:
-    for at, token in enumerate(tokens):
-        found = word_reason(os.path.basename(token.text), tokens[at + 1 :], depth)
-        if found:
-            return found
-    return None
-
-
-def word_reason(name: str, args: list[Word], depth: int) -> str | None:
-    """The reason to refuse running *name* with *args*, or None."""
-    if name in SHELLS:
-        for i, arg in enumerate(args):
-            if not arg.text.startswith("--") and SHELL_C_OPTION.fullmatch(arg.text):
-                for command in args[i + 1 :]:
-                    if not command.text.startswith("-"):
-                        found = check(command.text, depth + 1)
-                        if found:
-                            return found
-                return None
-        return None
-    if name == "eval":
-        return check(" ".join(arg.text for arg in args), depth + 1)
-    if name in FEEDERS and any(os.path.basename(arg.text) in NETWORK for arg in args):
-        return f"{name} feeds words to gh, az, curl or wget that the hook cannot see"
-    if name == "gh":
-        return gh_reason(args)
-    if name == "az":
-        return az_reason(args)
-    if name in ("curl", "wget"):
-        return url_reason(name, args)
+def segment_reason(words: list[Word], depth: int) -> str | None:
+    """The reason to refuse one simple command, or None."""
+    for i, word in enumerate(words):
+        name = os.path.basename(word.text)
+        rest = words[i + 1 :]
+        if name in SHELLS:
+            for j, arg in enumerate(rest):
+                if not arg.text.startswith("--") and SHELL_C_OPTION.fullmatch(arg.text):
+                    for command in rest[j + 1 :]:
+                        if not command.text.startswith("-"):
+                            found = check(command.text, depth + 1)
+                            if found:
+                                return found
+                    break
+        elif name == "eval":
+            found = check(" ".join(arg.text for arg in rest), depth + 1)
+            if found:
+                return found
+        elif name in FEEDERS and any(names_network(arg) for arg in rest):
+            return f"{name} feeds words to {SEEN} that the hook cannot see"
+    if any(names_network(word) for word in words):
+        return network_reason(words)
     return None
 
 
 def check(command: str, depth: int = 0) -> str | None:
     """The reason to refuse *command*, or None."""
     if depth > MAX_DEPTH:
-        return "the command nests shells or eval too deep to check"
+        return "the command is nested too deep to check"
     if len(command) > MAX_LENGTH:
         return "the command is too long to check"
-    inner = substitutions(command)
-    if len(inner) > MAX_SUBSTITUTIONS:
-        return "the command holds too many command substitutions to check"
-    for text in [command, *inner]:
+    spans = substitution_spans(command)
+    if len(spans) > MAX_SUBSTITUTIONS:
+        return "the command holds too many substitutions to check"
+    for text in [command, *(command[start:end] for start, end in spans)]:
         try:
             parsed = segments(text)
         except ValueError:
             parsed = rough_segments(text)
-        for tokens in parsed:
-            found = segment_reason(tokens, depth)
+        for words in parsed:
+            found = segment_reason(words, depth)
             if found:
                 return found
     return None
