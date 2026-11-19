@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Global mise task: build the herdr board mod's main.js from its modules in
 # src/ in the dotfiles repo; the header of mods/board/build.mjs says how and
-# why. tests/herdr-app/board.test.mjs fails while main.js differs from a
-# fresh build.
+# why.
 #
 # Usage: mise run herdr-board-build
 set -euo pipefail

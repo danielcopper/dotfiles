@@ -5,7 +5,10 @@
 # temporary folder, writes only in the temporary folder. Child processes are
 # allowed (the runner starts each test file as one, under the same limits;
 # the sh the checkout test runs is not bound by them). BOARD_TEST_PERMISSION
-# tells the tests they must run under those limits.
+# tells the tests they must run under those limits. The tests run twice:
+# against the built main.js, the file herdr loads, and against src/main.js,
+# where a module that uses a name it does not import fails (in main.js all
+# modules share one scope, so there it would not).
 #
 # Usage: mise run herdr-board-test [node --test option...]
 #   e.g. --test-name-pattern=UI
@@ -20,5 +23,11 @@ tmp="${TMPDIR:-/tmp}"
 # path up from /, which the permission model does not let it read.
 cd "$dotfiles"
 export BOARD_TEST_PERMISSION=1
-exec node --permission --allow-fs-read="$dotfiles" --allow-fs-read="$tmp" --allow-fs-write="$tmp" --allow-child-process \
-  --test "$@" tests/herdr-app/board.test.mjs
+run() {
+  node --permission --allow-fs-read="$dotfiles" --allow-fs-read="$tmp" --allow-fs-write="$tmp" --allow-child-process \
+    --test "$@" tests/herdr-app/board.test.mjs
+}
+echo "herdr-board-test: against main.js"
+run "$@"
+echo "herdr-board-test: against src/main.js"
+BOARD_MAIN=herdr-app/.config/herdr-app/mods/board/src/main.js run "$@"

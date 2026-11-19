@@ -148,7 +148,7 @@ test("main.js is what build.mjs builds from src/", () => {
   const fresh = builder.build();
   const a = shipped.split("\n"), b = fresh.split("\n");
   const at = a.findIndex((line, i) => line !== b[i]);
-  assert.ok(shipped === fresh, `main.js differs from a fresh build at line ${(at < 0 ? a.length : at) + 1}: mise run herdr-board-build`);
+  assert.ok(shipped === fresh, `main.js differs from a fresh build at line ${(at < 0 ? a.length : at) + 1}: node ${join(modDir, "build.mjs")}`);
 });
 
 test("src/main.js exports what main.js does", async () => {
@@ -205,6 +205,30 @@ test("the build refuses what main.js cannot hold: other import forms, imports be
   refused({ ...entry('import { a } from "./a.js";'), "a.js": 'export * from "./b.js";\nexport const a = 1;\n', "b.js": "export const b = 1;\n" }, /export \* only in the entry/);
   refused({ ...entry('import { a } from "./a.js";'), "a.js": "export const a = 1;\nexport default 2;\n" }, /export default only in the entry/);
   refused({ "main.js": "export default class Board {}\r\n" }, /CRLF/);
+  refused({ ...entry('import { a } from "./a.js";\nimport { b } from "./b.js";'), "a.js": "export const a = 1;\nconst same = 1;\n", "b.js": "export const b = 1;\nconst same = 2;\n" },
+    /src\/b\.js \(main\.js line \d+\): SyntaxError: Identifier 'same' has already been declared$/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": "export const a = 1;\nfunction (((\n" }, /src\/a\.js \(main\.js line \d+\): SyntaxError/);
+  refused({ ...entry('import { a } from "./a.js";'), "a.js": "export const a = 1;\n", "x/unused.js": "export const u = 1;\n" },
+    /src\/x\/unused\.js: no module imports it/);
+});
+
+test("the build script writes main.js only when the build succeeds", () => {
+  const dir = mkdtempSync(join(tmpdir(), "board-build-"));
+  try {
+    writeFileSync(join(dir, "build.mjs"), readFileSync(join(modDir, "build.mjs")));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src/main.js"), "export default class Board {}\nconst x = 1;\nconst x = 2;\n");
+    const failed = spawnSync(process.execPath, [join(dir, "build.mjs")], { encoding: "utf8" });
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /herdr-board-build: src\/main\.js \(main\.js line \d+\): SyntaxError: Identifier 'x' has already been declared/);
+    assert.throws(() => readFileSync(join(dir, "main.js")), { code: "ENOENT" }, "nothing written");
+    writeFileSync(join(dir, "src/main.js"), "export default class Board {}\n");
+    const built = spawnSync(process.execPath, [join(dir, "build.mjs")], { encoding: "utf8" });
+    assert.equal(built.status, 0, built.stderr);
+    assert.match(readFileSync(join(dir, "main.js"), "utf8"), /^\/\/ Built from src\//);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---- views.json ----

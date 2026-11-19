@@ -18,15 +18,21 @@
 //   what main.js does.
 // - Imports stand at the top of a module, after its leading comment.
 // - All modules share one scope in main.js: two modules must not declare the
-//   same top-level name (node --check of the output catches it), and no
-//   module may import itself through others.
+//   same top-level name, and no module may import itself through others.
+//   The built text is parsed as a module before anything is written, which
+//   catches the first (and any other syntax error), named by its module.
+// - Every module in src/ is imported by the entry or by a module it
+//   imports; one that nothing imports would be left out of main.js.
+// A module that uses a name it does not import still works in main.js,
+// where all share one scope, but not as a module of its own:
+// `mise run herdr-board-test` runs the tests against src/main.js too.
 // main.js is: a line that it is built, the entry's leading comment, the host
 // imports (each host module's names from all modules, sorted), then each
 // module after the modules it imports, in the order of its imports, the
 // entry last, each under a line naming its file.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -104,8 +110,24 @@ function resolveName(from, spec, where) {
   return name.split("\\").join("/");
 }
 
+// The .js files under `src`, as names relative to it.
+const modulesIn = (src) => readdirSync(src, { recursive: true }).map((n) => String(n).split("\\").join("/")).filter((n) => n.endsWith(".js")).sort();
+
+// Parses `text` as a module with node; throws a BuildError naming the
+// module whose line the first error is on.
+function checkParses(text) {
+  const r = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: text, encoding: "utf8" });
+  if (r.status === 0) return;
+  const line = Number(String(r.stderr).match(/\[stdin\]:(\d+)/)?.[1]);
+  const lines = text.split("\n").slice(0, line || 0);
+  const at = lines.findLastIndex((l) => l.startsWith("// ==== src/"));
+  const where = at < 0 ? "main.js" : lines[at].slice("// ==== ".length, -" ====".length);
+  const said = String(r.stderr).split("\n").find((l) => /Error:/.test(l)) ?? `node --check exited with ${r.status}`;
+  throw new BuildError(`${where} (main.js line ${line}): ${said.trim()}`);
+}
+
 // main.js's text from the modules under `src` (default: src/ beside this
-// file). Throws a BuildError naming what is wrong.
+// file), parsed as a module. Throws a BuildError naming what is wrong.
 export function build(src = SRC) {
   const modules = new Map();
   const order = [];
@@ -126,6 +148,8 @@ export function build(src = SRC) {
     return mod;
   };
   const entry = visit(ENTRY);
+  const unreached = modulesIn(src).filter((n) => !modules.has(n));
+  if (unreached.length) throw new BuildError(`${unreached.map((n) => `src/${n}`).join(", ")}: no module imports it, so main.js would leave it out`);
   const host = new Map(HOST.map((h) => [h, []]));
   for (const mod of order) {
     for (const imp of mod.host) for (const n of imp.names) if (!host.get(imp.from).includes(n)) host.get(imp.from).push(n);
@@ -136,23 +160,21 @@ export function build(src = SRC) {
     const head = mod === entry ? [] : mod.comment ? [mod.comment, ""] : [];
     parts.push("", `// ==== src/${mod.name} ====`, "", ...head, mod.body.replace(/\n+$/, ""));
   }
-  return `${parts.join("\n")}\n`;
+  const text = `${parts.join("\n")}\n`;
+  checkParses(text);
+  return text;
 }
 
-// Run as a script: write main.js and check that node can parse it (two
-// modules declaring one name fail here).
+// Run as a script: build, and write main.js only when that succeeded.
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  let text;
   try {
-    writeFileSync(OUT, build());
+    text = build();
   } catch (e) {
     if (!(e instanceof BuildError)) throw e;
     console.error(`herdr-board-build: ${e.message}`);
     process.exit(1);
   }
-  const check = spawnSync(process.execPath, ["--check", OUT], { encoding: "utf8" });
-  if (check.status !== 0) {
-    console.error(`herdr-board-build: node --check ${OUT} failed:\n${check.stderr}`);
-    process.exit(1);
-  }
+  writeFileSync(OUT, text);
   console.log(`herdr-board-build: wrote ${OUT}`);
 }
