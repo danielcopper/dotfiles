@@ -61,8 +61,12 @@ function drawPrs(b, t, mono, view, st) {
   const children = [];
   for (const s of st.data.sections) {
     const rows = s.rows.filter((r) => b.visible(r, st.data));
-    // While the filter or "nur meine" hides rows, the count is of those loaded.
-    const count = rows.length < s.rows.length ? shownOf(rows.length, s.rows.length) : `${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`;
+    // While the filter or "nur meine" hides rows, the count is of the rows
+    // the section holds (each pull request once, in its first section); a
+    // capped section adds how many it holds of how many GitHub found.
+    const count = rows.length < s.rows.length
+      ? `${shownOf(rows.length, s.rows.length)}${s.limited ? ` · erste ${s.rows.length} von ${s.count}` : ""}`
+      : `${s.count}${s.limited ? ` (erste ${s.rows.length})` : ""}`;
     children.push(div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted).child(`${s.name.toUpperCase()} · ${count}`));
     children.push(...rows.map(row));
   }

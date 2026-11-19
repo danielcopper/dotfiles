@@ -55,6 +55,6 @@ export function report(e) {
   return errorText(e);
 }
 
-// "<shown> von <total>" where the filter or "nur meine" hides some, else the
+// "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
-export const shownOf = (shown, total) => (shown < total ? `${shown} von ${total}` : String(total));
+export const shownOf = (shown, total) => (shown < total ? `${shown}/${total}` : String(total));

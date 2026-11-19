@@ -2666,8 +2666,8 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 808, 77],
     "the list: from a search of one's own, assigned, opened by sample-user; not the bot's own 1921");
   assert.ok(texts(b.render()).includes("REVIEW · 1"), "the review section, a search of one's own, keeps its row");
-  assert.ok(texts(b.render()).includes("MINE · 2 von 3"), "and says what is hidden");
-  assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3 von 4", "so does the tab");
+  assert.ok(texts(b.render()).includes("MINE · 2/3"), "and says what is hidden");
+  assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3/4", "so does the tab");
   await press(b, cx, "m");
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
 });
@@ -2699,13 +2699,28 @@ test("UI: what the filter or „nur meine“ hides is said: in the column, its c
   const column = (name) => texts(byId(b.render(), `col-${b.navColumns(b.view()).findIndex((c) => c.name === name)}`));
   assert.deepEqual([tab().at(-1), column("In progress")[1]], ["6", "3"]);
   await press(b, cx, "m");
-  assert.equal(tab().at(-1), "3 von 6");
-  assert.deepEqual(column("In progress").slice(1), ["0 von 3", "keine Karten (3 ausgeblendet)"]);
+  assert.equal(tab().at(-1), "3/6");
+  assert.deepEqual(column("In progress").slice(1), ["0/3", "keine Karten (3 ausgeblendet)"]);
+  const head = pathTo(byId(b.render(), `col-${b.navColumns(b.view()).findIndex((c) => c.name === "In progress")}`), (s) => s === "0/3").at(-1);
+  assert.ok(head.styles.includes("flex_none"), "the count keeps its width; the name gives way");
   assert.deepEqual(column("Ready").slice(1, 2), ["3"], "nothing hidden: the count alone");
   await press(b, cx, "m");
   b.filterText = "input";
-  assert.equal(tab().at(-1), "1 von 6", "the text filter too");
-  assert.deepEqual(column("Ready").slice(1, 2), ["1 von 3"]);
+  assert.equal(tab().at(-1), "1/6", "the text filter too");
+  assert.deepEqual(column("Ready").slice(1, 2), ["1/3"]);
+});
+
+test("UI: a capped list section keeps its true total while the filter or „nur meine“ thins it", async () => {
+  const data = json("github-list.json");
+  data.data.s1.issueCount = 120;
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[1].sections[1] = { name: "Mine", query: "is:pr repo:example/tender" };
+  const { b, cx, host } = await openBoard({ config: JSON.stringify(config) });
+  await press(b, cx, "2");
+  await host.answer("gh", ok(JSON.stringify(data)));
+  assert.ok(texts(b.render()).includes("MINE · 120 (erste 3)"));
+  await press(b, cx, "m");
+  assert.ok(texts(b.render()).includes("MINE · 2/3 · erste 3 von 120"), "shown of held, and held of found");
 });
 
 test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {
