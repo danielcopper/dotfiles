@@ -51,7 +51,7 @@ Apply the **deletion test** to anything you suspect is shallow: would deleting i
 
 ### 2. Present candidates as an HTML report
 
-Write a self-contained HTML file to the session scratchpad so nothing lands in the repo: `<scratchpad>/architecture-review-<timestamp>/index.html`, so each run gets a fresh directory holding only the report. Show it as the global `CLAUDE.md`, "Showing a page or image", says.
+Write a self-contained HTML file to the session scratchpad so nothing lands in the repo: `<scratchpad>/architecture-review-<timestamp>/index.html`, so each run gets a fresh directory holding only the report. Show it as the global `CLAUDE.md`, "Showing a page or image", says, served the way `~/Memory/global/show-images-as-page.md` sets out.
 
 The report uses **Tailwind via CDN** for layout and styling, and **Mermaid via CDN** for diagrams where a graph/flow/sequence reliably communicates the structure. Mix Mermaid with hand-crafted CSS/SVG visuals — use Mermaid when relationships are graph-shaped (call graphs, dependencies, sequences), and hand-built divs/SVG when you want something more editorial (mass diagrams, cross-sections, collapse animations). Each candidate gets a **before/after visualisation**. Be visual.
 
