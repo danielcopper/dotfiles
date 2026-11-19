@@ -1705,7 +1705,7 @@ test("UI: a board copy that is not shown does not take the keyboard", async () =
   assert.equal(host.focused, 0);
 });
 
-test("UI: number keys beyond the views do nothing; [ and ] go back and forth, also with AltGr, not with Control alone", async () => {
+test("UI: number keys beyond the views do nothing; [ and ] go back and forth, also with Control+Alt, not with Control alone", async () => {
   const { b, cx } = await openBoard();
   await press(b, cx, "[");
   assert.equal(b.view().id, "other", "[ from the first view wraps to the last");
@@ -2825,7 +2825,7 @@ test("UI: Enter and o with nothing selected stay herdr's: while loading, on an e
   assert.deepEqual([cx.stopped, b.notice], [0, null], "empty");
 });
 
-test("UI: a column operation on a view without columns is said; a dialog of a view that changed kind or went closes on r", async () => {
+test("UI: a column operation on a view without columns is said; a reload that finishes while a dialog is open closes it when views.json no longer has its view of that kind", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));

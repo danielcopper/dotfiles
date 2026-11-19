@@ -468,10 +468,10 @@ export default class Board extends View {
       cx.stop_propagation();
       cx.notify();
     };
-    // [ ] and / may come with Shift, or with Control+Alt (AltGr on
-    // Windows); Control alone stays herdr's. Alt alone is let through: a key
-    // herdr binds with Alt never reaches a mod (logged), so this costs herdr
-    // nothing; how AltGr arrives on a German layout is untested.
+    // [ ] and / may come with Shift, or with Control+Alt; Control alone
+    // stays herdr's. Alt alone is let through: a key herdr binds with Alt
+    // never reaches a mod (logged), so this costs herdr nothing; how AltGr
+    // arrives on a German layout is untested.
     const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();

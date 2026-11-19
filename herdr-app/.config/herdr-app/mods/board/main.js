@@ -2269,9 +2269,10 @@ export const statusModal = {
 // The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
 // and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
 // on Esc unless it is busy). A dialog keeps its state, and makes the inputs
-// it needs, in b.modal; one that belongs to a view keeps it as b.modal.view,
-// and r closes it when views.json no longer has that view of that kind. A
-// new dialog is a module here and its entry in MODALS.
+// it needs, in b.modal; one that belongs to a view keeps it as
+// b.modal.view, and a reload that finishes while it is open closes it when
+// views.json no longer has that view of that kind. A new dialog is a module
+// here and its entry in MODALS.
 
 export const MODALS = { start: startModal, status: statusModal };
 
@@ -2664,10 +2665,10 @@ export default class Board extends View {
       cx.stop_propagation();
       cx.notify();
     };
-    // [ ] and / may come with Shift, or with Control+Alt (AltGr on
-    // Windows); Control alone stays herdr's. Alt alone is let through: a key
-    // herdr binds with Alt never reaches a mod (logged), so this costs herdr
-    // nothing; how AltGr arrives on a German layout is untested.
+    // [ ] and / may come with Shift, or with Control+Alt; Control alone
+    // stays herdr's. Alt alone is let through: a key herdr binds with Alt
+    // never reaches a mod (logged), so this costs herdr nothing; how AltGr
+    // arrives on a German layout is untested.
     const typed = !(mod.control && !mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
