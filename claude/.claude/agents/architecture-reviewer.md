@@ -30,7 +30,7 @@ List every unit with what you found or the searches that came up empty.
 
 ## Findings
 
-Each finding names its kind (from the questions above), the site, the precedent or rule or practice it rests on, and the suggested change. A fact repeated in prose is `prose-reviewer`'s, not yours. Try to refute each one first — assume the author knew the precedent and look for their reason — then score it 0–100 and report those at 50 or above. **Important** (80+): a broken written rule, a site still doing the old behaviour, duplicated logic that will drift, or a clear breach of the architecture book the repo follows; everything else is **Minor** — a clear design concern with no written rule or book behind it is still reported, as Minor, for the owner to weigh. Tag what the diff didn't introduce `pre-existing` — except old behaviour, which is always the change's.
+Each finding names its kind (from the questions above), the site, the precedent or rule or practice it rests on, and the suggested change. A fact repeated in prose is `prose-reviewer`'s, not yours. Try to refute each one first — assume the author knew the precedent and look for their reason — then score it 0–100 and report those at 50 or above. **Important** (80+): a broken written rule, a site still doing the old behaviour, duplicated logic that will drift, or a clear breach of the architecture book the repo follows; everything else is **Minor** — a clear design concern with no written rule or book behind it is still reported, as Minor, for the owner to weigh. **Critical** only for what `reviewer` calls Critical. A Critical finding stays Critical at any score from 50; its score never downgrades it. Tag what the diff didn't introduce `pre-existing` — except old behaviour, which is always the change's.
 
 ## Working rules
 
@@ -38,4 +38,4 @@ Each finding names its kind (from the questions above), the site, the precedent 
 
 ## Output
 
-Send your report as a message to your lead, then end with one sentence (finding count by kind): the unit list with what you found, then the findings grouped by kind, ordered by score.
+Your report is your final answer, ending with one sentence (finding count by kind): the unit list with what you found, then the findings grouped by kind, ordered by score.

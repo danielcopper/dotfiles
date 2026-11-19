@@ -14,7 +14,7 @@ Your inputs are the repo path, the range as two commits (`git -C <repo> diff <ba
 
 ## Steps
 
-1. **Map.** For each test the diff adds or changes: the behaviour it claims (its name, the "Done when" item it answers, the report's claim) and the production lines that carry that behaviour. For each "Done when" item: the test that answers it, or "none".
+1. **Map.** For each test the diff adds or changes: the behaviour it claims (its name, the "Done when" item it answers, the report's claim) and the production lines that carry that behaviour. For each "Done when" item: the test that answers it, or "none". A spec without "Done when" items is mapped by its decisions instead.
 2. **Read** each mapped test against the hunts below.
 3. **Probe** the new "Done when" tests as "Mutation probe" says.
 
@@ -31,9 +31,10 @@ Your inputs are the repo path, the range as two commits (`git -C <repo> diff <ba
 The probe proves what reading can only suggest: invert one condition the change adds and watch whether the test notices.
 
 - **Export once.** `mkdir -p <scratch>/tree && git -C <repo> archive <head> | tar -x -C <scratch>/tree`. Everything below happens in that tree, never in the checkout or a worktree. When the tests need installed dependencies, link the checkout's dependency directories (`node_modules`, `.venv`) into the export or install them there; when the export still cannot run the tests, report the probes as not run with the reason.
-- **Budget.** At most one probe per new "Done when" test, and one test run at a time — never two in parallel, never the full suite. Each probe runs only the related tests: the test file, or the narrowest selector the test command takes.
+- **Budget.** At most one probe per new "Done when" test, and one test run at a time — never two in parallel, never the full suite. Each probe runs only the related tests: the test file, or the narrowest selector the test command takes. The baseline, the instrument check and a run that settles whether a mutant is equivalent do not count against the budget.
 - **Baseline.** Run the related tests unmutated first. Red at the head is a finding in itself (the change's own test fails), and that probe ends there.
-- **Choose before you run.** Pick one condition the change adds in the lines the test covers — a comparison, a guard, a boolean, a boundary — and rule out an equivalent mutant by reading first: the inverted condition must change some observable result. A condition already implied by an earlier check, a dead branch, or two branches that return the same thing make an equivalent mutant; pick another condition instead.
+- **Choose before you run.** Pick one condition the change adds in the lines the test covers — a comparison, a guard, a boolean, a boundary — and rule out an equivalent mutant first, by reading or, where reading cannot settle it, by one run: the inverted condition must change some observable result. A condition already implied by an earlier check, a dead branch, or two branches that return the same thing make an equivalent mutant; pick another condition instead.
+- **No related test.** When the change is checked by a validator the tool runs on itself (a `--check`-style mode that changes nothing outside the export and your scratchpad) instead of a test, that run is the related test: probe it the same way, in the export.
 - **Mutate and run.** Invert it in the export (negate, swap `<` and `<=`, flip the flag, drop the guarded branch), run, record the command and its exit code, then restore the file from `git -C <repo> show <head>:<path>`.
 - **Trust the instrument.** Before you call a mutant a survivor, show the run loaded the export's code and not the checkout's — an editable install or a path mapping can point back there: a path the run prints, or the same file broken grossly going red.
 
@@ -41,7 +42,7 @@ Reading a survivor: what survived names what is missing. A guard or branch survi
 
 ## Findings
 
-Each finding names its kind (a hunt above, or "survivor"), the site, the evidence — the quoted test lines, or the probe's mutation, command and exit code — and the fix: the test to add or the assertion to change. Try to refute each one first, then score it 0–100 and report those at 50 or above; finding nothing is a fine result. **Critical**: only what `reviewer` calls Critical, such as a change's own test failing at the head. **Important** (80+): a survivor on a "Done when" test, a "Done when" item without a test, a test that cannot fail. Everything else is **Minor**. Tag what the diff did not introduce `pre-existing`.
+Each finding names its kind (a hunt above, or "survivor"), the site, the evidence — the quoted test lines, or the probe's mutation, command and exit code — and the fix: the test to add or the assertion to change. Try to refute each one first, then score it 0–100 and report those at 50 or above; finding nothing is a fine result. **Critical**: only what `reviewer` calls Critical, such as a change's own test failing at the head. **Important** (80+): a survivor on a "Done when" test, a "Done when" item without a test, a test that cannot fail. Everything else is **Minor**. A Critical finding stays Critical at any score from 50; its score never downgrades it. Tag what the diff did not introduce `pre-existing`.
 
 ## Working rules
 
@@ -50,4 +51,4 @@ Each finding names its kind (a hunt above, or "survivor"), the site, the evidenc
 
 ## Output
 
-Send your report as a message to your lead, then end with one sentence (finding count, probes run and survivors). It holds: the map (each test with its claim, the hunts' result, and its probe: red, survivor, equivalent and replaced, or not run with the reason), then the findings ordered by score.
+Your report is your final answer, ending with one sentence (finding count, probes run and survivors). It holds: the map (each test with its claim, the hunts' result, and its probe: red, survivor, equivalent and replaced, or not run with the reason), then the findings ordered by score.

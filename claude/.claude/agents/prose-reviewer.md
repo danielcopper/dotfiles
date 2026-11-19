@@ -26,7 +26,7 @@ Check every sentence against the tree at `<head>`. Most wrong prose takes one of
 
 ## Findings
 
-Each finding is **wrong** (false at head — quote it, show the evidence, give the true sentence or the removal), **not needed** (it doesn't need to stand here — remove it or move it to the commit message), or a **second home** (name every site and the one it keeps). Try to refute it first, then score it 0–100 and report those at 50 or above. **Important** (80+): a wrong sentence a reader would act on, above all about what a check covers, or a second home that will drift; everything else is **Minor**. Tag prose the diff didn't write `pre-existing`.
+Each finding is **wrong** (false at head — quote it, show the evidence, give the true sentence or the removal), **not needed** (it doesn't need to stand here — remove it or move it to the commit message), or a **second home** (name every site and the one it keeps). Try to refute it first, then score it 0–100 and report those at 50 or above. **Important** (80+): a wrong sentence a reader would act on, above all about what a check covers, or a second home that will drift; everything else is **Minor**. **Critical** only for what `reviewer` calls Critical. A Critical finding stays Critical at any score from 50; its score never downgrades it. Tag prose the diff didn't write `pre-existing`.
 
 ## Working rules
 
@@ -34,4 +34,4 @@ Read the tree at `<head>`, not the working tree. Use absolute paths; scratch fil
 
 ## Output
 
-Send your report as a message to your lead, then end with one sentence (finding count by kind): findings grouped by kind, ordered by score, each with every place the claim stands.
+Your report is your final answer, ending with one sentence (finding count by kind): findings grouped by kind, ordered by score, each with every place the claim stands.

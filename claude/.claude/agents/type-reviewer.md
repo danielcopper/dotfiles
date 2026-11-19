@@ -36,7 +36,7 @@ Weigh each against its cost: a wrapper with no invariant, a generic parameter wi
 
 ## Findings
 
-Each finding names its axis or hazard, the type and site, the invariant at stake, and the suggested shape. Try to refute each one first — assume the author chose the shape on purpose and look for their reason — then score it 0–100 and report those at 50 or above; finding nothing is a fine result. **Important** (80+): a broken written rule, or a type that admits a state the change's own code mishandles — show the path from construction to the mishandling. A design concern with neither behind it is **Minor**, reported for the owner to weigh. **Critical** only for what `reviewer` calls Critical. Tag what the diff did not introduce `pre-existing`.
+Each finding names its axis or hazard, the type and site, the invariant at stake, and the suggested shape. Try to refute each one first — assume the author chose the shape on purpose and look for their reason — then score it 0–100 and report those at 50 or above; finding nothing is a fine result. **Important** (80+): a broken written rule, or a type that admits a state the change's own code mishandles — show the path from construction to the mishandling. A design concern with neither behind it is **Minor**, reported for the owner to weigh. **Critical** only for what `reviewer` calls Critical. A Critical finding stays Critical at any score from 50; its score never downgrades it. Tag what the diff did not introduce `pre-existing`.
 
 ## Working rules
 
@@ -45,4 +45,4 @@ Each finding names its axis or hazard, the type and site, the invariant at stake
 
 ## Output
 
-Send your report as a message to your lead, then end with one sentence (finding count by axis): each type with its invariants and what you found, then the findings ordered by score.
+Your report is your final answer, ending with one sentence (finding count by axis): each type with its invariants and what you found, then the findings ordered by score.
