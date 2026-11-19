@@ -1,4 +1,4 @@
 {
   "telemetry": false,
-  "theme": "catppuccin-mocha"
+  "theme": { "light": "copper-light", "dark": "copper-dark" }
 }

@@ -193,8 +193,11 @@ tab the leader's `b` opens, see below) and `mods/board-button/` (a button
 at the start of the tab row that does the same), the layout
 `layouts/personal.json` (herdr's `main`, cloned, plus an empty block that
 keeps focus-history running and the board button's block left of the tabs;
-its right panel has no maximum width) and the theme
-`themes/catppuccin-mocha.json`.
+its right panel has no maximum width) and the themes: `themes/copper-light.json`
+and `themes/copper-dark.json`, which `settings.json` picks by the system's light
+or dark mode, plus `themes/catppuccin-mocha.json`. The copper pair is copied
+unchanged from the copper-design release `v0.1.0` (`ports/herdr/`); on a new
+release, copy both files from its tag and update the tag here.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its comment on
 `no_folding_pkgs`), so relink it

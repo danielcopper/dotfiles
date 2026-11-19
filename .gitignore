@@ -28,6 +28,8 @@
 !/herdr-app/.config/herdr-app/themes/
 /herdr-app/.config/herdr-app/themes/*
 !/herdr-app/.config/herdr-app/themes/catppuccin-mocha.json
+!/herdr-app/.config/herdr-app/themes/copper-light.json
+!/herdr-app/.config/herdr-app/themes/copper-dark.json
 !/herdr-app/.config/herdr-app/layouts/
 /herdr-app/.config/herdr-app/layouts/*
 !/herdr-app/.config/herdr-app/layouts/personal.json
