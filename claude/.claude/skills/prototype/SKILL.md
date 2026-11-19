@@ -19,21 +19,14 @@ The two branches produce very different artifacts, so getting this wrong wastes 
 ## Rules for both
 
 1. **Throwaway, in its own worktree.** Create it with `mise run worktree-new prototype <slug>`: branch `prototype/<slug>`, worktree at the convention path the `worktree` skill gives. Inside it, put the code next to the module or page it prototypes for, named so a casual reader sees it is a prototype; a throwaway route follows the project's routing convention.
-2. **Trivial to run.** One command starts it: the project's task runner, `python <path>`, `bun <path>`, or the static server below for a logic page.
+2. **Trivial to run.** One command starts it: the project's task runner, `python <path>`, `bun <path>`, or, for a logic page, the static server "Show it" points to.
 3. **No persistence by default.** State lives in memory. If the question explicitly involves a database, hit a scratch DB or a local file with a clear "PROTOTYPE, wipe me" name.
 4. **Skip the polish.** No tests, no error handling beyond what makes the prototype _runnable_, no abstractions. The point is to learn something fast.
 5. **Surface the state.** After every action (logic) or on every variant switch (UI), print or render the full relevant state so the user can see what changed.
 
 ## Show it
 
-A page is shown the way the global `CLAUDE.md`, "Showing a page or image", says; `~/Memory/global/show-images-as-page.md` has the details behind it.
-
-- The IP is the `src` of `ip -4 route get 1.1.1.1`, read at runtime. Pick a free port (`ss -ltn` lists the taken ones).
-- A static page: `python3 -m http.server <port> --bind <ip> --directory <dir>`, run in the background. A dev server: its host option set to `<ip>`.
-- The first time on a machine, `curl` the link from the machine itself, then ask the user whether it opens on their device. When it does not, say so: opening a firewall port is the user's call (on the server, through Ansible).
-- Stop the server by its own task id or PID once the user has picked.
-
-A terminal UI runs in the user's own terminal instead: hand over the command, as [UI.md](UI.md) says.
+A page is shown as the global `CLAUDE.md`, "Showing a page or image", says, served the way `~/Memory/global/show-images-as-page.md` sets out; stop the server once the user has picked. A terminal UI runs in the user's own terminal instead: hand over the command, as [UI.md](UI.md) says.
 
 ## The user picks
 
