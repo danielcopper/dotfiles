@@ -4,12 +4,12 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { layer } from "../helpers.js";
+import { backdrop } from "../helpers.js";
 
 export const statusModal = {
   render(b, t) {
     const m = b.modal;
-    return layer(
+    return backdrop(
       t,
       "status-layer",
       v_flex()

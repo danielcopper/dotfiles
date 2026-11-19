@@ -1,15 +1,15 @@
 // The board layer: how the board finds the stack that shows it in place of
-// the shown tab's content, and how it shows that content again. The leader
-// and the board button hold the same block.
+// the shown tab's content, and how it shows that content again.
 
-import { focused, notify, run } from "herdr";
+import { focused, layout, notify, run } from "herdr";
 
 // ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that the copies match.)
 // The board layer (README, "herdr app") is a stack in the layout with a
-// block that shows the board mod and a block that shows the shown tab. It
-// is found by that shape, so its ids live in the layout alone.
+// block that shows the board mod with props { layer: true } and a block
+// that shows the shown tab. It is found by that shape, so its ids live in
+// the layout alone.
 
 // The first node of a layout tree, depth first, that `test` accepts, or
 // null.
@@ -27,7 +27,7 @@ function findNode(node, test) {
 // stack's id, its board child's and its tab child's, and whether it shows
 // the board; null for a layout without one.
 function boardLayer(root) {
-  const isBoard = (n) => n.content?.mod === "board";
+  const isBoard = (n) => n.content?.mod === "board" && n.content.props?.layer === true;
   const isTab = (n) => n.content?.tab === "active";
   const stack = findNode(root, (n) => n.type === "stack" && (n.children ?? []).some(isBoard) && n.children.some(isTab));
   if (!stack) return null;
@@ -35,20 +35,36 @@ function boardLayer(root) {
   return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
 
-// Shows the shown tab's content in place of the board and gives the
-// keyboard back to the focused pane, since layout.select leaves the
-// keyboard where it was. A failure says which stack and child.
-function showTab(layer) {
+// Shows the shown tab's content in place of the board. With `keyboard`, it
+// also gives the keyboard to the focused pane, or the focused terminal
+// outside a pane, since layout.select leaves the keyboard where it was.
+// Each failure says what failed.
+function showTab(layer, { keyboard = true } = {}) {
   try {
     run("layout.select", { stack: layer.stack, child: layer.tab });
-    const pane = focused()?.pane;
-    if (pane) run("pane.focus", { pane });
   } catch (e) {
     notify({ title: `Could not show "${layer.tab}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+    return;
   }
+  if (!keyboard) return;
+  const f = focused();
+  try {
+    if (f?.pane) run("pane.focus", { pane: f.pane });
+    else if (f?.terminal) run("pane.focus", { terminal: f.terminal });
+  } catch (e) {
+    notify({ title: "Could not give the pane the keyboard", body: String(e?.message ?? e), level: "error" });
+  }
+}
+
+// Shows the tab's content again where the layout's board layer shows the
+// board (showTab).
+function leaveLayer(options) {
+  const layer = boardLayer(layout());
+  if (layer?.shown) showTab(layer, options);
 }
 // ---- end layer ----
 
-// The block's functions for the board's other modules. In main.js all
-// modules share one scope; run from src/ each module is one of its own.
-export const layers = { boardLayer, showTab };
+// The block's functions for the board's other modules. The block stays
+// byte for byte the leader's and the button's copy, which have nothing to
+// export, so it carries no `export` of its own.
+export const layers = { boardLayer, showTab, leaveLayer };

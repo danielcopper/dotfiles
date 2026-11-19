@@ -282,8 +282,9 @@ function openFilePopup(mode) {
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that the copies match.)
 // The board layer (README, "herdr app") is a stack in the layout with a
-// block that shows the board mod and a block that shows the shown tab. It
-// is found by that shape, so its ids live in the layout alone.
+// block that shows the board mod with props { layer: true } and a block
+// that shows the shown tab. It is found by that shape, so its ids live in
+// the layout alone.
 
 // The first node of a layout tree, depth first, that `test` accepts, or
 // null.
@@ -301,7 +302,7 @@ function findNode(node, test) {
 // stack's id, its board child's and its tab child's, and whether it shows
 // the board; null for a layout without one.
 function boardLayer(root) {
-  const isBoard = (n) => n.content?.mod === "board";
+  const isBoard = (n) => n.content?.mod === "board" && n.content.props?.layer === true;
   const isTab = (n) => n.content?.tab === "active";
   const stack = findNode(root, (n) => n.type === "stack" && (n.children ?? []).some(isBoard) && n.children.some(isTab));
   if (!stack) return null;
@@ -309,17 +310,32 @@ function boardLayer(root) {
   return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
 
-// Shows the shown tab's content in place of the board and gives the
-// keyboard back to the focused pane, since layout.select leaves the
-// keyboard where it was. A failure says which stack and child.
-function showTab(layer) {
+// Shows the shown tab's content in place of the board. With `keyboard`, it
+// also gives the keyboard to the focused pane, or the focused terminal
+// outside a pane, since layout.select leaves the keyboard where it was.
+// Each failure says what failed.
+function showTab(layer, { keyboard = true } = {}) {
   try {
     run("layout.select", { stack: layer.stack, child: layer.tab });
-    const pane = focused()?.pane;
-    if (pane) run("pane.focus", { pane });
   } catch (e) {
     notify({ title: `Could not show "${layer.tab}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+    return;
   }
+  if (!keyboard) return;
+  const f = focused();
+  try {
+    if (f?.pane) run("pane.focus", { pane: f.pane });
+    else if (f?.terminal) run("pane.focus", { terminal: f.terminal });
+  } catch (e) {
+    notify({ title: "Could not give the pane the keyboard", body: String(e?.message ?? e), level: "error" });
+  }
+}
+
+// Shows the tab's content again where the layout's board layer shows the
+// board (showTab).
+function leaveLayer(options) {
+  const layer = boardLayer(layout());
+  if (layer?.shown) showTab(layer, options);
 }
 // ---- end layer ----
 
@@ -332,10 +348,10 @@ function showTab(layer) {
 // layout shows the board's tab instead (openBoard).
 function toggleBoard() {
   const layer = boardLayer(layout());
-  if (layer?.shown) return showTab(layer);
+  if (layer?.shown) return leaveLayer();
   if (layer) return showBoard(layer);
   if (shared("layout") === "personal") {
-    notify({ title: "The personal layout has no board layer", body: "layouts/personal.json needs a stack with the board and the shown tab", level: "error" });
+    notify({ title: "The personal layout has no board layer", body: "layouts/personal.json needs a stack with the shown tab and a board block whose props say layer", level: "error" });
     return;
   }
   openBoard();
@@ -343,13 +359,18 @@ function toggleBoard() {
 
 // Shows the board in place of the tab's content and gives it the keyboard
 // (its "focus" command), since layout.select leaves the keyboard where it
-// was. A failure says which stack and child.
+// was. Each failure says what failed.
 function showBoard(layer) {
   try {
     run("layout.select", { stack: layer.stack, child: layer.board });
-    run("board.focus");
   } catch (e) {
     notify({ title: `Could not show "${layer.board}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+    return;
+  }
+  try {
+    run("board.focus");
+  } catch (e) {
+    notify({ title: "Could not give the board the keyboard", body: String(e?.message ?? e), level: "error" });
   }
 }
 
@@ -680,12 +701,12 @@ export default class Leader extends View {
     closeOverlay(props().overlay);
   }
 
-  // Runs a key's command, or its function; a failure says so in a toast,
-  // as one of a bound key does (render).
-  act(key, command, args) {
+  // Runs what a key does (`go`); a failure says so in a toast naming the
+  // key. Every key goes through here: a bound one (render), a digit, an
+  // action and its repeats (press).
+  act(key, go) {
     try {
-      if (typeof command === "function") command();
-      else run(command, args);
+      go();
     } catch (e) {
       console.log(e?.stack ?? String(e));
       notify({ title: `Leader: ${key} failed`, body: String(e?.message ?? e), level: "error" });
@@ -711,7 +732,7 @@ export default class Leader extends View {
     const key = e.key === "tab" && !e.modifiers?.shift ? "Tab" : (e.key_char ?? e.key);
     if (/^[1-9]$/.test(key) && !this.repeating && this.level === LEADER) {
       this.close();
-      run("tab.select", { index: Number(key) });
+      this.act(key, () => run("tab.select", { index: Number(key) }));
       return;
     }
     const action = this.level.byKey.get(key);
@@ -726,10 +747,10 @@ export default class Leader extends View {
     }
     if (!repeats) {
       this.close();
-      this.act(key, command, args);
+      this.act(key, () => (typeof command === "function" ? command() : run(command, args)));
       return;
     }
-    this.act(key, command, args);
+    this.act(key, () => run(command, args));
     this.repeating = command;
     const generation = ++this.generation;
     cx.timer.after(REPEAT_MS, () => {
@@ -755,12 +776,7 @@ export default class Leader extends View {
     for (const k of BOUND_KEYS) {
       root = root.on_action(k.action, (_e, cx) => {
         cx.stop_propagation();
-        try {
-          k.run(this, cx, k);
-        } catch (e) {
-          console.log(e?.stack ?? String(e));
-          notify({ title: `Leader: ${k.name} failed`, body: String(e?.message ?? e), level: "error" });
-        }
+        this.act(k.name, () => k.run(this, cx, k));
       });
     }
     root = root

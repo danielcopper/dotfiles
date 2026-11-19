@@ -1,6 +1,6 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, an error's text for the UI, and the pieces that the Board, its
-// shapes and its modals draw alike (a button, a layer for a dialog, a detail
+// shapes and its modals draw alike (a button, a backdrop for a dialog, a detail
 // section, a check's color).
 
 import { div } from "gpui-kit";
@@ -48,14 +48,14 @@ export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
-// Whether this copy of the board shows. The layer's copy (`layer`) shows
+// Whether this copy of the board shows. The layer's copy (`isLayer`) shows
 // while the board layer shows the board. A copy in a tab shows while a
 // board pane is in the shown tab of the shown space, and no board layer
 // covers that tab's content. herdr tells a pane mod no id of its own pane,
 // so two Board tabs would count as one.
-export function boardShown(layer) {
+export function boardShown(isLayer) {
   const found = layers.boardLayer(layout());
-  if (layer) return Boolean(found?.shown);
+  if (isLayer) return Boolean(found?.shown);
   if (found?.shown) return false;
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
@@ -91,8 +91,9 @@ export function button(t, id, label, primary, action, disabled = false) {
     .child(label);
 }
 
-// A layer over the whole board that swallows presses, with a panel on it.
-export function layer(t, id, panel) {
+// A backdrop over the whole board that swallows presses, with a panel on
+// it.
+export function backdrop(t, id, panel) {
   return div()
     .id(id)
     .absolute()

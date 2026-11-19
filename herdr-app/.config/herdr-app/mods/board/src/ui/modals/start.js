@@ -12,7 +12,7 @@ import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine } from "../../s
 import { startSettings } from "../../config.js";
 import { call } from "../../tools.js";
 import { checkoutArgs, renderTemplate, sessionName, spaceForTab, startCommand, templateVars } from "../../actions/start.js";
-import { button, layer, machineName, onMachine, report } from "../helpers.js";
+import { backdrop, button, machineName, onMachine, report } from "../helpers.js";
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
@@ -151,7 +151,7 @@ export const startModal = {
             .child(div().text_color(t.dim).child("◂ ▸"))),
         );
     const agent = m.agents[m.agent];
-    return layer(
+    return backdrop(
       t,
       "start-layer",
       v_flex()

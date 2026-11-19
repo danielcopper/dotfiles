@@ -284,17 +284,17 @@ test("a bound key whose handling throws says so in a toast and goes no further",
   assert.deepEqual(host.closed, ["mod-leader"]);
 });
 
-// A layout with a board layer showing `active` ("tab" or "board"), the
+// A layout with a board layer showing `active` ("tab" or "b"), the
 // stack and its children named as no layout here names them.
 const layerLayout = (active) => ({ id: "root", type: "row", children: [{ id: "work", type: "column", children: [
-  { id: "layer", type: "stack", active, children: [{ id: "tab", type: "block", content: { tab: "active" } }, { id: "board", type: "block", content: { mod: "board", props: { layer: true } } }] },
+  { id: "layer", type: "stack", active, children: [{ id: "tab", type: "block", content: { tab: "active" } }, { id: "b", type: "block", content: { mod: "board", props: { layer: true } } }] },
 ] }] });
 const B = { key: "b", keystroke: "b", key_char: "b", modifiers: PLAIN };
 
 test("b shows the board layer's board, or the tab's content with the keyboard back, else the board's tab, and closes the leader", async () => {
   for (const [what, layout, runs] of [
-    ["the layer showing the tab", layerLayout("tab"), [["layout.select", { stack: "layer", child: "board" }], ["board.focus", undefined]]],
-    ["the layer showing the board", layerLayout("board"), [["layout.select", { stack: "layer", child: "tab" }], ["pane.focus", { pane: "p1" }]]],
+    ["the layer showing the tab", layerLayout("tab"), [["layout.select", { stack: "layer", child: "b" }], ["board.focus", undefined]]],
+    ["the layer showing the board", layerLayout("b"), [["layout.select", { stack: "layer", child: "tab" }], ["pane.focus", { pane: "p1" }]]],
     ["no layer", null, [["tab.new", { name: "Board", mod: "board" }]]],
   ]) {
     const { leader, cx, host } = await openLeader();
@@ -321,7 +321,7 @@ test("a raw key whose command fails says so in a toast; a failed switch of the b
   const layered = await openLeader({ failRun: "layout.select" });
   layered.host.layout = () => layerLayout("tab");
   await pressRaw(layered.leader, layered.cx, B);
-  assert.deepEqual(layered.host.notes.map((n) => [n.title, n.body]), [['Could not show "board" in "layer"', "layout.select broke"]]);
+  assert.deepEqual(layered.host.notes.map((n) => [n.title, n.body]), [['Could not show "b" in "layer"', "layout.select broke"]]);
 });
 
 // A layout with the right panel: hidden or not, its width, and the tab its
@@ -355,6 +355,14 @@ test("Z switches the right panel between its normal width and wide, and shows a 
     host.layout = () => layout;
     await pressRaw(leader, cx, { ...key("Z"), key: "z", modifiers: { ...PLAIN, shift: true } });
     assert.deepEqual(host.runs, runs, what);
+  }
+});
+
+test("a digit or a repeating key whose command fails says so in one toast naming the key", async () => {
+  for (const [k, failing] of [["1", "tab.select"], ["h", "pane.go"]]) {
+    const { leader, cx, host } = await openLeader({ failRun: failing });
+    await pressRaw(leader, cx, key(k));
+    assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[`Leader: ${k} failed`, `${failing} broke`, "error"]], k);
   }
 });
 

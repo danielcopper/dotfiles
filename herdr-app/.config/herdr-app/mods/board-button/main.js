@@ -16,8 +16,9 @@ import { focused, layout, notify, panes, run, shared, theme } from "herdr";
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that the copies match.)
 // The board layer (README, "herdr app") is a stack in the layout with a
-// block that shows the board mod and a block that shows the shown tab. It
-// is found by that shape, so its ids live in the layout alone.
+// block that shows the board mod with props { layer: true } and a block
+// that shows the shown tab. It is found by that shape, so its ids live in
+// the layout alone.
 
 // The first node of a layout tree, depth first, that `test` accepts, or
 // null.
@@ -35,7 +36,7 @@ function findNode(node, test) {
 // stack's id, its board child's and its tab child's, and whether it shows
 // the board; null for a layout without one.
 function boardLayer(root) {
-  const isBoard = (n) => n.content?.mod === "board";
+  const isBoard = (n) => n.content?.mod === "board" && n.content.props?.layer === true;
   const isTab = (n) => n.content?.tab === "active";
   const stack = findNode(root, (n) => n.type === "stack" && (n.children ?? []).some(isBoard) && n.children.some(isTab));
   if (!stack) return null;
@@ -43,17 +44,32 @@ function boardLayer(root) {
   return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
 
-// Shows the shown tab's content in place of the board and gives the
-// keyboard back to the focused pane, since layout.select leaves the
-// keyboard where it was. A failure says which stack and child.
-function showTab(layer) {
+// Shows the shown tab's content in place of the board. With `keyboard`, it
+// also gives the keyboard to the focused pane, or the focused terminal
+// outside a pane, since layout.select leaves the keyboard where it was.
+// Each failure says what failed.
+function showTab(layer, { keyboard = true } = {}) {
   try {
     run("layout.select", { stack: layer.stack, child: layer.tab });
-    const pane = focused()?.pane;
-    if (pane) run("pane.focus", { pane });
   } catch (e) {
     notify({ title: `Could not show "${layer.tab}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+    return;
   }
+  if (!keyboard) return;
+  const f = focused();
+  try {
+    if (f?.pane) run("pane.focus", { pane: f.pane });
+    else if (f?.terminal) run("pane.focus", { terminal: f.terminal });
+  } catch (e) {
+    notify({ title: "Could not give the pane the keyboard", body: String(e?.message ?? e), level: "error" });
+  }
+}
+
+// Shows the tab's content again where the layout's board layer shows the
+// board (showTab).
+function leaveLayer(options) {
+  const layer = boardLayer(layout());
+  if (layer?.shown) showTab(layer, options);
 }
 // ---- end layer ----
 
@@ -66,10 +82,10 @@ function showTab(layer) {
 // layout shows the board's tab instead (openBoard).
 function toggleBoard() {
   const layer = boardLayer(layout());
-  if (layer?.shown) return showTab(layer);
+  if (layer?.shown) return leaveLayer();
   if (layer) return showBoard(layer);
   if (shared("layout") === "personal") {
-    notify({ title: "The personal layout has no board layer", body: "layouts/personal.json needs a stack with the board and the shown tab", level: "error" });
+    notify({ title: "The personal layout has no board layer", body: "layouts/personal.json needs a stack with the shown tab and a board block whose props say layer", level: "error" });
     return;
   }
   openBoard();
@@ -77,13 +93,18 @@ function toggleBoard() {
 
 // Shows the board in place of the tab's content and gives it the keyboard
 // (its "focus" command), since layout.select leaves the keyboard where it
-// was. A failure says which stack and child.
+// was. Each failure says what failed.
 function showBoard(layer) {
   try {
     run("layout.select", { stack: layer.stack, child: layer.board });
-    run("board.focus");
   } catch (e) {
     notify({ title: `Could not show "${layer.board}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
+    return;
+  }
+  try {
+    run("board.focus");
+  } catch (e) {
+    notify({ title: "Could not give the board the keyboard", body: String(e?.message ?? e), level: "error" });
   }
 }
 
@@ -103,42 +124,27 @@ function openBoard() {
 }
 // ---- end board ----
 
+// A press on the button, whichever mouse button: it switches at once, on
+// the press. It starts no window drag, and a failure says so in a toast.
+// The shown board takes any press outside it, this one too, as one that
+// shows the tab's content after the press (mods/board/, pressOutside); a
+// switch on the release would undo that.
+function press(_e, cx) {
+  cx.stop_propagation();
+  try {
+    toggleBoard();
+  } catch (e) {
+    console.log(e?.stack ?? String(e));
+    notify({ title: "Board button failed", body: String(e?.message ?? e), level: "error" });
+  }
+}
+
 export default class BoardButton extends View {
-  init() {
-    // The focus the board was shown with, while it shows; null while the
-    // tab's content shows or before a first focus.
-    this.seen = null;
-  }
+  init() {}
 
-  // On every render, which herdr runs when the focus or the layout changes:
-  // while the board shows, a focus on another space, tab or pane than the
-  // one it was shown with shows the tab's content again. The terminal is
-  // left out, so an agent that restarts or exits in the same pane keeps the
-  // board. No focus at all changes nothing; the first focus after it is
-  // the one compared with. The switch waits until after the render.
-  followFocus(layer, cx) {
-    if (!layer?.shown) {
-      this.seen = null;
-      return;
-    }
-    const f = focused();
-    if (!f) return;
-    const now = JSON.stringify([f.space, f.tab, f.pane]);
-    if (this.seen === null) this.seen = now;
-    else if (now !== this.seen) {
-      this.seen = now;
-      cx.timer.after(0, () => {
-        const current = boardLayer(layout());
-        if (current?.shown) showTab(current);
-      });
-    }
-  }
-
-  render(cx) {
+  render() {
     const t = theme();
-    const layer = boardLayer(layout());
-    this.followFocus(layer, cx);
-    const shown = Boolean(layer?.shown);
+    const shown = Boolean(boardLayer(layout())?.shown);
     return h_flex()
       .size_full()
       .pl(10)
@@ -160,15 +166,9 @@ export default class BoardButton extends View {
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
           .tooltip("Board")
           .accessibility_label("Board")
-          // The press is the button's, not the start of a window drag. It
-          // switches at once, on the press: the shown board takes any
-          // press outside it, this one too, as one that shows the tab's
-          // content after the press (mods/board/, pressOutside), which a
-          // switch on the release would undo.
-          .on_mouse_down("left", (_e, cx) => {
-            cx.stop_propagation();
-            toggleBoard();
-          })
+          .on_mouse_down("left", press)
+          .on_mouse_down("right", press)
+          .on_mouse_down("middle", press)
           .child(svg("mods/board-button/board.svg").size(14)),
       );
   }

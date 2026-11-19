@@ -42,7 +42,7 @@
 // kinds/board.js (a board's columns and cards), select.js (filter, "nur
 // meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
 // az), actions/start.js (starting a session), ui/helpers.js, ui/layer.js
-// (the board layer, a block the leader and the board button share), ui/shapes/
+// (the board layer), ui/shapes/
 // (how a view's data is drawn and worked: board, prs, placeholder) and this
 // one, the Board, which looks the shape up. Their data logic is
 // plain exported functions, tested with a few UI paths by
@@ -50,7 +50,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { appHome, checking, exec, layout, nextCommand, notify, readTextFile, run, settings, spaces, theme } from "herdr";
+import { appHome, checking, exec, focused, layout, nextCommand, notify, props, readTextFile, run, settings, spaces, theme } from "herdr";
 import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel, updatedLabel } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
@@ -91,10 +91,13 @@ const TICK_MS = 30000;
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 
 export default class Board extends View {
-  init(props, cx) {
-    // The board layer's copy (its block's props in the layout), not one in
-    // a tab.
-    this.isLayer = props?.layer === true;
+  init(initProps, cx) {
+    this.initProps = initProps;
+    // Whether this copy showed at the last render (null before the first
+    // look), and the focus the layer's board was shown with (watchShown,
+    // followFocus).
+    this.wasShown = null;
+    this.seen = null;
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
@@ -135,14 +138,17 @@ export default class Board extends View {
     if (checking()) return;
     // A copy that is not shown (a reload of a background tab, or the layer's
     // copy behind the tab's content) leaves the keyboard where it is.
-    if (boardShown(this.isLayer)) {
+    this.wasShown = boardShown(this.isLayer());
+    if (this.wasShown) {
       this.handle.focus();
       cx.timer.after(300, () => this.handle.focus());
     }
+    // "focus" (board.focus, pane.go) reaches every copy; only one that
+    // shows takes the keyboard.
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
-        if (command === "focus") this.handle.focus();
+        if (command === "focus" && boardShown(this.isLayer())) this.handle.focus();
         cx.notify();
       }
     });
@@ -303,7 +309,7 @@ export default class Board extends View {
   // Every TICK_MS while the board shows: the shown view once refreshMinutes
   // have passed since it was last tried.
   tick(cx) {
-    if (!this.config || !boardShown(this.isLayer)) return;
+    if (!this.config || !boardShown(this.isLayer())) return;
     const every = this.config.refreshMinutes * 60000;
     const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
@@ -445,29 +451,72 @@ export default class Board extends View {
     const session = linkedSession(item, spaces());
     if (!session) return MODALS.start.open(this, view, item, cx);
     // The session may be the tab behind the board layer, which selecting
-    // it does not show.
-    this.leaveLayer();
-    run("space.select", { id: session.space });
-    if (session.tab) run("tab.select", { id: session.tab });
+    // it does not show; leaving the layer first keeps its pane.focus from
+    // undoing the selection.
+    if (this.isLayer()) layers.leaveLayer();
+    try {
+      run("space.select", { id: session.space });
+      if (session.tab) run("tab.select", { id: session.tab });
+    } catch (e) {
+      notify({ title: `Sitzung nicht gezeigt: Space ${session.space}, Tab ${session.tab ?? "–"}`, body: errorText(e), level: "error" });
+    }
   }
 
-  // As the board layer's shown board: shows the tab's content again.
-  leaveLayer() {
-    if (!this.isLayer) return;
-    const layer = layers.boardLayer(layout());
-    if (layer?.shown) layers.showTab(layer);
+  // Whether this copy is the board layer's: its block's props say so
+  // (props(), as herdr gives them now, else as init got them).
+  isLayer() {
+    return (props()?.layer ?? this.initProps?.layer) === true;
   }
 
-  // A press anywhere outside the board while it shows as the layer's board
-  // shows the tab's content again (README, "herdr app"). herdr tells a mod
-  // of no click on a tab, and a click on the shown tab changes nothing a
-  // mod sees, so every press outside counts. The board button's press
-  // arrives here too, and the button switches on it by itself; so the
-  // switch waits until after the press, and goes only where the layer still
-  // shows the board.
+  // A press outside the board while it shows as the layer's board shows the
+  // tab's content again (README, "herdr app"). On the tab bar there is no
+  // other way: herdr tells a mod of no click on a tab, and a click on the
+  // shown tab changes nothing a mod sees. Every other press counts by
+  // choice. The board button's press arrives here too, and the button
+  // switches on it by itself; so the switch waits until after the press,
+  // and goes only where the layer still shows the board. The pane gets the
+  // keyboard back only if the board had it at the press; otherwise what
+  // was pressed keeps it (the leader's popup, Files, Changes).
   pressOutside(cx) {
-    if (!this.isLayer || !layers.boardLayer(layout())?.shown) return;
-    cx.timer.after(0, () => this.leaveLayer());
+    if (!this.isLayer() || !layers.boardLayer(layout())?.shown) return;
+    const keyboard = this.handle.is_focused() || this.filtering;
+    cx.timer.after(0, () => layers.leaveLayer({ keyboard }));
+  }
+
+  // On every render, which herdr runs when the layout, the tabs or the focus
+  // change: a copy that was not shown and now shows takes the keyboard,
+  // whoever showed it, unless its dialog or its filter has it. The focus
+  // waits until after the render and goes only where the copy still shows.
+  watchShown(cx) {
+    const shown = boardShown(this.isLayer());
+    const was = this.wasShown;
+    this.wasShown = shown;
+    if (!shown || was !== false) return;
+    cx.timer.after(0, () => {
+      if (boardShown(this.isLayer()) && !this.modal && !this.filtering) this.handle.focus();
+    });
+  }
+
+  // On every render too: while this copy shows as the layer's board, a
+  // focus on another space, tab or pane than the one it was shown with
+  // shows the tab's content again (README, "herdr app"). The terminal is
+  // left out, so a program that restarts or exits in the same pane keeps
+  // the board. No focus at all is never the one compared with; before a
+  // first focus, the first focus becomes it. The switch waits until after
+  // the render and goes only where the layer still shows the board.
+  followFocus(cx) {
+    if (!this.isLayer() || !layers.boardLayer(layout())?.shown) {
+      this.seen = null;
+      return;
+    }
+    const f = focused();
+    if (!f) return;
+    const now = JSON.stringify([f.space, f.tab, f.pane]);
+    if (this.seen === null) this.seen = now;
+    else if (now !== this.seen) {
+      this.seen = now;
+      cx.timer.after(0, () => layers.leaveLayer());
+    }
   }
 
   closeModal(cx) {
@@ -523,7 +572,7 @@ export default class Board extends View {
       else if (this.filterText) {
         this.filterInput.set_value("");
         this.filterText = "";
-      } else this.leaveLayer();
+      } else if (this.isLayer()) layers.leaveLayer();
       return done();
     }
     if (!view) return;
@@ -559,7 +608,9 @@ export default class Board extends View {
 
   // ---- drawing ----
 
-  render() {
+  render(cx) {
+    this.watchShown(cx);
+    this.followFocus(cx);
     const t = theme();
     const mono = settings().font_family ?? "JetBrains Mono";
     const view = this.view();
