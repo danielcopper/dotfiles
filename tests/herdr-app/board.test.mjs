@@ -397,6 +397,10 @@ test("an old views.json with its views at the top is not read; the board says wh
 test("sources must be an object of azure and github, with at least one view", () => {
   assert.deepEqual(board.validateConfig({}).errors, ["„sources“ fehlt: „sources.azure“ oder „sources.github“"]);
   assert.deepEqual(board.validateConfig({ sources: [] }).errors, ["„sources“ muss ein Objekt sein"]);
+  const old = board.validateConfig({ views: [], sources: "x" }).errors;
+  assert.equal(old.length, 2, "beside an old top-level views, both are said");
+  assert.match(old[0], /alte Form/);
+  assert.equal(old[1], "„sources“ muss ein Objekt sein");
   assert.deepEqual(board.validateConfig({ sources: {} }).errors, ["„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“"]);
   const { config, errors } = board.validateConfig({ sources: { jira: {}, azure: { org: "https://dev.azure.com/o", contexts: [{ prs: { project: "P" } }] } } });
   assert.deepEqual(errors, ["„sources.jira“ gibt es nicht (nur „azure“ und „github“)"]);
@@ -1588,7 +1592,10 @@ function fakeCx() {
       every: (ms, fn) => cx.every.push(fn),
     },
     notify() {},
-    stop_propagation() {},
+    stopped: 0,
+    stop_propagation() {
+      cx.stopped++;
+    },
     open_url(url) {
       (cx.opened ??= []).push(url);
     },
@@ -2538,6 +2545,32 @@ test("UI: an Azure view drawn as a board has what the board shape reads, and dra
   const root = b.render();
   assert.ok(texts(root).includes("In Progress"), "the board's columns");
   assert.equal(b.shape(view), board.SHAPES.board, "the data's shape wins over the placeholder");
+});
+
+test("UI: switching a team's view loads the view now shown, where its source reads one", async () => {
+  const { b, cx } = await bootBoard({ stored: { source: "azure" } });
+  const loads = [];
+  b.sources.azure.views.backlog = { load: async (view) => (loads.push(view.id), { data: { shape: "prs", sections: [], viewer: null }, warnings: [] }) };
+  await press(b, cx, "v");
+  assert.deepEqual(loads, ["azure:team:Example Project/Example Team:backlog"]);
+  await click(b, cx, "team-view-sprint");
+  await click(b, cx, "team-view-backlog");
+  assert.equal(loads.length, 1, "not again while it is fresh");
+});
+
+test("UI: on a view without items Enter, o and the arrows stay herdr's", async () => {
+  const { b, cx } = await bootBoard({ stored: { source: "azure" } });
+  for (const k of ["enter", "o", "j", "down"]) await press(b, cx, k);
+  assert.equal(cx.stopped, 0, "none was taken");
+  assert.equal(b.notice, null, "no „Dazu gibt es keine Seite“");
+});
+
+test("UI: Alt with [ or ] stays herdr's (alt-[ and alt-] are its tab keys); AltGr as Control+Alt is typed", async () => {
+  const { b, cx } = await openBoard();
+  await press(b, cx, "]", { modifiers: { alt: true } });
+  assert.deepEqual([b.context().id, cx.stopped], ["github:mine", 0]);
+  await press(b, cx, "]", { modifiers: { control: true, alt: true } });
+  assert.equal(b.context().id, "github:prs");
 });
 
 test("the GitHub tab ids and a team's switch hint have one home", () => {

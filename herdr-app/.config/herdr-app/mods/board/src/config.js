@@ -243,7 +243,8 @@ export function validateConfig(raw) {
       errors.push(...read.errors);
     }
     if (!azure && !github) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
-  } else if (!old) errors.push(raw.sources === undefined ? "„sources“ fehlt: „sources.azure“ oder „sources.github“" : "„sources“ muss ein Objekt sein");
+  } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
+  else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
   return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }

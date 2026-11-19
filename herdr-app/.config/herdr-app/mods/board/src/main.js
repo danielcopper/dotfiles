@@ -394,7 +394,7 @@ export default class Board extends View {
     if (context?.kind !== "team" || !context.views.includes(name)) return;
     this.teamViews[context.id] = name;
     store.set(`teamView:${context.id}`, name);
-    cx.notify();
+    this.showContext(cx);
   }
 
   // v: the shown team context's next view.
@@ -592,8 +592,9 @@ export default class Board extends View {
       cx.notify();
     };
     // [ ] and / may come with Shift, or AltGr, which Windows reports as
-    // Control+Alt; Control alone stays herdr's.
-    const typed = !(mod.control && !mod.alt) && !mod.platform;
+    // Control+Alt; Control alone and Alt alone stay herdr's (it binds alt-[,
+    // alt-] and alt-digits).
+    const typed = Boolean(mod.control) === Boolean(mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
       const at = tabs.findIndex((c) => c.id === this.context()?.id);
@@ -620,6 +621,8 @@ export default class Board extends View {
     }
     if (!view) return;
     const shape = this.shape(view);
+    // A view without items leaves Enter, o and the arrows to herdr.
+    if (!shape.items) return;
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));

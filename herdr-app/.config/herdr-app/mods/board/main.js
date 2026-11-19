@@ -363,7 +363,8 @@ export function validateConfig(raw) {
       errors.push(...read.errors);
     }
     if (!azure && !github) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
-  } else if (!old) errors.push(raw.sources === undefined ? "„sources“ fehlt: „sources.azure“ oder „sources.github“" : "„sources“ muss ein Objekt sein");
+  } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
+  else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
   return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }
@@ -1687,8 +1688,8 @@ function tellUnclear(b, due, data, cx) {
 // ==== src/ui/shapes/placeholder.js ====
 
 // The placeholder shape: what a view whose source reads nothing for it yet
-// shows, the text of its kind (KINDS). View fields it reads: source,
-// layout.
+// shows, the text of its kind (KINDS). It has no items, so Enter, o and the
+// arrows are left to herdr. View fields it reads: source, layout.
 
 export const placeholderShape = {
   nav: () => [],
@@ -2121,7 +2122,7 @@ export default class Board extends View {
     if (context?.kind !== "team" || !context.views.includes(name)) return;
     this.teamViews[context.id] = name;
     store.set(`teamView:${context.id}`, name);
-    cx.notify();
+    this.showContext(cx);
   }
 
   // v: the shown team context's next view.
@@ -2319,8 +2320,9 @@ export default class Board extends View {
       cx.notify();
     };
     // [ ] and / may come with Shift, or AltGr, which Windows reports as
-    // Control+Alt; Control alone stays herdr's.
-    const typed = !(mod.control && !mod.alt) && !mod.platform;
+    // Control+Alt; Control alone and Alt alone stay herdr's (it binds alt-[,
+    // alt-] and alt-digits).
+    const typed = Boolean(mod.control) === Boolean(mod.alt) && !mod.platform;
     if (typed && (ch === "[" || ch === "]")) {
       const tabs = this.contexts();
       const at = tabs.findIndex((c) => c.id === this.context()?.id);
@@ -2347,6 +2349,8 @@ export default class Board extends View {
     }
     if (!view) return;
     const shape = this.shape(view);
+    // A view without items leaves Enter, o and the arrows to herdr.
+    if (!shape.items) return;
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));

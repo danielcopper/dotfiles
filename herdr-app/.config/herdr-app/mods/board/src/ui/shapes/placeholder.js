@@ -1,6 +1,6 @@
 // The placeholder shape: what a view whose source reads nothing for it yet
-// shows, the text of its kind (KINDS). View fields it reads: source,
-// layout.
+// shows, the text of its kind (KINDS). It has no items, so Enter, o and the
+// arrows are left to herdr. View fields it reads: source, layout.
 
 import { div } from "gpui-kit";
 import { kindOf } from "../../kinds/index.js";
