@@ -37,18 +37,21 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     quotes no `$`, backtick or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command is denied
     when its text
     - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge or auto-merge
-      mutation);
+      mutation, or with `gh` the word `pr` followed later by the word `merge`);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
-    - names `gh`, `az`, `curl` or `wget` (also as a path's last part) and reads a request from a file (an `@`, an
-      `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i` option),
-      mentions `merge`, or runs them through `xargs` or `parallel`;
+    - names a tool whose request body can merge — `gh` with `api`, `curl`, `wget`, or `az` with `rest`,
+      `devops invoke` or `repos pr` (also as a path's last part) — and reads a request from a file (an `@`, an
+      `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i` option)
+      or mentions `merge`;
+    - runs `gh`, `az`, `curl` or `wget` through `xargs` or `parallel`;
     - holds a construct the shell expands at run time (a `$`, a backtick, a `{a,b}` or `{a..b}` brace, a `*`, `?` or
       `[` next to a letter) next to a mention of `merge`, `complet` or `alias`, or next to `gh`, `az`, `curl` or
       `wget`;
     - is nested too deep, too long or holds too many substitutions to check.
 
-    False denials are accepted: a merge mentioned in a message next to one of those tools is denied like a call.
+    Other gh subcommands (issues, comments, reviews, releases, labels …) may read their body from a file. False
+    denials are accepted: a merge mentioned in a message next to one of those tools is denied like a call.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
     `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions
     one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of

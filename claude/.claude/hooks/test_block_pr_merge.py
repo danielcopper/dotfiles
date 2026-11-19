@@ -53,6 +53,11 @@ PASSES = [
     'gh pr create --title "fix(hooks): merge the two lists" --body-file body.md',
     "gh -R o/r pr create --title 'feat: x' --body-file b.md --base main",
     "gh pr edit 12 --body-file body.md",
+    # gh subcommands whose request body cannot merge, reading it from a file
+    'gh issue create --title "fix(dev): say which password a target\'s setup asks for" --body-file /var/tmp/x/issue.md',
+    "gh issue comment 12 --body-file c.md",
+    "gh pr comment 12 --body-file c.md",
+    "gh release create v1 --notes-file n.md",
     # commands that mention a merge without gh, az, curl or wget
     "git log --merges --oneline",
     "git merge --ff-only origin/main",

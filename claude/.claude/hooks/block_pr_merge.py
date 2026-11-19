@@ -20,6 +20,12 @@ GH = re.compile(r"(?<![\w.-])gh(?![\w.-])")
 AZ = re.compile(r"(?<![\w.-])az(?![\w.-])")
 FEEDER = re.compile(r"(?<![\w.-])(xargs|parallel)(?![\w.-])")
 EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
+# Where a request body can merge: gh api, curl, wget, and az rest, devops invoke and repos pr.
+BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
+GH_API = re.compile(r"(?<![\w.-])api(?![\w.-])")
+AZ_BODY = re.compile(r"\brest\b|\bdevops\s+invoke\b|\brepos\s+pr\b")
+PR_WORD = re.compile(r"\bpr\b")
+MERGE_WORD = re.compile(r"\bmerge\b")
 
 PR_MERGE = re.compile(
     r"\bpr\s+merge\b|pulls/[^\s/]+/merge|/merges\b|mergepullrequest|enablepullrequestautomerge"
@@ -103,18 +109,27 @@ def check(command: str) -> str | None:
     plain = stripped(command)
     lower = plain.lower()
     network = NETWORK.search(lower) is not None
+    gh = GH.search(lower) is not None
+    az = AZ.search(lower) is not None
+    body_tool = (
+        BODY_TOOL.search(lower) is not None
+        or (gh and GH_API.search(lower) is not None)
+        or (az and AZ_BODY.search(lower) is not None)
+    )
     if PR_MERGE.search(lower):
         return "mentions a PR merge"
-    if ALIAS.search(lower) and ALIAS_VERB.search(lower) and GH.search(lower):
+    if gh and (pr := PR_WORD.search(lower)) and MERGE_WORD.search(lower, pr.end()):
+        return "mentions a PR merge"
+    if ALIAS.search(lower) and ALIAS_VERB.search(lower) and gh:
         return "defines a gh alias"
-    if AZ.search(lower) and (
+    if az and (
         AZ_COMPLETE.search(lower) or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower)
     ):
         return "completes an Azure DevOps pull request"
-    if network and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
+    if body_tool and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
         return "reads a request from a file"
-    if network and "merge" in lower:
-        return "mentions a merge next to gh, az, curl or wget"
+    if body_tool and "merge" in lower:
+        return "mentions a merge next to gh api, az, curl or wget"
     if network and FEEDER.search(lower):
         return "feeds gh, az, curl or wget through xargs or parallel"
     if runs_at_run_time(command):
