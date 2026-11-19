@@ -864,11 +864,16 @@ test("the PR list is one GraphQL request with one search per section", () => {
   assert.ok(args.includes("q0=is:pr review-requested:@me"));
   assert.ok(args.includes("q1=is:pr author:@me"));
   assert.match(args.find((a) => a.startsWith("query=")), /^query=query\([^)]*\) \{\nviewer \{ login \}\n/, "and who gh runs as");
+  assert.match(args.find((a) => a.startsWith("query=")), /assignees\(first: 10\) \{ nodes \{ login \} \}\s+reviewRequests\(first: 20\) \{ nodes \{ requestedReviewer \{ \.\.\. on User \{ login \} \} \} \}/,
+    "and each pull request's assignees and the people asked to review it");
 });
 
 test("PR sections hold their rows once, with checks, review state and branch", () => {
   const list = board.parseGithubList(json("github-list.json"), listView());
   assert.deepEqual(list.sections.map((s) => [s.name, s.count, s.rows.map((r) => r.number)]), [["Review", 1, [2820]], ["Mine", 4, [1921, 808, 77]]]);
+  assert.deepEqual(list.sections.flatMap((s) => s.rows.map((r) => [r.number, r.assignees, r.reviewers])), [
+    [2820, [], ["sample-user"]], [1921, [], []], [808, ["sample-user"], []], [77, [], []],
+  ], "a team's review request names no one");
   const [review] = list.sections[0].rows;
   assert.deepEqual([review.repoShort, review.author, review.review, review.branch, review.checks.short, review.checks.text],
     ["tender", "sample-contributor", "noch kein Review", "pr/summary-card", "✓ 15", "15 bestanden · 3 übersprungen"]);
