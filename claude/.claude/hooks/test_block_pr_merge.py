@@ -58,6 +58,10 @@ PASSES = [
     "gh issue comment 12 --body-file c.md",
     "gh pr comment 12 --body-file c.md",
     "gh release create v1 --notes-file n.md",
+    # api, rest and the like as plain words, not in the subcommand position
+    'gh issue create --title "fix the api client" --body-file b.md',
+    "gh issue comment 3 --body-file /tmp/api/c.md",
+    'az boards work-item create --title "rest client" --description @d.md',
     # commands that mention a merge without gh, az, curl or wget
     "git log --merges --oneline",
     "git merge --ff-only origin/main",
@@ -241,6 +245,13 @@ DENIED = [
     "gh pr edit 12 --body-file b.md curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge",
     # a long open brace before a brace-built word
     ": {" + "a," * 40_000 + " ; gh pr {m..m}erge 3",
+    # api or rest in the subcommand position, also after options and their values
+    "gh --input b.json api graphql",
+    "gh -R o/r api graphql -F query=@q.graphql",
+    "x=1;gh api graphql --input q.json",
+    "az --only-show-errors rest --method put --uri u --body @b.json",
+    "az -o json devops invoke --in-file m.json",
+    "gh " + "-x " * 60 + "api --input q.json",
 ]
 
 REASONS = {

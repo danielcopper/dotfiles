@@ -22,8 +22,8 @@ FEEDER = re.compile(r"(?<![\w.-])(xargs|parallel)(?![\w.-])")
 EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
 # Where a request body can merge: gh api, curl, wget, and az rest, devops invoke and repos pr.
 BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
-GH_API = re.compile(r"(?<![\w.-])api(?![\w.-])")
-AZ_BODY = re.compile(r"\brest\b|\bdevops\s+invoke\b|\brepos\s+pr\b")
+TOKEN_SPLIT = re.compile(r"[\s;&|()<>`]+")
+MAX_OPTION_WALK = 50
 PR_WORD = re.compile(r"\bpr\b")
 MERGE_WORD = re.compile(r"\bmerge\b")
 
@@ -101,6 +101,46 @@ def pr_write(command: str) -> bool:
     return len(NETWORK.findall(text.lower())) == 1
 
 
+def subcommand_positions(tokens: list[str], at: int) -> list[int] | None:
+    """Indexes of the words that can be the subcommand of the tool at *tokens[at]*, past its
+    options: a word right after an option may be that option's value or the subcommand, so both
+    count. None when the options run past MAX_OPTION_WALK words, where the walk gives up."""
+    found: list[int] = []
+    after_option = False
+    end = min(len(tokens), at + 1 + MAX_OPTION_WALK)
+    for i in range(at + 1, end):
+        if tokens[i].startswith("-"):
+            after_option = True
+            continue
+        found.append(i)
+        if not after_option:
+            return found
+        after_option = False
+    return found if end == len(tokens) else None
+
+
+def body_subcommand(lower: str) -> bool:
+    """Whether gh runs `api`, or az runs `rest`, `devops invoke` or `repos pr`, in the position
+    of their subcommand, past any options: there a request body can merge."""
+    tokens = TOKEN_SPLIT.split(lower)
+    for at, token in enumerate(tokens):
+        tool = token.rsplit("/", 1)[-1]
+        if tool not in ("gh", "az"):
+            continue
+        positions = subcommand_positions(tokens, at)
+        if positions is None:
+            return True
+        for i in positions:
+            pair = (tokens[i], tokens[i + 1] if i + 1 < len(tokens) else "")
+            if tool == "gh" and pair[0] == "api":
+                return True
+            if tool == "az" and (
+                pair[0] == "rest" or pair in (("devops", "invoke"), ("repos", "pr"))
+            ):
+                return True
+    return False
+
+
 def check(command: str) -> str | None:
     """What makes *command* a possible merge, or None."""
     if len(command) > MAX_LENGTH:
@@ -112,11 +152,7 @@ def check(command: str) -> str | None:
     network = NETWORK.search(lower) is not None
     gh = GH.search(lower) is not None
     az = AZ.search(lower) is not None
-    body_tool = (
-        BODY_TOOL.search(lower) is not None
-        or (gh and GH_API.search(lower) is not None)
-        or (az and AZ_BODY.search(lower) is not None)
-    )
+    body_tool = BODY_TOOL.search(lower) is not None or body_subcommand(lower)
     if PR_MERGE.search(lower):
         return "mentions a PR merge"
     if gh and (pr := PR_WORD.search(lower)) and MERGE_WORD.search(lower, pr.end()):

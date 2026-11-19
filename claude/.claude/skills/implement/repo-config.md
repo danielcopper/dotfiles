@@ -40,8 +40,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       mutation, or with `gh` the word `pr` followed later by the word `merge`);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
-    - names a tool whose request body can merge — `gh` with `api`, `curl`, `wget`, or `az` with `rest`,
-      `devops invoke` or `repos pr` (also as a path's last part) — and reads a request from a file (an `@`, an
+    - names a tool whose request body can merge — `curl`, `wget`, or `gh api`, `az rest`, `az devops invoke` or
+      `az repos pr` with the subcommand right after the tool's options (also as a path's last part) — and reads a request from a file (an `@`, an
       `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i` option)
       or mentions `merge`;
     - runs `gh`, `az`, `curl` or `wget` through `xargs` or `parallel`;
