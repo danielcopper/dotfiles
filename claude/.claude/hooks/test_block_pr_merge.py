@@ -48,6 +48,8 @@ PASSES = [
     'curl -sH "Authorization: Bearer $TOKEN" https://api.github.com/repos/o/r/pulls/12',
     "bash -o pipefail -c 'gh pr view 3 | head'",
     "gh api https://api.github.com/graphql -f query='query { viewer { login } }'",
+    "echo $(date) $(whoami) `hostname`",
+    "echo " + "$(true) " * 64,
 ]
 
 DENIED = [
@@ -116,6 +118,11 @@ DENIED = [
     "gh api https://ghe.example.com/api/graphql --input q.json",
     'gh api graphql -f query="$(cat q.graphql)"',
     "gh api graphql --raw-field=query=@q.graphql",
+    # past what the hook checks: nesting, substitutions, length
+    "eval " * 7 + "echo hi",
+    "echo " + "$(true) " * 65,
+    "echo " + "x" * 100_001,
+    "echo $(echo $(echo $(gh pr merge 3)))",
 ]
 
 

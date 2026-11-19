@@ -68,6 +68,8 @@ WGET_VALUE_FLAGS = {
     "--body-data", "--post-data", "-o", "--output-file", "-U", "--user-agent",
 }  # fmt: skip
 MAX_DEPTH = 5
+MAX_LENGTH = 100_000
+MAX_SUBSTITUTIONS = 64
 
 REASON = (
     "Merging a pull request is the owner's alone (merge_policy in "
@@ -180,10 +182,34 @@ def segments(text: str) -> list[list[Word]]:
 
 
 def substitutions(text: str) -> list[str]:
-    """Text that runs inside $( ... ) or backticks, from each opening to the end."""
-    inner = [text[match.end() :] for match in re.finditer(r"\$\(", text)]
-    inner += text.split("`")[1::2]
-    return inner
+    """Text that runs inside $( ... ) or backticks, found in one pass; an open one runs to the end."""
+    found: list[str] = []
+    opened: list[int | None] = []  # start of each open $( ), None for a plain (
+    backtick: int | None = None
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "$" and text[i + 1 : i + 2] == "(":
+            opened.append(i + 2)
+            i += 2
+            continue
+        if c == "(":
+            opened.append(None)
+        elif c == ")" and opened:
+            start = opened.pop()
+            if start is not None:
+                found.append(text[start:i])
+        elif c == "`":
+            if backtick is None:
+                backtick = i + 1
+            else:
+                found.append(text[backtick:i])
+                backtick = None
+        i += 1
+    found += [text[start:] for start in opened if start is not None]
+    if backtick is not None:
+        found.append(text[backtick:])
+    return found
 
 
 def takes_value(flag: str, value_flags: set[str]) -> bool:
@@ -331,8 +357,13 @@ def word_reason(name: str, args: list[Word], depth: int) -> str | None:
 def check(command: str, depth: int = 0) -> str | None:
     """The reason to refuse *command*, or None."""
     if depth > MAX_DEPTH:
-        return None
-    for text in [command, *substitutions(command)]:
+        return "the command nests shells or eval too deep to check"
+    if len(command) > MAX_LENGTH:
+        return "the command is too long to check"
+    inner = substitutions(command)
+    if len(inner) > MAX_SUBSTITUTIONS:
+        return "the command holds too many command substitutions to check"
+    for text in [command, *inner]:
         try:
             parsed = segments(text)
         except ValueError:
