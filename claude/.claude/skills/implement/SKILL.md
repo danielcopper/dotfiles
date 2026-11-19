@@ -83,10 +83,8 @@ after the gate gets its affected commands re-run, by whoever changed it.
 
 Draft the PR — conventional-commit title, `Closes #<N>`, one sentence per small by-catch fix, docs per the repo's policy
 (updated in the PR, or its opt-out with a reason) — and save the body to `~/Memory/<repo>/pr-body-<N>.md`. Dispatch
-`prose-reviewer` with the worktree, the branch's range (`<base SHA>..HEAD`) and the body's path in its prompt, to read
-the body sentence by sentence against the final tree; fix its findings in the body yourself. Once the gate evidence
-exists and the body has no open finding, push and open the PR without asking, as `public_text_drafts` in
-[`repo-config.md`](repo-config.md) says.
+`prose-reviewer` on the body as [`dispatch.md`](dispatch.md) says, and fix its findings in the body yourself. Once the
+gate evidence exists and the body has no open finding, push and open the PR without asking.
 
 *(convention)* The body becomes the squash commit: a prose summary, `## Decisions` one line each (a sub-issue: "See epic
 #N" plus its own), and `Closes #<N>`; one issue per PR. A fix without decisions takes the label `no-decisions` and keeps
