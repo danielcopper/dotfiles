@@ -268,11 +268,32 @@ class GradeErrors(unittest.TestCase):
         v = grade([init(), text()], FIRES_ALPHA)
         self.assertError(v, "no result event")
 
-    def test_refused_credential(self):
-        failed = text("Failed to authenticate")
-        failed["error"] = "authentication_failed"
-        v = grade([init(), failed, result("success", is_error=True)], QUIET_BETA)
-        self.assertEqual(v.status, run.AUTH)
+    def test_account_credential_and_model_errors_stop(self):
+        kinds = (
+            "authentication_failed",
+            "oauth_org_not_allowed",
+            "account_on_hold",
+            "verification_required",
+            "billing_error",
+            "cloud_credential_error",
+            "model_not_found",
+        )
+        for kind in kinds:
+            with self.subTest(kind=kind):
+                failed = text(f"API Error: {kind}")
+                failed["error"] = kind
+                v = grade(
+                    [init(), failed, result("success", is_error=True)], QUIET_BETA
+                )
+                self.assertEqual(v.status, run.STOP)
+                self.assertEqual(v.note, f"{kind} (API Error: {kind})")
+
+    def test_passing_errors_do_not_stop(self):
+        for kind in ("rate_limit", "overloaded", "server_error", "unknown"):
+            with self.subTest(kind=kind):
+                failed = text("API Error")
+                failed["error"] = kind
+                self.assertError(grade([init(), failed, result()], QUIET_BETA), kind)
 
     def test_cost_unknown_without_result(self):
         self.assertIsNone(grade([init(), text()], QUIET_BETA).cost)
@@ -579,13 +600,11 @@ class Summary(Swapping):
         self.assertIn("LookupError: a bug in the runner", err)
         self.assertIn("stopped by an unexpected error", err)
 
-    def test_refused_credential_stops_with_exit_2(self):
-        self.verdicts = [
-            run.Verdict(run.AUTH, [], None, "Failed to authenticate", MODEL)
-        ]
+    def test_stop_kind_stops_with_exit_2(self):
+        self.verdicts = [run.Verdict(run.STOP, [], None, "billing_error", MODEL)]
         code, _, err = self.main("a")
         self.assertEqual(code, 2)
-        self.assertIn("the credential was refused", err)
+        self.assertIn("a: no run can go on: billing_error", err)
 
     def test_broken_isolation_stops_with_exit_2(self):
         self.verdicts = [run.Verdict(run.ISOLATION, [], 0.1, "plugins loaded", MODEL)]

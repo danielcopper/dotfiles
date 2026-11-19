@@ -32,8 +32,9 @@ claude.ai login (~/.claude/.credentials.json, or below CLAUDE_CONFIG_DIR) is
 read for each run and handed to the child as CLAUDE_CODE_OAUTH_TOKEN; its
 refresh token never leaves the file. An access token close to expiry stops
 the run: open an interactive claude session to renew it, or set
-CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. A credential the API
-refuses stops the run too.
+CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. An API error that every
+later run would hit too stops the run, naming its kind: a refused credential
+or account, or a model --model names that does not exist (STOP_KINDS).
 
 usage: python3 -I run.py [options] [case ...]
   --list                print the case names
@@ -94,7 +95,19 @@ PASS = "PASS"  # the skills fired as the case says
 FAIL = "FAIL"  # a skill fired that must stay quiet, or the one that must fire did not
 ERROR = "ERROR"  # the run did not finish cleanly, so it says nothing about the skills
 ISOLATION = "ISOLATION"  # the session saw more than the sandbox; stops the whole run
-AUTH = "AUTH"  # the credential was refused; stops the whole run
+STOP = "STOP"  # every run would fail the same way (see STOP_KINDS); stops the whole run
+
+# API error kinds no later run gets past: the credential or account is refused,
+# or the model asked for with --model does not exist.
+STOP_KINDS = (
+    "authentication_failed",
+    "oauth_org_not_allowed",
+    "account_on_hold",
+    "verification_required",
+    "billing_error",
+    "cloud_credential_error",
+    "model_not_found",
+)
 
 
 class Verdict(NamedTuple):
@@ -441,11 +454,11 @@ def grade(lines, case, every, exit_code: int | None, stderr: str):
         )
     if leaks:
         return Verdict(ISOLATION, fired, cost, "; ".join(leaks), model)
-    if any(kind == "authentication_failed" for kind, _ in api_errors):
-        text = next(
-            text for kind, text in api_errors if kind == "authentication_failed"
-        )
-        return Verdict(AUTH, fired, cost, text[:200] or "authentication_failed", model)
+    stops = [(kind, text) for kind, text in api_errors if kind in STOP_KINDS]
+    if stops:
+        kind, text = stops[0]
+        note = f"{kind} ({text[:200]})" if text else kind
+        return Verdict(STOP, fired, cost, note, model)
     if api_errors:
         kind, text = api_errors[0]
         return error(f"API error {kind}" + (f" ({text[:200]})" if text else ""))
@@ -601,10 +614,8 @@ def main():
                 resolved.add(verdict.model)
                 if verdict.status == ISOLATION:
                     raise Stop(f"{case['name']}: isolation broken: {verdict.note}")
-                if verdict.status == AUTH:
-                    raise Stop(
-                        f"{case['name']}: the credential was refused: {verdict.note}"
-                    )
+                if verdict.status == STOP:
+                    raise Stop(f"{case['name']}: no run can go on: {verdict.note}")
                 if verdict.status == PASS:
                     passes += 1
                 shown = ", ".join(verdict.fired) or "none"
