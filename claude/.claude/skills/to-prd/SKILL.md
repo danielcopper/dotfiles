@@ -17,7 +17,7 @@ Read the repo's profile, `~/Memory/<repo>/repo-profile.md`, as [`~/.claude/skill
 
 Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the PRD, and respect any ADRs in the area you're touching.
 
-When the user points you at a wayfinder map (`~/Memory/<repo>/wayfinder-<slug>.md`), that file and the notes it links are a source alongside the conversation: its resolved Answers are confirmed decisions and become the PRD's `## Decisions`, written out in full, since the issue's readers cannot reach the private notes.
+When the user points you at a wayfinder map (`~/Memory/<repo>/wayfinder-<slug>.md`), that file and the notes it links are a source alongside the conversation: its resolved Answers are confirmed decisions and become the PRD's `## Decisions`, and its `## Out of scope` lines become the PRD's Out of Scope, each written out in full, since the issue's readers cannot reach the private notes.
 
 ### 3. Sketch the test seams
 
