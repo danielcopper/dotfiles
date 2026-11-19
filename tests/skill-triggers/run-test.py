@@ -267,6 +267,147 @@ class GradeErrors(unittest.TestCase):
         self.assertIsNone(grade([init(), text()], QUIET_BETA).cost)
 
 
+VALID_CASES = """
+[[case]]
+name = "a"
+prompt = "p"
+fires = "alpha"
+quiet = ["beta"]
+
+[[case]]
+name = "b"
+prompt = "p"
+fires = "beta"
+quiet = ["alpha"]
+"""
+
+
+class LoadCases(unittest.TestCase):
+    """One broken cases file per guard; each must stop with its message."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-cases-"))
+        self.saved = run.CASES
+        run.CASES = self.tmp / "cases.toml"
+
+    def tearDown(self):
+        run.CASES = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def load(self, toml):
+        run.CASES.write_text(toml)
+        return run.load_cases(MODEL_INVOKED)
+
+    def assertStops(self, toml, words):
+        with self.assertRaises(run.Stop) as caught:
+            self.load(toml)
+        self.assertIn(words, str(caught.exception))
+
+    def test_valid_file_loads(self):
+        self.assertEqual([c["name"] for c in self.load(VALID_CASES)], ["a", "b"])
+
+    def test_invalid_toml(self):
+        self.assertStops("[[case]\n", str(run.CASES))
+
+    def test_other_top_level_key(self):
+        self.assertStops('other = "x"\n' + VALID_CASES, "expected only [[case]] tables")
+
+    def test_no_cases(self):
+        self.assertStops("", "expected only [[case]] tables")
+
+    def test_case_not_a_table(self):
+        self.assertStops("case = [1]\n", "case #1: not a table")
+
+    def test_unknown_key(self):
+        self.assertStops(VALID_CASES + "runs = 3\n", "unknown keys ['runs']")
+
+    def test_bad_name(self):
+        self.assertStops(
+            VALID_CASES.replace('name = "a"', 'name = "a-1"'), "name must match"
+        )
+
+    def test_name_used_twice(self):
+        self.assertStops(
+            VALID_CASES.replace('name = "b"', 'name = "a"'), "name used twice"
+        )
+
+    def test_prompt_missing(self):
+        self.assertStops(
+            VALID_CASES.replace('prompt = "p"', 'prompt = "  "', 1), "prompt missing"
+        )
+
+    def test_neither_fires_nor_quiet(self):
+        extra = '[[case]]\nname = "c"\nprompt = "p"\n'
+        self.assertStops(VALID_CASES + extra, "names neither fires nor quiet")
+
+    def test_fires_not_a_string(self):
+        self.assertStops(
+            VALID_CASES.replace('fires = "alpha"', 'fires = ["alpha"]'),
+            "fires must be a skill name",
+        )
+
+    def test_fires_user_invoked_skill(self):
+        self.assertStops(
+            VALID_CASES.replace('fires = "alpha"', 'fires = "gamma"'),
+            "fires 'gamma' is no model-invoked skill",
+        )
+
+    def test_quiet_not_a_list(self):
+        self.assertStops(
+            VALID_CASES.replace('quiet = ["beta"]', 'quiet = "beta"'),
+            "quiet must be a list of skill names",
+        )
+
+    def test_quiet_unknown_skill(self):
+        self.assertStops(
+            VALID_CASES.replace('quiet = ["beta"]', 'quiet = ["beta", "delta"]'),
+            "quiet 'delta' is no model-invoked skill",
+        )
+
+    def test_fires_and_quiet_same_skill(self):
+        self.assertStops(
+            VALID_CASES.replace('quiet = ["beta"]', 'quiet = ["alpha", "beta"]'),
+            "alpha must both fire and stay quiet",
+        )
+
+    def test_skill_without_fire_case(self):
+        self.assertStops(
+            VALID_CASES.replace('fires = "beta"', 'fires = "none"'),
+            "skill beta: no case where it must fire",
+        )
+
+    def test_skill_without_quiet_case(self):
+        self.assertStops(
+            VALID_CASES.replace('quiet = ["alpha"]', "quiet = []"),
+            "skill alpha: no case where it must stay quiet",
+        )
+
+
+class RepoFiles(unittest.TestCase):
+    def setUp(self):
+        self.saved = run.SKILLS, run.CASES
+        self.tmp = Path(tempfile.mkdtemp(prefix="skill-trigger-skills-"))
+
+    def tearDown(self):
+        run.SKILLS, run.CASES = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_model_invoked_skills_come_from_the_frontmatter(self):
+        for name, flag in (("alpha", ""), ("beta", "'false'"), ("gamma", "true")):
+            (self.tmp / name).mkdir()
+            line = f"disable-model-invocation: {flag}\n" if flag else ""
+            (self.tmp / name / "SKILL.md").write_text(f"---\nname: {name}\n{line}---\n")
+        (self.tmp / "no-skill").mkdir()
+        run.SKILLS = self.tmp
+        self.assertEqual(run.repo_skills(), (EVERY, MODEL_INVOKED))
+
+    def test_repo_cases_cover_the_repo_skills(self):
+        run.SKILLS = REPO / "claude" / ".claude" / "skills"
+        run.CASES = HERE / "cases.toml"
+        _, model = run.repo_skills()
+        self.assertTrue(run.load_cases(model))
+
+
 class Summary(unittest.TestCase):
     """main() around stand-in runs: no sandbox, no model call."""
 
