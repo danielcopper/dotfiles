@@ -11,7 +11,7 @@ Match the current situation against this index and recommend the right skill(s).
 - `/setup-repo` — set a repo up for the pipeline: own or foreign, the `CLAUDE.md` `## Pipeline` draft and `~/Memory/<repo>/repo-profile.md`; a skill that needs the profile asks for it when it is missing (`~/.claude/skills/implement/repo-config.md`)
 - `/next [hint]` — what to work on next: reads board + PRs + commits, commits to one recommendation
 - `/implement <N> [--go]` — one GitHub issue end-to-end: align → worktree + board → implementer → review agents → PR (prose-reviewed body) → watch CI to green → user gate → hand-over to the owner
-- `/epic <N>` — assembly line over an epic's native sub-issues; merge between issues, fresh worktree from updated main
+- `/epic <N>` — assembly line over an epic's native sub-issues; a dependent sub-issue waits for the owner's merge, fresh worktree from updated main
 - `/handoff` — compact the session into a handoff doc (context nearly full, or the work continues in a fresh session)
 
 ## Planning & design

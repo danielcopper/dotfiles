@@ -1,6 +1,6 @@
 ---
 name: epic
-description: "Work through an epic's sub-issues as an assembly line — align once on all issues, then run each through the implement pipeline, merging between issues. Argument: the epic issue number."
+description: "Work through an epic's sub-issues as an assembly line — align once on all issues, then run each through the implement pipeline and hand its PR to the owner. Argument: the epic issue number."
 disable-model-invocation: true
 ---
 
@@ -24,7 +24,7 @@ When the epic or any of its sub-issues meets implement step 3's `/grill-with-doc
 
 In a convention repo (see `implement`), epic-level answers go into the epic body's `## Decisions`, written directly as `public_text_drafts` in `~/.claude/skills/implement/repo-config.md` says, and each sub-issue's `## Decisions` reads "See epic #N", plus its own answers.
 
-The line starts on the user's green light. Questions that surface later stop the line at that issue, in every mode.
+The line starts on the user's green light. A question that surfaces later stops the line at that issue.
 
 *Done when:* order confirmed and green light received.
 
@@ -37,13 +37,13 @@ Move the **epic** to In Progress on the board (once), as implement step 4 does. 
 Execute the implement pipeline steps 2–10 with these epic-mode adjustments:
 
 - **Align (step 3)** collapses to questions-only: the epic-level alignment already happened, so a sub-issue with no open questions proceeds directly; one with questions stops for the user. In a convention repo "no open questions" means no open question under `## To decide`. Step 3's `/grill-with-docs` offer still applies to the sub-issue.
-- **Merge between issues**: the sub-issue's PR reaches green and merges (per merge policy) **before** the next sub-issue starts — the next worktree branches from updated main. PRs stay small; every merge leaves main runnable.
-- **Review findings** follow implement step 6: the user's list is no question that stops the line; it holds only the issue's handover, as the user gate does.
+- **Merge between issues**: the owner merges each sub-issue's PR (`merge_policy`). A sub-issue that depends on an earlier one starts only after that merge, its worktree branching from updated main; meanwhile the line moves on to sub-issues that do not depend on it. PRs stay small; every merge leaves main runnable.
+- **Review findings** follow implement step 6: the user's list stops the line only when the work cannot go on without an answer (`~/.claude/review-agents.md`, "Routing the findings"); otherwise it holds only the issue's hand-over, as the user gate does.
 - **Issues needing the user** (the step-2 split): prepare everything up to the blocking point, present exactly what's needed (one verification, one decision), and continue with the next autonomous sub-issue while waiting where the order allows.
 
-Between issues: reconcile the board where there is one, give the user a one-line status ("#N merged, next: #M"), and continue.
+Between issues: reconcile the board where there is one, give the user a one-line status ("#N handed over, next: #M"), and continue.
 
-*Done when (per issue):* PR merged, the board, where there is one, consistent, user gate passed if due.
+*Done when (per issue):* PR handed over to the owner, the board, where there is one, consistent, user gate passed if due.
 
 ## 5. Close the epic
 
