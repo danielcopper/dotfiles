@@ -42,6 +42,11 @@ PASSES = [
     "echo 'gh pr merge 12'",
     "git commit -m 'docs: the owner runs gh pr merge'",
     "grep -n 'pr merge' notes.md",
+    'gh pr view "$N" --json title',
+    "gh api repos/{owner}/{repo}/pulls/12/comments --jq '.[].body'",
+    "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=1",
+    'curl -sH "Authorization: Bearer $TOKEN" https://api.github.com/repos/o/r/pulls/12',
+    "bash -o pipefail -c 'gh pr view 3 | head'",
 ]
 
 DENIED = [
@@ -78,6 +83,30 @@ DENIED = [
     "az repos pr update --id 4 --auto-complete true",
     "curl -X PUT -H 'Authorization: token x' https://api.github.com/repos/o/r/pulls/12/merge",
     "wget --method=PUT https://api.github.com/repos/o/r/pulls/12/merge",
+    # a word that decides the verdict and that the shell still expands
+    "gh $SUB merge 3",
+    'gh pr "$VERB" 3',
+    "gh pr merg* 3",
+    "gh pr {merge,view} 3",
+    "gh pr mer\\ge 3",
+    "gh pr \\\nmerge 3",
+    'gh api "repos/o/r/pulls/$N/merge" -X PUT',
+    'gh api "$ENDPOINT" -X PUT',
+    "gh api repos/o/r/pulls/1/merg?",
+    "gh api repos/{owner}/{repo}/{a,b}",
+    "az $GROUP pr update --id 4",
+    'az repos pr update --id 4 --status "$S"',
+    'curl -X PUT "$URL"',
+    'wget "https://api.github.com/repos/o/r/pulls/$N/merge"',
+    "curl --url=$URL -X PUT",
+    # words supplied by xargs or parallel
+    "echo 3 | xargs gh pr view",
+    "parallel gh pr view ::: 1 2",
+    # every shell, every -c cluster, every command word after it
+    "bash -ec 'gh pr merge 3'",
+    "bash -c -- 'gh pr merge 3'",
+    "bash -c 'echo hi' 'gh pr merge 3'",
+    "fish -c 'gh pr merge 3'",
 ]
 
 
