@@ -58,6 +58,7 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -85,6 +86,21 @@ OWN_VARS = ("PATH", "HOME", "TMPDIR", "TERM", "DISABLE_AUTOUPDATER")
 # Set by the shell the isolation probe runs, not by the wrapper.
 SHELL_VARS = ("PWD", "OLDPWD", "SHLVL", "_")
 ALLOWED_VARS = set(OWN_VARS + PASSED_ON + TOKEN_VARS + SHELL_VARS)
+
+# The status of one run.
+PASS = "PASS"  # the skills fired as the case says
+FAIL = "FAIL"  # a skill fired that must stay quiet, or the one that must fire did not
+ERROR = "ERROR"  # the run did not finish cleanly, so it says nothing about the skills
+ISOLATION = "ISOLATION"  # the session saw more than the sandbox; stops the whole run
+
+
+class Verdict(NamedTuple):
+    """What grade() makes of one run."""
+
+    status: str
+    fired: list
+    cost: float
+    note: str
 
 
 class Stop(Exception):
@@ -330,7 +346,7 @@ def isolation_probe(every, binary):
 
 
 def grade(lines, case, every):
-    """Verdict for one run from its stream-json lines: (status, fired, cost, note)."""
+    """The Verdict on one run, from its stream-json lines."""
     init, result, fired, assistant = None, None, [], False
     for line in lines:
         try:
@@ -350,7 +366,7 @@ def grade(lines, case, every):
                     fired.append(skill.split(":")[-1])
     cost = (result or {}).get("total_cost_usd") or 0.0
     if init is None:
-        return "ERROR", fired, cost, "no init event"
+        return Verdict(ERROR, fired, cost, "no init event")
     missing = sorted(set(every) - set(init.get("skills") or []))
     foreign = [
         p.get("name") for p in init.get("plugins") or [] if p.get("path") != "builtin"
@@ -365,12 +381,12 @@ def grade(lines, case, every):
             f"MCP servers loaded: {[s.get('name') for s in init['mcp_servers']]}"
         )
     if leaks:
-        return "ISOLATION", fired, cost, "; ".join(leaks)
+        return Verdict(ISOLATION, fired, cost, "; ".join(leaks))
     if not assistant:
         reason = (
             (result or {}).get("result") or (result or {}).get("subtype") or "no reply"
         )
-        return "ERROR", fired, cost, str(reason)[:200]
+        return Verdict(ERROR, fired, cost, str(reason)[:200])
     fires, quiet = case.get("fires"), case.get("quiet", [])
     problems = []
     if fires == "none" and fired:
@@ -383,11 +399,11 @@ def grade(lines, case, every):
     note = "; ".join(problems)
     if result and result.get("subtype") not in (None, "success"):
         note = f"{note} [{result['subtype']}]" if note else f"[{result['subtype']}]"
-    return ("FAIL" if problems else "PASS"), fired, cost, note
+    return Verdict(FAIL if problems else PASS, fired, cost, note)
 
 
 def run_case(case, every, binary, args):
-    """One run of a case; returns grade()'s verdict and the raw stream."""
+    """One run of a case: its Verdict and the raw stream."""
     creds, _ = credential_env()
     box = Sandbox(every, binary)
     try:
@@ -425,13 +441,17 @@ def run_case(case, every, binary, args):
         except subprocess.TimeoutExpired as e:
             out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
             err = f"timed out after {args.timeout}s"
-        status, fired, cost, note = grade(out.splitlines(), case, every)
-        if status == "ERROR" and err.strip():
-            note = f"{note}: {err.strip().splitlines()[-1][:200]}"
+        verdict = grade(out.splitlines(), case, every)
+        if verdict.status == ERROR and err.strip():
+            verdict = verdict._replace(
+                note=f"{verdict.note}: {err.strip().splitlines()[-1][:200]}"
+            )
         written = box.written()
         if written:
-            status, note = "ISOLATION", f"wrote below the real home: {written}"
-        return status, fired, cost, note, out
+            verdict = verdict._replace(
+                status=ISOLATION, note=f"wrote below the real home: {written}"
+            )
+        return verdict, out
     finally:
         box.remove()
 
@@ -489,8 +509,8 @@ def main():
         for case in chosen:
             passes, notes = 0, []
             for n in range(1, args.runs + 1):
-                status, fired, cost, note, out = run_case(case, every, binary, args)
-                total_cost += cost
+                verdict, out = run_case(case, every, binary, args)
+                total_cost += verdict.cost
                 if args.keep:
                     (args.keep / f"{case['name']}-{n}.jsonl").write_text(
                         out, encoding="utf-8"
@@ -498,20 +518,20 @@ def main():
                 for line in out.splitlines()[:5]:
                     if '"subtype":"init"' in line:
                         resolved.add(json.loads(line).get("model"))
-                if status == "ISOLATION":
-                    raise Stop(f"{case['name']}: isolation broken: {note}")
-                if status == "PASS":
+                if verdict.status == ISOLATION:
+                    raise Stop(f"{case['name']}: isolation broken: {verdict.note}")
+                if verdict.status == PASS:
                     passes += 1
-                shown = ", ".join(fired) or "none"
+                shown = ", ".join(verdict.fired) or "none"
                 notes.append(
-                    f"run {n}: {status} fired {shown} ${cost:.3f}"
-                    + (f" ({note})" if note else "")
+                    f"run {n}: {verdict.status} fired {shown} ${verdict.cost:.3f}"
+                    + (f" ({verdict.note})" if verdict.note else "")
                 )
-            verdict = "PASS" if passes == args.runs else "FAIL"
-            if verdict == "FAIL":
+            outcome = PASS if passes == args.runs else FAIL
+            if outcome == FAIL:
                 failed.append(case["name"])
             print(
-                f"{verdict} {case['name']} {passes}/{args.runs}: " + "; ".join(notes),
+                f"{outcome} {case['name']} {passes}/{args.runs}: " + "; ".join(notes),
                 flush=True,
             )
         models = ", ".join(sorted(m for m in resolved if m)) or "unknown"
