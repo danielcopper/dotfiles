@@ -123,6 +123,10 @@ DENIED = [
     "echo " + "$(true) " * 65,
     "echo " + "x" * 100_001,
     "echo $(echo $(echo $(gh pr merge 3)))",
+    # quoting that does not parse: quotes and backslashes dropped
+    'gh pr "merge" 3 --body \'unclosed',
+    "gh p\\r merge 3 'unclosed",
+    'gh api "repos/o/r/pulls/$N/merge" \'unclosed',
 ]
 
 

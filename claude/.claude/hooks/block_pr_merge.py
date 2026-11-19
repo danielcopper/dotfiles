@@ -181,6 +181,16 @@ def segments(text: str) -> list[list[Word]]:
     return [segment for segment in found if segment]
 
 
+def rough_segments(text: str) -> list[list[Word]]:
+    """Segments of *text* whose quoting does not parse: quotes and backslashes dropped, and
+    every expanding character counted as expanding, since its quoting is unknown."""
+    bare = re.sub(r"[\"'\\]", "", text)
+    return [
+        [Word(word, frozenset(word) & UNQUOTED_EXPANSION) for word in segment.split()]
+        for segment in re.split(r"[;&|()<>\n]", bare)
+    ]
+
+
 def substitutions(text: str) -> list[str]:
     """Text that runs inside $( ... ) or backticks, found in one pass; an open one runs to the end."""
     found: list[str] = []
@@ -367,10 +377,7 @@ def check(command: str, depth: int = 0) -> str | None:
         try:
             parsed = segments(text)
         except ValueError:
-            parsed = [
-                [Word(word) for word in segment.split()]
-                for segment in re.split(r"[;&|()<>\n]", text)
-            ]
+            parsed = rough_segments(text)
         for tokens in parsed:
             found = segment_reason(tokens, depth)
             if found:
