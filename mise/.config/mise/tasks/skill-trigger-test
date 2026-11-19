@@ -15,4 +15,7 @@ dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
 runner="$dotfiles/tests/skill-triggers/run.py"
 [ -f "$runner" ] || { echo "skill-trigger-test: no such file: $runner" >&2; exit 1; }
 
+if [ "${1:-}" = --test ]; then
+  exec python3 -I "$dotfiles/tests/skill-triggers/run-test.py" "${@:2}"
+fi
 exec python3 -I "$runner" "$@"
