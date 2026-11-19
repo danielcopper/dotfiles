@@ -7,8 +7,9 @@
 # the sh the checkout test runs is not bound by them). BOARD_TEST_PERMISSION
 # tells the tests they must run under those limits. The tests run twice:
 # against the built main.js, the file herdr loads, and against src/main.js,
-# where a module that uses a name it does not import fails (in main.js all
-# modules share one scope, so there it would not).
+# where a module that uses a name it does not import fails, wherever a test
+# reaches that use (in main.js all modules share one scope, so there it
+# would not).
 #
 # Usage: mise run herdr-board-test [node --test option...]
 #   e.g. --test-name-pattern=UI

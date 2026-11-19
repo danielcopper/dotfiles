@@ -191,6 +191,15 @@ test("the build puts the entry's comment first, merges the host imports and list
   ].join("\n"));
 });
 
+test("a parse check that cannot run, or fails above the first module, says so plainly", () => {
+  const refused = (result, message) => assert.throws(() => builder.checkParses("export const a = 1;\n", () => result), message);
+  refused({ error: new Error("spawn node ENOENT"), status: null }, /^Error: node --check did not run: spawn node ENOENT$/);
+  refused({ signal: "SIGKILL", status: null }, /node --check did not run: stopped by SIGKILL$/);
+  refused({ status: null }, /node --check did not run: no exit status$/);
+  refused({ status: 1, stderr: "something odd" }, /^Error: main\.js: node --check exited with 1$/);
+  assert.throws(() => buildOf({ "main.js": '// Entry.\n\nimport { class } from "herdr";\n\nexport default class Board {}\n' }), /main\.js header \(main\.js line \d+\): SyntaxError/);
+});
+
 test("the build refuses what main.js cannot hold: other import forms, imports below the top, names not exported, cycles, export * or default outside the entry", () => {
   const entry = (body) => ({ "main.js": `// Entry.\n\n${body}\nexport default class Board {}\n` });
   const refused = (files, message) => assert.throws(() => buildOf(files), message);

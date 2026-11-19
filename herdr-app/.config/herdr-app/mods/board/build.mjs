@@ -25,7 +25,8 @@
 //   imports; one that nothing imports would be left out of main.js.
 // A module that uses a name it does not import still works in main.js,
 // where all share one scope, but not as a module of its own:
-// `mise run herdr-board-test` runs the tests against src/main.js too.
+// `mise run herdr-board-test` runs the tests against src/main.js too, which
+// catches such a name where a test reaches the code that uses it.
 // main.js is: a line that it is built, the entry's leading comment, the host
 // imports (each host module's names from all modules, sorted), then each
 // module after the modules it imports, in the order of its imports, the
@@ -47,7 +48,7 @@ const IMPORT = /^import\s*\{([^}]*)\}\s*from\s*"([^"]+)";[ \t]*\n/;
 const REEXPORT = /^export \* from "([^"]+)";[ \t]*\n/;
 const EXPORTED = /^export (?:default )?(?:async )?(?:const|let|function\*?|class) ([A-Za-z_$][\w$]*)/gm;
 
-class BuildError extends Error {}
+export class BuildError extends Error {}
 
 // A module's leading comment (its first lines starting with //, and the
 // blank line after them) and the rest.
@@ -113,17 +114,22 @@ function resolveName(from, spec, where) {
 // The .js files under `src`, as names relative to it.
 const modulesIn = (src) => readdirSync(src, { recursive: true }).map((n) => String(n).split("\\").join("/")).filter((n) => n.endsWith(".js")).sort();
 
-// Parses `text` as a module with node; throws a BuildError naming the
-// module whose line the first error is on.
-function checkParses(text) {
-  const r = spawnSync(process.execPath, ["--input-type=module", "--check"], { input: text, encoding: "utf8" });
+// Parses `text` as a module with node (`run`: how node is run, for the
+// tests); throws a BuildError naming the module whose line the first error
+// is on ("main.js header" above the first module), or saying that node did
+// not run and why.
+export function checkParses(text, run = spawnSync) {
+  const r = run(process.execPath, ["--input-type=module", "--check"], { input: text, encoding: "utf8" });
+  if (r.error || r.signal || r.status === null) {
+    throw new BuildError(`node --check did not run: ${r.error?.message ?? (r.signal ? `stopped by ${r.signal}` : "no exit status")}`);
+  }
   if (r.status === 0) return;
-  const line = Number(String(r.stderr).match(/\[stdin\]:(\d+)/)?.[1]);
-  const lines = text.split("\n").slice(0, line || 0);
+  const line = Number(String(r.stderr).match(/\[stdin\]:(\d+)/)?.[1]) || null;
+  const lines = text.split("\n").slice(0, line ?? 0);
   const at = lines.findLastIndex((l) => l.startsWith("// ==== src/"));
-  const where = at < 0 ? "main.js" : lines[at].slice("// ==== ".length, -" ====".length);
+  const where = !line ? "main.js" : at < 0 ? "main.js header" : lines[at].slice("// ==== ".length, -" ====".length);
   const said = String(r.stderr).split("\n").find((l) => /Error:/.test(l)) ?? `node --check exited with ${r.status}`;
-  throw new BuildError(`${where} (main.js line ${line}): ${said.trim()}`);
+  throw new BuildError(`${where}${line ? ` (main.js line ${line})` : ""}: ${said.trim()}`);
 }
 
 // main.js's text from the modules under `src` (default: src/ beside this
