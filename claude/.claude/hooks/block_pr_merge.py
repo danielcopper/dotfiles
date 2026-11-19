@@ -166,7 +166,9 @@ def check(command: str) -> str | None:
     if body_tool and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
         return "reads a request from a file"
     if body_tool and "merge" in lower:
-        return "mentions a merge next to gh api, az, curl or wget"
+        return (
+            "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"
+        )
     if network and FEEDER.search(lower):
         return "feeds gh, az, curl or wget through xargs or parallel"
     if runs_at_run_time(command):

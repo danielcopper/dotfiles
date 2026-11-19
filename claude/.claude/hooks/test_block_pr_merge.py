@@ -252,6 +252,10 @@ DENIED = [
     "az --only-show-errors rest --method put --uri u --body @b.json",
     "az -o json devops invoke --in-file m.json",
     "gh " + "-x " * 60 + "api --input q.json",
+    # the subcommand spelled with quotes or a backslash, read after normalising
+    "gh 'a'pi -X PUT repos/o/r/pulls/1/merge",
+    "gh a\\pi graphql --input q.json",
+    "az 're'st --method patch --body @b.json",
 ]
 
 REASONS = {
@@ -259,6 +263,9 @@ REASONS = {
     "gh alias set m x": "defines a gh alias",
     "az repos pr update --id 4 --status completed": "completes an Azure DevOps pull request",
     "curl -d @m.json https://example.com/x": "reads a request from a file",
+    "curl https://example.com/merge-queue": (
+        "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"
+    ),
     "echo merge | $RUNNER": "builds a word at run time next to a merge mention",
     'gh api "$ENDPOINT"': "builds a word at run time next to gh, az, curl or wget",
     "echo " + "x" * 100_001: "is too long to check",
