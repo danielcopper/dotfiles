@@ -10,7 +10,7 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 
 1. Call the Skill tool with `writing-for-agents` for the writing style guide.
 
-2. Read the primary sources for the session the user specifies. For a past session this means searching the session logs under `~/.claude/projects/<sanitized-cwd>/*.jsonl` the way `~/.claude/skills/find-session/SKILL.md` describes. If the user doesn't specify a session, default to the current one. When the work produced pull requests, the user's review comments on them are primary sources too: read them with `gh api repos/<owner>/<repo>/pulls/<N>/comments` (inline) and `gh pr view <N> --comments` (conversation), and treat each as a candidate.
+2. Read the primary sources for the session the user specifies. For a past session this means searching the session logs under `~/.claude/projects/<sanitized-cwd>/*.jsonl` the way `~/.claude/skills/find-session/SKILL.md` describes. If the user doesn't specify a session, default to the current one. When the work produced pull requests, the user's review comments on them are primary sources too: read them as `~/.claude/skills/pr-review/github.md` ("The user", "Existing feedback") or `~/.claude/skills/pr-review/azure-devops.md` ("The user", "Threads") fetches them, the platform picked as `~/.claude/skills/pr-review/SKILL.md`, "Platform", says, and treat each as a candidate.
 
 3. Look for candidates for improvement in these categories.
 
