@@ -182,15 +182,35 @@ def subcommand_positions(tokens: list[str], at: int) -> tuple[list[int], bool] |
     return (found, False) if end == len(tokens) else None
 
 
-def body_subcommand(lower: str) -> bool:
+def hidden_before(original: str, start: int, word: str) -> bool:
+    """Whether the original text from *start* up to the first *word* after it holds a quote, `<`
+    or `>` - a quoted value or a redirection that normalising may have turned into the word - or
+    holds no such word at all."""
+    found = re.compile(rf"(?<![\w.-]){re.escape(word)}(?![\w.-])").search(original, start)
+    return found is None or any(c in original[start : found.start()] for c in "'\"<>")
+
+
+def body_subcommand(lower: str, original: str) -> bool:
     """Whether gh or az may run a subcommand whose request body can merge: gh `api`, az `rest`,
     `devops invoke` or `repos pr` in the subcommand position, past any options - or a word there
-    that is no known subcommand, or options too long to walk, both of which fail closed."""
+    that is no known subcommand, options too long to walk, or a quote or redirection in the
+    original text before the subcommand, all of which fail closed. *original* is the command
+    lowercased but not normalised."""
     tokens = TOKEN_SPLIT.split(lower)
+    tool_starts = {
+        tool: [match.start() for match in re.finditer(rf"(?<![\w.-]){tool}(?![\w.-])", original)]
+        for tool in ("gh", "az")
+    }
+    tool_tokens = [token.rsplit("/", 1)[-1] for token in tokens]
+    if any(0 < tool_tokens.count(tool) != len(tool_starts[tool]) for tool in ("gh", "az")):
+        return True  # the original and the normalised text disagree on where the tool runs
+    seen = {"gh": 0, "az": 0}
     for at, token in enumerate(tokens):
         tool = token.rsplit("/", 1)[-1]
         if tool not in ("gh", "az"):
             continue
+        ordinal = seen[tool]
+        seen[tool] += 1
         walked = subcommand_positions(tokens, at)
         if walked is None:
             return True
@@ -206,6 +226,8 @@ def body_subcommand(lower: str) -> bool:
         known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
         if has_final and tokens[positions[-1]] not in known:
             return True
+        if has_final and hidden_before(original, tool_starts[tool][ordinal], tokens[positions[-1]]):
+            return True
     return False
 
 
@@ -220,7 +242,7 @@ def check(command: str) -> str | None:
     network = NETWORK.search(lower) is not None
     gh = GH.search(lower) is not None
     az = AZ.search(lower) is not None
-    body_tool = BODY_TOOL.search(lower) is not None or body_subcommand(lower)
+    body_tool = BODY_TOOL.search(lower) is not None or body_subcommand(lower, command.lower())
     if PR_MERGE.search(lower):
         return "mentions a PR merge"
     if gh and (pr := PR_WORD.search(lower)) and MERGE_WORD.search(lower, pr.end()):

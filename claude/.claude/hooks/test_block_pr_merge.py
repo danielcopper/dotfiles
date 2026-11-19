@@ -263,6 +263,12 @@ DENIED = [
     'gh --repo "a b" api graphql --input q.json',
     "gh -R 'o/r x' api graphql --input q.json",
     'az --query "[0] | x" rest --method patch --uri u --body @b.json',
+    # a quote or a redirection before a known word in the subcommand position
+    "gh >issue api graphql --input q.json",
+    "gh <pr api graphql --input -",
+    'gh -H "X-A: issue" api graphql --input q.json',
+    'az --query "[0] | group" rest --method patch --uri u --body @b.json',
+    "az >account rest --body @b.json",
     # the subcommand spelled with quotes or a backslash, read after normalising
     "gh 'a'pi -X PUT repos/o/r/pulls/1/merge",
     "gh a\\pi graphql --input q.json",
