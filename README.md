@@ -281,64 +281,65 @@ herdr-app`. Which files of the package git tracks is set in the root
   (without mise, `node --test tests/herdr-app/leader.test.mjs` from the
   repo) tests what the leader binds and what Tab, shift-Tab and Esc then
   do, in the leader and on their way to tmux. It needs node.
-- **The board (`mods/board/`) shows my own work.** In the personal layout it
-  is a layer of the work area, not a tab: a stack in the layout with the
-  shown tab's content and a board block whose props say `layer`. The board
-  button left of the tabs (a press of any mouse button) and the leader's
-  `b` show the board in place of the tab's content; the button is
-  highlighted while it shows. The board takes the keyboard whenever it
-  comes to show, there or in a Board tab, unless its dialog or filter has
-  it. The tab's content comes back, with the keyboard, on a second press of
-  the button or `b`, on `Esc` when the board has nothing else to close
-  (details, a notice, the filter), on `Enter` to an item's session, and
-  when the focus moves to another space, tab or pane, for example to the
-  agent the board just started; a new program in the same pane keeps the
-  board. Any press outside the board, except one on the button (the tab
-  bar, the sidebar, the right panel; any mouse button), brings it back,
-  with the keyboard only if the board had it; otherwise what was pressed
-  keeps it. herdr's tab bar keeps highlighting the last shown tab while the
-  board shows. The board layer is found by its shape, not by ids. Without one, the button and `b`
-  show the board's "Board" tab or open one, except in the personal
-  layout, where they say the layer is missing. A top bar toggles between
-  its sources, GitHub and Azure, and shows one tab per context of the shown
-  source, as `mods/board/views.json` sets them: on Azure each of my teams,
-  with a switch between its Sprint and its Backlog, followed by the pull
-  requests of its project; on GitHub "Meine Aufgaben" (my issues on the
-  Tender project's board, in the columns of its Status field) and "PRs"
-  (pull requests I opened or am asked to review, with checks and review
-  state). The Azure tabs read nothing yet; each says which view it will
-  hold. "nur meine" narrows whatever shows to my own items (on GitHub:
-  assigned to me, opened by me, or asking for my review; a list section of
-  my own search, one whose query sets author, assignee or
-  (user-)review-requested to @me, counts whole) without reading anything
-  again. A context or view added to `views.json` adds a tab, and `r` reads
-  the file again; the board remembers the source, tab and team view shown
-  last, and "nur meine". A count in a tab, a column or a list section that
-  the filter or "nur meine" thins says so ("1/4"). The code holds nothing of
-  mine; the header of `mods/board/src/main.js` describes the file's fields.
-  Keys: `q` switches the source, `1 2 3` or `[ ]` the tab, `v` a team's
-  Sprint and Backlog, `m` turns "nur meine" on and off (the toggle, the
-  tabs, the switch and "nur meine" take clicks too), `/` filters, `r`
-  refreshes (the shown view also refreshes every few minutes while the board
-  shows), `Esc` closes. On a GitHub view `h/l j/k` move, `H/L` move a
-  card one column (`s` picks from a menu, or drag the card onto a column),
-  `x` hides or shows a column (views.json sets which start hidden), `o`
-  opens the item in the browser. `Enter` opens the details, a second `Enter`
-  goes to the item's session or starts one: a new space or tab on the chosen
-  machine, in the repo's checkout, whose agent gets the first message
-  views.json sets (`/implement <n>`, `/pr-review <n>` for a pull request)
-  and makes its own worktree. The session is named after the item
-  (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
-  finds it again. A status change shows at once and is written to GitHub; a
-  refusal moves the card back with the error, and a write without a clear
-  answer refreshes the board and then says where the card is. It runs gh by
-  the path my shell gives, since herdr's own PATH lacks Homebrew and mise.
-  `mise run herdr-board-test` (without mise, `node --test
-  tests/herdr-app/board.test.mjs` from the repo) tests that `main.js` is
-  built from its sources, its data functions and a few of its key paths
-  against sample answers of gh, GitHub and az; the test file's header says
-  which answers are recorded, which built by hand and which written from
-  az's documentation. It needs node.
+- **The board (`mods/board/`) shows my own work.** In the personal layout it is
+  a layer of the work area, not a tab: a stack in the layout with the shown
+  tab's content and a board block whose props say `layer`. The board button left
+  of the tabs (a press of any mouse button) and the leader's `b` show the board
+  in place of the tab's content; the button is highlighted while it shows.
+  Whenever the board comes to show, there or in a Board tab, it takes the
+  keyboard: its dialog's text field (the start dialog's message), else the
+  filter being typed, else the board itself; the button and `b` also send it
+  herdr's focus command, which herdr hands only to a copy that shows. The tab's
+  content comes back, with the keyboard, on a second press of the button or `b`,
+  on `Esc` when the board has nothing else to close (details, a notice, the
+  filter), on `Enter` to an item's session, and when the focus moves to another
+  space, tab or pane, for example to the agent the board just started; a new
+  program in the same pane keeps the board. Any press outside the board but the
+  button's (the tab bar, the sidebar, the right panel; any mouse button) brings
+  the tab's content back; the pane gets the keyboard only if the board still has
+  it after the press, otherwise what was pressed keeps it. herdr's tab bar keeps
+  highlighting the last shown tab while the board shows. The board layer is
+  found by its shape, not by ids. Without one, the button and `b` show the
+  board's "Board" tab or open one, except in the personal layout, where they say
+  the layer is missing. A Board tab left open from before is best closed there:
+  when the layer hides the board, that tab's board may take the keyboard if its
+  tab is the shown one. A top bar toggles between its sources, GitHub and Azure,
+  and shows one tab per context of the shown source, as `mods/board/views.json`
+  sets them: on Azure each of my teams, with a switch between its Sprint and its
+  Backlog, followed by the pull requests of its project; on GitHub "Meine
+  Aufgaben" (my issues on the Tender project's board, in the columns of its
+  Status field) and "PRs" (pull requests I opened or am asked to review, with
+  checks and review state). The Azure tabs read nothing yet; each says which
+  view it will hold. "nur meine" narrows whatever shows to my own items (on
+  GitHub: assigned to me, opened by me, or asking for my review; a list section
+  of my own search, one whose query sets author, assignee or
+  (user-)review-requested to @me, counts whole) without reading anything again.
+  A context or view added to `views.json` adds a tab, and `r` reads the file
+  again; the board remembers the source, tab and team view shown last, and "nur
+  meine". A count in a tab, a column or a list section that the filter or "nur
+  meine" thins says so ("1/4"). The code holds nothing of mine; the header of
+  `mods/board/src/main.js` describes the file's fields. Keys: `q` switches the
+  source, `1 2 3` or `[ ]` the tab, `v` a team's Sprint and Backlog, `m` turns
+  "nur meine" on and off (the toggle, the tabs, the switch and "nur meine" take
+  clicks too), `/` filters, `r` refreshes (the shown view also refreshes every
+  few minutes while the board shows), `Esc` closes. On a GitHub view `h/l j/k`
+  move, `H/L` move a card one column (`s` picks from a menu, or drag the card
+  onto a column), `x` hides or shows a column (views.json sets which start
+  hidden), `o` opens the item in the browser. `Enter` opens the details, a
+  second `Enter` goes to the item's session or starts one: a new space or tab on
+  the chosen machine, in the repo's checkout, whose agent gets the first message
+  views.json sets (`/implement <n>`, `/pr-review <n>` for a pull request) and
+  makes its own worktree. The session is named after the item (`romm-tender#2845
+  …`, `AB#456 …` for a work item), which is how the board finds it again. A
+  status change shows at once and is written to GitHub; a refusal moves the card
+  back with the error, and a write without a clear answer refreshes the board
+  and then says where the card is. It runs gh by the path my shell gives, since
+  herdr's own PATH lacks Homebrew and mise. `mise run herdr-board-test` (without
+  mise, `node --test tests/herdr-app/board.test.mjs` from the repo) tests that
+  `main.js` is built from its sources, its data functions and a few of its key
+  paths against sample answers of gh, GitHub and az; the test file's header says
+  which answers are recorded, which built by hand and which written from az's
+  documentation. It needs node.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden, the child a
