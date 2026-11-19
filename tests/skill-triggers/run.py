@@ -100,7 +100,7 @@ class Verdict(NamedTuple):
 
     status: str
     fired: list
-    cost: float
+    cost: float | None  # None: the run left no result event to read it from
     note: str
     model: str | None = None  # as the session's init event names it
 
@@ -388,7 +388,7 @@ def grade(lines, case, every, exit_code=0, stderr=""):
                 if block.get("type") == "tool_use" and block.get("name") == "Skill":
                     skill = str((block.get("input") or {}).get("skill", ""))
                     fired.append(skill.split(":")[-1])
-    cost = (result or {}).get("total_cost_usd") or 0.0
+    cost = (result or {}).get("total_cost_usd")
     model = (init or {}).get("model")
     tail = stderr.strip().splitlines()[-1][:200] if stderr.strip() else ""
 
@@ -549,12 +549,15 @@ def main():
         )
         if args.keep:
             args.keep.mkdir(parents=True, exist_ok=True)
-        failed, total_cost, resolved = [], 0.0, set()
+        failed, total_cost, unknown_cost, resolved = [], 0.0, 0, set()
         for case in chosen:
             passes, notes = 0, []
             for n in range(1, args.runs + 1):
                 verdict, out = run_case(case, every, binary, args)
-                total_cost += verdict.cost
+                if verdict.cost is None:
+                    unknown_cost += 1
+                else:
+                    total_cost += verdict.cost
                 if args.keep:
                     (args.keep / f"{case['name']}-{n}.jsonl").write_text(
                         out, encoding="utf-8"
@@ -569,8 +572,11 @@ def main():
                 if verdict.status == PASS:
                     passes += 1
                 shown = ", ".join(verdict.fired) or "none"
+                cost = (
+                    "cost unknown" if verdict.cost is None else f"${verdict.cost:.3f}"
+                )
                 notes.append(
-                    f"run {n}: {verdict.status} fired {shown} ${verdict.cost:.3f}"
+                    f"run {n}: {verdict.status} fired {shown} {cost}"
                     + (f" ({verdict.note})" if verdict.note else "")
                 )
             outcome = PASS if passes == args.runs else FAIL
@@ -581,9 +587,14 @@ def main():
                 flush=True,
             )
         models = ", ".join(sorted(m for m in resolved if m)) or "unknown"
+        cost = f"cost ${total_cost:.2f}"
+        if unknown_cost:
+            cost = (
+                f"cost at least ${total_cost:.2f} ({unknown_cost} run(s) reported none)"
+            )
         print(
             f"{TASK}: {len(chosen) - len(failed)} of {len(chosen)} cases passed on {models}, "
-            f"cost ${total_cost:.2f} (the CLI's list-price estimate)"
+            f"{cost}, the CLI's list-price estimate"
         )
         if failed:
             print(f"{TASK}: failed: {' '.join(failed)}")
