@@ -374,7 +374,7 @@ def isolation_probe(every, binary):
         box.remove()
 
 
-def grade(lines, case, every, exit_code: int | None = 0, stderr: str = ""):
+def grade(lines, case, every, exit_code: int | None, stderr: str):
     """The Verdict on one run, from its stream-json lines, exit code and stderr.
 
     exit_code None means the run timed out. Only a run that ended cleanly is

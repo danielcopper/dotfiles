@@ -142,8 +142,6 @@ def lines(*events):
 
 
 def grade(events, case, exit_code: int | None = 0, stderr: str = ""):
-    if exit_code == 0 and not stderr:
-        return run.grade(lines(*events), case, EVERY)
     return run.grade(lines(*events), case, EVERY, exit_code, stderr)
 
 
