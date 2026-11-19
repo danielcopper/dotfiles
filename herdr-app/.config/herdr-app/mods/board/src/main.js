@@ -1,7 +1,7 @@
 // The board, in its tab "Board": one's own work from GitHub (issues and pull
 // requests on a Projects v2 board, open pull requests) and Azure DevOps, as
-// views.json beside this file sets them. The leader's `b` shows or opens its
-// tab. Keys and behaviour: README, "herdr app".
+// mods/board/views.json sets them. The leader's `b` shows or opens its tab.
+// What it shows, its keys and behaviour: README, "herdr app".
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
@@ -26,27 +26,24 @@
 // where they go now.
 //
 // Hidden columns are left out of the query; the same request counts them for
-// their stubs.
+// their stubs. GitHub's queries also ask for the login gh runs as, which
+// "nur meine" compares with.
 //
-// The top bar toggles between the sources (Azure, GitHub) and shows a tab
-// per context of the shown one: on Azure a team, with its view switch
-// (Sprint, Backlog), or a project's pull requests; on GitHub a view. The
-// Azure tabs read nothing yet: each says which view it will hold. "nur
-// meine" filters what shows to one's own (on GitHub: assigned to, or opened
-// by, the login gh runs as), without reading anything again. The shown
-// source, its tab and a team's view last across reloads.
+// Calls: a GitHub view costs one gh call per refresh; an Azure view reads
+// nothing yet. Finding gh costs one sh call now and then (toolPaths says
+// when). A view refreshes when its tab first shows, on `r`, after `x`, when
+// it is shown again older than refreshMinutes, and every refreshMinutes
+// while it shows.
 //
-// Calls: a GitHub view costs one gh call per refresh. Finding gh costs one
-// sh call now and then (toolPaths says when). A view refreshes when the
-// board opens on it, on `r`, after `x`, when it is shown again older than
-// refreshMinutes, and every refreshMinutes while its tab shows.
-//
-// The board is written as modules in src/ beside build.mjs, which builds
-// them into the one main.js a stowed mod is (README, "herdr app"): shared
-// helpers, views.json, the sources (GitHub, Azure, and running gh and az),
-// the board's columns and cards, starting a session, and the UI, this
-// module. Its data logic is plain exported functions, tested with a few UI
-// paths by tests/herdr-app/board.test.mjs with node.
+// The modules in src/, built into main.js by build.mjs (its header says how
+// and why): shared.js, config.js (views.json), contexts.js (the top bar's
+// sources, contexts and their views), kinds/index.js (view kinds),
+// kinds/board.js (a board's columns and cards), select.js (filter, "nur
+// meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
+// az), actions/start.js (starting a session), ui/helpers.js and this one,
+// the UI with the shapes views are drawn in (SHAPES). Their data logic is
+// plain exported functions, tested with a few UI paths by
+// tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";

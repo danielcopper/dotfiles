@@ -13,7 +13,7 @@ const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der 
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
 const OLD_SHAPE = "views.json hat noch die alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in " +
-  "„sources.github.views“, Azure in „sources.azure“ mit „org“ und „contexts“ (README, „herdr app“)";
+  "„sources.github.views“, Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
 
 function startProblems(start, where) {
   if (start === undefined) return [];

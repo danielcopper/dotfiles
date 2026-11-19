@@ -25,8 +25,10 @@
 // - built by hand in the shapes GitHub returns: github-board-cases.json (a
 //   pull request, a draft, an item without access, an item in an option that
 //   is gone), github-list.json, github-move.json, github-rate-limited.json,
-//   github-scope-error.json; the viewer's login in github-board.json,
-//   github-board-cases.json and github-list.json is added the same way;
+//   github-scope-error.json; added the same way: the viewer's login in
+//   github-board.json, github-board-cases.json and github-list.json, the
+//   items' authors (a draft's creator) in the first two, and the pull
+//   requests' assignees and review requests in github-list.json;
 // - written from az's documentation (`az devops invoke` for work item
 //   types), not recorded: azure-types.json.
 

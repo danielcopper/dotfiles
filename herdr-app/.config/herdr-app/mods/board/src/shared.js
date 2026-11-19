@@ -1,5 +1,5 @@
-// What every part of the board uses: its names, its error and how one is shown,
-// small checks and text helpers, an item's key, and labels for times.
+// What the board's modules share: its names, its error and how one is
+// shown, small checks and text helpers, an item's key, and labels for times.
 
 
 
