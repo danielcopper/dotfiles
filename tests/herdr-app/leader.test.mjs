@@ -324,6 +324,40 @@ test("a raw key whose command fails says so in a toast; a failed switch of the b
   assert.deepEqual(layered.host.notes.map((n) => [n.title, n.body]), [['Could not show "board" in "layer"', "layout.select broke"]]);
 });
 
+// A layout with the right panel: hidden or not, its width, and the tab its
+// stack shows.
+const panelLayout = (hidden, size, active) => ({ id: "root", type: "row", children: [
+  { id: "panel", type: "column", hidden, size, children: [{ id: "panel-body", type: "stack", active, children: [{ id: "files" }, { id: "changes" }] }] },
+] });
+const key = (k) => ({ key: k, keystroke: k, key_char: k, modifiers: PLAIN });
+
+test("f e shows the right panel on Files, or hides it when it shows Files", async () => {
+  for (const [what, layout, runs] of [
+    ["hidden", panelLayout(true, { px: 368 }, "files"), [["layout.select", { stack: "panel-body", child: "files" }], ["layout.show", { id: "panel" }]]],
+    ["on Changes", panelLayout(false, { px: 368 }, "changes"), [["layout.select", { stack: "panel-body", child: "files" }], ["layout.show", { id: "panel" }]]],
+    ["on Files", panelLayout(false, { px: 368 }, "files"), [["layout.hide", { id: "panel" }]]],
+  ]) {
+    const { leader, cx, host } = await openLeader();
+    host.layout = () => layout;
+    await pressRaw(leader, cx, key("f"));
+    await pressRaw(leader, cx, key("e"));
+    assert.deepEqual(host.runs, runs, what);
+  }
+});
+
+test("Z switches the right panel between its normal width and wide, and shows a hidden one wide", async () => {
+  for (const [what, layout, runs] of [
+    ["normal", panelLayout(false, { px: 368 }, "files"), [["layout.resize", { id: "panel", weight: 2 }]]],
+    ["wide", panelLayout(false, { weight: 2 }, "files"), [["layout.resize", { id: "panel", px: 368 }]]],
+    ["hidden", panelLayout(true, { px: 368 }, "files"), [["layout.resize", { id: "panel", weight: 2 }], ["layout.show", { id: "panel" }]]],
+  ]) {
+    const { leader, cx, host } = await openLeader();
+    host.layout = () => layout;
+    await pressRaw(leader, cx, { ...key("Z"), key: "z", modifiers: { ...PLAIN, shift: true } });
+    assert.deepEqual(host.runs, runs, what);
+  }
+});
+
 test("keys.json still hands the leader a second ctrl-space and Esc", () => {
   const section = JSON.parse(readFileSync(keysPath, "utf8"))["mod:leader"];
   assert.equal(section?.["ctrl-space"], "leader.send_prefix");

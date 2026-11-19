@@ -1832,6 +1832,10 @@ test("UI: a press outside the shown layer's board shows the tab's content after 
   outside({ button: "left", position: { x: 150, y: 300 } }, cx);
   await cx.fire();
   assert.deepEqual(host.runs.splice(0), [], "behind the tab's content");
+  outside({ button: "left", position: { x: 350, y: 20 } }, cx);
+  host.tree = layerLayout("board");
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "the board button's press that shows the board");
   host.tree = layerLayout("board");
   root.with.on_mouse_down[1]({ button: "left" }, cx);
   await cx.fire();
@@ -3219,7 +3223,7 @@ test("UI: while the board shows, a focus on another space, tab or pane shows the
     render();
     assert.deepEqual(await after(), [], `no switch on a change of ${Object.keys(change)}`);
   }
-  for (const change of [{ tab: "t1", pane: "p1" }, { space: "s2" }, { pane: "p3" }]) {
+  for (const change of [{ tab: "t1", pane: "p1" }, { space: "s2" }, { pane: "p3" }, { tab: "t3" }]) {
     host.focus = { ...host.focus, ...change };
     render();
     assert.deepEqual(host.runs, [], "not from the render itself");
