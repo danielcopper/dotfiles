@@ -54,7 +54,10 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       `complet` or `alias`, or next to `gh`, `az`, `curl` or `wget`;
     - is nested too deep, too long or holds too many substitutions to check.
 
-    Other gh subcommands (issues, comments, reviews, releases, labels …) may read their body from a file. False
+    When the command hands text to a shell that reads it again — a shell with a `-c` option, `eval`, `<<<`,
+    `source` or `.`, a pipe into a shell — quoting no longer separates anything: the file, write and run-time rules
+    then read the whole de-quoted text, next to any `gh`, `az`, `curl` or `wget`, and `$` and backticks count
+    everywhere. Other gh subcommands (issues, comments, reviews, releases, labels …) may read their body from a file. False
     denials are accepted: a merge mentioned in a message next to one of those tools is denied like a call.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
     `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions

@@ -288,6 +288,24 @@ DENIED = [
     "curl --json @q.json https://api.github.com/graphql",
     "wget --method=PATCH https://api.github.com/repos/o/r/pulls/1",
     "echo hi | bash -c 'curl -sd @q.json https://api.github.com/graphql'",
+    # a shell that reads its text again: run-time words inside its quotes
+    "bash -c 'gh pr $(printf mer)ge 12'",
+    "bash -c 'gh api -X PUT repos/o/r/pulls/1/$(printf %s mer ge)'",
+    "bash -c 'gh api graphql -f query=\"$(cat q.json)\"'",
+    "sh -c 'gh pr $(printf mer)ge 12'",
+    "eval 'gh pr $(printf mer)ge 12'",
+    "bash <<< 'gh pr $(printf mer)ge 12'",
+    "echo 'gh pr $(printf mer)ge 12' | bash",
+    "bash -c 'x=gh; $x api graphql --input q.json'",
+    "bash -c 'az rest --method put --url https://x/$(cat u)'",
+    # a shell that reads its text again: words joined from quotes or escaped spaces
+    "bash -c 'cu''rl -d @q.json https://api.github.com/graphql'",
+    "bash -c curl' -d @q.json https://api.github.com/graphql'",
+    "bash -c curl\\ -d\\ @q.json\\ https://api.github.com/graphql",
+    "bash <<< curl\\ -d\\ @q.json\\ https://api.github.com/graphql",
+    "bash -c 'gh a''pi graphql --input q.json'",
+    "bash -c gh\\ api\\ graphql\\ --input\\ q.json",
+    "eval 'gh ''api graphql --input q.json'",
 ]
 
 REASONS = {

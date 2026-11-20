@@ -21,6 +21,10 @@ GH = re.compile(r"(?<![\w.-])gh(?![\w.-])")
 AZ = re.compile(r"(?<![\w.-])az(?![\w.-])")
 FEEDER = re.compile(r"(?<![\w.-])(xargs|parallel)(?![\w.-])")
 EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
+SHELL_WORD = re.compile(r"(?<![\w.-])(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
+SHELL_C_CLUSTER = re.compile(r"(?<!\S)-[a-z]*c[a-z]*(?!\S)")
+SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])\s*(?:source|\.)(?=\s)")
+PIPE_INTO_SHELL = re.compile(r"\|\s*(?:\S*/)?(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
 # Where a request body can merge: gh api, curl, wget, and az rest, devops invoke and repos pr.
 BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
 TOKEN_SPLIT = re.compile(r"[\s;&|()<>`]+")
@@ -154,10 +158,26 @@ def quote_parts(command: str) -> tuple[str, str]:
     return "".join(outside), "".join(double)
 
 
-def runs_at_run_time(command: str) -> bool:
+def rereads(lower: str) -> bool:
+    """Whether the de-quoted, lowercased command hands text to a shell that reads it again: a
+    shell word followed later by a `-c` option cluster, `eval`, `<<<`, `source` or `.` as a
+    command, or a pipe into a shell word. Quoting means nothing to such text, so the caller
+    judges the whole text instead."""
+    shell = SHELL_WORD.search(lower)
+    return bool(
+        (shell and SHELL_C_CLUSTER.search(lower, shell.end()))
+        or EVAL.search(lower)
+        or "<<<" in lower
+        or SOURCE_COMMAND.search(lower)
+        or PIPE_INTO_SHELL.search(lower)
+    )
+
+
+def runs_at_run_time(command: str, whole: bool = False) -> bool:
     """Whether *command* holds a construct the shell expands when it runs: `$` or a backtick
-    outside single quotes, a brace expansion or a glob next to a letter outside any quotes."""
-    outside, double = quote_parts(command)
+    outside single quotes, a brace expansion or a glob next to a letter outside any quotes -
+    or, with *whole*, any of them anywhere in the text."""
+    outside, double = (command, "") if whole else quote_parts(command)
     return (
         "$" in outside
         or "`" in outside
@@ -446,14 +466,23 @@ def check(command: str) -> str | None:
         AZ_COMPLETE.search(lower) or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower)
     ):
         return "completes an Azure DevOps pull request"
-    try:
-        body = reads_or_writes_body(command)
-    except ValueError:  # open quoting: judge the whole text
-        body = (
-            "reads a request from a file"
-            if body_tool and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain))
-            else None
-        )
+    reread = rereads(lower)
+    whole = reread  # a shell reads the text again: judge the whole de-quoted text
+    body = None
+    if not reread:
+        try:
+            body = reads_or_writes_body(command)
+        except ValueError:  # open quoting: judge the whole text
+            whole = True
+    if whole:
+        # re-read text counts next to any network word; open quoting next to a body tool only
+        near = network if reread else body_tool
+        if near and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
+            body = "reads a request from a file"
+        elif near and writes_with_curl(plain.split()):
+            body = "sends a writing request with curl or wget"
+        else:
+            body = None
     if body:
         return body
     if body_tool and "merge" in lower:
@@ -462,7 +491,7 @@ def check(command: str) -> str | None:
         )
     if network and FEEDER.search(lower):
         return "feeds gh, az, curl or wget through xargs or parallel"
-    if runs_at_run_time(command):
+    if runs_at_run_time(command, whole=reread):
         if MENTION.search(lower):
             return "builds a word at run time next to a merge mention"
         if network:
