@@ -2368,11 +2368,11 @@ export const MODALS = { start: startModal, status: statusModal };
 
 const TICK_MS = 30000;
 // How often a copy looks whether it shows (watchShown). herdr draws, and so
-// renders, only a copy that shows, again on a change of its live data
-// (spaces and tabs, the focus, shared state), while its timers run when it
-// is hidden too. A change of the layout alone is not documented to render
-// it, and a hidden copy is not rendered at all, so a render cannot see the
-// copy come to show or be hidden: this timer does, whichever comes first.
+// renders, only a copy that shows, again on a change of its live data (spaces
+// and tabs, the focus, shared state); a change of the layout alone is not
+// documented to render it, while its timers run when it is hidden too. So no
+// render sees the copy be hidden, and none may come when it comes to show:
+// this timer sees both, and a render that comes first sees the show too.
 export const WATCH_MS = 250;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.

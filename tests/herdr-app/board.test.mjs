@@ -1838,7 +1838,7 @@ test("UI: the board's focus command gives the keyboard to a copy that shows, not
   }
 });
 
-test("UI: a throw while the board handles a command, or in its timer, is said once and ends neither", async () => {
+test("UI: a throw while the board handles a command, or in its timers, is said once while it repeats and ends neither", async () => {
   memory.clear();
   const host = fakeHost({ shown: true });
   const commands = ["focus", "focus", "focus"];
