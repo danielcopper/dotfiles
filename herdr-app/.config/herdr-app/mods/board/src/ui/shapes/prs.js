@@ -65,8 +65,7 @@ function drawPrs(b, t, mono, view, st) {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
-        // A click selects the row, or opens its details where the person
-        // chose it (clickItem).
+        // A click on a row (clickItem).
         if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))

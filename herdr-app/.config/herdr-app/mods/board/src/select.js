@@ -54,14 +54,6 @@ export function selectionAfter(columns, sel) {
   return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
 }
 
-// A selection the board sets by itself (after new data, a filter, a move or
-// a column hidden) on a view's state: the item the person chose (st.picked)
-// stays chosen only where it stays selected.
-export function reselect(st, sel) {
-  if (st.picked !== sel.key) st.picked = null;
-  st.sel = sel;
-}
-
 // The selection after the columns changed (`before` → `after`: a column
 // hidden or shown, a card moved out of sight): the selected column, found by
 // id, else the column now at its index or the last one; there its card,

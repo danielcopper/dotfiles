@@ -56,7 +56,7 @@ import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
-import { matches, shows, navigate, reselect, selectionAfter } from "./select.js";
+import { matches, shows, navigate, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
@@ -365,22 +365,36 @@ export default class Board extends View {
   }
 
   keepSelection(view) {
-    const st = this.state(view.id);
-    reselect(st, selectionAfter(this.navColumns(view), st.sel));
+    this.reselect(view, selectionAfter(this.navColumns(view), this.state(view.id).sel));
   }
 
-  // Selects an item and scrolls to it; `chosen`: the person chose it (a key
-  // move or a click), else the board set it (reselect).
-  select(view, sel, chosen = false) {
+  // A selection the board sets by itself, which is no choice (clickItem).
+  // Where it lands on another item, the choice lapses and open details
+  // close, so that they never show an item unasked, and the item is scrolled
+  // into view.
+  reselect(view, sel) {
     const st = this.state(view.id);
-    if (chosen) {
-      st.sel = sel;
-      st.picked = sel.key;
-    } else reselect(st, sel);
-    const cols = this.navColumns(view);
-    const row = cols[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
-    if (row < 0) return;
-    this.shape(view).scrollTo(this, view, sel, row);
+    const other = sel.key !== st.sel?.key;
+    st.sel = sel;
+    if (!other) return;
+    st.picked = null;
+    st.detail = false;
+    this.scrollToSelection(view);
+  }
+
+  // The item the person chose (what counts as a choice: clickItem): selected,
+  // kept as chosen and scrolled into view; open details follow it.
+  choose(view, sel) {
+    const st = this.state(view.id);
+    st.sel = sel;
+    st.picked = sel.key;
+    this.scrollToSelection(view);
+  }
+
+  scrollToSelection(view) {
+    const sel = this.state(view.id).sel;
+    const row = this.navColumns(view)[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
+    if (row >= 0) this.shape(view).scrollTo(this, view, sel, row);
   }
 
   // Shows the tab at `index` of the shown source; none there does nothing.
@@ -457,13 +471,15 @@ export default class Board extends View {
     else this.say("Dazu gibt es keine Seite", "warning", cx);
   }
 
-  // A click on an item: one the person chose (an earlier click, or moved to
-  // with keys; not a selection the board set) opens its details, as the
-  // first Enter does; any other is selected, and chosen.
+  // A click on an item. The item the person chose (st.picked) opens its
+  // details, as the first Enter does; any other is chosen. Chosen is an item
+  // clicked before, moved to with the keys, or dragged onto another column;
+  // not one the board selected by itself (reselect), and not one only
+  // pressed: a press may still turn into a drag, or end elsewhere.
   clickItem(view, sel, cx) {
     const st = this.state(view.id);
     if (st.picked === sel.key) st.detail = true;
-    else this.select(view, sel, true);
+    else this.choose(view, sel);
     this.handle.focus();
     cx.notify();
   }
@@ -647,7 +663,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir), true);
+      if (shape.dirs.includes(dir)) this.choose(view, navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();

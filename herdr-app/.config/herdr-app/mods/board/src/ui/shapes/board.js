@@ -14,7 +14,7 @@ import { notify, spaces } from "herdr";
 import { BoardError, itemLabel } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hiddenColumns, moveCard, rollback, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
 import { viewKind } from "../../kinds/index.js";
-import { reselect, selectionInColumns } from "../../select.js";
+import { selectionInColumns } from "../../select.js";
 import { AGENT_STATUS, linkedSession } from "../../actions/start.js";
 import { button, report, shownOf, store } from "../helpers.js";
 
@@ -132,9 +132,14 @@ function drawBoard(b, t, mono, view, st) {
       .on_mouse_up("left", (_e, cx) => {
         if (!b.drag) return;
         cx.stop_propagation();
-        const { key } = b.drag;
+        const { key, from } = b.drag;
         b.endDrag(cx);
         b.moveTo(view, key, col.id, cx);
+        // Dropped onto another column, the card is chosen (clickItem), in
+        // the column it is in now.
+        if (from === col.id) return;
+        const at = b.navColumns(view).findIndex((c) => c.shown.some((x) => x.key === key));
+        if (at >= 0) b.choose(view, { col: at, key });
       })
       .child(head)
       .child(
@@ -216,17 +221,17 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
+      // The press selects nothing: it is no choice (clickItem) until it ends
+      // as a click or a drop.
       b.drag = { key: card.key, from: card.column };
       b.over = ci;
-      b.select(view, { col: ci, key: card.key });
       b.handle.focus();
       cx.notify();
     })
     .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click, which selects the card,
-      // or opens its details where the person chose it (clickItem). Released
-      // on another card: the column under it takes the drop. A release
-      // without a press on the card is no click.
+      // Released on the card it started on: a click (clickItem). Released on
+      // another card: the column under it takes the drop. A release without
+      // a press on the card is no click.
       if (b.modal || b.drag?.key !== card.key) return;
       cx.stop_propagation();
       b.endDrag(cx);
@@ -273,7 +278,7 @@ function moveCardTo(b, view, key, columnId, cx) {
   st.pending[key] = true;
   // A card moved to a hidden column leaves the board; the notice says so. The
   // selection, where it was on that card, stays in its column.
-  if (to.hidden && st.sel?.key === key) reselectAfter(b, view, before);
+  if (to.hidden && st.sel?.key === key) b.reselect(view, selectionInColumns(before, b.navColumns(view), st.sel));
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
   b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
   cx.spawn(async (cx) => {
@@ -315,8 +320,8 @@ function moveCardTo(b, view, key, columnId, cx) {
   });
 }
 
-// Hides a shown column or shows a hidden one; the selection follows
-// (reselectAfter).
+// Hides a shown column or shows a hidden one; the board sets the selection
+// that follows (selectionInColumns).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
@@ -326,20 +331,11 @@ function toggleBoardColumn(b, view, col, cx) {
   st.hidden = hiddenColumns(view, st.stored);
   store.set(`hidden:${view.id}`, st.stored);
   st.data = withHidden(st.data, st.hidden);
-  reselectAfter(b, view, before);
+  b.reselect(view, selectionInColumns(before, b.navColumns(view), st.sel));
   // What a column holds comes from the query, which leaves hidden ones out.
   b.refresh(view, cx);
 }
 
-// After the shown columns changed from `before`: the selection the board
-// sets (selectionInColumns). Where that is another item, its details close,
-// rather than show that item unasked.
-function reselectAfter(b, view, before) {
-  const st = b.state(view.id);
-  const sel = selectionInColumns(before, b.navColumns(view), st.sel);
-  if (sel.key !== st.sel?.key) st.detail = false;
-  reselect(st, sel);
-}
 
 function openBoardStatusMenu(b, view) {
   const st = b.state(view.id);

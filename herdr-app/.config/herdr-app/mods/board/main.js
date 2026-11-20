@@ -473,14 +473,6 @@ export function selectionAfter(columns, sel) {
   return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
 }
 
-// A selection the board sets by itself (after new data, a filter, a move or
-// a column hidden) on a view's state: the item the person chose (st.picked)
-// stays chosen only where it stays selected.
-export function reselect(st, sel) {
-  if (st.picked !== sel.key) st.picked = null;
-  st.sel = sel;
-}
-
 // The selection after the columns changed (`before` → `after`: a column
 // hidden or shown, a card moved out of sight): the selected column, found by
 // id, else the column now at its index or the last one; there its card,
@@ -1490,8 +1482,8 @@ export const layers = { boardLayer, showTab, leaveLayer };
 
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, an error's text for the UI, and the pieces that the Board, its
-// shapes and its modals draw alike (a button, a backdrop for a dialog, a detail
-// section, a check's color).
+// shapes and its modals draw alike (a button, a backdrop for a dialog, a menu
+// and its keys, a detail section, a check's color).
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -1781,9 +1773,14 @@ function drawBoard(b, t, mono, view, st) {
       .on_mouse_up("left", (_e, cx) => {
         if (!b.drag) return;
         cx.stop_propagation();
-        const { key } = b.drag;
+        const { key, from } = b.drag;
         b.endDrag(cx);
         b.moveTo(view, key, col.id, cx);
+        // Dropped onto another column, the card is chosen (clickItem), in
+        // the column it is in now.
+        if (from === col.id) return;
+        const at = b.navColumns(view).findIndex((c) => c.shown.some((x) => x.key === key));
+        if (at >= 0) b.choose(view, { col: at, key });
       })
       .child(head)
       .child(
@@ -1865,17 +1862,17 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
+      // The press selects nothing: it is no choice (clickItem) until it ends
+      // as a click or a drop.
       b.drag = { key: card.key, from: card.column };
       b.over = ci;
-      b.select(view, { col: ci, key: card.key });
       b.handle.focus();
       cx.notify();
     })
     .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click, which selects the card,
-      // or opens its details where the person chose it (clickItem). Released
-      // on another card: the column under it takes the drop. A release
-      // without a press on the card is no click.
+      // Released on the card it started on: a click (clickItem). Released on
+      // another card: the column under it takes the drop. A release without
+      // a press on the card is no click.
       if (b.modal || b.drag?.key !== card.key) return;
       cx.stop_propagation();
       b.endDrag(cx);
@@ -1922,7 +1919,7 @@ function moveCardTo(b, view, key, columnId, cx) {
   st.pending[key] = true;
   // A card moved to a hidden column leaves the board; the notice says so. The
   // selection, where it was on that card, stays in its column.
-  if (to.hidden && st.sel?.key === key) reselectAfter(b, view, before);
+  if (to.hidden && st.sel?.key === key) b.reselect(view, selectionInColumns(before, b.navColumns(view), st.sel));
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
   b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
   cx.spawn(async (cx) => {
@@ -1964,8 +1961,8 @@ function moveCardTo(b, view, key, columnId, cx) {
   });
 }
 
-// Hides a shown column or shows a hidden one; the selection follows
-// (reselectAfter).
+// Hides a shown column or shows a hidden one; the board sets the selection
+// that follows (selectionInColumns).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
@@ -1975,20 +1972,11 @@ function toggleBoardColumn(b, view, col, cx) {
   st.hidden = hiddenColumns(view, st.stored);
   store.set(`hidden:${view.id}`, st.stored);
   st.data = withHidden(st.data, st.hidden);
-  reselectAfter(b, view, before);
+  b.reselect(view, selectionInColumns(before, b.navColumns(view), st.sel));
   // What a column holds comes from the query, which leaves hidden ones out.
   b.refresh(view, cx);
 }
 
-// After the shown columns changed from `before`: the selection the board
-// sets (selectionInColumns). Where that is another item, its details close,
-// rather than show that item unasked.
-function reselectAfter(b, view, before) {
-  const st = b.state(view.id);
-  const sel = selectionInColumns(before, b.navColumns(view), st.sel);
-  if (sel.key !== st.sel?.key) st.detail = false;
-  reselect(st, sel);
-}
 
 function openBoardStatusMenu(b, view) {
   const st = b.state(view.id);
@@ -2107,8 +2095,7 @@ function drawPrs(b, t, mono, view, st) {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
-        // A click selects the row, or opens its details where the person
-        // chose it (clickItem).
+        // A click on a row (clickItem).
         if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
@@ -2792,22 +2779,36 @@ export default class Board extends View {
   }
 
   keepSelection(view) {
-    const st = this.state(view.id);
-    reselect(st, selectionAfter(this.navColumns(view), st.sel));
+    this.reselect(view, selectionAfter(this.navColumns(view), this.state(view.id).sel));
   }
 
-  // Selects an item and scrolls to it; `chosen`: the person chose it (a key
-  // move or a click), else the board set it (reselect).
-  select(view, sel, chosen = false) {
+  // A selection the board sets by itself, which is no choice (clickItem).
+  // Where it lands on another item, the choice lapses and open details
+  // close, so that they never show an item unasked, and the item is scrolled
+  // into view.
+  reselect(view, sel) {
     const st = this.state(view.id);
-    if (chosen) {
-      st.sel = sel;
-      st.picked = sel.key;
-    } else reselect(st, sel);
-    const cols = this.navColumns(view);
-    const row = cols[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
-    if (row < 0) return;
-    this.shape(view).scrollTo(this, view, sel, row);
+    const other = sel.key !== st.sel?.key;
+    st.sel = sel;
+    if (!other) return;
+    st.picked = null;
+    st.detail = false;
+    this.scrollToSelection(view);
+  }
+
+  // The item the person chose (what counts as a choice: clickItem): selected,
+  // kept as chosen and scrolled into view; open details follow it.
+  choose(view, sel) {
+    const st = this.state(view.id);
+    st.sel = sel;
+    st.picked = sel.key;
+    this.scrollToSelection(view);
+  }
+
+  scrollToSelection(view) {
+    const sel = this.state(view.id).sel;
+    const row = this.navColumns(view)[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
+    if (row >= 0) this.shape(view).scrollTo(this, view, sel, row);
   }
 
   // Shows the tab at `index` of the shown source; none there does nothing.
@@ -2884,13 +2885,15 @@ export default class Board extends View {
     else this.say("Dazu gibt es keine Seite", "warning", cx);
   }
 
-  // A click on an item: one the person chose (an earlier click, or moved to
-  // with keys; not a selection the board set) opens its details, as the
-  // first Enter does; any other is selected, and chosen.
+  // A click on an item. The item the person chose (st.picked) opens its
+  // details, as the first Enter does; any other is chosen. Chosen is an item
+  // clicked before, moved to with the keys, or dragged onto another column;
+  // not one the board selected by itself (reselect), and not one only
+  // pressed: a press may still turn into a drag, or end elsewhere.
   clickItem(view, sel, cx) {
     const st = this.state(view.id);
     if (st.picked === sel.key) st.detail = true;
-    else this.select(view, sel, true);
+    else this.choose(view, sel);
     this.handle.focus();
     cx.notify();
   }
@@ -3074,7 +3077,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir), true);
+      if (shape.dirs.includes(dir)) this.choose(view, navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
