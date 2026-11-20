@@ -704,8 +704,8 @@ export default class Leader extends View {
   }
 
   // Runs what a key does (`go`); a failure says so in a toast naming the
-  // key. Every key goes through here: a bound one (render), a digit, an
-  // action and its repeats (press).
+  // key. Used for a bound key (render), a digit, and an action and its
+  // repeats (press).
   act(key, go) {
     try {
       go();

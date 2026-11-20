@@ -1867,6 +1867,12 @@ test("UI: a throw while the board handles a command, or in its timer, is said on
   };
   await cx.look();
   assert.equal(said(), 2, "and again after a look that worked");
+  host.layout = () => {
+    throw new Error("layout broke");
+  };
+  await cx.tick();
+  await cx.tick();
+  assert.equal(host.notes.filter((n) => n.title === "Board: Neuladen fehlgeschlagen").length, 1, "the refresh timer too");
 });
 
 test("UI: herdr's props() say which copy is the layer's; the props init got stand in only where it gives none", async () => {
@@ -1879,7 +1885,7 @@ test("UI: herdr's props() say which copy is the layer's; the props init got stan
 });
 
 test("UI: the board's keyboard goes to the start dialog's message, else the filter being typed, else the board, whose keys a status menu takes", async () => {
-  const { b, cx, host } = await openBoard();
+  const { b, cx } = await openBoard();
   const taken = () => (b.handle.held ? "board" : b.modal?.inputFocused ? "message" : b.filtering ? "filter" : "none");
   await press(b, cx, "s");
   b.handle.held = false;
@@ -1901,7 +1907,6 @@ test("UI: the board's keyboard goes to the start dialog's message, else the filt
   b.filterInput.blur();
   b.takeKeyboard();
   assert.equal(taken(), "board");
-  void host;
 });
 
 test("UI: a copy that comes to show takes the keyboard once, after its timer or its render saw it, whoever showed it, never rendered while hidden", async () => {

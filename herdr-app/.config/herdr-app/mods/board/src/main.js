@@ -86,8 +86,12 @@ export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 
 const TICK_MS = 30000;
-// How often a copy looks whether it shows (watchShown): herdr draws, and so
-// renders, only a copy that shows, but its timers run while it is hidden.
+// How often a copy looks whether it shows (watchShown). herdr draws, and so
+// renders, only a copy that shows, again on a change of its live data
+// (spaces and tabs, the focus, shared state), while its timers run when it
+// is hidden too. A change of the layout alone is not documented to render
+// it, and a hidden copy is not rendered at all, so a render cannot see the
+// copy come to show or be hidden: this timer does, whichever comes first.
 export const WATCH_MS = 250;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
@@ -159,7 +163,7 @@ export default class Board extends View {
         cx.notify();
       }
     });
-    cx.timer.every(TICK_MS, (cx) => this.tick(cx));
+    cx.timer.every(TICK_MS, (cx) => this.guarded("Neuladen", () => this.tick(cx)));
     cx.timer.every(WATCH_MS, (cx) => this.guarded("Anzeige", () => this.watchShown(cx)));
     this.reload(cx);
   }
@@ -505,8 +509,9 @@ export default class Board extends View {
     return this.handle.is_focused() || this.filtering || Boolean(this.modal?.inputFocused);
   }
 
-  // Runs one step of a loop or a timer; a throw is logged and said once in a
-  // toast (again only when it says something else), so it ends no loop.
+  // Runs one step of a loop or a timer; a throw is logged and said in a
+  // toast, not again while the same failure repeats (a step that works
+  // clears it), so it ends no loop.
   guarded(what, step) {
     try {
       step();
@@ -521,8 +526,8 @@ export default class Board extends View {
   }
 
   // A press outside the layer's shown board shows the tab's content again
-  // (README, "herdr app"). On the tab bar it is the only sign: herdr tells a
-  // mod of no click on a tab. The board button's press arrives here too, and
+  // (README, "herdr app"). On the shown tab it is the only sign: herdr tells
+  // a mod of no click on a tab. The board button's press arrives here too, and
   // the button switches on it by itself; so the switch waits until after
   // the press, when it also shows whether the press took the keyboard.
   pressOutside(cx) {
@@ -530,8 +535,7 @@ export default class Board extends View {
     cx.timer.after(0, () => this.guarded("Klick", () => layers.leaveLayer({ keyboard: this.boardHasKeyboard() })));
   }
 
-  // At every look (a render, which herdr runs only while the copy shows,
-  // and the WATCH_MS timer, which runs while it is hidden too): a copy that
+  // At every look (a render or the WATCH_MS timer, see there): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
   // after the look and only where it still shows. While hidden, the layer's
   // board forgets the focus it compared with (followFocus), so it starts
@@ -654,9 +658,8 @@ export default class Board extends View {
 
   // ---- drawing ----
 
-  // herdr renders a copy while it shows, again on a change of its live data
-  // (spaces and tabs, the focus, shared state); a change of the layout alone
-  // is not documented to render it, hence the WATCH_MS timer too.
+  // When herdr renders a copy, and why the WATCH_MS timer looks too: see
+  // WATCH_MS.
   render(cx) {
     this.watchShown(cx);
     this.followFocus(cx);

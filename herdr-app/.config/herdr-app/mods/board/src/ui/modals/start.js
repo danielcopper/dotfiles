@@ -2,9 +2,8 @@
 // and with an agent chosen here, as a new space or tab, with a first message
 // to edit. It is b.modal = { kind: "start", view, item, settings, input
 // (the message's InputState, made for this dialog), field, inputFocused,
-// agents, agent,
-// agentsError, machines, machine, machineNote, agentNote, notes, open,
-// busy, error }.
+// agents, agent, agentsError, machines, machine, machineNote, agentNote,
+// notes, open, busy, error }.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
@@ -117,8 +116,7 @@ export const startModal = {
       cx.stop_propagation();
       const at = FIELDS.indexOf(m.field);
       m.field = FIELDS[(at + (e.modifiers?.shift ? -1 : 1) + FIELDS.length) % FIELDS.length];
-      if (m.field === "message") m.input.focus();
-      else b.handle.focus();
+      b.takeKeyboard();
       return cx.notify();
     }
     if (m.field === "message") return;
