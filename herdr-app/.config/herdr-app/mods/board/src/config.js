@@ -148,16 +148,17 @@ function contextName(c) {
 }
 
 // A context as the board uses it: { id, source: "azure", kind: "team",
-// name, project, team, views } or { id, source: "azure", kind: "prs", name,
-// project }; views in the switch's order.
-function normalizeContext(c) {
+// name, org, project, team, views } or { id, source: "azure", kind: "prs",
+// name, org, project }; views in the switch's order, org the organisation's
+// address (orgUrl).
+function normalizeContext(c, org) {
   const name = contextName(c);
   if (c.team) {
     const views = c.views ?? TEAM_VIEW_IDS;
     const { project, team } = c.team;
-    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
+    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, org, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
   }
-  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, project: c.prs.project };
+  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, org, project: c.prs.project };
 }
 
 // An organisation's address: https://<host>/<organisation>, a trailing /
@@ -183,7 +184,7 @@ function readAzure(raw) {
     const name = contextName(c);
     const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
     const problems = contextProblems(c);
-    const context = problems.length ? null : normalizeContext(c);
+    const context = problems.length ? null : normalizeContext(c, org);
     if (context && contexts.some((x) => x.id === context.id)) problems.push("gibt es schon");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
     contexts.push(context);

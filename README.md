@@ -309,12 +309,21 @@ herdr-app`. Which files of the package git tracks is set in the root
   teams, with a switch between its Sprint and its Backlog, followed by the pull
   requests of its project; on GitHub "Meine Aufgaben" (my issues on the Tender
   project's board, in the columns of its Status field) and "PRs" (pull requests
-  I opened or am asked to review, with checks and review state). The Azure tabs
-  read nothing yet; each says which view it will hold. "nur meine" narrows
-  whatever shows to my own items (on GitHub: assigned to me, opened by me, or
-  asking for my review; a list section of my own search, one whose query sets
-  author, assignee or (user-)review-requested to @me, counts whole) without
-  reading anything again. A context or view added to `views.json` adds a tab,
+  I opened or am asked to review, with checks and review state). A team's
+  Sprint shows its current sprint the way Azure's taskboard does: one row per
+  story (its id, title and own state), its tasks as cards in the team's
+  taskboard columns, each with its own state, assignee and id, and the tasks
+  whose story is not in the sprint in a row "Ohne Story" at the top; it holds
+  the work items of the sprint in the team's areas. It costs two az runs per
+  refresh; the sprint, the team's areas, its taskboard columns and the work
+  item types are read once until the sprint ends, and who az is signed in as
+  once. The Backlog and the pull request tabs read nothing yet; each says
+  which view it will hold. "nur meine" narrows whatever shows to my own items
+  (on GitHub: assigned to me, opened by me, or asking for my review; a list
+  section of my own search, one whose query sets author, assignee or
+  (user-)review-requested to @me, counts whole; on Azure: assigned to the
+  account az is signed in as, which needs `az login`, and a story stays
+  dimmed for my tasks in it) without reading anything again. A context or view added to `views.json` adds a tab,
   and `r` reads the file again; the board remembers the source, tab and team
   view shown last, and "nur meine". A count in a tab, a column or a list section
   that the filter or "nur meine" thins says so ("1/4"); a tab's count leaves
@@ -324,7 +333,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   and Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
   switch and "nur meine" take clicks too), `/` filters, `r` refreshes (the shown
   view also refreshes every few minutes while the board shows), `Esc` closes. On
-  a GitHub view `h/l j/k` move over the columns shown, `H/L` move a card one
+  a Sprint `h/l j/k` move over the stories and then each column, staying in the
+  row where they can, `H/L` move a task to the next column its type has (through
+  the taskboard's own column, not the state, since two columns may map to one
+  state; az takes the request from a file under
+  `~/.cache/herdr-app/board/`), `s` sets a story's or task's state from its
+  type's states, a click selects, and `Enter` shows the details (parent, state,
+  assignee, column, area and iteration). Where a work item's session starts
+  is only `start.checkout` so far. On a GitHub view `h/l j/k` move over the
+  columns shown, `H/L` move a card one
   column, hidden ones included (`s` picks from a menu, hidden ones too, or drag
   the card onto a column; the notice says when a card went to a hidden column),
   `x` hides a column (views.json sets which start hidden), `o` opens the item
@@ -341,10 +358,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
   pull request) and makes its own worktree. The session is named after the item
   (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
-  finds it again. A status change shows at once and is written to GitHub; a
-  refusal moves the card back with the error, and a write without a clear answer
-  refreshes the board and then says where the card is. It runs gh by the path my
-  shell gives, since herdr's own PATH lacks Homebrew and mise. `mise run
+  finds it again. A status change shows at once and is written to GitHub or
+  Azure; a refusal moves the card back with the error, and a write without a
+  clear answer refreshes the board and then says where the card is (a state set
+  on Azure refreshes the Sprint either way: where a task stands then is
+  Azure's to say). It runs gh and az by the path my shell gives, since herdr's
+  own PATH lacks Homebrew and mise. `mise run
   herdr-board-test` (without mise, `node --test tests/herdr-app/board.test.mjs`
   from the repo) tests that `main.js` is built from its sources, its data
   functions and a few of its key paths against sample answers of gh, GitHub and

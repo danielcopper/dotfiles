@@ -14,11 +14,12 @@ export function matches(card, text) {
 
 // Whether an item is one's own, for "nur meine": it came from a search of
 // one's own (ownByQuery), or `me` (the login the data was read as; null
-// when the source did not say) is one of its assignees, its author, or a
-// reviewer asked for.
+// when the source did not say) is one of its assignees (their logins, where
+// the item names them apart from the names it shows: assigneeLogins), its
+// author, or a reviewer asked for.
 export const isMine = (item, me) =>
   item.ownByQuery === true ||
-  (Boolean(me) && ((item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
+  (Boolean(me) && ((item.assigneeLogins ?? item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
 
 // Whether an item shows in data read as `viewer`: it matches the filter and,
 // with `mine` on, it is one's own.

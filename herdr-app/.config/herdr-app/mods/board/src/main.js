@@ -30,9 +30,13 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh; an Azure view reads
-// nothing yet. Finding gh costs one sh call now and then (toolPaths says
-// when). A view refreshes when its tab first shows, on `r`, after a column
+// Calls: a GitHub view costs one gh call per refresh. An Azure team's
+// Sprint costs two az calls per refresh (the taskboard's column of each work
+// item, and one WIQL query for their fields); its sprint, areas, taskboard
+// columns and work item types are read once until the sprint ends, who az
+// is signed in as once (makeAzure says more). The other Azure views read
+// nothing yet. Finding gh and az costs one sh call now and then (toolPaths
+// says when). A view refreshes when its tab first shows, on `r`, after a column
 // is hidden or shown (x, a name in the hidden line, the column menu), when
 // it is shown again older than refreshMinutes, and every refreshMinutes
 // while it shows.
@@ -40,11 +44,11 @@
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), select.js (filter, "nur
-// meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
-// az), actions/start.js (starting a session), ui/helpers.js, ui/layer.js
-// (the board layer), ui/shapes/ (how a view's data is drawn and worked:
-// board, prs, placeholder), ui/modals/ (the dialogs: start, status, columns)
+// kinds/board.js (a board's columns and cards), kinds/sprint.js (a
+// sprint's taskboard), select.js (filter, "nur meine", selection), sources/
+// (GitHub, Azure), tools.js (running gh and az), actions/start.js (starting
+// a session), ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how
+// a view's data is drawn and worked: board, prs, sprint, placeholder), ui/modals/ (the dialogs: start, status, columns)
 // and this one, the Board, which looks the shape up. Their data logic is
 // plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
@@ -70,6 +74,7 @@ export * from "./config.js";
 export * from "./contexts.js";
 export * from "./kinds/board.js";
 export * from "./kinds/index.js";
+export * from "./kinds/sprint.js";
 export * from "./select.js";
 export * from "./sources/github.js";
 export * from "./sources/azure.js";
@@ -81,6 +86,7 @@ export * from "./ui/layer.js";
 export * from "./ui/shapes/index.js";
 export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
+export * from "./ui/shapes/sprint.js";
 export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
@@ -670,7 +676,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.choose(view, navigate(this.navColumns(view), st.sel, dir));
+      if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
@@ -684,7 +690,7 @@ export default class Board extends View {
   openStatusMenu(view, cx) {
     const open = this.shape(view).openStatusMenu;
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
-    open(this, view);
+    open(this, view, cx);
     cx.notify();
   }
 

@@ -255,10 +255,11 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     );
 }
 
-// Moves a card to a column at once and writes it; one write per card at a
-// time. A refusal moves it back with the error shown; a write whose outcome
+// Moves a card to a column at once and writes it (the view's loader's
+// move); one write per card at a time; the sprint shape moves its tasks so
+// too. A refusal moves it back with the error shown; a write whose outcome
 // is unclear leaves it and refreshes.
-function moveCardTo(b, view, key, columnId, cx) {
+export function moveCardTo(b, view, key, columnId, cx) {
   const st = b.state(view.id);
   const found = findCard(st.data, key);
   const to = st.data?.columns.find((c) => c.id === columnId);
@@ -352,7 +353,7 @@ function openBoardStatusMenu(b, view) {
 // not there while the target is hidden, not shown (info); not there while
 // other columns are hidden, not shown, it may be in any of them (warning);
 // else not on the board (warning).
-function tellUnclear(b, due, data, cx) {
+export function tellUnclear(b, due, data, cx) {
   const lines = due.map((u) => {
     const now = findCard(data, u.key)?.column;
     if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };

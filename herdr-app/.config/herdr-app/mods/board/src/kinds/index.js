@@ -16,7 +16,7 @@ export const viewDefaults = () => ({ hide: [], start: {} });
 export const KINDS = {
   "github board": { shape: "board" },
   "github list": { shape: "prs" },
-  "azure sprint": { text: "Sprint-Ansicht folgt" },
+  "azure sprint": { shape: "sprint" },
   "azure backlog": { text: "Backlog folgt" },
   "azure prs": { text: "PR-Ansicht folgt" },
 };

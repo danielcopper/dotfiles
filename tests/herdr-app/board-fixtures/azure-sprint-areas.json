@@ -1,0 +1,18 @@
+{
+  "defaultValue": "Example Project\\Core",
+  "field": {
+    "referenceName": "System.AreaPath",
+    "url": "https://dev.azure.com/example-org/_apis/wit/fields/System.AreaPath"
+  },
+  "values": [
+    {
+      "includeChildren": true,
+      "value": "Example Project\\Core"
+    },
+    {
+      "includeChildren": false,
+      "value": "Example Project\\Shared"
+    }
+  ],
+  "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/teamfieldvalues"
+}

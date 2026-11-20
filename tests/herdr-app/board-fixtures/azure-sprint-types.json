@@ -1,0 +1,94 @@
+{
+  "continuation_token": null,
+  "count": 3,
+  "value": [
+    {
+      "name": "User Story",
+      "referenceName": "Custom.UserStory",
+      "states": [
+        {
+          "name": "To Do",
+          "color": "b2b2b2",
+          "category": "Proposed"
+        },
+        {
+          "name": "In Progress",
+          "color": "007acc",
+          "category": "InProgress"
+        },
+        {
+          "name": "In Dev Test",
+          "color": "ff9d00",
+          "category": "InProgress"
+        },
+        {
+          "name": "In UAT",
+          "color": "5688e0",
+          "category": "Resolved"
+        },
+        {
+          "name": "Broken",
+          "color": "cc293d",
+          "category": "InProgress"
+        },
+        {
+          "name": "Done",
+          "color": "339933",
+          "category": "Completed"
+        }
+      ]
+    },
+    {
+      "name": "Task",
+      "referenceName": "Microsoft.VSTS.WorkItemTypes.Task",
+      "states": [
+        {
+          "name": "To Do",
+          "color": "b2b2b2",
+          "category": "Proposed"
+        },
+        {
+          "name": "In Progress",
+          "color": "007acc",
+          "category": "InProgress"
+        },
+        {
+          "name": "Done",
+          "color": "339933",
+          "category": "Completed"
+        },
+        {
+          "name": "Removed",
+          "color": "ffffff",
+          "category": "Removed"
+        }
+      ]
+    },
+    {
+      "name": "Bug",
+      "referenceName": "Microsoft.VSTS.WorkItemTypes.Bug",
+      "states": [
+        {
+          "name": "New",
+          "color": "b2b2b2",
+          "category": "Proposed"
+        },
+        {
+          "name": "Committed",
+          "color": "007acc",
+          "category": "InProgress"
+        },
+        {
+          "name": "Done",
+          "color": "339933",
+          "category": "Completed"
+        },
+        {
+          "name": "Removed",
+          "color": "ffffff",
+          "category": "Removed"
+        }
+      ]
+    }
+  ]
+}

@@ -32,7 +32,17 @@
 //   request's in github-board-cases.json, a review request whose reviewer
 //   is gone (null) and an issue whose author is gone (null);
 // - written from az's documentation (`az devops invoke` for work item
-//   types), not recorded: azure-types.json.
+//   types), not recorded: azure-types.json;
+// - written in the shapes az prints for the Sprint view's calls (the REST
+//   reference at api-version 7.1 and the azure-devops extension's models),
+//   with made-up names, not recorded: azure-sprint-iteration.json (az
+//   boards iteration team list --timeframe current),
+//   azure-sprint-areas.json (az boards area team list),
+//   azure-sprint-columns.json (taskboardColumns), azure-sprint-types.json
+//   (workitemtypes), azure-sprint-taskboard.json (taskboardWorkItems, with
+//   one work item the query does not find), azure-sprint-items.json (az
+//   boards query) and azure-sprint-account.json (az account show --query
+//   user).
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -501,7 +511,7 @@ test("each context shows one view, with an id and a kind; an Azure view's kind s
     ["mine", "github board"],
   ]);
   assert.deepEqual(views.map((v) => board.kindOf(v)), [
-    { text: "Sprint-Ansicht folgt" }, { text: "Backlog folgt" }, { text: "PR-Ansicht folgt" }, { shape: "board" },
+    { shape: "sprint" }, { text: "Backlog folgt" }, { text: "PR-Ansicht folgt" }, { shape: "board" },
   ]);
   assert.deepEqual(board.viewsOf(config).map((v) => v.id), [
     "mine", "prs", "other", "azure:team:Example Project/Example Team:sprint", "azure:team:Example Project/Example Team:backlog", "azure:prs:Example Project",
@@ -1571,8 +1581,20 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
       calls.push({ tool, args, options, ...d });
       return d.promise;
     },
-    readTextFile: async () => host.config,
+    // views.json is `config`; any other file is in `files` (path → text),
+    // which writeTextFile writes as herdr's does: only where the file still
+    // holds `expected` (null: there is none). `failWrite` makes it fail.
+    files: {},
+    failWrite: null,
+    readTextFile: async (path) => (path.endsWith("/views.json") ? host.config : host.files[path] ?? null),
+    writeTextFile: async (path, text, expected) => {
+      if (host.failWrite) throw host.failWrite;
+      if ((host.files[path] ?? null) !== expected) throw new Error(`stale snapshot of ${path}`);
+      host.files[path] = text;
+      return null;
+    },
     appHome: () => "/fake-home",
+    home: () => "/home/sample",
     checking: () => false,
     nextCommand: () => new Promise(() => {}),
     notify: (n) => host.notes.push(n),
@@ -1624,9 +1646,11 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
   };
   // A call of a tool: by its name, or by the path which gave for it.
   const named = (c, tool) => c.tool === tool || c.tool.endsWith(`/${tool}`);
-  // Answers the oldest open call of a tool (whose arguments hold `has`).
+  // Answers the oldest open call of a tool (whose arguments hold `has`, or
+  // that `has` takes, given its arguments).
   host.answer = async (tool, result, has) => {
-    const at = calls.findIndex((c) => named(c, tool) && !c.done && (!has || c.args.some((a) => String(a).includes(has))));
+    const fits = (c) => (typeof has === "function" ? has(c.args) : c.args.some((a) => String(a).includes(has)));
+    const at = calls.findIndex((c) => named(c, tool) && !c.done && (!has || fits(c)));
     assert.ok(at >= 0, `no open ${tool} call${has ? ` with ${has}` : ""}`);
     calls[at].done = true;
     if (result instanceof Error) calls[at].reject(result);
@@ -1765,11 +1789,12 @@ test("UI: on the shipped views.json, with nothing remembered, the board opens on
   assert.deepEqual(byId(b.render(), "source").kids.map((k) => k.with.id[0]), ["source-github", "source-azure"], "the toggle's order");
 });
 
-test("UI: on the shipped views.json with Azure remembered, the board opens on its team's Sprint and runs nothing", async () => {
+test("UI: on the shipped views.json with Azure remembered, the board opens on its team's Sprint and reads it with az, not gh", async () => {
   const { b, host } = await bootBoard({ config: shippedConfig(), stored: { source: "azure" } });
   assert.deepEqual([b.source().id, b.context().kind, b.teamViewOf(b.context())], ["azure", "team", "sprint"]);
   assert.deepEqual(b.contexts().map((c) => c.kind).slice(0, 2), ["team", "prs"]);
-  assert.deepEqual([host.calls, host.asked], [[], []], "no gh and no az");
+  assert.deepEqual([host.calls, host.asked.map((a) => a.tool)], [[], ["az"]], "az is asked for (and not found here), gh is not");
+  assert.equal(b.state(b.view().id).error, "az ist nicht installiert");
   assert.ok(host.focusCalls > 0);
 });
 
@@ -3170,15 +3195,16 @@ test("UI: digits and [ ] pick the shown source's tabs; a digit beyond them does 
   assert.equal(b.context().kind, "team");
 });
 
-test("UI: an Azure team tab shows its Sprint or Backlog to come and v switches them; the PRs tab its list to come; the hints follow", async () => {
+test("UI: an Azure team tab shows its Sprint, or its Backlog to come, and v switches them; the PRs tab its list to come; the hints follow", async () => {
   const { b, cx, host } = await bootBoard({ stored: { source: "azure" } });
   const shown = () => texts(b.render());
-  assert.ok(shown().includes("Sprint-Ansicht folgt"));
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "m", "/", "r", "Esc"]);
+  assert.ok(shown().includes("az ist nicht installiert"), "the Sprint reads with az, which is not found here");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "H/L", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
   await press(b, cx, "v");
   assert.ok(shown().includes("Backlog folgt"));
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "m", "/", "r", "Esc"]);
   await press(b, cx, "v");
-  assert.ok(shown().includes("Sprint-Ansicht folgt"));
+  assert.ok(shown().includes("az ist nicht installiert"));
   await click(b, cx, "team-view-backlog");
   assert.ok(shown().includes("Backlog folgt"), "a click on the switch");
   await press(b, cx, "2");
@@ -3230,8 +3256,11 @@ test("UI: switching a team's view loads the view now shown, where its source rea
 
 test("UI: on a shape without items (the placeholder) Enter, o and the arrows stay herdr's", async () => {
   const { b, cx } = await bootBoard({ stored: { source: "azure" } });
+  await press(b, cx, "v");
+  assert.equal(b.shape(b.view()), board.SHAPES.placeholder, "the Backlog to come");
+  const stopped = cx.stopped;
   for (const k of ["enter", "o", "j", "down"]) await press(b, cx, k);
-  assert.equal(cx.stopped, 0, "none was taken");
+  assert.equal(cx.stopped, stopped, "none was taken");
   assert.equal(b.notice, null, "no „Dazu gibt es keine Seite“");
 });
 
@@ -3275,7 +3304,7 @@ test("UI: while one types in the filter, m, q, v and digits are text, not keys",
   assert.equal(b.mine, true, "after Esc they are keys again");
 });
 
-test("UI: the shown GitHub view refreshes every refreshMinutes while the board shows; an Azure tab and a hidden board read nothing", async () => {
+test("UI: the shown GitHub view refreshes every refreshMinutes while the board shows; an Azure tab without a loader and a hidden board read nothing", async () => {
   let shown = true;
   const { b, cx, host } = await openBoard();
   host.panes = () => (shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []);
@@ -3292,9 +3321,10 @@ test("UI: the shown GitHub view refreshes every refreshMinutes while the board s
   assert.equal(host.open("gh").length, 0, "not while the board is not shown");
   shown = true;
   await press(b, cx, "q");
+  await press(b, cx, "v");
   advance(10 * 60000);
   await cx.tick();
-  assert.deepEqual([host.open("gh").length, host.open("az").length], [0, 0], "an Azure tab reads nothing");
+  assert.deepEqual([host.open("gh").length, host.open("az").length], [0, 0], "the Backlog to come reads nothing");
 });
 
 test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
@@ -3952,4 +3982,365 @@ test("the personal layout's work area is the board layer: a stack of the shown t
   assert.equal(stack.active, tab.id, "the tab's content shows first");
   assert.deepEqual([tab.type, tab.content.tab, boardBlock.type, boardBlock.content], ["block", "active", "block", { mod: "board", props: { layer: true } }]);
   assert.equal(stack.children.length, 2);
+});
+
+// ---- Azure: the Sprint view ----
+
+const DAY = 86400000;
+const ORG = "https://dev.azure.com/example-org";
+const ITERATION_ID = "7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23";
+const sprintTeam = () => board.contextsOf(sampleConfig(), "azure")[0];
+// The fixture's sprint, its last day starting `days` days after the test
+// clock's now (Azure's finishDate is that day's start).
+function iterationAnswer(days = 3) {
+  const list = json("azure-sprint-iteration.json");
+  list[0].attributes.finishDate = `${new Date(Date.now() + days * DAY).toISOString().slice(0, 10)}T00:00:00Z`;
+  return JSON.stringify(list);
+}
+// The Sprint's az calls, told apart by their arguments.
+const AZ = {
+  iteration: (a) => a.includes("--timeframe"),
+  areas: (a) => a[0] === "boards" && a[1] === "area",
+  columns: (a) => a.includes("taskboardColumns"),
+  types: (a) => a.includes("workitemtypes"),
+  places: (a) => a.includes("taskboardWorkItems") && !a.includes("PATCH"),
+  query: (a) => a[0] === "boards" && a[1] === "query",
+  me: (a) => a[0] === "account",
+  move: (a) => a.includes("PATCH"),
+  state: (a) => a[1] === "work-item",
+};
+const openAz = (host, kind) => host.open("az").filter((c) => AZ[kind](c.args));
+const azRefused = (text) => ({ code: 1, stdout: "", stderr: `ERROR: ${text}\n` });
+async function answerSettings(host, iteration = iterationAnswer()) {
+  await host.answer("az", ok(iteration), AZ.iteration);
+  await host.answer("az", ok(fixture("azure-sprint-areas.json")), AZ.areas);
+  await host.answer("az", ok(fixture("azure-sprint-columns.json")), AZ.columns);
+  await host.answer("az", ok(fixture("azure-sprint-types.json")), AZ.types);
+}
+// One refresh's answers; `me`: the account's answer (true: the fixture's,
+// false: none is asked).
+async function answerRefresh(host, { me = true, items = fixture("azure-sprint-items.json") } = {}) {
+  await host.answer("az", ok(fixture("azure-sprint-taskboard.json")), AZ.places);
+  await host.answer("az", ok(items), AZ.query);
+  if (me) await host.answer("az", me === true ? ok(fixture("azure-sprint-account.json")) : me, AZ.me);
+}
+// A Board on the Azure team's Sprint, read from the fixtures (az found).
+async function openSprint(options = {}) {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found, ...options });
+  await answerSettings(host);
+  await answerRefresh(host, options);
+  cx.later.splice(0);
+  return { b, cx, host, view: b.view(), st: () => b.state(b.view().id) };
+}
+// The Sprint's data as sprintBoard builds it from the fixtures; `drop`:
+// numbers of work items the query does not find.
+function sprintData({ viewer = "alex.sample@example.com", drop = [] } = {}) {
+  return board.sprintBoard({
+    iteration: board.parseIteration(iterationAnswer()), columns: board.parseColumns(fixture("azure-sprint-columns.json")),
+    types: board.parseAzureTypes(fixture("azure-sprint-types.json")),
+    items: board.parseSprintItems(fixture("azure-sprint-items.json"), sprintTeam()).filter((i) => !drop.includes(i.number)),
+    places: board.parseTaskboard(fixture("azure-sprint-taskboard.json")), viewer,
+  });
+}
+const columnId = (data, name) => data.columns.find((c) => c.name === name).id;
+// The cards in each column cell of a drawn row.
+const rowCells = (root, key) => byId(root, `row-${key}`).kids.slice(1).map((cell) => cell.kids.map((k) => k.with.id[0]));
+const drawnRows = (root) => byId(root, "sprint-rows").kids.map((k) => k.with.id[0]);
+
+test("the Sprint's az calls name the organisation without detection and the team; az devops invoke asks for api-version 7.1", () => {
+  const c = sprintTeam();
+  const org = ["--org", ORG, "--detect", "false"];
+  const team = ["--project", "Example Project", "--team", "Example Team"];
+  assert.deepEqual(board.azIterationArgs(c), ["boards", "iteration", "team", "list", ...org, ...team, "--timeframe", "current", "-o", "json"]);
+  assert.deepEqual(board.azAreasArgs(c), ["boards", "area", "team", "list", ...org, ...team, "-o", "json"]);
+  const invoke = (resource, route, more = []) => ["devops", "invoke", ...org, "--area", resource === "workitemtypes" ? "wit" : "work", "--resource", resource,
+    "--route-parameters", ...route, "--api-version", "7.1", ...more, "-o", "json"];
+  const route = ["project=Example Project", "team=Example Team"];
+  assert.deepEqual(board.azColumnsArgs(c), invoke("taskboardColumns", route));
+  assert.deepEqual(board.azTypesArgs(c), invoke("workitemtypes", ["project=Example Project"]));
+  assert.deepEqual(board.azTaskboardArgs(c, ITERATION_ID), invoke("taskboardWorkItems", [...route, `iterationId=${ITERATION_ID}`]));
+  assert.deepEqual(board.azMoveArgs(c, ITERATION_ID, 312, "/f.json"),
+    invoke("taskboardWorkItems", [...route, `iterationId=${ITERATION_ID}`, "workItemId=312"], ["--http-method", "PATCH", "--in-file", "/f.json"]));
+  assert.deepEqual(board.azQueryArgs(c, "SELECT 1"), ["boards", "query", ...org, "--project", "Example Project", "--wiql", "SELECT 1", "-o", "json"]);
+  assert.deepEqual(board.azStateArgs(ORG, 311, "Done"), ["boards", "work-item", "update", ...org, "--id", "311", "--state", "Done", "-o", "json"]);
+  assert.deepEqual(board.AZ_ME_ARGS, ["account", "show", "--query", "user", "-o", "json"]);
+});
+
+test("the Sprint's one query asks for the fields of the work items in the sprint's path and the team's areas, below one where the team includes them", () => {
+  const wiql = board.sprintWiql(board.parseIteration(iterationAnswer()), board.parseAreas(fixture("azure-sprint-areas.json")));
+  assert.equal(wiql, "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.AssignedTo], [System.Parent], [System.AreaPath], [System.IterationPath] " +
+    "FROM WorkItems WHERE [System.IterationPath] = 'Example Project\\Sprint 12' AND ([System.AreaPath] UNDER 'Example Project\\Core' OR [System.AreaPath] = 'Example Project\\Shared') " +
+    "ORDER BY [System.Id]");
+  const quoted = board.sprintWiql({ path: "P\\Sprint 'x'" }, { field: "System.AreaPath", values: [{ value: "P\\O'Neil", includeChildren: true }] });
+  assert.match(quoted, /\[System\.IterationPath\] = 'P\\Sprint ''x''' AND \(\[System\.AreaPath\] UNDER 'P\\O''Neil'\)/);
+  assert.match(board.sprintWiql({ path: "P" }, { field: "Custom.Team", values: [{ value: "Core", includeChildren: true }] }), /AND \(\[Custom\.Team\] = 'Core'\)/,
+    "a team field that is no area path has no level below");
+});
+
+test("the Sprint's answers: the current sprint, the team's areas, the columns in their order, each work item's column, the work items, who az is", () => {
+  assert.deepEqual(board.parseIteration(fixture("azure-sprint-iteration.json")),
+    { id: ITERATION_ID, name: "Sprint 12", path: "Example Project\\Sprint 12", finish: "2026-11-27T00:00:00Z" });
+  const past = { id: "old", name: "Sprint 11", path: "Example Project\\Sprint 11", attributes: { timeFrame: "past" } };
+  assert.equal(board.parseIteration(JSON.stringify([past, ...json("azure-sprint-iteration.json")])).id, ITERATION_ID, "the current one");
+  assert.throws(() => board.parseIteration("[]"), /^Error: Das Team hat keinen laufenden Sprint$/);
+  assert.throws(() => board.parseIteration("not json"), /az lieferte für den Sprint kein lesbares JSON/);
+  assert.deepEqual(board.parseAreas(fixture("azure-sprint-areas.json")), {
+    field: "System.AreaPath", values: [{ value: "Example Project\\Core", includeChildren: true }, { value: "Example Project\\Shared", includeChildren: false }],
+  });
+  assert.throws(() => board.parseAreas('{"values": []}'), /keine Bereiche/);
+  const columns = board.parseColumns(fixture("azure-sprint-columns.json"));
+  assert.deepEqual(columns.map((c) => c.name), ["To Do", "In Progress", "In PR/Work done", "Done"]);
+  assert.deepEqual(columns[2].mappings, [{ type: "Task", state: "In Progress" }]);
+  assert.throws(() => board.parseColumns('{"columns": []}'), /keine Spalten des Taskboards/);
+  const places = board.parseTaskboard(fixture("azure-sprint-taskboard.json"));
+  assert.deepEqual(places.get(313), { columnId: columns[2].id, column: "In PR/Work done", state: "In Progress" });
+  assert.equal(places.size, 7);
+  assert.deepEqual(board.parseTaskboard(JSON.stringify(json("azure-sprint-taskboard.json").value)), places, "a plain list too");
+  const items = board.parseSprintItems(fixture("azure-sprint-items.json"), sprintTeam());
+  assert.equal(items.length, 8);
+  assert.deepEqual(items[0], {
+    key: "AB#301", source: "azure", kind: "workitem", number: 301, title: "Import the sample catalogue", type: "User Story", state: "In Progress",
+    assignees: ["Alex Sample"], assigneeLogins: ["alex.sample@example.com"], parent: null, area: "Example Project\\Core", iteration: "Example Project\\Sprint 12",
+    url: "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/301", labels: [], sub: null, branch: null,
+  });
+  assert.equal(items[2].parent, 301);
+  assert.deepEqual([items[1].assignees, items[1].assigneeLogins], [[], []], "no one assigned");
+  assert.deepEqual([board.parseSprintItems("", sprintTeam()), board.parseSprintItems("\n", sprintTeam())], [[], []], "no output: nothing matched");
+  assert.deepEqual(board.azPerson("Robin Example <Robin.Example@example.com>"), { name: "Robin Example", login: "robin.example@example.com" });
+  assert.deepEqual(board.azPerson(undefined), { name: null, login: null });
+  assert.deepEqual([board.parseViewer(fixture("azure-sprint-account.json")), board.parseViewer(""), board.parseViewer('"x@example.com"')], ["alex.sample@example.com", null, null]);
+});
+
+test("the sprint's taskboard: a row per story in the query's order after „Ohne Story“, the tasks in their taskboard columns, each column the types it maps", () => {
+  const data = sprintData();
+  assert.equal(data.shape, "sprint");
+  assert.deepEqual(data.rows.map((r) => r.key), ["none", "AB#301", "AB#302"]);
+  assert.deepEqual(data.columns.map((c) => [c.name, c.cards.map((k) => k.number)]), [["To Do", [311, 331]], ["In Progress", [312, 332]], ["In PR/Work done", [313]], ["Done", [321]]],
+    "a work item the query did not find (399) is left out");
+  const rowOfCard = (n) => data.columns.flatMap((c) => c.cards).find((k) => k.number === n).row;
+  assert.deepEqual([311, 321, 331, 332].map(rowOfCard), ["AB#301", "AB#302", "none", "none"], "a story not in the sprint, or none, is „Ohne Story“");
+  assert.deepEqual(data.columns.map((c) => [c.color, c.types]), [["muted", ["Task", "Bug"]], ["ansi4", ["Task", "Bug"]], ["ansi4", ["Task"]], ["ansi2", ["Task", "Bug"]]]);
+  assert.deepEqual(data.columns[1].mappings, { Task: "In Progress", Bug: "Committed" });
+  assert.deepEqual([data.meta.iterationId, data.meta.iteration, data.meta.typeStates["User Story"].length, data.viewer, data.total, data.limited],
+    [ITERATION_ID, "Sprint 12", 6, "alex.sample@example.com", 8, false]);
+  assert.deepEqual(sprintData({ drop: [331, 332] }).rows.map((r) => r.key), ["AB#301", "AB#302"], "no „Ohne Story“ without a task in it");
+});
+
+test("H/L step a task to the next column that maps its type; a moved task shows the state its column maps it to until a refresh reads it", () => {
+  const data = sprintData();
+  const step = (key, s) => board.stepTarget(data, key, s)?.name ?? null;
+  assert.deepEqual([step("AB#312", 1), step("AB#332", 1), step("AB#311", -1), step("AB#313", -1)], ["In PR/Work done", "Done", null, "In Progress"],
+    "a Bug skips the column only Tasks map");
+  assert.equal(board.canDrop(data, board.findCard(data, "AB#332").card, data.columns[2]), false);
+  const moved = board.moveCard(data, "AB#311", columnId(data, "In Progress"));
+  const { card, column } = board.findCard(moved, "AB#311");
+  assert.deepEqual([card.state, board.shownState(card, column)], ["To Do", "In Progress"]);
+  const back = board.findCard(board.moveCard(moved, "AB#311", columnId(data, "To Do")), "AB#311");
+  assert.equal(board.shownState(back.card, back.column), "To Do");
+  assert.equal(board.shownState(data.rows[1].story, null), "In Progress");
+});
+
+test("the Sprint's keys walk the stories, then each column in row order; h/l land on the same row's item, else the next one below, else the last", () => {
+  const data = sprintData();
+  const nav = board.sprintNav(data, "", false);
+  assert.deepEqual(nav.map((c) => c.name), ["Story", "To Do", "In Progress", "In PR/Work done", "Done"]);
+  assert.deepEqual(nav.map((c) => c.shown.map((i) => i.number)), [[301, 302], [331, 311], [332, 312], [313], [321]]);
+  const go = (col, key, dir, columns = nav) => board.sprintNavigate(columns, { col, key }, dir, data.rows);
+  assert.deepEqual(go(0, "AB#301", "right"), { col: 1, key: "AB#311" });
+  assert.deepEqual(go(1, "AB#311", "right"), { col: 2, key: "AB#312" });
+  assert.deepEqual(go(3, "AB#313", "right"), { col: 4, key: "AB#321" }, "the next row below");
+  assert.deepEqual(go(0, "AB#302", "right"), { col: 1, key: "AB#311" }, "none below: the last");
+  assert.deepEqual(go(2, "AB#332", "left"), { col: 1, key: "AB#331" });
+  assert.deepEqual(go(0, "AB#302", "left"), { col: 0, key: "AB#302" }, "at the edge it stays");
+  assert.deepEqual(go(1, "AB#331", "down"), { col: 1, key: "AB#311" });
+  const mine = board.sprintNav(data, "", true);
+  assert.deepEqual(mine.map((c) => c.shown.map((i) => i.number)), [[301], [331, 311], [], [313], []]);
+  assert.deepEqual(go(1, "AB#311", "right", mine), { col: 2, key: null }, "an empty column is selected as such");
+  assert.deepEqual(board.shownRows(data, mine).map((r) => r.key), ["none", "AB#301"]);
+  const changed = board.withItemState(data, "AB#302", "In Dev Test");
+  assert.deepEqual([changed.rows[2].story.state, data.rows[2].story.state], ["In Dev Test", "To Do"], "a new data, the old one kept");
+  const moved = board.moveCard(data, "AB#311", columnId(data, "In Progress"));
+  const set = board.findCard(board.withItemState(moved, "AB#311", "Done"), "AB#311");
+  assert.deepEqual([set.card.state, board.shownState(set.card, set.column)], ["Done", "Done"], "a set state is the task's own");
+});
+
+test("UI: the Sprint reads its settings once, all at the same time, then the taskboard and the query per refresh; who az is once; a new sprint's settings once it ended", async () => {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found });
+  assert.deepEqual(["iteration", "areas", "columns", "types"].map((k) => openAz(host, k).length), [1, 1, 1, 1]);
+  assert.equal(host.open("az").length, 4);
+  await answerSettings(host);
+  assert.deepEqual(["places", "query", "me"].map((k) => openAz(host, k).length), [1, 1, 1], "at the same time");
+  assert.ok(openAz(host, "places")[0].args.includes(`iterationId=${ITERATION_ID}`));
+  assert.ok(openAz(host, "query")[0].args.includes(board.sprintWiql(board.parseIteration(iterationAnswer()), board.parseAreas(fixture("azure-sprint-areas.json")))));
+  await answerRefresh(host);
+  assert.equal(b.state(b.view().id).data.shape, "sprint");
+  assert.ok(host.calls.every((c) => c.tool === found("az") && c.options.on === null && c.options.timeout === board.AZ_TIMEOUT), "az by its path, here, with its timeout");
+  await press(b, cx, "r");
+  assert.deepEqual(["places", "query"].map((k) => openAz(host, k).length), [1, 1]);
+  assert.equal(host.open("az").length, 2, "a refresh is two az calls");
+  await answerRefresh(host, { me: false });
+  const end = Date.parse(JSON.parse(iterationAnswer())[0].attributes.finishDate) + DAY;
+  advance(end - Date.now() - 60000);
+  await press(b, cx, "r");
+  assert.equal(host.open("az").length, 2, "still the sprint's last day");
+  await answerRefresh(host, { me: false });
+  advance(2 * 60000);
+  await press(b, cx, "r");
+  assert.equal(host.open("az").length, 4, "the sprint ended: its settings again");
+});
+
+test("UI: the Sprint shows a row per story, its tasks as cards with state, assignee and id in the taskboard's columns, and „Ohne Story“ first", async () => {
+  const { b } = await openSprint();
+  const root = b.render();
+  const head = texts(byId(root, "sprint-head"));
+  for (const name of ["To Do", "In Progress", "In PR/Work done", "Done"]) assert.ok(head.includes(name), name);
+  assert.ok(head.some((s) => /^Sprint 12 · bis \d+\.\d+\. · 2 Stories$/.test(s)), head.join("|"));
+  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301", "row-AB#302"]);
+  assert.ok(texts(byId(root, "row-none")).includes("Ohne Story"));
+  const story = texts(byId(root, "story-AB#301"));
+  for (const s of ["AB#301", "User Story", "Import the sample catalogue", "In Progress"]) assert.ok(story.includes(s), s);
+  assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], ["card-AB#312"], ["card-AB#313"], []]);
+  assert.deepEqual(rowCells(root, "none"), [["card-AB#331"], ["card-AB#332"], [], []]);
+  assert.deepEqual(rowCells(root, "AB#302"), [[], [], [], ["card-AB#321"]]);
+  const card = texts(byId(root, "card-AB#311"));
+  for (const s of ["AB#311", "Parse the sample file", "To Do", "Alex Sample"]) assert.ok(card.includes(s), s);
+  assert.ok(texts(byId(root, "card-AB#332")).includes("Committed"), "a card shows its own state");
+  assert.equal(texts(root).some((s) => s.includes("undefined")), false);
+  assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "8", "the tab counts stories and tasks");
+});
+
+test("UI: H/L move a task through the taskboard's columns with the column's name as newColumn; a story stays and says why", async () => {
+  const { b, cx, host, st, view } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  const path = "/home/sample/.cache/herdr-app/board/taskboard-move-311.json";
+  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In Progress" });
+  const [move] = openAz(host, "move");
+  assert.deepEqual(move.args, board.azMoveArgs(view.context, ITERATION_ID, 311, path));
+  assert.equal(board.findCard(st().data, "AB#311").column.name, "In Progress", "the card moves at once");
+  assert.ok(texts(byId(b.render(), "card-AB#311")).includes("In Progress"), "with the state that column maps it to");
+  await host.answer("az", ok("{}"), AZ.move);
+  assert.equal(b.notice.text, "AB#311 steht jetzt in „In Progress“");
+  await press(b, cx, "l", shiftL);
+  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In PR/Work done" }, "the next move rewrites the work item's file");
+  await host.answer("az", ok(""), AZ.move);
+  await click(b, cx, "card-AB#332");
+  await press(b, cx, "l", shiftL);
+  assert.deepEqual(JSON.parse(host.files["/home/sample/.cache/herdr-app/board/taskboard-move-332.json"]), { newColumn: "Done" }, "a Bug skips the column only Tasks map");
+  await host.answer("az", ok("{}"), AZ.move);
+  await click(b, cx, "story-AB#301");
+  await press(b, cx, "l", shiftL);
+  assert.equal(b.notice.text, "AB#301 ist eine Story: H/L verschieben Tasks, s ändert ihren Status");
+  assert.equal(host.open("az").length, 0);
+});
+
+test("UI: a move Azure refuses goes back; one whose request cannot be written down refuses before az runs", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  host.failWrite = new Error("read-only file system");
+  await press(b, cx, "l", shiftL);
+  assert.equal(host.open("az").length, 0);
+  assert.equal(b.notice.text, "AB#311 bleibt in „To Do“: Die Anfrage an Azure ließ sich nicht ablegen (/home/sample/.cache/herdr-app/board/taskboard-move-311.json): read-only file system");
+  host.failWrite = null;
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", azRefused("TF401320: Rule Error for field Task State."), AZ.move);
+  assert.equal(board.findCard(st().data, "AB#311").column.name, "To Do");
+  assert.equal(b.notice.text, "AB#311 bleibt in „To Do“: TF401320: Rule Error for field Task State.");
+});
+
+test("UI: s on a task offers its type's states and sets one with az boards work-item update; then the Sprint is read again", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "s");
+  assert.deepEqual([b.modal.kind, b.modal.targets.map((t) => t.name), b.modal.at], ["status", ["To Do", "In Progress", "Done", "Removed"], 0]);
+  await press(b, cx, "3");
+  const [update] = openAz(host, "state");
+  assert.deepEqual(update.args, board.azStateArgs(ORG, 311, "Done"));
+  assert.deepEqual([board.findSprintItem(st().data, "AB#311").state, st().pending["AB#311"]], ["Done", true], "at once, while it is written");
+  await host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "Done" } })), AZ.state);
+  assert.equal(b.notice.text, "AB#311 hat jetzt den Status „Done“");
+  assert.deepEqual(["places", "query"].map((k) => openAz(host, k).length), [1, 1], "where Azure put it is read again");
+});
+
+test("UI: s on a story offers its type's states; a refusal sets the state back, an answer without the state is unclear and reads again", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "story-AB#302");
+  await press(b, cx, "s");
+  assert.deepEqual(b.modal.targets.map((t) => t.name), ["To Do", "In Progress", "In Dev Test", "In UAT", "Broken", "Done"]);
+  await press(b, cx, "3");
+  assert.equal(board.findSprintItem(st().data, "AB#302").state, "In Dev Test");
+  await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZ.state);
+  assert.equal(board.findSprintItem(st().data, "AB#302").state, "To Do");
+  assert.equal(b.notice.text, "AB#302 bleibt „To Do“: TF401320: Rule Error for field State.");
+  assert.equal(host.notes.at(-1).level, "error");
+  assert.equal(host.open("az").length, 0, "nothing read again");
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  await press(b, cx, "s");
+  await press(b, cx, "4");
+  assert.equal(b.notice.text, "AB#302 wird noch gespeichert", "no second write while the first is open");
+  await host.answer("az", ok("{}"), AZ.state);
+  assert.equal(b.notice.text, "AB#302 → In Dev Test: Ergebnis unklar: Azure hat den Status nicht bestätigt; lädt neu");
+  assert.equal(host.notes.at(-1).level, "warning");
+  assert.deepEqual(["places", "query", "state"].map((k) => openAz(host, k).length), [1, 1, 0]);
+});
+
+test("UI: Enter shows a work item's parent, state, assignee, column, area and iteration; o opens its page", async () => {
+  const { b, cx } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#311");
+  const shown = texts(b.render());
+  for (const s of ["Teil von AB#301", "zugewiesen: Alex Sample", "To Do ▾", "Spalte: To Do", "Bereich: Example Project\\Core", "Iteration: Example Project\\Sprint 12"]) {
+    assert.ok(shown.includes(s), s);
+  }
+  assert.ok(byId(b.render(), "act-status"));
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, ["https://dev.azure.com/example-org/Example%20Project/_workitems/edit/311"]);
+});
+
+test("UI: „nur meine“ keeps the stories and tasks assigned to the account az is signed in as; a story shows dimmed for its own tasks; without that account it says why", async () => {
+  const { b, cx } = await openSprint();
+  await press(b, cx, "m");
+  const root = b.render();
+  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301"]);
+  assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], [], ["card-AB#313"], []]);
+  const { b: robin, cx: rcx } = await openSprint({ me: ok('{ "name": "robin.example@example.com", "type": "user" }\n') });
+  await press(robin, rcx, "m");
+  const other = robin.render();
+  assert.deepEqual(drawnRows(other), ["row-none", "row-AB#301", "row-AB#302"]);
+  const dimmed = byId(other, "story-AB#301");
+  assert.deepEqual([dimmed.with.opacity, dimmed.with.on_click], [[0.5], undefined], "shown for its task, not to be chosen");
+  const { b: none, cx: ncx, host } = await openSprint({ me: azRefused("Please run 'az login' to setup account.") });
+  await press(none, ncx, "m");
+  assert.ok(texts(none.render()).includes("„nur meine“ zeigt nichts: az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)"));
+  await press(none, ncx, "r");
+  assert.equal(openAz(host, "me").length, 1, "asked again while it fails");
+});
+
+test("UI: a Sprint that cannot be read says why in its view; a failed read of its settings keeps nothing", async () => {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found });
+  await host.answer("az", ok("[]"), AZ.iteration);
+  for (const k of ["areas", "columns", "types"]) await host.answer("az", ok(fixture(`azure-sprint-${k}.json`)), AZ[k]);
+  assert.equal(b.state(b.view().id).error, "Das Team hat keinen laufenden Sprint");
+  assert.ok(texts(b.render()).includes("Das Team hat keinen laufenden Sprint"));
+  await press(b, cx, "r");
+  assert.equal(host.open("az").length, 4, "the settings are asked again");
+  await host.answer("az", azRefused("Before you can run Azure DevOps commands, you need to run the login command (az login if using AAD/MSA identity else az devops login if using PAT token) to setup credentials."), AZ.iteration);
+  assert.equal(b.state(b.view().id).error, "az ist nicht angemeldet (az login oder az devops login)");
+});
+
+test("UI: on the Sprint h/l j/k walk stories and tasks by row, and the chosen item's row is scrolled into view", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "story-AB#301");
+  await press(b, cx, "l");
+  assert.equal(st().sel.key, "AB#311");
+  await press(b, cx, "l");
+  assert.equal(st().sel.key, "AB#312");
+  await press(b, cx, "k");
+  assert.equal(st().sel.key, "AB#332");
+  await press(b, cx, "h");
+  assert.equal(st().sel.key, "AB#331");
+  host.scrolled.length = 0;
+  await click(b, cx, "card-AB#321");
+  assert.equal(host.scrolled.at(-1).row, 2, "the third row shown");
 });

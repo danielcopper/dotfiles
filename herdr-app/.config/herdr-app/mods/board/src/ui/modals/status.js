@@ -1,14 +1,18 @@
-// The status menu: the columns a card may go to, picked with j/k and Enter,
-// a digit, or a click. A shape with columns opens it (openStatusMenu) as
-// b.modal = { kind: "status", view, key, targets, at }.
+// The status menu: the columns a card may go to, or the states an item may
+// take, picked with j/k and Enter, a digit, or a click. A shape with columns
+// or states opens it (openStatusMenu) as b.modal = { kind: "status", view,
+// key, targets, at }.
 
 import { div } from "gpui-kit";
 import { menu, menuKey } from "../helpers.js";
 
-// Moves the card to the target at `i`.
+// Moves the card to the target at `i`, or does what the view's shape does
+// with a pick (pickStatus).
 function pickTarget(b, m, i, cx) {
   b.closeModal(cx);
-  b.moveTo(m.view, m.key, m.targets[i].id, cx);
+  const pick = b.shape(m.view).pickStatus;
+  if (pick) pick(b, m.view, m.key, m.targets[i], cx);
+  else b.moveTo(m.view, m.key, m.targets[i].id, cx);
 }
 
 export const statusModal = {

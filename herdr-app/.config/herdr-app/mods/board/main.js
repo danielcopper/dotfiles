@@ -32,9 +32,13 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh; an Azure view reads
-// nothing yet. Finding gh costs one sh call now and then (toolPaths says
-// when). A view refreshes when its tab first shows, on `r`, after a column
+// Calls: a GitHub view costs one gh call per refresh. An Azure team's
+// Sprint costs two az calls per refresh (the taskboard's column of each work
+// item, and one WIQL query for their fields); its sprint, areas, taskboard
+// columns and work item types are read once until the sprint ends, who az
+// is signed in as once (makeAzure says more). The other Azure views read
+// nothing yet. Finding gh and az costs one sh call now and then (toolPaths
+// says when). A view refreshes when its tab first shows, on `r`, after a column
 // is hidden or shown (x, a name in the hidden line, the column menu), when
 // it is shown again older than refreshMinutes, and every refreshMinutes
 // while it shows.
@@ -42,18 +46,18 @@
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), select.js (filter, "nur
-// meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
-// az), actions/start.js (starting a session), ui/helpers.js, ui/layer.js
-// (the board layer), ui/shapes/ (how a view's data is drawn and worked:
-// board, prs, placeholder), ui/modals/ (the dialogs: start, status, columns)
+// kinds/board.js (a board's columns and cards), kinds/sprint.js (a
+// sprint's taskboard), select.js (filter, "nur meine", selection), sources/
+// (GitHub, Azure), tools.js (running gh and az), actions/start.js (starting
+// a session), ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how
+// a view's data is drawn and worked: board, prs, sprint, placeholder), ui/modals/ (the dialogs: start, status, columns)
 // and this one, the Board, which looks the shape up. Their data logic is
 // plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
 import { Input, InputState, ScrollHandle, h_flex, v_flex } from "gpui-base";
-import { appHome, checking, exec, focused, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, theme } from "herdr";
+import { appHome, checking, exec, focused, home, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, theme, writeTextFile } from "herdr";
 
 // ==== src/shared.js ====
 
@@ -147,7 +151,7 @@ export const viewDefaults = () => ({ hide: [], start: {} });
 export const KINDS = {
   "github board": { shape: "board" },
   "github list": { shape: "prs" },
-  "azure sprint": { text: "Sprint-Ansicht folgt" },
+  "azure sprint": { shape: "sprint" },
   "azure backlog": { text: "Backlog folgt" },
   "azure prs": { text: "PR-Ansicht folgt" },
 };
@@ -304,16 +308,17 @@ function contextName(c) {
 }
 
 // A context as the board uses it: { id, source: "azure", kind: "team",
-// name, project, team, views } or { id, source: "azure", kind: "prs", name,
-// project }; views in the switch's order.
-function normalizeContext(c) {
+// name, org, project, team, views } or { id, source: "azure", kind: "prs",
+// name, org, project }; views in the switch's order, org the organisation's
+// address (orgUrl).
+function normalizeContext(c, org) {
   const name = contextName(c);
   if (c.team) {
     const views = c.views ?? TEAM_VIEW_IDS;
     const { project, team } = c.team;
-    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
+    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, org, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
   }
-  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, project: c.prs.project };
+  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, org, project: c.prs.project };
 }
 
 // An organisation's address: https://<host>/<organisation>, a trailing /
@@ -339,7 +344,7 @@ function readAzure(raw) {
     const name = contextName(c);
     const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
     const problems = contextProblems(c);
-    const context = problems.length ? null : normalizeContext(c);
+    const context = problems.length ? null : normalizeContext(c, org);
     if (context && contexts.some((x) => x.id === context.id)) problems.push("gibt es schon");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
     contexts.push(context);
@@ -433,11 +438,12 @@ export function matches(card, text) {
 
 // Whether an item is one's own, for "nur meine": it came from a search of
 // one's own (ownByQuery), or `me` (the login the data was read as; null
-// when the source did not say) is one of its assignees, its author, or a
-// reviewer asked for.
+// when the source did not say) is one of its assignees (their logins, where
+// the item names them apart from the names it shows: assigneeLogins), its
+// author, or a reviewer asked for.
 export const isMine = (item, me) =>
   item.ownByQuery === true ||
-  (Boolean(me) && ((item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
+  (Boolean(me) && ((item.assigneeLogins ?? item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
 
 // Whether an item shows in data read as `viewer`: it matches the filter and,
 // with `mine` on, it is one's own.
@@ -579,11 +585,13 @@ export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
 }
 
-// Whether a card may go to a column: one that takes drops and, where the
-// board's meta names its types' states (none does yet: GitHub boards carry
-// none), a state of the card's own type.
+// Whether a card may go to a column: one that takes drops, that maps the
+// card's type where it names the types it takes (a taskboard's column) and,
+// where the board's meta names its types' states (none does yet: GitHub
+// boards carry none), a state of the card's own type.
 export function canDrop(board, card, column) {
   if (!column?.target) return false;
+  if (column.types && !column.types.includes(card.type)) return false;
   const states = board.meta?.types?.[card.type];
   return !states || states.includes(column.name);
 }
@@ -938,11 +946,96 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
   return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
 }
 
+// ==== src/kinds/sprint.js ====
+
+// A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
+// whose story is not in the sprint), the items it holds, what shows and how
+// the keys walk it, a task's state as shown, and a state change laid over
+// the data. The data is a board's (kinds/board.js: its columns hold the
+// tasks, so moves, their rollback and H/L work on it as on a board) plus
+// its rows; sprintBoard (sources/azure.js) reads it.
+
+// The key of the row "Ohne Story", and the id of the column of stories the
+// keys walk first.
+export const NO_STORY = "none";
+export const STORY_COLUMN = "stories";
+
+// The stories of a sprint, in row order.
+export const sprintStories = (data) => data.rows.map((r) => r.story).filter(Boolean);
+
+// Every story and task of a sprint.
+export const sprintItems = (data) => [...sprintStories(data), ...data.columns.flatMap((c) => c.cards)];
+
+// The story or task with `key`, or null.
+export function findSprintItem(data, key) {
+  return data?.rows.find((r) => r.story?.key === key)?.story ?? findCard(data, key)?.card ?? null;
+}
+
+// The row an item stands in: a story its own, a task its story's (or
+// NO_STORY).
+export const rowOf = (item) => item.row ?? item.key;
+
+// Whether an item is a task (a card in a column) rather than a story.
+export const isTask = (item) => Boolean(item?.row);
+
+// A task's state as shown: moved since it was read, the state its new
+// column maps its type to (Azure sets that state with the move), until a
+// refresh reads it; else its own.
+export function shownState(item, column) {
+  if (!isTask(item) || !column || item.column === item.readColumn) return item.state;
+  return column.mappings?.[item.type] ?? item.state;
+}
+
+// The columns keyboard movement and selection walk: the stories that show,
+// then the taskboard's columns with the tasks that show, each in row order
+// (a task moved in comes last in its column's data).
+export function sprintNav(data, filter, mine) {
+  const order = new Map(data.rows.map((r, i) => [r.key, i]));
+  const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
+  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
+  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
+}
+
+// The rows that show: those with a story or a task that shows (`nav`,
+// sprintNav), in the data's order.
+export function shownRows(data, nav) {
+  const used = new Set(nav.flatMap((c) => c.shown.map(rowOf)));
+  return data.rows.filter((r) => used.has(r.key));
+}
+
+// Keyboard movement over sprintNav's columns: j/k as everywhere (navigate);
+// h/l to the next column, onto the item of the same row there, else the
+// first one below it, else the last; an empty column is selected as such.
+export function sprintNavigate(nav, sel, dir, rows) {
+  if (dir === "up" || dir === "down" || !nav.length) return navigate(nav, sel, dir);
+  const ci = Math.min(Math.max(sel?.col ?? 0, 0), nav.length - 1);
+  const from = nav[ci].shown.find((i) => i.key === sel?.key);
+  const to = Math.min(Math.max(ci + (dir === "left" ? -1 : 1), 0), nav.length - 1);
+  if (!from || to === ci) return navigate(nav, sel, dir);
+  const list = nav[to].shown;
+  if (!list.length) return { col: to, key: null };
+  const order = new Map(rows.map((r, i) => [r.key, i]));
+  const at = order.get(rowOf(from));
+  const next = list.find((i) => rowOf(i) === rowOf(from)) ?? list.find((i) => order.get(rowOf(i)) > at) ?? list.at(-1);
+  return { col: to, key: next.key };
+}
+
+// The data with the item `key` in `state`; a task's column then counts as
+// read (shownState shows its own state).
+export function withItemState(data, key, state) {
+  const set = (i) => (i.key === key ? { ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) } : i);
+  return {
+    ...data,
+    rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)),
+    columns: data.columns.map((c) => ({ ...c, cards: c.cards.map(set) })),
+  };
+}
+
 // ==== src/sources/azure.js ====
 
 // Azure DevOps: work item types and their states, what az's failures mean,
-// and the source as the board uses it (makeAzure). What the Azure views read
-// and write comes with each view; these stay for them.
+// the Sprint view's calls and what they answer, and the source as the board
+// uses it (makeAzure).
 
 // Theme colors and column order for Azure's state categories.
 export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
@@ -1004,10 +1097,306 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
-// The Azure source for the board, as makeGithub's: no view of it reads
-// anything yet, so each shows what its kind says (KINDS).
-export function makeAzure() {
-  return { site: "Azure", views: {} };
+// How long az may take: each run starts Python and asks Azure a few times.
+export const AZ_TIMEOUT = 60000;
+
+// The organisation for az boards and az devops, and no guessing it from a
+// git checkout in the folder az runs in.
+const azOrg = (org) => ["--org", org, "--detect", "false"];
+
+// az devops invoke on one REST resource (`area`, `resource`, the route's
+// parameters), always at api-version 7.1: its own default is 5.0, which
+// knows no taskboard.
+export function azInvokeArgs(c, area, resource, route, more = []) {
+  return [
+    "devops", "invoke", ...azOrg(c.org), "--area", area, "--resource", resource,
+    "--route-parameters", ...Object.entries(route).map(([k, v]) => `${k}=${v}`), "--api-version", "7.1", ...more, "-o", "json",
+  ];
+}
+
+// The Sprint view's calls for a team context `c` ({ org, project, team }):
+// its current iteration, its areas, its taskboard's columns, the project's
+// work item types with their states, and per refresh the taskboard's column
+// of each work item and the fields of the sprint's work items (azQueryArgs).
+export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ...azOrg(c.org), "--project", c.project, "--team", c.team, "--timeframe", "current", "-o", "json"];
+export const azAreasArgs = (c) => ["boards", "area", "team", "list", ...azOrg(c.org), "--project", c.project, "--team", c.team, "-o", "json"];
+export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
+export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
+export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
+export const azQueryArgs = (c, wiql) => ["boards", "query", ...azOrg(c.org), "--project", c.project, "--wiql", wiql, "-o", "json"];
+// Who az is signed in as (az login): the account's user, { name, type }.
+export const AZ_ME_ARGS = ["account", "show", "--query", "user", "-o", "json"];
+
+// A text in a WIQL query: in single quotes, a quote in it doubled.
+const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
+// The fields read here are all System. ones; the prefix stands in one
+// place, which also keeps the names out of the shape the command check
+// (tests/herdr-app/check-commands.py) takes for a herdr command.
+const SYSTEM = "System.";
+const AREA_PATH = `${SYSTEM}AreaPath`;
+const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
+
+// The fields the Sprint view reads of each work item.
+export const SPRINT_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+
+// One WIQL query for the work items of the sprint `iteration` in the team's
+// areas (parseAreas), as Azure's taskboard shows them: in the iteration's
+// path, and in one of the team's area paths, those below it too where the
+// team includes them. az boards query takes no team or project for its
+// macros, so the paths are spelled out.
+export function sprintWiql(iteration, areas) {
+  const field = `[${areas.field}]`;
+  const tree = areas.field === AREA_PATH;
+  const inArea = areas.values.map((a) => `${field} ${tree && a.includeChildren ? "UNDER" : "="} ${wiqlText(a.value)}`).join(" OR ");
+  return `SELECT ${SPRINT_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.IterationPath] = ${wiqlText(iteration.path)} AND (${inArea}) ORDER BY [System.Id]`;
+}
+
+// az's JSON answer for `what`; `empty` stands for no output at all (az
+// boards query prints nothing when nothing matches).
+function azJson(stdout, what, empty) {
+  const text = String(stdout ?? "").trim();
+  if (!text && empty !== undefined) return empty;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new BoardError(`az lieferte für ${what} kein lesbares JSON`);
+  }
+}
+
+// A list Azure sends either as it is or wrapped in { count, value } (az
+// devops invoke prints REST's wrapper, with its continuation_token).
+const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
+
+// The team's current iteration → { id, name, path, finish } (finish: the
+// start of its last day, as Azure gives it, or null).
+export function parseIteration(stdout) {
+  const list = azList(azJson(stdout, "den Sprint"));
+  if (!list) throw new BoardError("Azure lieferte keinen Sprint");
+  const it = list.find((i) => i?.attributes?.timeFrame === "current") ?? list[0];
+  if (!it?.id || !it.path) throw new BoardError("Das Team hat keinen laufenden Sprint");
+  return { id: it.id, name: it.name ?? it.path, path: it.path, finish: it.attributes?.finishDate ?? null };
+}
+
+// The team's areas → { field (the team field, System.AreaPath by default),
+// values: [{ value, includeChildren }] }.
+export function parseAreas(stdout) {
+  const json = azJson(stdout, "die Bereiche des Teams");
+  const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
+  if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
+  return { field: json.field?.referenceName ?? AREA_PATH, values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })) };
+}
+
+// The taskboard's columns → [{ id, name, mappings: [{ type, state }] }] in
+// their order.
+export function parseColumns(stdout) {
+  const columns = azJson(stdout, "die Spalten des Taskboards")?.columns;
+  if (!Array.isArray(columns) || !columns.length) throw new BoardError("Azure lieferte keine Spalten des Taskboards");
+  return [...columns]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((c) => ({ id: c.id, name: c.name, mappings: (c.mappings ?? []).map((m) => ({ type: m.workItemType, state: m.state })) }));
+}
+
+// The taskboard's column of each work item → Map(id → { columnId, column,
+// state }).
+export function parseTaskboard(stdout) {
+  const list = azList(azJson(stdout, "die Spalten der Work Items"));
+  if (!list) throw new BoardError("Azure lieferte keine Spalten der Work Items");
+  return new Map(list.filter((w) => Number.isInteger(w?.workItemId)).map((w) => [w.workItemId, { columnId: w.columnId, column: w.column, state: w.state }]));
+}
+
+// The address of a work item's page.
+export const workItemUrl = (c, id) => `${c.org}/${encodeURIComponent(c.project)}/_workitems/edit/${id}`;
+
+// A person as a work item names one: an identity ({ displayName,
+// uniqueName }), or older answers' "Name <login>" → { name, login } (login
+// in lower case, null where it is not given).
+export function azPerson(who) {
+  if (typeof who === "string") {
+    const login = who.match(/<([^>]+)>\s*$/)?.[1] ?? null;
+    return { name: who.replace(/\s*<[^>]*>\s*$/, "") || null, login: login?.toLowerCase() ?? null };
+  }
+  if (!isObject(who)) return { name: null, login: null };
+  return { name: who.displayName ?? who.uniqueName ?? null, login: who.uniqueName?.toLowerCase() ?? null };
+}
+
+// A work item of az boards query's answer as the board shows it. Its key is
+// Azure Boards' own name for it (itemKey).
+export function azWorkItem(wi, c) {
+  const f = (name) => fieldOf(wi, name) ?? null;
+  const who = azPerson(f("AssignedTo"));
+  return {
+    key: `AB#${wi.id}`, source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
+    state: f("State"), assignees: who.name ? [who.name] : [], assigneeLogins: who.login ? [who.login] : [],
+    parent: f("Parent"), area: f("AreaPath"), iteration: f("IterationPath"),
+    url: workItemUrl(c, wi.id), labels: [], sub: null, branch: null,
+  };
+}
+
+// The most work items az boards query gives.
+export const AZ_QUERY_LIMIT = 1000;
+
+// The sprint's work items → [items] (azWorkItem), in the query's order; no
+// output is none.
+export function parseSprintItems(stdout, c) {
+  const list = azList(azJson(stdout, "die Work Items des Sprints", []));
+  if (!list) throw new BoardError("Azure lieferte keine Work Items");
+  return list.filter((wi) => Number.isInteger(wi?.id)).map((wi) => azWorkItem(wi, c));
+}
+
+// Who az is signed in as (the user's name), in lower case, or null.
+export function parseViewer(stdout) {
+  try {
+    const name = JSON.parse(String(stdout ?? "").trim())?.name;
+    return typeof name === "string" && name ? name.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+// The sprint as the sprint shape shows it (kinds/sprint.js): the taskboard's
+// columns, each a board column holding its tasks (the work items the
+// taskboard places, `places`, parseTaskboard), and one row per story (a work
+// item of the sprint it does not place), in the query's order, after the
+// row "Ohne Story" for tasks whose story is not in the sprint (only where
+// there is one). A column's color is that of the state its first mapping
+// names; it takes the types it maps (types) and says which state each
+// gets (mappings). A task the taskboard places in a column it does not
+// list is left out, as is a placed one the query did not find.
+export function sprintBoard({ iteration, columns, types, items, places, viewer }) {
+  const colors = new Map(types.states.map((s) => [s.name, s.color]));
+  const cols = columns.map((c) => ({
+    id: c.id, name: c.name, color: colors.get(c.mappings[0]?.state) ?? "muted", hidden: false, count: 0, target: true,
+    types: c.mappings.map((m) => m.type), mappings: Object.fromEntries(c.mappings.map((m) => [m.type, m.state])), cards: [],
+  }));
+  const byId = new Map(cols.map((c) => [c.id, c]));
+  const stories = items.filter((i) => !places.has(i.number));
+  const storyIds = new Set(stories.map((s) => s.number));
+  for (const item of items) {
+    const place = places.get(item.number);
+    const col = place && (byId.get(place.columnId) ?? cols.find((c) => c.name === place.column));
+    if (!col) continue;
+    const row = storyIds.has(item.parent) ? `AB#${item.parent}` : NO_STORY;
+    col.cards.push({ ...item, column: col.id, readColumn: col.id, row });
+    col.count++;
+  }
+  const loose = cols.some((c) => c.cards.some((card) => card.row === NO_STORY));
+  return {
+    shape: "sprint",
+    meta: { iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states },
+    columns: cols,
+    rows: [...(loose ? [{ key: NO_STORY, story: null }] : []), ...stories.map((s) => ({ key: s.key, story: s }))],
+    viewer,
+    total: items.length,
+    limited: items.length >= AZ_QUERY_LIMIT,
+  };
+}
+
+// Until when a team's sprint settings stay cached (ms): the end of the
+// sprint's last day (Azure's finishDate is that day's start, in UTC), or half
+// a day from `now` where it names none.
+const DAY_MS = 86400000;
+export function sprintUntil(finish, now) {
+  const at = Date.parse(finish ?? "");
+  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
+}
+
+// az devops invoke takes a request's body only from a file (--in-file):
+// one per work item, written before each move and kept for the next.
+export const moveBodyPath = (id) => `${home()}/.cache/herdr-app/board/taskboard-move-${id}.json`;
+
+// The body that moves a task to a taskboard column. The REST reference
+// (Taskboard Work Items - Update, api-version 7.1) names the field
+// newColumn, a plain string, beside the list's column (the column's name)
+// and columnId (a uuid); so it is sent the column's name.
+export const moveBody = (column) => `${JSON.stringify({ newColumn: column.name })}\n`;
+
+// Writes the body of a move to its file, where it does not hold it
+// already; a file that cannot be written is a refusal (nothing was sent).
+async function writeMoveBody(id, column) {
+  const path = moveBodyPath(id);
+  const text = moveBody(column);
+  try {
+    const now = await readTextFile(path);
+    if (now !== text) await writeTextFile(path, text, now);
+  } catch (e) {
+    throw new BoardError(`Die Anfrage an Azure ließ sich nicht ablegen (${path}): ${firstLine(e?.message ?? e)}`);
+  }
+  return path;
+}
+
+export const azMoveArgs = (c, iterationId, id, file) =>
+  azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId, workItemId: id }, ["--http-method", "PATCH", "--in-file", file]);
+
+export const azStateArgs = (org, id, state) => ["boards", "work-item", "update", ...azOrg(org), "--id", String(id), "--state", state, "-o", "json"];
+
+// az's answer to a state change must name the state it set; anything else
+// leaves open whether the change landed.
+export function checkStateResult(stdout, state) {
+  let json = null;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    // Not JSON: unclear, below.
+  }
+  if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
+}
+
+// The Azure source for the board: the name of the site `o` opens, why "nur
+// meine" cannot tell one's own items, and per layout of an Azure view how
+// it loads and writes. az runs by the path `paths` (toolPaths) finds.
+// A team's sprint settings (its iteration, areas, taskboard columns and the
+// project's work item types) are read once, all at the same time, and kept
+// until the sprint ends (sprintUntil); one that fails keeps nothing. Who az
+// is signed in as is read once; while that fails it is asked again with
+// each refresh. A refresh then reads the taskboard's columns of the work
+// items and the sprint's work items, also at the same time.
+export function makeAzure(paths) {
+  const az = async (args, options = {}) => {
+    const r = await call("az", args, null, AZ_TIMEOUT, { ...options, paths });
+    if (r.code !== 0) throw azFailure(r, null, options);
+    return r.stdout;
+  };
+  const teams = new Map();
+  let viewer = null;
+  async function settingsOf(c) {
+    const key = `${c.org}\n${c.project}\n${c.team}`;
+    const kept = teams.get(key);
+    if (kept && Date.now() < kept.until) return kept;
+    const [iteration, areas, columns, types] = await Promise.all([az(azIterationArgs(c)), az(azAreasArgs(c)), az(azColumnsArgs(c)), az(azTypesArgs(c))]);
+    const read = { iteration: parseIteration(iteration), areas: parseAreas(areas), columns: parseColumns(columns), types: parseAzureTypes(types) };
+    read.until = sprintUntil(read.iteration.finish, Date.now());
+    teams.set(key, read);
+    return read;
+  }
+  async function whoAmI() {
+    if (viewer) return viewer;
+    viewer = await az(AZ_ME_ARGS).then(parseViewer, () => null);
+    return viewer;
+  }
+  return {
+    site: "Azure",
+    noViewer: "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)",
+    views: {
+      sprint: {
+        async load(view) {
+          const c = view.context;
+          const s = await settingsOf(c);
+          const [places, items, me] = await Promise.all([az(azTaskboardArgs(c, s.iteration.id)), az(azQueryArgs(c, sprintWiql(s.iteration, s.areas))), whoAmI()]);
+          const data = sprintBoard({ ...s, items: parseSprintItems(items, c), places: parseTaskboard(places), viewer: me });
+          const warnings = data.limited ? [`Nur die ersten ${AZ_QUERY_LIMIT} Work Items des Sprints (so viele gibt az boards query)`] : [];
+          return { data, warnings };
+        },
+        async move(view, data, card, column) {
+          const file = await writeMoveBody(card.number, column);
+          await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true });
+        },
+        async setState(view, item, state) {
+          checkStateResult(await az(azStateArgs(view.context.org, item.number, state), { write: true }), state);
+        },
+      },
+    },
+  };
 }
 
 // ==== src/sources/github.js ====
@@ -1899,10 +2288,11 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     );
 }
 
-// Moves a card to a column at once and writes it; one write per card at a
-// time. A refusal moves it back with the error shown; a write whose outcome
+// Moves a card to a column at once and writes it (the view's loader's
+// move); one write per card at a time; the sprint shape moves its tasks so
+// too. A refusal moves it back with the error shown; a write whose outcome
 // is unclear leaves it and refreshes.
-function moveCardTo(b, view, key, columnId, cx) {
+export function moveCardTo(b, view, key, columnId, cx) {
   const st = b.state(view.id);
   const found = findCard(st.data, key);
   const to = st.data?.columns.find((c) => c.id === columnId);
@@ -1996,7 +2386,7 @@ function openBoardStatusMenu(b, view) {
 // not there while the target is hidden, not shown (info); not there while
 // other columns are hidden, not shown, it may be in any of them (warning);
 // else not on the board (warning).
-function tellUnclear(b, due, data, cx) {
+export function tellUnclear(b, due, data, cx) {
   const lines = due.map((u) => {
     const now = findCard(data, u.key)?.column;
     if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };
@@ -2131,6 +2521,287 @@ function scrollToRow(b, view, key) {
   }
 }
 
+// ==== src/ui/shapes/sprint.js ====
+
+// The sprint shape: a team's current sprint as a taskboard. One row per
+// story (its id, title and own state at the left), its tasks as cards in
+// the team's taskboard columns, each with its own state, assignee and id;
+// tasks whose story is not in the sprint stand in the row "Ohne Story". H/L
+// move a task to the next column (as the board shape moves a card, through
+// the taskboard's own column, not the state: two columns may map to one
+// state), s changes a story's or a task's state from its type's states (the
+// status menu), Enter shows the details. Keys walk the stories, then each
+// column (sprintNav). The data: { shape: "sprint", meta: { iterationId,
+// iteration, finish, typeStates, states }, columns: [{ id, name, color,
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
+// viewer, total, limited } (sprintBoard, kinds/sprint.js). View fields it
+// reads: id, source, layout (as the board shape's moves do).
+
+// How wide the stories' column is.
+const STORY_WIDTH = 260;
+
+// The sprint shape's own state on a Board (state(), shapes/index.js): the
+// rows' scroll handle.
+const sprintState = (b) => b.shapeState.sprint;
+
+const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
+
+export const sprintShape = {
+  state: () => ({ scroll: ScrollHandle.new() }),
+  nav: (b, st) => sprintColumns(b, st),
+  selected: (b, st) => findSprintItem(st.data, st.sel?.key),
+  // The row of the selected item, among the rows that show.
+  scrollTo(b, view) {
+    const st = b.state(view.id);
+    const item = findSprintItem(st.data, st.sel?.key);
+    const at = item ? shownRows(st.data, sprintColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
+    if (at >= 0) sprintState(b).scroll.scroll_to_item(at);
+  },
+  navigate: (b, view, st, dir) => {
+    const nav = sprintColumns(b, st);
+    return sprintNavigate(nav, st.sel, dir, st.data.rows);
+  },
+  items: (data) => sprintItems(data),
+  count(b, data) {
+    const items = sprintItems(data);
+    return { shown: items.filter((i) => b.visible(i, data)).length, total: items.length };
+  },
+  render: (b, t, mono, view, st) => drawSprint(b, t, mono, view, st),
+  hints: [["h/l j/k", "bewegen"], ["H/L", "Task verschieben"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  dirs: ["up", "down", "left", "right"],
+  loads: true,
+  keys(b, view, st, { k, ch, mod }, cx) {
+    if (!st.data) return false;
+    const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
+    if (upper === "H" || upper === "L") {
+      const item = b.selected(view);
+      if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
+      else if (item) {
+        const target = stepTarget(st.data, item.key, upper === "H" ? -1 : 1);
+        if (target) b.moveTo(view, item.key, target.id, cx);
+      }
+      return true;
+    }
+    if (k === "s") return b.openStatusMenu(view, cx), true;
+    return false;
+  },
+  received: (data, st) => applyMoves(data, st.moves),
+  warnings: () => [],
+  settle: (b, due, data, cx) => tellUnclear(b, due, data, cx),
+  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
+  openStatusMenu: (b, view, cx) => openStateMenu(b, view, cx),
+  pickStatus: (b, view, key, target, cx) => setItemState(b, view, key, target.name, cx),
+  // The detail panel's rows of a story or task: its state as a pill (a click
+  // opens the status menu), a task's column, its area and iteration, and
+  // Status s.
+  detailParts(b, t, view, item) {
+    const st = b.state(view.id);
+    if (!st.data) return {};
+    const column = isTask(item) ? findCard(st.data, item.key)?.column : null;
+    const state = shownState(item, column);
+    const openStatus = (cx) => {
+      if (!b.modal) b.openStatusMenu(view, cx);
+    };
+    const line = (label, value) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
+    const rows = [
+      ...(column ? [line("Spalte", column.name)] : []),
+      ...(item.area ? [line("Bereich", item.area)] : []),
+      ...(item.iteration ? [line("Iteration", item.iteration)] : []),
+    ];
+    return {
+      chips: [
+        div()
+          .id("status-pill")
+          .px(10)
+          .py(2)
+          .rounded(12)
+          .text_size(12)
+          .font_semibold()
+          .cursor_pointer()
+          .bg(t[stateColor(st.data, state)] ?? t.muted)
+          .text_color(t.background)
+          .on_click((_e, cx) => openStatus(cx))
+          .child(`${state ?? "ohne Status"} ▾`),
+      ],
+      sections: rows.length ? [detailSection(t, isTask(item) ? "TASK" : "STORY", ...rows)] : [],
+      buttons: [button(t, "act-status", "Status s", false, openStatus)],
+    };
+  },
+};
+
+// The theme color of a state, by its category (parseAzureTypes).
+const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
+
+// "bis 28.11." for the sprint's last day (UTC, as Azure gives it), or "".
+function sprintEnd(finish) {
+  const at = new Date(finish ?? "");
+  return Number.isNaN(at.getTime()) ? "" : ` · bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
+}
+
+function drawSprint(b, t, mono, view, st) {
+  const data = st.data;
+  const nav = sprintColumns(b, st);
+  const [, ...cols] = nav;
+  const rows = shownRows(data, nav);
+  const stories = sprintStories(data);
+  const head = h_flex()
+    .id("sprint-head")
+    .flex_none()
+    .gap(10)
+    .px(14)
+    .pt(10)
+    .pb(6)
+    .items_center()
+    .child(
+      div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
+        .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
+    )
+    .children(cols.map((col) => h_flex()
+      .flex_1()
+      .min_w(0)
+      .gap(6)
+      .items_center()
+      .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
+      .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
+      .child(div().flex_none().text_size(12).text_color(t.muted).child(shownOf(col.shown.length, col.cards.length)))));
+  if (!rows.length) {
+    const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
+    return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
+  }
+  const rowEl = (r) => h_flex()
+    .id(`row-${r.key}`)
+    .flex_none()
+    .gap(10)
+    .px(14)
+    .py(8)
+    .items_start()
+    .border_b(1)
+    .border_color(t.border)
+    .child(storyCell(b, t, mono, view, st, r, nav))
+    .children(cols.map((col, ci) => v_flex()
+      .flex_1()
+      .min_w(0)
+      .gap(6)
+      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col)))));
+  return v_flex()
+    .flex_1()
+    .min_h(0)
+    .child(head)
+    .child(v_flex().id("sprint-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(sprintState(b).scroll).children(rows.map(rowEl)));
+}
+
+// A row's story at the left: its key and type, title and state; one the
+// filter or "nur meine" hides (it shows for its tasks) is dimmed and takes
+// no click. The row "Ohne Story" names itself.
+function storyCell(b, t, mono, view, st, r, nav) {
+  const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
+  if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
+  const story = r.story;
+  const shown = nav[0].shown.includes(story);
+  const selected = st.sel?.key === story.key;
+  return cell
+    .id(`story-${story.key}`)
+    .p(6)
+    .rounded(8)
+    .border_1()
+    .border_color(selected ? t.accent : t.background)
+    .when(selected, (el) => el.bg(t.selected))
+    .opacity(shown ? (st.pending[story.key] ? 0.7 : 1) : 0.5)
+    .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
+      if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
+    }))
+    .child(h_flex().gap(6).items_center()
+      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(story)))
+      .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
+      .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+    .child(div().text_size(12.5).line_height("17px").child(story.title))
+    .child(stateChip(t, st.data, story.state));
+}
+
+const stateChip = (t, data, state) =>
+  div().flex_none().px(7).rounded(9).text_size(11).text_color(t.background).bg(t[stateColor(data, state)] ?? t.muted).child(state ?? "ohne Status");
+
+// A task's card: its key, title, own state and assignee; a click selects
+// it (clickItem).
+function drawTask(b, t, mono, view, st, card, ci, col) {
+  const selected = st.sel?.key === card.key;
+  return v_flex()
+    .id(`card-${card.key}`)
+    .flex_none()
+    .p(8)
+    .gap(5)
+    .rounded(8)
+    .border_1()
+    .border_color(selected ? t.accent : t.border)
+    .bg(selected ? t.selected : t.background)
+    .opacity(st.pending[card.key] ? 0.7 : 1)
+    .cursor_pointer()
+    .on_click((_e, cx) => {
+      if (!b.modal) b.clickItem(view, { col: ci, key: card.key }, cx);
+    })
+    .child(h_flex().gap(6).items_center()
+      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+      .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+    .child(div().text_size(12.5).line_height("17px").child(card.title))
+    .child(h_flex().gap(5).flex_wrap().items_center()
+      .child(stateChip(t, st.data, shownState(card, col)))
+      .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", ")))));
+}
+
+// The status menu for the selected story or task: the states of its type.
+function openStateMenu(b, view, cx) {
+  const st = b.state(view.id);
+  const item = b.selected(view);
+  if (!item) return;
+  const states = st.data.meta.typeStates?.[item.type];
+  if (!states?.length) return b.say(`Für ${item.type ?? "diesen Typ"} kennt das Board keine Status`, "info", cx);
+  const now = shownState(item, isTask(item) ? findCard(st.data, item.key)?.column : null);
+  const targets = states.map((name) => ({ id: name, name, color: stateColor(st.data, name), hidden: false }));
+  b.modal = { kind: "status", view, key: item.key, targets, at: Math.max(0, states.indexOf(now)) };
+}
+
+// Sets an item's state at once and writes it; one write per item at a time
+// (the moves' too). A refusal sets the state back with the error shown; a
+// write that landed, or whose outcome is unclear, refreshes the view while
+// views.json still has it of the same kind: which column a task's new state
+// puts it in is Azure's to say.
+function setItemState(b, view, key, state, cx) {
+  const st = b.state(view.id);
+  const item = findSprintItem(st.data, key);
+  if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
+  const label = itemLabel(item);
+  const before = shownState(item, isTask(item) ? findCard(st.data, key)?.column : null);
+  if (before === state) return;
+  if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
+  st.data = withItemState(st.data, key, state);
+  st.pending[key] = true;
+  b.say(`${label} → ${state} …`, "info", cx);
+  cx.spawn(async (cx) => {
+    let again = false;
+    try {
+      await b.loader(view).setState(view, item, state);
+      b.say(`${label} hat jetzt den Status „${state}“`, "success", cx);
+      again = true;
+    } catch (e) {
+      const why = report(e);
+      if (e instanceof BoardError && e.unclear) {
+        b.say(`${label} → ${state}: ${why}; lädt neu`, "warning", cx);
+        notify({ title: `Status von ${label}`, body: why, level: "warning" });
+        again = true;
+      } else {
+        if (findSprintItem(st.data, key)?.state === state) st.data = withItemState(st.data, key, before);
+        b.say(`${label} bleibt „${before}“: ${why}`, "error", cx);
+        notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
+      }
+    } finally {
+      delete st.pending[key];
+      const current = b.viewById(view.id);
+      if (again && current && viewKind(current) === viewKind(view)) b.refresh(current, cx);
+      cx.notify();
+    }
+  });
+}
+
 // ==== src/ui/shapes/index.js ====
 
 // The shapes a view's data is drawn and worked in, by name: data carries
@@ -2146,13 +2817,15 @@ function scrollToRow(b, view, key) {
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
 // where it has them, detailParts (its rows in the detail panel), settle
-// (says where the cards of unclear writes ended up), moveTo, toggleColumn
-// and openStatusMenu. A shape keeps its own state per Board in
+// (says where the cards of unclear writes ended up), moveTo, toggleColumn,
+// openStatusMenu, navigate (its own keyboard movement in place of
+// navigate's, select.js) and pickStatus (what a pick in the status menu
+// does in place of a move to that column). A shape keeps its own state per Board in
 // b.shapeState[name], which its state() makes once, when the Board starts:
 // herdr refuses a ScrollHandle made while a view draws ("cannot run during
 // render"). A new way to draw is a module here and its entry in SHAPES.
 
-export const SHAPES = { board: boardShape, prs: prsShape, placeholder: placeholderShape };
+export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, placeholder: placeholderShape };
 
 // ==== src/ui/modals/columns.js ====
 
@@ -2460,14 +3133,18 @@ function watchSession(b, name, cx, at = 0) {
 
 // ==== src/ui/modals/status.js ====
 
-// The status menu: the columns a card may go to, picked with j/k and Enter,
-// a digit, or a click. A shape with columns opens it (openStatusMenu) as
-// b.modal = { kind: "status", view, key, targets, at }.
+// The status menu: the columns a card may go to, or the states an item may
+// take, picked with j/k and Enter, a digit, or a click. A shape with columns
+// or states opens it (openStatusMenu) as b.modal = { kind: "status", view,
+// key, targets, at }.
 
-// Moves the card to the target at `i`.
+// Moves the card to the target at `i`, or does what the view's shape does
+// with a pick (pickStatus).
 function pickTarget(b, m, i, cx) {
   b.closeModal(cx);
-  b.moveTo(m.view, m.key, m.targets[i].id, cx);
+  const pick = b.shape(m.view).pickStatus;
+  if (pick) pick(b, m.view, m.key, m.targets[i], cx);
+  else b.moveTo(m.view, m.key, m.targets[i].id, cx);
 }
 
 export const statusModal = {
@@ -3088,7 +3765,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.choose(view, navigate(this.navColumns(view), st.sel, dir));
+      if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir));
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
@@ -3102,7 +3779,7 @@ export default class Board extends View {
   openStatusMenu(view, cx) {
     const open = this.shape(view).openStatusMenu;
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
-    open(this, view);
+    open(this, view, cx);
     cx.notify();
   }
 

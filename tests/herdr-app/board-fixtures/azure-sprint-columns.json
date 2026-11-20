@@ -1,0 +1,64 @@
+{
+  "columns": [
+    {
+      "id": "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c04",
+      "mappings": [
+        {
+          "state": "Done",
+          "workItemType": "Task"
+        },
+        {
+          "state": "Done",
+          "workItemType": "Bug"
+        }
+      ],
+      "name": "Done",
+      "order": 3
+    },
+    {
+      "id": "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c01",
+      "mappings": [
+        {
+          "state": "To Do",
+          "workItemType": "Task"
+        },
+        {
+          "state": "New",
+          "workItemType": "Bug"
+        }
+      ],
+      "name": "To Do",
+      "order": 0
+    },
+    {
+      "id": "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c02",
+      "mappings": [
+        {
+          "state": "In Progress",
+          "workItemType": "Task"
+        },
+        {
+          "state": "Committed",
+          "workItemType": "Bug"
+        }
+      ],
+      "name": "In Progress",
+      "order": 1
+    },
+    {
+      "id": "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c03",
+      "mappings": [
+        {
+          "state": "In Progress",
+          "workItemType": "Task"
+        }
+      ],
+      "name": "In PR/Work done",
+      "order": 2
+    }
+  ],
+  "continuation_token": null,
+  "isCustomized": true,
+  "isValid": true,
+  "validationMesssage": null
+}

@@ -1,0 +1,168 @@
+[
+  {
+    "fields": {
+      "System.Id": 301,
+      "System.Title": "Import the sample catalogue",
+      "System.WorkItemType": "User Story",
+      "System.State": "In Progress",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Alex Sample",
+        "uniqueName": "Alex.Sample@example.com",
+        "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+        "descriptor": "aad.sample1"
+      }
+    },
+    "id": 301,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/301"
+  },
+  {
+    "fields": {
+      "System.Id": 302,
+      "System.Title": "Export the weekly report",
+      "System.WorkItemType": "User Story",
+      "System.State": "To Do",
+      "System.AreaPath": "Example Project\\Shared",
+      "System.IterationPath": "Example Project\\Sprint 12"
+    },
+    "id": 302,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/302"
+  },
+  {
+    "fields": {
+      "System.Id": 311,
+      "System.Title": "Parse the sample file",
+      "System.WorkItemType": "Task",
+      "System.State": "To Do",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Alex Sample",
+        "uniqueName": "Alex.Sample@example.com",
+        "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+        "descriptor": "aad.sample1"
+      },
+      "System.Parent": 301
+    },
+    "id": 311,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/311"
+  },
+  {
+    "fields": {
+      "System.Id": 312,
+      "System.Title": "Write the importer tests",
+      "System.WorkItemType": "Task",
+      "System.State": "In Progress",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Robin Example",
+        "uniqueName": "robin.example@example.com",
+        "id": "8e1f0d2c-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample2",
+        "descriptor": "aad.sample2"
+      },
+      "System.Parent": 301
+    },
+    "id": 312,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/312"
+  },
+  {
+    "fields": {
+      "System.Id": 313,
+      "System.Title": "Review the importer",
+      "System.WorkItemType": "Task",
+      "System.State": "In Progress",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Alex Sample",
+        "uniqueName": "Alex.Sample@example.com",
+        "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+        "descriptor": "aad.sample1"
+      },
+      "System.Parent": 301
+    },
+    "id": 313,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/313"
+  },
+  {
+    "fields": {
+      "System.Id": 321,
+      "System.Title": "Lay out the report",
+      "System.WorkItemType": "Task",
+      "System.State": "Done",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Robin Example",
+        "uniqueName": "robin.example@example.com",
+        "id": "8e1f0d2c-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample2",
+        "descriptor": "aad.sample2"
+      },
+      "System.Parent": 302
+    },
+    "id": 321,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/321"
+  },
+  {
+    "fields": {
+      "System.Id": 331,
+      "System.Title": "Tidy the old export",
+      "System.WorkItemType": "Task",
+      "System.State": "To Do",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Alex Sample",
+        "uniqueName": "Alex.Sample@example.com",
+        "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+        "descriptor": "aad.sample1"
+      },
+      "System.Parent": 299
+    },
+    "id": 331,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/331"
+  },
+  {
+    "fields": {
+      "System.Id": 332,
+      "System.Title": "Fix the date format",
+      "System.WorkItemType": "Bug",
+      "System.State": "Committed",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Robin Example",
+        "uniqueName": "robin.example@example.com",
+        "id": "8e1f0d2c-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample2",
+        "descriptor": "aad.sample2"
+      }
+    },
+    "id": 332,
+    "relations": null,
+    "rev": 3,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/332"
+  }
+]

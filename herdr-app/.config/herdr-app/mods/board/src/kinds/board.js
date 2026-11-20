@@ -86,11 +86,13 @@ export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
 }
 
-// Whether a card may go to a column: one that takes drops and, where the
-// board's meta names its types' states (none does yet: GitHub boards carry
-// none), a state of the card's own type.
+// Whether a card may go to a column: one that takes drops, that maps the
+// card's type where it names the types it takes (a taskboard's column) and,
+// where the board's meta names its types' states (none does yet: GitHub
+// boards carry none), a state of the card's own type.
 export function canDrop(board, card, column) {
   if (!column?.target) return false;
+  if (column.types && !column.types.includes(card.type)) return false;
   const states = board.meta?.types?.[card.type];
   return !states || states.includes(column.name);
 }
