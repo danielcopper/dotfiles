@@ -1899,6 +1899,8 @@ test("UI: the board's keyboard goes to the start dialog's message, else the filt
   await press(b, cx, "tab");
   b.takeKeyboard();
   assert.deepEqual([b.modal.field, taken()], ["agent", "board"], "the start dialog on another field");
+  await press(b, cx, "tab", { modifiers: { shift: true } });
+  assert.deepEqual([b.modal.field, taken()], ["message", "message"], "Tab back to the message gives it the keys");
   b.modal = null;
   b.filterInput.focus();
   b.handle.held = false;
