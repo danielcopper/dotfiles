@@ -317,15 +317,23 @@ herdr-app`. Which files of the package git tracks is set in the root
   reading anything again. A context or view added to `views.json` adds a tab,
   and `r` reads the file again; the board remembers the source, tab and team
   view shown last, and "nur meine". A count in a tab, a column or a list section
-  that the filter or "nur meine" thins says so ("1/4"). The code holds nothing
+  that the filter or "nur meine" thins says so ("1/4"); a tab's count leaves the
+  cards of hidden columns out. The code holds nothing
   of mine; the header of `mods/board/src/main.js` describes the file's fields.
   Keys: `q` switches the source, `1 2 3` or `[ ]` the tab, `v` a team's Sprint
   and Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
   switch and "nur meine" take clicks too), `/` filters, `r` refreshes (the shown
   view also refreshes every few minutes while the board shows), `Esc` closes. On
-  a GitHub view `h/l j/k` move, `H/L` move a card one column (`s` picks from a
-  menu, or drag the card onto a column), `x` hides or shows a column (views.json
-  sets which start hidden), `o` opens the item in the browser. `Enter` opens the
+  a GitHub view `h/l j/k` move over the columns shown, `H/L` move a card one
+  column, hidden ones included (`s` picks from a menu, hidden ones too, or drag
+  the card onto a column; the notice says when a card went to a hidden column),
+  `x` hides a column (views.json sets which start hidden), `o` opens the item
+  in the browser. A hidden column is not drawn: the line above the columns
+  names the hidden ones ("ausgeblendet: Backlog, Done"), a click on a name
+  shows that column again, and `X` opens a menu of every column, shown or
+  hidden, where `Enter`, a digit or a click hides or shows one. A click on a
+  card or a list's row selects it, a second click on the selected one opens its
+  details. `Enter` opens the
   details, a second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
