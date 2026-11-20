@@ -86,10 +86,13 @@ export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
 }
 
-// Whether a card may go to a column: one that takes drops, that maps the
-// card's type where it names the types it takes (a taskboard's column) and,
-// where the board's meta names its types' states (none does yet: GitHub
-// boards carry none), a state of the card's own type.
+// Whether a card may go to a column: one that takes drops; one that maps
+// the card's type, where the column names the types it takes (a
+// taskboard's column, whose name is no state); and, where the board's meta
+// names its types' states for columns named after states (meta.types; no
+// board carries them yet), a state of the card's own type. The sprint
+// names its types' states as meta.typeStates instead, for the status menu:
+// its columns are no states.
 export function canDrop(board, card, column) {
   if (!column?.target) return false;
   if (column.types && !column.types.includes(card.type)) return false;

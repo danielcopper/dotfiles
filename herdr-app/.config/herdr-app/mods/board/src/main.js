@@ -30,13 +30,11 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh. An Azure team's
-// Sprint costs two az calls per refresh (the taskboard's column of each work
-// item, and one WIQL query for their fields); its sprint, areas, taskboard
-// columns and work item types are read once until the sprint ends, who az
-// is signed in as once (makeAzure says more). The other Azure views read
-// nothing yet. Finding gh and az costs one sh call now and then (toolPaths
-// says when). A view refreshes when its tab first shows, on `r`, after a column
+// Calls: a GitHub view costs one gh call per refresh, an Azure team's
+// Sprint two az calls (the taskboard's column of each work item, and one
+// WIQL query for their fields); what the Sprint reads once and keeps, and
+// for how long, makeAzure says. The other Azure views read nothing yet.
+// Finding gh and az costs one sh call now and then (toolPaths says when). A view refreshes when its tab first shows, on `r`, after a column
 // is hidden or shown (x, a name in the hidden line, the column menu), when
 // it is shown again older than refreshMinutes, and every refreshMinutes
 // while it shows.
@@ -46,11 +44,12 @@
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), select.js (filter, "nur meine", selection), sources/
-// (GitHub, Azure), tools.js (running gh and az), actions/start.js (starting
-// a session), ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how
-// a view's data is drawn and worked: board, prs, sprint, placeholder), ui/modals/ (the dialogs: start, status, columns)
-// and this one, the Board, which looks the shape up. Their data logic is
-// plain exported functions, tested with a few UI paths by
+// (GitHub, Azure), tools.js (running gh and az), actions/ (starting a
+// session, writing a change at once, moving a card), ui/helpers.js,
+// ui/layer.js (the board layer), ui/shapes/ (how a view's data is drawn and
+// worked: board, prs, sprint, placeholder), ui/modals/ (the dialogs: start,
+// status, columns) and this one, the Board, which looks the shape up. Their
+// data logic is plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
@@ -80,6 +79,8 @@ export * from "./sources/github.js";
 export * from "./sources/azure.js";
 export * from "./tools.js";
 export * from "./actions/start.js";
+export * from "./actions/write.js";
+export * from "./actions/move.js";
 export * from "./sources/index.js";
 export * from "./ui/helpers.js";
 export * from "./ui/layer.js";
@@ -933,13 +934,14 @@ export default class Board extends View {
 
   // With "nur meine" on and no login the data was read as: what the text
   // filter leaves but "nur meine" hides only for want of that login (not
-  // from a search of one's own) is said, with what still shows.
+  // from a search of one's own) is said, with what still shows, and why:
+  // the data's own words (noViewer) where it has them, else its source's.
   noViewerWarning(view, st, shape) {
     if (!this.mine || !st.data || st.data.viewer) return [];
     const left = shape.items(st.data).filter((i) => matches(i, this.filterText));
     if (!left.some((i) => !i.ownByQuery)) return [];
     const what = left.some((i) => i.ownByQuery) ? "nur Treffer eigener Suchen" : "nichts";
-    return [`„nur meine“ zeigt ${what}: ${this.sources[view.source].noViewer ?? NO_VIEWER}`];
+    return [`„nur meine“ zeigt ${what}: ${st.data.noViewer ?? this.sources[view.source].noViewer ?? NO_VIEWER}`];
   }
 
   detail(t, mono, view, item) {

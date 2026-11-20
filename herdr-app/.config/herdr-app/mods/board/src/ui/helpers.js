@@ -1,13 +1,15 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, an error's text for the UI, and the pieces that the Board, its
 // shapes and its modals draw alike (a button, a backdrop for a dialog, a menu
-// and its keys, a detail section, a check's color).
+// and its keys, a detail section, a check's color, a status pill, a
+// column's head, a session's chip).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { layout, panes, spaces } from "herdr";
 import { MOD, BoardError, errorText } from "../shared.js";
 import { githubContextId } from "../contexts.js";
+import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
 
 // Settings that last across reloads: the shown source ("source"), each
@@ -171,3 +173,33 @@ export const detailSection = (t, title, ...kids) =>
 
 // The theme color of a check state.
 export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 })[state] ?? t.dim;
+
+// The detail panel's status pill: `label` on its theme `color`; a click
+// opens the status menu (`open(cx)`).
+export function statusPill(t, label, color, open) {
+  return div()
+    .id("status-pill")
+    .px(10)
+    .py(2)
+    .rounded(12)
+    .text_size(12)
+    .font_semibold()
+    .cursor_pointer()
+    .bg(t[color] ?? t.muted)
+    .text_color(t.background)
+    .on_click((_e, cx) => open(cx))
+    .child(`${label} ▾`);
+}
+
+// A column's head: its color, its name and `count`.
+export const columnHead = (t, col, count) =>
+  h_flex()
+    .gap(6)
+    .items_center()
+    .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
+    .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
+    .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
+
+// A card's chip for its session (linkedSession): what its agent does.
+export const sessionChip = (t, session) =>
+  div().px(7).rounded(9).text_size(11).text_color(t.background).bg(t[session.status] ?? t.idle).child(AGENT_STATUS[session.status] ?? "Sitzung");

@@ -3,8 +3,8 @@
 // uses it (makeAzure).
 
 import { home, readTextFile, writeTextFile } from "herdr";
-import { BoardError, failure, firstLine, isObject } from "../shared.js";
-import { call } from "../tools.js";
+import { BoardError, errorText, failure, firstLine, isObject, itemKey } from "../shared.js";
+import { AZ_TIMEOUT, call } from "../tools.js";
 import { NO_STORY } from "../kinds/sprint.js";
 
 // Theme colors and column order for Azure's state categories.
@@ -16,7 +16,7 @@ const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ans
 export function parseAzureTypes(stdout) {
   const types = {};
   const states = new Map();
-  const value = JSON.parse(stdout)?.value;
+  const value = azJson(stdout, "die Work-Item-Typen")?.value;
   if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
   for (const type of value) {
     types[type.name] = (type.states ?? []).map((s) => s.name);
@@ -67,9 +67,6 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
 }
 
-// How long az may take: each run starts Python and asks Azure a few times.
-export const AZ_TIMEOUT = 60000;
-
 // The organisation for az boards and az devops, and no guessing it from a
 // git checkout in the folder az runs in.
 const azOrg = (org) => ["--org", org, "--detect", "false"];
@@ -94,21 +91,25 @@ export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", 
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
 export const azQueryArgs = (c, wiql) => ["boards", "query", ...azOrg(c.org), "--project", c.project, "--wiql", wiql, "-o", "json"];
-// Who az is signed in as (az login): the account's user, { name, type }.
+// Who az is signed in as (az login): the account's user, { name, type }. It
+// reads az's own profile and asks Azure nothing, so it has a short timeout
+// of its own.
 export const AZ_ME_ARGS = ["account", "show", "--query", "user", "-o", "json"];
+export const AZ_ME_TIMEOUT = 15000;
 
 // A text in a WIQL query: in single quotes, a quote in it doubled.
 const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 
-// The fields read here are all System. ones; the prefix stands in one
-// place, which also keeps the names out of the shape the command check
-// (tests/herdr-app/check-commands.py) takes for a herdr command.
+// The fields read here are all System. ones. The field names that would
+// stand alone in quotes are built from SYSTEM: the command check
+// (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
+// for a herdr command.
 const SYSTEM = "System.";
 const AREA_PATH = `${SYSTEM}AreaPath`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
-// The fields the Sprint view reads of each work item.
-export const SPRINT_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+// The fields read of each work item.
+export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
 
 // One WIQL query for the work items of the sprint `iteration` in the team's
 // areas (parseAreas), as Azure's taskboard shows them: in the iteration's
@@ -119,7 +120,7 @@ export function sprintWiql(iteration, areas) {
   const field = `[${areas.field}]`;
   const tree = areas.field === AREA_PATH;
   const inArea = areas.values.map((a) => `${field} ${tree && a.includeChildren ? "UNDER" : "="} ${wiqlText(a.value)}`).join(" OR ");
-  return `SELECT ${SPRINT_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.IterationPath] = ${wiqlText(iteration.path)} AND (${inArea}) ORDER BY [System.Id]`;
+  return `SELECT ${WORK_ITEM_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.IterationPath] = ${wiqlText(iteration.path)} AND (${inArea}) ORDER BY [System.Id]`;
 }
 
 // az's JSON answer for `what`; `empty` stands for no output at all (az
@@ -168,11 +169,14 @@ export function parseColumns(stdout) {
 }
 
 // The taskboard's column of each work item → Map(id → { columnId, column,
-// state }).
+// state }). A list that holds entries but none with a work item's id is no
+// answer this reads.
 export function parseTaskboard(stdout) {
   const list = azList(azJson(stdout, "die Spalten der Work Items"));
   if (!list) throw new BoardError("Azure lieferte keine Spalten der Work Items");
-  return new Map(list.filter((w) => Number.isInteger(w?.workItemId)).map((w) => [w.workItemId, { columnId: w.columnId, column: w.column, state: w.state }]));
+  const placed = list.filter((w) => Number.isInteger(w?.workItemId));
+  if (list.length && !placed.length) throw new BoardError("Azure nannte keine Work Items in den Spalten des Taskboards");
+  return new Map(placed.map((w) => [w.workItemId, { columnId: w.columnId, column: w.column, state: w.state }]));
 }
 
 // The address of a work item's page.
@@ -190,26 +194,27 @@ export function azPerson(who) {
   return { name: who.displayName ?? who.uniqueName ?? null, login: who.uniqueName?.toLowerCase() ?? null };
 }
 
-// A work item of az boards query's answer as the board shows it. Its key is
-// Azure Boards' own name for it (itemKey).
+// A work item of az boards query's answer as the board shows it, keyed as
+// itemKey names it.
 export function azWorkItem(wi, c) {
   const f = (name) => fieldOf(wi, name) ?? null;
   const who = azPerson(f("AssignedTo"));
-  return {
-    key: `AB#${wi.id}`, source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
+  const item = {
+    source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
     state: f("State"), assignees: who.name ? [who.name] : [], assigneeLogins: who.login ? [who.login] : [],
     parent: f("Parent"), area: f("AreaPath"), iteration: f("IterationPath"),
     url: workItemUrl(c, wi.id), labels: [], sub: null, branch: null,
   };
+  return { key: itemKey(item), ...item };
 }
 
 // The most work items az boards query gives.
 export const AZ_QUERY_LIMIT = 1000;
 
-// The sprint's work items → [items] (azWorkItem), in the query's order; no
-// output is none.
-export function parseSprintItems(stdout, c) {
-  const list = azList(azJson(stdout, "die Work Items des Sprints", []));
+// The work items of az boards query's answer → [items] (azWorkItem), in its
+// order; no output is none.
+export function parseWorkItems(stdout, c) {
+  const list = azList(azJson(stdout, "die Work Items", []));
   if (!list) throw new BoardError("Azure lieferte keine Work Items");
   return list.filter((wi) => Number.isInteger(wi?.id)).map((wi) => azWorkItem(wi, c));
 }
@@ -224,15 +229,16 @@ export function parseViewer(stdout) {
   }
 }
 
-// The sprint as the sprint shape shows it (kinds/sprint.js): the taskboard's
-// columns, each a board column holding its tasks (the work items the
-// taskboard places, `places`, parseTaskboard), and one row per story (a work
-// item of the sprint it does not place), in the query's order, after the
-// row "Ohne Story" for tasks whose story is not in the sprint (only where
-// there is one). A column's color is that of the state its first mapping
-// names; it takes the types it maps (types) and says which state each
-// gets (mappings). A task the taskboard places in a column it does not
-// list is left out, as is a placed one the query did not find.
+// The sprint as the sprint shape shows it (kinds/sprint.js). Its tasks are
+// the work items of the types the taskboard's columns map; each goes to the
+// column the taskboard places it in (`places`, parseTaskboard). Every other
+// work item of the sprint is a story, one row each in the query's order,
+// after the row "Ohne Story" for tasks whose story is not in the sprint
+// (only where there is one). A task the taskboard does not place is left
+// out and counted (meta.unplaced), as is one placed in a column the columns
+// read do not list (meta.unknownColumns). A column's color is that of the
+// state its first mapping names; it takes the types it maps (types) and
+// says which state each gets (mappings).
 export function sprintBoard({ iteration, columns, types, items, places, viewer }) {
   const colors = new Map(types.states.map((s) => [s.name, s.color]));
   const cols = columns.map((c) => ({
@@ -240,20 +246,27 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
     types: c.mappings.map((m) => m.type), mappings: Object.fromEntries(c.mappings.map((m) => [m.type, m.state])), cards: [],
   }));
   const byId = new Map(cols.map((c) => [c.id, c]));
-  const stories = items.filter((i) => !places.has(i.number));
-  const storyIds = new Set(stories.map((s) => s.number));
+  const taskTypes = new Set(cols.flatMap((c) => c.types));
+  const stories = items.filter((i) => !taskTypes.has(i.type));
+  const storyKeys = new Map(stories.map((s) => [s.number, s.key]));
+  let unplaced = 0;
+  let unknownColumns = 0;
   for (const item of items) {
+    if (!taskTypes.has(item.type)) continue;
     const place = places.get(item.number);
     const col = place && byId.get(place.columnId);
-    if (!col) continue;
-    const row = storyIds.has(item.parent) ? `AB#${item.parent}` : NO_STORY;
-    col.cards.push({ ...item, column: col.id, readColumn: col.id, row });
+    if (!col) {
+      if (place) unknownColumns++;
+      else unplaced++;
+      continue;
+    }
+    col.cards.push({ ...item, column: col.id, readColumn: col.id, row: storyKeys.get(item.parent) ?? NO_STORY });
     col.count++;
   }
   const loose = cols.some((c) => c.cards.some((card) => card.row === NO_STORY));
   return {
     shape: "sprint",
-    meta: { iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states },
+    meta: { iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states, unplaced, unknownColumns },
     columns: cols,
     rows: [...(loose ? [{ key: NO_STORY, story: null }] : []), ...stories.map((s) => ({ key: s.key, story: s }))],
     viewer,
@@ -262,9 +275,19 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
   };
 }
 
-// Until when a team's sprint settings stay cached (ms): the end of the
-// sprint's last day (Azure's finishDate is that day's start, in UTC), or half
-// a day from `now` where it names none.
+// The warnings of a sprint: tasks left out, and a query az may have cut.
+export function sprintWarnings(data) {
+  const { unplaced, unknownColumns } = data.meta;
+  return [
+    ...(unplaced ? [`${unplaced} ${unplaced === 1 ? "Task" : "Tasks"} ohne Platz auf dem Taskboard`] : []),
+    ...(unknownColumns ? [`${unknownColumns} ${unknownColumns === 1 ? "Task steht" : "Tasks stehen"} in einer Spalte, die das Board nicht kennt; die Spalten werden beim nächsten Neuladen neu gelesen`] : []),
+    ...(data.limited ? [`Nur die ersten ${AZ_QUERY_LIMIT} Work Items des Sprints (so viele gibt az boards query)`] : []),
+  ];
+}
+
+// Until when a team's sprint stays cached (ms): the end of its last day
+// (Azure's finishDate is that day's start, in UTC), or half a day from
+// `now` where it names none.
 const DAY_MS = 86400000;
 export function sprintUntil(finish, now) {
   const at = Date.parse(finish ?? "");
@@ -273,12 +296,15 @@ export function sprintUntil(finish, now) {
 
 // az devops invoke takes a request's body only from a file (--in-file):
 // one per work item, written before each move and kept for the next.
+// herdr's writeTextFile makes the folders it needs (src/mod_files.rs,
+// write: create_dir_all of the parent), and its readTextFile gives null for
+// a file that is not there (read: NotFound is None).
 export const moveBodyPath = (id) => `${home()}/.cache/herdr-app/board/taskboard-move-${id}.json`;
 
 // The body that moves a task to a taskboard column. The REST reference
 // (Taskboard Work Items - Update, api-version 7.1) names the field
-// newColumn, a plain string, beside the list's column (the column's name)
-// and columnId (a uuid); so it is sent the column's name.
+// newColumn, a string; it does not say whether that is the name or the id,
+// and the name is sent.
 export const moveBody = (column) => `${JSON.stringify({ newColumn: column.name })}\n`;
 
 // Writes the body of a move to its file, where it does not hold it
@@ -298,7 +324,24 @@ async function writeMoveBody(id, column) {
 export const azMoveArgs = (c, iterationId, id, file) =>
   azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId, workItemId: id }, ["--http-method", "PATCH", "--in-file", file]);
 
-export const azStateArgs = (org, id, state) => ["boards", "work-item", "update", ...azOrg(org), "--id", String(id), "--state", state, "-o", "json"];
+// az's answer to a move. The reference names none (200 OK); an answer that
+// names the work item in its new column, as the list's entries do
+// (workItemId, column, columnId), confirms the move. Anything else leaves
+// open whether it landed: the refresh that follows says where it stands.
+export function checkTaskboardMove(stdout, card, column) {
+  let json = null;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    // Not JSON: unclear, below.
+  }
+  const entry = azList(json)?.find((w) => w?.workItemId === card.number) ?? json;
+  if (entry?.workItemId !== card.number || (entry.columnId !== column.id && entry.column !== column.name)) {
+    throw failure("Azure hat die Verschiebung nicht bestätigt", { write: true, unclear: true });
+  }
+}
+
+export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--state", state, "-o", "json"];
 
 // az's answer to a state change must name the state it set; anything else
 // leaves open whether the change landed.
@@ -315,35 +358,63 @@ export function checkStateResult(stdout, state) {
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, and per layout of an Azure view how
 // it loads and writes. az runs by the path `paths` (toolPaths) finds.
-// A team's sprint settings (its iteration, areas, taskboard columns and the
-// project's work item types) are read once, all at the same time, and kept
-// until the sprint ends (sprintUntil); one that fails keeps nothing. Who az
-// is signed in as is read once; while that fails it is asked again with
-// each refresh. A refresh then reads the taskboard's columns of the work
-// items and the sprint's work items, also at the same time.
+//
+// What the Sprint keeps, each read once and kept until the sprint ends
+// (sprintUntil; one that fails keeps nothing): per team, by organisation,
+// project and team, its current sprint, and its areas and taskboard
+// columns; per project the work item types, until the sprint of the team
+// that read them ends. What is not kept is read at the same time. A refresh then reads
+// the taskboard's columns of the work items and the sprint's work items,
+// also at the same time: two az runs. A task in a column the columns read
+// do not know drops the team's kept settings, so the next refresh reads
+// them again. Who az is signed in as is read beside all that, with its own
+// short timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
+// asked again with each refresh, and the data says why (noViewer).
 export function makeAzure(paths) {
-  const az = async (args, options = {}) => {
-    const r = await call("az", args, null, AZ_TIMEOUT, { ...options, paths });
+  const az = async (args, options = {}, timeout = AZ_TIMEOUT) => {
+    const r = await call("az", args, null, timeout, { ...options, paths });
     if (r.code !== 0) throw azFailure(r, null, options);
     return r.stdout;
   };
-  const teams = new Map();
-  let viewer = null;
+  const kept = new Map();
+  const keptValue = (key) => {
+    const entry = kept.get(key);
+    return entry && Date.now() < entry.until ? entry : null;
+  };
+  const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
   async function settingsOf(c) {
-    const key = `${c.org}\n${c.project}\n${c.team}`;
-    const kept = teams.get(key);
-    if (kept && Date.now() < kept.until) return kept;
-    const [iteration, areas, columns, types] = await Promise.all([az(azIterationArgs(c)), az(azAreasArgs(c)), az(azColumnsArgs(c)), az(azTypesArgs(c))]);
-    const read = { iteration: parseIteration(iteration), areas: parseAreas(areas), columns: parseColumns(columns), types: parseAzureTypes(types) };
-    read.until = sprintUntil(read.iteration.finish, Date.now());
-    teams.set(key, read);
-    return read;
+    const team = teamKey(c);
+    const project = `types\n${c.org}\n${c.project}`;
+    const [iteration, board, types] = [keptValue(`iteration\n${team}`), keptValue(`board\n${team}`), keptValue(project)];
+    const [it, areas, columns, ty] = await Promise.all([
+      iteration?.value ?? az(azIterationArgs(c)).then(parseIteration),
+      board?.value.areas ?? az(azAreasArgs(c)).then(parseAreas),
+      board?.value.columns ?? az(azColumnsArgs(c)).then(parseColumns),
+      types?.value ?? az(azTypesArgs(c)).then(parseAzureTypes),
+    ]);
+    const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
+    if (!iteration) kept.set(`iteration\n${team}`, { value: it, until });
+    if (!board) kept.set(`board\n${team}`, { value: { areas, columns }, until });
+    if (!types) kept.set(project, { value: ty, until });
+    return { iteration: it, areas, columns, types: ty };
   }
-  async function whoAmI() {
-    if (viewer) return viewer;
-    viewer = await az(AZ_ME_ARGS).then(parseViewer, () => null);
-    return viewer;
-  }
+  const forget = (c) => {
+    kept.delete(`iteration\n${teamKey(c)}`);
+    kept.delete(`board\n${teamKey(c)}`);
+  };
+  let viewer = null;
+  let viewerError = null;
+  const whoAmI = () =>
+    viewer
+      ? Promise.resolve(viewer)
+      : az(AZ_ME_ARGS, {}, AZ_ME_TIMEOUT).then((out) => {
+        viewer = parseViewer(out);
+        viewerError = viewer ? null : "keinen Benutzer genannt";
+        return viewer;
+      }, (e) => {
+        viewerError = errorText(e);
+        return null;
+      });
   return {
     site: "Azure",
     noViewer: "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)",
@@ -351,18 +422,20 @@ export function makeAzure(paths) {
       sprint: {
         async load(view) {
           const c = view.context;
+          const me = whoAmI();
           const s = await settingsOf(c);
-          const [places, items, me] = await Promise.all([az(azTaskboardArgs(c, s.iteration.id)), az(azQueryArgs(c, sprintWiql(s.iteration, s.areas))), whoAmI()]);
-          const data = sprintBoard({ ...s, items: parseSprintItems(items, c), places: parseTaskboard(places), viewer: me });
-          const warnings = data.limited ? [`Nur die ersten ${AZ_QUERY_LIMIT} Work Items des Sprints (so viele gibt az boards query)`] : [];
-          return { data, warnings };
+          const [places, items] = await Promise.all([az(azTaskboardArgs(c, s.iteration.id)), az(azQueryArgs(c, sprintWiql(s.iteration, s.areas)))]);
+          const data = sprintBoard({ ...s, items: parseWorkItems(items, c), places: parseTaskboard(places), viewer: await me });
+          if (!data.viewer) data.noViewer = `az account show sagte nicht, wer angemeldet ist: ${viewerError}`;
+          if (data.meta.unknownColumns) forget(c);
+          return { data, warnings: sprintWarnings(data) };
         },
         async move(view, data, card, column) {
           const file = await writeMoveBody(card.number, column);
-          await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true });
+          checkTaskboardMove(await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }), card, column);
         },
         async setState(view, item, state) {
-          checkStateResult(await az(azStateArgs(view.context.org, item.number, state), { write: true }), state);
+          checkStateResult(await az(azStateArgs(view.context, item.number, state), { write: true }), state);
         },
       },
     },

@@ -11,13 +11,14 @@
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
 // where it has them, detailParts (its rows in the detail panel), settle
-// (says where the cards of unclear writes ended up), moveTo, toggleColumn,
-// openStatusMenu, navigate (its own keyboard movement in place of
-// navigate's, select.js) and pickStatus (what a pick in the status menu
-// does in place of a move to that column). A shape keeps its own state per Board in
-// b.shapeState[name], which its state() makes once, when the Board starts:
-// herdr refuses a ScrollHandle made while a view draws ("cannot run during
-// render"). A new way to draw is a module here and its entry in SHAPES.
+// (says how the unclear writes of its items ended up), moveTo,
+// toggleColumn, openStatusMenu, navigate (its own keyboard movement in
+// place of navigate's, select.js) and pickStatus (what a pick in the status
+// menu does in place of a move to that column). A shape keeps its own
+// state per Board in b.shapeState[name], which its state() makes once, when
+// the Board starts: herdr refuses a ScrollHandle made while a view draws
+// ("cannot run during render"). A new way to draw is a module here and its
+// entry in SHAPES.
 
 import { boardShape } from "./board.js";
 import { placeholderShape } from "./placeholder.js";

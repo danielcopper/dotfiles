@@ -10,13 +10,12 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { notify, spaces } from "herdr";
-import { BoardError, itemLabel } from "../../shared.js";
-import { applyMoves, canDrop, findCard, hiddenColumns, moveCard, rollback, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
-import { viewKind } from "../../kinds/index.js";
-import { selectionInColumns } from "../../select.js";
-import { AGENT_STATUS, linkedSession } from "../../actions/start.js";
-import { button, report, shownOf, store } from "../helpers.js";
+import { spaces } from "herdr";
+import { itemLabel } from "../../shared.js";
+import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
+import { linkedSession } from "../../actions/start.js";
+import { moveCardTo, reselectIn, tellOutcomes, unclearMoveLines } from "../../actions/move.js";
+import { button, columnHead, sessionChip, shownOf, statusPill, store } from "../helpers.js";
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -62,7 +61,7 @@ export const boardShape = {
   },
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
-  settle: (b, due, data, cx) => tellUnclear(b, due, data, cx),
+  settle: (b, due, data, cx) => tellOutcomes(b, unclearMoveLines(due, data), cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
@@ -75,20 +74,7 @@ export const boardShape = {
       if (!b.modal) b.openStatusMenu(view, cx);
     };
     return {
-      chips: [
-        div()
-          .id("status-pill")
-          .px(10)
-          .py(2)
-          .rounded(12)
-          .text_size(12)
-          .font_semibold()
-          .cursor_pointer()
-          .bg(t[column.color] ?? t.muted)
-          .text_color(t.background)
-          .on_click((_e, cx) => openStatus(cx))
-          .child(`${column.name} ▾`),
-      ],
+      chips: [statusPill(t, column.name, column.color, openStatus)],
       buttons: [button(t, "act-status", "Status s", false, openStatus)],
     };
   },
@@ -103,12 +89,7 @@ function drawBoard(b, t, mono, view, st) {
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
-    const head = h_flex()
-      .gap(6)
-      .items_center()
-      .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
-      .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
-      .child(div().flex_none().text_size(12).text_color(t.muted).child(filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length)));
+    const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length));
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -251,70 +232,8 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
         .when(card.labels.length > 3, (el) => el.child(chip(`+${card.labels.length - 3}`)))
         .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
         .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-        .when(Boolean(session), (el) => el.child(chip(AGENT_STATUS[session?.status] ?? "Sitzung", t.background, t[session?.status] ?? t.idle))),
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
     );
-}
-
-// Moves a card to a column at once and writes it (the view's loader's
-// move); one write per card at a time; the sprint shape moves its tasks so
-// too. A refusal moves it back with the error shown; a write whose outcome
-// is unclear leaves it and refreshes.
-export function moveCardTo(b, view, key, columnId, cx) {
-  const st = b.state(view.id);
-  const found = findCard(st.data, key);
-  const to = st.data?.columns.find((c) => c.id === columnId);
-  if (!found || !to) return b.say("Die Karte oder Spalte gibt es nicht mehr", "warning", cx);
-  const label = itemLabel(found.card);
-  if (found.column.id === columnId) return;
-  if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
-  if (!canDrop(st.data, found.card, to)) return b.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
-  const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
-  const before = b.navColumns(view);
-  st.moves.push(move);
-  st.data = moveCard(st.data, key, columnId);
-  st.pending[key] = true;
-  // A card moved to a hidden column leaves the board; the notice says so. The
-  // selection, where it was on that card, stays in its column.
-  if (to.hidden && st.sel?.key === key) reselectIn(b, view, before);
-  const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
-  b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
-  cx.spawn(async (cx) => {
-    try {
-      await b.loader(view).move(view, st.data, found.card, to);
-      move.confirmedAt = Date.now();
-      // A new move that landed replaces the open outcome of an earlier one.
-      st.unclear = st.unclear.filter((u) => u.key !== key);
-      b.say(`${label} steht jetzt in „${to.name}“${hiddenNote()}`, "success", cx);
-    } catch (e) {
-      st.moves = st.moves.filter((m) => m !== move);
-      const why = report(e);
-      // Followed up only while views.json still has this view, of the same
-      // kind (as the last valid views.json says; an invalid one in between
-      // keeps it).
-      const followed = b.kinds?.get(view.id) === viewKind(view);
-      const current = b.viewById(view.id);
-      if (e instanceof BoardError && e.unclear) {
-        if (followed) st.unclear = [...st.unclear.filter((u) => u.key !== key), { key, label, to: { id: to.id, name: to.name }, at: Date.now() }];
-        const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
-        b.say(`${label} → ${to.name}: ${why}${next}`, "warning", cx);
-        notify({ title: `Status von ${label}`, body: why, level: "warning" });
-        if (followed && current) b.refresh(current, cx);
-      } else {
-        st.data = rollback(st.data, move);
-        // With an earlier outcome of the card open, where it is now is for
-        // the refresh to say.
-        const open = st.unclear.some((u) => u.key === key);
-        b.say(open ? `${label} → ${to.name} nicht gespeichert: ${why}` : `${label} bleibt in „${found.column.name}“: ${why}`, "error", cx);
-        notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-        // An earlier unclear write of the card waited for this one; the
-        // server's answer tells it now.
-        if (followed && current && open) b.refresh(current, cx);
-      }
-    } finally {
-      delete st.pending[key];
-      cx.notify();
-    }
-  });
 }
 
 // Hides a shown column or shows a hidden one; the selection follows
@@ -333,12 +252,6 @@ function toggleBoardColumn(b, view, col, cx) {
   b.refresh(view, cx);
 }
 
-// After the shown columns changed from `before`: the selection the board
-// sets (selectionInColumns, reselect).
-function reselectIn(b, view, before) {
-  b.reselect(view, selectionInColumns(before, b.navColumns(view), b.state(view.id).sel));
-}
-
 function openBoardStatusMenu(b, view) {
   const st = b.state(view.id);
   const card = b.selected(view);
@@ -346,27 +259,4 @@ function openBoardStatusMenu(b, view) {
   const targets = targetsFor(st.data, card);
   const at = Math.max(0, targets.findIndex((c) => c.id === findCard(st.data, card.key)?.column.id));
   b.modal = { kind: "status", view, key: card.key, targets, at };
-}
-
-// Where the cards of settled unclear writes (`due`) are in the new data:
-// the target column, the write landed (info); another column, a warning;
-// not there while the target is hidden, not shown (info); not there while
-// other columns are hidden, not shown, it may be in any of them (warning);
-// else not on the board (warning).
-export function tellUnclear(b, due, data, cx) {
-  const lines = due.map((u) => {
-    const now = findCard(data, u.key)?.column;
-    if (now?.id === u.to.id) return { text: `${u.label} steht nach dem Neuladen in „${u.to.name}“`, warn: false };
-    if (now) return { text: `${u.label} steht nach dem Neuladen in „${now.name}“, nicht in „${u.to.name}“`, warn: true };
-    if (data.columns.find((c) => c.id === u.to.id)?.hidden) {
-      return { text: `${u.label} steht nicht in den gezeigten Spalten („${u.to.name}“ ist ausgeblendet)`, warn: false };
-    }
-    const hidden = data.columns.filter((c) => c.hidden).map((c) => `„${c.name}“`);
-    if (hidden.length) return { text: `${u.label} steht nicht in den gezeigten Spalten (ausgeblendet: ${hidden.join(", ")})`, warn: true };
-    return { text: `${u.label} ist nach dem Neuladen nicht auf dem Board`, warn: true };
-  });
-  const level = lines.some((l) => l.warn) ? "warning" : "info";
-  const text = lines.map((l) => l.text).join("; ");
-  b.say(text, level, cx);
-  if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
 }

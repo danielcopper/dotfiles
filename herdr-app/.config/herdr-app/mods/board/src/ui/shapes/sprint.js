@@ -1,26 +1,29 @@
 // The sprint shape: a team's current sprint as a taskboard. One row per
 // story (its id, title and own state at the left), its tasks as cards in
-// the team's taskboard columns, each with its own state, assignee and id;
-// tasks whose story is not in the sprint stand in the row "Ohne Story". H/L
-// move a task to the next column (as the board shape moves a card, through
-// the taskboard's own column, not the state: two columns may map to one
-// state), s changes a story's or a task's state from its type's states (the
-// status menu), Enter shows the details. Keys walk the stories, then each
-// column (sprintNav). The data: { shape: "sprint", meta: { iterationId,
-// iteration, finish, typeStates, states }, columns: [{ id, name, color,
-// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
-// viewer, total, limited } (sprintBoard, kinds/sprint.js). View fields it
-// reads: id, source, layout (as the board shape's moves do).
+// the team's taskboard columns, each with its own state, assignee and id
+// and the chip of its session where it has one; tasks whose story is not in
+// the sprint stand in the row "Ohne Story". H/L move a task to the next
+// column (through the taskboard's own column, not the state: two columns
+// may map to one state), s changes a story's or a task's state from its
+// type's states (the status menu), Enter shows the details; both write at
+// once (actions/move.js, actions/write.js). Keys walk the stories, then
+// each column (sprintNav). The data: { shape: "sprint", meta: {
+// iterationId, iteration, finish, typeStates, states, unplaced,
+// unknownColumns }, columns: [{ id, name, color, hidden, count, target,
+// types, mappings, cards }], rows: [{ key, story }], viewer, noViewer,
+// total, limited } (sprintBoard, sources/azure.js). View fields it reads:
+// id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { notify } from "herdr";
-import { BoardError, itemLabel } from "../../shared.js";
+import { spaces } from "herdr";
+import { itemLabel } from "../../shared.js";
 import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
-import { viewKind } from "../../kinds/index.js";
 import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, withItemState } from "../../kinds/sprint.js";
-import { button, detailSection, report, shownOf } from "../helpers.js";
-import { moveCardTo, tellUnclear } from "./board.js";
+import { linkedSession } from "../../actions/start.js";
+import { moveCardTo, tellOutcomes, unclearMoveLines } from "../../actions/move.js";
+import { writeAtOnce } from "../../actions/write.js";
+import { button, columnHead, detailSection, sessionChip, shownOf, statusPill } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -30,6 +33,9 @@ const STORY_WIDTH = 260;
 const sprintState = (b) => b.shapeState.sprint;
 
 const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
+
+// An item's state as shown: a task's as its column maps it (shownState).
+const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -42,10 +48,7 @@ export const sprintShape = {
     const at = item ? shownRows(st.data, sprintColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
     if (at >= 0) sprintState(b).scroll.scroll_to_item(at);
   },
-  navigate: (b, view, st, dir) => {
-    const nav = sprintColumns(b, st);
-    return sprintNavigate(nav, st.sel, dir, st.data.rows);
-  },
+  navigate: (b, view, st, dir) => sprintNavigate(sprintColumns(b, st), st.sel, dir, st.data.rows),
   items: (data) => sprintItems(data),
   count(b, data) {
     const items = sprintItems(data);
@@ -72,7 +75,9 @@ export const sprintShape = {
   },
   received: (data, st) => applyMoves(data, st.moves),
   warnings: () => [],
-  settle: (b, due, data, cx) => tellUnclear(b, due, data, cx),
+  // The settled outcomes: a move's (it has a target column) where its card
+  // stands, a state change's which state its item has.
+  settle: (b, due, data, cx) => tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.to), data), ...unclearStateLines(due.filter((u) => u.state !== undefined), data)], cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, cx),
   pickStatus: (b, view, key, target, cx) => setItemState(b, view, key, target.name, cx),
@@ -94,20 +99,7 @@ export const sprintShape = {
       ...(item.iteration ? [line("Iteration", item.iteration)] : []),
     ];
     return {
-      chips: [
-        div()
-          .id("status-pill")
-          .px(10)
-          .py(2)
-          .rounded(12)
-          .text_size(12)
-          .font_semibold()
-          .cursor_pointer()
-          .bg(t[stateColor(st.data, state)] ?? t.muted)
-          .text_color(t.background)
-          .on_click((_e, cx) => openStatus(cx))
-          .child(`${state ?? "ohne Status"} ▾`),
-      ],
+      chips: [statusPill(t, state ?? "ohne Status", stateColor(st.data, state), openStatus)],
       sections: rows.length ? [detailSection(t, isTask(item) ? "TASK" : "STORY", ...rows)] : [],
       buttons: [button(t, "act-status", "Status s", false, openStatus)],
     };
@@ -117,7 +109,7 @@ export const sprintShape = {
 // The theme color of a state, by its category (parseAzureTypes).
 const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
 
-// "bis 28.11." for the sprint's last day (UTC, as Azure gives it), or "".
+// "bis 27.11." for the sprint's last day (UTC, as Azure gives it), or "".
 function sprintEnd(finish) {
   const at = new Date(finish ?? "");
   return Number.isNaN(at.getTime()) ? "" : ` · bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
@@ -129,6 +121,7 @@ function drawSprint(b, t, mono, view, st) {
   const [, ...cols] = nav;
   const rows = shownRows(data, nav);
   const stories = sprintStories(data);
+  const allSpaces = spaces();
   const head = h_flex()
     .id("sprint-head")
     .flex_none()
@@ -141,14 +134,7 @@ function drawSprint(b, t, mono, view, st) {
       div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
         .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
     )
-    .children(cols.map((col) => h_flex()
-      .flex_1()
-      .min_w(0)
-      .gap(6)
-      .items_center()
-      .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
-      .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
-      .child(div().flex_none().text_size(12).text_color(t.muted).child(shownOf(col.shown.length, col.cards.length)))));
+    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length)).flex_1().min_w(0)));
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
@@ -167,7 +153,7 @@ function drawSprint(b, t, mono, view, st) {
       .flex_1()
       .min_w(0)
       .gap(6)
-      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col)))));
+      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces)))));
   return v_flex()
     .flex_1()
     .min_h(0)
@@ -206,10 +192,11 @@ function storyCell(b, t, mono, view, st, r, nav) {
 const stateChip = (t, data, state) =>
   div().flex_none().px(7).rounded(9).text_size(11).text_color(t.background).bg(t[stateColor(data, state)] ?? t.muted).child(state ?? "ohne Status");
 
-// A task's card: its key, title, own state and assignee; a click selects
-// it (clickItem).
-function drawTask(b, t, mono, view, st, card, ci, col) {
+// A task's card: its key, title, own state, assignee and session; a click
+// selects it (clickItem).
+function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
+  const session = linkedSession(card, allSpaces);
   return v_flex()
     .id(`card-${card.key}`)
     .flex_none()
@@ -230,7 +217,8 @@ function drawTask(b, t, mono, view, st, card, ci, col) {
     .child(div().text_size(12.5).line_height("17px").child(card.title))
     .child(h_flex().gap(5).flex_wrap().items_center()
       .child(stateChip(t, st.data, shownState(card, col)))
-      .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", ")))));
+      .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+      .when(Boolean(session), (el) => el.child(sessionChip(t, session))));
 }
 
 // The status menu for the selected story or task: the states of its type.
@@ -240,49 +228,49 @@ function openStateMenu(b, view, cx) {
   if (!item) return;
   const states = st.data.meta.typeStates?.[item.type];
   if (!states?.length) return b.say(`Für ${item.type ?? "diesen Typ"} kennt das Board keine Status`, "info", cx);
-  const now = shownState(item, isTask(item) ? findCard(st.data, item.key)?.column : null);
   const targets = states.map((name) => ({ id: name, name, color: stateColor(st.data, name), hidden: false }));
-  b.modal = { kind: "status", view, key: item.key, targets, at: Math.max(0, states.indexOf(now)) };
+  b.modal = { kind: "status", view, key: item.key, targets, at: Math.max(0, states.indexOf(stateNow(st.data, item))) };
 }
 
-// Sets an item's state at once and writes it; one write per item at a time
-// (the moves' too). A refusal sets the state back with the error shown; a
-// write that landed, or whose outcome is unclear, refreshes the view while
-// views.json still has it of the same kind: which column a task's new state
-// puts it in is Azure's to say.
+// Sets an item's state at once and writes it (writeAtOnce); the state it
+// has already sends nothing. A refusal sets the state back, unless a
+// refresh has read another since. A write that landed refreshes the view
+// too: which column a task's new state puts it in is Azure's to say.
 function setItemState(b, view, key, state, cx) {
   const st = b.state(view.id);
   const item = findSprintItem(st.data, key);
   if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
   const label = itemLabel(item);
-  const before = shownState(item, isTask(item) ? findCard(st.data, key)?.column : null);
+  const before = stateNow(st.data, item);
   if (before === state) return;
-  if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
-  st.data = withItemState(st.data, key, state);
-  st.pending[key] = true;
-  b.say(`${label} → ${state} …`, "info", cx);
-  cx.spawn(async (cx) => {
-    let again = false;
-    try {
-      await b.loader(view).setState(view, item, state);
-      b.say(`${label} hat jetzt den Status „${state}“`, "success", cx);
-      again = true;
-    } catch (e) {
-      const why = report(e);
-      if (e instanceof BoardError && e.unclear) {
-        b.say(`${label} → ${state}: ${why}; lädt neu`, "warning", cx);
-        notify({ title: `Status von ${label}`, body: why, level: "warning" });
-        again = true;
-      } else {
-        if (findSprintItem(st.data, key)?.state === state) st.data = withItemState(st.data, key, before);
-        b.say(`${label} bleibt „${before}“: ${why}`, "error", cx);
-        notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-      }
-    } finally {
-      delete st.pending[key];
-      const current = b.viewById(view.id);
-      if (again && current && viewKind(current) === viewKind(view)) b.refresh(current, cx);
-      cx.notify();
-    }
+  writeAtOnce(b, view, {
+    key,
+    label,
+    apply: () => (st.data = withItemState(st.data, key, state)),
+    write: () => b.loader(view).setState(view, item, state),
+    undo() {
+      if (findSprintItem(st.data, key)?.state === state) st.data = withItemState(st.data, key, before);
+    },
+    open: { state },
+    again: true,
+    texts: {
+      pending: () => `${label} → ${state} …`,
+      landed: () => `${label} hat jetzt den Status „${state}“`,
+      unclear: `${label} → ${state}`,
+      refused: (why, earlier) => (earlier ? `${label} → ${state} nicht gespeichert: ${why}` : `${label} bleibt „${before}“: ${why}`),
+    },
+  }, cx);
+}
+
+// Which state the items of settled unclear state changes (`due`) have in
+// the new data, one line each: the state it was set to (info), another
+// (warning), or not in the sprint any more (warning).
+function unclearStateLines(due, data) {
+  return due.map((u) => {
+    const now = findSprintItem(data, u.key);
+    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht im Sprint`, warn: true };
+    const state = stateNow(data, now);
+    if (state === u.state) return { text: `${u.label} hat nach dem Neuladen den Status „${u.state}“`, warn: false };
+    return { text: `${u.label} hat nach dem Neuladen den Status „${state}“, nicht „${u.state}“`, warn: true };
   });
 }
