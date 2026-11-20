@@ -26,13 +26,14 @@
 // An older views.json with its views at the top is not read; the board says
 // where they go now.
 //
-// Hidden columns are left out of the query and of the board; the same request
-// counts them for the column menu. GitHub's queries also ask for the login gh runs as, which
-// "nur meine" compares with.
+// Hidden columns are left out of the query and of the board. GitHub's
+// queries also ask for the login gh runs as, which "nur meine" compares
+// with.
 //
 // Calls: a GitHub view costs one gh call per refresh; an Azure view reads
 // nothing yet. Finding gh costs one sh call now and then (toolPaths says
-// when). A view refreshes when its tab first shows, on `r`, after `x`, when
+// when). A view refreshes when its tab first shows, on `r`, after a column
+// is hidden or shown (x, a name in the hidden line, the column menu), when
 // it is shown again older than refreshMinutes, and every refreshMinutes
 // while it shows.
 //
@@ -42,9 +43,9 @@
 // kinds/board.js (a board's columns and cards), select.js (filter, "nur
 // meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
 // az), actions/start.js (starting a session), ui/helpers.js, ui/layer.js
-// (the board layer), ui/shapes/
-// (how a view's data is drawn and worked: board, prs, placeholder) and this
-// one, the Board, which looks the shape up. Their data logic is
+// (the board layer), ui/shapes/ (how a view's data is drawn and worked:
+// board, prs, placeholder), ui/modals/ (the dialogs: start, status, columns)
+// and this one, the Board, which looks the shape up. Their data logic is
 // plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
 
@@ -55,7 +56,7 @@ import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
-import { matches, shows, navigate, selectionAfter } from "./select.js";
+import { matches, shows, navigate, reselect, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
@@ -176,12 +177,12 @@ export default class Board extends View {
   // moves (laid over refreshes, see pendingMoves), pending (card keys being
   // written), unclear ({ key, label, to, at } of writes whose outcome is
   // still open; see settleUnclear), stored/hidden (the person's toggles and
-  // the hidden set), sel ({ col, key }, null before the first data) and
-  // detail.
+  // the hidden set), sel ({ col, key }, null before the first data), picked
+  // (the key of the item the person chose, see clickItem) and detail.
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
-      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, detail: false,
+      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, detail: false,
     };
     return this.views[id];
   }
@@ -365,12 +366,17 @@ export default class Board extends View {
 
   keepSelection(view) {
     const st = this.state(view.id);
-    st.sel = selectionAfter(this.navColumns(view), st.sel);
+    reselect(st, selectionAfter(this.navColumns(view), st.sel));
   }
 
-  select(view, sel) {
+  // Selects an item and scrolls to it; `chosen`: the person chose it (a key
+  // move or a click), else the board set it (reselect).
+  select(view, sel, chosen = false) {
     const st = this.state(view.id);
-    st.sel = sel;
+    if (chosen) {
+      st.sel = sel;
+      st.picked = sel.key;
+    } else reselect(st, sel);
     const cols = this.navColumns(view);
     const row = cols[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
     if (row < 0) return;
@@ -449,6 +455,17 @@ export default class Board extends View {
   open(item, cx) {
     if (item?.url) cx.open_url(item.url);
     else this.say("Dazu gibt es keine Seite", "warning", cx);
+  }
+
+  // A click on an item: one the person chose (an earlier click, or moved to
+  // with keys; not a selection the board set) opens its details, as the
+  // first Enter does; any other is selected, and chosen.
+  clickItem(view, sel, cx) {
+    const st = this.state(view.id);
+    if (st.picked === sel.key) st.detail = true;
+    else this.select(view, sel, true);
+    this.handle.focus();
+    cx.notify();
   }
 
   // Enter: details first, then the item's session (go to it, or start one).
@@ -630,7 +647,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));
+      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir), true);
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();

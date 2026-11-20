@@ -1,12 +1,12 @@
 // The board shape: a view's data as columns of cards, which a card moves
 // between (H/L, the status menu, a drag). A hidden column is not drawn: x
 // hides one, the line above the columns names the hidden ones and a click
-// on a name shows it again, and X opens the column menu (modals/columns.js).
-// A click on a card selects it, a second one opens its details. The data:
-// { shape: "board", meta, columns: [{ id, name, color, hidden, count,
-// target, cards }], total, limited, viewer, limit } (parseGithubBoard). View
-// fields it reads: id, source, layout, hide (the columns hidden by default)
-// and, where the data does not name its own, limit.
+// on a name shows it again; X opens the column menu (modals/columns.js).
+// The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
+// count, target, cards }], total, limited, viewer, limit }
+// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
+// columns hidden by default) and, where the data does not name its own,
+// limit.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -14,6 +14,7 @@ import { notify, spaces } from "herdr";
 import { BoardError, itemLabel } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hiddenColumns, moveCard, rollback, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
 import { viewKind } from "../../kinds/index.js";
+import { reselect, selectionInColumns } from "../../select.js";
 import { AGENT_STATUS, linkedSession } from "../../actions/start.js";
 import { button, report, shownOf, store } from "../helpers.js";
 
@@ -215,22 +216,21 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
-      // again: the card was selected already, so a click opens its details.
-      b.drag = { key: card.key, from: card.column, again: selected };
+      b.drag = { key: card.key, from: card.column };
       b.over = ci;
       b.select(view, { col: ci, key: card.key });
       b.handle.focus();
       cx.notify();
     })
     .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click, which selects it and,
-      // on a card selected already, opens its details. Released on another
-      // card: the column under it takes the drop.
-      if (b.modal || (b.drag && b.drag.key !== card.key)) return;
+      // Released on the card it started on: a click, which selects the card,
+      // or opens its details where the person chose it (clickItem). Released
+      // on another card: the column under it takes the drop. A release
+      // without a press on the card is no click.
+      if (b.modal || b.drag?.key !== card.key) return;
       cx.stop_propagation();
-      if (b.drag?.again) st.detail = true;
       b.endDrag(cx);
-      cx.notify();
+      b.clickItem(view, { col: ci, key: card.key }, cx);
     })
     .child(
       h_flex()
@@ -267,17 +267,13 @@ function moveCardTo(b, view, key, columnId, cx) {
   if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
   if (!canDrop(st.data, found.card, to)) return b.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
   const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
-  const row = b.navColumns(view)[st.sel?.col]?.shown.findIndex((c) => c.key === key) ?? -1;
+  const before = b.navColumns(view);
   st.moves.push(move);
   st.data = moveCard(st.data, key, columnId);
   st.pending[key] = true;
   // A card moved to a hidden column leaves the board; the notice says so. The
-  // selection, where it was on that card, stays in its column, on the card
-  // now in its row.
-  if (to.hidden && row >= 0) {
-    const left = b.navColumns(view)[st.sel.col].shown;
-    st.sel = { col: st.sel.col, key: left[Math.min(row, left.length - 1)]?.key ?? null };
-  }
+  // selection, where it was on that card, stays in its column.
+  if (to.hidden && st.sel?.key === key) reselectAfter(b, view, before);
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
   b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
   cx.spawn(async (cx) => {
@@ -319,27 +315,30 @@ function moveCardTo(b, view, key, columnId, cx) {
   });
 }
 
-// Hides a shown column or shows a hidden one. The selection stays on its
-// column; where that column is hidden now, it goes to the column that takes
-// its place (the next, or the last).
+// Hides a shown column or shows a hidden one; the selection follows
+// (reselectAfter).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
   if (!col.target) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
-  const was = b.navColumns(view)[st.sel?.col]?.id;
+  const before = b.navColumns(view);
   st.stored = toggleHidden(view, st.stored, col);
   st.hidden = hiddenColumns(view, st.stored);
   store.set(`hidden:${view.id}`, st.stored);
   st.data = withHidden(st.data, st.hidden);
-  const cols = b.navColumns(view);
-  const same = cols.findIndex((c) => c.id === was);
-  if (same >= 0) st.sel = { col: same, key: st.sel.key };
-  else {
-    const at = Math.min(st.sel?.col ?? 0, cols.length - 1);
-    st.sel = at >= 0 ? { col: at, key: cols[at].shown[0]?.key ?? null } : { col: 0, key: null };
-  }
+  reselectAfter(b, view, before);
   // What a column holds comes from the query, which leaves hidden ones out.
   b.refresh(view, cx);
+}
+
+// After the shown columns changed from `before`: the selection the board
+// sets (selectionInColumns). Where that is another item, its details close,
+// rather than show that item unasked.
+function reselectAfter(b, view, before) {
+  const st = b.state(view.id);
+  const sel = selectionInColumns(before, b.navColumns(view), st.sel);
+  if (sel.key !== st.sel?.key) st.detail = false;
+  reselect(st, sel);
 }
 
 function openBoardStatusMenu(b, view) {

@@ -4,7 +4,7 @@
 // section, a check's color).
 
 import { div } from "gpui-kit";
-import { v_flex } from "gpui-base";
+import { h_flex, v_flex } from "gpui-base";
 import { layout, panes, spaces } from "herdr";
 import { MOD, BoardError, errorText } from "../shared.js";
 import { githubContextId } from "../contexts.js";
@@ -105,6 +105,64 @@ export function backdrop(t, id, panel) {
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
     .child(panel);
+}
+
+// A menu over the board (the status and the column menu): a panel `width`
+// wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a title line and one
+// row per entry of `rows` (its own children), each `<rowId>-<i>` and led by
+// its digit (1–9). The row `at` is marked; a click on a row picks it
+// (`pick(i, cx)`); menuKey takes its keys.
+export function menu(t, { id, rowId, width, title, rows, at, pick }) {
+  return backdrop(
+    t,
+    `${id}-backdrop`,
+    v_flex()
+      .id(`${id}-menu`)
+      .w(width)
+      .p(8)
+      .gap(2)
+      .rounded(10)
+      .border_1()
+      .border_color(t.input)
+      .bg(t.popover)
+      .shadow_lg()
+      .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
+      .children(
+        rows.map((kids, i) =>
+          h_flex()
+            .id(`${rowId}-${i}`)
+            .px(8)
+            .py(6)
+            .gap(8)
+            .items_center()
+            .rounded(6)
+            .cursor_pointer()
+            .when(i === at, (el) => el.bg(t.selected))
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => pick(i, cx))
+            .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+            .children(kids),
+        ),
+      ),
+  );
+}
+
+// A menu's keys (every key but Esc, which the Board keeps; all are taken):
+// j/k or the arrows move m.at over `count` rows, Enter picks the row at
+// m.at, a digit picks its row (`pick(i, cx)`); a digit beyond the rows does
+// nothing.
+export function menuKey(e, cx, m, count, pick) {
+  const k = e.key;
+  const ch = e.key_char ?? "";
+  cx.stop_propagation();
+  if (k === "j" || k === "down") m.at = Math.max(0, Math.min(m.at + 1, count - 1));
+  else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
+  else if (k === "enter") return pick(m.at, cx);
+  else if (/^[1-9]$/.test(ch) && Number(ch) <= count) {
+    m.at = Number(ch) - 1;
+    return pick(m.at, cx);
+  }
+  cx.notify();
 }
 
 // A section of the detail panel: a title over its rows.

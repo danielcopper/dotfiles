@@ -882,6 +882,31 @@ test("j/k move within a column, h/l across the columns shown, skipping hidden on
   assert.deepEqual(board.navigate(list, { col: 0, key: "a" }, "down"), { col: 0, key: "b" }, "a list is one column");
 });
 
+test("after the columns change the selection keeps its column by id, else the column now at its index or the last, on its card or the card in its row", () => {
+  const col = (id, ...keys) => ({ id, shown: keys.map((key) => ({ key })) });
+  const before = [col("a", "a1"), col("b", "b1", "b2", "b3"), col("c")];
+  assert.deepEqual(board.selectionInColumns(before, [col("z"), ...before], { col: 1, key: "b2" }), { col: 2, key: "b2" }, "a column shown before it");
+  assert.deepEqual(board.selectionInColumns(before, [col("a", "a1"), col("b", "b1", "b3"), col("c")], { col: 1, key: "b2" }), { col: 1, key: "b3" }, "its card gone: the card in its row");
+  assert.deepEqual(board.selectionInColumns(before, [col("a", "a1"), col("b", "b1"), col("c")], { col: 1, key: "b3" }), { col: 1, key: "b1" }, "past the end: the last card");
+  assert.deepEqual(board.selectionInColumns(before, [col("a", "a1"), col("c", "c1", "c2")], { col: 1, key: "b2" }), { col: 1, key: "c2" }, "its column hidden: the one at its index, same row");
+  assert.deepEqual(board.selectionInColumns(before, [col("a", "a1")], { col: 2, key: null }), { col: 0, key: "a1" }, "past the last column: the last");
+  assert.deepEqual(board.selectionInColumns(before, [col("a"), col("c")], { col: 0, key: "a1" }), { col: 0, key: null }, "an empty column");
+  assert.deepEqual(board.selectionInColumns(before, [], { col: 1, key: "b1" }), { col: 0, key: null }, "no column");
+  assert.deepEqual(board.selectionInColumns([], [col("a", "a1")], null), { col: 0, key: "a1" }, "no selection before");
+  assert.deepEqual(board.selectionInColumns(before, [col("a", "a1"), col("b", "b2", "b3", "b4")], { col: 1, key: "b3" }), { col: 1, key: "b3" },
+    "its card in another row: the card, not the row");
+});
+
+test("a selection the board sets keeps the person's choice only on the same item", () => {
+  const st = { sel: { col: 0, key: "a" }, picked: "a" };
+  board.reselect(st, { col: 1, key: "a" });
+  assert.deepEqual([st.sel, st.picked], [{ col: 1, key: "a" }, "a"]);
+  board.reselect(st, { col: 1, key: "b" });
+  assert.deepEqual([st.sel, st.picked], [{ col: 1, key: "b" }, null]);
+  board.reselect(st, { col: 0, key: "a" });
+  assert.equal(st.picked, null, "nor comes back with it");
+});
+
 test("after new data the selection follows its card, else falls to the first card", () => {
   const cols = board.shownColumns(githubBoard(), "");
   assert.deepEqual(board.selectionAfter(cols, { col: 2, key: "PVTI_rec4" }), { col: 0, key: "PVTI_rec4" });
@@ -2242,11 +2267,13 @@ test("UI: hidden columns are not drawn; the line above the columns names them, h
   assert.equal(byId(all.b.render(), "hidden-columns"), null, "nothing hidden: no line");
 });
 
+const ALL_HIDDEN = "Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder";
+
 test("UI: with every column hidden the board says how to show one", async () => {
   const { b, cx, st } = await openBoard({ config: testConfig({ hide: ["Backlog", "Ready", "In progress", "In review", "Done"] }) });
   assert.deepEqual(st().sel, { col: 0, key: null });
   assert.equal(byId(b.render(), "columns"), null);
-  assert.ok(texts(b.render()).includes("Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder"));
+  assert.ok(texts(b.render()).includes(ALL_HIDDEN));
   await press(b, cx, "l");
   await press(b, cx, "enter");
   assert.equal(st().detail, false);
@@ -2263,9 +2290,17 @@ test("UI: x hides the selected column; the selection goes to the column taking i
   await host.answer("gh", ok(fixture("github-board.json")));
   await press(b, cx, "x");
   assert.deepEqual(b.navColumns(b.view()).map((c) => c.name), ["Ready"]);
-  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" }, "the last column hidden: the one before it, on its first card");
-  await click(b, cx, "show-opt-in-progress");
-  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" }, "a column shown again keeps the selection on its card");
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" }, "the last column hidden: the one before it, on the card in the same row");
+  assert.ok(byId(b.render(), "col-0"), "one column shown is drawn");
+  assert.equal(texts(b.render()).includes(ALL_HIDDEN), false);
+  await click(b, cx, "show-opt-backlog");
+  assert.deepEqual(st().sel, { col: 1, key: "PVTI_rec4" }, "a column shown before the selected one keeps the selection on its card");
+  await press(b, cx, "x");
+  assert.deepEqual([b.navColumns(b.view()).map((c) => c.name), st().sel], [["Backlog"], { col: 0, key: null }]);
+  await press(b, cx, "x");
+  assert.deepEqual(b.navColumns(b.view()), [], "the last column shown hidden");
+  assert.deepEqual(st().sel, { col: 0, key: null });
+  assert.ok(texts(b.render()).includes(ALL_HIDDEN));
 });
 
 test("UI: H/L and the status menu move a card into a hidden column, and the notice says it is hidden; counts leave it out", async () => {
@@ -2282,6 +2317,7 @@ test("UI: H/L and the status menu move a card into a hidden column, and the noti
   assert.equal(b.notice.text, "tender#3004 steht jetzt in „Backlog“ (ausgeblendet)");
   await press(b, cx, "s");
   assert.deepEqual(b.modal.targets.map((c) => c.name), ["Backlog", "Ready", "In progress", "In review", "Done"]);
+  assert.deepEqual([0, 1].map((i) => texts(byId(b.render(), `status-${i}`)).includes("ausgeblendet")), [true, false], "the menu marks a hidden target");
   await press(b, cx, "5");
   assert.equal(b.notice.text, "tender#3005 → Done (ausgeblendet) …");
   assert.equal(tab(), "4");
@@ -2291,10 +2327,39 @@ test("UI: H/L and the status menu move a card into a hidden column, and the noti
   assert.equal(st().sel.key, "PVTI_rec6", "and the selection goes with its card");
 });
 
+test("UI: the last card of a column moved into a hidden column leaves the selection on the card now last", async () => {
+  const { b, cx, st } = await openBoard();
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec6" });
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec5" });
+});
+
+test("UI: a card moved into a hidden column closes its details; a move of another card leaves the selection", async () => {
+  const { b, cx, st } = await openBoard();
+  await press(b, cx, "enter");
+  assert.equal(st().detail, true);
+  byId(b.render(), "act-status").with.on_click[0]({}, cx);
+  await settle();
+  assert.equal(b.modal?.kind, "status", "the detail's Status button opens the menu");
+  await press(b, cx, "5");
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "Done");
+  assert.deepEqual([st().sel, st().detail], [{ col: 0, key: "PVTI_rec5" }, false], "the panel shows no other card unasked");
+  await press(b, cx, "enter");
+  b.moveTo(b.view(), "PVTI_rec6", "opt-done", cx);
+  await settle();
+  assert.deepEqual([st().sel, st().detail], [{ col: 0, key: "PVTI_rec5" }, true], "another card moved out of sight changes nothing");
+  await click(b, cx, "show-opt-backlog");
+  assert.deepEqual([st().sel, st().detail], [{ col: 1, key: "PVTI_rec5" }, true], "nor a column shown: the details stay on their card");
+});
+
 test("UI: X opens the column menu: every column, shown or hidden; Enter, a digit or a click hides or shows one, and it stays open until Esc", async () => {
   const { b, cx, st, host } = await openBoard();
   await press(b, cx, "x", { char: "X", modifiers: { shift: true } });
   assert.equal(b.modal?.kind, "columns");
+  assert.deepEqual([0, 1].map((i) => byId(b.render(), `column-${i}`).styles.includes("bg")), [true, false], "the row at the cursor is marked");
+  assert.ok(texts(byId(b.render(), "columns-menu")).includes("Spalten zeigen · j/k Enter · Esc"), "under its title");
   const rows = () => [0, 1, 2, 3, 4].map((i) => texts(byId(b.render(), `column-${i}`)).filter(Boolean));
   assert.deepEqual(rows(), [
     ["1", "Backlog", "265", "ausgeblendet"],
@@ -3242,8 +3307,8 @@ test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async
   assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "j/k", "Enter", "o", "m", "/", "r", "Esc"]);
 });
 
-// Sends the element with the id `id`, as the board draws it now, the left
-// button's `event` ("on_mouse_down" or "on_mouse_up").
+// Fires the left button's `event` ("on_mouse_down" or "on_mouse_up") on the
+// element with the id `id`, as the board draws it now.
 async function mouse(b, cx, id, event) {
   const el = byId(b.render(), id);
   assert.ok(el, `no ${id}`);
@@ -3255,8 +3320,22 @@ const clickCard = async (b, cx, key) => {
   await mouse(b, cx, `card-${key}`, "on_mouse_up");
 };
 
-test("UI: a click on a card selects it; a second click on it opens its details", async () => {
+test("UI: a click on a card selects it; a click on the card the person chose opens its details", async () => {
   const { b, cx, st, host } = await openBoard();
+  assert.equal(st().sel.key, "PVTI_rec4", "the board selected the first card by itself");
+  await clickCard(b, cx, "PVTI_rec4");
+  assert.equal(st().detail, false, "a click on it only selects it");
+  await clickCard(b, cx, "PVTI_rec4");
+  assert.equal(st().detail, true, "a second opens the details");
+  await press(b, cx, "escape");
+  await press(b, cx, "j");
+  await clickCard(b, cx, "PVTI_rec5");
+  assert.equal(st().detail, true, "a card moved to with keys is chosen: one click opens it");
+  await press(b, cx, "escape");
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  assert.equal(st().sel.key, "PVTI_rec6", "the board selected the card taking the moved one's row");
+  await clickCard(b, cx, "PVTI_rec6");
+  assert.equal(st().detail, false, "which is not chosen: a click selects it");
   await clickCard(b, cx, "PVTI_rec1");
   assert.deepEqual([st().sel, st().detail], [{ col: 1, key: "PVTI_rec1" }, false], "the first click selects");
   assert.equal(b.drag, null);
@@ -3269,7 +3348,20 @@ test("UI: a click on a card selects it; a second click on it opens its details",
   await press(b, cx, "escape");
   await mouse(b, cx, "card-PVTI_rec2", "on_mouse_up");
   assert.equal(st().detail, false, "a release without a press on the card is no click");
-  assert.equal(host.open("gh").length, 0);
+  assert.equal(host.open("gh").length, 1, "only H wrote");
+});
+
+test("UI: a choice the board's own selection replaced is gone: a click on that card again selects it only", async () => {
+  const { b, cx, st } = await openBoard();
+  await clickCard(b, cx, "PVTI_rec4");
+  assert.equal(st().picked, "PVTI_rec4");
+  b.filterText = "BUG input";
+  await press(b, cx, "z");
+  assert.equal(st().sel.key, "PVTI_rec6", "the filter left only 3007: the board selected it");
+  b.filterText = "";
+  await press(b, cx, "z");
+  await clickCard(b, cx, "PVTI_rec4");
+  assert.deepEqual([st().sel.key, st().detail], ["PVTI_rec4", false]);
 });
 
 test("UI: a card dragged onto another column moves there, selected, without opening its details", async () => {
@@ -3286,13 +3378,23 @@ test("UI: a card dragged onto another column moves there, selected, without open
   assert.equal(st().detail, false, "nor a drag of the selected card");
 });
 
-test("UI: a click on a pull request's row selects it; a second click on it opens its details", async () => {
+test("UI: a click on a pull request's row selects it; a click on the row the person chose opens its details", async () => {
   const { b, cx, host, st } = await openBoard();
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
   const list = b.views.prs;
   const [first, second] = b.navColumns(b.view())[0].shown;
-  assert.equal(list.sel.key, first.key);
+  assert.equal(list.sel.key, first.key, "the board selected the first row by itself");
+  await click(b, cx, `row-${first.key}`);
+  assert.equal(list.detail, false, "a click on it only selects it");
+  await press(b, cx, "j");
+  await click(b, cx, `row-${second.key}`);
+  assert.equal(list.detail, true, "a row moved to with keys is chosen: one click opens it");
+  await press(b, cx, "escape");
+  await press(b, cx, "k");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  assert.equal(list.picked, first.key, "a refresh that keeps the selection keeps the choice");
   await click(b, cx, `row-${second.key}`);
   assert.deepEqual([list.sel, list.detail], [{ col: 0, key: second.key }, false], "the first click selects");
   await click(b, cx, `row-${second.key}`);

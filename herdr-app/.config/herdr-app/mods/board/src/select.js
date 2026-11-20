@@ -53,3 +53,27 @@ export function selectionAfter(columns, sel) {
   const first = columns.findIndex((c) => c.shown.length);
   return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
 }
+
+// A selection the board sets by itself (after new data, a filter, a move or
+// a column hidden) on a view's state: the item the person chose (st.picked)
+// stays chosen only where it stays selected.
+export function reselect(st, sel) {
+  if (st.picked !== sel.key) st.picked = null;
+  st.sel = sel;
+}
+
+// The selection after the columns changed (`before` → `after`: a column
+// hidden or shown, a card moved out of sight): the selected column, found by
+// id, else the column now at its index or the last one; there its card,
+// else the card now in the same row (the last, past the end); no column,
+// { col: 0, key: null }.
+export function selectionInColumns(before, after, sel) {
+  const was = before[sel?.col];
+  const row = Math.max(0, was?.shown.findIndex((c) => c.key === sel?.key) ?? 0);
+  const kept = after.findIndex((c) => c.id === was?.id);
+  const col = kept >= 0 ? kept : Math.min(sel?.col ?? 0, after.length - 1);
+  if (col < 0) return { col: 0, key: null };
+  const cards = after[col].shown;
+  if (cards.some((c) => c.key === sel?.key)) return { col, key: sel.key };
+  return { col, key: cards.length ? cards[Math.min(row, cards.length - 1)].key : null };
+}

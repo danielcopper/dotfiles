@@ -28,13 +28,14 @@
 // An older views.json with its views at the top is not read; the board says
 // where they go now.
 //
-// Hidden columns are left out of the query and of the board; the same request
-// counts them for the column menu. GitHub's queries also ask for the login gh runs as, which
-// "nur meine" compares with.
+// Hidden columns are left out of the query and of the board. GitHub's
+// queries also ask for the login gh runs as, which "nur meine" compares
+// with.
 //
 // Calls: a GitHub view costs one gh call per refresh; an Azure view reads
 // nothing yet. Finding gh costs one sh call now and then (toolPaths says
-// when). A view refreshes when its tab first shows, on `r`, after `x`, when
+// when). A view refreshes when its tab first shows, on `r`, after a column
+// is hidden or shown (x, a name in the hidden line, the column menu), when
 // it is shown again older than refreshMinutes, and every refreshMinutes
 // while it shows.
 //
@@ -44,9 +45,9 @@
 // kinds/board.js (a board's columns and cards), select.js (filter, "nur
 // meine", selection), sources/ (GitHub, Azure), tools.js (running gh and
 // az), actions/start.js (starting a session), ui/helpers.js, ui/layer.js
-// (the board layer), ui/shapes/
-// (how a view's data is drawn and worked: board, prs, placeholder) and this
-// one, the Board, which looks the shape up. Their data logic is
+// (the board layer), ui/shapes/ (how a view's data is drawn and worked:
+// board, prs, placeholder), ui/modals/ (the dialogs: start, status, columns)
+// and this one, the Board, which looks the shape up. Their data logic is
 // plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
 
@@ -470,6 +471,30 @@ export function selectionAfter(columns, sel) {
   if (!sel?.key && columns[sel?.col]) return sel;
   const first = columns.findIndex((c) => c.shown.length);
   return first >= 0 ? { col: first, key: columns[first].shown[0].key } : { col: 0, key: null };
+}
+
+// A selection the board sets by itself (after new data, a filter, a move or
+// a column hidden) on a view's state: the item the person chose (st.picked)
+// stays chosen only where it stays selected.
+export function reselect(st, sel) {
+  if (st.picked !== sel.key) st.picked = null;
+  st.sel = sel;
+}
+
+// The selection after the columns changed (`before` → `after`: a column
+// hidden or shown, a card moved out of sight): the selected column, found by
+// id, else the column now at its index or the last one; there its card,
+// else the card now in the same row (the last, past the end); no column,
+// { col: 0, key: null }.
+export function selectionInColumns(before, after, sel) {
+  const was = before[sel?.col];
+  const row = Math.max(0, was?.shown.findIndex((c) => c.key === sel?.key) ?? 0);
+  const kept = after.findIndex((c) => c.id === was?.id);
+  const col = kept >= 0 ? kept : Math.min(sel?.col ?? 0, after.length - 1);
+  if (col < 0) return { col: 0, key: null };
+  const cards = after[col].shown;
+  if (cards.some((c) => c.key === sel?.key)) return { col, key: sel.key };
+  return { col, key: cards.length ? cards[Math.min(row, cards.length - 1)].key : null };
 }
 
 // ==== src/kinds/board.js ====
@@ -1565,6 +1590,64 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
+// A menu over the board (the status and the column menu): a panel `width`
+// wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a title line and one
+// row per entry of `rows` (its own children), each `<rowId>-<i>` and led by
+// its digit (1–9). The row `at` is marked; a click on a row picks it
+// (`pick(i, cx)`); menuKey takes its keys.
+export function menu(t, { id, rowId, width, title, rows, at, pick }) {
+  return backdrop(
+    t,
+    `${id}-backdrop`,
+    v_flex()
+      .id(`${id}-menu`)
+      .w(width)
+      .p(8)
+      .gap(2)
+      .rounded(10)
+      .border_1()
+      .border_color(t.input)
+      .bg(t.popover)
+      .shadow_lg()
+      .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
+      .children(
+        rows.map((kids, i) =>
+          h_flex()
+            .id(`${rowId}-${i}`)
+            .px(8)
+            .py(6)
+            .gap(8)
+            .items_center()
+            .rounded(6)
+            .cursor_pointer()
+            .when(i === at, (el) => el.bg(t.selected))
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => pick(i, cx))
+            .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+            .children(kids),
+        ),
+      ),
+  );
+}
+
+// A menu's keys (every key but Esc, which the Board keeps; all are taken):
+// j/k or the arrows move m.at over `count` rows, Enter picks the row at
+// m.at, a digit picks its row (`pick(i, cx)`); a digit beyond the rows does
+// nothing.
+export function menuKey(e, cx, m, count, pick) {
+  const k = e.key;
+  const ch = e.key_char ?? "";
+  cx.stop_propagation();
+  if (k === "j" || k === "down") m.at = Math.max(0, Math.min(m.at + 1, count - 1));
+  else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
+  else if (k === "enter") return pick(m.at, cx);
+  else if (/^[1-9]$/.test(ch) && Number(ch) <= count) {
+    m.at = Number(ch) - 1;
+    return pick(m.at, cx);
+  }
+  cx.notify();
+}
+
 // A section of the detail panel: a title over its rows.
 export const detailSection = (t, title, ...kids) =>
   v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
@@ -1577,12 +1660,12 @@ export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, pa
 // The board shape: a view's data as columns of cards, which a card moves
 // between (H/L, the status menu, a drag). A hidden column is not drawn: x
 // hides one, the line above the columns names the hidden ones and a click
-// on a name shows it again, and X opens the column menu (modals/columns.js).
-// A click on a card selects it, a second one opens its details. The data:
-// { shape: "board", meta, columns: [{ id, name, color, hidden, count,
-// target, cards }], total, limited, viewer, limit } (parseGithubBoard). View
-// fields it reads: id, source, layout, hide (the columns hidden by default)
-// and, where the data does not name its own, limit.
+// on a name shows it again; X opens the column menu (modals/columns.js).
+// The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
+// count, target, cards }], total, limited, viewer, limit }
+// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
+// columns hidden by default) and, where the data does not name its own,
+// limit.
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -1782,22 +1865,21 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
-      // again: the card was selected already, so a click opens its details.
-      b.drag = { key: card.key, from: card.column, again: selected };
+      b.drag = { key: card.key, from: card.column };
       b.over = ci;
       b.select(view, { col: ci, key: card.key });
       b.handle.focus();
       cx.notify();
     })
     .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click, which selects it and,
-      // on a card selected already, opens its details. Released on another
-      // card: the column under it takes the drop.
-      if (b.modal || (b.drag && b.drag.key !== card.key)) return;
+      // Released on the card it started on: a click, which selects the card,
+      // or opens its details where the person chose it (clickItem). Released
+      // on another card: the column under it takes the drop. A release
+      // without a press on the card is no click.
+      if (b.modal || b.drag?.key !== card.key) return;
       cx.stop_propagation();
-      if (b.drag?.again) st.detail = true;
       b.endDrag(cx);
-      cx.notify();
+      b.clickItem(view, { col: ci, key: card.key }, cx);
     })
     .child(
       h_flex()
@@ -1834,17 +1916,13 @@ function moveCardTo(b, view, key, columnId, cx) {
   if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
   if (!canDrop(st.data, found.card, to)) return b.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
   const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
-  const row = b.navColumns(view)[st.sel?.col]?.shown.findIndex((c) => c.key === key) ?? -1;
+  const before = b.navColumns(view);
   st.moves.push(move);
   st.data = moveCard(st.data, key, columnId);
   st.pending[key] = true;
   // A card moved to a hidden column leaves the board; the notice says so. The
-  // selection, where it was on that card, stays in its column, on the card
-  // now in its row.
-  if (to.hidden && row >= 0) {
-    const left = b.navColumns(view)[st.sel.col].shown;
-    st.sel = { col: st.sel.col, key: left[Math.min(row, left.length - 1)]?.key ?? null };
-  }
+  // selection, where it was on that card, stays in its column.
+  if (to.hidden && st.sel?.key === key) reselectAfter(b, view, before);
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
   b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
   cx.spawn(async (cx) => {
@@ -1886,27 +1964,30 @@ function moveCardTo(b, view, key, columnId, cx) {
   });
 }
 
-// Hides a shown column or shows a hidden one. The selection stays on its
-// column; where that column is hidden now, it goes to the column that takes
-// its place (the next, or the last).
+// Hides a shown column or shows a hidden one; the selection follows
+// (reselectAfter).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
   if (!col.target) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
-  const was = b.navColumns(view)[st.sel?.col]?.id;
+  const before = b.navColumns(view);
   st.stored = toggleHidden(view, st.stored, col);
   st.hidden = hiddenColumns(view, st.stored);
   store.set(`hidden:${view.id}`, st.stored);
   st.data = withHidden(st.data, st.hidden);
-  const cols = b.navColumns(view);
-  const same = cols.findIndex((c) => c.id === was);
-  if (same >= 0) st.sel = { col: same, key: st.sel.key };
-  else {
-    const at = Math.min(st.sel?.col ?? 0, cols.length - 1);
-    st.sel = at >= 0 ? { col: at, key: cols[at].shown[0]?.key ?? null } : { col: 0, key: null };
-  }
+  reselectAfter(b, view, before);
   // What a column holds comes from the query, which leaves hidden ones out.
   b.refresh(view, cx);
+}
+
+// After the shown columns changed from `before`: the selection the board
+// sets (selectionInColumns). Where that is another item, its details close,
+// rather than show that item unasked.
+function reselectAfter(b, view, before) {
+  const st = b.state(view.id);
+  const sel = selectionInColumns(before, b.navColumns(view), st.sel);
+  if (sel.key !== st.sel?.key) st.detail = false;
+  reselect(st, sel);
 }
 
 function openBoardStatusMenu(b, view) {
@@ -1965,7 +2046,6 @@ export const placeholderShape = {
 // ==== src/ui/shapes/prs.js ====
 
 // The prs shape: a list of pull requests in sections, walked as one column.
-// A click on a row selects it, a second one opens its details.
 // The data: { shape: "prs", sections: [{ name, count, fetched, limited,
 // skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
 // and checks show where it has them. View fields it reads: id.
@@ -2027,12 +2107,9 @@ function drawPrs(b, t, mono, view, st) {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
-        // A click selects the row; on the selected one it opens the details.
-        if (b.modal) return;
-        if (selected) st.detail = true;
-        else st.sel = { col: 0, key: r.key };
-        b.handle.focus();
-        cx.notify();
+        // A click selects the row, or opens its details where the person
+        // chose it (clickItem).
+        if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
@@ -2109,59 +2186,24 @@ function toggleAt(b, m, at, cx) {
 export const columnsModal = {
   render(b, t) {
     const m = b.modal;
-    return backdrop(
-      t,
-      "columns-backdrop",
-      v_flex()
-        .id("columns-menu")
-        .w(320)
-        .p(8)
-        .gap(2)
-        .rounded(10)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(div().px(8).py(6).text_size(12).text_color(t.muted).child("Spalten zeigen · j/k Enter · Esc"))
-        .children(
-          columnsOf(b, m).map((c, i) =>
-            h_flex()
-              .id(`column-${i}`)
-              .px(8)
-              .py(6)
-              .gap(8)
-              .items_center()
-              .rounded(6)
-              .cursor_pointer()
-              .when(i === m.at, (el) => el.bg(t.selected))
-              .hover((s) => s.bg(t.hover))
-              .on_click((_e, cx) => toggleAt(b, m, i, cx))
-              .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
-              .child(div().w(14).text_color(t.foreground).child(c.hidden ? "" : "✓"))
-              .child(div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted))
-              .child(div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name))
-              .child(div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)))
-              .child(div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt")),
-          ),
-        ),
-    );
+    return menu(t, {
+      id: "columns",
+      rowId: "column",
+      width: 320,
+      title: "Spalten zeigen · j/k Enter · Esc",
+      at: m.at,
+      pick: (i, cx) => toggleAt(b, m, i, cx),
+      rows: columnsOf(b, m).map((c) => [
+        div().w(14).text_color(t.foreground).child(c.hidden ? "" : "✓"),
+        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
+        div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
+        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
+      ]),
+    });
   },
 
-  // Every key but Esc (the Board's): j/k or the arrows move, Enter or a digit
-  // hides or shows; all are taken.
-  key(b, e, cx) {
-    const m = b.modal;
-    const k = e.key;
-    const ch = e.key_char ?? "";
-    cx.stop_propagation();
-    const last = columnsOf(b, m).length - 1;
-    if (k === "j" || k === "down") m.at = Math.max(0, Math.min(m.at + 1, last));
-    else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
-    else if (k === "enter") return toggleAt(b, m, m.at, cx);
-    // A digit beyond the rows does nothing.
-    else if (/^[1-9]$/.test(ch)) return toggleAt(b, m, Number(ch) - 1, cx);
-    cx.notify();
-  },
+  key: (b, e, cx) => menuKey(e, cx, b.modal, columnsOf(b, b.modal).length, (i, cx) => toggleAt(b, b.modal, i, cx)),
 };
 
 // ==== src/ui/modals/start.js ====
@@ -2431,68 +2473,31 @@ function watchSession(b, name, cx, at = 0) {
 // a digit, or a click. A shape with columns opens it (openStatusMenu) as
 // b.modal = { kind: "status", view, key, targets, at }.
 
+// Moves the card to the target at `i`.
+function pickTarget(b, m, i, cx) {
+  b.closeModal(cx);
+  b.moveTo(m.view, m.key, m.targets[i].id, cx);
+}
+
 export const statusModal = {
   render(b, t) {
     const m = b.modal;
-    return backdrop(
-      t,
-      "status-backdrop",
-      v_flex()
-        .id("status-menu")
-        .w(280)
-        .p(8)
-        .gap(2)
-        .rounded(10)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(div().px(8).py(6).text_size(12).text_color(t.muted).child("Status ändern · j/k Enter · Esc"))
-        .children(
-          m.targets.map((c, i) =>
-            h_flex()
-              .id(`status-${i}`)
-              .px(8)
-              .py(6)
-              .gap(8)
-              .items_center()
-              .rounded(6)
-              .cursor_pointer()
-              .when(i === m.at, (el) => el.bg(t.selected))
-              .hover((s) => s.bg(t.hover))
-              .on_click((_e, cx) => {
-                b.closeModal(cx);
-                b.moveTo(m.view, m.key, c.id, cx);
-              })
-              .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
-              .child(div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted))
-              .child(div().flex_1().child(c.name))
-              .when(Boolean(c.hidden), (el) => el.child(div().text_size(11).text_color(t.dim).child("ausgeblendet"))),
-          ),
-        ),
-    );
+    return menu(t, {
+      id: "status",
+      rowId: "status",
+      width: 280,
+      title: "Status ändern · j/k Enter · Esc",
+      at: m.at,
+      pick: (i, cx) => pickTarget(b, m, i, cx),
+      rows: m.targets.map((c) => [
+        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().flex_1().child(c.name),
+        ...(c.hidden ? [div().text_size(11).text_color(t.dim).child("ausgeblendet")] : []),
+      ]),
+    });
   },
 
-  // Every key but Esc (the Board's): j/k or the arrows move, Enter or a
-  // digit picks; all are taken.
-  key(b, e, cx) {
-    const m = b.modal;
-    const k = e.key;
-    const ch = e.key_char ?? "";
-    cx.stop_propagation();
-    let commit = k === "enter";
-    if (k === "j" || k === "down") m.at = Math.min(m.at + 1, m.targets.length - 1);
-    else if (k === "k" || k === "up") m.at = Math.max(m.at - 1, 0);
-    else if (/^[1-9]$/.test(ch)) {
-      // A digit beyond the rows does nothing.
-      if (!m.targets[Number(ch) - 1]) return cx.notify();
-      m.at = Number(ch) - 1;
-      commit = true;
-    }
-    if (!commit) return cx.notify();
-    b.closeModal(cx);
-    b.moveTo(m.view, m.key, m.targets[m.at].id, cx);
-  },
+  key: (b, e, cx) => menuKey(e, cx, b.modal, b.modal.targets.length, (i, cx) => pickTarget(b, b.modal, i, cx)),
 };
 
 // ==== src/ui/modals/index.js ====
@@ -2599,12 +2604,12 @@ export default class Board extends View {
   // moves (laid over refreshes, see pendingMoves), pending (card keys being
   // written), unclear ({ key, label, to, at } of writes whose outcome is
   // still open; see settleUnclear), stored/hidden (the person's toggles and
-  // the hidden set), sel ({ col, key }, null before the first data) and
-  // detail.
+  // the hidden set), sel ({ col, key }, null before the first data), picked
+  // (the key of the item the person chose, see clickItem) and detail.
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
-      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, detail: false,
+      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, detail: false,
     };
     return this.views[id];
   }
@@ -2788,12 +2793,17 @@ export default class Board extends View {
 
   keepSelection(view) {
     const st = this.state(view.id);
-    st.sel = selectionAfter(this.navColumns(view), st.sel);
+    reselect(st, selectionAfter(this.navColumns(view), st.sel));
   }
 
-  select(view, sel) {
+  // Selects an item and scrolls to it; `chosen`: the person chose it (a key
+  // move or a click), else the board set it (reselect).
+  select(view, sel, chosen = false) {
     const st = this.state(view.id);
-    st.sel = sel;
+    if (chosen) {
+      st.sel = sel;
+      st.picked = sel.key;
+    } else reselect(st, sel);
     const cols = this.navColumns(view);
     const row = cols[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
     if (row < 0) return;
@@ -2872,6 +2882,17 @@ export default class Board extends View {
   open(item, cx) {
     if (item?.url) cx.open_url(item.url);
     else this.say("Dazu gibt es keine Seite", "warning", cx);
+  }
+
+  // A click on an item: one the person chose (an earlier click, or moved to
+  // with keys; not a selection the board set) opens its details, as the
+  // first Enter does; any other is selected, and chosen.
+  clickItem(view, sel, cx) {
+    const st = this.state(view.id);
+    if (st.picked === sel.key) st.detail = true;
+    else this.select(view, sel, true);
+    this.handle.focus();
+    cx.notify();
   }
 
   // Enter: details first, then the item's session (go to it, or start one).
@@ -3053,7 +3074,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir));
+      if (shape.dirs.includes(dir)) this.select(view, navigate(this.navColumns(view), st.sel, dir), true);
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
