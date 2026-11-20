@@ -4285,7 +4285,7 @@ test("UI: s on a story offers its type's states; a refusal sets the state back, 
   assert.deepEqual(["places", "query", "state"].map((k) => openAz(host, k).length), [1, 1, 0]);
 });
 
-test("UI: Enter shows a work item's parent, state, assignee, column, area and iteration; o opens its page", async () => {
+test("UI: Enter shows a work item's parent, state, assignee, column, area and iteration; o opens its page; Enter again names what is missing to start", async () => {
   const { b, cx } = await openSprint();
   await click(b, cx, "card-AB#311");
   await click(b, cx, "card-AB#311");
@@ -4296,6 +4296,9 @@ test("UI: Enter shows a work item's parent, state, assignee, column, area and it
   assert.ok(byId(b.render(), "act-status"));
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://dev.azure.com/example-org/Example%20Project/_workitems/edit/311"]);
+  await press(b, cx, "enter");
+  assert.equal(b.modal, null);
+  assert.equal(b.notice.text, "Für AB#311 steht kein „checkout“ in views.json: „start.checkout“");
 });
 
 test("UI: „nur meine“ keeps the stories and tasks assigned to the account az is signed in as; a story shows dimmed for its own tasks; without that account it says why", async () => {

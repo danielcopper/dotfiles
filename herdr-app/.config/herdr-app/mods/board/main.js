@@ -2887,10 +2887,13 @@ const SESSION_CHECKS = [1000, 2000, 3000];
 const FIELDS = ["message", "agent", "machine", "open"];
 
 export const startModal = {
-  // Opens the dialog for an item, or says where its checkout is missing.
+  // Opens the dialog for an item, or says where its checkout is missing. An
+  // item without a repo (an Azure work item) takes only views.json's own
+  // start: an Azure view has no start of its own.
   open(b, view, item, cx) {
     const settings = startSettings(b.config, view, item.repo);
     if (!settings.checkout) {
+      if (!item.repo) return b.say(`Für ${itemLabel(item)} steht kein „checkout“ in ${CONFIG_NAME}.json: „start.checkout“`, "error", cx);
       const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
       return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
     }
