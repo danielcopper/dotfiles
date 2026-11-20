@@ -44,10 +44,13 @@ export function navigate(columns, sel, dir) {
   return { col: ci, key: list.length ? list[Math.min(row, list.length - 1)].key : null };
 }
 
+// The index of the column whose shown cards hold `key`; -1 for none.
+export const columnOf = (columns, key) => columns.findIndex((c) => c.shown.some((card) => card.key === key));
+
 // The selection after new data or a filter: its card's column again, else the
 // first card; a selected empty column stays selected.
 export function selectionAfter(columns, sel) {
-  const at = columns.findIndex((c) => c.shown.some((card) => card.key === sel?.key));
+  const at = columnOf(columns, sel?.key);
   if (at >= 0) return { col: at, key: sel.key };
   if (!sel?.key && columns[sel?.col]) return sel;
   const first = columns.findIndex((c) => c.shown.length);

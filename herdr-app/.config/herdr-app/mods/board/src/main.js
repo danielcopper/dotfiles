@@ -56,7 +56,7 @@ import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
-import { matches, shows, navigate, selectionAfter } from "./select.js";
+import { matches, shows, navigate, columnOf, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
@@ -482,6 +482,13 @@ export default class Board extends View {
     else this.choose(view, sel);
     this.handle.focus();
     cx.notify();
+  }
+
+  // A card dropped onto another column by a drag: chosen (clickItem), in the
+  // column it is in now (its own, where the move was refused).
+  chooseDropped(view, key) {
+    const col = columnOf(this.navColumns(view), key);
+    if (col >= 0) this.choose(view, { col, key });
   }
 
   // Enter: details first, then the item's session (go to it, or start one).

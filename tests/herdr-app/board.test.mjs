@@ -898,7 +898,6 @@ test("after the columns change the selection keeps its column by id, else the co
     "its card in another row: the card, not the row");
 });
 
-
 test("after new data the selection follows its card, else falls to the first card", () => {
   const cols = board.shownColumns(githubBoard(), "");
   assert.deepEqual(board.selectionAfter(cols, { col: 2, key: "PVTI_rec4" }), { col: 0, key: "PVTI_rec4" });
@@ -1610,11 +1609,12 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
       return input;
     },
     // herdr refuses a ScrollHandle made while a view draws. Each handle's
-    // scroll_to_item(row) is recorded in `scrolled`.
+    // scroll_to_item(row) is recorded in `scrolled` as { handle, row }.
     scrolled: [],
     "ScrollHandle.new": () => {
       if (host.drawing) throw new Error("ScrollHandle.new() cannot run during render; create state in init() or in an event handler and keep it on the view");
-      return { scroll_to_item: (row) => host.scrolled.push(row) };
+      const handle = { scroll_to_item: (row) => host.scrolled.push({ handle, row }) };
+      return handle;
     },
     div: () => element("div"),
     h_flex: () => element("h_flex"),
@@ -3349,7 +3349,7 @@ test("UI: a click on a card selects it; a click on the card the person chose ope
   assert.equal(host.open("gh").length, 1, "only H wrote");
 });
 
-test("UI: a selection the board sets on another card closes open details: after a filter, a refresh, a hide; on the same card they stay", async () => {
+test("UI: a selection the board sets on another card closes open details: after a filter or a refresh; on the same card they stay", async () => {
   const { b, cx, st, host } = await openBoard();
   await press(b, cx, "enter");
   b.filterText = "BUG input";
@@ -3367,15 +3367,19 @@ test("UI: a selection the board sets on another card closes open details: after 
 
 test("UI: a chosen item and one the board selects in its place are scrolled into view; a selection that stays put is not", async () => {
   const { b, cx, host } = await openBoard();
+  const list = (col) => b.shapeState.board.scrolls[col];
   host.scrolled.splice(0);
+  await press(b, cx, "l");
+  assert.deepEqual(host.scrolled.splice(0), [{ handle: list(1), row: 0 }], "l: 3000, In progress's first row, in its own list");
+  await press(b, cx, "h");
   await press(b, cx, "j");
-  assert.deepEqual(host.scrolled.splice(0), [1], "j: 3005, the second row");
+  assert.deepEqual(host.scrolled.splice(0), [{ handle: list(0), row: 0 }, { handle: list(0), row: 1 }], "h, j: 3004, then 3005, Ready's second row");
   await press(b, cx, "r");
   await host.answer("gh", ok(fixture("github-board.json")));
   assert.deepEqual(host.scrolled.splice(0), [], "a refresh keeping the card");
   b.filterText = "BUG input";
   await press(b, cx, "z");
-  assert.deepEqual(host.scrolled.splice(0), [0], "the filter: 3007, now the first row");
+  assert.deepEqual(host.scrolled.splice(0), [{ handle: list(0), row: 0 }], "the filter: 3007, now Ready's first row");
 });
 
 test("UI: hiding the column of a card whose details are open closes them", async () => {

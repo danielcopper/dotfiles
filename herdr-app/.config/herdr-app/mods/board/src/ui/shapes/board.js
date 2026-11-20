@@ -135,11 +135,7 @@ function drawBoard(b, t, mono, view, st) {
         const { key, from } = b.drag;
         b.endDrag(cx);
         b.moveTo(view, key, col.id, cx);
-        // Dropped onto another column, the card is chosen (clickItem), in
-        // the column it is in now.
-        if (from === col.id) return;
-        const at = b.navColumns(view).findIndex((c) => c.shown.some((x) => x.key === key));
-        if (at >= 0) b.choose(view, { col: at, key });
+        if (from !== col.id) b.chooseDropped(view, key);
       })
       .child(head)
       .child(
@@ -278,7 +274,7 @@ function moveCardTo(b, view, key, columnId, cx) {
   st.pending[key] = true;
   // A card moved to a hidden column leaves the board; the notice says so. The
   // selection, where it was on that card, stays in its column.
-  if (to.hidden && st.sel?.key === key) b.reselect(view, selectionInColumns(before, b.navColumns(view), st.sel));
+  if (to.hidden && st.sel?.key === key) reselectIn(b, view, before);
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
   b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
   cx.spawn(async (cx) => {
@@ -320,8 +316,8 @@ function moveCardTo(b, view, key, columnId, cx) {
   });
 }
 
-// Hides a shown column or shows a hidden one; the board sets the selection
-// that follows (selectionInColumns).
+// Hides a shown column or shows a hidden one; the selection follows
+// (reselectIn).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
@@ -331,11 +327,16 @@ function toggleBoardColumn(b, view, col, cx) {
   st.hidden = hiddenColumns(view, st.stored);
   store.set(`hidden:${view.id}`, st.stored);
   st.data = withHidden(st.data, st.hidden);
-  b.reselect(view, selectionInColumns(before, b.navColumns(view), st.sel));
+  reselectIn(b, view, before);
   // What a column holds comes from the query, which leaves hidden ones out.
   b.refresh(view, cx);
 }
 
+// After the shown columns changed from `before`: the selection the board
+// sets (selectionInColumns, reselect).
+function reselectIn(b, view, before) {
+  b.reselect(view, selectionInColumns(before, b.navColumns(view), b.state(view.id).sel));
+}
 
 function openBoardStatusMenu(b, view) {
   const st = b.state(view.id);
