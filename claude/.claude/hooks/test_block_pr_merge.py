@@ -75,6 +75,14 @@ PASSES = [
     "gh api graphql -f query='query { viewer { login } }'",
     "gh api https://api.github.com/graphql -f query='query { viewer { login } }'",
     "gh api repos/{owner}/{repo}/pulls/12/comments --jq '.[].body'",
+    "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=1",
+    # read-only curl, and other pipeline stages that are not its words
+    "curl -sI https://github.com/cli/cli | grep -i '^location'",
+    "git show HEAD:x.py | grep -i -E 'gh|curl'",
+    'curl -s "https://sonarcloud.io/api/issues/search?componentKeys=x_y&pullRequest=12&resolved=false"',
+    "curl -s 'https://sonarcloud.io/api/issues/search?componentKeys=x_y&pullRequest=12&resolved=false'",
+    "curl -s 'https://api.github.com/repos/o/r/pulls?state=open&per_page=100'",
+    "curl -s -X GET https://api.github.com/repos/o/r/pulls/12",
     "az repos pr update --id 4 --title 'fix: x'",
     "az repos pr update --id 4 --status active",
     "curl -s https://api.github.com/repos/o/r/pulls/12",
@@ -235,7 +243,6 @@ DENIED = [
     'curl -sH "Authorization: Bearer $TOKEN" https://api.github.com/repos/o/r/pulls/12',
     "gh api repos/o/r/pulls/12/merged_by",
     "gh api -X GET repos/o/r/pulls/12/merge",
-    "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=1",
     # opening or editing a PR with anything beyond flags and plain quoted values
     'gh pr create --title "$(cat title.txt)" --body-file b.md',
     "gh pr create --body-file b; gh pr merge 1",
@@ -273,13 +280,22 @@ DENIED = [
     "gh 'a'pi -X PUT repos/o/r/pulls/1/merge",
     "gh a\\pi graphql --input q.json",
     "az 're'st --method patch --body @b.json",
+    # curl or wget sending a writing request, in any stage of a pipeline
+    "curl -X PUT 'https://api.github.com/repos/o/r/pulls/1/merge'",
+    "curl -s -d @b.json https://api.github.com/graphql",
+    "cat q | curl -d @- https://api.github.com/graphql",
+    "curl -s -X POST https://api.github.com/graphql",
+    "curl --json @q.json https://api.github.com/graphql",
+    "wget --method=PATCH https://api.github.com/repos/o/r/pulls/1",
+    "echo hi | bash -c 'curl -sd @q.json https://api.github.com/graphql'",
 ]
 
 REASONS = {
     "gh pr merge 3": "mentions a PR merge",
     "gh alias set m x": "defines a gh alias",
     "az repos pr update --id 4 --status completed": "completes an Azure DevOps pull request",
-    "curl -d @m.json https://example.com/x": "reads a request from a file",
+    "curl -d @m.json https://example.com/x": "sends a writing request with curl or wget",
+    "gh api graphql --input q.json": "reads a request from a file",
     "curl https://example.com/merge-queue": (
         "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"
     ),

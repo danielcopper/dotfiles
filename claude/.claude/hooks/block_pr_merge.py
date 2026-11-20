@@ -9,6 +9,7 @@ once, in `merge_policy` (~/.claude/skills/implement/repo-config.md).
 import json
 import re
 import sys
+from dataclasses import dataclass
 
 MAX_LENGTH = 100_000
 MAX_EVALS = 5
@@ -24,6 +25,9 @@ EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
 BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
 TOKEN_SPLIT = re.compile(r"[\s;&|()<>`]+")
 MAX_OPTION_WALK = 50
+MAX_QUOTE_DEPTH = 3
+SHELL_OPS = set("|;&<>()`")
+CURL_WRITE_LONG = ("--data", "--json", "--form", "--upload-file", "--config", "--post-", "--body-")
 # gh's top-level commands other than api, as `gh help` lists them (gh 2.x, 2026-11), plus help
 # and version. A word in the subcommand position outside this list fails closed.
 GH_SUBCOMMANDS = frozenset(
@@ -128,14 +132,203 @@ def stripped(command: str) -> str:
     return text.replace("'", "").replace('"', "").replace("\\", "")
 
 
+def quote_parts(command: str) -> tuple[str, str]:
+    """The text of *command* outside quotes, and the text inside double quotes. Single-quoted
+    text is in neither. Open quoting puts the whole command outside, which fails closed."""
+    outside: list[str] = []
+    double: list[str] = []
+    quote = ""
+    for c in command:
+        if quote:
+            if c == quote:
+                quote = ""
+                outside.append(" ")
+            elif quote == '"':
+                double.append(c)
+        elif c in "'\"":
+            quote = c
+        else:
+            outside.append(c)
+    if quote:
+        return command, ""
+    return "".join(outside), "".join(double)
+
+
 def runs_at_run_time(command: str) -> bool:
-    """Whether *command* holds a construct the shell expands when it runs."""
+    """Whether *command* holds a construct the shell expands when it runs: `$` or a backtick
+    outside single quotes, a brace expansion or a glob next to a letter outside any quotes."""
+    outside, double = quote_parts(command)
     return (
-        "$" in command
-        or "`" in command
-        or bool(BRACE_EXPANSION.search(command))
-        or bool(GLOB_NEXT_TO_LETTER.search(command))
+        "$" in outside
+        or "`" in outside
+        or "$" in double
+        or "`" in double
+        or bool(BRACE_EXPANSION.search(outside))
+        or bool(GLOB_NEXT_TO_LETTER.search(outside))
     )
+
+
+@dataclass(frozen=True)
+class Token:
+    """A word of a command with its quotes removed, or an operator (`op`)."""
+
+    text: str
+    op: bool = False
+    quoted: bool = False
+
+
+def shell_tokens(text: str) -> tuple[list[Token], list[str]]:
+    """Words and operators of *text* by the shell's quoting rules, and the content of every
+    quoted string in it. ValueError on open quoting."""
+    tokens: list[Token] = []
+    quoted_parts: list[str] = []
+    chars: list[str] = []
+    in_word = False
+    quoted = False
+    i = 0
+
+    def flush() -> None:
+        nonlocal in_word, quoted
+        if in_word:
+            tokens.append(Token("".join(chars), quoted=quoted))
+        chars.clear()
+        in_word = quoted = False
+
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            if text[i + 1 : i + 2] != "\n":
+                chars.append(text[i + 1 : i + 2])
+                in_word = True
+            i += 2
+        elif c in "'\"":
+            end = text.find(c, i + 1)
+            if end < 0:
+                raise ValueError("open quote")
+            quoted_parts.append(text[i + 1 : end])
+            chars.append(text[i + 1 : end])
+            in_word = quoted = True
+            i = end + 1
+        elif c in " \t\r":
+            flush()
+            i += 1
+        elif c == "\n":
+            flush()
+            tokens.append(Token("\n", op=True))
+            i += 1
+        elif c in SHELL_OPS:
+            flush()
+            start = i
+            while i < len(text) and text[i] in SHELL_OPS:
+                i += 1
+            tokens.append(Token(text[start:i], op=True))
+        else:
+            chars.append(c)
+            in_word = True
+            i += 1
+    flush()
+    return tokens, quoted_parts
+
+
+def simple_commands(tokens: list[Token]) -> list[list[Token]]:
+    """*tokens* cut at the operators that end a simple command: `|`, `;`, `&`, `&&`, `||`,
+    newline, parentheses and backticks. Redirections (`<`, `>` and their forms) stay inside."""
+    found: list[list[Token]] = [[]]
+    for token in tokens:
+        if token.op and not set(token.text) & set("<>"):
+            found.append([])
+        else:
+            found[-1].append(token)
+    return [command for command in found if command]
+
+
+def writes_with_curl(words: list[str]) -> bool:
+    """Whether curl or wget words send a request that writes: a method other than GET or HEAD,
+    a body (`-d`, `--data*`, `--json`, `-F`, `--form*`, `--post-*`, `--body-*`), an upload
+    (`-T`, `--upload-file`) or a config file (`-K`, `--config`)."""
+    for i, word in enumerate(words):
+        following = words[i + 1] if i + 1 < len(words) else ""
+        if word.startswith("--"):
+            name, _, value = word.partition("=")
+            if name in ("--request", "--method"):
+                if (value or following).upper() not in ("GET", "HEAD"):
+                    return True
+            elif name.startswith(CURL_WRITE_LONG):
+                return True
+        elif word.startswith("-"):
+            # the option letters, before any attached value such as `@file`
+            letters = re.split(r"[^A-Za-z0-9#:]", word[1:], maxsplit=1)[0]
+            if "X" in letters:
+                value = word[1:].split("X", 1)[1] or following
+                if value.upper() not in ("GET", "HEAD"):
+                    return True
+            elif set(letters) & set("dFTK"):
+                return True
+    return False
+
+
+def gh_az_body_tokens(words: list[Token]) -> bool:
+    """Whether a simple command runs gh or az with a subcommand whose request body can merge,
+    read from its quote-aware words: gh `api`, az `rest`, `devops invoke` or `repos pr` past the
+    options - or an unknown word there, a quoted word or a redirection before it, or options too
+    long to walk, all of which fail closed."""
+    for at, token in enumerate(words):
+        tool = token.text.lower().rsplit("/", 1)[-1]
+        if token.op or tool not in ("gh", "az"):
+            continue
+        known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
+        after_option = False
+        for step, current in enumerate(words[at + 1 :]):
+            if step >= MAX_OPTION_WALK:
+                return True
+            word = current.text.lower()
+            if current.op or current.quoted:  # a redirection or a quoted word before it
+                return True
+            if word.startswith("-"):
+                after_option = True
+                continue
+            index = at + 1 + step
+            following = words[index + 1].text.lower() if index + 1 < len(words) else ""
+            if tool == "gh" and word == "api":
+                return True
+            if tool == "az" and (
+                word == "rest" or (word, following) in (("devops", "invoke"), ("repos", "pr"))
+            ):
+                return True
+            if after_option:
+                after_option = False
+                continue
+            if word not in known:
+                return True
+            break
+    return False
+
+
+def reads_or_writes_body(command: str, depth: int = 0) -> str | None:
+    """The reason when a simple command of *command*, or of a quoted string in it, sends a
+    request body that can merge: gh api, az rest, devops invoke or repos pr reading from a file,
+    or curl or wget writing. Only the words of that simple command count. None otherwise; open
+    quoting returns None for the caller's whole-text check."""
+    if depth > MAX_QUOTE_DEPTH:
+        return "is nested too deep to check"
+    tokens, quoted_parts = shell_tokens(command)
+    for words in simple_commands(tokens):
+        texts = [token.text for token in words if not token.op]
+        names = [text.lower().rsplit("/", 1)[-1] for text in texts]
+        if (set(names) & {"curl", "wget"}) and writes_with_curl(texts):
+            return "sends a writing request with curl or wget"
+        if gh_az_body_tokens(words):
+            joined = " ".join(texts)
+            if FILE_FLAGS.search(joined.lower()) or FILE_SHORT_FLAGS.search(joined):
+                return "reads a request from a file"
+    for part in quoted_parts:
+        try:
+            found = reads_or_writes_body(part, depth + 1)
+        except ValueError:
+            continue
+        if found:
+            return found
+    return None
 
 
 def read_only(command: str) -> bool:
@@ -253,8 +446,16 @@ def check(command: str) -> str | None:
         AZ_COMPLETE.search(lower) or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower)
     ):
         return "completes an Azure DevOps pull request"
-    if body_tool and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
-        return "reads a request from a file"
+    try:
+        body = reads_or_writes_body(command)
+    except ValueError:  # open quoting: judge the whole text
+        body = (
+            "reads a request from a file"
+            if body_tool and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain))
+            else None
+        )
+    if body:
+        return body
     if body_tool and "merge" in lower:
         return (
             "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"

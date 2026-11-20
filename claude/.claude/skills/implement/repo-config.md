@@ -40,14 +40,18 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       mutation, or with `gh` the word `pr` followed later by the word `merge`);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
-    - names a tool whose request body can merge — `curl`, `wget`, or `gh api`, `az rest`, `az devops invoke` or
-      `az repos pr` with the subcommand right after the tool's options (also as a path's last part) — and reads a request from a file (an `@`, an
-      `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i` option)
-      or mentions `merge`;
+    - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
+      string also read as a command — that runs `gh api`, `az rest`, `az devops invoke` or `az repos pr` (the
+      subcommand right after the tool's options, with no quoted word or redirection before it) and reads a request
+      from a file (an `@`, an `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`,
+      `-T`, `-K` or `-i` option), or that runs `curl` or `wget` with a writing request (a method other than GET or
+      HEAD, `-d`, `--data…`, `--json`, `-F`, `--form`, `-T`, `--upload-file`, `-K`, `--config`, `--post-…`,
+      `--body-…`); only that command's words count, not other stages of a pipeline;
+    - mentions `merge` anywhere next to `curl`, `wget`, `gh api`, `az rest`, `az devops invoke` or `az repos pr`;
     - runs `gh`, `az`, `curl` or `wget` through `xargs` or `parallel`;
-    - holds a construct the shell expands at run time (a `$`, a backtick, a `{a,b}` or `{a..b}` brace, a `*`, `?` or
-      `[` next to a letter) next to a mention of `merge`, `complet` or `alias`, or next to `gh`, `az`, `curl` or
-      `wget`;
+    - holds a construct the shell expands at run time (a `$` or a backtick outside single quotes, a `{a,b}` or
+      `{a..b}` brace or a `*`, `?` or `[` next to a letter outside any quotes) next to a mention of `merge`,
+      `complet` or `alias`, or next to `gh`, `az`, `curl` or `wget`;
     - is nested too deep, too long or holds too many substitutions to check.
 
     Other gh subcommands (issues, comments, reviews, releases, labels …) may read their body from a file. False
