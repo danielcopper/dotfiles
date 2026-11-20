@@ -8,11 +8,11 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { knownAgents, machines, notify, run, spaces } from "herdr";
-import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine } from "../../shared.js";
+import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine, report } from "../../shared.js";
 import { startSettings } from "../../config.js";
 import { call } from "../../tools.js";
 import { checkoutArgs, renderTemplate, sessionName, spaceForTab, startCommand, templateVars } from "../../actions/start.js";
-import { backdrop, button, machineName, onMachine, report } from "../helpers.js";
+import { backdrop, button, machineName, onMachine } from "../helpers.js";
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in

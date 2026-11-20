@@ -35,6 +35,12 @@ export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
 
+// An error's message for the UI; an unexpected one is logged with its stack.
+export function report(e) {
+  if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
+  return errorText(e);
+}
+
 // An item's key: `<repo>#<number>` on GitHub; on Azure `AB#<id>` for a work
 // item (Azure Boards' own way to name one) and `!<id>` for a pull request
 // (Azure Repos' own); null for a draft.

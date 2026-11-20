@@ -272,17 +272,8 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
     viewer,
     total: items.length,
     limited: items.length >= AZ_QUERY_LIMIT,
+    limit: AZ_QUERY_LIMIT,
   };
-}
-
-// The warnings of a sprint: tasks left out, and a query az may have cut.
-export function sprintWarnings(data) {
-  const { unplaced, unknownColumns } = data.meta;
-  return [
-    ...(unplaced ? [`${unplaced} ${unplaced === 1 ? "Task" : "Tasks"} ohne Platz auf dem Taskboard`] : []),
-    ...(unknownColumns ? [`${unknownColumns} ${unknownColumns === 1 ? "Task steht" : "Tasks stehen"} in einer Spalte, die das Board nicht kennt; die Spalten werden beim nächsten Neuladen neu gelesen`] : []),
-    ...(data.limited ? [`Nur die ersten ${AZ_QUERY_LIMIT} Work Items des Sprints (so viele gibt az boards query)`] : []),
-  ];
 }
 
 // Until when a team's sprint stays cached (ms): the end of its last day
@@ -296,9 +287,10 @@ export function sprintUntil(finish, now) {
 
 // az devops invoke takes a request's body only from a file (--in-file):
 // one per work item, written before each move and kept for the next.
-// herdr's writeTextFile makes the folders it needs (src/mod_files.rs,
-// write: create_dir_all of the parent), and its readTextFile gives null for
-// a file that is not there (read: NotFound is None).
+// herdr's writeTextFile makes the folders it needs (herdr-app 0.1.16,
+// src/mod_files.rs, write: create_dir_all of the parent), and its
+// readTextFile gives null for a file that is not there (read: NotFound is
+// None).
 export const moveBodyPath = (id) => `${home()}/.cache/herdr-app/board/taskboard-move-${id}.json`;
 
 // The body that moves a task to a taskboard column. The REST reference
@@ -321,6 +313,16 @@ async function writeMoveBody(id, column) {
   return path;
 }
 
+// az's answer to a write as JSON, or null for any other: the checks below
+// take that for an answer that confirms nothing.
+function writeAnswer(stdout) {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
 export const azMoveArgs = (c, iterationId, id, file) =>
   azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId, workItemId: id }, ["--http-method", "PATCH", "--in-file", file]);
 
@@ -329,12 +331,7 @@ export const azMoveArgs = (c, iterationId, id, file) =>
 // (workItemId, column, columnId), confirms the move. Anything else leaves
 // open whether it landed: the refresh that follows says where it stands.
 export function checkTaskboardMove(stdout, card, column) {
-  let json = null;
-  try {
-    json = JSON.parse(stdout);
-  } catch {
-    // Not JSON: unclear, below.
-  }
+  const json = writeAnswer(stdout);
   const entry = azList(json)?.find((w) => w?.workItemId === card.number) ?? json;
   if (entry?.workItemId !== card.number || (entry.columnId !== column.id && entry.column !== column.name)) {
     throw failure("Azure hat die Verschiebung nicht bestätigt", { write: true, unclear: true });
@@ -346,12 +343,7 @@ export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", .
 // az's answer to a state change must name the state it set; anything else
 // leaves open whether the change landed.
 export function checkStateResult(stdout, state) {
-  let json = null;
-  try {
-    json = JSON.parse(stdout);
-  } catch {
-    // Not JSON: unclear, below.
-  }
+  const json = writeAnswer(stdout);
   if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
 }
 
@@ -363,13 +355,15 @@ export function checkStateResult(stdout, state) {
 // (sprintUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint, and its areas and taskboard
 // columns; per project the work item types, until the sprint of the team
-// that read them ends. What is not kept is read at the same time. A refresh then reads
-// the taskboard's columns of the work items and the sprint's work items,
-// also at the same time: two az runs. A task in a column the columns read
-// do not know drops the team's kept settings, so the next refresh reads
-// them again. Who az is signed in as is read beside all that, with its own
-// short timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
-// asked again with each refresh, and the data says why (noViewer).
+// that read them ends. What is not kept is read at the same time. A
+// refresh then reads the taskboard's columns of the work items and the
+// sprint's work items, also at the same time. The team's kept settings
+// (not the project's types) are dropped, so that they are read again, by
+// `r` (forget), by a task in a column the columns read do not know, and by
+// a move or state change Azure refuses. Who az is signed in as is read
+// beside all that, with its own short timeout (AZ_ME_TIMEOUT), and kept
+// once read; while that fails it is asked again with each refresh, and the
+// data says why (noViewer: the source's words and the error).
 export function makeAzure(paths) {
   const az = async (args, options = {}, timeout = AZ_TIMEOUT) => {
     const r = await call("az", args, null, timeout, { ...options, paths });
@@ -415,9 +409,17 @@ export function makeAzure(paths) {
         viewerError = errorText(e);
         return null;
       });
+  const noViewer = "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)";
+  // A write Azure refused may have met settings that are out of date.
+  const forgetOnRefusal = (c) => (e) => {
+    if (!(e instanceof BoardError && e.unclear)) forget(c);
+    throw e;
+  };
   return {
     site: "Azure",
-    noViewer: "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)",
+    noViewer,
+    // Drops what is kept of the view's team (r, Board.reload).
+    forget: (view) => view.context?.kind === "team" && forget(view.context),
     views: {
       sprint: {
         async load(view) {
@@ -426,16 +428,17 @@ export function makeAzure(paths) {
           const s = await settingsOf(c);
           const [places, items] = await Promise.all([az(azTaskboardArgs(c, s.iteration.id)), az(azQueryArgs(c, sprintWiql(s.iteration, s.areas)))]);
           const data = sprintBoard({ ...s, items: parseWorkItems(items, c), places: parseTaskboard(places), viewer: await me });
-          if (!data.viewer) data.noViewer = `az account show sagte nicht, wer angemeldet ist: ${viewerError}`;
+          if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
           if (data.meta.unknownColumns) forget(c);
-          return { data, warnings: sprintWarnings(data) };
+          return { data, warnings: [] };
         },
         async move(view, data, card, column) {
           const file = await writeMoveBody(card.number, column);
-          checkTaskboardMove(await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }), card, column);
+          const out = await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }).catch(forgetOnRefusal(view.context));
+          checkTaskboardMove(out, card, column);
         },
         async setState(view, item, state) {
-          checkStateResult(await az(azStateArgs(view.context, item.number, state), { write: true }), state);
+          checkStateResult(await az(azStateArgs(view.context, item.number, state), { write: true }).catch(forgetOnRefusal(view.context)), state);
         },
       },
     },

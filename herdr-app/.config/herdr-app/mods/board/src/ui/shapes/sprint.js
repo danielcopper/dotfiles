@@ -19,11 +19,11 @@ import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { itemLabel } from "../../shared.js";
 import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
-import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, withItemState } from "../../kinds/sprint.js";
+import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, sprintWarnings, withItemState } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
-import { moveCardTo, tellOutcomes, unclearMoveLines } from "../../actions/move.js";
-import { writeAtOnce } from "../../actions/write.js";
-import { button, columnHead, detailSection, sessionChip, shownOf, statusPill } from "../helpers.js";
+import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
+import { tellOutcomes, writeAtOnce } from "../../actions/write.js";
+import { button, chip, columnHead, detailSection, sessionChip, shownOf, statusPill } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -74,10 +74,12 @@ export const sprintShape = {
     return false;
   },
   received: (data, st) => applyMoves(data, st.moves),
-  warnings: () => [],
-  // The settled outcomes: a move's (it has a target column) where its card
-  // stands, a state change's which state its item has.
-  settle: (b, due, data, cx) => tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.to), data), ...unclearStateLines(due.filter((u) => u.state !== undefined), data)], cx),
+  // Tasks left out, and a query az may have cut (sprintWarnings).
+  warnings: (view, data) => sprintWarnings(data),
+  // The settled outcomes: a move's where its card stands, a state change's
+  // which state its item has.
+  settle: (b, due, data, cx) =>
+    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data)], cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, cx),
   pickStatus: (b, view, key, target, cx) => setItemState(b, view, key, target.name, cx),
@@ -189,8 +191,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
     .child(stateChip(t, st.data, story.state));
 }
 
-const stateChip = (t, data, state) =>
-  div().flex_none().px(7).rounded(9).text_size(11).text_color(t.background).bg(t[stateColor(data, state)] ?? t.muted).child(state ?? "ohne Status");
+const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, t[stateColor(data, state)] ?? t.muted).flex_none();
 
 // A task's card: its key, title, own state, assignee and session; a click
 // selects it (clickItem).
@@ -251,7 +252,7 @@ function setItemState(b, view, key, state, cx) {
     undo() {
       if (findSprintItem(st.data, key)?.state === state) st.data = withItemState(st.data, key, before);
     },
-    open: { state },
+    open: { kind: "state", state },
     again: true,
     texts: {
       pending: () => `${label} → ${state} …`,

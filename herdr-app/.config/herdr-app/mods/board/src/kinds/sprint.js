@@ -56,6 +56,17 @@ export function shownRows(data, nav) {
   return data.rows.filter((r) => used.has(r.key));
 }
 
+// The warnings of a sprint: tasks left out (sprintBoard counts them), and
+// a query az may have cut at data.limit.
+export function sprintWarnings(data) {
+  const { unplaced, unknownColumns } = data.meta;
+  return [
+    ...(unplaced ? [`${unplaced} ${unplaced === 1 ? "Task" : "Tasks"} ohne Platz auf dem Taskboard`] : []),
+    ...(unknownColumns ? [`${unknownColumns} ${unknownColumns === 1 ? "Task steht" : "Tasks stehen"} in einer Spalte, die das Board nicht kennt; die Spalten werden beim nächsten Neuladen neu gelesen`] : []),
+    ...(data.limited ? [`Nur die ersten ${data.limit} Work Items des Sprints (so viele gibt az boards query)`] : []),
+  ];
+}
+
 // Keyboard movement over sprintNav's columns: j/k as everywhere (navigate);
 // h/l to the next column, onto the item of the same row there, else the
 // first one below it, else the last; an empty column is selected as such.

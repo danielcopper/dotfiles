@@ -5,8 +5,8 @@
 import { exec } from "herdr";
 import { BoardError, failure, firstLine, lastLine } from "./shared.js";
 
-// How long gh may take, and az: each az run starts Python and asks Azure a
-// few times.
+// How long gh may take, and az: an az run starts Python, and most ask Azure
+// a few times.
 export const GH_TIMEOUT = 30000;
 export const AZ_TIMEOUT = 60000;
 

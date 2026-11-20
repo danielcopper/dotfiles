@@ -4,7 +4,6 @@
 // unclear moves ended up. The board and the sprint shape move their cards
 // so.
 
-import { notify } from "herdr";
 import { itemLabel } from "../shared.js";
 import { canDrop, findCard, moveCard, rollback } from "../kinds/board.js";
 import { selectionInColumns } from "../select.js";
@@ -38,7 +37,7 @@ export function moveCardTo(b, view, key, columnId, cx) {
     landed: () => (move.confirmedAt = Date.now()),
     failed: () => (st.moves = st.moves.filter((m) => m !== move)),
     undo: () => (st.data = rollback(st.data, move)),
-    open: { to: { id: to.id, name: to.name } },
+    open: { kind: "move", to: { id: to.id, name: to.name } },
     texts: {
       pending: () => `${label} → ${to.name}${hiddenNote()} …`,
       landed: () => `${label} steht jetzt in „${to.name}“${hiddenNote()}`,
@@ -56,8 +55,8 @@ export function reselectIn(b, view, before) {
   b.reselect(view, selectionInColumns(before, b.navColumns(view), b.state(view.id).sel));
 }
 
-// Where the cards of settled unclear moves (`due`, those with a target
-// `to`) are in the new data, one line each: the target column, the write
+// Where the cards of settled unclear moves (`due`, of kind "move") are in
+// the new data, one line each: the target column, the write
 // landed (info); another column, a warning; not there while the target is
 // hidden, not shown (info); not there while other columns are hidden, not
 // shown, it may be in any of them (warning); else not on the board
@@ -74,14 +73,4 @@ export function unclearMoveLines(due, data) {
     if (hidden.length) return { text: `${u.label} steht nicht in den gezeigten Spalten (ausgeblendet: ${hidden.join(", ")})`, warn: true };
     return { text: `${u.label} ist nach dem Neuladen nicht auf dem Board`, warn: true };
   });
-}
-
-// Says the lines of settled outcomes in one notice; one that warns makes
-// it a warning, which a toast repeats.
-export function tellOutcomes(b, lines, cx) {
-  if (!lines.length) return;
-  const level = lines.some((l) => l.warn) ? "warning" : "info";
-  const text = lines.map((l) => l.text).join("; ");
-  b.say(text, level, cx);
-  if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
 }

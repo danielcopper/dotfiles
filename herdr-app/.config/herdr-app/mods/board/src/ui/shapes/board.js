@@ -14,8 +14,9 @@ import { spaces } from "herdr";
 import { itemLabel } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
-import { moveCardTo, reselectIn, tellOutcomes, unclearMoveLines } from "../../actions/move.js";
-import { button, columnHead, sessionChip, shownOf, statusPill, store } from "../helpers.js";
+import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
+import { tellOutcomes } from "../../actions/write.js";
+import { button, chip, columnHead, sessionChip, shownOf, statusPill, store } from "../helpers.js";
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -183,7 +184,6 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const session = linkedSession(card, allSpaces);
-  const chip = (text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
   return v_flex()
     .id(`card-${card.key}`)
     .flex_none()
@@ -227,9 +227,9 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
         .gap(5)
         .flex_wrap()
         .items_center()
-        .when(Boolean(card.type), (el) => el.child(chip(card.type, t.foreground)))
-        .children(card.labels.slice(0, 3).map((l) => chip(l)))
-        .when(card.labels.length > 3, (el) => el.child(chip(`+${card.labels.length - 3}`)))
+        .when(Boolean(card.type), (el) => el.child(chip(t, card.type, t.foreground)))
+        .children(card.labels.slice(0, 3).map((l) => chip(t, l)))
+        .when(card.labels.length > 3, (el) => el.child(chip(t, `+${card.labels.length - 3}`)))
         .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
         .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session))),

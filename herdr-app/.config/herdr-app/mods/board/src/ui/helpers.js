@@ -1,13 +1,13 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
-// shows, an error's text for the UI, and the pieces that the Board, its
+// shows, and the pieces that the Board, its
 // shapes and its modals draw alike (a button, a backdrop for a dialog, a menu
 // and its keys, a detail section, a check's color, a status pill, a
-// column's head, a session's chip).
+// column's head, a card's chip and a session's).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { layout, panes, spaces } from "herdr";
-import { MOD, BoardError, errorText } from "../shared.js";
+import { MOD } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
@@ -61,12 +61,6 @@ export function boardShown(isLayer) {
   if (found?.shown) return false;
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
-}
-
-// An error's message for the UI; an unexpected one is logged with its stack.
-export function report(e) {
-  if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
-  return errorText(e);
 }
 
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
@@ -200,6 +194,8 @@ export const columnHead = (t, col, count) =>
     .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
     .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
 
+// A card's chip: `text` in `fg` on `bg`.
+export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
+
 // A card's chip for its session (linkedSession): what its agent does.
-export const sessionChip = (t, session) =>
-  div().px(7).rounded(9).text_size(11).text_color(t.background).bg(t[session.status] ?? t.idle).child(AGENT_STATUS[session.status] ?? "Sitzung");
+export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);

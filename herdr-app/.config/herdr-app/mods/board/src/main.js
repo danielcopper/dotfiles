@@ -32,12 +32,14 @@
 //
 // Calls: a GitHub view costs one gh call per refresh, an Azure team's
 // Sprint two az calls (the taskboard's column of each work item, and one
-// WIQL query for their fields); what the Sprint reads once and keeps, and
-// for how long, makeAzure says. The other Azure views read nothing yet.
-// Finding gh and az costs one sh call now and then (toolPaths says when). A view refreshes when its tab first shows, on `r`, after a column
-// is hidden or shown (x, a name in the hidden line, the column menu), when
-// it is shown again older than refreshMinutes, and every refreshMinutes
-// while it shows.
+// WIQL query for their fields; three while who az is stays unknown); what
+// the Sprint reads once and keeps, and for how long, makeAzure says. The
+// other Azure views read nothing yet. Finding gh and az costs one sh call
+// now and then (toolPaths says when). A view refreshes when its tab first
+// shows, on `r` (which first drops what its source keeps of it: its
+// source's forget), after a column is hidden or shown (x, a name in the
+// hidden line, the column menu), when it is shown again older than
+// refreshMinutes, and every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -55,7 +57,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, layout, nextCommand, notify, props, readTextFile, run, settings, spaces, theme } from "herdr";
-import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel, updatedLabel } from "./shared.js";
+import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel, report, updatedLabel } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
@@ -64,7 +66,7 @@ import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, v
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
-import { store, migrateShownView, boardShown, shownOf, button, detailSection, report } from "./ui/helpers.js";
+import { store, migrateShownView, boardShown, shownOf, button, detailSection } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
@@ -181,11 +183,12 @@ export default class Board extends View {
 
   // A view's state: data and error, loading (again: one more refresh
   // after this one), at (last success) and tried (last start), warnings,
-  // moves (laid over refreshes, see pendingMoves), pending (card keys being
-  // written), unclear ({ key, label, to, at } of writes whose outcome is
-  // still open; see settleUnclear), stored/hidden (the person's toggles and
-  // the hidden set), sel ({ col, key }, null before the first data), picked
-  // (the key of the item the person chose, see clickItem) and detail.
+  // moves (laid over refreshes, see pendingMoves), pending (keys of items
+  // being written), unclear (open outcomes: key, label, at and
+  // writeAtOnce's w.open; see settleUnclear), stored/hidden (the person's
+  // toggles and the hidden set), sel ({ col, key }, null before the first
+  // data), picked (the key of the item the person chose, see clickItem) and
+  // detail.
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
@@ -273,7 +276,9 @@ export default class Board extends View {
       const m = this.modal;
       if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
       const shown = this.view();
-      if (shown) this.refresh(shown, cx);
+      if (!shown) return;
+      this.sources[shown.source]?.forget?.(shown);
+      this.refresh(shown, cx);
     });
   }
 
@@ -316,9 +321,9 @@ export default class Board extends View {
 
   // After a refresh that succeeded: the writes whose outcome was open, came
   // before that refresh started (an older one may have read before the
-  // write ended) and whose card has no write under way (that write decides
-  // first) are settled; the shape of the new data tells where their cards
-  // are now (a shape without columns tells nothing).
+  // write ended) and whose item has no write under way (that write decides
+  // first) are settled; the shape of the new data tells how their writes
+  // ended up (a shape without a settle tells nothing).
   settleUnclear(view, started, data, cx) {
     const st = this.state(view.id);
     const due = st.unclear.filter(isDue(st, started));
