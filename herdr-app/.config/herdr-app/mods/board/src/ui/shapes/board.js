@@ -1,6 +1,9 @@
 // The board shape: a view's data as columns of cards, which a card moves
-// between (H/L, the status menu, a drag), a column hidden or shown (x). The
-// data: { shape: "board", meta, columns: [{ id, name, color, hidden, count,
+// between (H/L, the status menu, a drag). A hidden column is not drawn: x
+// hides one, the line above the columns names the hidden ones and a click
+// on a name shows it again, and X opens the column menu (modals/columns.js).
+// A click on a card selects it, a second one opens its details. The data:
+// { shape: "board", meta, columns: [{ id, name, color, hidden, count,
 // target, cards }], total, limited, viewer, limit } (parseGithubBoard). View
 // fields it reads: id, source, layout, hide (the columns hidden by default)
 // and, where the data does not name its own, limit.
@@ -29,22 +32,26 @@ export const boardShape = {
   // All items, whatever the filter: the cards of the shown columns.
   items: (data) => data.columns.filter((c) => !c.hidden).flatMap((c) => c.cards),
   count(b, data) {
-    const cols = shownColumns(data, b.filterText, b.mine).filter((c) => !c.hidden);
+    const cols = shownColumns(data, b.filterText, b.mine);
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
   },
   render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
-  hints: [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["h/l j/k", "bewegen"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte ausblenden"], ["X", "Spalten"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
     if (!st.data) return false;
-    const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
+    const upper = mod.shift && (k === "h" || k === "l" || k === "x") ? k.toUpperCase() : ch;
     if (upper === "H" || upper === "L") {
-      const target = st.sel?.key && stepTarget(st.data, b.navColumns(view), st.sel?.key, upper === "H" ? -1 : 1);
+      const target = st.sel?.key && stepTarget(st.data, st.sel?.key, upper === "H" ? -1 : 1);
       if (target) b.moveTo(view, st.sel?.key, target.id, cx);
       return true;
     }
     if (k === "s") return b.openStatusMenu(view, cx), true;
+    if (upper === "X") {
+      b.modal = { kind: "columns", view, at: 0 };
+      return true;
+    }
     if (k === "x") {
       const col = b.navColumns(view)[st.sel?.col];
       if (col) b.toggleColumn(view, col, cx);
@@ -92,48 +99,43 @@ function drawBoard(b, t, mono, view, st) {
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const columnEl = (col, ci) => {
     // Cards the filter or "nur meine" hides in this column.
-    const filtered = col.hidden ? 0 : col.cards.length - col.shown.length;
+    const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
-    const base = (el) =>
-      el
-        .id(`col-${ci}`)
-        .rounded(10)
-        .border_1()
-        .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
-        .bg(target ? t.selected : t.chrome)
-        .p(10)
-        .on_hover((hovered, cx) => {
-          if (!b.drag) return;
-          if (hovered) b.over = ci;
-          else if (b.over === ci) b.over = null;
-          cx.notify();
-        })
-        .on_mouse_up("left", (_e, cx) => {
-          if (!b.drag) return;
-          cx.stop_propagation();
-          const { key } = b.drag;
-          b.endDrag(cx);
-          b.moveTo(view, key, col.id, cx);
-        });
     const head = h_flex()
       .gap(6)
       .items_center()
       .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
-      .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name));
-    if (col.hidden) {
-      return base(v_flex().w(120).flex_none().gap(6))
-        .cursor_pointer()
-        .on_click((_e, cx) => {
-          if (!b.drag && !b.modal) b.toggleColumn(view, col, cx);
-        })
-        .child(head)
-        .child(div().text_size(12).text_color(t.muted).child(col.count === null ? "x zeigt" : `${col.count} · x zeigt`));
-    }
-    // The row's full height (the row lines its columns up at the top, so
-    // a stub keeps its own), in which a long column scrolls its cards.
-    return base(v_flex().flex_1().min_w(0).min_h(0).h_full().gap(8))
-      .child(head.child(div().flex_none().text_size(12).text_color(t.muted).child(filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length))))
+      .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
+      .child(div().flex_none().text_size(12).text_color(t.muted).child(filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length)));
+    // The row's full height (the row lines its columns up at the top), in
+    // which a long column scrolls its cards.
+    return v_flex()
+      .flex_1()
+      .min_w(0)
+      .min_h(0)
+      .h_full()
+      .gap(8)
+      .id(`col-${ci}`)
+      .rounded(10)
+      .border_1()
+      .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
+      .bg(target ? t.selected : t.chrome)
+      .p(10)
+      .on_hover((hovered, cx) => {
+        if (!b.drag) return;
+        if (hovered) b.over = ci;
+        else if (b.over === ci) b.over = null;
+        cx.notify();
+      })
+      .on_mouse_up("left", (_e, cx) => {
+        if (!b.drag) return;
+        cx.stop_propagation();
+        const { key } = b.drag;
+        b.endDrag(cx);
+        b.moveTo(view, key, col.id, cx);
+      })
+      .child(head)
       .child(
         v_flex()
           .id(`cards-${ci}`)
@@ -149,10 +151,48 @@ function drawBoard(b, t, mono, view, st) {
   return v_flex()
     .flex_1()
     .min_h(0)
-    .child(h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl)))
+    .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
+    .child(
+      cols.length
+        ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
+        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder"),
+    )
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(t.ansi3)
         .child(`Nur die ersten ${st.data.limit ?? view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+    );
+}
+
+// The line above the columns that names the hidden ones; a click on a name
+// shows that column again.
+function hiddenLine(b, t, view, st) {
+  const hidden = st.data.columns.filter((c) => c.hidden);
+  return h_flex()
+    .id("hidden-columns")
+    .flex_none()
+    .flex_wrap()
+    .gap(6)
+    .px(16)
+    .pt(10)
+    .items_center()
+    .text_size(12)
+    .child(div().text_color(t.muted).child("ausgeblendet:"))
+    .children(
+      hidden.map((col) =>
+        div()
+          .id(`show-${col.id}`)
+          .px(8)
+          .py(2)
+          .rounded(9)
+          .cursor_pointer()
+          .bg(t.raised)
+          .text_color(t.foreground)
+          .hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => {
+            if (!b.drag && !b.modal) b.toggleColumn(view, col, cx);
+          })
+          .child(col.name),
+      ),
     );
 }
 
@@ -175,19 +215,21 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
-      b.drag = { key: card.key, from: card.column };
+      // again: the card was selected already, so a click opens its details.
+      b.drag = { key: card.key, from: card.column, again: selected };
       b.over = ci;
       b.select(view, { col: ci, key: card.key });
       b.handle.focus();
       cx.notify();
     })
     .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click. Released on another
+      // Released on the card it started on: a click, which selects it and,
+      // on a card selected already, opens its details. Released on another
       // card: the column under it takes the drop.
       if (b.modal || (b.drag && b.drag.key !== card.key)) return;
       cx.stop_propagation();
+      if (b.drag?.again) st.detail = true;
       b.endDrag(cx);
-      st.detail = true;
       cx.notify();
     })
     .child(
@@ -225,17 +267,26 @@ function moveCardTo(b, view, key, columnId, cx) {
   if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
   if (!canDrop(st.data, found.card, to)) return b.say(`${label} kann nicht nach „${to.name}“`, "warning", cx);
   const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
+  const row = b.navColumns(view)[st.sel?.col]?.shown.findIndex((c) => c.key === key) ?? -1;
   st.moves.push(move);
   st.data = moveCard(st.data, key, columnId);
   st.pending[key] = true;
-  b.say(`${label} → ${to.name} …`, "info", cx);
+  // A card moved to a hidden column leaves the board; the notice says so. The
+  // selection, where it was on that card, stays in its column, on the card
+  // now in its row.
+  if (to.hidden && row >= 0) {
+    const left = b.navColumns(view)[st.sel.col].shown;
+    st.sel = { col: st.sel.col, key: left[Math.min(row, left.length - 1)]?.key ?? null };
+  }
+  const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
+  b.say(`${label} → ${to.name}${hiddenNote()} …`, "info", cx);
   cx.spawn(async (cx) => {
     try {
       await b.loader(view).move(view, st.data, found.card, to);
       move.confirmedAt = Date.now();
       // A new move that landed replaces the open outcome of an earlier one.
       st.unclear = st.unclear.filter((u) => u.key !== key);
-      b.say(`${label} steht jetzt in „${to.name}“`, "success", cx);
+      b.say(`${label} steht jetzt in „${to.name}“${hiddenNote()}`, "success", cx);
     } catch (e) {
       st.moves = st.moves.filter((m) => m !== move);
       const why = report(e);
@@ -268,14 +319,25 @@ function moveCardTo(b, view, key, columnId, cx) {
   });
 }
 
+// Hides a shown column or shows a hidden one. The selection stays on its
+// column; where that column is hidden now, it goes to the column that takes
+// its place (the next, or the last).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
   if (!col.target) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
+  const was = b.navColumns(view)[st.sel?.col]?.id;
   st.stored = toggleHidden(view, st.stored, col);
   st.hidden = hiddenColumns(view, st.stored);
   store.set(`hidden:${view.id}`, st.stored);
   st.data = withHidden(st.data, st.hidden);
+  const cols = b.navColumns(view);
+  const same = cols.findIndex((c) => c.id === was);
+  if (same >= 0) st.sel = { col: same, key: st.sel.key };
+  else {
+    const at = Math.min(st.sel?.col ?? 0, cols.length - 1);
+    st.sel = at >= 0 ? { col: at, key: cols[at].shown[0]?.key ?? null } : { col: 0, key: null };
+  }
   // What a column holds comes from the query, which leaves hidden ones out.
   b.refresh(view, cx);
 }

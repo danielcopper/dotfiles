@@ -26,8 +26,8 @@
 // An older views.json with its views at the top is not read; the board says
 // where they go now.
 //
-// Hidden columns are left out of the query; the same request counts them for
-// their stubs. GitHub's queries also ask for the login gh runs as, which
+// Hidden columns are left out of the query and of the board; the same request
+// counts them for the column menu. GitHub's queries also ask for the login gh runs as, which
 // "nur meine" compares with.
 //
 // Calls: a GitHub view costs one gh call per refresh; an Azure view reads
@@ -82,6 +82,7 @@ export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
 export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
+export * from "./ui/modals/columns.js";
 export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 

@@ -32,8 +32,8 @@ const ITEM_FIELDS = `
 
 // One GraphQL request for a board view: the project, its field's options and
 // the items of the shown columns, plus one count per hidden column (`h0`,
-// `h1`, … aliases, first: 0) for the stubs, and the login gh runs as (for
-// "nur meine").
+// `h1`, … aliases, first: 0) for the column menu, and the login gh runs as
+// (for "nur meine").
 export function githubBoardArgs(view, hidden) {
   const { owner, number, field } = view.project;
   const names = [...hidden];

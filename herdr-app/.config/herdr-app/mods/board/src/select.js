@@ -24,10 +24,10 @@ export const isMine = (item, me) =>
 // with `mine` on, it is one's own.
 export const shows = (item, filter, mine, viewer) => matches(item, filter) && (!mine || isMine(item, viewer));
 
-// Keyboard movement: sel = { col, key } (key null on a stub or an empty
-// column) → the next sel. "up"/"down" move within the column, "left"/"right"
-// to the next column (stubs too), keeping the row where they can. A list is
-// one column.
+// Keyboard movement: sel = { col, key } (key null on an empty column) → the
+// next sel. "up"/"down" move within the column, "left"/"right" to the next
+// column, keeping the row where they can. `columns` are those that show
+// (hidden ones left out); a list is one column.
 export function navigate(columns, sel, dir) {
   if (!columns.length) return { col: 0, key: null };
   let ci = Math.min(Math.max(sel?.col ?? 0, 0), columns.length - 1);
@@ -45,7 +45,7 @@ export function navigate(columns, sel, dir) {
 }
 
 // The selection after new data or a filter: its card's column again, else the
-// first card; a selected stub or empty column stays selected.
+// first card; a selected empty column stays selected.
 export function selectionAfter(columns, sel) {
   const at = columns.findIndex((c) => c.shown.some((card) => card.key === sel?.key));
   if (at >= 0) return { col: at, key: sel.key };

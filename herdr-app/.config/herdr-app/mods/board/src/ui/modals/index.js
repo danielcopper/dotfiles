@@ -6,7 +6,8 @@
 // views.json no longer has that view of that kind. A new dialog is a module
 // here and its entry in MODALS.
 
+import { columnsModal } from "./columns.js";
 import { startModal } from "./start.js";
 import { statusModal } from "./status.js";
 
-export const MODALS = { start: startModal, status: statusModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal };

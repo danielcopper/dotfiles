@@ -1,4 +1,5 @@
 // The prs shape: a list of pull requests in sections, walked as one column.
+// A click on a row selects it, a second one opens its details.
 // The data: { shape: "prs", sections: [{ name, count, fetched, limited,
 // skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
 // and checks show where it has them. View fields it reads: id.
@@ -65,9 +66,10 @@ function drawPrs(b, t, mono, view, st) {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
+        // A click selects the row; on the selected one it opens the details.
         if (b.modal) return;
-        st.sel = { col: 0, key: r.key };
-        st.detail = true;
+        if (selected) st.detail = true;
+        else st.sel = { col: 0, key: r.key };
         b.handle.focus();
         cx.notify();
       })

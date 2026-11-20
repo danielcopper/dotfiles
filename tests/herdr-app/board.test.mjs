@@ -778,7 +778,7 @@ test("moving a card changes its column and the counts, and rollback restores the
 test("a card moved into a hidden column adds to its count and can come back", () => {
   const moved = board.moveCard(githubBoard(), "PVTI_rec1", "opt-done");
   assert.equal(moved.columns.find((c) => c.name === "Done").count, 958);
-  assert.deepEqual(board.shownColumns(moved, "").find((c) => c.name === "Done").shown, []);
+  assert.equal(board.shownColumns(moved, "").some((c) => c.name === "Done"), false, "and stays out of the columns shown");
   const back = board.moveCard(moved, "PVTI_rec1", "opt-in-progress");
   assert.equal(back.columns.find((c) => c.name === "Done").count, 957);
 });
@@ -823,14 +823,13 @@ test("where a board names its types' states, a card can only go to its own type'
   assert.equal(board.canDrop(cases, board.findCard(cases, "PVTI_case1").card, cases.columns[0]), false, "never into Ohne Status");
 });
 
-test("H/L step to the next column the card may go to, stubs included", () => {
+test("H/L step to the next column the card may go to, hidden ones included", () => {
   const b = typedBoard();
-  const cols = board.shownColumns(b, "");
-  assert.equal(board.stepTarget(b, cols, "w101", 1)?.name, "Done", "Committed is skipped, the stub taken");
-  assert.equal(board.stepTarget(b, cols, "w101", -1)?.name, "To Do", "New is skipped");
-  assert.equal(board.stepTarget(b, cols, "w102", -1), null, "nothing left of the first state");
+  assert.equal(board.stepTarget(b, "w101", 1)?.name, "Done", "Committed is skipped, the hidden Done taken");
+  assert.equal(board.stepTarget(b, "w101", -1)?.name, "To Do", "New is skipped");
+  assert.equal(board.stepTarget(b, "w102", -1), null, "nothing left of the first state");
   const gh = casesBoard();
-  assert.equal(board.stepTarget(gh, board.shownColumns(gh, ""), "PVTI_case3", -1)?.name, "Backlog", "Ohne Status is skipped");
+  assert.equal(board.stepTarget(gh, "PVTI_case3", -1)?.name, "Backlog", "the hidden Backlog taken");
 });
 
 // ---- Filter and keyboard ----
@@ -864,18 +863,20 @@ test("„nur meine“ keeps the items assigned to, opened by or asking a review 
     [true, false, false, true]);
 });
 
-test("j/k move within a column, h/l across columns and stubs, keeping the row", () => {
+test("j/k move within a column, h/l across the columns shown, skipping hidden ones, keeping the row", () => {
   const cols = board.shownColumns(githubBoard(), "");
-  // Columns: 0 Backlog (stub), 1 Ready, 2 In progress, 3 In review, 4 Done (stub).
-  let sel = { col: 2, key: "PVTI_rec1" };
+  // Backlog and Done are hidden.
+  assert.deepEqual(cols.map((c) => c.name), ["Ready", "In progress", "In review"]);
+  let sel = { col: 1, key: "PVTI_rec1" };
   sel = board.navigate(cols, sel, "down");
-  assert.deepEqual(sel, { col: 2, key: "PVTI_rec2" });
+  assert.deepEqual(sel, { col: 1, key: "PVTI_rec2" });
   sel = board.navigate(cols, board.navigate(cols, sel, "down"), "down");
-  assert.deepEqual(sel, { col: 2, key: "PVTI_rec3" }, "stops at the last card");
-  assert.deepEqual(board.navigate(cols, sel, "left"), { col: 1, key: "PVTI_rec6" });
-  assert.deepEqual(board.navigate(cols, { col: 1, key: "PVTI_rec4" }, "left"), { col: 0, key: null }, "a stub takes the selection without a card");
-  assert.deepEqual(board.navigate(cols, { col: 0, key: null }, "up"), { col: 0, key: null });
-  assert.deepEqual(board.navigate(cols, { col: 4, key: null }, "right"), { col: 4, key: null });
+  assert.deepEqual(sel, { col: 1, key: "PVTI_rec3" }, "stops at the last card");
+  assert.deepEqual(board.navigate(cols, sel, "left"), { col: 0, key: "PVTI_rec6" });
+  assert.deepEqual(board.navigate(cols, { col: 0, key: "PVTI_rec4" }, "left"), { col: 0, key: "PVTI_rec4" }, "the hidden Backlog is skipped");
+  assert.deepEqual(board.navigate(cols, { col: 1, key: "PVTI_rec1" }, "right"), { col: 2, key: null }, "an empty column takes the selection without a card");
+  assert.deepEqual(board.navigate(cols, { col: 2, key: null }, "up"), { col: 2, key: null });
+  assert.deepEqual(board.navigate(cols, { col: 2, key: null }, "right"), { col: 2, key: null }, "the hidden Done is skipped");
   assert.deepEqual(board.navigate([], null, "down"), { col: 0, key: null });
   const list = [{ shown: [{ key: "a" }, { key: "b" }] }];
   assert.deepEqual(board.navigate(list, { col: 0, key: "a" }, "down"), { col: 0, key: "b" }, "a list is one column");
@@ -883,9 +884,9 @@ test("j/k move within a column, h/l across columns and stubs, keeping the row", 
 
 test("after new data the selection follows its card, else falls to the first card", () => {
   const cols = board.shownColumns(githubBoard(), "");
-  assert.deepEqual(board.selectionAfter(cols, { col: 0, key: "PVTI_rec4" }), { col: 1, key: "PVTI_rec4" });
-  assert.deepEqual(board.selectionAfter(cols, { col: 2, key: "gone" }), { col: 1, key: "PVTI_rec4" });
-  assert.deepEqual(board.selectionAfter(cols, { col: 4, key: null }), { col: 4, key: null }, "a selected stub stays");
+  assert.deepEqual(board.selectionAfter(cols, { col: 2, key: "PVTI_rec4" }), { col: 0, key: "PVTI_rec4" });
+  assert.deepEqual(board.selectionAfter(cols, { col: 1, key: "gone" }), { col: 0, key: "PVTI_rec4" });
+  assert.deepEqual(board.selectionAfter(cols, { col: 2, key: null }), { col: 2, key: null }, "a selected empty column stays");
   assert.deepEqual(board.selectionAfter([], { col: 3, key: "x" }), { col: 0, key: null });
 });
 
@@ -1756,7 +1757,7 @@ test("UI: on the shipped views.json with Azure remembered, the board opens on it
 test("UI: on the shipped views.json the GitHub source loads its first view", async () => {
   const { b, st, host } = await openBoard({ config: shippedConfig() });
   assert.equal(st().data.columns.length, 5);
-  assert.deepEqual(st().sel, { col: 1, key: "PVTI_rec4" });
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" });
   assert.deepEqual(b.contexts().map((c) => c.view.id), ["mine", "prs"]);
   assert.deepEqual(host.asked.filter((a) => a.tool === "az"), []);
 });
@@ -2207,21 +2208,138 @@ test("UI: x on the column without status does nothing", async () => {
   assert.equal(host.open("gh").length, 0, "no refresh");
 });
 
-test("UI: x shows a hidden column and keeps it shown when storage fails", async () => {
+test("UI: a click on a hidden column's name shows it and keeps it shown when storage fails", async () => {
   const { b, cx, st, host } = await openBoard();
-  st().sel = { col: 4, key: null };
   const setItem = localStorage.setItem;
   localStorage.setItem = () => {
     throw new Error("full");
   };
   try {
-    await press(b, cx, "x");
+    await click(b, cx, "show-opt-done");
   } finally {
     localStorage.setItem = setItem;
   }
   assert.equal(st().hidden.has("Done"), false);
   assert.equal(st().data.columns[4].hidden, false);
+  assert.deepEqual(b.navColumns(b.view()).map((c) => c.name), ["Ready", "In progress", "In review", "Done"]);
+  assert.deepEqual(texts(byId(b.render(), "hidden-columns")), ["ausgeblendet:", "Backlog"]);
   assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog"'), "the refresh asks for Done again");
+});
+
+test("UI: hidden columns are not drawn; the line above the columns names them, h/l skip them", async () => {
+  const { b, cx, st } = await openBoard();
+  const root = b.render();
+  assert.deepEqual(texts(byId(root, "hidden-columns")), ["ausgeblendet:", "Backlog", "Done"]);
+  const drawn = texts(byId(root, "columns"));
+  assert.deepEqual(["Ready", "In progress", "In review"].map((n) => drawn.includes(n)), [true, true, true]);
+  assert.deepEqual(["Backlog", "Done"].map((n) => drawn.includes(n)), [false, false], "no stub");
+  assert.equal(byId(root, "col-3"), null, "three columns drawn");
+  await press(b, cx, "h");
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" }, "h stops at Ready");
+  for (const k of ["l", "l", "l"]) await press(b, cx, k);
+  assert.deepEqual(st().sel, { col: 2, key: null }, "l stops at In review");
+  const all = await openBoard({ config: testConfig({ hide: [] }) });
+  assert.equal(byId(all.b.render(), "hidden-columns"), null, "nothing hidden: no line");
+});
+
+test("UI: with every column hidden the board says how to show one", async () => {
+  const { b, cx, st } = await openBoard({ config: testConfig({ hide: ["Backlog", "Ready", "In progress", "In review", "Done"] }) });
+  assert.deepEqual(st().sel, { col: 0, key: null });
+  assert.equal(byId(b.render(), "columns"), null);
+  assert.ok(texts(b.render()).includes("Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder"));
+  await press(b, cx, "l");
+  await press(b, cx, "enter");
+  assert.equal(st().detail, false);
+});
+
+test("UI: x hides the selected column; the selection goes to the column taking its place", async () => {
+  const { b, cx, st, host } = await openBoard();
+  st().sel = { col: 1, key: "PVTI_rec1" };
+  await press(b, cx, "x");
+  assert.deepEqual(b.navColumns(b.view()).map((c) => c.name), ["Ready", "In review"]);
+  assert.deepEqual(texts(byId(b.render(), "hidden-columns")), ["ausgeblendet:", "Backlog", "In progress", "Done"]);
+  assert.deepEqual(st().sel, { col: 1, key: null }, "In review, empty");
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog","Done","In progress"'), "the refresh leaves it out");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await press(b, cx, "x");
+  assert.deepEqual(b.navColumns(b.view()).map((c) => c.name), ["Ready"]);
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" }, "the last column hidden: the one before it, on its first card");
+  await click(b, cx, "show-opt-in-progress");
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" }, "a column shown again keeps the selection on its card");
+});
+
+test("UI: H/L and the status menu move a card into a hidden column, and the notice says it is hidden; counts leave it out", async () => {
+  const { b, cx, host, st } = await openBoard();
+  const tab = () => texts(byId(b.render(), "tab-github:mine")).at(-1);
+  assert.equal(tab(), "6");
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "Backlog");
+  assert.equal(b.notice.text, "tender#3004 → Backlog (ausgeblendet) …");
+  assert.equal(tab(), "5", "a card in a hidden column does not count");
+  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec5" }, "the selection stays in its column, on the card now in its row");
+  assert.equal(b.selected(b.view()).key, "PVTI_rec5");
+  await host.answer("gh", confirmed("PVTI_rec4"), "updateProjectV2ItemFieldValue");
+  assert.equal(b.notice.text, "tender#3004 steht jetzt in „Backlog“ (ausgeblendet)");
+  await press(b, cx, "s");
+  assert.deepEqual(b.modal.targets.map((c) => c.name), ["Backlog", "Ready", "In progress", "In review", "Done"]);
+  await press(b, cx, "5");
+  assert.equal(b.notice.text, "tender#3005 → Done (ausgeblendet) …");
+  assert.equal(tab(), "4");
+  await press(b, cx, "l", shiftL);
+  assert.equal(board.findCard(st().data, "PVTI_rec6").column.name, "In progress");
+  assert.equal(b.notice.text, "tender#3007 → In progress …", "a shown target is said as before");
+  assert.equal(st().sel.key, "PVTI_rec6", "and the selection goes with its card");
+});
+
+test("UI: X opens the column menu: every column, shown or hidden; Enter, a digit or a click hides or shows one, and it stays open until Esc", async () => {
+  const { b, cx, st, host } = await openBoard();
+  await press(b, cx, "x", { char: "X", modifiers: { shift: true } });
+  assert.equal(b.modal?.kind, "columns");
+  const rows = () => [0, 1, 2, 3, 4].map((i) => texts(byId(b.render(), `column-${i}`)).filter(Boolean));
+  assert.deepEqual(rows(), [
+    ["1", "Backlog", "265", "ausgeblendet"],
+    ["2", "✓", "Ready", "3", "gezeigt"],
+    ["3", "✓", "In progress", "3", "gezeigt"],
+    ["4", "✓", "In review", "0", "gezeigt"],
+    ["5", "Done", "957", "ausgeblendet"],
+  ]);
+  await press(b, cx, "enter");
+  assert.equal(st().hidden.has("Backlog"), false, "Enter shows Backlog");
+  assert.equal(rows()[0].at(-1), "gezeigt");
+  assert.equal(b.modal?.kind, "columns", "the menu stays open");
+  assert.equal(host.open("gh").length, 1, "and the board refreshes");
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.equal(st().hidden.has("Ready"), true, "j, Enter hides Ready");
+  await press(b, cx, "5");
+  assert.equal(st().hidden.has("Done"), false, "5 shows Done");
+  assert.equal(b.modal.at, 4);
+  await press(b, cx, "j");
+  assert.equal(b.modal.at, 4, "j stops at the last row");
+  await press(b, cx, "k");
+  assert.equal(b.modal.at, 3, "k moves up");
+  byId(b.render(), "column-1").with.on_click[0]({}, cx);
+  await settle();
+  assert.equal(st().hidden.has("Ready"), false, "a click shows Ready again");
+  await press(b, cx, "9");
+  assert.equal(b.modal.at, 1, "a digit beyond the rows does nothing");
+  assert.deepEqual(b.navColumns(b.view()).map((c) => c.name), ["Backlog", "Ready", "In progress", "In review", "Done"]);
+  await press(b, cx, "escape");
+  assert.equal(b.modal, null);
+  assert.deepEqual(st().sel, { col: 2, key: "PVTI_rec1" }, "Ready hidden took the selection to In progress, which kept it");
+  await press(b, cx, "x");
+  assert.equal(st().hidden.has("In progress"), true, "x still hides the selected column");
+});
+
+test("UI: the column menu says the column without status is always shown, and leaves it so", async () => {
+  const { b, cx, st } = await openBoard({ answer: fixture("github-board-cases.json") });
+  // Shift-x whose character comes without the shift.
+  await press(b, cx, "x", { modifiers: { shift: true } });
+  assert.equal(b.modal?.kind, "columns");
+  assert.deepEqual(texts(byId(b.render(), "column-0")).filter(Boolean).at(-1), "immer gezeigt");
+  await press(b, cx, "enter");
+  assert.equal(st().data.columns[0].hidden, false);
+  assert.equal(b.notice.text, "„Ohne Status“ lässt sich nicht ausblenden");
 });
 
 test("UI: a second move of a card is refused while the first is written; a refusal moves it back", async () => {
@@ -2844,7 +2962,7 @@ test("UI: no sidebar: the content fills the width under the top bar, and it and 
   assert.ok(chainTo(root, hasId("tabs")), "the tabs stand in the top bar");
 });
 
-test("UI: the board, its stubs and the detail beside it start at the top", async () => {
+test("UI: the board, the line naming its hidden columns and the detail beside it start at the top", async () => {
   const { b, cx } = await openBoard();
   await press(b, cx, "enter");
   assert.equal(b.views.mine.detail, true);
@@ -2857,11 +2975,9 @@ test("UI: the board, its stubs and the detail beside it start at the top", async
   const column = pathTo(root, (s) => s === name);
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
-  const at = b.navColumns(b.view()).findIndex((c) => c.hidden);
-  const stub = chainTo(root, hasId(`col-${at}`));
-  assert.ok(stub, "a stub");
-  assert.deepEqual(centring(stub), [], "no row centres a stub");
-  assert.equal(stub.at(-1).styles.includes("h_full"), false, "a stub keeps its own height");
+  const line = chainTo(root, hasId("hidden-columns"));
+  assert.ok(line, "the line naming the hidden columns");
+  assert.deepEqual(centring(line), [], "no row centres it");
 });
 
 // A column: a v_flex, or a div made flex with flex_col.
@@ -3120,10 +3236,70 @@ test("UI: the shown GitHub view refreshes every refreshMinutes while the board s
 
 test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
   const { b, cx, host } = await openBoard();
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "H/L", "s", "x", "Enter", "o", "m", "/", "r", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "H/L", "s", "x", "X", "Enter", "o", "m", "/", "r", "Esc"]);
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
   assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "j/k", "Enter", "o", "m", "/", "r", "Esc"]);
+});
+
+// Sends the element with the id `id`, as the board draws it now, the left
+// button's `event` ("on_mouse_down" or "on_mouse_up").
+async function mouse(b, cx, id, event) {
+  const el = byId(b.render(), id);
+  assert.ok(el, `no ${id}`);
+  el.with[event][1]({}, cx);
+  await settle();
+}
+const clickCard = async (b, cx, key) => {
+  await mouse(b, cx, `card-${key}`, "on_mouse_down");
+  await mouse(b, cx, `card-${key}`, "on_mouse_up");
+};
+
+test("UI: a click on a card selects it; a second click on it opens its details", async () => {
+  const { b, cx, st, host } = await openBoard();
+  await clickCard(b, cx, "PVTI_rec1");
+  assert.deepEqual([st().sel, st().detail], [{ col: 1, key: "PVTI_rec1" }, false], "the first click selects");
+  assert.equal(b.drag, null);
+  await clickCard(b, cx, "PVTI_rec1");
+  assert.equal(st().detail, true, "the second opens the details");
+  await clickCard(b, cx, "PVTI_rec2");
+  assert.deepEqual([st().sel.key, st().detail], ["PVTI_rec2", true], "another card: selected, the details follow it as with the keys");
+  await clickCard(b, cx, "PVTI_rec2");
+  assert.equal(b.modal, null, "a click on the selected card with its details open starts nothing");
+  await press(b, cx, "escape");
+  await mouse(b, cx, "card-PVTI_rec2", "on_mouse_up");
+  assert.equal(st().detail, false, "a release without a press on the card is no click");
+  assert.equal(host.open("gh").length, 0);
+});
+
+test("UI: a card dragged onto another column moves there, selected, without opening its details", async () => {
+  const { b, cx, st, host } = await openBoard();
+  await mouse(b, cx, "card-PVTI_rec4", "on_mouse_down");
+  byId(b.render(), "col-1").with.on_hover[0](true, cx);
+  await mouse(b, cx, "col-1", "on_mouse_up");
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress");
+  assert.ok(host.open("gh")[0].args.includes("option=opt-in-progress"));
+  assert.deepEqual([st().sel.key, st().detail, b.drag], ["PVTI_rec4", false, null]);
+  await mouse(b, cx, "card-PVTI_rec4", "on_mouse_down");
+  byId(b.render(), "col-2").with.on_hover[0](true, cx);
+  await mouse(b, cx, "col-2", "on_mouse_up");
+  assert.equal(st().detail, false, "nor a drag of the selected card");
+});
+
+test("UI: a click on a pull request's row selects it; a second click on it opens its details", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  const list = b.views.prs;
+  const [first, second] = b.navColumns(b.view())[0].shown;
+  assert.equal(list.sel.key, first.key);
+  await click(b, cx, `row-${second.key}`);
+  assert.deepEqual([list.sel, list.detail], [{ col: 0, key: second.key }, false], "the first click selects");
+  await click(b, cx, `row-${second.key}`);
+  assert.equal(list.detail, true, "the second opens the details");
+  await click(b, cx, `row-${first.key}`);
+  assert.deepEqual([list.sel.key, list.detail], [first.key, true], "another row: selected, the details follow it");
+  assert.equal(st().detail, false, "the board's view keeps its own");
 });
 
 test("UI: clicks on the source toggle, a tab and „nur meine“ do what their keys do, not while a dialog is open", async () => {

@@ -97,11 +97,12 @@ export function canDrop(board, card, column) {
 
 export const targetsFor = (board, card) => board.columns.filter((c) => canDrop(board, card, c));
 
-// The column H (step -1) or L (+1) moves a card to: the next shown column,
-// stubs included, the card may go to; null at the edge.
-export function stepTarget(board, columns, key, step) {
+// The column H (step -1) or L (+1) moves a card to: the next column, hidden
+// ones included, the card may go to; null at the edge.
+export function stepTarget(board, key, step) {
   const found = findCard(board, key);
   if (!found) return null;
+  const columns = board.columns;
   for (let i = columns.findIndex((c) => c.id === found.column.id) + step; i >= 0 && i < columns.length; i += step) {
     if (canDrop(board, found.card, columns[i])) return columns[i];
   }
@@ -113,8 +114,8 @@ export function withHidden(board, hidden) {
   return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hidden.has(c.name) })) };
 }
 
-// The columns as the board shows them: hidden ones as stubs (no cards), the
-// others with the cards that show (`mine`: only one's own).
+// The columns as the board shows them: hidden ones left out, the others with
+// the cards that show (`mine`: only one's own).
 export function shownColumns(board, filter, mine = false) {
-  return (board?.columns ?? []).map((c) => ({ ...c, shown: c.hidden ? [] : c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
+  return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }
