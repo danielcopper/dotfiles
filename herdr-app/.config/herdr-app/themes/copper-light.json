@@ -23,26 +23,15 @@
   ],
   "colors": {
     "foreground": "#464261",
-    "surface": "#fffaf3",
-    "canvas": "#faf4ed",
-    "chrome": "#f2e9e1",
-    "popover": "#fffaf3",
-    "raised": "#f2e9e1",
-    "hover": "#ebe1d8",
-    "selected": "#e3d9d0",
-    "border": "#c6bec5",
-    "input": "#6f6b82",
     "muted": "#635f7c",
-    "dim": "#6f6b82",
+    "dim": "#6c687f",
+    "solid": "#464261",
     "accent": "#1c689e",
     "accent_foreground": "#fffaf3",
-    "solid": "#464261",
-    "solid_foreground": "#fffaf3",
-    "ring": "#1c689e",
     "working": "#c17c54",
     "blocked": "#b15b72",
     "done": "#5e8755",
-    "idle": "#6f6b82",
-    "unknown": "#6f6b82"
+    "idle": "#6c687f",
+    "unknown": "#6c687f"
   }
 }
