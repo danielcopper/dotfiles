@@ -314,21 +314,22 @@ herdr-app`. Which files of the package git tracks is set in the root
   story (its id, title and own state), its tasks as cards in the team's
   taskboard columns, each with its own state, assignee and id, and the tasks
   whose story is not in the sprint in a row "Ohne Story" at the top; it holds
-  the work items of the sprint in the team's areas. It costs two az runs per
-  refresh; the sprint, the team's areas, its taskboard columns and the work
-  item types are read once until the sprint ends, and who az is signed in as
-  once. The Backlog and the pull request tabs read nothing yet; each says
-  which view it will hold. "nur meine" narrows whatever shows to my own items
-  (on GitHub: assigned to me, opened by me, or asking for my review; a list
-  section of my own search, one whose query sets author, assignee or
-  (user-)review-requested to @me, counts whole; on Azure: assigned to the
-  account az is signed in as, which needs `az login`, and a story stays
-  dimmed for my tasks in it) without reading anything again. A context or view added to `views.json` adds a tab,
-  and `r` reads the file again; the board remembers the source, tab and team
-  view shown last, and "nur meine". A count in a tab, a column or a list section
-  that the filter or "nur meine" thins says so ("1/4"); a tab's count leaves
-  the cards of hidden columns out. The code holds nothing of mine; the header
-  of `mods/board/src/main.js` describes the file's fields.
+  the work items of the sprint in the team's areas, and its tasks are the
+  types the taskboard's columns map. What it reads, and what it reads only
+  once, the header of `mods/board/src/main.js` says. The Backlog and the
+  pull request tabs read nothing yet; each says which view it will hold.
+  "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
+  me, opened by me, or asking for my review; a list section of my own
+  search, one whose query sets author, assignee or (user-)review-requested
+  to @me, counts whole; on Azure: assigned to the account az is signed in
+  as, which needs `az login`, and a story stays dimmed for my tasks in it)
+  without reading anything again. A context or view added to `views.json`
+  adds a tab, and `r` reads the file again; the board remembers the source,
+  tab and team view shown last, and "nur meine". A count in a tab, a column
+  or a list section that the filter or "nur meine" thins says so ("1/4"); a
+  tab's count leaves the cards of hidden columns out. The code holds nothing
+  of mine; the header of `mods/board/src/main.js` describes the file's
+  fields.
   Keys: `q` switches the source, `1 2 3` or `[ ]` the tab, `v` a team's Sprint
   and Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
   switch and "nur meine" take clicks too), `/` filters, `r` refreshes (the shown
@@ -341,14 +342,14 @@ herdr-app`. Which files of the package git tracks is set in the root
   type's states, a click selects, and `Enter` shows the details (parent, state,
   assignee, column, area and iteration). Where a work item's session starts
   is only `start.checkout` so far. On a GitHub view `h/l j/k` move over the
-  columns shown, `H/L` move a card one
-  column, hidden ones included (`s` picks from a menu, hidden ones too, or drag
-  the card onto a column; the notice says when a card went to a hidden column),
-  `x` hides a column (views.json sets which start hidden), `o` opens the item
-  in the browser. A hidden column is not drawn: the line above the columns
-  names the hidden ones ("ausgeblendet: Backlog, Done"), a click on a name
-  shows that column again, and `X` opens a menu of every column, shown or
-  hidden, where `Enter`, a digit or a click hides or shows one. A click on a
+  columns shown, `H/L` move a card one column, hidden ones included (`s` picks
+  from a menu, hidden ones too, or drag the card onto a column; the notice
+  says when a card went to a hidden column), `x` hides a column (views.json
+  sets which start hidden), `o` opens the item in the browser. A hidden
+  column is not drawn: the line above the columns names the hidden ones
+  ("ausgeblendet: Backlog, Done"), a click on a name shows that column
+  again, and `X` opens a menu of every column, shown or hidden, where
+  `Enter`, a digit or a click hides or shows one. A click on a
   card or a list's row selects it; a click on one I chose (clicked before, moved
   to with the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
@@ -359,10 +360,11 @@ herdr-app`. Which files of the package git tracks is set in the root
   pull request) and makes its own worktree. The session is named after the item
   (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
   finds it again. A status change shows at once and is written to GitHub or
-  Azure; a refusal moves the card back with the error, and a write without a
-  clear answer refreshes the board and then says where the card is (a state set
-  on Azure refreshes the Sprint either way: where a task stands then is
-  Azure's to say). It runs gh and az by the path my shell gives, since herdr's
+  Azure; a refusal moves the card back (or sets the state back) with the
+  error, and a write without a clear answer refreshes the board and then says
+  where the card is, or which state the work item has. A state set on Azure
+  refreshes the Sprint either way, since which column it puts a task in is
+  Azure's to say. It runs gh and az by the path my shell gives, since herdr's
   own PATH lacks Homebrew and mise. `mise run
   herdr-board-test` (without mise, `node --test tests/herdr-app/board.test.mjs`
   from the repo) tests that `main.js` is built from its sources, its data
