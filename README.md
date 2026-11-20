@@ -332,15 +332,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   names the hidden ones ("ausgeblendet: Backlog, Done"), a click on a name
   shows that column again, and `X` opens a menu of every column, shown or
   hidden, where `Enter`, a digit or a click hides or shows one. A click on a
-  card or a list's row selects it; a click on one I chose (clicked before, or
-  moved to with the keys, not one the board selected by itself) opens its
-  details. `Enter` opens the details, a second `Enter` goes to the item's
-  session or starts one: a new space or tab on the chosen machine, in the
-  repo's checkout, whose agent gets the first message views.json sets
-  (`/implement <n>`, `/pr-review <n>` for a pull request) and makes its own
-  worktree. The session is named after the item (`romm-tender#2845 …`,
-  `AB#456 …` for a work item), which is how the board finds it again. A status
-  change shows at once and is written to GitHub; a
+  card or a list's row selects it; a click on one I chose (clicked before, moved
+  to with the keys or dragged onto another column; not one the board selected by
+  itself) opens its details. Where the board selects another item by itself (a
+  refresh, the filter, a hidden column), open details close. `Enter` opens the
+  details, a second `Enter` goes to the item's session or starts one: a new
+  space or tab on the chosen machine, in the repo's checkout, whose agent gets
+  the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
+  pull request) and makes its own worktree. The session is named after the item
+  (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
+  finds it again. A status change shows at once and is written to GitHub; a
   refusal moves the card back with the error, and a write without a clear answer
   refreshes the board and then says where the card is. It runs gh by the path my
   shell gives, since herdr's own PATH lacks Homebrew and mise. `mise run
