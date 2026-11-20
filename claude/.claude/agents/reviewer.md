@@ -22,6 +22,7 @@ When the dispatch gives a delta and earlier findings to judge, add `### Earlier 
 
 ## Working rules
 
+- Never send a writing request to an outside service (GitHub, Azure DevOps, any API) while you review; reads the dispatch asks for, such as `gh pr view` or `gh pr diff`, are fine. To test a hook, filter or gate, call its check function or run it on a crafted input from a scratch copy. When a probe needs a stand-in binary, check in the same command that the stand-in exists and is the one on `PATH`, so a missing stub never falls through to the real tool.
 - Use absolute paths (`git -C <wt> …`); scratch files go in your scratchpad, not the tree.
 - In a worktree, LSP diagnostics are unreliable; the repo's own type checker and linter decide.
 - **Upstream source:** another project's repository is read from this machine's mirror, one per repository: `~/.claude/upstream-sources.md`.
