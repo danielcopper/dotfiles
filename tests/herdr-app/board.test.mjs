@@ -4034,13 +4034,14 @@ async function openSprint(options = {}) {
 }
 // The Sprint's data as sprintBoard builds it from the fixtures; `drop`:
 // numbers of work items the query does not find.
+const sprintParts = () => ({
+  iteration: board.parseIteration(iterationAnswer()), columns: board.parseColumns(fixture("azure-sprint-columns.json")),
+  types: board.parseAzureTypes(fixture("azure-sprint-types.json")), items: board.parseSprintItems(fixture("azure-sprint-items.json"), sprintTeam()),
+  places: board.parseTaskboard(fixture("azure-sprint-taskboard.json")), viewer: "alex.sample@example.com",
+});
 function sprintData({ viewer = "alex.sample@example.com", drop = [] } = {}) {
-  return board.sprintBoard({
-    iteration: board.parseIteration(iterationAnswer()), columns: board.parseColumns(fixture("azure-sprint-columns.json")),
-    types: board.parseAzureTypes(fixture("azure-sprint-types.json")),
-    items: board.parseSprintItems(fixture("azure-sprint-items.json"), sprintTeam()).filter((i) => !drop.includes(i.number)),
-    places: board.parseTaskboard(fixture("azure-sprint-taskboard.json")), viewer,
-  });
+  const parts = sprintParts();
+  return board.sprintBoard({ ...parts, items: parts.items.filter((i) => !drop.includes(i.number)), viewer });
 }
 const columnId = (data, name) => data.columns.find((c) => c.name === name).id;
 // The cards in each column cell of a drawn row.
@@ -4087,6 +4088,8 @@ test("the Sprint's answers: the current sprint, the team's areas, the columns in
   assert.deepEqual(board.parseAreas(fixture("azure-sprint-areas.json")), {
     field: "System.AreaPath", values: [{ value: "Example Project\\Core", includeChildren: true }, { value: "Example Project\\Shared", includeChildren: false }],
   });
+  assert.deepEqual(board.parseAreas('{"field": {"referenceName": "Custom.Team"}, "values": [{"value": "Core", "includeChildren": false}]}'),
+    { field: "Custom.Team", values: [{ value: "Core", includeChildren: false }] }, "the team's own field");
   assert.throws(() => board.parseAreas('{"values": []}'), /keine Bereiche/);
   const columns = board.parseColumns(fixture("azure-sprint-columns.json"));
   assert.deepEqual(columns.map((c) => c.name), ["To Do", "In Progress", "In PR/Work done", "Done"]);
@@ -4124,6 +4127,15 @@ test("the sprint's taskboard: a row per story in the query's order after „Ohne
   assert.deepEqual([data.meta.iterationId, data.meta.iteration, data.meta.typeStates["User Story"].length, data.viewer, data.total, data.limited],
     [ITERATION_ID, "Sprint 12", 6, "alex.sample@example.com", 8, false]);
   assert.deepEqual(sprintData({ drop: [331, 332] }).rows.map((r) => r.key), ["AB#301", "AB#302"], "no „Ohne Story“ without a task in it");
+  const places = board.parseTaskboard(fixture("azure-sprint-taskboard.json"));
+  places.set(311, { ...places.get(311), columnId: "gone" });
+  const odd = board.sprintBoard({ ...sprintParts(), places });
+  assert.equal(odd.columns.flatMap((c) => c.cards).some((k) => k.number === 311), false, "a task in a column the taskboard does not list is left out");
+  assert.equal(odd.rows.some((r) => r.key === "AB#311"), false, "and is no story either");
+  const many = Array.from({ length: board.AZ_QUERY_LIMIT }, (_, i) => ({ ...sprintParts().items[1], number: 5000 + i, key: `AB#${5000 + i}` }));
+  assert.equal(board.sprintBoard({ ...sprintParts(), items: many }).limited, true, "as many as az boards query gives: maybe cut");
+  assert.deepEqual([board.sprintUntil("2026-11-27T00:00:00Z", 0), board.sprintUntil(null, 1000), board.sprintUntil("soon", 1000)],
+    [Date.parse("2026-11-28T00:00:00Z"), 1000 + DAY / 2, 1000 + DAY / 2], "the end of the last day, else half a day");
 });
 
 test("H/L step a task to the next column that maps its type; a moved task shows the state its column maps it to until a refresh reads it", () => {
@@ -4138,6 +4150,8 @@ test("H/L step a task to the next column that maps its type; a moved task shows 
   const back = board.findCard(board.moveCard(moved, "AB#311", columnId(data, "To Do")), "AB#311");
   assert.equal(board.shownState(back.card, back.column), "To Do");
   assert.equal(board.shownState(data.rows[1].story, null), "In Progress");
+  const read = { ...card, column: "x", readColumn: "x", state: "Done" };
+  assert.equal(board.shownState(read, { mappings: { Task: "To Do" } }), "Done", "not moved since it was read: its own state");
 });
 
 test("the Sprint's keys walk the stories, then each column in row order; h/l land on the same row's item, else the next one below, else the last", () => {
@@ -4152,6 +4166,10 @@ test("the Sprint's keys walk the stories, then each column in row order; h/l lan
   assert.deepEqual(go(0, "AB#302", "right"), { col: 1, key: "AB#311" }, "none below: the last");
   assert.deepEqual(go(2, "AB#332", "left"), { col: 1, key: "AB#331" });
   assert.deepEqual(go(0, "AB#302", "left"), { col: 0, key: "AB#302" }, "at the edge it stays");
+  const item = (key, row) => ({ key, row });
+  const synthetic = [{ shown: [item("a", "r0")] }, { shown: [item("b", "r1"), item("c", "r2")] }];
+  assert.deepEqual(board.sprintNavigate(synthetic, { col: 0, key: "a" }, "right", [{ key: "r0" }, { key: "r1" }, { key: "r2" }]), { col: 1, key: "b" },
+    "the first one below, not the last");
   assert.deepEqual(go(1, "AB#331", "down"), { col: 1, key: "AB#311" });
   const mine = board.sprintNav(data, "", true);
   assert.deepEqual(mine.map((c) => c.shown.map((i) => i.number)), [[301], [331, 311], [], [313], []]);
@@ -4246,6 +4264,11 @@ test("UI: a move Azure refuses goes back; one whose request cannot be written do
   await host.answer("az", azRefused("TF401320: Rule Error for field Task State."), AZ.move);
   assert.equal(board.findCard(st().data, "AB#311").column.name, "To Do");
   assert.equal(b.notice.text, "AB#311 bleibt in „To Do“: TF401320: Rule Error for field Task State.");
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", { code: 1, stdout: "", stderr: "Traceback (most recent call last):\nKeyError: 'value'\n" }, AZ.move);
+  assert.equal(board.findCard(st().data, "AB#311").column.name, "In Progress", "a write without a clear answer keeps the card");
+  assert.equal(b.notice.text, "AB#311 → In Progress: Ergebnis unklar: Traceback (most recent call last):; lädt neu");
+  assert.deepEqual(["places", "query"].map((k) => openAz(host, k).length), [1, 1]);
 });
 
 test("UI: s on a task offers its type's states and sets one with az boards work-item update; then the Sprint is read again", async () => {
@@ -4260,6 +4283,14 @@ test("UI: s on a task offers its type's states and sets one with az boards work-
   await host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "Done" } })), AZ.state);
   assert.equal(b.notice.text, "AB#311 hat jetzt den Status „Done“");
   assert.deepEqual(["places", "query"].map((k) => openAz(host, k).length), [1, 1], "where Azure put it is read again");
+  await answerRefresh(host, { me: false });
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "s");
+  assert.equal(b.modal.at, 1, "the menu starts at the task's state");
+  await press(b, cx, "3");
+  await host.answer("az", { code: 1, stdout: "", stderr: "ERROR: Operation returned a 503 status code.\n" }, AZ.state);
+  assert.equal(b.notice.text, "AB#312 → Done: Ergebnis unklar: Azure antwortete mit einem Fehler (az): Operation returned a 503 status code.; lädt neu");
+  assert.equal(board.findSprintItem(st().data, "AB#312").state, "Done", "kept until the refresh says");
 });
 
 test("UI: s on a story offers its type's states; a refusal sets the state back, an answer without the state is unclear and reads again", async () => {
@@ -4283,6 +4314,9 @@ test("UI: s on a story offers its type's states; a refusal sets the state back, 
   assert.equal(b.notice.text, "AB#302 → In Dev Test: Ergebnis unklar: Azure hat den Status nicht bestätigt; lädt neu");
   assert.equal(host.notes.at(-1).level, "warning");
   assert.deepEqual(["places", "query", "state"].map((k) => openAz(host, k).length), [1, 1, 0]);
+  st().data.meta.typeStates = {};
+  await press(b, cx, "s");
+  assert.deepEqual([b.modal, b.notice.text], [null, "Für User Story kennt das Board keine Status"]);
 });
 
 test("UI: Enter shows a work item's parent, state, assignee, column, area and iteration; o opens its page; Enter again names what is missing to start", async () => {
@@ -4346,4 +4380,10 @@ test("UI: on the Sprint h/l j/k walk stories and tasks by row, and the chosen it
   host.scrolled.length = 0;
   await click(b, cx, "card-AB#321");
   assert.equal(host.scrolled.at(-1).row, 2, "the third row shown");
+});
+
+test("UI: a Sprint with as many work items as az boards query gives says it may be cut", async () => {
+  const items = Array.from({ length: board.AZ_QUERY_LIMIT }, (_, i) => ({ id: 5000 + i, fields: { "System.Title": `Item ${i}`, "System.WorkItemType": "User Story", "System.State": "To Do" } }));
+  const { b } = await openSprint({ items: JSON.stringify(items) });
+  assert.ok(texts(b.render()).includes("Nur die ersten 1000 Work Items des Sprints (so viele gibt az boards query)"));
 });

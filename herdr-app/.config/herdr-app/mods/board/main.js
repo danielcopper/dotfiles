@@ -1274,7 +1274,7 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
   const storyIds = new Set(stories.map((s) => s.number));
   for (const item of items) {
     const place = places.get(item.number);
-    const col = place && (byId.get(place.columnId) ?? cols.find((c) => c.name === place.column));
+    const col = place && byId.get(place.columnId);
     if (!col) continue;
     const row = storyIds.has(item.parent) ? `AB#${item.parent}` : NO_STORY;
     col.cards.push({ ...item, column: col.id, readColumn: col.id, row });
