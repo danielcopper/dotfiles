@@ -1,8 +1,8 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
-// shows, and the pieces that the Board, its
-// shapes and its modals draw alike (a button, a backdrop for a dialog, a menu
-// and its keys, a detail section, a check's color, a status pill, a
-// column's head, a card's chip and a session's).
+// shows, and the pieces that the Board, its shapes and its modals draw
+// alike (a button, a backdrop for a dialog, a menu and its keys, a detail
+// section, a check's color, a status pill, a column's head, a card's chip
+// and a session's).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";

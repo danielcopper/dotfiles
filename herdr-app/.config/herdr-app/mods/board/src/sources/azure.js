@@ -135,6 +135,16 @@ function azJson(stdout, what, empty) {
   }
 }
 
+// az's answer as JSON, or null for anything else: an answer the reader
+// (who az is) or the checks of a write take for one that says nothing.
+function jsonOrNull(stdout) {
+  try {
+    return JSON.parse(String(stdout ?? "").trim());
+  } catch {
+    return null;
+  }
+}
+
 // A list Azure sends either as it is or wrapped in { count, value } (az
 // devops invoke prints REST's wrapper, with its continuation_token).
 const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
@@ -221,12 +231,8 @@ export function parseWorkItems(stdout, c) {
 
 // Who az is signed in as (the user's name), in lower case, or null.
 export function parseViewer(stdout) {
-  try {
-    const name = JSON.parse(String(stdout ?? "").trim())?.name;
-    return typeof name === "string" && name ? name.toLowerCase() : null;
-  } catch {
-    return null;
-  }
+  const name = jsonOrNull(stdout)?.name;
+  return typeof name === "string" && name ? name.toLowerCase() : null;
 }
 
 // The sprint as the sprint shape shows it (kinds/sprint.js). Its tasks are
@@ -313,16 +319,6 @@ async function writeMoveBody(id, column) {
   return path;
 }
 
-// az's answer to a write as JSON, or null for any other: the checks below
-// take that for an answer that confirms nothing.
-function writeAnswer(stdout) {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-}
-
 export const azMoveArgs = (c, iterationId, id, file) =>
   azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId, workItemId: id }, ["--http-method", "PATCH", "--in-file", file]);
 
@@ -331,7 +327,7 @@ export const azMoveArgs = (c, iterationId, id, file) =>
 // (workItemId, column, columnId), confirms the move. Anything else leaves
 // open whether it landed: the refresh that follows says where it stands.
 export function checkTaskboardMove(stdout, card, column) {
-  const json = writeAnswer(stdout);
+  const json = jsonOrNull(stdout);
   const entry = azList(json)?.find((w) => w?.workItemId === card.number) ?? json;
   if (entry?.workItemId !== card.number || (entry.columnId !== column.id && entry.column !== column.name)) {
     throw failure("Azure hat die Verschiebung nicht bestätigt", { write: true, unclear: true });
@@ -343,7 +339,7 @@ export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", .
 // az's answer to a state change must name the state it set; anything else
 // leaves open whether the change landed.
 export function checkStateResult(stdout, state) {
-  const json = writeAnswer(stdout);
+  const json = jsonOrNull(stdout);
   if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
 }
 

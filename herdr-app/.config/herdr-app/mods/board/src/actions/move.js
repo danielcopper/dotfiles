@@ -56,11 +56,10 @@ export function reselectIn(b, view, before) {
 }
 
 // Where the cards of settled unclear moves (`due`, of kind "move") are in
-// the new data, one line each: the target column, the write
-// landed (info); another column, a warning; not there while the target is
-// hidden, not shown (info); not there while other columns are hidden, not
-// shown, it may be in any of them (warning); else not on the board
-// (warning).
+// the new data, one line each: the target column, the write landed (info);
+// another column, a warning; not there while the target is hidden, not
+// shown (info); not there while other columns are hidden, not shown, it may
+// be in any of them (warning); else not on the board (warning).
 export function unclearMoveLines(due, data) {
   return due.map((u) => {
     const now = findCard(data, u.key)?.column;

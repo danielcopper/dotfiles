@@ -31,10 +31,12 @@ export function viewStands(b, view) {
 //   change and the other way round;
 // - w.texts: pending() and landed() say how it goes, unclear leads the
 //   warning, refused(why, earlier) the error (earlier: an outcome of the
-//   item's write of this kind is still open, which the refresh after the
-//   refusal tells);
+//   item's write of this kind is still open);
 // - w.again: refresh after a write that landed too.
-// A refresh follows only while the view stands (viewStands).
+// A write that landed or was refused refreshes the view too while an open
+// outcome of the item, of either kind, remains: the refresh tells it, so
+// it does not wait for the timer. A refresh follows only while the view
+// stands (viewStands).
 export function writeAtOnce(b, view, w, cx) {
   const st = b.state(view.id);
   const { key, label } = w;
@@ -52,7 +54,7 @@ export function writeAtOnce(b, view, w, cx) {
       st.unclear = st.unclear.filter((u) => !same(u));
       b.say(w.texts.landed(), "success", cx);
       const { followed, current } = viewStands(b, view);
-      if (w.again && followed && current) b.refresh(current, cx);
+      if ((w.again || openOf(st, key)) && followed && current) b.refresh(current, cx);
     } catch (e) {
       w.failed?.();
       const why = report(e);
@@ -68,9 +70,9 @@ export function writeAtOnce(b, view, w, cx) {
         const earlier = st.unclear.some(same);
         b.say(w.texts.refused(why, earlier), "error", cx);
         notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-        // An earlier unclear write of the item waited for this one; the
-        // server's answer tells it now.
-        if (followed && current && earlier) b.refresh(current, cx);
+        // An open outcome of the item waited for this write; the refresh
+        // tells it now.
+        if (followed && current && openOf(st, key)) b.refresh(current, cx);
       }
     } finally {
       delete st.pending[key];
@@ -78,6 +80,9 @@ export function writeAtOnce(b, view, w, cx) {
     }
   });
 }
+
+// Whether an outcome of the item `key`, of either kind, is still open.
+const openOf = (st, key) => st.unclear.some((u) => u.key === key);
 
 // Says the lines of settled outcomes ({ text, warn }) in one notice; one
 // that warns makes it a warning, which a toast repeats.

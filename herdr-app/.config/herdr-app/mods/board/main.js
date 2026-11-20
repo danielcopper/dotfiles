@@ -962,8 +962,8 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
 
 // A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
 // whose story is not in the sprint), the items it holds, what shows and how
-// the keys walk it, a task's state as shown, and a state change laid over
-// the data. The data is a board's (kinds/board.js: its columns hold the
+// the keys walk it, a task's state as shown, a state change laid over the
+// data, and its warnings (sprintWarnings). The data is a board's (kinds/board.js: its columns hold the
 // tasks, so moves, their rollback and H/L work on it as on a board) plus
 // its rows; sprintBoard (sources/azure.js) builds it.
 
@@ -1188,6 +1188,16 @@ function azJson(stdout, what, empty) {
   }
 }
 
+// az's answer as JSON, or null for anything else: an answer the reader
+// (who az is) or the checks of a write take for one that says nothing.
+function jsonOrNull(stdout) {
+  try {
+    return JSON.parse(String(stdout ?? "").trim());
+  } catch {
+    return null;
+  }
+}
+
 // A list Azure sends either as it is or wrapped in { count, value } (az
 // devops invoke prints REST's wrapper, with its continuation_token).
 const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
@@ -1274,12 +1284,8 @@ export function parseWorkItems(stdout, c) {
 
 // Who az is signed in as (the user's name), in lower case, or null.
 export function parseViewer(stdout) {
-  try {
-    const name = JSON.parse(String(stdout ?? "").trim())?.name;
-    return typeof name === "string" && name ? name.toLowerCase() : null;
-  } catch {
-    return null;
-  }
+  const name = jsonOrNull(stdout)?.name;
+  return typeof name === "string" && name ? name.toLowerCase() : null;
 }
 
 // The sprint as the sprint shape shows it (kinds/sprint.js). Its tasks are
@@ -1366,16 +1372,6 @@ async function writeMoveBody(id, column) {
   return path;
 }
 
-// az's answer to a write as JSON, or null for any other: the checks below
-// take that for an answer that confirms nothing.
-function writeAnswer(stdout) {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-}
-
 export const azMoveArgs = (c, iterationId, id, file) =>
   azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId, workItemId: id }, ["--http-method", "PATCH", "--in-file", file]);
 
@@ -1384,7 +1380,7 @@ export const azMoveArgs = (c, iterationId, id, file) =>
 // (workItemId, column, columnId), confirms the move. Anything else leaves
 // open whether it landed: the refresh that follows says where it stands.
 export function checkTaskboardMove(stdout, card, column) {
-  const json = writeAnswer(stdout);
+  const json = jsonOrNull(stdout);
   const entry = azList(json)?.find((w) => w?.workItemId === card.number) ?? json;
   if (entry?.workItemId !== card.number || (entry.columnId !== column.id && entry.column !== column.name)) {
     throw failure("Azure hat die Verschiebung nicht bestätigt", { write: true, unclear: true });
@@ -1396,7 +1392,7 @@ export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", .
 // az's answer to a state change must name the state it set; anything else
 // leaves open whether the change landed.
 export function checkStateResult(stdout, state) {
-  const json = writeAnswer(stdout);
+  const json = jsonOrNull(stdout);
   if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
 }
 
@@ -1972,10 +1968,10 @@ export const layers = { boardLayer, showTab, leaveLayer };
 // ==== src/ui/helpers.js ====
 
 // UI helpers: lasting settings, colors and machine names, whether the board
-// shows, and the pieces that the Board, its
-// shapes and its modals draw alike (a button, a backdrop for a dialog, a menu
-// and its keys, a detail section, a check's color, a status pill, a
-// column's head, a card's chip and a session's).
+// shows, and the pieces that the Board, its shapes and its modals draw
+// alike (a button, a backdrop for a dialog, a menu and its keys, a detail
+// section, a check's color, a status pill, a column's head, a card's chip
+// and a session's).
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -2196,10 +2192,12 @@ export function viewStands(b, view) {
 //   change and the other way round;
 // - w.texts: pending() and landed() say how it goes, unclear leads the
 //   warning, refused(why, earlier) the error (earlier: an outcome of the
-//   item's write of this kind is still open, which the refresh after the
-//   refusal tells);
+//   item's write of this kind is still open);
 // - w.again: refresh after a write that landed too.
-// A refresh follows only while the view stands (viewStands).
+// A write that landed or was refused refreshes the view too while an open
+// outcome of the item, of either kind, remains: the refresh tells it, so
+// it does not wait for the timer. A refresh follows only while the view
+// stands (viewStands).
 export function writeAtOnce(b, view, w, cx) {
   const st = b.state(view.id);
   const { key, label } = w;
@@ -2217,7 +2215,7 @@ export function writeAtOnce(b, view, w, cx) {
       st.unclear = st.unclear.filter((u) => !same(u));
       b.say(w.texts.landed(), "success", cx);
       const { followed, current } = viewStands(b, view);
-      if (w.again && followed && current) b.refresh(current, cx);
+      if ((w.again || openOf(st, key)) && followed && current) b.refresh(current, cx);
     } catch (e) {
       w.failed?.();
       const why = report(e);
@@ -2233,9 +2231,9 @@ export function writeAtOnce(b, view, w, cx) {
         const earlier = st.unclear.some(same);
         b.say(w.texts.refused(why, earlier), "error", cx);
         notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-        // An earlier unclear write of the item waited for this one; the
-        // server's answer tells it now.
-        if (followed && current && earlier) b.refresh(current, cx);
+        // An open outcome of the item waited for this write; the refresh
+        // tells it now.
+        if (followed && current && openOf(st, key)) b.refresh(current, cx);
       }
     } finally {
       delete st.pending[key];
@@ -2243,6 +2241,9 @@ export function writeAtOnce(b, view, w, cx) {
     }
   });
 }
+
+// Whether an outcome of the item `key`, of either kind, is still open.
+const openOf = (st, key) => st.unclear.some((u) => u.key === key);
 
 // Says the lines of settled outcomes ({ text, warn }) in one notice; one
 // that warns makes it a warning, which a toast repeats.
@@ -2309,11 +2310,10 @@ export function reselectIn(b, view, before) {
 }
 
 // Where the cards of settled unclear moves (`due`, of kind "move") are in
-// the new data, one line each: the target column, the write
-// landed (info); another column, a warning; not there while the target is
-// hidden, not shown (info); not there while other columns are hidden, not
-// shown, it may be in any of them (warning); else not on the board
-// (warning).
+// the new data, one line each: the target column, the write landed (info);
+// another column, a warning; not there while the target is hidden, not
+// shown (info); not there while other columns are hidden, not shown, it may
+// be in any of them (warning); else not on the board (warning).
 export function unclearMoveLines(due, data) {
   return due.map((u) => {
     const now = findCard(data, u.key)?.column;
@@ -2715,7 +2715,7 @@ function scrollToRow(b, view, key) {
 // iterationId, iteration, finish, typeStates, states, unplaced,
 // unknownColumns }, columns: [{ id, name, color, hidden, count, target,
 // types, mappings, cards }], rows: [{ key, story }], viewer, noViewer,
-// total, limited } (sprintBoard, sources/azure.js). View fields it reads:
+// total, limited, limit } (sprintBoard, sources/azure.js). View fields it reads:
 // id, source, layout (as writeAtOnce does).
 
 // How wide the stories' column is.
@@ -2767,7 +2767,7 @@ export const sprintShape = {
     return false;
   },
   received: (data, st) => applyMoves(data, st.moves),
-  // Tasks left out, and a query az may have cut (sprintWarnings).
+  // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has.

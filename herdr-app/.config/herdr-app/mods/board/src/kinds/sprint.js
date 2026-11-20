@@ -1,7 +1,7 @@
 // A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
 // whose story is not in the sprint), the items it holds, what shows and how
-// the keys walk it, a task's state as shown, and a state change laid over
-// the data. The data is a board's (kinds/board.js: its columns hold the
+// the keys walk it, a task's state as shown, a state change laid over the
+// data, and its warnings (sprintWarnings). The data is a board's (kinds/board.js: its columns hold the
 // tasks, so moves, their rollback and H/L work on it as on a board) plus
 // its rows; sprintBoard (sources/azure.js) builds it.
 

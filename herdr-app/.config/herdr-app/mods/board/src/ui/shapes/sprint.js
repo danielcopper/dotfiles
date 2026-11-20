@@ -11,7 +11,7 @@
 // iterationId, iteration, finish, typeStates, states, unplaced,
 // unknownColumns }, columns: [{ id, name, color, hidden, count, target,
 // types, mappings, cards }], rows: [{ key, story }], viewer, noViewer,
-// total, limited } (sprintBoard, sources/azure.js). View fields it reads:
+// total, limited, limit } (sprintBoard, sources/azure.js). View fields it reads:
 // id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
@@ -74,7 +74,7 @@ export const sprintShape = {
     return false;
   },
   received: (data, st) => applyMoves(data, st.moves),
-  // Tasks left out, and a query az may have cut (sprintWarnings).
+  // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has.

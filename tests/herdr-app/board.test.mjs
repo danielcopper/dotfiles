@@ -4579,3 +4579,59 @@ test("UI: an open outcome waits through a write of another kind: a state change 
   await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
   assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“");
 });
+
+test("UI: a refused state change while a move of the item is open refreshes, and the move's line is said after it", async () => {
+  const { b, cx, host } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", ok(""), AZ.move);
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "move"]], "not due while the state is written");
+  await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZ.state);
+  assert.equal(b.notice.text, "AB#311 bleibt „In Progress“: TF401320: Rule Error for field State.");
+  assert.deepEqual(openCounts(host, [...SETTINGS, "places"]), [1, 1, 1, 0, 0], "a refresh follows (the refusal dropped the team's settings)");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
+  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“");
+});
+
+test("UI: a move that lands while a state change of the item is open refreshes, and the state's line is said after it", async () => {
+  const { b, cx, host } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  await host.answer("az", ok("{}"), AZ.state);
+  await press(b, cx, "l", shiftL);
+  const items = json("azure-sprint-items.json");
+  items[2].fields["System.State"] = "Done";
+  await answerRefresh(host, { me: false, items: JSON.stringify(items) });
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "state"]], "not due while the move is written");
+  await host.answer("az", moved(311, "prog", "In Progress"), AZ.move);
+  assert.equal(b.notice.text, "AB#311 steht jetzt in „In Progress“");
+  assert.deepEqual(openCounts(host, ["places", "query"]), [1, 1], "a refresh follows");
+  await answerRefresh(host, { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
+  assert.equal(b.notice.text, "AB#311 hat nach dem Neuladen den Status „Done“");
+});
+
+test("UI: an unclear move and an unclear state change of one item stay open side by side, and one refresh says both", async () => {
+  const { b, cx, host } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", ok(""), AZ.move);
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  const items = json("azure-sprint-items.json");
+  items[2].fields["System.State"] = "Done";
+  const after = { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 311: ["prog", "In Progress"] }) };
+  await answerRefresh(host, after);
+  await host.answer("az", ok("{}"), AZ.state);
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "move"], ["AB#311", "state"]]);
+  await answerRefresh(host, after);
+  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“; AB#311 hat nach dem Neuladen den Status „Done“");
+});
+
+test("who az is is read with the same tolerant parse as the answers to writes", () => {
+  assert.deepEqual([board.parseViewer(" { \"name\": \"A@B.example\" }\n"), board.parseViewer("ERROR"), board.parseViewer(undefined), board.parseViewer("[]")], ["a@b.example", null, null, null]);
+});
