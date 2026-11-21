@@ -19,11 +19,13 @@
 # The server is python3 -I -m http.server, started from / in its own session
 # so it imports nothing from the caller's directory and outlives the shell;
 # its output goes to
-# ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log. The link is
+# ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log, its PID to
+# <port>.pid beside it. The link is
 # printed once ss shows the server listening. A server that exits first lost
 # its port to another process after the check: the next free port is tried,
-# 3 in all. One that does not listen within 3 seconds is stopped. --stop ends a
-# server this script started, and refuses any other process.
+# 3 in all. One that does not listen within 3 seconds is stopped. --stop ends
+# only a server with such a PID file whose command line still matches it, and
+# removes the file.
 # PREVIEW_PORTS_FILE overrides the path of the range file.
 set -euo pipefail
 # die inside $(...) must end the script, not just the substitution's subshell.
@@ -33,6 +35,7 @@ ports_file=${PREVIEW_PORTS_FILE:-/etc/preview-ports}
 fallback_range=8700-8799
 listen_wait=3
 start_tries=3
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
 
 die() {
   printf 'preview-serve: %s\n' "$*" >&2
@@ -43,12 +46,28 @@ usage() {
   exit 2
 }
 
+# stop <pid>: ends the server whose PID file names <pid>, once its command
+# line shows the PID still belongs to that server, and removes the file. A
+# file whose server is gone is removed too.
 stop() {
-  local pid=$1 cmdline
+  local pid=$1 file='' candidate port cmdline
   [[ $pid =~ ^[0-9]+$ ]] || die "not a PID: $pid"
-  cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline") || die "no process $pid"
-  [[ $cmdline == *" -m http.server "* ]] || die "process $pid is no preview server: $cmdline"
-  kill "$pid"
+  for candidate in "$state_dir"/*.pid; do
+    if [ -f "$candidate" ] && [ "$(<"$candidate")" = "$pid" ]; then
+      file=$candidate
+      break
+    fi
+  done
+  [ -n "$file" ] || die "no server started by preview-serve has PID $pid"
+  port=${file##*/}
+  port=${port%.pid}
+  if ! cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline") ||
+    [[ $cmdline != *" -m http.server $port "* ]]; then
+    rm -f -- "$file"
+    die "the server on port $port with PID $pid is gone; its PID file is removed"
+  fi
+  kill -- "$pid"
+  rm -f -- "$file"
   echo "stopped $pid"
 }
 
@@ -141,13 +160,12 @@ await_listen() {
 }
 
 serve() {
-  local dir ip port log_dir log pid tries=0 from=
+  local dir ip port log pid tries=0 from=
   [ -d "$1" ] || die "no such directory: $1"
   dir=$(cd "$1" && pwd -P)
   check_tree "$dir"
   ip=$(home_ip)
-  log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
-  mkdir -p "$log_dir"
+  mkdir -p "$state_dir"
   # -I and the neutral working directory keep python from importing modules
   # planted in the caller's directory or named by PYTHON* variables.
   cd /
@@ -155,7 +173,7 @@ serve() {
   # next free port is tried then, up to $start_tries ports in all.
   while :; do
     port=$(free_port "$from")
-    log=$log_dir/$port.log
+    log=$state_dir/$port.log
     setsid python3 -I -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
     pid=$!
     if await_listen "$pid" "$ip" "$port" "$log"; then
@@ -168,6 +186,7 @@ serve() {
     fi
     from=$((port + 1))
   done
+  echo "$pid" >"$state_dir/$port.pid"
   echo "http://$ip:$port/"
   echo "pid $pid; stop it with: preview-serve --stop $pid"
 }

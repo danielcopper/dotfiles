@@ -39,8 +39,12 @@
 #   b2  a server that exits at once on 8700 and 8701: served on 8702
 #   b3  a server that never listens: stopped after the wait, exit 1, says so
 #   b4  a server that listens only after a second: link printed once it does
-#   s1  --stop ends a server the script started
-#   s2  --stop refuses a process that is no preview server and leaves it
+#   s1  a started server's PID is in <port>.pid in the state directory;
+#       --stop ends that server and removes the file
+#   s2  --stop refuses a process without a PID file and leaves it, also one
+#       whose command line is a preview server's
+#   s3  a PID file whose server is gone, or whose PID now belongs to another
+#       process: refused, that process left alone, the file removed
 # usage: preview-serve.sh [preview-serve] [case ...]
 #        preview-serve.sh --list
 #   The script defaults to the repo's bash/.local/bin/preview-serve, the cases
@@ -53,7 +57,7 @@ set -uo pipefail
 
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range g1_git_root
   g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated i1_no_src b1_server_exits
-  b2_retry b3_never_listens b4_waits_for_listen s1_stop s2_stop_refuses)
+  b2_retry b3_never_listens b4_waits_for_listen s1_stop s2_stop_refuses s3_stop_stale)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -81,7 +85,7 @@ trap cleanup EXIT
 export HOME=$ROOT/home
 mkdir -p "$HOME" "$ROOT/bin"
 
-for tool in bash cat find grep mkdir readlink setsid sleep tr; do
+for tool in bash cat find grep mkdir readlink rm setsid sleep tr; do
   ln -s "$(type -P "$tool")" "$ROOT/bin/$tool"
 done
 cat >"$ROOT/bin/ip" <<EOF
@@ -303,9 +307,11 @@ b4_waits_for_listen() {
 s1_stop() {
   run -- "$DIR"
   serving 8700
-  local pid=$PID
+  local pid=$PID pidfile=$HOME/.local/state/preview-serve/8700.pid
+  check "PID file holds the PID" [ "$(cat "$pidfile" 2>/dev/null)" = "$pid" ]
   run -- --stop "$pid"
   check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
+  check "PID file removed" [ ! -e "$pidfile" ]
   check "says stopped: $OUT" [ "$OUT" = "stopped $pid" ]
   local tries=0
   while alive "$pid" && [ "$tries" -lt 20 ]; do
@@ -315,14 +321,47 @@ s1_stop() {
   check "server ended" gone "$pid"
 }
 
+# foreign <command...>: starts the command in its own session, outside
+# preview-serve, and sets $FOREIGN to its PID.
+foreign() {
+  setsid "$@" </dev/null >/dev/null 2>&1 &
+  FOREIGN=$!
+  PIDS+=("$FOREIGN")
+}
+
 s2_stop_refuses() {
-  setsid sleep 30 &
-  local pid=$!
-  PIDS+=("$pid")
-  run -- --stop "$pid"
+  foreign sleep 30
+  run -- --stop "$FOREIGN"
   check "exit 1, got $RC" [ "$RC" = 1 ]
-  check "says it is no preview server: $ERR" grep -q "is no preview server" <<<"$ERR"
-  check "process left alone" alive "$pid"
+  check "says no such server: $ERR" grep -qxF \
+    "preview-serve: no server started by preview-serve has PID $FOREIGN" <<<"$ERR"
+  check "sleep left alone" alive "$FOREIGN"
+  foreign env PATH="$ROOT/bin" "$ROOT/bin/python3" -I -m http.server 8700 --bind 192.0.2.7 --directory "$DIR"
+  run -- --stop "$FOREIGN"
+  check "exit 1 for a foreign server, got $RC" [ "$RC" = 1 ]
+  check "foreign server left alone" alive "$FOREIGN"
+}
+
+s3_stop_stale() {
+  local state=$HOME/.local/state/preview-serve
+  mkdir -p "$state"
+  # A process that ends on its own: a signal sent before the child has
+  # exec'd would run this suite's EXIT trap in the child.
+  foreign true
+  local held=$FOREIGN
+  wait "$held"
+  echo "$held" >"$state/8700.pid"
+  run -- --stop "$held"
+  check "exit 1 for a gone server, got $RC" [ "$RC" = 1 ]
+  check "says it is gone: $ERR" grep -qxF \
+    "preview-serve: the server on port 8700 with PID $held is gone; its PID file is removed" <<<"$ERR"
+  check "PID file of the gone server removed" [ ! -e "$state/8700.pid" ]
+  foreign sleep 30
+  echo "$FOREIGN" >"$state/8701.pid"
+  run -- --stop "$FOREIGN"
+  check "exit 1 for a reused PID, got $RC" [ "$RC" = 1 ]
+  check "process with the reused PID left alone" alive "$FOREIGN"
+  check "PID file of the reused PID removed" [ ! -e "$state/8701.pid" ]
 }
 
 missing=0
