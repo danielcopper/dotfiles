@@ -21,9 +21,15 @@
 #   r2  ports with a listener on any address (0.0.0.0, [::], 127.0.0.1, *)
 #       are skipped, a listener on 18703 does not take 8703: 8703
 #   r3  every port of the range taken: exit 1, says so, no server started
-#   r4  no range file: 8700-8799, so 8701 with 8700 taken
+#   r4  no range file: 8700-8719, said in one line on stderr, so 8701 with
+#       8700 taken; 8719 with 8700-8718 taken; all 20 taken: exit 1, the
+#       error names 8700-8719
 #   r5  a range file without <first>-<last>, or with first above last or a
 #       port above 65535: exit 1, no server started
+#   r6  a symlink to a missing file at the range file's path: exit 1, says
+#       so, no server started
+#   r7  only the range's last port free: that one
+#   r8  one-port ranges at the bounds, 8700-8700 and 65535-65535: accepted
 #   g1  a directory holding .git (a directory or, as in a worktree, a file):
 #       refused, no server started
 #   g2  a .git further below the directory: refused, no server started
@@ -55,7 +61,8 @@
 # next case.
 set -uo pipefail
 
-CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range g1_git_root
+CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range r6_dangling_range_file
+  r7_last_port_free r8_one_port_ranges g1_git_root
   g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated i1_no_src b1_server_exits
   b2_retry b3_never_listens b4_waits_for_listen s1_stop s2_stop_refuses s3_stop_stale)
 if [ "${1:-}" = --list ]; then
@@ -197,10 +204,33 @@ r3_all_taken() {
   refused "every port of 8700-8701 is in use"
 }
 
+# no_file_said: stderr holds the fallback's line once and nothing else.
+no_file_said() { [ "$ERR" = "preview-serve: no $ROOT/preview-ports, so the range is 8700-8719" ]; }
+
+# taken <first> <last>: listeners on every port of the range.
+taken() {
+  local port addrs=()
+  for ((port = $1; port <= $2; port++)); do addrs+=("0.0.0.0:$port"); done
+  listening "${addrs[@]}"
+}
+
 r4_no_file() {
   listening 0.0.0.0:8700
   run -- "$DIR"
   serving 8701
+  check "one line on stderr says the range: $ERR" no_file_said
+  stop_servers
+  : >"$ROOT/calls"
+  : >"$ROOT/bound"
+  taken 8700 8718
+  run -- "$DIR"
+  serving 8719
+  : >"$ROOT/calls"
+  taken 8700 8719
+  run -- "$DIR"
+  check "exit 1 with all 20 taken, got $RC" [ "$RC" = 1 ]
+  check "error names 8700-8719: $ERR" grep -q "every port of 8700-8719 is in use" <<<"$ERR"
+  check "no server started: $(calls)" no_server
 }
 
 r5_bad_range() {
@@ -211,6 +241,30 @@ r5_bad_range() {
     run -- "$DIR"
     refused "port range"
   done
+}
+
+r6_dangling_range_file() {
+  ln -s "$ROOT/missing" "$ROOT/preview-ports"
+  run -- "$DIR"
+  refused "$ROOT/preview-ports is a symlink to a missing file"
+}
+
+r7_last_port_free() {
+  ports 8700-8702
+  listening 0.0.0.0:8700 0.0.0.0:8701
+  run -- "$DIR"
+  serving 8702
+}
+
+r8_one_port_ranges() {
+  ports 8700-8700
+  run -- "$DIR"
+  serving 8700
+  stop_servers
+  : >"$ROOT/calls"
+  ports 65535-65535
+  run -- "$DIR"
+  serving 65535
 }
 
 g1_git_root() {
@@ -285,6 +339,8 @@ b2_retry() {
     "http.server 8700 http.server 8701 http.server 8702 " ]
   check "link printed: $OUT" grep -qxF "http://192.0.2.7:8702/" <<<"$OUT"
   check "server alive" alive "$PID"
+  check "the fallback said once over the 3 tries: $ERR" \
+    [ "$(grep -c "so the range is" <<<"$ERR")" = 1 ]
 }
 
 b3_never_listens() {

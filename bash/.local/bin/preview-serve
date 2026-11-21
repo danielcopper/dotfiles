@@ -10,7 +10,8 @@
 # /etc/preview-ports holds as <first>-<last>; the homelab playbook writes that
 # file on hosts whose firewall opens only that range to the LAN. When every
 # port of the range is taken, nothing starts and the exit code is 1. Without
-# the file the range is 8700-8799.
+# the file the range is 8700-8719, the one the playbook writes, and one line on
+# stderr says so; a symlink there to a missing file is an error.
 #
 # The server hands out every file below <dir> and follows symlinks, so <dir>
 # may hold no .git at or below it (a work tree root, a nested clone) and no
@@ -32,7 +33,8 @@ set -euo pipefail
 shopt -s inherit_errexit
 
 ports_file=${PREVIEW_PORTS_FILE:-/etc/preview-ports}
-fallback_range=8700-8799
+# The range the homelab playbook writes on the Minisforum, the one known source.
+fallback_range=8700-8719
 listen_wait=3
 start_tries=3
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
@@ -71,18 +73,25 @@ stop() {
   echo "stopped $pid"
 }
 
-# Prints the range as "<first> <last>".
-port_range() {
-  local range=$fallback_range
+# load_range: sets $first and $last from the range file, or from the
+# fallback with one line on stderr when there is no file. Run it outside a
+# command substitution, so the globals and that line come once per run.
+load_range() {
+  local range
   if [ -e "$ports_file" ]; then
     range=$(<"$ports_file") || die "cannot read $ports_file"
+  elif [ -L "$ports_file" ]; then
+    die "$ports_file is a symlink to a missing file"
+  else
+    range=$fallback_range
+    printf 'preview-serve: no %s, so the range is %s\n' "$ports_file" "$range" >&2
   fi
   [[ $range =~ ^([0-9]{1,5})-([0-9]{1,5})$ ]] ||
     die "$ports_file holds no <first>-<last> port range: $range"
-  local first=$((10#${BASH_REMATCH[1]})) last=$((10#${BASH_REMATCH[2]}))
+  first=$((10#${BASH_REMATCH[1]}))
+  last=$((10#${BASH_REMATCH[2]}))
   [ "$first" -ge 1 ] && [ "$first" -le "$last" ] && [ "$last" -le 65535 ] ||
     die "$ports_file holds no valid port range: $range"
-  echo "$first $last"
 }
 
 # Prints the local address:port of every listening TCP socket, one per line.
@@ -94,12 +103,10 @@ listening() {
   done <<<"$sockets"
 }
 
-# free_port [from]: the first port of the range, from <from> on, that nothing
-# listens on, on any address.
+# free_port [from]: the first port of the range load_range set, from <from>
+# on, that nothing listens on, on any address.
 free_port() {
-  local range first last start sockets addr port
-  range=$(port_range)
-  read -r first last <<<"$range"
+  local start sockets addr port
   start=${1:-$first}
   [ "$start" -ge "$first" ] || start=$first
   sockets=$(listening)
@@ -165,6 +172,7 @@ serve() {
   dir=$(cd "$1" && pwd -P)
   check_tree "$dir"
   ip=$(home_ip)
+  load_range
   mkdir -p "$state_dir"
   # -I and the neutral working directory keep python from importing modules
   # planted in the caller's directory or named by PYTHON* variables.
