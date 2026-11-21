@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Global mise task: run the tests of the shell startup and the Claude Code
-# status line from the dotfiles repo; what they check is in the headers of
-# tests/statusline/width.sh and tests/bash/startup.sh.
+# Global mise task: run the tests of the shell startup, the Claude Code
+# status line and preview-serve from the dotfiles repo; what they check is in
+# the headers of tests/statusline/width.sh, tests/bash/startup.sh and
+# tests/bash/preview-serve.sh.
 #
 # Usage: mise run shell-test [case...]   (defaults to all)
 #   Each case runs from the test file that lists it.
@@ -11,4 +12,5 @@ dotfiles="${DOTFILES_DIR:-$HOME/dotfiles}"
 run_listed="$dotfiles/tests/run-listed.sh"
 [ -f "$run_listed" ] || { echo "shell-test: no such file: $run_listed" >&2; exit 1; }
 
-exec "$run_listed" shell-test "$dotfiles/tests/statusline/width.sh" "$dotfiles/tests/bash/startup.sh" -- "$@"
+exec "$run_listed" shell-test "$dotfiles/tests/statusline/width.sh" "$dotfiles/tests/bash/startup.sh" \
+  "$dotfiles/tests/bash/preview-serve.sh" -- "$@"

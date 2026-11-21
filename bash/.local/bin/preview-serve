@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Serve a directory of pages or images on this machine's home-network address,
+# in the background, and print the link and the server's PID.
+#
+# usage: preview-serve <dir>
+#        preview-serve --stop <pid>
+#
+# The address is the src of `ip -4 route get 1.1.1.1`. The port is the first
+# one that nothing listens on (`ss -Hltn`, any address) in the range
+# /etc/preview-ports holds as <first>-<last>; the homelab playbook writes that
+# file on hosts whose firewall opens only that range to the LAN. When every
+# port of the range is taken, nothing starts and the exit code is 1. Without
+# the file the range is 8700-8799.
+#
+# <dir> may not contain a .git anywhere at or below it (a work tree root, a
+# nested clone): the server hands out every file below <dir>.
+#
+# The server is python3 -m http.server, started in its own session so it
+# outlives the shell; its output goes to
+# ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log. --stop ends a
+# server this script started, and refuses any other process.
+# PREVIEW_PORTS_FILE overrides the path of the range file.
+set -euo pipefail
+# die inside $(...) must end the script, not just the substitution's subshell.
+shopt -s inherit_errexit
+
+ports_file=${PREVIEW_PORTS_FILE:-/etc/preview-ports}
+fallback_range=8700-8799
+
+die() {
+  printf 'preview-serve: %s\n' "$*" >&2
+  exit 1
+}
+usage() {
+  echo "usage: preview-serve <dir> | preview-serve --stop <pid>" >&2
+  exit 2
+}
+
+stop() {
+  local pid=$1 cmdline
+  [[ $pid =~ ^[0-9]+$ ]] || die "not a PID: $pid"
+  cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline") || die "no process $pid"
+  [[ $cmdline == *" -m http.server "* ]] || die "process $pid is no preview server: $cmdline"
+  kill "$pid"
+  echo "stopped $pid"
+}
+
+# Prints the range as "<first> <last>".
+port_range() {
+  local range=$fallback_range
+  if [ -e "$ports_file" ]; then
+    range=$(<"$ports_file") || die "cannot read $ports_file"
+  fi
+  [[ $range =~ ^([0-9]{1,5})-([0-9]{1,5})$ ]] ||
+    die "$ports_file holds no <first>-<last> port range: $range"
+  local first=$((10#${BASH_REMATCH[1]})) last=$((10#${BASH_REMATCH[2]}))
+  [ "$first" -ge 1 ] && [ "$first" -le "$last" ] && [ "$last" -le 65535 ] ||
+    die "$ports_file holds no valid port range: $range"
+  echo "$first $last"
+}
+
+free_port() {
+  local range first last listening addr port
+  range=$(port_range)
+  read -r first last <<<"$range"
+  listening=$(ss -Hltn) || die "ss cannot list the listening ports"
+  local -A taken=()
+  while read -r _ _ _ addr _; do
+    [ -z "$addr" ] || taken[${addr##*:}]=1
+  done <<<"$listening"
+  for ((port = first; port <= last; port++)); do
+    if [ -z "${taken[$port]+set}" ]; then
+      echo "$port"
+      return
+    fi
+  done
+  die "every port of $first-$last is in use; stop a server with preview-serve --stop <pid>"
+}
+
+home_ip() {
+  local route
+  route=$(ip -4 route get 1.1.1.1) || die "no IPv4 route to find the home-network address"
+  [[ $route =~ (^|[[:space:]])src[[:space:]]+([0-9.]+) ]] || die "no src address in: $route"
+  echo "${BASH_REMATCH[2]}"
+}
+
+serve() {
+  local dir git ip port log_dir log pid
+  [ -d "$1" ] || die "no such directory: $1"
+  dir=$(cd "$1" && pwd -P)
+  git=$(find "$dir" -name .git -print -quit)
+  [ -z "$git" ] || die "$dir holds $git; serve a directory with only the files to show"
+  ip=$(home_ip)
+  port=$(free_port)
+  log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
+  mkdir -p "$log_dir"
+  log=$log_dir/$port.log
+  setsid python3 -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
+  pid=$!
+  # A port taken between the check and the bind ends the server at once.
+  sleep 0.5
+  if ! kill -0 "$pid" 2>/dev/null; then
+    cat "$log" >&2
+    die "the server on port $port exited at once; its output is above"
+  fi
+  echo "http://$ip:$port/"
+  echo "pid $pid; stop it with: preview-serve --stop $pid"
+}
+
+case ${1:-} in
+  --stop)
+    [ $# -eq 2 ] || usage
+    stop "$2"
+    ;;
+  "" | -*) usage ;;
+  *)
+    [ $# -eq 1 ] || usage
+    serve "$1"
+    ;;
+esac

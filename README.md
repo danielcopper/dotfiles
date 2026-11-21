@@ -45,7 +45,7 @@ A `mise install` that fails does not stop the steps after it: the run ends with 
 | `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), stows the given packages and seeds missing live files of reference copies; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`) and the bash startup (`tests/bash/startup.sh`), the herdr app's command check and board mod (`tests/herdr-app/`), and whether the Claude Code skills fire on the right prompts (`tests/skill-triggers/`); `tests/run-listed.sh` hands each named case to the test file that lists it. Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`), the bash startup (`tests/bash/startup.sh`) and `preview-serve` (`tests/bash/preview-serve.sh`), for the herdr app's command check and board mod (`tests/herdr-app/`), and whether the Claude Code skills fire on the right prompts (`tests/skill-triggers/`); `tests/run-listed.sh` hands each named case to the test file that lists it. Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -556,17 +556,21 @@ the directories that must be real ("Install / update" above), in
 throwaway homes. Each file's header lists its cases, `--list` prints their
 names, and naming cases runs only those. It needs stow, git and tar.
 
-`mise run shell-test` (without mise, `tests/statusline/width.sh` and
-`tests/bash/startup.sh`) checks how the Claude Code status line finds the
-terminal's width, and the startup of an interactive bash: the greeter, the
-TMUX variables a herdr terminal drops and, on wsl-arch, how a shell finds or
-starts the keyring daemon, and the one line it prints on stderr when the lock
-stays busy or the start fails. Stand-ins take the place of hc, tmux,
-fastfetch and gnome-keyring-daemon, and flock and mkdir run through logging
-wrappers around the real tools, so no herdr or tmux server is asked and no
-real keyring daemon starts. Each file's header lists its cases, `--list`
-prints their names, and naming cases runs only those. It needs jq, timeout,
-flock and python3.
+`mise run shell-test` (without mise, `tests/statusline/width.sh`,
+`tests/bash/startup.sh` and `tests/bash/preview-serve.sh`) checks how the
+Claude Code status line finds the terminal's width, and the startup of an
+interactive bash: the greeter, the TMUX variables a herdr terminal drops and,
+on wsl-arch, how a shell finds or starts the keyring daemon, and the one line
+it prints on stderr when the lock stays busy or the start fails. Stand-ins
+take the place of hc, tmux, fastfetch and gnome-keyring-daemon, and flock and
+mkdir run through logging wrappers around the real tools, so no herdr or tmux
+server is asked and no real keyring daemon starts. It also checks
+`~/.local/bin/preview-serve`, which serves a directory on the home-network
+address and the first free port of the range in `/etc/preview-ports` (written
+by the homelab playbook; 8700-8799 without it), with stand-ins for ip, ss and
+python3, so no real port is taken. Each file's header lists its cases,
+`--list` prints their names, and naming cases runs only those. It needs jq,
+timeout, flock, setsid and python3.
 
 `mise run skill-trigger-test` (without mise, `python3 -I
 tests/skill-triggers/run.py`) checks that the skills under
