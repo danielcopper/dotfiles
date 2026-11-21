@@ -6,38 +6,33 @@
 #        preview-serve --stop <pid>
 #        preview-serve --addr
 #
-# The address is the src of `ip -4 route get 1.1.1.1`. The port is the first
-# one that nothing listens on (`ss -Hltn`, any address) in the range
-# /etc/preview-ports holds as <first>-<last>; the homelab playbook writes that
-# file on hosts whose firewall opens only that range to the LAN. When every
-# port of the range is taken, nothing starts and the exit code is 1. Without
-# the file the range is 8700-8719, the one the playbook writes, and one line on
-# stderr says so; a symlink there to a missing file is an error. --addr prints
-# that address and port as "<ip> <port>" and starts nothing, for a dev server
-# to bind to.
+# preview-serve <dir> serves <dir> on the src address of
+# `ip -4 route get 1.1.1.1` and the first port of the host's preview range
+# that nothing listens on, and prints the link once the server listens. It
+# refuses a <dir> holding a .git at or below it or a symlink that leads
+# outside it. It exits 1 and leaves no server running when every port of the
+# range is taken or the server does not come up, showing the server's output
+# where there is one.
+# preview-serve --stop <pid> ends a server preview-serve started, and nothing
+# else.
+# preview-serve --addr prints "<ip> <port>", the address and port a start
+# would take now, and starts nothing.
 #
-# The server hands out every file below <dir> and follows symlinks, so <dir>
-# may hold no .git at or below it (a work tree root, a nested clone) and no
-# symlink whose target lies outside it.
+# The range is /etc/preview-ports, as <first>-<last>, which the homelab
+# playbook writes. Without the file a built-in range applies and one line on
+# stderr says so; a symlink there to a missing file is an error.
+# PREVIEW_PORTS_FILE overrides the path.
 #
-# The server is python3 -I -m http.server, started from / in its own session
-# so it imports nothing from the caller's directory and outlives the shell.
-# Its output goes to ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log
-# and its PID to <port>.pid in ${XDG_RUNTIME_DIR}/preview-serve, or beside
-# the log without XDG_RUNTIME_DIR. The link is printed once ss shows the
-# server listening. A server that exits because another process took its
-# port after the check is tried again on the next free port, 3 tries in all;
-# any other early exit ends the run with the server's output. One that does
-# not listen within 3 seconds is stopped. --stop ends only a server with
-# such a PID file whose command line still matches it, and removes the file.
-#
-# PREVIEW_PORTS_FILE overrides the path of the range file.
+# Logs: ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log. PID files:
+# $XDG_RUNTIME_DIR/preview-serve/<port>.pid, or beside the logs without
+# XDG_RUNTIME_DIR.
 set -euo pipefail
 # die inside $(...) must end the script, not just the substitution's subshell.
 shopt -s inherit_errexit
 
 ports_file=${PREVIEW_PORTS_FILE:-/etc/preview-ports}
-# The range the homelab playbook writes on the Minisforum, the one known source.
+# The range the homelab playbook writes on the Minisforum, the only one on
+# record: a host that has no file yet still gets a port its firewall opens.
 fallback_range=8700-8719
 listen_wait=3
 start_tries=3
@@ -56,7 +51,8 @@ usage() {
 
 # stop <pid>: ends the server whose PID file names <pid>, once its command
 # line shows the PID still belongs to that server, and removes the file. A
-# file whose server is gone is removed too.
+# file whose server is gone is removed too. A PID alone could name a server
+# another tool started, or a process that took over a dead server's PID.
 stop() {
   local pid=$1 file='' candidate port cmdline
   [[ $pid =~ ^[0-9]+$ ]] || die "not a PID: $pid"
@@ -142,8 +138,9 @@ home_ip() {
 }
 
 # check_tree <dir>: refuses a tree the server would hand out more than the
-# files to show from: a symlink whose target lies outside <dir>, or a .git at
-# or below it. A search that cannot finish refuses too.
+# files to show from, since it serves every file below <dir> and follows
+# symlinks: a symlink whose target lies outside <dir>, or a .git at or below
+# it. A search that cannot finish refuses too.
 check_tree() {
   local dir=$1 escape git
   # shellcheck disable=SC2016 # expanded by the inner bash, once per link
@@ -158,8 +155,9 @@ check_tree() {
 }
 
 # await_listen <pid> <ip> <port> <log>: returns once the server listens on
-# <ip>:<port>, fails when it exits before that; a server still not listening
-# after $listen_wait seconds is stopped and the script dies with its output.
+# <ip>:<port>, so the printed link answers, and fails when it exits before
+# that; a server still not listening after $listen_wait seconds is stopped and
+# the script dies with its output.
 await_listen() {
   local pid=$1 address=$2:$3 log=$4 deadline=$((SECONDS + listen_wait)) sockets
   while kill -0 "$pid" 2>/dev/null; do
@@ -196,6 +194,8 @@ serve() {
   port=$(free_port) || all_taken
   while :; do
     log=$state_dir/$port.log
+    # Its own session: the server outlives the calling shell, and a kill of
+    # its process group ends it with everything it started.
     setsid python3 -I -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
     pid=$!
     if await_listen "$pid" "$ip" "$port" "$log"; then

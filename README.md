@@ -399,8 +399,8 @@ opens them:
 
 The range comes from `/etc/preview-ports` (`<first>-<last>`). On the
 Minisforum the homelab playbook writes that file from the variable that opens
-the range in the host firewall; without it the script uses 8700-8719 and says
-so. The script's header has the details.
+the range in the host firewall; without it the script falls back to the
+playbook's range and says so. The script's header has the details.
 
 ## memex sync
 
