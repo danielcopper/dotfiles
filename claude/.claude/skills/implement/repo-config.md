@@ -52,14 +52,31 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     - runs `gh`, `az`, `curl` or `wget` through `xargs` or `parallel`;
     - holds a construct the shell expands at run time (a `$` or a backtick outside single quotes, a `{a,b}` or
       `{a..b}` brace or a `*`, `?` or `[` next to a letter outside any quotes) next to a mention of `merge`,
-      `complet` or `alias`, or next to `gh`, `az`, `curl` or `wget`;
+      `complet` or `alias`, or next to `gh`, `az`, `curl` or `wget` — except the parameters named below;
     - is nested too deep, too long or holds too many substitutions to check.
+
+    The run-time rule spares a parameter only when the whole command is plain and runs only listed commands.
+    Plain: every word is only the characters `A-Z a-z 0-9 _ . / : , @ % + = -`, or exactly one double-quoted
+    `"$NAME"` or `"${NAME}"` (NAME a name, not a digit), or exactly `$?`, `$#` or `$$`, or a double-quoted string
+    of those characters, spaces and `$?`, `$#`, `$$`; between the words stand only blanks, `;`, `&&`, `||`, `|`
+    and newlines; after the command word (after its subcommand for gh) only the redirections `>`, `>>`, `2>`,
+    `2>>` and `<` to a word of those characters, and `2>&1`. Listed: every simple command is only `NAME=word`
+    assignments, or its command word after them is, unquoted and without a path, `echo`, `printf`, `test`,
+    `true`, `false`, `exit`, `:`, `head`, `tail`, `grep`, `jq`, `wc`, `uniq`, `cut`, `tr` or `cat`, or `gh`
+    followed at once by `pr view`, `list`, `status`, `checks` or `diff`, `issue view` or `list`, or `run view`,
+    `list` or `watch`; a listed name the shell resolves to a function or alias is trusted unseen. Anything else
+    anywhere in the text — another character, quoting, expansion, comment or redirection, or any other command,
+    builtin or keyword — makes every parameter count. In such a command the rule does not count `$?`, `$#` or
+    `$$` in a simple command none of whose pieces names `gh`, `az`, `curl` or `wget`, and does not count a word
+    `"$NAME"` or `"${NAME}"` in a simple command that starts with that `gh` form, when the word before it is a
+    plain word that is no option.
 
     When the command hands text to a shell that reads it again — a shell with a `-c` option, `eval`, `<<<`,
     `source` or `.`, a pipe into a shell — quoting no longer separates anything: the file, write and run-time rules
     then read the whole de-quoted text, next to any `gh`, `az`, `curl` or `wget`, and `$` and backticks count
-    everywhere. Other gh subcommands (issues, comments, reviews, releases, labels …) may read their body from a file. False
-    denials are accepted: a merge mentioned in a message next to one of those tools is denied like a call.
+    everywhere, and no parameter is spared. Other gh subcommands (issues, comments, reviews, releases, labels …)
+    may read their body from a file. False denials are accepted: a merge mentioned in a message next to one of
+    those tools is denied like a call.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
     `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions
     one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of

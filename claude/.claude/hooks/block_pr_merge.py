@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) hook: a coarse, fail-closed filter against merging a pull request.
 
-It judges the whole command text, normalised, with linear-time patterns.
-What it refuses, what passes, and what is left to the policy is written
-once, in `merge_policy` (~/.claude/skills/implement/repo-config.md).
+What it refuses, what passes, and what is left to the policy is written once, in
+`merge_policy` (~/.claude/skills/implement/repo-config.md).
 """
 
+import itertools
 import json
 import re
 import sys
@@ -123,6 +123,33 @@ PR_WRITE = re.compile(
     r"gh(?:\s+(?:-R|--repo)\s+\S+|\s+--repo=\S+)?\s+pr\s+(?:create|edit)(?:\s+\S+)*"
 )
 QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+# The plain language and the commands in which the run-time rule spares parameters (merge_policy).
+PLAIN = r"[A-Za-z0-9_./:,@%+=-]"
+NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+SPECIAL = r"\$[?#$]"
+QUOTED_PARAMETER = rf'"\$(?:{NAME}|\{{{NAME}\}})"'
+PLAIN_WORD = rf'{PLAIN}++|{QUOTED_PARAMETER}|{SPECIAL}|"(?:{PLAIN}| |{SPECIAL})*+"'
+PLAIN_REDIRECT = rf"2>&1|(?:2?>>?|<)[ \t]*+{PLAIN}++"
+PLAIN_SEPARATOR = r"[ \t]*+(?:;|&&|\|\||\||\n)[ \t\n]*+"
+PLAIN_SIMPLE = rf"(?:{PLAIN_WORD})(?:[ \t]++(?:{PLAIN_REDIRECT}|{PLAIN_WORD}))*+"
+PLAIN_COMMAND = re.compile(
+    rf"[ \t\n]*+{PLAIN_SIMPLE}(?:{PLAIN_SEPARATOR}{PLAIN_SIMPLE})*+[ \t]*+(?:[;\n][ \t\n]*+)?"
+)
+PLAIN_PIECE = re.compile(
+    rf"(?P<redirect>{PLAIN_REDIRECT})|(?P<word>{PLAIN_WORD})|(?P<separator>{PLAIN_SEPARATOR})"
+)
+SPECIAL_PARAMETER = re.compile(SPECIAL)
+ASSIGNMENT = re.compile(rf"{NAME}=")
+ALLOWED_COMMANDS = frozenset(
+    ["echo", "printf", "test", "true", "false", "exit", ":"]
+    + ["head", "tail", "grep", "jq", "wc", "uniq", "cut", "tr", "cat"]
+)
+GH_READ_ONLY = {
+    "pr": frozenset(["view", "list", "status", "checks", "diff"]),
+    "issue": frozenset(["view", "list"]),
+    "run": frozenset(["view", "list", "watch"]),
+}
 
 REASON = (
     "Merging a pull request is the owner's alone (merge_policy in "
@@ -444,6 +471,76 @@ def body_subcommand(lower: str, original: str) -> bool:
     return False
 
 
+def plain_commands(command: str) -> list[list[re.Match[str]]]:
+    """The simple commands of *command*, each as its words and redirections, when the whole text
+    is in the plain language and every simple command is allowed; no command at all otherwise."""
+    if not PLAIN_COMMAND.fullmatch(command):
+        return []
+    found: list[list[re.Match[str]]] = [[]]
+    for piece in PLAIN_PIECE.finditer(command):
+        if piece.lastgroup == "separator":
+            found.append([])
+        else:
+            found[-1].append(piece)
+    commands = [pieces for pieces in found if pieces]
+    return commands if all(allowed(pieces) for pieces in commands) else []
+
+
+def allowed(pieces: list[re.Match[str]]) -> bool:
+    """Whether a plain simple command is only assignments, or its command word past leading
+    assignments is one of ALLOWED_COMMANDS or gh with a subcommand from GH_READ_ONLY."""
+    rest = list(
+        itertools.dropwhile(
+            lambda piece: piece.lastgroup == "word" and ASSIGNMENT.match(piece.group()), pieces
+        )
+    )
+    texts = [piece.group() if piece.lastgroup == "word" else "" for piece in rest[:3]]
+    if not texts:
+        return True
+    if texts[0] == "gh":
+        return len(texts) == 3 and texts[2] in GH_READ_ONLY.get(texts[1], ())
+    return texts[0] in ALLOWED_COMMANDS
+
+
+def spared_in(command: str, pieces: list[re.Match[str]]) -> list[tuple[int, int, str]]:
+    """Where a parameter of one allowed plain simple command does not count, and what stands for
+    it: `0` for `$?`, `$#` and `$$` when no piece names gh, az, curl or wget; `""` for a
+    whole-word `"$NAME"` in a command that starts with gh, after a plain word that is no
+    option."""
+    if not NETWORK.search(" ".join(piece.group() for piece in pieces).lower()):
+        return [
+            (found.start(), found.end(), "0")
+            for piece in pieces
+            if piece.lastgroup == "word"
+            for found in SPECIAL_PARAMETER.finditer(command, piece.start(), piece.end())
+        ]
+    if pieces[0].group() != "gh":
+        return []
+    return [
+        (piece.start(), piece.end(), '""')
+        for previous, piece in itertools.pairwise(pieces[2:])
+        if re.fullmatch(rf"{PLAIN}++", previous.group())
+        and not previous.group().startswith("-")
+        and re.fullmatch(QUOTED_PARAMETER, piece.group())
+    ]
+
+
+def without_spared_parameters(command: str) -> str:
+    """*command* with the parameters the run-time rule does not count replaced by plain text;
+    unchanged when the command is not in the plain language."""
+    spans = sorted(
+        span for pieces in plain_commands(command) for span in spared_in(command, pieces)
+    )
+    out: list[str] = []
+    position = 0
+    for start, end, replacement in spans:
+        out.append(command[position:start])
+        out.append(replacement)
+        position = end
+    out.append(command[position:])
+    return "".join(out)
+
+
 def check(command: str) -> str | None:
     """What makes *command* a possible merge, or None."""
     if len(command) > MAX_LENGTH:
@@ -491,7 +588,7 @@ def check(command: str) -> str | None:
         )
     if network and FEEDER.search(lower):
         return "feeds gh, az, curl or wget through xargs or parallel"
-    if runs_at_run_time(command, whole=reread):
+    if runs_at_run_time(command if reread else without_spared_parameters(command), whole=reread):
         if MENTION.search(lower):
             return "builds a word at run time next to a merge mention"
         if network:
