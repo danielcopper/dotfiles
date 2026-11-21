@@ -50,8 +50,8 @@
 #   b2  a server that exits at once on 8700 and 8701: served on 8702
 #   b3  a server that never listens: stopped after the wait, exit 1, says so
 #   b4  a server that listens only after a second: link printed once it does
-#   b5  ss failing while the server comes up: exit 1 at once with ss's error,
-#       the server stopped
+#   b5  ss failing while the server comes up: exit 1 at once with ss's error
+#       and nothing else on stderr, the server stopped
 #   b6  a server that exits at once for another reason: not tried again,
 #       exit 1, its error on stderr; also with a one-port range
 #   b7  a one-port range whose port is lost after the check: exit 1, the
@@ -424,11 +424,15 @@ b4_waits_for_listen() {
   check "listening when the link was printed" grep -q "192.0.2.7:8700" "$ROOT/bound"
 }
 
+SS_ERR="Cannot open netlink socket
+preview-serve: ss cannot list the listening ports"
+
 b5_ss_fails() {
   local start=$SECONDS server
+  ports 8700-8719
   run PY_DELAY=1 SS_WORKS=1 -- "$DIR"
   check "exit 1, got $RC" [ "$RC" = 1 ]
-  check "says ss failed: $ERR" grep -q "ss cannot list the listening ports" <<<"$ERR"
+  check "stderr is ss's error alone: $ERR" [ "$ERR" = "$SS_ERR" ]
   check "did not wait for the deadline: $ERR" [ $((SECONDS - start)) -lt 3 ]
   check "no link printed: $OUT" [ -z "$OUT" ]
   sleep 0.3
