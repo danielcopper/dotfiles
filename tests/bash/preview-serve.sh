@@ -6,7 +6,7 @@
 # range file under /etc and no real port is involved:
 #   ip       prints $ROOT/ip.out, a route with src 192.0.2.7
 #   ss       prints $ROOT/ss.out, the listening sockets of the case, and
-#            $ROOT/bound
+#            $ROOT/bound; with SS_WORKS=<n> every call after the n-th fails
 #   python3  logs its arguments to $ROOT/calls and its working directory to
 #            $ROOT/cwd. By default it waits PY_DELAY seconds (0), adds its
 #            listener to $ROOT/bound, which ss prints too, and stays alive.
@@ -49,6 +49,8 @@
 #   b2  a server that exits at once on 8700 and 8701: served on 8702
 #   b3  a server that never listens: stopped after the wait, exit 1, says so
 #   b4  a server that listens only after a second: link printed once it does
+#   b5  ss failing while the server comes up: exit 1 at once with ss's error,
+#       the server stopped
 #   s1  a started server's PID is in <port>.pid in the state directory;
 #       --stop ends that server and removes the file
 #   s2  --stop refuses a process without a PID file and leaves it, also one
@@ -68,7 +70,7 @@ set -uo pipefail
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range r6_dangling_range_file
   r7_last_port_free r8_one_port_ranges g1_git_root
   g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated n1_addr i1_no_src b1_server_exits
-  b2_retry b3_never_listens b4_waits_for_listen s1_stop s2_stop_refuses s3_stop_stale)
+  b2_retry b3_never_listens b4_waits_for_listen b5_ss_fails s1_stop s2_stop_refuses s3_stop_stale)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -96,7 +98,7 @@ trap cleanup EXIT
 export HOME=$ROOT/home
 mkdir -p "$HOME" "$ROOT/bin"
 
-for tool in bash cat find grep mkdir readlink rm setsid sleep tr; do
+for tool in bash cat find grep mkdir readlink rm setsid sleep tr wc; do
   ln -s "$(type -P "$tool")" "$ROOT/bin/$tool"
 done
 cat >"$ROOT/bin/ip" <<EOF
@@ -104,7 +106,12 @@ cat >"$ROOT/bin/ip" <<EOF
 cat "$ROOT/ip.out"
 EOF
 cat >"$ROOT/bin/ss" <<EOF
-#!/bin/sh
+#!/usr/bin/env bash
+echo x >>"$ROOT/ss.calls"
+if [ -n "\${SS_WORKS:-}" ] && [ "\$(wc -l <"$ROOT/ss.calls")" -gt "\$SS_WORKS" ]; then
+  echo "Cannot open netlink socket" >&2
+  exit 1
+fi
 cat "$ROOT/ss.out" "$ROOT/bound"
 EOF
 # Stays a bash process (no exec) so its command line keeps -m http.server.
@@ -378,6 +385,18 @@ b4_waits_for_listen() {
   check "listening when the link was printed" grep -q "192.0.2.7:8700" "$ROOT/bound"
 }
 
+b5_ss_fails() {
+  local start=$SECONDS server
+  run PY_DELAY=1 SS_WORKS=1 -- "$DIR"
+  check "exit 1, got $RC" [ "$RC" = 1 ]
+  check "says ss failed: $ERR" grep -q "ss cannot list the listening ports" <<<"$ERR"
+  check "did not wait for the deadline: $ERR" [ $((SECONDS - start)) -lt 3 ]
+  check "no link printed: $OUT" [ -z "$OUT" ]
+  sleep 0.3
+  server=$(pgrep -f -- "-m http.server 8700 --bind 192.0.2.7 --directory $DIR")
+  check "server stopped: $server" [ -z "$server" ]
+}
+
 s1_stop() {
   run -- "$DIR"
   serving 8700
@@ -465,6 +484,7 @@ for CASE in "${all[@]}"; do
   : >"$ROOT/calls"
   : >"$ROOT/ss.out"
   : >"$ROOT/bound"
+  rm -f "$ROOT/ss.calls"
   echo "$ROUTE" >"$ROOT/ip.out"
   if in_cases "$CASE"; then
     "$CASE"

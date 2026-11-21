@@ -154,7 +154,12 @@ check_tree() {
 await_listen() {
   local pid=$1 address=$2:$3 log=$4 deadline=$((SECONDS + listen_wait)) sockets
   while kill -0 "$pid" 2>/dev/null; do
-    sockets=$(listening)
+    # Called as an if condition, so set -e is off here: a failed ss ends the
+    # script by hand, and the server, which nothing could stop later, with it.
+    if ! sockets=$(listening); then
+      kill -- "-$pid" 2>/dev/null || true
+      exit 1
+    fi
     if grep -qxF -- "$address" <<<"$sockets"; then
       return 0
     fi
