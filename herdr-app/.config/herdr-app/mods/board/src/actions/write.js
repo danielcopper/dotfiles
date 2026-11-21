@@ -70,8 +70,6 @@ export function writeAtOnce(b, view, w, cx) {
         const earlier = st.unclear.some(same);
         b.say(w.texts.refused(why, earlier), "error", cx);
         notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-        // An open outcome of the item waited for this write; the refresh
-        // tells it now.
         if (followed && current && openOf(st, key)) b.refresh(current, cx);
       }
     } finally {

@@ -961,11 +961,11 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
 // ==== src/kinds/sprint.js ====
 
 // A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
-// whose story is not in the sprint), the items it holds, what shows and how
-// the keys walk it, a task's state as shown, a state change laid over the
-// data, and its warnings (sprintWarnings). The data is a board's (kinds/board.js: its columns hold the
-// tasks, so moves, their rollback and H/L work on it as on a board) plus
-// its rows; sprintBoard (sources/azure.js) builds it.
+// whose story is not in the sprint), the items it holds, what shows and how the
+// keys walk it, a task's state as shown, a state change laid over the data, and
+// its warnings (sprintWarnings). The data is a board's (kinds/board.js: its
+// columns hold the tasks, so moves, their rollback and H/L work on it as on a
+// board) plus its rows; sprintBoard (sources/azure.js) builds it.
 
 // The key of the row "Ohne Story", and the id of the column of stories the
 // keys walk first.
@@ -2231,8 +2231,6 @@ export function writeAtOnce(b, view, w, cx) {
         const earlier = st.unclear.some(same);
         b.say(w.texts.refused(why, earlier), "error", cx);
         notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-        // An open outcome of the item waited for this write; the refresh
-        // tells it now.
         if (followed && current && openOf(st, key)) b.refresh(current, cx);
       }
     } finally {
@@ -2702,21 +2700,20 @@ function scrollToRow(b, view, key) {
 
 // ==== src/ui/shapes/sprint.js ====
 
-// The sprint shape: a team's current sprint as a taskboard. One row per
-// story (its id, title and own state at the left), its tasks as cards in
-// the team's taskboard columns, each with its own state, assignee and id
-// and the chip of its session where it has one; tasks whose story is not in
-// the sprint stand in the row "Ohne Story". H/L move a task to the next
-// column (through the taskboard's own column, not the state: two columns
-// may map to one state), s changes a story's or a task's state from its
-// type's states (the status menu), Enter shows the details; both write at
-// once (actions/move.js, actions/write.js). Keys walk the stories, then
-// each column (sprintNav). The data: { shape: "sprint", meta: {
-// iterationId, iteration, finish, typeStates, states, unplaced,
-// unknownColumns }, columns: [{ id, name, color, hidden, count, target,
-// types, mappings, cards }], rows: [{ key, story }], viewer, noViewer,
-// total, limited, limit } (sprintBoard, sources/azure.js). View fields it reads:
-// id, source, layout (as writeAtOnce does).
+// The sprint shape: a team's current sprint as a taskboard. One row per story
+// (its id, title and own state at the left), its tasks as cards in the team's
+// taskboard columns, each with its own state, assignee and id and the chip of
+// its session where it has one; tasks whose story is not in the sprint stand in
+// the row "Ohne Story". H/L move a task to the next column (through the
+// taskboard's own column, not the state: two columns may map to one state), s
+// changes a story's or a task's state from its type's states (the status menu),
+// Enter shows the details; both write at once (actions/move.js,
+// actions/write.js). Keys walk the stories, then each column (sprintNav). The
+// data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
+// states, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
+// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
+// noViewer, total, limited, limit } (sprintBoard, sources/azure.js). View
+// fields it reads: id, source, layout (as writeAtOnce does).
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;

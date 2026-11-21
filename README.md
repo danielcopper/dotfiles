@@ -314,13 +314,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   story (its id, title and own state), its tasks as cards in the team's
   taskboard columns, each with its own state, assignee and id, and the tasks
   whose story is not in the sprint in a row "Ohne Story" at the top; it holds
-  the work items of the sprint in the team's areas, and its tasks are the
-  work items of the types the taskboard's columns map. What it reads per
-  refresh, the header of `mods/board/src/main.js` says, and makeAzure (in
-  `mods/board/src/sources/azure.js`) what it keeps; `r` reads the team's
-  sprint, areas and columns again. The
-  Backlog and the pull request tabs read nothing yet; each says which view
-  it will hold.
+  the work items of the sprint in the team's areas, and its tasks are the work
+  items of the types the taskboard's columns map. What it reads per refresh, the
+  header of `mods/board/src/main.js` says, and makeAzure (in
+  `mods/board/src/sources/azure.js`) what it keeps; `r` reads the team's sprint,
+  areas and columns again. The Backlog and the pull request tabs read nothing
+  yet; each says which view it will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
   me, opened by me, or asking for my review; a list section of my own
   search, one whose query sets author, assignee or (user-)review-requested

@@ -1,18 +1,17 @@
-// The sprint shape: a team's current sprint as a taskboard. One row per
-// story (its id, title and own state at the left), its tasks as cards in
-// the team's taskboard columns, each with its own state, assignee and id
-// and the chip of its session where it has one; tasks whose story is not in
-// the sprint stand in the row "Ohne Story". H/L move a task to the next
-// column (through the taskboard's own column, not the state: two columns
-// may map to one state), s changes a story's or a task's state from its
-// type's states (the status menu), Enter shows the details; both write at
-// once (actions/move.js, actions/write.js). Keys walk the stories, then
-// each column (sprintNav). The data: { shape: "sprint", meta: {
-// iterationId, iteration, finish, typeStates, states, unplaced,
-// unknownColumns }, columns: [{ id, name, color, hidden, count, target,
-// types, mappings, cards }], rows: [{ key, story }], viewer, noViewer,
-// total, limited, limit } (sprintBoard, sources/azure.js). View fields it reads:
-// id, source, layout (as writeAtOnce does).
+// The sprint shape: a team's current sprint as a taskboard. One row per story
+// (its id, title and own state at the left), its tasks as cards in the team's
+// taskboard columns, each with its own state, assignee and id and the chip of
+// its session where it has one; tasks whose story is not in the sprint stand in
+// the row "Ohne Story". H/L move a task to the next column (through the
+// taskboard's own column, not the state: two columns may map to one state), s
+// changes a story's or a task's state from its type's states (the status menu),
+// Enter shows the details; both write at once (actions/move.js,
+// actions/write.js). Keys walk the stories, then each column (sprintNav). The
+// data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
+// states, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
+// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
+// noViewer, total, limited, limit } (sprintBoard, sources/azure.js). View
+// fields it reads: id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";

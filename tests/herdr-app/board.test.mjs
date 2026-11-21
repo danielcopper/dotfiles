@@ -4632,6 +4632,6 @@ test("UI: an unclear move and an unclear state change of one item stay open side
   assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“; AB#311 hat nach dem Neuladen den Status „Done“");
 });
 
-test("who az is is read with the same tolerant parse as the answers to writes", () => {
+test("who az is: the name of a JSON answer, in lower case, else null", () => {
   assert.deepEqual([board.parseViewer(" { \"name\": \"A@B.example\" }\n"), board.parseViewer("ERROR"), board.parseViewer(undefined), board.parseViewer("[]")], ["a@b.example", null, null, null]);
 });
