@@ -12,11 +12,13 @@
 # port of the range is taken, nothing starts and the exit code is 1. Without
 # the file the range is 8700-8799.
 #
-# <dir> may not contain a .git anywhere at or below it (a work tree root, a
-# nested clone): the server hands out every file below <dir>.
+# The server hands out every file below <dir> and follows symlinks, so <dir>
+# may hold no .git at or below it (a work tree root, a nested clone) and no
+# symlink whose target lies outside it.
 #
-# The server is python3 -m http.server, started in its own session so it
-# outlives the shell; its output goes to
+# The server is python3 -I -m http.server, started from / in its own session
+# so it imports nothing from the caller's directory and outlives the shell;
+# its output goes to
 # ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log. --stop ends a
 # server this script started, and refuses any other process.
 # PREVIEW_PORTS_FILE overrides the path of the range file.
@@ -84,18 +86,36 @@ home_ip() {
   echo "${BASH_REMATCH[2]}"
 }
 
+# check_tree <dir>: refuses a tree the server would hand out more than the
+# files to show from: a symlink whose target lies outside <dir>, or a .git at
+# or below it. A search that cannot finish refuses too.
+check_tree() {
+  local dir=$1 escape git
+  # shellcheck disable=SC2016 # expanded by the inner bash, once per link
+  escape=$(find "$dir" -type l -exec bash -c '
+    for link; do
+      target=$(readlink -m -- "$link")
+      case $target in "$0" | "$0"/*) ;; *) printf "%s -> %s\n" "$link" "$target"; exit 0 ;; esac
+    done' "$dir" {} +) || die "cannot check the symlinks below $dir"
+  [ -z "$escape" ] || die "a symlink leads outside $dir: ${escape%%$'\n'*}"
+  git=$(find -L "$dir" -name .git -print -quit) || die "cannot search $dir for .git"
+  [ -z "$git" ] || die "$dir holds $git; serve a directory with only the files to show"
+}
+
 serve() {
-  local dir git ip port log_dir log pid
+  local dir ip port log_dir log pid
   [ -d "$1" ] || die "no such directory: $1"
   dir=$(cd "$1" && pwd -P)
-  git=$(find "$dir" -name .git -print -quit)
-  [ -z "$git" ] || die "$dir holds $git; serve a directory with only the files to show"
+  check_tree "$dir"
   ip=$(home_ip)
   port=$(free_port)
   log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
   mkdir -p "$log_dir"
   log=$log_dir/$port.log
-  setsid python3 -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
+  # -I and the neutral working directory keep python from importing modules
+  # planted in the caller's directory or named by PYTHON* variables.
+  cd /
+  setsid python3 -I -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
   pid=$!
   # A port taken between the check and the bind ends the server at once.
   sleep 0.5

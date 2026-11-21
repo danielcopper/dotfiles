@@ -6,10 +6,12 @@
 # range file under /etc and no real port is involved:
 #   ip       prints $ROOT/ip.out, a route with src 192.0.2.7
 #   ss       prints $ROOT/ss.out, the listening sockets of the case
-#   python3  logs its arguments to $ROOT/calls; then stays alive (PY_MODE=run)
-#            or prints an error and exits 1 (PY_MODE=fail), as a server whose
-#            port was taken after the check does
-# PREVIEW_PORTS_FILE points at a range file in the test directory.
+#   python3  logs its arguments to $ROOT/calls and its working directory to
+#            $ROOT/cwd; then stays alive (PY_MODE=run) or prints an error and
+#            exits 1 (PY_MODE=fail), as a server whose port was taken after
+#            the check does
+# PREVIEW_PORTS_FILE points at a range file in the test directory. The script
+# runs from $ROOT/caller, so p1 can tell that python does not.
 #   r1  the range file is read: the first port of 8710-8712, bound to the src
 #       address of the route, serving the directory; link and PID printed, the
 #       server alive and its log under the test's HOME
@@ -22,6 +24,12 @@
 #   g1  a directory holding .git (a directory or, as in a worktree, a file):
 #       refused, no server started
 #   g2  a .git further below the directory: refused, no server started
+#   g3  a symlink whose target lies outside the directory (absolute,
+#       relative, dangling, a sibling sharing its name as a prefix): refused,
+#       no server started
+#   g4  symlinks to a file and a directory inside it: served
+#   g5  a symlink loop, which the .git search cannot finish: refused
+#   p1  python runs isolated (-I) from /, not from the caller's directory
 #   i1  a route without src: exit 1, no server started
 #   b1  a server that exits at once: exit 1, its output on stderr
 #   s1  --stop ends a server the script started
@@ -36,7 +44,7 @@
 set -uo pipefail
 
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range g1_git_root
-  g2_git_below i1_no_src b1_server_exits s1_stop s2_stop_refuses)
+  g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated i1_no_src b1_server_exits s1_stop s2_stop_refuses)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -60,8 +68,8 @@ trap cleanup EXIT
 export HOME=$ROOT/home
 mkdir -p "$HOME" "$ROOT/bin"
 
-for tool in bash cat find mkdir setsid sleep tr; do
-  ln -s "$(command -v "$tool")" "$ROOT/bin/$tool"
+for tool in bash cat find mkdir readlink setsid sleep tr; do
+  ln -s "$(type -P "$tool")" "$ROOT/bin/$tool"
 done
 cat >"$ROOT/bin/ip" <<EOF
 #!/bin/sh
@@ -75,6 +83,7 @@ EOF
 cat >"$ROOT/bin/python3" <<EOF
 #!/usr/bin/env bash
 echo "python3 \$*" >>"$ROOT/calls"
+pwd >"$ROOT/cwd"
 if [ "\${PY_MODE:-run}" = fail ]; then
   echo "OSError: [Errno 98] Address already in use" >&2
   exit 1
@@ -116,7 +125,7 @@ run() {
   done
   shift
   RC=0
-  OUT=$(env -i PATH="$ROOT/bin" HOME="$HOME" PREVIEW_PORTS_FILE="$ROOT/preview-ports" \
+  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" PREVIEW_PORTS_FILE="$ROOT/preview-ports" \
     "${vars[@]}" "$SUT" "$@" 2>"$ROOT/stderr") || RC=$?
   ERR=$(cat "$ROOT/stderr")
   PID=$(sed -n 's/^pid \([0-9]*\);.*/\1/p' <<<"$OUT")
@@ -126,7 +135,7 @@ run() {
 # and the output names the link and a live PID.
 serving() {
   check "python3 called once with port $1" [ "$(calls)" = \
-    "python3 -m http.server $1 --bind 192.0.2.7 --directory $DIR" ]
+    "python3 -I -m http.server $1 --bind 192.0.2.7 --directory $DIR" ]
   check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
   check "link printed: $OUT" grep -qxF "http://192.0.2.7:$1/" <<<"$OUT"
   check "PID printed: $OUT" [ -n "$PID" ]
@@ -192,6 +201,39 @@ g2_git_below() {
   refused "holds $DIR/clone/.git"
 }
 
+g3_symlink_outside() {
+  local target
+  echo outside >"$ROOT/outside.txt"
+  # ../site2 shares the directory's name as a prefix, but lies outside.
+  for target in /etc ../outside.txt /nonexistent/file ../site2/page.html; do
+    : >"$ROOT/calls"
+    rm -f "$DIR/link"
+    ln -s "$target" "$DIR/link"
+    run -- "$DIR"
+    refused "a symlink leads outside $DIR: $DIR/link -> "
+  done
+}
+
+g4_symlink_inside() {
+  mkdir "$DIR/sub"
+  ln -s index.html "$DIR/home.html"
+  ln -s sub "$DIR/sub-link"
+  run -- "$DIR"
+  serving 8700
+}
+
+g5_symlink_loop() {
+  ln -s . "$DIR/loop"
+  run -- "$DIR"
+  refused "cannot search $DIR for .git"
+}
+
+p1_isolated() {
+  run -- "$DIR"
+  serving 8700
+  check "python started from /, got $(cat "$ROOT/cwd")" [ "$(cat "$ROOT/cwd")" = / ]
+}
+
 i1_no_src() {
   echo "1.1.1.1 via 192.0.2.1 dev eth0 uid 1000" >"$ROOT/ip.out"
   run -- "$DIR"
@@ -251,8 +293,8 @@ all=("${CASES[@]}")
 for CASE in "${all[@]}"; do
   FAILED=0
   DIR=$ROOT/site
-  rm -rf "$DIR" "$ROOT/preview-ports" "$HOME/.local"
-  mkdir -p "$DIR"
+  rm -rf "$DIR" "$ROOT/preview-ports" "$HOME/.local" "$ROOT/cwd"
+  mkdir -p "$DIR" "$ROOT/caller"
   echo "<p>shown</p>" >"$DIR/index.html"
   : >"$ROOT/calls"
   : >"$ROOT/ss.out"
