@@ -23,7 +23,8 @@
 # The server is python3 -I -m http.server, started from / in its own session
 # so it imports nothing from the caller's directory and outlives the shell.
 # Its output goes to ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log
-# and its PID to <port>.pid beside it. The link is printed once ss shows the
+# and its PID to <port>.pid in ${XDG_RUNTIME_DIR}/preview-serve, or beside
+# the log without XDG_RUNTIME_DIR. The link is printed once ss shows the
 # server listening. A server that exits because another process took its
 # port after the check is tried again on the next free port, 3 tries in all;
 # any other early exit ends the run with the server's output. One that does
@@ -41,6 +42,8 @@ fallback_range=8700-8719
 listen_wait=3
 start_tries=3
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
+# PID files live where a reboot or logout clears them, as their servers end.
+run_dir=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/preview-serve
 
 die() {
   printf 'preview-serve: %s\n' "$*" >&2
@@ -57,7 +60,7 @@ usage() {
 stop() {
   local pid=$1 file='' candidate port cmdline
   [[ $pid =~ ^[0-9]+$ ]] || die "not a PID: $pid"
-  for candidate in "$state_dir"/*.pid; do
+  for candidate in "$run_dir"/*.pid; do
     if [ -f "$candidate" ] && [ "$(<"$candidate")" = "$pid" ]; then
       file=$candidate
       break
@@ -186,7 +189,7 @@ serve() {
   check_tree "$dir"
   ip=$(home_ip)
   load_range
-  mkdir -p "$state_dir"
+  mkdir -p "$state_dir" "$run_dir"
   # -I and the neutral working directory keep python from importing modules
   # planted in the caller's directory or named by PYTHON* variables.
   cd /
@@ -215,7 +218,7 @@ serve() {
     port=$next
     tries=$((tries + 1))
   done
-  echo "$pid" >"$state_dir/$port.pid"
+  echo "$pid" >"$run_dir/$port.pid"
   echo "http://$ip:$port/"
   echo "pid $pid; stop it with: preview-serve --stop $pid"
 }

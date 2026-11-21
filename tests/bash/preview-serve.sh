@@ -56,12 +56,15 @@
 #       exit 1, its error on stderr; also with a one-port range
 #   b7  a one-port range whose port is lost after the check: exit 1, the
 #       server's error and the lost port named, not "every port in use"
-#   s1  a started server's PID is in <port>.pid in the state directory;
+#   s1  a started server's PID is in <port>.pid under XDG_RUNTIME_DIR, its
+#       log not;
 #       --stop ends that server and removes the file
 #   s2  --stop refuses a process without a PID file and leaves it, also one
 #       whose command line is a preview server's
 #   s3  a PID file whose server is gone, or whose PID now belongs to another
 #       process: refused, that process left alone, the file removed
+#   s4  without XDG_RUNTIME_DIR the PID file lies beside the log, and --stop
+#       finds it there
 # usage: preview-serve.sh [preview-serve] [case ...]
 #        preview-serve.sh --list
 #   The script defaults to the repo's bash/.local/bin/preview-serve, the cases
@@ -76,7 +79,8 @@ CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range r6_dangl
   r7_last_port_free r8_one_port_ranges g1_git_root
   g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated n1_addr i1_no_src b1_server_exits
   b2_retry b3_never_listens b4_waits_for_listen b5_ss_fails b6_other_exit
-  b7_lost_last_port s1_stop s2_stop_refuses s3_stop_stale)
+  b7_lost_last_port s1_stop s2_stop_refuses s3_stop_stale
+  s4_no_runtime_dir)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -179,7 +183,8 @@ run() {
   done
   shift
   RC=0
-  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" PREVIEW_PORTS_FILE="$ROOT/preview-ports" \
+  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" XDG_RUNTIME_DIR="$ROOT/run" \
+    PREVIEW_PORTS_FILE="$ROOT/preview-ports" \
     "${vars[@]}" "$SUT" "$@" 2>"$ROOT/stderr") || RC=$?
   ERR=$(cat "$ROOT/stderr")
   PID=$(sed -n 's/^pid \([0-9]*\);.*/\1/p' <<<"$OUT")
@@ -434,8 +439,10 @@ b5_ss_fails() {
 s1_stop() {
   run -- "$DIR"
   serving 8700
-  local pid=$PID pidfile=$HOME/.local/state/preview-serve/8700.pid
+  local pid=$PID pidfile=$ROOT/run/preview-serve/8700.pid
   check "PID file holds the PID" [ "$(cat "$pidfile" 2>/dev/null)" = "$pid" ]
+  check "log in the state directory" [ -f "$HOME/.local/state/preview-serve/8700.log" ]
+  check "no log under XDG_RUNTIME_DIR" [ ! -e "$ROOT/run/preview-serve/8700.log" ]
   run -- --stop "$pid"
   check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
   check "PID file removed" [ ! -e "$pidfile" ]
@@ -470,7 +477,7 @@ s2_stop_refuses() {
 }
 
 s3_stop_stale() {
-  local state=$HOME/.local/state/preview-serve
+  local state=$ROOT/run/preview-serve
   mkdir -p "$state"
   # A process that ends on its own: a signal sent before the child has
   # exec'd would run this suite's EXIT trap in the child.
@@ -489,6 +496,16 @@ s3_stop_stale() {
   check "exit 1 for a reused PID, got $RC" [ "$RC" = 1 ]
   check "process with the reused PID left alone" alive "$FOREIGN"
   check "PID file of the reused PID removed" [ ! -e "$state/8701.pid" ]
+}
+
+s4_no_runtime_dir() {
+  local pidfile=$HOME/.local/state/preview-serve/8700.pid
+  run XDG_RUNTIME_DIR= -- "$DIR"
+  serving 8700
+  check "PID file beside the log" [ "$(cat "$pidfile" 2>/dev/null)" = "$PID" ]
+  run XDG_RUNTIME_DIR= -- --stop "$PID"
+  check "stopped, got $RC: $ERR" [ "$RC" = 0 ]
+  check "PID file removed" [ ! -e "$pidfile" ]
 }
 
 missing=0
@@ -512,8 +529,8 @@ for CASE in "${all[@]}"; do
   FAILED=0
   stop_servers
   DIR=$ROOT/site
-  rm -rf "$DIR" "$ROOT/preview-ports" "$HOME/.local" "$ROOT/cwd"
-  mkdir -p "$DIR" "$ROOT/caller"
+  rm -rf "$DIR" "$ROOT/preview-ports" "$HOME/.local" "$ROOT/run" "$ROOT/cwd"
+  mkdir -p "$DIR" "$ROOT/caller" "$ROOT/run"
   echo "<p>shown</p>" >"$DIR/index.html"
   : >"$ROOT/calls"
   : >"$ROOT/ss.out"
