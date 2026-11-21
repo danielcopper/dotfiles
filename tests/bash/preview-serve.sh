@@ -12,7 +12,8 @@
 #            listener to $ROOT/bound, which ss prints too, and stays alive.
 #            PY_MODE=fail, or a port named in PY_FAIL_PORTS, prints an error
 #            and exits 1, as a server whose port was taken after the check
-#            does; PY_MODE=hang stays alive without listening.
+#            does; PY_MODE=crash exits 1 with another error; PY_MODE=hang
+#            stays alive without listening.
 # PREVIEW_PORTS_FILE points at a range file in the test directory. The script
 # runs from $ROOT/caller, so p1 can tell that python does not.
 #   r1  the range file is read: the first port of 8710-8712, bound to the src
@@ -44,13 +45,17 @@
 #       with 8710 taken in 8710-8712, and starts nothing; with every port
 #       taken it fails as a start does
 #   i1  a route without src: exit 1, no server started
-#   b1  a server that exits at once on every port: 3 ports tried, exit 1, the
-#       last one's output on stderr
+#   b1  a server that loses every port it tries to another process: 3 ports
+#       tried, exit 1, the last one's output on stderr
 #   b2  a server that exits at once on 8700 and 8701: served on 8702
 #   b3  a server that never listens: stopped after the wait, exit 1, says so
 #   b4  a server that listens only after a second: link printed once it does
 #   b5  ss failing while the server comes up: exit 1 at once with ss's error,
 #       the server stopped
+#   b6  a server that exits at once for another reason: not tried again,
+#       exit 1, its error on stderr; also with a one-port range
+#   b7  a one-port range whose port is lost after the check: exit 1, the
+#       server's error and the lost port named, not "every port in use"
 #   s1  a started server's PID is in <port>.pid in the state directory;
 #       --stop ends that server and removes the file
 #   s2  --stop refuses a process without a PID file and leaves it, also one
@@ -70,7 +75,8 @@ set -uo pipefail
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range r6_dangling_range_file
   r7_last_port_free r8_one_port_ranges g1_git_root
   g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated n1_addr i1_no_src b1_server_exits
-  b2_retry b3_never_listens b4_waits_for_listen b5_ss_fails s1_stop s2_stop_refuses s3_stop_stale)
+  b2_retry b3_never_listens b4_waits_for_listen b5_ss_fails b6_other_exit
+  b7_lost_last_port s1_stop s2_stop_refuses s3_stop_stale)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -130,6 +136,7 @@ done
 case " \${PY_FAIL_PORTS:-} " in *" \$port "*) PY_MODE=fail ;; esac
 case \${PY_MODE:-run} in
   fail) echo "OSError: [Errno 98] Address already in use on \$port" >&2; exit 1 ;;
+  crash) echo "ModuleNotFoundError: No module named 'http.server'" >&2; exit 1 ;;
   hang) sleep 30; exit 0 ;;
 esac
 sleep "\${PY_DELAY:-0}"
@@ -150,6 +157,7 @@ calls() { cat "$ROOT/calls" 2>/dev/null; }
 no_server() { [ -z "$(calls)" ]; }
 alive() { kill -0 "$1" 2>/dev/null; }
 gone() { ! alive "$1"; }
+err_lacks() { ! grep -q -- "$1" <<<"$ERR"; }
 
 # ports <range>: write the range file. listening <addr:port>...: the ss lines.
 ports() { printf '%s\n' "$1" >"$ROOT/preview-ports"; }
@@ -353,8 +361,34 @@ b1_server_exits() {
   check "3 ports tried: $(calls)" [ "$(calls | grep -o 'http.server [0-9]*' | tr '\n' ' ')" = \
     "http.server 8700 http.server 8701 http.server 8702 " ]
   check "the last server's error on stderr: $ERR" grep -q "Address already in use on 8702" <<<"$ERR"
-  check "says it exited: $ERR" grep -q "exited at once on 3 ports, the last 8702" <<<"$ERR"
+  check "says it exited: $ERR" grep -q \
+    "exited at once on port 8702, which another process took after the check (try 3 of 3)" <<<"$ERR"
   check "no link printed: $OUT" [ -z "$OUT" ]
+}
+
+b6_other_exit() {
+  local range
+  for range in 8700-8719 8700-8700; do
+    : >"$ROOT/calls"
+    ports "$range"
+    run PY_MODE=crash -- "$DIR"
+    check "exit 1 in $range, got $RC" [ "$RC" = 1 ]
+    check "one try in $range: $(calls)" [ "$(calls | wc -l)" = 1 ]
+    check "the server's error on stderr: $ERR" grep -q "No module named 'http.server'" <<<"$ERR"
+    check "says the server on 8700 exited: $ERR" grep -qxF \
+      "preview-serve: the server on port 8700 exited at once; its output is above" <<<"$ERR"
+    check "no link printed: $OUT" [ -z "$OUT" ]
+  done
+}
+
+b7_lost_last_port() {
+  ports 8700-8700
+  run PY_MODE=fail -- "$DIR"
+  check "exit 1, got $RC" [ "$RC" = 1 ]
+  check "the server's error on stderr: $ERR" grep -q "Address already in use on 8700" <<<"$ERR"
+  check "names the lost port: $ERR" grep -q \
+    "exited at once on port 8700, which another process took after the check, and no later port of 8700-8700 is free" <<<"$ERR"
+  check "not every port in use: $ERR" err_lacks "every port"
 }
 
 b2_retry() {

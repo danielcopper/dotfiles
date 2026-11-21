@@ -24,9 +24,10 @@
 # so it imports nothing from the caller's directory and outlives the shell.
 # Its output goes to ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log
 # and its PID to <port>.pid beside it. The link is printed once ss shows the
-# server listening. A server that exits first lost its port to another
-# process after the check: the next free port is tried, 3 in all. One that
-# does not listen within 3 seconds is stopped. --stop ends only a server with
+# server listening. A server that exits because another process took its
+# port after the check is tried again on the next free port, 3 tries in all;
+# any other early exit ends the run with the server's output. One that does
+# not listen within 3 seconds is stopped. --stop ends only a server with
 # such a PID file whose command line still matches it, and removes the file.
 #
 # PREVIEW_PORTS_FILE overrides the path of the range file.
@@ -106,7 +107,8 @@ listening() {
 }
 
 # free_port [from]: the first port of the range load_range set, from <from>
-# on, that nothing listens on, on any address.
+# on, that nothing listens on, on any address; fails without output when
+# there is none.
 free_port() {
   local start sockets addr port
   start=${1:-$first}
@@ -122,6 +124,10 @@ free_port() {
       return
     fi
   done
+  return 1
+}
+
+all_taken() {
   die "every port of $first-$last is in use; stop a server with preview-serve --stop <pid>"
 }
 
@@ -174,7 +180,7 @@ await_listen() {
 }
 
 serve() {
-  local dir ip port log pid tries=0 from=
+  local dir ip port next log pid tries=1
   [ -d "$1" ] || die "no such directory: $1"
   dir=$(cd "$1" && pwd -P)
   check_tree "$dir"
@@ -184,22 +190,30 @@ serve() {
   # -I and the neutral working directory keep python from importing modules
   # planted in the caller's directory or named by PYTHON* variables.
   cd /
-  # A port taken between the check and the bind ends the server at once; the
-  # next free port is tried then, up to $start_tries ports in all.
+  port=$(free_port) || all_taken
   while :; do
-    port=$(free_port "$from")
     log=$state_dir/$port.log
     setsid python3 -I -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
     pid=$!
     if await_listen "$pid" "$ip" "$port" "$log"; then
       break
     fi
-    tries=$((tries + 1))
+    # Only a port another process took between the check and the bind earns
+    # another try, on the next free port; any other exit is the server's own.
+    if ! grep -q "Address already in use" "$log"; then
+      cat "$log" >&2
+      die "the server on port $port exited at once; its output is above"
+    fi
     if [ "$tries" -ge "$start_tries" ]; then
       cat "$log" >&2
-      die "the server exited at once on $tries ports, the last $port; its output is above"
+      die "the server exited at once on port $port, which another process took after the check (try $tries of $start_tries); its output is above"
     fi
-    from=$((port + 1))
+    if ! next=$(free_port $((port + 1))); then
+      cat "$log" >&2
+      die "the server exited at once on port $port, which another process took after the check, and no later port of $first-$last is free; its output is above"
+    fi
+    port=$next
+    tries=$((tries + 1))
   done
   echo "$pid" >"$state_dir/$port.pid"
   echo "http://$ip:$port/"
@@ -211,7 +225,7 @@ addr() {
   local ip port
   ip=$(home_ip)
   load_range
-  port=$(free_port)
+  port=$(free_port) || all_taken
   echo "$ip $port"
 }
 
