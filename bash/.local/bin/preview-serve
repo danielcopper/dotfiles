@@ -19,7 +19,10 @@
 # The server is python3 -I -m http.server, started from / in its own session
 # so it imports nothing from the caller's directory and outlives the shell;
 # its output goes to
-# ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log. --stop ends a
+# ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log. The link is
+# printed once ss shows the server listening. A server that exits first lost
+# its port to another process after the check: the next free port is tried,
+# 3 in all. One that does not listen within 3 seconds is stopped. --stop ends a
 # server this script started, and refuses any other process.
 # PREVIEW_PORTS_FILE overrides the path of the range file.
 set -euo pipefail
@@ -28,6 +31,8 @@ shopt -s inherit_errexit
 
 ports_file=${PREVIEW_PORTS_FILE:-/etc/preview-ports}
 fallback_range=8700-8799
+listen_wait=3
+start_tries=3
 
 die() {
   printf 'preview-serve: %s\n' "$*" >&2
@@ -61,16 +66,29 @@ port_range() {
   echo "$first $last"
 }
 
+# Prints the local address:port of every listening TCP socket, one per line.
+listening() {
+  local sockets addr
+  sockets=$(ss -Hltn) || die "ss cannot list the listening ports"
+  while read -r _ _ _ addr _; do
+    [ -z "$addr" ] || echo "$addr"
+  done <<<"$sockets"
+}
+
+# free_port [from]: the first port of the range, from <from> on, that nothing
+# listens on, on any address.
 free_port() {
-  local range first last listening addr port
+  local range first last start sockets addr port
   range=$(port_range)
   read -r first last <<<"$range"
-  listening=$(ss -Hltn) || die "ss cannot list the listening ports"
+  start=${1:-$first}
+  [ "$start" -ge "$first" ] || start=$first
+  sockets=$(listening)
   local -A taken=()
-  while read -r _ _ _ addr _; do
+  while read -r addr; do
     [ -z "$addr" ] || taken[${addr##*:}]=1
-  done <<<"$listening"
-  for ((port = first; port <= last; port++)); do
+  done <<<"$sockets"
+  for ((port = start; port <= last; port++)); do
     if [ -z "${taken[$port]+set}" ]; then
       echo "$port"
       return
@@ -102,27 +120,54 @@ check_tree() {
   [ -z "$git" ] || die "$dir holds $git; serve a directory with only the files to show"
 }
 
+# await_listen <pid> <ip> <port> <log>: returns once the server listens on
+# <ip>:<port>, fails when it exits before that; a server still not listening
+# after $listen_wait seconds is stopped and the script dies with its output.
+await_listen() {
+  local pid=$1 address=$2:$3 log=$4 deadline=$((SECONDS + listen_wait)) sockets
+  while kill -0 "$pid" 2>/dev/null; do
+    sockets=$(listening)
+    if grep -qxF -- "$address" <<<"$sockets"; then
+      return 0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kill -- "-$pid" 2>/dev/null || true
+      cat "$log" >&2
+      die "the server did not listen on $address within $listen_wait s; its output is above"
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 serve() {
-  local dir ip port log_dir log pid
+  local dir ip port log_dir log pid tries=0 from=
   [ -d "$1" ] || die "no such directory: $1"
   dir=$(cd "$1" && pwd -P)
   check_tree "$dir"
   ip=$(home_ip)
-  port=$(free_port)
   log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
   mkdir -p "$log_dir"
-  log=$log_dir/$port.log
   # -I and the neutral working directory keep python from importing modules
   # planted in the caller's directory or named by PYTHON* variables.
   cd /
-  setsid python3 -I -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
-  pid=$!
-  # A port taken between the check and the bind ends the server at once.
-  sleep 0.5
-  if ! kill -0 "$pid" 2>/dev/null; then
-    cat "$log" >&2
-    die "the server on port $port exited at once; its output is above"
-  fi
+  # A port taken between the check and the bind ends the server at once; the
+  # next free port is tried then, up to $start_tries ports in all.
+  while :; do
+    port=$(free_port "$from")
+    log=$log_dir/$port.log
+    setsid python3 -I -m http.server "$port" --bind "$ip" --directory "$dir" </dev/null >"$log" 2>&1 &
+    pid=$!
+    if await_listen "$pid" "$ip" "$port" "$log"; then
+      break
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge "$start_tries" ]; then
+      cat "$log" >&2
+      die "the server exited at once on $tries ports, the last $port; its output is above"
+    fi
+    from=$((port + 1))
+  done
   echo "http://$ip:$port/"
   echo "pid $pid; stop it with: preview-serve --stop $pid"
 }

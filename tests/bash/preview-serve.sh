@@ -5,11 +5,14 @@
 # and python3 and links to the few real tools the script needs, so no root, no
 # range file under /etc and no real port is involved:
 #   ip       prints $ROOT/ip.out, a route with src 192.0.2.7
-#   ss       prints $ROOT/ss.out, the listening sockets of the case
+#   ss       prints $ROOT/ss.out, the listening sockets of the case, and
+#            $ROOT/bound
 #   python3  logs its arguments to $ROOT/calls and its working directory to
-#            $ROOT/cwd; then stays alive (PY_MODE=run) or prints an error and
-#            exits 1 (PY_MODE=fail), as a server whose port was taken after
-#            the check does
+#            $ROOT/cwd. By default it waits PY_DELAY seconds (0), adds its
+#            listener to $ROOT/bound, which ss prints too, and stays alive.
+#            PY_MODE=fail, or a port named in PY_FAIL_PORTS, prints an error
+#            and exits 1, as a server whose port was taken after the check
+#            does; PY_MODE=hang stays alive without listening.
 # PREVIEW_PORTS_FILE points at a range file in the test directory. The script
 # runs from $ROOT/caller, so p1 can tell that python does not.
 #   r1  the range file is read: the first port of 8710-8712, bound to the src
@@ -31,7 +34,11 @@
 #   g5  a symlink loop, which the .git search cannot finish: refused
 #   p1  python runs isolated (-I) from /, not from the caller's directory
 #   i1  a route without src: exit 1, no server started
-#   b1  a server that exits at once: exit 1, its output on stderr
+#   b1  a server that exits at once on every port: 3 ports tried, exit 1, the
+#       last one's output on stderr
+#   b2  a server that exits at once on 8700 and 8701: served on 8702
+#   b3  a server that never listens: stopped after the wait, exit 1, says so
+#   b4  a server that listens only after a second: link printed once it does
 #   s1  --stop ends a server the script started
 #   s2  --stop refuses a process that is no preview server and leaves it
 # usage: preview-serve.sh [preview-serve] [case ...]
@@ -40,11 +47,13 @@
 #   to all of them. The script argument needs a / in its path.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. HOME points into a temporary directory for the whole run, which
-# is removed at the end; every server a case starts is stopped.
+# is removed at the end; the servers a case started are stopped before the
+# next case.
 set -uo pipefail
 
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range g1_git_root
-  g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated i1_no_src b1_server_exits s1_stop s2_stop_refuses)
+  g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated i1_no_src b1_server_exits
+  b2_retry b3_never_listens b4_waits_for_listen s1_stop s2_stop_refuses)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -59,16 +68,20 @@ if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
 fi
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/preview-serve-test.XXXXXX")
 PIDS=()
-cleanup() {
+stop_servers() {
   local pid
   for pid in "${PIDS[@]}"; do kill -- "-$pid" 2>/dev/null; done
+  PIDS=()
+}
+cleanup() {
+  stop_servers
   rm -rf "$ROOT"
 }
 trap cleanup EXIT
 export HOME=$ROOT/home
 mkdir -p "$HOME" "$ROOT/bin"
 
-for tool in bash cat find mkdir readlink setsid sleep tr; do
+for tool in bash cat find grep mkdir readlink setsid sleep tr; do
   ln -s "$(type -P "$tool")" "$ROOT/bin/$tool"
 done
 cat >"$ROOT/bin/ip" <<EOF
@@ -77,17 +90,28 @@ cat "$ROOT/ip.out"
 EOF
 cat >"$ROOT/bin/ss" <<EOF
 #!/bin/sh
-cat "$ROOT/ss.out"
+cat "$ROOT/ss.out" "$ROOT/bound"
 EOF
 # Stays a bash process (no exec) so its command line keeps -m http.server.
 cat >"$ROOT/bin/python3" <<EOF
 #!/usr/bin/env bash
 echo "python3 \$*" >>"$ROOT/calls"
 pwd >"$ROOT/cwd"
-if [ "\${PY_MODE:-run}" = fail ]; then
-  echo "OSError: [Errno 98] Address already in use" >&2
-  exit 1
-fi
+port= bind=
+while [ \$# -gt 0 ]; do
+  case \$1 in
+    http.server) port=\$2; shift ;;
+    --bind) bind=\$2; shift ;;
+  esac
+  shift
+done
+case " \${PY_FAIL_PORTS:-} " in *" \$port "*) PY_MODE=fail ;; esac
+case \${PY_MODE:-run} in
+  fail) echo "OSError: [Errno 98] Address already in use on \$port" >&2; exit 1 ;;
+  hang) sleep 30; exit 0 ;;
+esac
+sleep "\${PY_DELAY:-0}"
+printf 'LISTEN 0      5      %s:%s 0.0.0.0:*\n' "\$bind" "\$port" >>"$ROOT/bound"
 sleep 30
 EOF
 chmod +x "$ROOT/bin/ip" "$ROOT/bin/ss" "$ROOT/bin/python3"
@@ -243,9 +267,37 @@ i1_no_src() {
 b1_server_exits() {
   run PY_MODE=fail -- "$DIR"
   check "exit 1, got $RC" [ "$RC" = 1 ]
-  check "the server's error on stderr: $ERR" grep -q "Address already in use" <<<"$ERR"
-  check "says it exited: $ERR" grep -q "exited at once" <<<"$ERR"
+  check "3 ports tried: $(calls)" [ "$(calls | grep -o 'http.server [0-9]*' | tr '\n' ' ')" = \
+    "http.server 8700 http.server 8701 http.server 8702 " ]
+  check "the last server's error on stderr: $ERR" grep -q "Address already in use on 8702" <<<"$ERR"
+  check "says it exited: $ERR" grep -q "exited at once on 3 ports, the last 8702" <<<"$ERR"
   check "no link printed: $OUT" [ -z "$OUT" ]
+}
+
+b2_retry() {
+  run PY_FAIL_PORTS="8700 8701" -- "$DIR"
+  check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
+  check "8700, 8701, 8702 tried: $(calls)" [ "$(calls | grep -o 'http.server [0-9]*' | tr '\n' ' ')" = \
+    "http.server 8700 http.server 8701 http.server 8702 " ]
+  check "link printed: $OUT" grep -qxF "http://192.0.2.7:8702/" <<<"$OUT"
+  check "server alive" alive "$PID"
+}
+
+b3_never_listens() {
+  local start=$SECONDS server
+  run PY_MODE=hang -- "$DIR"
+  check "exit 1, got $RC" [ "$RC" = 1 ]
+  check "says it did not listen: $ERR" grep -q "did not listen on 192.0.2.7:8700" <<<"$ERR"
+  check "gave up within 5 s" [ $((SECONDS - start)) -le 5 ]
+  check "no link printed: $OUT" [ -z "$OUT" ]
+  server=$(pgrep -f -- "-m http.server 8700 --bind 192.0.2.7 --directory $DIR")
+  check "server stopped: $server" [ -z "$server" ]
+}
+
+b4_waits_for_listen() {
+  run PY_DELAY=1 -- "$DIR"
+  serving 8700
+  check "listening when the link was printed" grep -q "192.0.2.7:8700" "$ROOT/bound"
 }
 
 s1_stop() {
@@ -292,12 +344,14 @@ all=("${CASES[@]}")
 [ $# -gt 0 ] && all=("$@")
 for CASE in "${all[@]}"; do
   FAILED=0
+  stop_servers
   DIR=$ROOT/site
   rm -rf "$DIR" "$ROOT/preview-ports" "$HOME/.local" "$ROOT/cwd"
   mkdir -p "$DIR" "$ROOT/caller"
   echo "<p>shown</p>" >"$DIR/index.html"
   : >"$ROOT/calls"
   : >"$ROOT/ss.out"
+  : >"$ROOT/bound"
   echo "$ROUTE" >"$ROOT/ip.out"
   if in_cases "$CASE"; then
     "$CASE"
