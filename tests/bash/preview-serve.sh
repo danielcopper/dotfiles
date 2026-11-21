@@ -36,7 +36,8 @@
 #   g3  a symlink whose target lies outside the directory (absolute,
 #       relative, dangling, a sibling sharing its name as a prefix): refused,
 #       no server started
-#   g4  symlinks to a file and a directory inside it: served
+#   g4  symlinks to a file and a directory inside it, and a dangling one
+#       whose target would lie inside it: served
 #   g5  a symlink loop, which the .git search cannot finish: refused
 #   p1  python runs isolated (-I) from /, not from the caller's directory
 #   n1  --addr prints "<ip> <port>" from the same choice, 192.0.2.7 8711
@@ -303,6 +304,7 @@ g4_symlink_inside() {
   mkdir "$DIR/sub"
   ln -s index.html "$DIR/home.html"
   ln -s sub "$DIR/sub-link"
+  ln -s missing.html "$DIR/gone.html"
   run -- "$DIR"
   serving 8700
 }
