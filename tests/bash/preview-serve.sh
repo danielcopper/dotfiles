@@ -39,6 +39,9 @@
 #   g4  symlinks to a file and a directory inside it: served
 #   g5  a symlink loop, which the .git search cannot finish: refused
 #   p1  python runs isolated (-I) from /, not from the caller's directory
+#   n1  --addr prints "<ip> <port>" from the same choice, 192.0.2.7 8711
+#       with 8710 taken in 8710-8712, and starts nothing; with every port
+#       taken it fails as a start does
 #   i1  a route without src: exit 1, no server started
 #   b1  a server that exits at once on every port: 3 ports tried, exit 1, the
 #       last one's output on stderr
@@ -63,7 +66,7 @@ set -uo pipefail
 
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range r6_dangling_range_file
   r7_last_port_free r8_one_port_ranges g1_git_root
-  g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated i1_no_src b1_server_exits
+  g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated n1_addr i1_no_src b1_server_exits
   b2_retry b3_never_listens b4_waits_for_listen s1_stop s2_stop_refuses s3_stop_stale)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
@@ -314,6 +317,19 @@ p1_isolated() {
   run -- "$DIR"
   serving 8700
   check "python started from /, got $(cat "$ROOT/cwd")" [ "$(cat "$ROOT/cwd")" = / ]
+}
+
+n1_addr() {
+  ports 8710-8712
+  listening 0.0.0.0:8710
+  run -- --addr
+  check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
+  check "prints the address and port: $OUT" [ "$OUT" = "192.0.2.7 8711" ]
+  check "nothing on stderr: $ERR" [ -z "$ERR" ]
+  check "no server started: $(calls)" no_server
+  listening 0.0.0.0:8710 0.0.0.0:8711 0.0.0.0:8712
+  run -- --addr
+  refused "every port of 8710-8712 is in use"
 }
 
 i1_no_src() {

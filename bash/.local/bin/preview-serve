@@ -4,6 +4,7 @@
 #
 # usage: preview-serve <dir>
 #        preview-serve --stop <pid>
+#        preview-serve --addr
 #
 # The address is the src of `ip -4 route get 1.1.1.1`. The port is the first
 # one that nothing listens on (`ss -Hltn`, any address) in the range
@@ -11,22 +12,23 @@
 # file on hosts whose firewall opens only that range to the LAN. When every
 # port of the range is taken, nothing starts and the exit code is 1. Without
 # the file the range is 8700-8719, the one the playbook writes, and one line on
-# stderr says so; a symlink there to a missing file is an error.
+# stderr says so; a symlink there to a missing file is an error. --addr prints
+# that address and port as "<ip> <port>" and starts nothing, for a dev server
+# to bind to.
 #
 # The server hands out every file below <dir> and follows symlinks, so <dir>
 # may hold no .git at or below it (a work tree root, a nested clone) and no
 # symlink whose target lies outside it.
 #
 # The server is python3 -I -m http.server, started from / in its own session
-# so it imports nothing from the caller's directory and outlives the shell;
-# its output goes to
-# ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log, its PID to
-# <port>.pid beside it. The link is
-# printed once ss shows the server listening. A server that exits first lost
-# its port to another process after the check: the next free port is tried,
-# 3 in all. One that does not listen within 3 seconds is stopped. --stop ends
-# only a server with such a PID file whose command line still matches it, and
-# removes the file.
+# so it imports nothing from the caller's directory and outlives the shell.
+# Its output goes to ${XDG_STATE_HOME:-~/.local/state}/preview-serve/<port>.log
+# and its PID to <port>.pid beside it. The link is printed once ss shows the
+# server listening. A server that exits first lost its port to another
+# process after the check: the next free port is tried, 3 in all. One that
+# does not listen within 3 seconds is stopped. --stop ends only a server with
+# such a PID file whose command line still matches it, and removes the file.
+#
 # PREVIEW_PORTS_FILE overrides the path of the range file.
 set -euo pipefail
 # die inside $(...) must end the script, not just the substitution's subshell.
@@ -44,7 +46,7 @@ die() {
   exit 1
 }
 usage() {
-  echo "usage: preview-serve <dir> | preview-serve --stop <pid>" >&2
+  echo "usage: preview-serve <dir> | preview-serve --stop <pid> | preview-serve --addr" >&2
   exit 2
 }
 
@@ -199,7 +201,20 @@ serve() {
   echo "pid $pid; stop it with: preview-serve --stop $pid"
 }
 
+# Prints "<ip> <port>": what serve would bind to now.
+addr() {
+  local ip port
+  ip=$(home_ip)
+  load_range
+  port=$(free_port)
+  echo "$ip $port"
+}
+
 case ${1:-} in
+  --addr)
+    [ $# -eq 1 ] || usage
+    addr
+    ;;
   --stop)
     [ $# -eq 2 ] || usage
     stop "$2"
