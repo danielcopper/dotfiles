@@ -21,7 +21,8 @@ import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
 import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, sprintWarnings, withItemState } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
-import { tellOutcomes, writeAtOnce } from "../../actions/write.js";
+import { tellOutcomes } from "../../actions/write.js";
+import { openStateMenu, setStateAtOnce, stateColor, unclearStateLines } from "../../actions/state.js";
 import { button, chip, columnHead, detailSection, sessionChip, shownOf, statusPill } from "../helpers.js";
 
 // How wide the stories' column is.
@@ -78,10 +79,10 @@ export const sprintShape = {
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has.
   settle: (b, due, data, cx) =>
-    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data)], cx),
+    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data, SPRINT_STATES)], cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
-  openStatusMenu: (b, view, cx) => openStateMenu(b, view, cx),
-  pickStatus: (b, view, key, target, cx) => setItemState(b, view, key, target.name, cx),
+  openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
+  pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, SPRINT_STATES, cx),
   // The detail panel's rows of a story or task: its state as a pill (a click
   // opens the status menu), a task's column, its area and iteration, and
   // Status s.
@@ -106,9 +107,6 @@ export const sprintShape = {
     };
   },
 };
-
-// The theme color of a state, by its category (parseAzureTypes).
-const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
 
 // "bis 27.11." for the sprint's last day (UTC, as Azure gives it), or "".
 function sprintEnd(finish) {
@@ -221,56 +219,9 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
       .when(Boolean(session), (el) => el.child(sessionChip(t, session))));
 }
 
-// The status menu for the selected story or task: the states of its type.
-function openStateMenu(b, view, cx) {
-  const st = b.state(view.id);
-  const item = b.selected(view);
-  if (!item) return;
-  const states = st.data.meta.typeStates?.[item.type];
-  if (!states?.length) return b.say(`Für ${item.type ?? "diesen Typ"} kennt das Board keine Status`, "info", cx);
-  const targets = states.map((name) => ({ id: name, name, color: stateColor(st.data, name), hidden: false }));
-  b.modal = { kind: "status", view, key: item.key, targets, at: Math.max(0, states.indexOf(stateNow(st.data, item))) };
-}
-
-// Sets an item's state at once and writes it (writeAtOnce); the state it
-// has already sends nothing. A refusal sets the state back, unless a
-// refresh has read another since. A write that landed refreshes the view
-// too: which column a task's new state puts it in is Azure's to say.
-function setItemState(b, view, key, state, cx) {
-  const st = b.state(view.id);
-  const item = findSprintItem(st.data, key);
-  if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
-  const label = itemLabel(item);
-  const before = stateNow(st.data, item);
-  if (before === state) return;
-  writeAtOnce(b, view, {
-    key,
-    label,
-    apply: () => (st.data = withItemState(st.data, key, state)),
-    write: () => b.loader(view).setState(view, item, state),
-    undo() {
-      if (findSprintItem(st.data, key)?.state === state) st.data = withItemState(st.data, key, before);
-    },
-    open: { kind: "state", state },
-    again: true,
-    texts: {
-      pending: () => `${label} → ${state} …`,
-      landed: () => `${label} hat jetzt den Status „${state}“`,
-      unclear: `${label} → ${state}`,
-      refused: (why, earlier) => (earlier ? `${label} → ${state} nicht gespeichert: ${why}` : `${label} bleibt „${before}“: ${why}`),
-    },
-  }, cx);
-}
-
-// Which state the items of settled unclear state changes (`due`) have in
-// the new data, one line each: the state it was set to (info), another
-// (warning), or not in the sprint any more (warning).
-function unclearStateLines(due, data) {
-  return due.map((u) => {
-    const now = findSprintItem(data, u.key);
-    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht im Sprint`, warn: true };
-    const state = stateNow(data, now);
-    if (state === u.state) return { text: `${u.label} hat nach dem Neuladen den Status „${u.state}“`, warn: false };
-    return { text: `${u.label} hat nach dem Neuladen den Status „${state}“, nicht „${u.state}“`, warn: true };
-  });
-}
+// How the sprint finds, changes and shows its items' states (actions/state.js).
+// A write that landed refreshes the view too: which column a task's new
+// state puts it in is Azure's to say.
+const SPRINT_STATES = {
+  find: findSprintItem, withState: withItemState, stateOf: stateNow, where: "im Sprint", again: true,
+};

@@ -20,9 +20,10 @@
 // ("cannot run during render"). A new way to draw is a module here and its
 // entry in SHAPES.
 
+import { backlogShape } from "./backlog.js";
 import { boardShape } from "./board.js";
 import { placeholderShape } from "./placeholder.js";
 import { prsShape } from "./prs.js";
 import { sprintShape } from "./sprint.js";
 
-export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, placeholder: placeholderShape };
+export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };

@@ -1,0 +1,162 @@
+{
+  "backlogFields": {
+    "typeFields": {
+      "Order": "Microsoft.VSTS.Common.StackRank",
+      "Effort": "Microsoft.VSTS.Scheduling.StoryPoints",
+      "RemainingWork": "Microsoft.VSTS.Scheduling.RemainingWork",
+      "Activity": "Microsoft.VSTS.Common.Activity"
+    }
+  },
+  "bugsBehavior": "asRequirements",
+  "hiddenBacklogs": [
+    "Microsoft.EpicCategory"
+  ],
+  "isBugsBehaviorConfigured": true,
+  "portfolioBacklogs": [
+    {
+      "id": "Microsoft.EpicCategory",
+      "name": "Epics",
+      "rank": 4,
+      "workItemCountLimit": 1000,
+      "addPanelFields": [
+        {
+          "referenceName": "System.Title",
+          "name": "Title",
+          "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/fields/System.Title"
+        }
+      ],
+      "columnFields": [],
+      "defaultWorkItemType": {
+        "name": "Epic",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Epic"
+      },
+      "workItemTypes": [
+        {
+          "name": "Epic",
+          "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Epic"
+        }
+      ],
+      "color": "009CCC",
+      "isHidden": true,
+      "type": "portfolio"
+    },
+    {
+      "id": "Microsoft.FeatureCategory",
+      "name": "Features",
+      "rank": 3,
+      "workItemCountLimit": 1000,
+      "addPanelFields": [
+        {
+          "referenceName": "System.Title",
+          "name": "Title",
+          "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/fields/System.Title"
+        }
+      ],
+      "columnFields": [],
+      "defaultWorkItemType": {
+        "name": "Feature",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Feature"
+      },
+      "workItemTypes": [
+        {
+          "name": "Feature",
+          "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Feature"
+        }
+      ],
+      "color": "009CCC",
+      "isHidden": false,
+      "type": "portfolio"
+    }
+  ],
+  "requirementBacklog": {
+    "id": "Microsoft.RequirementCategory",
+    "name": "Stories",
+    "rank": 2,
+    "workItemCountLimit": 1000,
+    "addPanelFields": [
+      {
+        "referenceName": "System.Title",
+        "name": "Title",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/fields/System.Title"
+      }
+    ],
+    "columnFields": [],
+    "defaultWorkItemType": {
+      "name": "User Story",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/User%20Story"
+    },
+    "workItemTypes": [
+      {
+        "name": "User Story",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/User%20Story"
+      },
+      {
+        "name": "Bug",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Bug"
+      }
+    ],
+    "color": "009CCC",
+    "isHidden": false,
+    "type": "requirement"
+  },
+  "taskBacklog": {
+    "id": "Microsoft.TaskCategory",
+    "name": "Tasks",
+    "rank": 1,
+    "workItemCountLimit": 1000,
+    "addPanelFields": [
+      {
+        "referenceName": "System.Title",
+        "name": "Title",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/fields/System.Title"
+      }
+    ],
+    "columnFields": [],
+    "defaultWorkItemType": {
+      "name": "Task",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Task"
+    },
+    "workItemTypes": [
+      {
+        "name": "Task",
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItemTypes/Task"
+      }
+    ],
+    "color": "009CCC",
+    "isHidden": false,
+    "type": "task"
+  },
+  "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/backlogconfiguration",
+  "workItemTypeMappedStates": [
+    {
+      "workItemTypeName": "User Story",
+      "states": {
+        "To Do": "Proposed",
+        "In Progress": "InProgress",
+        "In Dev Test": "InProgress",
+        "In UAT": "Resolved",
+        "Broken": "InProgress",
+        "Done": "Completed",
+        "Removed": "Removed"
+      }
+    },
+    {
+      "workItemTypeName": "Bug",
+      "states": {
+        "New": "Proposed",
+        "Committed": "InProgress",
+        "Done": "Completed",
+        "Removed": "Removed"
+      }
+    },
+    {
+      "workItemTypeName": "Task",
+      "states": {
+        "To Do": "Proposed",
+        "In Progress": "InProgress",
+        "Done": "Completed",
+        "Removed": "Removed"
+      }
+    }
+  ]
+}

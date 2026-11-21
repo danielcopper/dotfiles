@@ -1,0 +1,98 @@
+[
+  {
+    "fields": {
+      "System.Id": 301,
+      "System.Title": "Import the sample catalogue",
+      "System.WorkItemType": "User Story",
+      "System.State": "In Progress",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "System.AssignedTo": {
+        "displayName": "Alex Sample",
+        "uniqueName": "Alex.Sample@example.com",
+        "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+        "descriptor": "aad.sample1"
+      },
+      "Microsoft.VSTS.Common.StackRank": 1000.5
+    },
+    "id": 301,
+    "relations": null,
+    "rev": 2,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/301"
+  },
+  {
+    "fields": {
+      "System.Id": 302,
+      "System.Title": "Export the weekly report",
+      "System.WorkItemType": "User Story",
+      "System.State": "To Do",
+      "System.AreaPath": "Example Project\\Shared",
+      "System.IterationPath": "Example Project\\Sprint 12",
+      "Microsoft.VSTS.Common.StackRank": 2000.0
+    },
+    "id": 302,
+    "relations": null,
+    "rev": 2,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/302"
+  },
+  {
+    "fields": {
+      "System.Id": 401,
+      "System.Title": "Show the sample prices in euros",
+      "System.WorkItemType": "User Story",
+      "System.State": "To Do",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project",
+      "System.AssignedTo": {
+        "displayName": "Robin Example",
+        "uniqueName": "Robin.Example@example.com",
+        "id": "5e1d2c3b-6a7f-4b8e-9c0d-1a2b3c4d5e6f",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample2",
+        "descriptor": "aad.sample2"
+      },
+      "System.Parent": 390,
+      "Microsoft.VSTS.Common.StackRank": 3000.25
+    },
+    "id": 401,
+    "relations": null,
+    "rev": 2,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/401"
+  },
+  {
+    "fields": {
+      "System.Id": 402,
+      "System.Title": "Sample totals are off by one",
+      "System.WorkItemType": "Bug",
+      "System.State": "New",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project"
+    },
+    "id": 402,
+    "relations": null,
+    "rev": 2,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/402"
+  },
+  {
+    "fields": {
+      "System.Id": 403,
+      "System.Title": "Archive old sample reports",
+      "System.WorkItemType": "User Story",
+      "System.State": "To Do",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 13",
+      "System.AssignedTo": {
+        "displayName": "Alex Sample",
+        "uniqueName": "Alex.Sample@example.com",
+        "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+        "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+        "descriptor": "aad.sample1"
+      },
+      "Microsoft.VSTS.Common.StackRank": 4000.0
+    },
+    "id": 403,
+    "relations": null,
+    "rev": 2,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/403"
+  }
+]

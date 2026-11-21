@@ -318,8 +318,13 @@ herdr-app`. Which files of the package git tracks is set in the root
   items of the types the taskboard's columns map. What it reads per refresh, the
   header of `mods/board/src/main.js` says, and makeAzure (in
   `mods/board/src/sources/azure.js`) what it keeps; `r` reads the team's sprint,
-  areas and columns again. The Backlog and the pull request tabs read nothing
-  yet; each says which view it will hold.
+  areas and columns again. A team's Backlog lists its requirement level (its
+  Stories, and Bugs where the team keeps them there) in backlog order, one row
+  each with id, type, title, state, sprint ("—" for none) and assignee. It
+  needs `az login`: the order comes through `az rest`, which takes no PAT, and
+  the Backlog says so when the login is missing. What it keeps and for how
+  long, makeAzure says; `r` reads that again. The pull request tabs read
+  nothing yet; each says which view it will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
   me, opened by me, or asking for my review; a list section of my own
   search, one whose query sets author, assignee or (user-)review-requested
@@ -342,7 +347,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   state; az takes the request from a file under
   `~/.cache/herdr-app/board/`), `s` sets a story's or task's state from its
   type's states, a click selects, and `Enter` shows the details (parent, state,
-  assignee, column, area and iteration). Where a work item's session starts
+  assignee, column, area and iteration). On a Backlog `j/k` move, `s` sets the
+  state, `Enter` shows the details (parent, state, assignee, area, iteration
+  and sprint), `o` opens the item in the browser, and `n` creates a work item:
+  a dialog asks for its type (the level's, Story first; with a Story selected
+  also Task, as its child) and its title (`Tab` switches the field, `h/l` the
+  type). It is created in the team's default area and iteration, assigned to
+  me, and shows, selected, once Azure has named its id and the Backlog is read
+  again; a Task is linked to the selected Story as its parent and, being no
+  Story, does not show in the list. Where a work item's session starts
   is only `start.checkout` so far. On a GitHub view `h/l j/k` move over the
   columns shown, `H/L` move a card one column, hidden ones included (`s` picks
   from a menu, hidden ones too, or drag the card onto a column; the notice

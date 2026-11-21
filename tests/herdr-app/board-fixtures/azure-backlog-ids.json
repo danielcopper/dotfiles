@@ -1,0 +1,44 @@
+{
+  "workItems": [
+    {
+      "rel": null,
+      "source": null,
+      "target": {
+        "id": 302,
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/302"
+      }
+    },
+    {
+      "rel": null,
+      "source": null,
+      "target": {
+        "id": 401,
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/401"
+      }
+    },
+    {
+      "rel": null,
+      "source": null,
+      "target": {
+        "id": 301,
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/301"
+      }
+    },
+    {
+      "rel": null,
+      "source": null,
+      "target": {
+        "id": 402,
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/402"
+      }
+    },
+    {
+      "rel": null,
+      "source": null,
+      "target": {
+        "id": 403,
+        "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/403"
+      }
+    }
+  ]
+}

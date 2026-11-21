@@ -34,9 +34,13 @@
 //
 // Calls: a GitHub view costs one gh call per refresh, an Azure team's
 // Sprint two az calls (the taskboard's column of each work item, and one
-// WIQL query for their fields; three while who az is stays unknown); what
-// the Sprint reads once and keeps, and for how long, makeAzure says. The
-// other Azure views read nothing yet. Finding gh and az costs one sh call
+// WIQL query for their fields), its Backlog two, one after the other (the
+// level's work items in their list by az rest, then one WIQL query for
+// their fields; one for an empty backlog); either one more while who az is
+// stays unknown. What the Sprint and the Backlog read once and keep, and
+// for how long, makeAzure says. A state change costs one az call, a
+// Backlog's create one and a child's parent link one more; a create reads
+// the Backlog again. The PR tabs read nothing yet. Finding gh and az costs one sh call
 // now and then (toolPaths says when). A view refreshes when its tab first
 // shows, on `r` (which first drops what its source keeps of it: its
 // source's forget), after a column is hidden or shown (x, a name in the
@@ -47,12 +51,13 @@
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
-// sprint's taskboard), select.js (filter, "nur meine", selection), sources/
-// (GitHub, Azure), tools.js (running gh and az), actions/ (starting a
-// session, writing a change at once, moving a card), ui/helpers.js,
-// ui/layer.js (the board layer), ui/shapes/ (how a view's data is drawn and
-// worked: board, prs, sprint, placeholder), ui/modals/ (the dialogs: start,
-// status, columns) and this one, the Board, which looks the shape up. Their
+// sprint's taskboard), kinds/backlog.js (a team's backlog), select.js
+// (filter, "nur meine", selection), sources/ (GitHub, Azure), tools.js
+// (running gh and az), actions/ (starting a session, writing a change at
+// once, moving a card, changing a state, creating a work item),
+// ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how a view's
+// data is drawn and worked: board, prs, sprint, backlog, placeholder),
+// ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
 // data logic is plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
 
@@ -159,7 +164,7 @@ export const KINDS = {
   "github board": { shape: "board" },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
-  "azure backlog": { text: "Backlog folgt" },
+  "azure backlog": { shape: "backlog" },
   "azure prs": { text: "PR-Ansicht folgt" },
 };
 
@@ -1396,6 +1401,205 @@ export function checkStateResult(stdout, state) {
   if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
 }
 
+// ---- the Backlog ----
+
+// The Backlog view's calls for a team context `c`: the team's backlog
+// levels, its backlog configuration (the order field, each type's states
+// and their categories), its settings (default and backlog iteration; its
+// default area comes from azAreasArgs' defaultValue), and per refresh the
+// level's work items in their list (az rest: az devops invoke picks a
+// location by area and resource, the first that fits, which does not
+// reliably reach backlogs/{id}/workItems) and one WIQL query for their
+// fields (azQueryArgs).
+export const azLevelsArgs = (c) => azInvokeArgs(c, "work", "backlogs", { project: c.project, team: c.team });
+export const azBacklogConfigArgs = (c) => azInvokeArgs(c, "work", "backlogconfiguration", { project: c.project, team: c.team });
+export const azTeamSettingsArgs = (c) =>
+  ["boards", "iteration", "team", "show-default-iteration", ...azOrg(c.org), "--project", c.project, "--team", c.team, "-o", "json"];
+// Azure DevOps' resource for an Entra token (az rest --resource): az rest
+// knows no Azure DevOps host of its own.
+export const AZ_DEVOPS_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
+export const backlogIdsUrl = (c, levelId) =>
+  `${c.org}/${[c.project, c.team].map(encodeURIComponent).join("/")}/_apis/work/backlogs/${encodeURIComponent(levelId)}/workItems?api-version=7.1`;
+export const azBacklogIdsArgs = (c, levelId) => ["rest", "--method", "get", "--url", backlogIdsUrl(c, levelId), "--resource", AZ_DEVOPS_RESOURCE, "-o", "json"];
+
+// What a failed az rest says. az rest signs in only with az login (an Entra
+// token), never with a PAT, so where az asks for az login, an Entra answer
+// (AADSTS…) fails or Azure answers 401, the Backlog says what it needs.
+export const BACKLOG_NEEDS_LOGIN = "Der Backlog braucht az login (ein PAT reicht dafür nicht)";
+const AZ_REST_LOGIN = /az login|AADSTS\d+|Unauthorized|\b401\b/i;
+export function azRestFailure(r) {
+  const said = String(r.stderr ?? "").split("\n").filter((l) => !/^WARNING:/.test(l)).join("\n");
+  if (AZ_REST_LOGIN.test(said)) return new BoardError(BACKLOG_NEEDS_LOGIN, { unavailable: true });
+  return azFailure(r);
+}
+
+// A backlog level of Azure's answer → { id, name, type ("portfolio",
+// "requirement" or "task"), types: [names], defaultType }, or null.
+function backlogLevel(l) {
+  if (!isObject(l) || typeof l.id !== "string" || !l.id) return null;
+  const types = (Array.isArray(l.workItemTypes) ? l.workItemTypes : []).map((t) => t?.name).filter((n) => typeof n === "string" && n);
+  const defaultType = typeof l.defaultWorkItemType?.name === "string" ? l.defaultWorkItemType.name : types[0] ?? null;
+  return { id: l.id, name: typeof l.name === "string" && l.name ? l.name : l.id, type: l.type ?? null, types, defaultType };
+}
+
+// The team's backlog levels → [levels] (backlogLevel); none is no answer.
+export function parseBacklogLevels(stdout) {
+  const list = azList(azJson(stdout, "die Backlog-Ebenen"));
+  const levels = (list ?? []).map(backlogLevel).filter(Boolean);
+  if (!levels.length) throw new BoardError("Azure lieferte keine Backlog-Ebenen des Teams");
+  return levels;
+}
+
+// The level the Backlog shows: the team's requirement level (Stories, by
+// the process: User Stories, Product Backlog Items, Requirements), and the
+// level below it, whose types (Tasks) may be created under one of its
+// items: the team's task level, else the configuration's.
+export function backlogLevels(levels, config) {
+  const level = levels.find((l) => l.type === "requirement");
+  if (!level) throw new BoardError("Das Team hat keine Backlog-Ebene für Anforderungen (Stories)");
+  return { level, childLevel: levels.find((l) => l.type === "task") ?? config.taskLevel ?? null };
+}
+
+// A field's reference name, as a WIQL query may name it; anything else is
+// none.
+const fieldName = (name) => (typeof name === "string" && /^[A-Za-z][\w.]*$/.test(name) ? name : null);
+
+// The team's backlog configuration → { orderField (the field the backlog
+// is ordered by: Microsoft.VSTS.Common.StackRank or …BacklogPriority, by
+// the process; null where it names none), typeStates: { [type]: [state
+// names] in Azure's order }, states: [{ id, name, category, color }] in
+// category order (as parseAzureTypes), taskLevel }.
+export function parseBacklogConfig(stdout) {
+  const json = azJson(stdout, "die Backlog-Einstellungen");
+  if (!isObject(json)) throw new BoardError("Azure lieferte keine Backlog-Einstellungen");
+  const typeStates = {};
+  const states = new Map();
+  for (const info of Array.isArray(json.workItemTypeMappedStates) ? json.workItemTypeMappedStates : []) {
+    if (typeof info?.workItemTypeName !== "string" || !isObject(info.states)) continue;
+    typeStates[info.workItemTypeName] = Object.keys(info.states);
+    for (const [name, category] of Object.entries(info.states)) {
+      if (!states.has(name)) states.set(name, { id: name, name, category, color: CATEGORY_COLORS[category] ?? "muted" });
+    }
+  }
+  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
+  return {
+    orderField: fieldName(json.backlogFields?.typeFields?.Order),
+    typeStates,
+    states: [...states.values()].sort((a, b) => order(a) - order(b)),
+    taskLevel: backlogLevel(json.taskBacklog),
+  };
+}
+
+// The team's settings → { defaultIteration, backlogIteration }: the paths
+// of the iteration a new work item gets and of the backlog's own (the root
+// of the team's iterations), each null where Azure names none.
+export function parseTeamSettings(stdout) {
+  const json = azJson(stdout, "die Einstellungen des Teams");
+  const path = (it) => (typeof it?.path === "string" && it.path ? it.path : null);
+  return { defaultIteration: path(json?.defaultIteration), backlogIteration: path(json?.backlogIteration) };
+}
+
+// The team's default area (the area a new work item gets) from its areas'
+// answer (azAreasArgs), or null.
+export function parseDefaultArea(stdout) {
+  const value = azJson(stdout, "die Bereiche des Teams")?.defaultValue;
+  return typeof value === "string" && value ? value : null;
+}
+
+// The ids of the level's work items, in the list's order, each once.
+export function parseBacklogIds(stdout) {
+  const list = azJson(stdout, "die Work Items des Backlogs")?.workItems;
+  if (!Array.isArray(list)) throw new BoardError("Azure lieferte keine Work Items des Backlogs");
+  return [...new Set(list.map((l) => l?.target?.id).filter(Number.isInteger))];
+}
+
+// One WIQL query for the fields of the work items `ids`, the order field
+// among them where there is one.
+export function backlogWiql(ids, orderField) {
+  const fields = [...WORK_ITEM_FIELDS, ...(orderField ? [orderField] : [])].map((f) => `[${f}]`).join(", ");
+  return `SELECT ${fields} FROM WorkItems WHERE [System.Id] IN (${ids.join(", ")}) ORDER BY [System.Id]`;
+}
+
+// The sprint a work item is in, as the Backlog shows it: the last part of
+// its iteration's path, or null for none, which is the backlog's own
+// iteration (the root of the team's iterations) or the project's root (a
+// path without a level below).
+export function sprintName(path, backlogIteration) {
+  if (typeof path !== "string" || !path || path === backlogIteration || !path.includes("\\")) return null;
+  return path.split("\\").at(-1);
+}
+
+// The backlog as the backlog shape shows it (kinds/backlog.js): one row
+// per work item of the level (`items`, parseWorkItems on the ids' query
+// with the order field in `orders`: id → value), each with its sprint
+// (sprintName). The rows are sorted by the order field, as Azure's backlog
+// is: the REST reference does not say whether the list of ids
+// (parseBacklogIds) comes in backlog order, so it is not relied on; it
+// orders only what has no order value, after all that has one. Ids the
+// query did not find are counted (meta.missing); `limited` says the ids
+// were more than one query reads (AZ_QUERY_LIMIT).
+export function backlogList({ level, childLevel, config, settings, area, ids, items, orders, viewer }) {
+  const at = new Map(ids.map((id, i) => [id, i]));
+  const rank = (i) => orders.get(i.number) ?? Infinity;
+  const rows = items
+    .filter((i) => at.has(i.number))
+    .map((i) => ({ ...i, sprint: sprintName(i.iteration, settings.backlogIteration) }))
+    .sort((a, b) => rank(a) - rank(b) || at.get(a.number) - at.get(b.number));
+  const read = Math.min(ids.length, AZ_QUERY_LIMIT);
+  return {
+    shape: "backlog",
+    meta: {
+      level, childLevel, typeStates: config.typeStates, states: config.states, orderField: config.orderField,
+      area, iteration: settings.defaultIteration, missing: read - rows.length,
+    },
+    rows,
+    viewer,
+    total: ids.length,
+    limited: ids.length > AZ_QUERY_LIMIT,
+    limit: AZ_QUERY_LIMIT,
+  };
+}
+
+// The order values of az boards query's answer → Map(id → number).
+export function parseOrders(stdout, orderField) {
+  const list = azList(azJson(stdout, "die Work Items", [])) ?? [];
+  if (!orderField) return new Map();
+  return new Map(list.filter((wi) => Number.isInteger(wi?.id) && typeof wi.fields?.[orderField] === "number").map((wi) => [wi.id, wi.fields[orderField]]));
+}
+
+// Creating a work item: of `type` with `title`, in the team's default area
+// and iteration (az applies no team defaults), assigned to the account az
+// is signed in as (az resolves "me"). The title is given as --title=…, so
+// one that starts with a dash is no option.
+export const azCreateArgs = (c, { type, title, area, iteration }) => [
+  "boards", "work-item", "create", ...azOrg(c.org), "--project", c.project, "--type", type, `--title=${title}`,
+  "--area", area, "--iteration", iteration, "--assigned-to", "me", "-o", "json",
+];
+
+// az's answer to a create: the new work item's id. Without one it is open
+// whether, and as what, it was created.
+export function parseCreated(stdout) {
+  const id = jsonOrNull(stdout)?.id;
+  if (!Number.isInteger(id)) throw failure("Azure hat keine Nummer des neuen Work Items genannt", { write: true, unclear: true });
+  return id;
+}
+
+// Making the work item `id` a child of `parent`.
+export const azParentArgs = (c, id, parent) =>
+  ["boards", "work-item", "relation", "add", ...azOrg(c.org), "--id", String(id), "--relation-type", "parent", "--target-id", String(parent), "-o", "json"];
+
+// az's answer to the parent link: the work item with its relations, which
+// az names by their friendly names ("Parent"); one to the parent's address
+// confirms the link, anything else leaves it open.
+export function checkParentLink(stdout, parent) {
+  const relations = jsonOrNull(stdout)?.relations;
+  const linked = Array.isArray(relations) && relations.some((r) => /^parent$|Hierarchy-Reverse$/i.test(r?.rel ?? "") && new RegExp(`/workItems/${parent}$`, "i").test(r?.url ?? ""));
+  if (!linked) throw failure("Azure hat die Verknüpfung nicht bestätigt", { write: true, unclear: true });
+}
+
+// How long the Backlog keeps a team's settings (ms): they change rarely.
+export const BACKLOG_KEEP_MS = 4 * 3600000;
+
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, and per layout of an Azure view how
 // it loads and writes. az runs by the path `paths` (toolPaths) finds.
@@ -1408,11 +1612,21 @@ export function checkStateResult(stdout, state) {
 // refresh then reads the taskboard's columns of the work items and the
 // sprint's work items, also at the same time. The team's kept settings
 // (not the project's types) are dropped, so that they are read again, by
-// `r` (forget), by a task in a column the columns read do not know, and by
-// a move or state change Azure refuses. Who az is signed in as is read
-// beside all that, with its own short timeout (AZ_ME_TIMEOUT), and kept
-// once read; while that fails it is asked again with each refresh, and the
-// data says why (noViewer: the source's words and the error).
+// `r` on the Sprint (forget), by a task in a column the columns read do not
+// know, and by a move or state change Azure refuses.
+//
+// What the Backlog keeps, per team, read at the same time once and kept
+// for BACKLOG_KEEP_MS (one that fails keeps nothing): the team's backlog
+// levels, its backlog configuration, its settings and its areas (for the
+// default area). A refresh then reads the level's ids (az rest) and, after
+// them, one query for their fields; a backlog without ids asks no query.
+// `r` on the Backlog and a state change or create Azure refuses drop what
+// it keeps.
+//
+// Who az is signed in as is read beside all that, with its own short
+// timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
+// asked again with each refresh, and the data says why (noViewer: the
+// source's words and the error).
 export function makeAzure(paths) {
   const az = async (args, options = {}, timeout = AZ_TIMEOUT) => {
     const r = await call("az", args, null, timeout, { ...options, paths });
@@ -1445,6 +1659,21 @@ export function makeAzure(paths) {
     kept.delete(`iteration\n${teamKey(c)}`);
     kept.delete(`board\n${teamKey(c)}`);
   };
+  async function backlogSettingsOf(c) {
+    const key = `backlog\n${teamKey(c)}`;
+    const held = keptValue(key);
+    if (held) return held.value;
+    const [levels, config, settings, area] = await Promise.all([
+      az(azLevelsArgs(c)).then(parseBacklogLevels),
+      az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
+      az(azTeamSettingsArgs(c)).then(parseTeamSettings),
+      az(azAreasArgs(c)).then(parseDefaultArea),
+    ]);
+    const value = { ...backlogLevels(levels, config), config, settings, area };
+    kept.set(key, { value, until: Date.now() + BACKLOG_KEEP_MS });
+    return value;
+  }
+  const forgetBacklog = (c) => kept.delete(`backlog\n${teamKey(c)}`);
   let viewer = null;
   let viewerError = null;
   const whoAmI = () =>
@@ -1460,15 +1689,23 @@ export function makeAzure(paths) {
       });
   const noViewer = "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)";
   // A write Azure refused may have met settings that are out of date.
-  const forgetOnRefusal = (c) => (e) => {
-    if (!(e instanceof BoardError && e.unclear)) forget(c);
+  const dropOnRefusal = (drop, c) => (e) => {
+    if (!(e instanceof BoardError && e.unclear)) drop(c);
     throw e;
   };
+  const forgetOnRefusal = (c) => dropOnRefusal(forget, c);
+  const forgetBacklogOnRefusal = (c) => dropOnRefusal(forgetBacklog, c);
+  const setState = (view, item, state, onRefusal) =>
+    az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state));
   return {
     site: "Azure",
     noViewer,
-    // Drops what is kept of the view's team (r, Board.reload).
-    forget: (view) => view.context?.kind === "team" && forget(view.context),
+    // Drops what the view keeps of its team (r, Board.reload).
+    forget(view) {
+      if (view.context?.kind !== "team") return;
+      if (view.layout === "backlog") forgetBacklog(view.context);
+      else forget(view.context);
+    },
     views: {
       sprint: {
         async load(view) {
@@ -1486,8 +1723,32 @@ export function makeAzure(paths) {
           const out = await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }).catch(forgetOnRefusal(view.context));
           checkTaskboardMove(out, card, column);
         },
-        async setState(view, item, state) {
-          checkStateResult(await az(azStateArgs(view.context, item.number, state), { write: true }).catch(forgetOnRefusal(view.context)), state);
+        setState: (view, item, state) => setState(view, item, state, forgetOnRefusal),
+      },
+      backlog: {
+        async load(view) {
+          const c = view.context;
+          const me = whoAmI();
+          const s = await backlogSettingsOf(c);
+          const r = await call("az", azBacklogIdsArgs(c, s.level.id), null, AZ_TIMEOUT, { paths });
+          if (r.code !== 0) throw azRestFailure(r);
+          const ids = parseBacklogIds(r.stdout);
+          const read = ids.slice(0, AZ_QUERY_LIMIT);
+          const out = read.length ? await az(azQueryArgs(c, backlogWiql(read, s.config.orderField))) : "";
+          const data = backlogList({ ...s, ids, items: parseWorkItems(out, c), orders: parseOrders(out, s.config.orderField), viewer: await me });
+          if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
+          return { data, warnings: [] };
+        },
+        setState: (view, item, state) => setState(view, item, state, forgetBacklogOnRefusal),
+        // Creates a work item ({ type, title }) in the team's default area
+        // and iteration (data.meta), assigned to me; its id.
+        async create(view, data, { type, title }) {
+          const args = azCreateArgs(view.context, { type, title, area: data.meta.area, iteration: data.meta.iteration });
+          return parseCreated(await az(args, { write: true }).catch(forgetBacklogOnRefusal(view.context)));
+        },
+        // Makes the work item `id` a child of `parent`.
+        async addParent(view, id, parent) {
+          checkParentLink(await az(azParentArgs(view.context, id, parent), { write: true }), parent);
         },
       },
     },
@@ -2161,6 +2422,41 @@ export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounde
 // A card's chip for its session (linkedSession): what its agent does.
 export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);
 
+// ==== src/kinds/backlog.js ====
+
+// A team's backlog: its rows in backlog order, the item with a key, a state
+// change laid over the data, what a new work item may be, and the
+// backlog's warnings. backlogList (sources/azure.js) builds the data.
+
+// The work item with `key`, or null.
+export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
+
+// The data with the item `key` in `state`.
+export const withBacklogState = (data, key, state) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, state } : r)) });
+
+// The rows that show, as one column (navigate walks a list as one).
+export const backlogNav = (data, filter, mine) => [{ id: "backlog", name: data.meta.level.name, shown: data.rows.filter((r) => shows(r, filter, mine, data.viewer)) }];
+
+// The types a new work item may have: the level's, its default first, then
+// with a selected item of the level (`parent`) the types of the level
+// below it, as its children (child: true).
+export function createTypes(data, parent) {
+  const { level, childLevel } = data.meta;
+  const own = [...new Set([level.defaultType, ...level.types].filter(Boolean))].map((name) => ({ name, child: false }));
+  const children = parent ? (childLevel?.types ?? []).filter((n) => !own.some((t) => t.name === n)).map((name) => ({ name, child: true })) : [];
+  return [...own, ...children];
+}
+
+// The warnings of a backlog: ids its query did not find, and a backlog
+// longer than one query reads.
+export function backlogWarnings(data) {
+  const { missing } = data.meta;
+  return [
+    ...(missing > 0 ? [`${missing} ${missing === 1 ? "Eintrag" : "Einträge"} des Backlogs ohne Felder (nicht gefunden)`] : []),
+    ...(data.limited ? [`Nur die ersten ${data.limit} von ${data.total} Einträgen des Backlogs (so viele liest eine Abfrage)`] : []),
+  ];
+}
+
 // ==== src/actions/write.js ====
 
 // Writing a change of an item at once: it shows before it is written, one
@@ -2251,6 +2547,811 @@ export function tellOutcomes(b, lines, cx) {
   const text = lines.map((l) => l.text).join("; ");
   b.say(text, level, cx);
   if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
+}
+
+// ==== src/actions/state.js ====
+
+// Changing a work item's state: the status menu of its type's states, the
+// change shown at once and written by the view's loader (its setState), as
+// writeAtOnce writes, and after a refresh which state the items of unclear
+// changes have. The sprint and the backlog shape change states so; each
+// says how it finds an item, lays a state over its data and reads the
+// state an item shows (`how`: { find(data, key), withState(data, key,
+// state), stateOf(data, item), where (where an item
+// no longer is: "im Sprint"), again (refresh after a change that landed)
+// }).
+
+// The theme color of a state, by its category (data.meta.states:
+// parseAzureTypes, parseBacklogConfig).
+export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
+
+// Opens the status menu for the selected item: the states of its type
+// (data.meta.typeStates), the one it shows marked.
+export function openStateMenu(b, view, how, cx) {
+  const st = b.state(view.id);
+  const item = b.selected(view);
+  if (!item) return;
+  const states = st.data.meta.typeStates?.[item.type];
+  if (!states?.length) return b.say(`Für ${item.type ?? "diesen Typ"} kennt das Board keine Status`, "info", cx);
+  const targets = states.map((name) => ({ id: name, name, color: stateColor(st.data, name), hidden: false }));
+  b.modal = { kind: "status", view, key: item.key, targets, at: Math.max(0, states.indexOf(how.stateOf(st.data, item))) };
+}
+
+// Sets an item's state at once and writes it (writeAtOnce); the state it
+// has already sends nothing. A refusal sets the state back, unless a
+// refresh has read another since.
+export function setStateAtOnce(b, view, key, state, how, cx) {
+  const st = b.state(view.id);
+  const item = how.find(st.data, key);
+  if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
+  const label = itemLabel(item);
+  const before = how.stateOf(st.data, item);
+  if (before === state) return;
+  writeAtOnce(b, view, {
+    key,
+    label,
+    apply: () => (st.data = how.withState(st.data, key, state)),
+    write: () => b.loader(view).setState(view, item, state),
+    undo() {
+      if (how.find(st.data, key)?.state === state) st.data = how.withState(st.data, key, before);
+    },
+    open: { kind: "state", state },
+    again: how.again,
+    texts: {
+      pending: () => `${label} → ${state} …`,
+      landed: () => `${label} hat jetzt den Status „${state}“`,
+      unclear: `${label} → ${state}`,
+      refused: (why, earlier) => (earlier ? `${label} → ${state} nicht gespeichert: ${why}` : `${label} bleibt „${before}“: ${why}`),
+    },
+  }, cx);
+}
+
+// Which state the items of settled unclear state changes (`due`) have in
+// the new data, one line each: the state it was set to (info), another
+// (warning), or not in the view any more (warning).
+export function unclearStateLines(due, data, how) {
+  return due.map((u) => {
+    const now = how.find(data, u.key);
+    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht ${how.where}`, warn: true };
+    const state = how.stateOf(data, now);
+    if (state === u.state) return { text: `${u.label} hat nach dem Neuladen den Status „${u.state}“`, warn: false };
+    return { text: `${u.label} hat nach dem Neuladen den Status „${state}“, nicht „${u.state}“`, warn: true };
+  });
+}
+
+// ==== src/actions/create.js ====
+
+// Creating a work item on a backlog: written by the view's loader (its
+// create, then its addParent for a child), as writeAtOnce writes, with no
+// row before Azure names the new id; and after a refresh, how unclear
+// creates and parent links ended up. The backlog shape creates so.
+
+// The key a create is written under: one create at a time per view.
+export const CREATE_KEY = "create";
+
+// Creates a work item of `type` with `title`; a child type (type.child)
+// goes under `parent`. Nothing shows before Azure names the id; then the
+// backlog is read again and the new item, where the level holds its type,
+// is chosen once that refresh has it (Board.chooseWanted). A child, which
+// is no item of the level, is linked to its parent next (linkParent).
+export function createItem(b, view, { type, title, parent }, cx) {
+  const st = b.state(view.id);
+  const label = `„${title}“`;
+  const under = type.child && parent ? parent : null;
+  let id = null;
+  writeAtOnce(b, view, {
+    key: CREATE_KEY,
+    label,
+    apply() {},
+    write: async () => (id = await b.loader(view).create(view, st.data, { type: type.name, title })),
+    landed() {
+      if (!under) st.want = { key: itemLabel({ source: "azure", kind: "workitem", number: id }), after: st.runs };
+      else linkParent(b, view, id, under, cx);
+    },
+    undo() {},
+    open: { kind: "create", title },
+    again: true,
+    texts: {
+      pending: () => `${type.name} ${label} wird angelegt …`,
+      landed: () => (under ? `AB#${id} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `AB#${id} ${label} angelegt`),
+      unclear: `${type.name} ${label} anlegen`,
+      refused: (why) => `${type.name} ${label} nicht angelegt: ${why}`,
+    },
+  }, cx);
+}
+
+// Makes the new work item `id` a child of `parent`, as a write of its own:
+// the item is there either way, so a refusal says only that the link is
+// missing.
+function linkParent(b, view, id, parent, cx) {
+  const label = `AB#${id}`;
+  const to = itemLabel(parent);
+  writeAtOnce(b, view, {
+    key: label,
+    label,
+    apply() {},
+    write: () => b.loader(view).addParent(view, id, parent.number),
+    undo() {},
+    open: { kind: "parent", parent: parent.number, parentLabel: to },
+    texts: {
+      pending: () => `${label} wird unter ${to} gehängt …`,
+      landed: () => `${label} hängt jetzt unter ${to}`,
+      unclear: `${label} unter ${to}`,
+      refused: (why) => `${label} ist angelegt, hängt aber nicht unter ${to}: ${why}`,
+    },
+  }, cx);
+}
+
+// Where the work items of settled unclear creates (`due`, of kind
+// "create") are in the new data, one line each: an item of that title in
+// the backlog (info), else none (warning; a child type is no item of the
+// level, so it never shows there).
+export function unclearCreateLines(due, data) {
+  return due.map((u) => {
+    const found = data.rows.filter((r) => r.title === u.title);
+    if (found.length) return { text: `${u.label} steht nach dem Neuladen im Backlog (${found.map(itemLabel).join(", ")})`, warn: false };
+    return { text: `${u.label} steht nach dem Neuladen nicht im Backlog`, warn: true };
+  });
+}
+
+// Whether the items of settled unclear parent links (`due`, of kind
+// "parent") hang under their parent in the new data, one line each; an
+// item the backlog does not hold (a Task) it cannot tell.
+export function unclearParentLines(due, data) {
+  return due.map((u) => {
+    const now = findBacklogItem(data, u.key);
+    if (!now) return { text: `Ob ${u.label} unter ${u.parentLabel} hängt, zeigt der Backlog nicht: ${u.label} ist kein Eintrag von ihm`, warn: true };
+    if (now.parent === u.parent) return { text: `${u.label} hängt nach dem Neuladen unter ${u.parentLabel}`, warn: false };
+    return { text: `${u.label} hängt nach dem Neuladen nicht unter ${u.parentLabel}`, warn: true };
+  });
+}
+
+// ==== src/ui/modals/columns.js ====
+
+// The column menu: every column of a board view, shown or hidden, walked
+// with j/k; Enter, a digit or a click hides or shows one, and the menu stays
+// open until Esc. The board shape opens it (X) as b.modal = { kind:
+// "columns", view, at }; it reads the columns from the view's data as they
+// are now, so a toggle shows at once.
+
+// The view's columns, all of them, in the board's order.
+const columnsOf = (b, m) => b.state(m.view.id).data?.columns ?? [];
+
+// Hides or shows the column at `at`, on the view as views.json has it now.
+function toggleAt(b, m, at, cx) {
+  const col = columnsOf(b, m)[at];
+  if (!col) return;
+  m.at = at;
+  b.toggleColumn(b.viewById(m.view.id) ?? m.view, col, cx);
+  cx.notify();
+}
+
+export const columnsModal = {
+  render(b, t) {
+    const m = b.modal;
+    return menu(t, {
+      id: "columns",
+      rowId: "column",
+      width: 320,
+      title: "Spalten zeigen · j/k Enter · Esc",
+      at: m.at,
+      pick: (i, cx) => toggleAt(b, m, i, cx),
+      rows: columnsOf(b, m).map((c) => [
+        div().w(14).text_color(t.foreground).child(c.hidden ? "" : "✓"),
+        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
+        div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
+        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
+      ]),
+    });
+  },
+
+  key: (b, e, cx) => menuKey(e, cx, b.modal, columnsOf(b, b.modal).length, (i, cx) => toggleAt(b, b.modal, i, cx)),
+};
+
+// ==== src/ui/modals/create.js ====
+
+// The create dialog: a new work item on a team's backlog, its type (the
+// level's types, its default first; with an item of the level selected also
+// the types of the level below, as that item's children) and its title.
+// The backlog shape opens it (n) as b.modal = { kind: "create", view,
+// types, at (the chosen type), parent (the selected item, or null), input
+// (the title's InputState, made for this dialog), field ("title" or
+// "type"), textField ("title"), inputFocused, error }. Enter or Anlegen
+// creates (actions/create.js): the dialog closes and the notice says how it
+// goes.
+
+// The fields Tab walks, in order.
+const CREATE_FIELDS = ["title", "type"];
+
+// Where a new work item of the chosen type goes, as the dialog says it.
+function whereText(m) {
+  const meta = m.data.meta;
+  const type = m.types[m.at];
+  const place = type?.child ? `unter ${itemLabel(m.parent)} „${m.parent.title}“` : `in „${meta.level.name}“`;
+  return `Neu ${place}; Bereich ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
+}
+
+export const createModal = {
+  // Opens the dialog for the view's backlog, or says why a new work item
+  // cannot be made there: no type, no default area or iteration.
+  open(b, view, cx) {
+    const data = b.state(view.id).data;
+    if (!data) return;
+    const parent = b.selected(view);
+    const types = createTypes(data, parent);
+    if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
+    if (!data.meta.area || !data.meta.iteration) {
+      const missing = [!data.meta.area && "Standardbereich", !data.meta.iteration && "Standard-Iteration"].filter(Boolean).join(" und ");
+      return b.say(`Das Team hat keinen ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
+    }
+    const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
+    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", textField: "title", inputFocused: false, error: null };
+    input.on("focus", (_e, cx) => {
+      m.inputFocused = true;
+      if (b.modal === m) m.field = "title";
+      cx.notify();
+    });
+    input.on("blur", () => {
+      m.inputFocused = false;
+    });
+    input.on("submit", (_e, cx) => createModal.create(b, cx));
+    b.modal = m;
+    input.focus();
+    cx.notify();
+  },
+
+  // Creates the work item and closes the dialog; without a title it stays
+  // and says so.
+  create(b, cx) {
+    const m = b.modal;
+    if (m?.kind !== "create") return;
+    const title = m.input.value().trim();
+    if (!title) {
+      m.error = "Der Titel fehlt";
+      return cx.notify();
+    }
+    b.closeModal(cx);
+    createItem(b, m.view, { type: m.types[m.at], title, parent: m.parent }, cx);
+  },
+
+  // Tab and shift-Tab (`back`): the next or previous field.
+  tab(b, back, cx) {
+    const m = b.modal;
+    const at = CREATE_FIELDS.indexOf(m.field);
+    m.field = CREATE_FIELDS[(at + (back ? -1 : 1) + CREATE_FIELDS.length) % CREATE_FIELDS.length];
+    b.takeKeyboard();
+    cx.notify();
+  },
+
+  // Every key but Esc (the Board's): Tab walks the fields; on the type h/l
+  // or the arrows change it, Enter creates. Typing goes to the title.
+  key(b, e, cx) {
+    const m = b.modal;
+    const k = e.key;
+    if (k === "tab") {
+      cx.stop_propagation();
+      return createModal.tab(b, Boolean(e.modifiers?.shift), cx);
+    }
+    if (m.field === "title") return;
+    cx.stop_propagation();
+    if (k === "enter") return createModal.create(b, cx);
+    const by = { h: -1, left: -1, k: -1, up: -1, l: 1, right: 1, j: 1, down: 1, space: 1 }[k];
+    if (by) cycleType(m, by, cx);
+  },
+
+  render(b, t) {
+    const m = b.modal;
+    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
+    const frame = (field, inner) =>
+      h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+    const type = m.types[m.at];
+    return backdrop(
+      t,
+      "create-backdrop",
+      v_flex()
+        .id("create-dialog")
+        .w(560)
+        .rounded(12)
+        .border_1()
+        .border_color(t.input)
+        .bg(t.popover)
+        .shadow_lg()
+        .child(
+          v_flex().px(20).py(16).gap(4).border_b(1).border_color(t.border)
+            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.context.team}`))
+            .child(div().text_size(12).text_color(t.muted).child(whereText(m))),
+        )
+        .child(
+          v_flex().px(20).py(16).gap(14)
+            .child(v_flex().gap(6).child(label("Typ")).child(
+              frame("type", h_flex().id("create-type").flex_1().min_w(0).gap(6).cursor_pointer()
+                .on_click((_e, cx) => {
+                  m.field = "type";
+                  b.handle.focus();
+                  cycleType(m, 1, cx);
+                })
+                .child(div().flex_1().min_w(0).truncate().child(type.child ? `${type.name} (unter ${itemLabel(m.parent)})` : type.name))
+                .child(div().text_color(t.dim).child("◂ ▸"))),
+            ))
+            .child(v_flex().gap(6).child(label("Titel")).child(frame("title", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))))
+            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
+        )
+        .child(
+          h_flex().px(20).py(12).gap(8).items_center().border_t(1).border_color(t.border)
+            .child(div().flex_1().text_size(12).text_color(t.muted).child("Tab wechselt das Feld · ◂ ▸ wählt den Typ"))
+            .child(button(t, "create-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx)))
+            .child(button(t, "create-go", "Anlegen ↵", true, (cx) => createModal.create(b, cx))),
+        ),
+    );
+  },
+};
+
+function cycleType(m, by, cx) {
+  m.at = (m.at + by + m.types.length) % m.types.length;
+  cx.notify();
+}
+
+// ==== src/ui/modals/start.js ====
+
+// The start dialog: opens an item's session in its checkout, on a machine
+// and with an agent chosen here, as a new space or tab, with a first message
+// to edit. It is b.modal = { kind: "start", view, item, settings, input
+// (the message's InputState, made for this dialog), field, textField (the
+// field that is the input: "message"), inputFocused,
+// agents, agent, agentsError, machines, machine, machineNote, agentNote,
+// notes, open, busy, error }.
+
+const CHECKOUT_TIMEOUT = 30000;
+// How long watchSession waits before each check for a session it opened, in
+// ms (1, 3 and 6 s after the start).
+const SESSION_CHECKS = [1000, 2000, 3000];
+// The fields Tab walks, in order.
+const FIELDS = ["message", "agent", "machine", "open"];
+
+export const startModal = {
+  // Opens the dialog for an item, or says where its checkout is missing. An
+  // item without a repo (an Azure work item) takes only views.json's own
+  // start: an Azure view has no start of its own.
+  open(b, view, item, cx) {
+    const settings = startSettings(b.config, view, item.repo);
+    if (!settings.checkout) {
+      if (!item.repo) return b.say(`Für ${itemLabel(item)} steht kein „checkout“ in ${CONFIG_NAME}.json: „start.checkout“`, "error", cx);
+      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
+      return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
+    }
+    const input = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
+    const template = item.kind === "pr" ? settings.review : settings.message;
+    input.set_value(renderTemplate(template, templateVars(item)));
+    const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
+    const list = listed.length ? listed : [null];
+    let machine = list.indexOf(settings.machine ?? null);
+    const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
+    if (machine < 0) machine = 0;
+    const m = {
+      kind: "start", view, item, settings, input, field: "message", textField: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
+    };
+    // inputFocused: whether the message has the keyboard
+    // (Board.boardHasKeyboard).
+    input.on("focus", (_e, cx) => {
+      m.inputFocused = true;
+      if (b.modal === m) m.field = "message";
+      cx.notify();
+    });
+    input.on("blur", () => {
+      m.inputFocused = false;
+    });
+    input.on("submit", (_e, cx) => startModal.start(b, cx));
+    b.modal = m;
+    input.focus();
+    loadAgents(b, cx);
+    cx.notify();
+  },
+
+  // Opens the item's session in its checkout on the chosen machine: finds the
+  // checkout's folder there, then runs space.new or tab.new. run() answers
+  // nothing, so the board says the session is being opened and watches for a
+  // space or tab of its name (watchSession). The dialog stays until the
+  // folder is known or the start failed; a failure that comes after the
+  // dialog went shows in the banner and as a toast.
+  start(b, cx) {
+    const m = b.modal;
+    if (m?.kind !== "start" || m.busy) return;
+    const agent = m.agents[m.agent];
+    if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
+    const on = m.machines[m.machine];
+    const task = m.input.value().trim();
+    const name = sessionName(m.item);
+    m.busy = "Sitzung wird geöffnet …";
+    m.error = null;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
+        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
+        const folder = lastLine(r.stdout);
+        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
+        let space = null;
+        if (m.open === "tab") {
+          space = spaceForTab(spaces(), on, folder);
+          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
+        }
+        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
+        if (b.modal === m) {
+          b.modal = null;
+          b.handle.focus();
+        }
+        b.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
+        watchSession(b, name, cx);
+      } catch (e) {
+        const why = report(e);
+        if (b.modal === m) m.error = why;
+        else {
+          b.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
+          notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
+        }
+      } finally {
+        m.busy = null;
+        cx.notify();
+      }
+    });
+    cx.notify();
+  },
+
+  // Tab and shift-Tab (`back`): the next or previous field.
+  tab(b, back, cx) {
+    const m = b.modal;
+    const at = FIELDS.indexOf(m.field);
+    m.field = FIELDS[(at + (back ? -1 : 1) + FIELDS.length) % FIELDS.length];
+    b.takeKeyboard();
+    cx.notify();
+  },
+
+  // Every key but Esc (the Board's): Tab walks the fields (where it comes
+  // here at all: Board.dialogTab); h/l or the arrows change a choice, Enter
+  // starts. Typing goes to the message.
+  key(b, e, cx) {
+    const m = b.modal;
+    const k = e.key;
+    if (k === "tab") {
+      cx.stop_propagation();
+      return startModal.tab(b, Boolean(e.modifiers?.shift), cx);
+    }
+    if (m.field === "message") return;
+    cx.stop_propagation();
+    if (k === "enter") return startModal.start(b, cx);
+    if (k === "h" || k === "left") return cycle(b, m.field, -1, cx);
+    if (k === "l" || k === "right" || k === "space") return cycle(b, m.field, 1, cx);
+  },
+
+  render(b, t) {
+    const m = b.modal;
+    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
+    const frame = (field, inner) =>
+      h_flex()
+        .h(34)
+        .px(10)
+        .items_center()
+        .rounded(6)
+        .border_1()
+        .border_color(m.field === field ? t.accent : t.input)
+        .bg(t.background)
+        .child(inner);
+    const choice = (field, title, value) =>
+      v_flex()
+        .flex_1()
+        .min_w(0)
+        .gap(6)
+        .child(label(title))
+        .child(
+          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
+            .on_click((_e, cx) => {
+              m.field = field;
+              b.handle.focus();
+              cycle(b, field, 1, cx);
+            })
+            .child(div().flex_1().min_w(0).truncate().child(value))
+            .child(div().text_color(t.dim).child("◂ ▸"))),
+        );
+    const agent = m.agents[m.agent];
+    return backdrop(
+      t,
+      "start-backdrop",
+      v_flex()
+        .id("start-dialog")
+        .w(600)
+        .rounded(12)
+        .border_1()
+        .border_color(t.input)
+        .bg(t.popover)
+        .shadow_lg()
+        .child(
+          v_flex()
+            .px(20)
+            .py(16)
+            .gap(4)
+            .border_b(1)
+            .border_color(t.border)
+            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${itemLabel(m.item)}`))
+            .child(div().text_size(12).text_color(t.muted).truncate().child(m.item.title)),
+        )
+        .child(
+          v_flex()
+            .px(20)
+            .py(16)
+            .gap(14)
+            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
+            .child(
+              h_flex()
+                .gap(12)
+                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
+                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
+                .child(choice("open", "Öffnen als", m.open === "tab" ? "neuer Tab" : "neuer Space")),
+            )
+            .child(
+              v_flex()
+                .gap(6)
+                .child(label("Erste Nachricht"))
+                .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
+            )
+            .children(m.notes.map((n) => div().text_size(12).text_color(t.ansi3).child(n)))
+            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
+        )
+        .child(
+          h_flex()
+            .px(20)
+            .py(12)
+            .gap(8)
+            .items_center()
+            .border_t(1)
+            .border_color(t.border)
+            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
+            .child(button(t, "start-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx), Boolean(m.busy)))
+            .child(button(t, "start-go", "Starten ↵", true, (cx) => startModal.start(b, cx), Boolean(m.busy))),
+        ),
+    );
+  },
+};
+
+function loadAgents(b, cx) {
+  const m = b.modal;
+  const on = m.machines[m.machine];
+  m.agents = [];
+  m.agentsError = null;
+  m.agentNote = null;
+  cx.spawn(async (cx) => {
+    try {
+      const agents = (await knownAgents({ on })).filter((a) => a.installed);
+      if (b.modal !== m || m.machines[m.machine] !== on) return;
+      m.agents = agents;
+      const wanted = m.settings.agent;
+      m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
+      if (!agents.length) m.agentsError = "Kein Agent installiert";
+      else if (wanted && !agents.some((a) => a.key === wanted)) {
+        m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
+      }
+    } catch (e) {
+      if (b.modal !== m || m.machines[m.machine] !== on) return;
+      m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+    }
+    m.notes = [m.machineNote, m.agentNote].filter(Boolean);
+    cx.notify();
+  });
+}
+
+function cycle(b, field, by, cx) {
+  const m = b.modal;
+  if (m.busy) return;
+  if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
+  if (field === "machine") {
+    m.machine = (m.machine + by + m.machines.length) % m.machines.length;
+    m.machineNote = null;
+    loadAgents(b, cx);
+  }
+  if (field === "open") m.open = m.open === "space" ? "tab" : "space";
+  cx.notify();
+}
+
+// Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
+// says so when it appears, warns when it has not after the last.
+function watchSession(b, name, cx, at = 0) {
+  cx.timer.after(SESSION_CHECKS[at], (cx) => {
+    const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
+    if (there) return b.say(`Sitzung geöffnet: ${name}`, "success", cx);
+    if (at + 1 < SESSION_CHECKS.length) return watchSession(b, name, cx, at + 1);
+    b.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
+    notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
+  });
+}
+
+// ==== src/ui/modals/status.js ====
+
+// The status menu: the columns a card may go to, or the states an item may
+// take, picked with j/k and Enter, a digit, or a click. A shape with columns
+// or states opens it (openStatusMenu) as b.modal = { kind: "status", view,
+// key, targets, at }.
+
+// Moves the card to the target at `i`, or does what the view's shape does
+// with a pick (pickStatus).
+function pickTarget(b, m, i, cx) {
+  b.closeModal(cx);
+  const pick = b.shape(m.view).pickStatus;
+  if (pick) pick(b, m.view, m.key, m.targets[i], cx);
+  else b.moveTo(m.view, m.key, m.targets[i].id, cx);
+}
+
+export const statusModal = {
+  render(b, t) {
+    const m = b.modal;
+    return menu(t, {
+      id: "status",
+      rowId: "status",
+      width: 280,
+      title: "Status ändern · j/k Enter · Esc",
+      at: m.at,
+      pick: (i, cx) => pickTarget(b, m, i, cx),
+      rows: m.targets.map((c) => [
+        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().flex_1().child(c.name),
+        ...(c.hidden ? [div().text_size(11).text_color(t.dim).child("ausgeblendet")] : []),
+      ]),
+    });
+  },
+
+  key: (b, e, cx) => menuKey(e, cx, b.modal, b.modal.targets.length, (i, cx) => pickTarget(b, b.modal, i, cx)),
+};
+
+// ==== src/ui/modals/index.js ====
+
+// The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
+// and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
+// on Esc unless it is busy). A dialog keeps its state, and makes the inputs
+// it needs, in b.modal; one that belongs to a view keeps it as
+// b.modal.view, and a reload that finishes while it is open closes it when
+// views.json no longer has that view of that kind. A dialog with fields
+// also has tab(b, back, cx), which Tab and shift-Tab (`back`) call to move
+// between them (Board.dialogTab). A new dialog is a module here and its
+// entry in MODALS.
+
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal };
+
+// ==== src/ui/shapes/backlog.js ====
+
+// The backlog shape: a team's backlog level (its Stories) as a list in
+// backlog order, one row per work item with its id, type, title, state,
+// sprint ("—" for none) and assignee, walked as one column. n creates a
+// work item (the create dialog, actions/create.js), s changes the selected
+// item's state from its type's states (the status menu, actions/state.js),
+// Enter shows the details. Not the prs shape: that one draws sections of
+// GitHub pull requests with their author, draft mark, checks and age. The
+// data: { shape: "backlog", meta: { level, childLevel, typeStates, states,
+// orderField, area, iteration, missing }, rows, viewer, noViewer, total,
+// limited, limit } (backlogList, sources/azure.js). View fields it reads:
+// id, source, layout (as writeAtOnce does), context (the create dialog).
+
+// The backlog shape's own state on a Board (state(), shapes/index.js): the
+// list's scroll handle.
+const backlogState = (b) => b.shapeState.backlog;
+
+const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
+
+// How the backlog finds, changes and shows its items' states
+// (actions/state.js). A state that landed is the item's own: nothing is
+// read again for it.
+const BACKLOG_STATES = {
+  find: findBacklogItem, withState: withBacklogState, stateOf: (_data, item) => item.state, where: "im Backlog", again: false,
+};
+
+// The widths of a row's cells (the title takes the rest).
+const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
+
+export const backlogShape = {
+  state: () => ({ scroll: ScrollHandle.new() }),
+  nav: (b, st) => backlogColumns(b, st),
+  selected: (b, st) => backlogColumns(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
+  scrollTo: (b, view, sel, row) => backlogState(b).scroll.scroll_to_item(row),
+  items: (data) => data.rows,
+  count: (b, data) => ({ shown: data.rows.filter((r) => b.visible(r, data)).length, total: data.rows.length }),
+  render: (b, t, mono, view, st) => drawBacklog(b, t, mono, view, st),
+  hints: [["j/k", "bewegen"], ["n", "neu"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  dirs: ["up", "down"],
+  loads: true,
+  keys(b, view, st, { k }, cx) {
+    if (!st.data) return false;
+    if (k === "n") return MODALS.create.open(b, view, cx), true;
+    if (k === "s") return b.openStatusMenu(view, cx), true;
+    return false;
+  },
+  received: (data) => data,
+  warnings: (_view, data) => backlogWarnings(data),
+  // The settled outcomes: a state change's which state its item has, a
+  // create's whether its title is in the backlog, a parent link's whether
+  // the item hangs under its parent.
+  settle: (b, due, data, cx) => tellOutcomes(b, [
+    ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
+    ...unclearCreateLines(due.filter((u) => u.kind === "create"), data),
+    ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
+  ], cx),
+  openStatusMenu: (b, view, cx) => openStateMenu(b, view, BACKLOG_STATES, cx),
+  pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, BACKLOG_STATES, cx),
+  // The detail panel's rows of a work item: its state as a pill (a click
+  // opens the status menu), its area, iteration and sprint, and Status s.
+  detailParts(b, t, view, item) {
+    const st = b.state(view.id);
+    if (!st.data) return {};
+    const openStatus = (cx) => {
+      if (!b.modal) b.openStatusMenu(view, cx);
+    };
+    const line = (label, value) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
+    return {
+      chips: [statusPill(t, item.state ?? "ohne Status", stateColor(st.data, item.state), openStatus)],
+      sections: [detailSection(t, "BACKLOG",
+        line("Sprint", item.sprint ?? "—"),
+        ...(item.area ? [line("Bereich", item.area)] : []),
+        ...(item.iteration ? [line("Iteration", item.iteration)] : []))],
+      buttons: [button(t, "act-status", "Status s", false, openStatus)],
+    };
+  },
+};
+
+function drawBacklog(b, t, mono, view, st) {
+  const data = st.data;
+  const [col] = backlogColumns(b, st);
+  const allSpaces = spaces();
+  const cell = (w, text, color = t.muted) => div().w(w).flex_none().truncate().text_size(12).text_color(color).child(text);
+  const head = v_flex()
+    .id("backlog-head")
+    .flex_none()
+    .px(18)
+    .pt(10)
+    .pb(6)
+    .gap(6)
+    .child(div().text_size(12).text_color(t.muted).child(`${data.meta.level.name} · ${shownOf(col.shown.length, data.rows.length)}`))
+    .child(h_flex().gap(12).text_size(11).text_color(t.dim)
+      .child(div().w(WIDTH.key).flex_none().child("ID"))
+      .child(div().w(WIDTH.type).flex_none().child("Typ"))
+      .child(div().flex_1().min_w(0).child("Titel"))
+      .child(div().w(WIDTH.state).flex_none().child("Status"))
+      .child(div().w(WIDTH.sprint).flex_none().child("Sprint"))
+      .child(div().w(WIDTH.assignee).flex_none().child("Zugewiesen")));
+  if (!col.shown.length) {
+    const what = data.rows.length ? "Nichts passt zum Filter oder zu „nur meine“" : "Der Backlog ist leer";
+    return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
+  }
+  const row = (r) => {
+    const selected = st.sel?.key === r.key;
+    const session = linkedSession(r, allSpaces);
+    return h_flex()
+      .id(`row-${r.key}`)
+      .flex_none()
+      .gap(12)
+      .px(18)
+      .py(7)
+      .items_center()
+      .border_l(2)
+      .border_color(selected ? t.accent : t.background)
+      .when(selected, (el) => el.bg(t.selected))
+      .opacity(st.pending[r.key] ? 0.7 : 1)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => {
+        // A click on a row (clickItem).
+        if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
+      })
+      .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
+      .child(cell(WIDTH.type, r.type ?? ""))
+      .child(h_flex().flex_1().min_w(0).gap(6).items_center()
+        .child(div().min_w(0).truncate().child(r.title))
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
+      .child(div().w(WIDTH.state).flex_none().child(chip(t, r.state ?? "ohne Status", t.background, t[stateColor(data, r.state)] ?? t.muted)))
+      .child(cell(WIDTH.sprint, r.sprint ?? "—"))
+      .child(cell(WIDTH.assignee, r.assignees.join(", ")));
+  };
+  return v_flex()
+    .flex_1()
+    .min_h(0)
+    .child(head)
+    .child(v_flex().id("backlog-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(backlogState(b).scroll).children(col.shown.map(row)));
 }
 
 // ==== src/actions/move.js ====
@@ -2769,10 +3870,10 @@ export const sprintShape = {
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has.
   settle: (b, due, data, cx) =>
-    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data)], cx),
+    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data, SPRINT_STATES)], cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
-  openStatusMenu: (b, view, cx) => openStateMenu(b, view, cx),
-  pickStatus: (b, view, key, target, cx) => setItemState(b, view, key, target.name, cx),
+  openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
+  pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, SPRINT_STATES, cx),
   // The detail panel's rows of a story or task: its state as a pill (a click
   // opens the status menu), a task's column, its area and iteration, and
   // Status s.
@@ -2797,9 +3898,6 @@ export const sprintShape = {
     };
   },
 };
-
-// The theme color of a state, by its category (parseAzureTypes).
-const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
 
 // "bis 27.11." for the sprint's last day (UTC, as Azure gives it), or "".
 function sprintEnd(finish) {
@@ -2912,59 +4010,12 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
       .when(Boolean(session), (el) => el.child(sessionChip(t, session))));
 }
 
-// The status menu for the selected story or task: the states of its type.
-function openStateMenu(b, view, cx) {
-  const st = b.state(view.id);
-  const item = b.selected(view);
-  if (!item) return;
-  const states = st.data.meta.typeStates?.[item.type];
-  if (!states?.length) return b.say(`Für ${item.type ?? "diesen Typ"} kennt das Board keine Status`, "info", cx);
-  const targets = states.map((name) => ({ id: name, name, color: stateColor(st.data, name), hidden: false }));
-  b.modal = { kind: "status", view, key: item.key, targets, at: Math.max(0, states.indexOf(stateNow(st.data, item))) };
-}
-
-// Sets an item's state at once and writes it (writeAtOnce); the state it
-// has already sends nothing. A refusal sets the state back, unless a
-// refresh has read another since. A write that landed refreshes the view
-// too: which column a task's new state puts it in is Azure's to say.
-function setItemState(b, view, key, state, cx) {
-  const st = b.state(view.id);
-  const item = findSprintItem(st.data, key);
-  if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
-  const label = itemLabel(item);
-  const before = stateNow(st.data, item);
-  if (before === state) return;
-  writeAtOnce(b, view, {
-    key,
-    label,
-    apply: () => (st.data = withItemState(st.data, key, state)),
-    write: () => b.loader(view).setState(view, item, state),
-    undo() {
-      if (findSprintItem(st.data, key)?.state === state) st.data = withItemState(st.data, key, before);
-    },
-    open: { kind: "state", state },
-    again: true,
-    texts: {
-      pending: () => `${label} → ${state} …`,
-      landed: () => `${label} hat jetzt den Status „${state}“`,
-      unclear: `${label} → ${state}`,
-      refused: (why, earlier) => (earlier ? `${label} → ${state} nicht gespeichert: ${why}` : `${label} bleibt „${before}“: ${why}`),
-    },
-  }, cx);
-}
-
-// Which state the items of settled unclear state changes (`due`) have in
-// the new data, one line each: the state it was set to (info), another
-// (warning), or not in the sprint any more (warning).
-function unclearStateLines(due, data) {
-  return due.map((u) => {
-    const now = findSprintItem(data, u.key);
-    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht im Sprint`, warn: true };
-    const state = stateNow(data, now);
-    if (state === u.state) return { text: `${u.label} hat nach dem Neuladen den Status „${u.state}“`, warn: false };
-    return { text: `${u.label} hat nach dem Neuladen den Status „${state}“, nicht „${u.state}“`, warn: true };
-  });
-}
+// How the sprint finds, changes and shows its items' states (actions/state.js).
+// A write that landed refreshes the view too: which column a task's new
+// state puts it in is Azure's to say.
+const SPRINT_STATES = {
+  find: findSprintItem, withState: withItemState, stateOf: stateNow, where: "im Sprint", again: true,
+};
 
 // ==== src/ui/shapes/index.js ====
 
@@ -2990,363 +4041,7 @@ function unclearStateLines(due, data) {
 // ("cannot run during render"). A new way to draw is a module here and its
 // entry in SHAPES.
 
-export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, placeholder: placeholderShape };
-
-// ==== src/ui/modals/columns.js ====
-
-// The column menu: every column of a board view, shown or hidden, walked
-// with j/k; Enter, a digit or a click hides or shows one, and the menu stays
-// open until Esc. The board shape opens it (X) as b.modal = { kind:
-// "columns", view, at }; it reads the columns from the view's data as they
-// are now, so a toggle shows at once.
-
-// The view's columns, all of them, in the board's order.
-const columnsOf = (b, m) => b.state(m.view.id).data?.columns ?? [];
-
-// Hides or shows the column at `at`, on the view as views.json has it now.
-function toggleAt(b, m, at, cx) {
-  const col = columnsOf(b, m)[at];
-  if (!col) return;
-  m.at = at;
-  b.toggleColumn(b.viewById(m.view.id) ?? m.view, col, cx);
-  cx.notify();
-}
-
-export const columnsModal = {
-  render(b, t) {
-    const m = b.modal;
-    return menu(t, {
-      id: "columns",
-      rowId: "column",
-      width: 320,
-      title: "Spalten zeigen · j/k Enter · Esc",
-      at: m.at,
-      pick: (i, cx) => toggleAt(b, m, i, cx),
-      rows: columnsOf(b, m).map((c) => [
-        div().w(14).text_color(t.foreground).child(c.hidden ? "" : "✓"),
-        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
-        div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
-        div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
-        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
-      ]),
-    });
-  },
-
-  key: (b, e, cx) => menuKey(e, cx, b.modal, columnsOf(b, b.modal).length, (i, cx) => toggleAt(b, b.modal, i, cx)),
-};
-
-// ==== src/ui/modals/start.js ====
-
-// The start dialog: opens an item's session in its checkout, on a machine
-// and with an agent chosen here, as a new space or tab, with a first message
-// to edit. It is b.modal = { kind: "start", view, item, settings, input
-// (the message's InputState, made for this dialog), field, inputFocused,
-// agents, agent, agentsError, machines, machine, machineNote, agentNote,
-// notes, open, busy, error }.
-
-const CHECKOUT_TIMEOUT = 30000;
-// How long watchSession waits before each check for a session it opened, in
-// ms (1, 3 and 6 s after the start).
-const SESSION_CHECKS = [1000, 2000, 3000];
-// The fields Tab walks, in order.
-const FIELDS = ["message", "agent", "machine", "open"];
-
-export const startModal = {
-  // Opens the dialog for an item, or says where its checkout is missing. An
-  // item without a repo (an Azure work item) takes only views.json's own
-  // start: an Azure view has no start of its own.
-  open(b, view, item, cx) {
-    const settings = startSettings(b.config, view, item.repo);
-    if (!settings.checkout) {
-      if (!item.repo) return b.say(`Für ${itemLabel(item)} steht kein „checkout“ in ${CONFIG_NAME}.json: „start.checkout“`, "error", cx);
-      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
-      return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
-    }
-    const input = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
-    const template = item.kind === "pr" ? settings.review : settings.message;
-    input.set_value(renderTemplate(template, templateVars(item)));
-    const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
-    const list = listed.length ? listed : [null];
-    let machine = list.indexOf(settings.machine ?? null);
-    const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
-    if (machine < 0) machine = 0;
-    const m = {
-      kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
-    };
-    // inputFocused: whether the message has the keyboard
-    // (Board.boardHasKeyboard).
-    input.on("focus", (_e, cx) => {
-      m.inputFocused = true;
-      if (b.modal === m) m.field = "message";
-      cx.notify();
-    });
-    input.on("blur", () => {
-      m.inputFocused = false;
-    });
-    input.on("submit", (_e, cx) => startModal.start(b, cx));
-    b.modal = m;
-    input.focus();
-    loadAgents(b, cx);
-    cx.notify();
-  },
-
-  // Opens the item's session in its checkout on the chosen machine: finds the
-  // checkout's folder there, then runs space.new or tab.new. run() answers
-  // nothing, so the board says the session is being opened and watches for a
-  // space or tab of its name (watchSession). The dialog stays until the
-  // folder is known or the start failed; a failure that comes after the
-  // dialog went shows in the banner and as a toast.
-  start(b, cx) {
-    const m = b.modal;
-    if (m?.kind !== "start" || m.busy) return;
-    const agent = m.agents[m.agent];
-    if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
-    const on = m.machines[m.machine];
-    const task = m.input.value().trim();
-    const name = sessionName(m.item);
-    m.busy = "Sitzung wird geöffnet …";
-    m.error = null;
-    cx.spawn(async (cx) => {
-      try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
-        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
-        const folder = lastLine(r.stdout);
-        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
-        let space = null;
-        if (m.open === "tab") {
-          space = spaceForTab(spaces(), on, folder);
-          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
-        }
-        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
-        if (b.modal === m) {
-          b.modal = null;
-          b.handle.focus();
-        }
-        b.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
-        watchSession(b, name, cx);
-      } catch (e) {
-        const why = report(e);
-        if (b.modal === m) m.error = why;
-        else {
-          b.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
-          notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
-        }
-      } finally {
-        m.busy = null;
-        cx.notify();
-      }
-    });
-    cx.notify();
-  },
-
-  // Every key but Esc (the Board's): Tab walks the fields; h/l or the
-  // arrows change a choice, Enter starts. Typing goes to the message.
-  key(b, e, cx) {
-    const m = b.modal;
-    const k = e.key;
-    if (k === "tab") {
-      cx.stop_propagation();
-      const at = FIELDS.indexOf(m.field);
-      m.field = FIELDS[(at + (e.modifiers?.shift ? -1 : 1) + FIELDS.length) % FIELDS.length];
-      b.takeKeyboard();
-      return cx.notify();
-    }
-    if (m.field === "message") return;
-    cx.stop_propagation();
-    if (k === "enter") return startModal.start(b, cx);
-    if (k === "h" || k === "left") return cycle(b, m.field, -1, cx);
-    if (k === "l" || k === "right" || k === "space") return cycle(b, m.field, 1, cx);
-  },
-
-  render(b, t) {
-    const m = b.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex()
-        .h(34)
-        .px(10)
-        .items_center()
-        .rounded(6)
-        .border_1()
-        .border_color(m.field === field ? t.accent : t.input)
-        .bg(t.background)
-        .child(inner);
-    const choice = (field, title, value) =>
-      v_flex()
-        .flex_1()
-        .min_w(0)
-        .gap(6)
-        .child(label(title))
-        .child(
-          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
-            .on_click((_e, cx) => {
-              m.field = field;
-              b.handle.focus();
-              cycle(b, field, 1, cx);
-            })
-            .child(div().flex_1().min_w(0).truncate().child(value))
-            .child(div().text_color(t.dim).child("◂ ▸"))),
-        );
-    const agent = m.agents[m.agent];
-    return backdrop(
-      t,
-      "start-backdrop",
-      v_flex()
-        .id("start-dialog")
-        .w(600)
-        .rounded(12)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(
-          v_flex()
-            .px(20)
-            .py(16)
-            .gap(4)
-            .border_b(1)
-            .border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`${m.item.kind === "pr" ? "Review starten" : "Agent starten"} · ${itemLabel(m.item)}`))
-            .child(div().text_size(12).text_color(t.muted).truncate().child(m.item.title)),
-        )
-        .child(
-          v_flex()
-            .px(20)
-            .py(16)
-            .gap(14)
-            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
-            .child(
-              h_flex()
-                .gap(12)
-                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
-                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen als", m.open === "tab" ? "neuer Tab" : "neuer Space")),
-            )
-            .child(
-              v_flex()
-                .gap(6)
-                .child(label("Erste Nachricht"))
-                .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
-            )
-            .children(m.notes.map((n) => div().text_size(12).text_color(t.ansi3).child(n)))
-            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
-        )
-        .child(
-          h_flex()
-            .px(20)
-            .py(12)
-            .gap(8)
-            .items_center()
-            .border_t(1)
-            .border_color(t.border)
-            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
-            .child(button(t, "start-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx), Boolean(m.busy)))
-            .child(button(t, "start-go", "Starten ↵", true, (cx) => startModal.start(b, cx), Boolean(m.busy))),
-        ),
-    );
-  },
-};
-
-function loadAgents(b, cx) {
-  const m = b.modal;
-  const on = m.machines[m.machine];
-  m.agents = [];
-  m.agentsError = null;
-  m.agentNote = null;
-  cx.spawn(async (cx) => {
-    try {
-      const agents = (await knownAgents({ on })).filter((a) => a.installed);
-      if (b.modal !== m || m.machines[m.machine] !== on) return;
-      m.agents = agents;
-      const wanted = m.settings.agent;
-      m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
-      if (!agents.length) m.agentsError = "Kein Agent installiert";
-      else if (wanted && !agents.some((a) => a.key === wanted)) {
-        m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
-      }
-    } catch (e) {
-      if (b.modal !== m || m.machines[m.machine] !== on) return;
-      m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
-    }
-    m.notes = [m.machineNote, m.agentNote].filter(Boolean);
-    cx.notify();
-  });
-}
-
-function cycle(b, field, by, cx) {
-  const m = b.modal;
-  if (m.busy) return;
-  if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
-  if (field === "machine") {
-    m.machine = (m.machine + by + m.machines.length) % m.machines.length;
-    m.machineNote = null;
-    loadAgents(b, cx);
-  }
-  if (field === "open") m.open = m.open === "space" ? "tab" : "space";
-  cx.notify();
-}
-
-// Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
-// says so when it appears, warns when it has not after the last.
-function watchSession(b, name, cx, at = 0) {
-  cx.timer.after(SESSION_CHECKS[at], (cx) => {
-    const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
-    if (there) return b.say(`Sitzung geöffnet: ${name}`, "success", cx);
-    if (at + 1 < SESSION_CHECKS.length) return watchSession(b, name, cx, at + 1);
-    b.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
-    notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
-  });
-}
-
-// ==== src/ui/modals/status.js ====
-
-// The status menu: the columns a card may go to, or the states an item may
-// take, picked with j/k and Enter, a digit, or a click. A shape with columns
-// or states opens it (openStatusMenu) as b.modal = { kind: "status", view,
-// key, targets, at }.
-
-// Moves the card to the target at `i`, or does what the view's shape does
-// with a pick (pickStatus).
-function pickTarget(b, m, i, cx) {
-  b.closeModal(cx);
-  const pick = b.shape(m.view).pickStatus;
-  if (pick) pick(b, m.view, m.key, m.targets[i], cx);
-  else b.moveTo(m.view, m.key, m.targets[i].id, cx);
-}
-
-export const statusModal = {
-  render(b, t) {
-    const m = b.modal;
-    return menu(t, {
-      id: "status",
-      rowId: "status",
-      width: 280,
-      title: "Status ändern · j/k Enter · Esc",
-      at: m.at,
-      pick: (i, cx) => pickTarget(b, m, i, cx),
-      rows: m.targets.map((c) => [
-        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
-        div().flex_1().child(c.name),
-        ...(c.hidden ? [div().text_size(11).text_color(t.dim).child("ausgeblendet")] : []),
-      ]),
-    });
-  },
-
-  key: (b, e, cx) => menuKey(e, cx, b.modal, b.modal.targets.length, (i, cx) => pickTarget(b, b.modal, i, cx)),
-};
-
-// ==== src/ui/modals/index.js ====
-
-// The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
-// and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
-// on Esc unless it is busy). A dialog keeps its state, and makes the inputs
-// it needs, in b.modal; one that belongs to a view keeps it as
-// b.modal.view, and a reload that finishes while it is open closes it when
-// views.json no longer has that view of that kind. A new dialog is a module
-// here and its entry in MODALS.
-
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal };
+export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
 
 // ==== src/main.js ====
 
@@ -3441,12 +4136,13 @@ export default class Board extends View {
   // being written), unclear (open outcomes: key, label, at and
   // writeAtOnce's w.open; see settleUnclear), stored/hidden (the person's
   // toggles and the hidden set), sel ({ col, key }, null before the first
-  // data), picked (the key of the item the person chose, see clickItem) and
-  // detail.
+  // data), picked (the key of the item the person chose, see clickItem),
+  // runs (how many refreshes have started), want (an item to choose once a
+  // refresh has it: chooseWanted) and detail.
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
-      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, detail: false,
+      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
     };
     return this.views[id];
   }
@@ -3546,6 +4242,7 @@ export default class Board extends View {
     st.again = false;
     st.tried = Date.now();
     const started = st.tried;
+    const run = ++st.runs;
     cx.spawn(async (cx) => {
       try {
         const { data, warnings } = await loader.load(view, (v) => this.hiddenFor(v));
@@ -3555,6 +4252,7 @@ export default class Board extends View {
         st.error = null;
         st.at = Date.now();
         this.keepSelection(view);
+        this.chooseWanted(view, run);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
         st.error = report(e);
@@ -3571,6 +4269,21 @@ export default class Board extends View {
       }
     });
     cx.notify();
+  }
+
+  // After the refresh `run` (its number, st.runs) succeeded: the item a
+  // write asked to be chosen (st.want = { key, after: the refreshes started
+  // when it asked }: a created work item), once by the first refresh that
+  // started after it asked (an earlier one may have read before the item
+  // was there); where that refresh's data does not show it (the filter,
+  // "nur meine"), nothing is chosen.
+  chooseWanted(view, run) {
+    const st = this.state(view.id);
+    const want = st.want;
+    if (!want || run <= want.after) return;
+    st.want = null;
+    const col = columnOf(this.navColumns(view), want.key);
+    if (col >= 0) this.choose(view, { col, key: want.key });
   }
 
   // After a refresh that succeeded: the writes whose outcome was open, came
@@ -3799,13 +4512,13 @@ export default class Board extends View {
   }
 
   // Gives the board's keyboard to where it belongs, the one rule for it:
-  // the open dialog's text field when the dialog is on it (the start
-  // dialog's message), else the filter while one is typed, else the board
-  // itself, which hands its keys to a dialog without a text field (the
-  // status menu).
+  // the open dialog's text field when the dialog is on it (m.textField:
+  // the start dialog's message, the create dialog's title), else the filter
+  // while one is typed, else the board itself, which hands its keys to a
+  // dialog without a text field (the status menu) or on another field.
   takeKeyboard() {
     const m = this.modal;
-    if (m?.input && m.field === "message") m.input.focus();
+    if (m?.input && m.field === m.textField) m.input.focus();
     else if (this.filtering) this.filterInput.focus();
     else this.handle.focus();
   }

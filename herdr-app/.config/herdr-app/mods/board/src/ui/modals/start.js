@@ -1,7 +1,8 @@
 // The start dialog: opens an item's session in its checkout, on a machine
 // and with an agent chosen here, as a new space or tab, with a first message
 // to edit. It is b.modal = { kind: "start", view, item, settings, input
-// (the message's InputState, made for this dialog), field, inputFocused,
+// (the message's InputState, made for this dialog), field, textField (the
+// field that is the input: "message"), inputFocused,
 // agents, agent, agentsError, machines, machine, machineNote, agentNote,
 // notes, open, busy, error }.
 
@@ -41,7 +42,7 @@ export const startModal = {
     const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
     if (machine < 0) machine = 0;
     const m = {
-      kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      kind: "start", view, item, settings, input, field: "message", textField: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
     };
     // inputFocused: whether the message has the keyboard
@@ -110,17 +111,24 @@ export const startModal = {
     cx.notify();
   },
 
-  // Every key but Esc (the Board's): Tab walks the fields; h/l or the
-  // arrows change a choice, Enter starts. Typing goes to the message.
+  // Tab and shift-Tab (`back`): the next or previous field.
+  tab(b, back, cx) {
+    const m = b.modal;
+    const at = FIELDS.indexOf(m.field);
+    m.field = FIELDS[(at + (back ? -1 : 1) + FIELDS.length) % FIELDS.length];
+    b.takeKeyboard();
+    cx.notify();
+  },
+
+  // Every key but Esc (the Board's): Tab walks the fields (where it comes
+  // here at all: Board.dialogTab); h/l or the arrows change a choice, Enter
+  // starts. Typing goes to the message.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
     if (k === "tab") {
       cx.stop_propagation();
-      const at = FIELDS.indexOf(m.field);
-      m.field = FIELDS[(at + (e.modifiers?.shift ? -1 : 1) + FIELDS.length) % FIELDS.length];
-      b.takeKeyboard();
-      return cx.notify();
+      return startModal.tab(b, Boolean(e.modifiers?.shift), cx);
     }
     if (m.field === "message") return;
     cx.stop_propagation();

@@ -32,9 +32,13 @@
 //
 // Calls: a GitHub view costs one gh call per refresh, an Azure team's
 // Sprint two az calls (the taskboard's column of each work item, and one
-// WIQL query for their fields; three while who az is stays unknown); what
-// the Sprint reads once and keeps, and for how long, makeAzure says. The
-// other Azure views read nothing yet. Finding gh and az costs one sh call
+// WIQL query for their fields), its Backlog two, one after the other (the
+// level's work items in their list by az rest, then one WIQL query for
+// their fields; one for an empty backlog); either one more while who az is
+// stays unknown. What the Sprint and the Backlog read once and keep, and
+// for how long, makeAzure says. A state change costs one az call, a
+// Backlog's create one and a child's parent link one more; a create reads
+// the Backlog again. The PR tabs read nothing yet. Finding gh and az costs one sh call
 // now and then (toolPaths says when). A view refreshes when its tab first
 // shows, on `r` (which first drops what its source keeps of it: its
 // source's forget), after a column is hidden or shown (x, a name in the
@@ -45,12 +49,13 @@
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
-// sprint's taskboard), select.js (filter, "nur meine", selection), sources/
-// (GitHub, Azure), tools.js (running gh and az), actions/ (starting a
-// session, writing a change at once, moving a card), ui/helpers.js,
-// ui/layer.js (the board layer), ui/shapes/ (how a view's data is drawn and
-// worked: board, prs, sprint, placeholder), ui/modals/ (the dialogs: start,
-// status, columns) and this one, the Board, which looks the shape up. Their
+// sprint's taskboard), kinds/backlog.js (a team's backlog), select.js
+// (filter, "nur meine", selection), sources/ (GitHub, Azure), tools.js
+// (running gh and az), actions/ (starting a session, writing a change at
+// once, moving a card, changing a state, creating a work item),
+// ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how a view's
+// data is drawn and worked: board, prs, sprint, backlog, placeholder),
+// ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
 // data logic is plain exported functions, tested with a few UI paths by
 // tests/herdr-app/board.test.mjs with node.
 
@@ -76,6 +81,7 @@ export * from "./contexts.js";
 export * from "./kinds/board.js";
 export * from "./kinds/index.js";
 export * from "./kinds/sprint.js";
+export * from "./kinds/backlog.js";
 export * from "./select.js";
 export * from "./sources/github.js";
 export * from "./sources/azure.js";
@@ -83,6 +89,8 @@ export * from "./tools.js";
 export * from "./actions/start.js";
 export * from "./actions/write.js";
 export * from "./actions/move.js";
+export * from "./actions/state.js";
+export * from "./actions/create.js";
 export * from "./sources/index.js";
 export * from "./ui/helpers.js";
 export * from "./ui/layer.js";
@@ -90,9 +98,11 @@ export * from "./ui/shapes/index.js";
 export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
 export * from "./ui/shapes/sprint.js";
+export * from "./ui/shapes/backlog.js";
 export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
+export * from "./ui/modals/create.js";
 export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 
@@ -187,12 +197,13 @@ export default class Board extends View {
   // being written), unclear (open outcomes: key, label, at and
   // writeAtOnce's w.open; see settleUnclear), stored/hidden (the person's
   // toggles and the hidden set), sel ({ col, key }, null before the first
-  // data), picked (the key of the item the person chose, see clickItem) and
-  // detail.
+  // data), picked (the key of the item the person chose, see clickItem),
+  // runs (how many refreshes have started), want (an item to choose once a
+  // refresh has it: chooseWanted) and detail.
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
-      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, detail: false,
+      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
     };
     return this.views[id];
   }
@@ -292,6 +303,7 @@ export default class Board extends View {
     st.again = false;
     st.tried = Date.now();
     const started = st.tried;
+    const run = ++st.runs;
     cx.spawn(async (cx) => {
       try {
         const { data, warnings } = await loader.load(view, (v) => this.hiddenFor(v));
@@ -301,6 +313,7 @@ export default class Board extends View {
         st.error = null;
         st.at = Date.now();
         this.keepSelection(view);
+        this.chooseWanted(view, run);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
         st.error = report(e);
@@ -317,6 +330,21 @@ export default class Board extends View {
       }
     });
     cx.notify();
+  }
+
+  // After the refresh `run` (its number, st.runs) succeeded: the item a
+  // write asked to be chosen (st.want = { key, after: the refreshes started
+  // when it asked }: a created work item), once by the first refresh that
+  // started after it asked (an earlier one may have read before the item
+  // was there); where that refresh's data does not show it (the filter,
+  // "nur meine"), nothing is chosen.
+  chooseWanted(view, run) {
+    const st = this.state(view.id);
+    const want = st.want;
+    if (!want || run <= want.after) return;
+    st.want = null;
+    const col = columnOf(this.navColumns(view), want.key);
+    if (col >= 0) this.choose(view, { col, key: want.key });
   }
 
   // After a refresh that succeeded: the writes whose outcome was open, came
@@ -545,13 +573,13 @@ export default class Board extends View {
   }
 
   // Gives the board's keyboard to where it belongs, the one rule for it:
-  // the open dialog's text field when the dialog is on it (the start
-  // dialog's message), else the filter while one is typed, else the board
-  // itself, which hands its keys to a dialog without a text field (the
-  // status menu).
+  // the open dialog's text field when the dialog is on it (m.textField:
+  // the start dialog's message, the create dialog's title), else the filter
+  // while one is typed, else the board itself, which hands its keys to a
+  // dialog without a text field (the status menu) or on another field.
   takeKeyboard() {
     const m = this.modal;
-    if (m?.input && m.field === "message") m.input.focus();
+    if (m?.input && m.field === m.textField) m.input.focus();
     else if (this.filtering) this.filterInput.focus();
     else this.handle.focus();
   }

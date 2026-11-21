@@ -17,7 +17,7 @@ export const KINDS = {
   "github board": { shape: "board" },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
-  "azure backlog": { text: "Backlog folgt" },
+  "azure backlog": { shape: "backlog" },
   "azure prs": { text: "PR-Ansicht folgt" },
 };
 

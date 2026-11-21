@@ -1,0 +1,31 @@
+{
+  "backlogIteration": {
+    "id": "a1b2c3d4-0000-4000-8000-000000000001",
+    "name": "Example Project",
+    "path": "Example Project",
+    "attributes": null,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/a1b2c3d4-0000-4000-8000-000000000001"
+  },
+  "backlogVisibilities": {
+    "Microsoft.EpicCategory": false,
+    "Microsoft.FeatureCategory": true,
+    "Microsoft.RequirementCategory": true
+  },
+  "bugsBehavior": "asRequirements",
+  "defaultIteration": {
+    "id": "7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23",
+    "name": "Sprint 12",
+    "path": "Example Project\\Sprint 12",
+    "attributes": null,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23"
+  },
+  "defaultIterationMacro": null,
+  "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings",
+  "workingDays": [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday"
+  ]
+}

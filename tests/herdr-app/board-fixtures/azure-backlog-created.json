@@ -1,0 +1,23 @@
+{
+  "fields": {
+    "System.AreaPath": "Example Project\\Core",
+    "System.TeamProject": "Example Project",
+    "System.IterationPath": "Example Project\\Sprint 12",
+    "System.WorkItemType": "User Story",
+    "System.State": "To Do",
+    "System.Reason": "New",
+    "System.AssignedTo": {
+      "displayName": "Alex Sample",
+      "uniqueName": "Alex.Sample@example.com",
+      "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+      "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+      "descriptor": "aad.sample1"
+    },
+    "System.Title": "Sample new story",
+    "Microsoft.VSTS.Common.StackRank": 1999000000.0
+  },
+  "id": 450,
+  "relations": null,
+  "rev": 1,
+  "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/450"
+}
