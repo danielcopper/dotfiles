@@ -27,8 +27,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
 - **`merge_policy: user`** — the owner merges every PR, and this policy has no departure. Two layers block the merge
   paths a session reaches by shell:
   - The hook `hooks/block_pr_merge.py`, a coarse filter that fails closed. It judges the whole Bash command as one
-    text: backslash-newlines joined, every quote, backslash and `$'`/`$"` prefix removed, lowercased; it does not
-    split the command or read any tool's flags. It first lets through a whole command that is exactly one read-only
+    text: backslash-newlines joined, every quote, backslash and `$'`/`$"` prefix removed, lowercased; the rules
+    that name a simple command or a tool's options read the command by the shell's quoting instead. It first
+    lets through a whole command that is exactly one read-only
     gh form — optional `VAR=value`, `env` and `timeout N`, then `gh` with an optional `-R`/`--repo`, then `pr view`,
     `list`, `status`, `checks` or `diff`, `issue view` or `list`, `search <word>` or `run <word>`, followed by plain
     words — with no shell syntax, quote or backslash, and no second `gh`, `az`, `curl` or `wget`. It also lets through
