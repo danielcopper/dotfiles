@@ -37,7 +37,8 @@ fallback_range=8700-8719
 listen_wait=3
 start_tries=3
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/preview-serve
-# PID files live where a reboot or logout clears them, as their servers end.
+# PID files go to the runtime directory, which a reboot empties as it ends
+# their servers; without one they sit beside the logs.
 run_dir=${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/preview-serve
 
 die() {
