@@ -383,6 +383,25 @@ and it has three parts. Stow brings none of them:
    package stows a wrapper `~/.local/bin/tmux-agent-sidebar` that execs the TPM
    copy under `~/.config/tmux/plugins`.
 
+## preview-serve
+
+`~/.local/bin/preview-serve` (`bash` package) shows a directory of pages or
+images on this machine's home-network address, so a browser on another device
+opens them:
+
+- `preview-serve <dir>` starts `python3 -m http.server` in the background on
+  the address and the first free port of the host's preview range, and prints
+  the link and the PID. It refuses a directory holding a `.git` or a symlink
+  that leads outside it, since the server hands out everything below.
+- `preview-serve --stop <pid>` ends a server it started.
+- `preview-serve --addr` prints the address and port for a dev server to bind
+  to, and starts nothing.
+
+The range comes from `/etc/preview-ports` (`<first>-<last>`). On the
+Minisforum the homelab playbook writes that file from the variable that opens
+the range in the host firewall; without it the script uses 8700-8719 and says
+so. The script's header has the details.
+
 ## memex sync
 
 `~/Memory` is a symlink into `~/memex`, a git clone of the memex repository
@@ -564,13 +583,11 @@ on wsl-arch, how a shell finds or starts the keyring daemon, and the one line
 it prints on stderr when the lock stays busy or the start fails. Stand-ins
 take the place of hc, tmux, fastfetch and gnome-keyring-daemon, and flock and
 mkdir run through logging wrappers around the real tools, so no herdr or tmux
-server is asked and no real keyring daemon starts. It also checks
-`~/.local/bin/preview-serve`, which serves a directory on the home-network
-address and the first free port of the range in `/etc/preview-ports` (written
-by the homelab playbook; 8700-8799 without it), with stand-ins for ip, ss and
-python3, so no real port is taken. Each file's header lists its cases,
-`--list` prints their names, and naming cases runs only those. It needs jq,
-timeout, flock, setsid and python3.
+server is asked and no real keyring daemon starts. It also checks how
+`preview-serve` picks its port, refuses a directory, waits for its server and
+stops it, with stand-ins for ip, ss and python3, so no real port is taken.
+Each file's header lists its cases, `--list` prints their names, and naming
+cases runs only those. It needs jq, timeout, flock, setsid and python3.
 
 `mise run skill-trigger-test` (without mise, `python3 -I
 tests/skill-triggers/run.py`) checks that the skills under
