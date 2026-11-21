@@ -372,8 +372,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   details, a second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
-  pull request) and makes its own worktree. The session is named after the item
-  (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
+  pull request) and makes its own worktree. In that dialog and the create
+  dialog `Tab` and shift-`Tab` move between the fields, from the message or
+  title too: the board binds them in its own key context, as the leader does
+  (the comment above `BOARD_KEYS` in `mods/board/src/main.js`). The session
+  is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
+  item), which is how the board
   finds it again. A status change shows at once and is written to GitHub or
   Azure; a refusal moves the card back (or sets the state back) with the
   error, and a write without a clear answer refreshes the board and then says

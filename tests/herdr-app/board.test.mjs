@@ -1677,10 +1677,14 @@ async function settle() {
 }
 
 // A fake cx; its timers run when a test calls fire(), tick() or look().
-function fakeCx() {
+// bind_keys records the bindings in `bound` and gives what `bindKeys` (by
+// default: how many it got) gives or throws.
+function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
   const cx = {
     later: [],
     every: [],
+    bound: [],
+    bind_keys: (bindings) => (cx.bound.push(...bindings), bindKeys(bindings)),
     // A handle that knows whether it has the keyboard: from its focus()
     // until a test says otherwise (handle.held = false).
     // The board's handle, one of the host's handles: its focus() takes the
@@ -1770,7 +1774,7 @@ async function bootBoard(options = {}) {
   const host = fakeHost(options);
   globalThis.__boardHost = host;
   const b = new board.default();
-  const cx = fakeCx();
+  const cx = fakeCx(options);
   b.init(options.props ?? {}, cx);
   await settle();
   return { b, cx, host, st: () => b.views.mine };
@@ -5072,4 +5076,68 @@ test("UI: a backlog longer than one query reads asks for the first ones and says
   await host.answer("az", ok("[]"), AZB.query);
   await host.answer("az", ok(fixture("azure-sprint-account.json")), AZB.me);
   assert.ok(texts(b.render()).includes("Nur die ersten 1000 von 1005 Einträgen des Backlogs (so viele liest eine Abfrage)"));
+});
+
+// ---- Tab in the board's dialogs ----
+
+// The board's root's handler for a bound action (BOARD_KEYS), as herdr
+// calls it: with a cx whose stop_propagation is counted.
+function boardAction(b, action) {
+  const root = b.render();
+  const handler = root.calls.find((c) => c[0] === "on_action" && c[1] === action)?.[2];
+  assert.ok(handler, `no on_action ${action}`);
+  const cx = { ...fakeCx(), stopped: 0 };
+  cx.stop_propagation = () => cx.stopped++;
+  handler({}, cx);
+  return cx.stopped;
+}
+
+test("the board binds Tab and shift-Tab in its own key context, which its root carries with a handler for each", async () => {
+  const { b, cx } = await openBoard();
+  assert.deepEqual(cx.bound, board.BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: board.BOARD_KEY_CONTEXT })));
+  assert.deepEqual(board.BOARD_KEYS.map((k) => [k.keystroke, k.back]), [["tab", false], ["shift-tab", true]]);
+  const root = b.render();
+  assert.deepEqual(root.with.key_context, [board.BOARD_KEY_CONTEXT]);
+  assert.deepEqual(root.calls.filter((c) => c[0] === "on_action").map((c) => c[1]), ["board_tab", "board_shift_tab"]);
+  assert.equal(boardAction(b, "board_tab"), 0, "without a dialog nothing takes Tab: it stays herdr's");
+});
+
+test("UI: Tab and shift-Tab move between the start dialog's fields, also while its message has the keyboard (owner check: Tab wechselt das Feld im Start-Dialog)", async () => {
+  const { b, cx } = await openBoard();
+  await openStart(b, cx);
+  const m = b.modal;
+  assert.deepEqual([m.kind, m.field, m.inputFocused], ["start", "message", true]);
+  assert.equal(boardAction(b, "board_tab"), 1, "taken");
+  assert.deepEqual([m.field, m.inputFocused, b.handle.is_focused()], ["agent", false, true], "the board has the keyboard for the choice");
+  boardAction(b, "board_tab");
+  boardAction(b, "board_tab");
+  assert.equal(m.field, "open");
+  boardAction(b, "board_tab");
+  assert.deepEqual([m.field, m.inputFocused], ["message", true], "round to the message, which takes the keyboard");
+  boardAction(b, "board_shift_tab");
+  assert.equal(m.field, "open", "shift-Tab goes back");
+});
+
+test("UI: Tab and shift-Tab move between the create dialog's title and type", async () => {
+  const { b, cx } = await openBacklog();
+  await press(b, cx, "n");
+  const m = b.modal;
+  assert.equal(boardAction(b, "board_tab"), 1);
+  assert.deepEqual([m.field, m.inputFocused], ["type", false]);
+  boardAction(b, "board_shift_tab");
+  assert.deepEqual([m.field, m.inputFocused], ["title", true]);
+  await press(b, cx, "escape");
+  await press(b, cx, "s");
+  assert.equal(b.modal.kind, "status");
+  assert.equal(boardAction(b, "board_tab"), 0, "a menu without fields leaves Tab alone");
+});
+
+test("UI: a bind_keys that fails is said in a toast, and the board works on", async () => {
+  const { b, host } = await bootBoard({ bindKeys: () => {
+    throw new Error("keymap locked");
+  } });
+  assert.deepEqual(host.notes.at(-1), { title: "Board: Tab und shift-Tab nicht gebunden", body: "keymap locked", level: "error" });
+  assert.ok(b.render());
+  const { host: short } = await bootBoard({ bindKeys: () => 1 });
+  assert.deepEqual(short.notes.at(-1), { title: "Board: Tab und shift-Tab nicht alle gebunden", body: "1 von 2 Bindungen angelegt", level: "error" });
 });

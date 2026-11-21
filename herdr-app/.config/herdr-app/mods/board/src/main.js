@@ -118,6 +118,21 @@ export const WATCH_MS = 250;
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 
+// Keys the board binds in its own key context. herdr binds Tab and
+// shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
+// next or previous tab stop, and runs a matching binding's action before
+// on_key_down, so a dialog's key handler never saw Tab, not even while its
+// text field had the keyboard; of the matching bindings, the one in the
+// deepest context wins, so a binding in the context of the board's root,
+// around its dialogs and their fields, comes first. The leader mod binds
+// the same way and says more (mods/leader/main.js, KEY_CONTEXT). Each
+// action runs tabKey, the one place that says what Tab does on the board.
+export const BOARD_KEY_CONTEXT = "Board";
+export const BOARD_KEYS = [
+  { keystroke: "tab", action: "board_tab", back: false },
+  { keystroke: "shift-tab", action: "board_shift_tab", back: true },
+];
+
 export default class Board extends View {
   init(initProps, cx) {
     this.initProps = initProps;
@@ -184,9 +199,36 @@ export default class Board extends View {
         cx.notify();
       }
     });
+    this.bindKeys(cx);
     cx.timer.every(TICK_MS, (cx) => this.guarded("Neuladen", () => this.tick(cx)));
     cx.timer.every(WATCH_MS, (cx) => this.guarded("Anzeige", () => this.watchShown(cx)));
     this.reload(cx);
+  }
+
+  // Binds BOARD_KEYS in BOARD_KEY_CONTEXT, once per copy, as the leader
+  // does (mods/leader/main.js, bindKeys: each bind adds entries, and a load
+  // of keys.json drops them all). A failure leaves the rest of the board
+  // working and says why.
+  bindKeys(cx) {
+    const names = "Tab und shift-Tab";
+    try {
+      const count = cx.bind_keys(BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: BOARD_KEY_CONTEXT })));
+      if (count !== BOARD_KEYS.length) {
+        notify({ title: `Board: ${names} nicht alle gebunden`, body: `${count} von ${BOARD_KEYS.length} Bindungen angelegt`, level: "error" });
+      }
+    } catch (e) {
+      notify({ title: `Board: ${names} nicht gebunden`, body: String(e?.message ?? e), level: "error" });
+    }
+  }
+
+  // Tab and shift-Tab (`back`), whatever has the keyboard in the board: in
+  // an open dialog with fields, its next or previous field (its tab,
+  // MODALS). Anything else takes no Tab yet: the key goes on to herdr.
+  tabKey(back, cx) {
+    const tab = this.modal ? MODALS[this.modal.kind].tab : null;
+    if (!tab) return;
+    cx.stop_propagation();
+    tab(this, back, cx);
   }
 
   // ---- data ----
@@ -752,6 +794,9 @@ export default class Board extends View {
     let out = v_flex()
       .id("board")
       .track_focus(this.handle)
+      .key_context(BOARD_KEY_CONTEXT);
+    for (const k of BOARD_KEYS) out = out.on_action(k.action, (_e, cx) => this.tabKey(k.back, cx));
+    out = out
       .size_full()
       .relative()
       .bg(t.background)
