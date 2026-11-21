@@ -6,11 +6,13 @@
 # range file under /etc and no real port is involved:
 #   ip       prints $ROOT/ip.out, a route with src 192.0.2.7
 #   ss       prints $ROOT/ss.out, the listening sockets of the case, and
-#            $ROOT/bound; with SS_WORKS=<n> every call after the n-th fails
+#            $ROOT/bound; with SS_WORKS=<n> every call after the n-th fails,
+#            with SS_FAILS_AFTER_LOST set every call once $ROOT/lost exists
 #   python3  logs its arguments to $ROOT/calls and its working directory to
 #            $ROOT/cwd. By default it waits PY_DELAY seconds (0), adds its
 #            listener to $ROOT/bound, which ss prints too, and stays alive.
-#            PY_MODE=fail, or a port named in PY_FAIL_PORTS, prints an error
+#            PY_MODE=fail, or a port named in PY_FAIL_PORTS, waits
+#            PY_FAIL_DELAY seconds (0), prints an error, creates $ROOT/lost
 #            and exits 1, as a server whose port was taken after the check
 #            does; PY_MODE=crash exits 1 with another error; PY_MODE=hang
 #            stays alive without listening.
@@ -52,6 +54,10 @@
 #   b4  a server that listens only after a second: link printed once it does
 #   b5  ss failing while the server comes up: exit 1 at once with ss's error
 #       and nothing else on stderr, the server stopped
+#   b8  ss failing on its first call, for --addr and for a start: exit 1, ss's
+#       error once and nothing else, nothing on stdout, no server started
+#   b9  ss failing once a server lost its port, while the next port is
+#       sought: exit 1, ss's error once and nothing else, no second start
 #   b6  a server that exits at once for another reason: not tried again,
 #       exit 1, its error on stderr; also with a one-port range
 #   b7  a one-port range whose port is lost after the check: exit 1, the
@@ -78,7 +84,7 @@ set -uo pipefail
 CASES=(r1_range_file r2_first_free r3_all_taken r4_no_file r5_bad_range r6_dangling_range_file
   r7_last_port_free r8_one_port_ranges g1_git_root
   g2_git_below g3_symlink_outside g4_symlink_inside g5_symlink_loop p1_isolated n1_addr i1_no_src b1_server_exits
-  b2_retry b3_never_listens b4_waits_for_listen b5_ss_fails b6_other_exit
+  b2_retry b3_never_listens b4_waits_for_listen b5_ss_fails b8_ss_fails_first b9_ss_fails_on_retry b6_other_exit
   b7_lost_last_port s1_stop s2_stop_refuses s3_stop_stale
   s4_no_runtime_dir)
 if [ "${1:-}" = --list ]; then
@@ -118,7 +124,8 @@ EOF
 cat >"$ROOT/bin/ss" <<EOF
 #!/usr/bin/env bash
 echo x >>"$ROOT/ss.calls"
-if [ -n "\${SS_WORKS:-}" ] && [ "\$(wc -l <"$ROOT/ss.calls")" -gt "\$SS_WORKS" ]; then
+if { [ -n "\${SS_WORKS:-}" ] && [ "\$(wc -l <"$ROOT/ss.calls")" -gt "\$SS_WORKS" ]; } ||
+  { [ -n "\${SS_FAILS_AFTER_LOST:-}" ] && [ -e "$ROOT/lost" ]; }; then
   echo "Cannot open netlink socket" >&2
   exit 1
 fi
@@ -139,7 +146,12 @@ while [ \$# -gt 0 ]; do
 done
 case " \${PY_FAIL_PORTS:-} " in *" \$port "*) PY_MODE=fail ;; esac
 case \${PY_MODE:-run} in
-  fail) echo "OSError: [Errno 98] Address already in use on \$port" >&2; exit 1 ;;
+  fail)
+    sleep "\${PY_FAIL_DELAY:-0}"
+    echo "OSError: [Errno 98] Address already in use on \$port" >&2
+    : >"$ROOT/lost"
+    exit 1
+    ;;
   crash) echo "ModuleNotFoundError: No module named 'http.server'" >&2; exit 1 ;;
   hang) sleep 30; exit 0 ;;
 esac
@@ -440,6 +452,32 @@ b5_ss_fails() {
   check "server stopped: $server" [ -z "$server" ]
 }
 
+b8_ss_fails_first() {
+  local args
+  ports 8700-8719
+  for args in --addr "$DIR"; do
+    : >"$ROOT/calls"
+    rm -f "$ROOT/ss.calls"
+    run SS_WORKS=0 -- "$args"
+    check "exit 1 for $args, got $RC" [ "$RC" = 1 ]
+    check "stderr for $args is ss's error once: $ERR" [ "$ERR" = "$SS_ERR" ]
+    check "nothing on stdout for $args: $OUT" [ -z "$OUT" ]
+    check "no server started for $args: $(calls)" no_server
+  done
+}
+
+b9_ss_fails_on_retry() {
+  ports 8700-8719
+  # The first try waits a moment, so the wait for its listener reads ss
+  # before the port is lost; ss fails only once it is, at the search for the
+  # next port.
+  run PY_MODE=fail PY_FAIL_DELAY=0.3 SS_FAILS_AFTER_LOST=1 -- "$DIR"
+  check "exit 1, got $RC" [ "$RC" = 1 ]
+  check "stderr is ss's error once: $ERR" [ "$ERR" = "$SS_ERR" ]
+  check "nothing on stdout: $OUT" [ -z "$OUT" ]
+  check "one start: $(calls)" [ "$(calls | wc -l)" = 1 ]
+}
+
 s1_stop() {
   run -- "$DIR"
   serving 8700
@@ -539,7 +577,7 @@ for CASE in "${all[@]}"; do
   : >"$ROOT/calls"
   : >"$ROOT/ss.out"
   : >"$ROOT/bound"
-  rm -f "$ROOT/ss.calls"
+  rm -f "$ROOT/ss.calls" "$ROOT/lost"
   echo "$ROUTE" >"$ROOT/ip.out"
   if in_cases "$CASE"; then
     "$CASE"

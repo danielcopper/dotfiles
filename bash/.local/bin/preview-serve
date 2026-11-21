@@ -105,14 +105,15 @@ listening() {
   done <<<"$sockets"
 }
 
-# free_port [from]: the first port of the range load_range set, from <from>
-# on, that nothing listens on, on any address; fails without output when
-# there is none.
+# free_port <sockets> [from]: the first port of the range load_range set,
+# from <from> on, that no address:port in <sockets> (listening's output)
+# listens on; fails without output when there is none. The caller reads
+# <sockets> with a plain assignment, where set -e holds, so a failing ss ends
+# the script there and a failure here only ever means "none free".
 free_port() {
-  local start sockets addr port
-  start=${1:-$first}
+  local sockets=$1 start addr port
+  start=${2:-$first}
   [ "$start" -ge "$first" ] || start=$first
-  sockets=$(listening)
   local -A taken=()
   while read -r addr; do
     [ -z "$addr" ] || taken[${addr##*:}]=1
@@ -181,7 +182,7 @@ await_listen() {
 }
 
 serve() {
-  local dir ip port next log pid tries=1
+  local dir ip sockets port next log pid tries=1
   [ -d "$1" ] || die "no such directory: $1"
   dir=$(cd "$1" && pwd -P)
   check_tree "$dir"
@@ -191,7 +192,8 @@ serve() {
   # -I and the neutral working directory keep python from importing modules
   # planted in the caller's directory or named by PYTHON* variables.
   cd /
-  port=$(free_port) || all_taken
+  sockets=$(listening)
+  port=$(free_port "$sockets") || all_taken
   while :; do
     log=$state_dir/$port.log
     # Its own session: the server outlives the calling shell, and a kill of
@@ -211,7 +213,8 @@ serve() {
       cat "$log" >&2
       die "the server exited at once on port $port, which another process took after the check (try $tries of $start_tries); its output is above"
     fi
-    if ! next=$(free_port $((port + 1))); then
+    sockets=$(listening)
+    if ! next=$(free_port "$sockets" $((port + 1))); then
       cat "$log" >&2
       die "the server exited at once on port $port, which another process took after the check, and no later port of $first-$last is free; its output is above"
     fi
@@ -225,10 +228,11 @@ serve() {
 
 # Prints "<ip> <port>": what serve would bind to now.
 addr() {
-  local ip port
+  local ip sockets port
   ip=$(home_ip)
   load_range
-  port=$(free_port) || all_taken
+  sockets=$(listening)
+  port=$(free_port "$sockets") || all_taken
   echo "$ip $port"
 }
 
