@@ -89,9 +89,9 @@
 #       -- a --section is an image name like any other
 #   l3  the layout: each section's images in a grid whose column is its
 #       widest image's CSS width (--col) and that fits as many columns as the
-#       page allows, never wider than the screen; the page centered, as wide
-#       as its widest section with every image in one row (--page), whichever
-#       section that is, and at least 40rem
+#       page allows, never wider than the screen, rows that wrap centered;
+#       the page centered, as wide as its widest section with every image in
+#       one row (--page), whichever section that is, and at least 40rem
 # The f cases run the script inside a python harness, $ROOT/faulty.py, that
 # loads it as a module and makes the os calls the scenario FAULT names fail,
 # the one way to reach a rename that fails between two that succeed:
@@ -901,7 +901,7 @@ l3_grid_layout() {
   check "the header first inside the page" [ "$(page | grep -A1 '^<main' | tail -1)" = '<header>' ]
   # The 24px column gap is the one the page width above counts.
   check "the grid fits columns of --col, never wider than the screen" \
-    grep -qF '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--col)),var(--col)));gap:32px 24px;' "$OUTDIR/index.html"
+    grep -qF '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--col)),var(--col)));gap:32px 24px;justify-content:center}' "$OUTDIR/index.html"
   check "the page centered, at least 40rem" \
     grep -qF '.page{width:100%;max-width:max(40rem,var(--page));margin-inline:auto' "$OUTDIR/index.html"
   check "each image still at its real size: $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]
