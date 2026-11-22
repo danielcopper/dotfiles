@@ -11,7 +11,7 @@ The page's colours, typography and spacing come from the `show-page` skill's des
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Architecture review — {{repo name}}</title>
     <script src="https://cdn.tailwindcss.com/3.4.17"></script>
     <script type="module">
@@ -48,7 +48,7 @@ The page's colours, typography and spacing come from the `show-page` skill's des
 
 ## Header
 
-Repo name, date, and a compact legend: solid box = module, dashed line = seam, a `--leak` arrow = leakage, a thick filled box = deep module. No introduction paragraph — straight into the candidates.
+Repo name, date, and a compact legend: solid box = module, dashed line = seam, a leak-coloured arrow or node = leakage (the `--leak` token, or classDef's literal colour in a Mermaid graph), a thick filled box = deep module. No introduction paragraph — straight into the candidates.
 
 ## Candidate card
 
@@ -73,7 +73,7 @@ Pick the pattern that fits the candidate. Mix them. Don't make every diagram loo
 
 ### Mermaid graph (the workhorse for dependencies / call flow)
 
-Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and look at the mess." Wrap it in a card styled from the tokens so it doesn't feel parachuted in. Style with classDef to colour leakage edges and the deep module; classDef takes literal colours only (a `var(--leak)` there is a syntax error in Mermaid 11.4.1), so pick ones that read on both themes' backgrounds. Sequence diagrams work well for "before: 6 round-trips; after: 1."
+Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and look at the mess." Wrap it in a card styled from the tokens so it doesn't feel parachuted in. Style with classDef to colour leakage nodes and the deep module; classDef takes literal colours only (a `var(--leak)` there is a syntax error in Mermaid 11.4.1), so pick ones that read on both themes' backgrounds. Sequence diagrams work well for "before: 6 round-trips; after: 1."
 
 ```html
 <div class="rounded-lg border border-[color:var(--rule)] bg-[var(--surface)] p-4">
@@ -90,7 +90,7 @@ Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and l
 
 ### Hand-built boxes-and-arrows (when Mermaid's layout fights you)
 
-Modules as `<div>`s with borders and labels. Arrows as inline SVG `<line>` or `<path>` elements positioned absolutely over a relative container. Reach for this when you want the "after" diagram to feel like one thick-bordered deep module with greyed-out internals — Mermaid won't render that with the right weight.
+Modules as `<div>`s with borders and labels. Arrows as inline SVG `<line>` or `<path>` elements positioned absolutely over a relative container. Reach for this when you want the "after" diagram to feel like one thick filled box for the deep module (`.deep`) with its internals faded inside it — Mermaid won't render that with the right weight.
 
 ### Cross-section (good for layered shallowness)
 
