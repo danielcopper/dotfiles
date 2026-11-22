@@ -5045,8 +5045,12 @@ test("UI: a create Azure refuses says why and drops the Backlog's settings; one 
   // An item of the same title is in the backlog already: the rows decide nothing.
   await answerBacklog(host, { me: false, ids: idsWith(450), items: itemsWith([450, "Sample new story", "User Story", 1500]) });
   const [check] = openAzb(host, "created");
-  assert.ok(check.args.includes(board.createdWiql("Sample new story")), "one query: that title, created by me, today");
-  assert.match(board.createdWiql("O'Neil"), /\[System\.Title\] = 'O''Neil' AND \[System\.CreatedBy\] = @Me AND \[System\.CreatedDate\] = @Today/);
+  assert.ok(check.args.includes(board.createdWiql({ project: "Example Project", type: "User Story", title: "Sample new story" })),
+    "one query: that project, type and title, created by me, today");
+  assert.equal(board.createdWiql({ project: "P'x", type: "User Story", title: "O'Neil" }),
+    "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'P''x' AND [System.WorkItemType] = 'User Story' " +
+    "AND [System.Title] = 'O''Neil' AND [System.CreatedBy] = @Me AND [System.CreatedDate] = @Today ORDER BY [System.Id]");
+  assert.match(board.createdWiql({ project: "P", type: "Task", title: "t", child: true }), /^SELECT \[System\.Id\], \[System\.Parent\] FROM/, "a child's asks for its parent");
   await host.answer("az", ok(JSON.stringify([{ id: 450, fields: { "System.Id": 450 } }])), AZB.created);
   assert.deepEqual([b.notice.text, b.notice.level], ["User Story „Sample new story“ ist angelegt (AB#450)", "info"]);
   const unclearCreate = async (title, answer) => {
@@ -5085,7 +5089,8 @@ test("UI: an unclear create of a Task under a Story says the Backlog cannot show
   assert.equal(new Set(st().unclear.map((u) => u.key)).size, 2);
   await answerBacklog(host, { me: false });
   assert.equal(openAzb(host, "created").length, 1, "the refresh after the first settles the first");
-  await host.answer("az", ok(JSON.stringify([{ id: 451, fields: {} }])), AZB.created);
+  assert.match(openAzb(host, "created")[0].args.find((a) => a.startsWith("SELECT")), /\[System\.Parent\].*\[System\.WorkItemType\] = 'Task'/);
+  await host.answer("az", ok(JSON.stringify([{ id: 449, fields: { "System.Parent": 301 } }, { id: 451, fields: {} }])), AZB.created);
   assert.deepEqual([b.notice.text, b.notice.level], ["Task „Sample new task“ ist angelegt (AB#451), hängt aber nicht unter AB#301", "warning"]);
   await answerBacklog(host, { me: false });
   await host.answer("az", ok(""), AZB.created);
@@ -5354,4 +5359,29 @@ test("UI: a team default iteration that follows the current one keeps the Backlo
   advance(60 * 60000);
   await refreshSprint(b, cx);
   assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1], "it ended: read again, long before four hours");
+});
+
+test("UI: a team whose default iteration follows the current one has it read again when a work item is created, and the create takes that one", async () => {
+  const settings = json("azure-backlog-settings.json");
+  settings.defaultIterationMacro = "@currentIteration";
+  assert.equal(settings.defaultIteration.attributes, null, "Azure's answer names no end for it");
+  const { b, cx, host, view } = await openBacklog({ settings: JSON.stringify(settings) });
+  await press(b, cx, "n");
+  b.modal.input.set_value("Sample new story");
+  await click(b, cx, "create-go");
+  assert.deepEqual([openAzb(host, "settings").length, openAzb(host, "create").length], [1, 0], "the settings first");
+  const later = json("azure-backlog-settings.json");
+  later.defaultIterationMacro = "@currentIteration";
+  later.defaultIteration.path = "Example Project\\Sprint 13";
+  await host.answer("az", ok(JSON.stringify(later)), AZB.settings);
+  assert.deepEqual(openAzb(host, "create")[0].args,
+    board.azCreateArgs(view.context, { type: "User Story", title: "Sample new story", area: "Example Project\\Core", iteration: "Example Project\\Sprint 13" }));
+  await host.answer("az", ok(fixture("azure-backlog-created.json")), AZB.create);
+  await answerBacklog(host, { me: false });
+  await press(b, cx, "n");
+  b.modal.input.set_value("Another");
+  await click(b, cx, "create-go");
+  await host.answer("az", ok(JSON.stringify({ ...later, defaultIteration: null })), AZB.settings);
+  assert.equal(openAzb(host, "create").length, 0);
+  assert.equal(b.notice.text, "User Story „Another“ nicht angelegt: Das Team nennt gerade keine Standard-Iteration (Team-Einstellungen in Azure)");
 });

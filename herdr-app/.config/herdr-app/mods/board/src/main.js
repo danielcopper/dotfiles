@@ -39,12 +39,14 @@
 // for how long, makeAzure says. A state change costs one az call, a
 // Backlog's create one and a child's parent link one more; a create reads
 // the Backlog again, and one whose answer was unclear asks one WIQL query
-// more after that refresh. The PR tabs read nothing yet. Finding gh and az
-// costs one sh call now and then (toolPaths says when). A view refreshes
-// when its tab first shows, on `r` (which first drops what its source
-// keeps of it: its source's forget), after a column is hidden or shown (x,
-// a name in the hidden line, the column menu), when it is shown again
-// older than refreshMinutes, and every refreshMinutes while it shows.
+// more after that refresh; a create for a team whose default iteration
+// follows the current one reads the team's settings first, one call more.
+// The PR tabs read nothing yet. Finding gh and az costs one sh call now
+// and then (toolPaths says when). A view refreshes when its tab first
+// shows, on `r` (which first drops what its source keeps of it: its
+// source's forget), after a column is hidden or shown (x, a name in the
+// hidden line, the column menu), when it is shown again older than
+// refreshMinutes, and every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's

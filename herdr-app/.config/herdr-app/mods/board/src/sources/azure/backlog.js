@@ -146,7 +146,7 @@ export function backlogList({ level, childLevel, config, settings, area, ids, it
     shape: "backlog",
     meta: {
       level, childLevel, typeStates: config.typeStates, states: config.states, orderField: config.orderField,
-      area, iteration: settings.defaultIteration, missing: read - rows.length,
+      area, iteration: settings.defaultIteration, follows: Boolean(settings.follows), missing: read - rows.length,
     },
     rows,
     viewer,
@@ -197,11 +197,15 @@ export function backlogUntil(settings, now) {
   return settings.follows ? Math.min(keep, iterationUntil(settings.follows.finish, now)) : keep;
 }
 
-// One WIQL query for the work items titled `title` that the account az is
-// signed in as created today: one is the create whose answer was unclear,
-// none means it did not land, several cannot be told apart.
-export const createdWiql = (title) =>
-  `SELECT [System.Id] FROM WorkItems WHERE [System.Title] = ${wiqlText(title)} AND [System.CreatedBy] = @Me AND [System.CreatedDate] = @Today ORDER BY [System.Id]`;
+// One WIQL query for the work items of the project `project` and the type
+// `type`, titled `title`, that the account az is signed in as created
+// today, with their parent where `child` asks for it. The project is
+// spelled out: az boards query gives @project nothing to stand for.
+export function createdWiql({ project, type, title, child = false }) {
+  const fields = child ? "[System.Id], [System.Parent]" : "[System.Id]";
+  return `SELECT ${fields} FROM WorkItems WHERE [System.TeamProject] = ${wiqlText(project)} AND [System.WorkItemType] = ${wiqlText(type)} ` +
+    `AND [System.Title] = ${wiqlText(title)} AND [System.CreatedBy] = @Me AND [System.CreatedDate] = @Today ORDER BY [System.Id]`;
+}
 
 // The Backlog as makeAzure uses it, on the source's shared parts `s` (see
 // makeAzure): what it keeps per team (backlogSettingsOf), how it loads and
@@ -243,19 +247,28 @@ export function backlogView(s) {
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
     // Creates a work item ({ type, title }) in the team's default area and
-    // iteration (data.meta), assigned to me; its id.
+    // iteration (data.meta), assigned to me; its id. A default iteration
+    // that follows the current one (data.meta.follows) is read again first:
+    // the one kept may have ended since, and Azure names no end for it.
     async create(view, data, { type, title }) {
-      const args = azCreateArgs(view.context, { type, title, area: data.meta.area, iteration: data.meta.iteration });
-      return parseCreated(await s.az(args, { write: true }).catch(onRefusal(view.context)));
+      const c = view.context;
+      let iteration = data.meta.iteration;
+      if (data.meta.follows) {
+        iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c))).defaultIteration;
+        if (!iteration) throw new BoardError("Das Team nennt gerade keine Standard-Iteration (Team-Einstellungen in Azure)");
+      }
+      const args = azCreateArgs(c, { type, title, area: data.meta.area, iteration });
+      return parseCreated(await s.az(args, { write: true }).catch(onRefusal(c)));
     },
     // Makes the work item `id` a child of `parent`.
     async addParent(view, id, parent) {
       checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true }), parent);
     },
-    // The ids of the work items titled `title` that I created today: what
-    // settles a create whose answer was unclear (createdWiql).
-    async findCreated(view, title) {
-      return parseWorkItems(await s.az(azQueryArgs(view.context, createdWiql(title))), view.context).map((i) => i.number);
+    // The work items createdWiql finds for a create ({ type, title,
+    // child }) in the view's project, as parseWorkItems reads them.
+    async findCreated(view, { type, title, child }) {
+      const c = view.context;
+      return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child }))), c);
     },
   };
 }

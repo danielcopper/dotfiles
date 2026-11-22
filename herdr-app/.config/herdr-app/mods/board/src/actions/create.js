@@ -89,19 +89,22 @@ function linkParent(b, view, id, parent, cx) {
 }
 
 // How the settled unclear creates `due` (of kind "create") ended up, one
-// line each, by asking Azure for the work items of each title that I
-// created today (the loader's findCreated): exactly one is the create
-// (info; a child's line adds that it hangs under nothing yet, a warning),
-// none means it did not land, several are said as they are, a failed
-// question says that it could not be checked (warnings). Nothing is
-// guessed from the rows: another item of the same title may be there.
+// line each, by asking Azure for the work items of each one's project,
+// type and title that I created today (the loader's findCreated); for a
+// child, only those that hang under no parent yet count, since its link
+// was never made. Exactly one is taken for the create (info; a child's
+// line adds that it hangs under nothing yet, a warning), none means it did
+// not land, several are said as they are, a failed question says that it
+// could not be checked (warnings). Nothing is guessed from the rows:
+// another item of the same title may be there.
 export async function unclearCreateLines(b, view, due) {
   const loader = b.loader(view);
   return Promise.all(due.map(async (u) => {
     const head = `${u.type} ${u.label}`;
     let ids;
     try {
-      ids = await loader.findCreated(view, u.title);
+      const found = await loader.findCreated(view, { type: u.type, title: u.title, child: u.child });
+      ids = found.filter((i) => !u.child || i.parent === null).map((i) => i.number);
     } catch (e) {
       return { text: `${head}: ob es angelegt ist, ließ sich nicht prüfen (${errorText(e)}); vor einem neuen Versuch in Azure nachsehen`, warn: true };
     }

@@ -356,7 +356,13 @@ herdr-app`. Which files of the package git tracks is set in the root
   created in the team's default area and iteration, assigned to me, and
   shows, selected, once Azure has named its id and the Backlog is read again;
   a Task is linked to the selected Story as its parent and, being no Story,
-  does not show in the list. Where a work item's session starts is only
+  does not show in the list. Where Azure's answer to a create leaves open
+  whether it landed, the board asks Azure after the next refresh for work
+  items of that project, type and title that I created today (a Task only
+  among those without a parent): exactly one is taken as the new one, none
+  means it did not land, several are named; the header's "Calls:" says what
+  that costs. A team whose default iteration follows the current one has it
+  read again for each create. Where a work item's session starts is only
   `start.checkout` so far. On a GitHub view `h/l j/k` move over the
   columns shown, `H/L` move a card one column, hidden ones included (`s` picks
   from a menu, hidden ones too, or drag the card onto a column; the notice
