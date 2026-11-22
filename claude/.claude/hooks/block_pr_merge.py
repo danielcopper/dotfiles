@@ -207,11 +207,19 @@ def stripped(command: str) -> str:
 
 def quote_parts(command: str) -> tuple[str, str]:
     """The text of *command* outside quotes, and the text inside double quotes. Single-quoted
-    text is in neither. Open quoting puts the whole command outside, which fails closed."""
+    text is in neither. A backslash outside quotes or inside double quotes keeps the character
+    after it, which then opens or closes no quote. Open quoting puts the whole command outside,
+    which fails closed."""
     outside: list[str] = []
     double: list[str] = []
     quote = ""
-    for c in command:
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if c == "\\" and quote != "'":
+            (double if quote else outside).append(command[i : i + 2])
+            i += 2
+            continue
         if quote:
             if c == quote:
                 quote = ""
@@ -222,6 +230,7 @@ def quote_parts(command: str) -> tuple[str, str]:
             quote = c
         else:
             outside.append(c)
+        i += 1
     if quote:
         return command, ""
     return "".join(outside), "".join(double)
