@@ -29,10 +29,11 @@ SHELL_WORD = re.compile(rf"(?<![\w.-])({'|'.join(SHELL_NAMES)})(?![\w.-])")
 SHELL_C_CLUSTER = re.compile(r"(?<!\S)-[a-z]*c[a-z]*(?!\S)")
 SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])[^\S\n]*(?:source|\.)(?=\s)")
 # Operators and words of de-quoted text, for finding command words.
-COMMAND_TOKEN = re.compile(r"\|&|&&|\|\||[|;&()\n`]|[^\s|;&()`]+")
+# 2>&1, >&2 and &> are redirections, read before & can count as an operator.
+COMMAND_TOKEN = re.compile(r"\d*[<>]&-?\d*|&>>?|\|&|&&|\|\||[|;&()\n`]|[^\s|;&()`]+")
 COMMAND_OPERATORS = frozenset(["|&", "&&", "||", "|", ";", "&", "(", ")", "\n", "`"])
-REDIRECTION = re.compile(r"\d*[<>]")
-BARE_REDIRECTION = re.compile(r"\d*[<>]+[&|]?")
+REDIRECTION = re.compile(r"\d*[<>]|&>")
+BARE_REDIRECTION = re.compile(r"\d*[<>]+[&|]?|&>>?")
 # Commands that run a program named in their arguments or their data.
 TRAP = re.compile(r"(?<![\w.-])trap(?![\w.-])")
 SORT = re.compile(r"(?<![\w.-])sort(?![\w.-])")
@@ -249,11 +250,13 @@ def runs_a_shell(lower: str) -> bool:
     simple command anywhere in the de-quoted, lowercased text: at the start, after `|`, `|&`,
     `;`, `&`, `&&`, `||`, a newline, a parenthesis or a backtick, past assignments,
     redirections and the keywords `if`, `then`, `do`, `!`, `{` and the like, or after one of the
-    WRAPPERS, `coproc` or `busybox` with or without options. One pass over the words."""
+    WRAPPERS, `coproc` (and a named coproc's name) or `busybox` with or without options. One
+    pass over the words."""
     expect = True  # the next word may be a command word
     wrapped = False  # a wrapper stands earlier in this simple command
     target = False  # the next word is a redirection's target
-    for token in COMMAND_TOKEN.findall(lower):
+    tokens = COMMAND_TOKEN.findall(lower)
+    for at, token in enumerate(tokens):
         if token in COMMAND_OPERATORS:
             expect, wrapped, target = True, False, False
             continue
@@ -272,6 +275,8 @@ def runs_a_shell(lower: str) -> bool:
             continue
         if ASSIGNMENT.match(token) or token in KEYWORDS or token == "coproc":
             continue
+        if at > 0 and tokens[at - 1] == "coproc" and tokens[at + 1 : at + 2] == ["{"]:
+            continue  # the name of a named coproc: its command follows the {
         if name in WRAPPERS or name == "busybox":
             wrapped = True
             continue

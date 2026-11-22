@@ -110,7 +110,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     `source` or `.`, or a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `fish`, `busybox sh`, as a word or
     a path's basename) as the command word of any simple command: after `|`, `|&`, `;`, `&`, a newline, a
     parenthesis or a backtick, past assignments, redirections, keywords such as `if`, `then`, `do`, `!` and
-    `{`, after one of the wrappers named above or `coproc` with or without options, in a process substitution,
+    `{`, after one of the wrappers named above or `coproc` (and a named coproc's name) with or without options,
+    also after `2>&1` or `>&2`, in a process substitution,
     or plainly (`bash s.sh`) — or to a command that runs a program from its arguments or data —
     `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs`,
     `parallel` — quoting no longer separates anything: the file, write and run-time rules then read the whole
