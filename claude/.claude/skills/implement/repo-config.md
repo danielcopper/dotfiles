@@ -78,8 +78,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     when no word of that command is a shell word, at most an output redirection to a plain word follows the
     marker on its line, a line ends the body, and the marker stands outside quotes, comments, parentheses, brace
     groups and substitutions. A backtick, a `$'` string, a `$(`, `${` or backtick inside double quotes, a process
-    substitution, `((`, a `<<` with no delimiter name after it, a `)` or `}` without its opening, or a heredoc
-    without the line that ends it, anywhere in the text, leaves every body counted. All other rules read the
+    substitution, `((`, `case`, a `{` or `}` that is no command word, a backslash-newline right before a `#`, a
+    `<<` with no delimiter name after it, a `)` or `}` without its opening, or a heredoc without the line that
+    ends it, anywhere in the text, leaves every body counted. All other rules read the
     bodies.
 
     The run-time rule spares a parameter only when the whole command is plain and runs only listed commands.

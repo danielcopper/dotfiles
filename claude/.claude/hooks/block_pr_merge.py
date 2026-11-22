@@ -844,8 +844,22 @@ def terminator(command: str, position: int, delimiter: str, tabs: bool) -> tuple
 
 def standalone(command: str, i: int) -> bool:
     """Whether the character at *i* stands as a word of its own."""
+    return standalone_word(command, i, 1)
+
+
+def standalone_word(command: str, i: int, length: int) -> bool:
+    """Whether the *length* characters at *i* stand as a word of their own."""
     before = i == 0 or command[i - 1] in STANDALONE
-    return before and (i + 1 == len(command) or command[i + 1] in STANDALONE)
+    end = i + length
+    return before and (end == len(command) or command[end] in STANDALONE)
+
+
+def after_blanks(command: str, i: int) -> str:
+    """The character before *i* past spaces and tabs, or a newline at the start of *command*."""
+    i -= 1
+    while i >= 0 and command[i] in " \t":
+        i -= 1
+    return command[i] if i >= 0 else "\n"
 
 
 def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
@@ -854,8 +868,9 @@ def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
     substitutions, fed to a command reads_data() accepts, with at most an output redirection to a
     plain word after the marker on its line, and a line that ends the body. No span at all when
     the text holds what this reading does not follow: a backtick, a `$'` string, a substitution
-    or `${` inside double quotes, a process substitution, `((`, or a `<<` that is no heredoc
-    marker it reads."""
+    or `${` inside double quotes, a process substitution, `((`, `case`, a `{` or `}` that is no
+    command word, a backslash-newline before a `#`, or a `<<` that is no heredoc marker it
+    reads."""
     spans: list[tuple[int, int]] = []
     pending: list[tuple[str, bool, bool]] = []  # delimiter, tabs stripped, body spared
     quote = ""
@@ -875,9 +890,13 @@ def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
             i += 1
             continue
         if c == "\\":
+            if command.startswith("\n#", i + 1):  # the # continues a word, no comment
+                return []
             i += 2
             continue
         if c == "`" or command.startswith(("$'", "<(", ">(", "(("), i):
+            return []
+        if command.startswith("case", i) and standalone_word(command, i, 4):
             return []
         if c in "'\"":
             quote = c
@@ -885,6 +904,12 @@ def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
             newline = command.find("\n", i)
             i = len(command) if newline < 0 else newline
             continue
+        elif (
+            c in "{}"
+            and standalone(command, i)
+            and after_blanks(command, i) not in ("\n;&|(){" if c == "{" else "\n;&")
+        ):
+            return []  # a brace that is an argument, or a group the reading cannot place
         elif c == "(" or (c == "{" and standalone(command, i)):
             depth += 1
             start = i + 1

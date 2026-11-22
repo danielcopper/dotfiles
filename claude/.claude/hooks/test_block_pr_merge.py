@@ -680,6 +680,11 @@ DENIED = [
     "gh pr_merge 5",
     "gh -R o/r automerge 5",
     "az automerge x",
+    # a backslash-newline before #, case, or a brace that is an argument: the heredoc reading
+    # gives up
+    "echo x\\\n#'\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
+    "{ echo }; cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\necho {\n} | env bash",
+    "case x in (x) cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n;; esac | env bash",
 ]
 
 REASONS = {
