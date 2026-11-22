@@ -1,4 +1,5 @@
 # Steamdeck-specific bash config. Sourced by shared .bashrc.
+# shellcheck shell=bash
 
 # Clear the prompt hooks SteamOS installs, before mise and starship add theirs.
 # In a login shell (every tmux pane, wezterm's `bash -l`) systemd's
@@ -34,6 +35,8 @@ esac
 
 # Nix daemon
 if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
+    # A system file, not in this repo.
+    # shellcheck source=/dev/null
     . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
 fi
 
