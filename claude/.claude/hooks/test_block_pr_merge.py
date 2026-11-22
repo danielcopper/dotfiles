@@ -188,7 +188,7 @@ PASSES = [
     "grep -n alias $F",
     "gh api repos/o/r --jq '{squash_merge_commit_title}'",
     "cd $D && gh api repos/github/docs/contents/content/x/configuring-branches-and-merges.md",
-    # the body of a quoted heredoc fed to a command that only stores or reads it as data
+    # the body of a quoted heredoc fed to a command that does not read it as shell text
     "cat > $S/brief.md <<'EOF'\nshow it, then check it with curl -sI $URL\nEOF",
     "python3 - <<'EOF'\nprint(\"$HOME\", 'use gh pr view')\nEOF",
     "cat > $S/n.md <<'EOF'\nthe gh api call reads \"$EP\"\nEOF",

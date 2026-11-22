@@ -824,8 +824,8 @@ def network_runtime_by_command(command: str) -> bool | None:
 
 
 def reads_data(text: str) -> bool:
-    """Whether the simple command *text*, up to a heredoc marker, runs a command that only stores
-    or reads the heredoc as data: cat, tee, python or python3, or git commit, tag or notes
+    """Whether the simple command *text*, up to a heredoc marker, runs a command that does not
+    read the heredoc as shell text: cat, tee, python or python3, or git commit, tag or notes
     without `-c`, with no shell word among its words."""
     words = text.lower().split()
     if not words or words[0].rsplit("/", 1)[-1] not in DATA_READERS:
