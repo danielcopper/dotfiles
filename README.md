@@ -84,12 +84,16 @@ instead: `.bashrc` makes `claude`, `opencode` and `pi` functions that run
 `agent-env <harness> <harness> "$@"`, each only where agent-env and that
 harness are installed and no function of that name exists yet: the Deck's
 `claude` in `host-steamdeck/.bashrc.local` starts its slice through agent-env
-itself ("Memory protection on the Steam Deck"). agent-env passes on only the names the harness's list
+itself ("Memory protection on the Steam Deck").
+
+agent-env passes on only the names the harness's list
 `~/.config/agent-env/<harness>` declares, one per line with `#` comments, and
-only with the values the file gives them: it unsets every other name the file
-assigns, also where the starting shell holds a value for it, but never
-`PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME` or `TERM`. It prints no value, also
-under `bash -x`. A missing file is named on stderr and the harness starts
+only with the values the file gives them. The names the file assigns are
+every name a line assigns first (`NAME=…` / `export NAME=…`); one assignment
+per line. agent-env unsets each of them the list does not declare, also
+where the starting shell holds a value for it, but never `PATH`, `HOME`,
+`SHELL`, `USER`, `LOGNAME` or `TERM`. It prints no value, also under
+`bash -x`. A missing file is named on stderr and the harness starts
 without its secrets; a missing list, or a file that cannot be read or does
 not parse, stops the start. The script's header has the details.
 

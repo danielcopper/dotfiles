@@ -10,7 +10,7 @@
 #     CHILD_EXIT (0)
 # HOME holds a ~/.bashrc.secrets with dummy values, one of them from a
 # $(...), one assigned without export, and copies of the repo's lists under
-# ~/.config/agent-env; the .bashrc cases put a link to the script at
+# ~/.config/agent-env; f1, b1 and s1 put a link to the script at
 # ~/.local/bin/agent-env. No dummy value contains the word of another and
 # every one contains "dummy", which no other output does.
 #   l1  the shipped lists of claude, opencode and pi pass SONARQUBE_CLI_ORG,
@@ -18,7 +18,7 @@
 #       no stderr
 #   f1  an interactive shell on bash/.bashrc that sourced the file, which is
 #       then rewritten: `claude` in that shell gets the new value, the shell
-#       still holds the old one
+#       held the old one when it started
 #   d1  only the declared names reach the child; "#" comments, blank lines
 #       and blanks around a name are skipped; a declared name the file
 #       assigns without export is exported

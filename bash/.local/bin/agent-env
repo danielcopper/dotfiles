@@ -12,7 +12,7 @@
 #     harness name other than letters, digits, ".", "_" and "-" (not starting
 #     with "."), or a line that is no variable name stops the start.
 #   - The declared names are unset first, so their values come from the file
-#     alone, never from the calling shell.
+#     alone, never from the calling shell (the six names kept below aside).
 #   - ~/.bashrc.secrets is checked with `bash -n`, then sourced with xtrace
 #     and verbose off, so `bash -x` shows none of it. A file that cannot be
 #     read or does not parse stops the start; its content is not shown.
@@ -27,7 +27,8 @@
 #     the calling shell's values of those pass through.
 #   - <command> then replaces this process, with its arguments as given; its
 #     exit code is the script's.
-# Values are never printed and never put in an argument list.
+# The script prints no value and puts none in an argument list; an error a
+# command in the file raises reaches stderr as bash writes it.
 #
 # Exit codes: 2 for a usage error; 1 for a missing or broken list, or a
 # secrets file that cannot be read or does not parse; otherwise those of

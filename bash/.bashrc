@@ -113,22 +113,20 @@ if command -v fastfetch >/dev/null && [ -z "${HC_TERMINAL_ID:-}" ]; then
   [ "${SHLVL:-1}" = "1" ] && fastfetch
 fi
 
-# Prompt + cd jumper — must run last
+# Prompt + cd jumper — after every other prompt and cd setup; what follows
+# only extends PATH and defines functions
 command -v starship >/dev/null && eval "$(starship init bash)"
 command -v zoxide >/dev/null && eval "$(zoxide init bash --cmd cd)"
 
 # opencode
 export PATH=$HOME/.opencode/bin:$PATH
 
-# Agent harnesses start through agent-env (bash/.local/bin), which reads
-# ~/.bashrc.secrets afresh at each start and hands the harness only the names
-# its list in ~/.config/agent-env declares: a shell started before the file
-# changed still starts them with the current tokens. Placed after the opencode
-# PATH line, so its check finds opencode. A function only where agent-env and
-# the harness are both installed; agent-env runs in a process of its own,
-# without these functions, and finds the harness on PATH. The functions pass
-# no flags (see the cc alias above). A function defined earlier, such as the
-# steamdeck claude in .bashrc.local, is left alone.
+# Agent harnesses start through agent-env (bash/.local/bin/agent-env, whose
+# header says what it passes on). Placed after the opencode PATH line, so the
+# check finds opencode. A function only where agent-env and the harness are
+# both installed; it passes no flags (see the cc alias above). A function
+# defined earlier, such as the steamdeck claude in .bashrc.local, is left
+# alone.
 if command -v agent-env >/dev/null; then
   if ! declare -F claude >/dev/null && command -v claude >/dev/null; then
     claude() { agent-env claude claude "$@"; }
