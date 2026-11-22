@@ -11,9 +11,9 @@ size beside the caption. Each image's CSS width is its pixel width divided
 by D, rounded half up and at least 1 px, its height follows, and
 max-width:100% keeps it inside a narrow screen. D is the density the image
 was drawn at, in pixels per CSS pixel, such as an Android render's 2.625;
-without --density it is 1, for photos and desktop screenshots; a phone
-screenshot takes the phone's density. The pixel size is
-read from the file itself: PNG, JPEG, GIF or WebP. A line at the top names
+a screenshot takes the scale of the screen it was taken on (a phone's
+density, a desktop's scale factor); photos take none, and without --density
+D is 1. The pixel size is read from the file itself: PNG, JPEG, GIF or WebP. A line at the top names
 the number of images and D. --title sets the page's <title> and an <h1>;
 without it the <title> is the out-dir's name. Captions, title and file names
 are HTML-escaped. The page follows the viewer's light or dark setting and
@@ -26,7 +26,13 @@ It also writes .image-page.json there, the list of what it wrote, which
 
 It writes the page into a new directory beside <out-dir> and puts that in
 place of <out-dir> only once every file is written, so a page never mixes
-old files and a run that fails leaves the earlier page as it was.
+old files and a run that fails leaves the earlier page as it was. So the
+parent of <out-dir> must be writable, even when <out-dir> itself is. Into
+an empty <out-dir> it moves the files one by one, .image-page.json first and
+index.html last, so --replace can clear what a failed move left there. When
+putting the new page in place fails and putting the earlier one back fails
+too, it says where the earlier page is; when only removing the earlier page
+afterwards fails, it warns and exits 0.
 
 It refuses, before it writes anything, and exits 1:
 - an image whose pixel size it cannot read, or that it cannot read at all;
@@ -37,13 +43,14 @@ It refuses, before it writes anything, and exits 1:
 - an <out-dir> that is not empty, unless --replace is given and the
   directory holds only what an earlier image-page run wrote there (the
   files its .image-page.json names, index.html and that list);
-- --replace on the current directory or one that holds it, which the swap
-  would move away from under the caller.
+- --replace on the current directory, or one that holds it, when it holds a
+  page: the swap would move it away from under the caller.
 
 Exit codes: 0 written, 1 refused, 2 usage (an unknown option, an option
-without its value, a --density that is no positive decimal number, no
-<out-dir> or no image), 3 the page could not be written (a full disk, a
-directory it may not write); the earlier page, if any, stays.
+without its value, a --density that is no positive decimal number or too
+large for a float, no <out-dir> or no image), 3 the page could not be
+written in <out-dir> (a full disk, a directory it may not write); the
+earlier page, if any, stays.
 """
 
 import html
@@ -89,6 +96,10 @@ class Refused(Exception):
     """A reason to stop with exit 1, before anything is written."""
 
 
+class PageLost(Exception):
+    """The new page could not be put in place, nor the earlier one back."""
+
+
 def usage(reason) -> NoReturn:
     print(f"image-page: {reason}\n{USAGE}", file=sys.stderr)
     sys.exit(2)
@@ -97,7 +108,7 @@ def usage(reason) -> NoReturn:
 def density(value):
     # A plain decimal only: float() also takes nan, inf, 1e3 and 1_0.
     if not re.fullmatch(r"[0-9]+(\.[0-9]*)?|\.[0-9]+", value) or not 0 < float(value) < math.inf:
-        usage(f"--density takes a positive decimal number, not {value!r}")
+        usage(f"--density takes a positive decimal number not too large for a float, not {value!r}")
     return float(value)
 
 
@@ -258,7 +269,7 @@ def prepare(out, replace):
         raise Refused(f"cannot read {out}: {e.strerror}") from None
     target, cwd = os.path.realpath(out), os.getcwd()
     if cwd == target or cwd.startswith(target + os.sep):
-        raise Refused(f"{out} is the current directory or holds it; run image-page from outside it")
+        raise Refused(f"--replace cannot swap {out}: it is the current directory or holds it; run image-page from outside it")
     return "page", names
 
 
@@ -304,8 +315,8 @@ def render(out, images, title, density_):
 def write_page(out, state, stale, images, page):
     """Writes the page into a new directory beside <out>, then puts it in place.
 
-    Until the last step the earlier page stays as it was; a directory that
-    held one is swapped out whole and then emptied of the stale names.
+    Returns the warnings of a run whose page is in place but whose earlier
+    page could not be removed.
     """
     target = os.path.realpath(out)
     parent = os.path.dirname(target)
@@ -324,25 +335,53 @@ def write_page(out, state, stale, images, page):
             f.write(page)
         if state == "missing":
             os.rename(temp, target)
-        elif state == "empty":
-            # File by file: the directory may be the caller's working directory.
-            for name in os.listdir(temp):
+            return []
+        if state == "empty":
+            # File by file, as the directory may be the caller's working
+            # directory; the list first and index.html last, so a move that
+            # fails leaves what --replace can clear.
+            for name in [MANIFEST, *(name for _, name, _, _, _ in images), INDEX]:
                 os.rename(os.path.join(temp, name), os.path.join(target, name))
             os.rmdir(temp)
-        else:
-            old = tempfile.mkdtemp(prefix=".image-page-", dir=parent)
-            os.rename(target, old)
-            try:
-                os.rename(temp, target)
-            except OSError:
-                os.rename(old, target)
-                raise
-            for name in stale:
-                os.remove(os.path.join(old, name))
-            os.rmdir(old)
+            return []
+        return swap(out, target, temp, stale)
     finally:
         if os.path.isdir(temp):
             shutil.rmtree(temp, ignore_errors=True)
+
+
+def swap(out, target, new, stale):
+    """Puts the directory <new> in place of <target>, whose earlier page goes aside and then away."""
+    old = tempfile.mkdtemp(prefix=".image-page-", dir=os.path.dirname(target))
+    keep_old = False
+    try:
+        os.rename(target, old)
+        try:
+            os.rename(new, target)
+        except OSError as e:
+            try:
+                os.rename(old, target)
+            except OSError:
+                keep_old = True
+                raise PageLost(
+                    f"cannot write the page in {out}: {e.strerror}; {out} is missing; the earlier page is at {old}"
+                ) from None
+            raise
+        try:
+            for name in stale:
+                os.remove(os.path.join(old, name))
+            os.rmdir(old)
+        except OSError as e:
+            keep_old = True
+            return [f"the page is written, but {old} could not be removed: {e.strerror}"]
+        return []
+    finally:
+        # Empty unless it holds the earlier page: aside, or still there.
+        if not keep_old and os.path.isdir(old):
+            try:
+                os.rmdir(old)
+            except OSError:
+                pass
 
 
 def main(argv):
@@ -355,10 +394,16 @@ def main(argv):
         print(f"image-page: {e}", file=sys.stderr)
         return 1
     try:
-        write_page(out, state, stale, images, page)
-    except OSError as e:
-        print(f"image-page: cannot write {e.filename or out}: {e.strerror}", file=sys.stderr)
+        warnings = write_page(out, state, stale, images, page)
+    except PageLost as e:
+        print(f"image-page: {e}", file=sys.stderr)
         return 3
+    except OSError as e:
+        detail = f" ({e.filename})" if e.filename else ""
+        print(f"image-page: cannot write the page in {out}: {e.strerror or e}{detail}", file=sys.stderr)
+        return 3
+    for warning in warnings:
+        print(f"image-page: {warning}", file=sys.stderr)
     print(os.path.abspath(os.path.join(out, INDEX)))
     return 0
 

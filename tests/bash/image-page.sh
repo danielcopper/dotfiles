@@ -10,9 +10,9 @@
 #       up); 1 px at 3: 1, never 0; the copy is the same bytes as the source;
 #       the page's meta line says "3 images · density 2.625"
 #   m2  without --density: the pixel width, 725, and "1 image · density 1"
-#   m3  a density that is no positive decimal number (0, 0.0, -1, abc, empty,
-#       nan, inf, 1e3, 1_0, " 2", 400 digits that overflow to infinity, a
-#       missing value), --title without its value, an unknown option, no
+#   m3  a density that is no positive decimal number or too large for a
+#       float (0, 0.0, -1, abc, empty, nan, inf, 1e3, 1_0, " 2", 400 digits
+#       that overflow to infinity, a missing value), --title without its value, an unknown option, no
 #       image: exit 2, the usage on stderr, the out-dir not created; the
 #       usage names preview-serve <out-dir>
 #   m4  each format's size read from the file, width and height, as the CSS
@@ -49,26 +49,44 @@
 #   o2  a non-empty out-dir is refused without --replace, also one holding
 #       an earlier page: exit 1, nothing in it changed
 #   o3  --replace on a page image-page wrote: the earlier images are gone,
-#       the new ones and index.html in place; on a missing or empty out-dir
-#       it writes the page
+#       the new ones and index.html in place, nothing left beside the
+#       out-dir; on a missing or empty out-dir it writes the page
 #   o4  --replace on an out-dir holding anything image-page did not write (a
 #       foreign file beside a page, a subdirectory, a symlink under the name
 #       of an image the page shows, a directory without image-page's list,
-#       a list that is no JSON or no list of names): exit 1, nothing in it
-#       changed
+#       a list that is no JSON or no list of names, a list it cannot read):
+#       exit 1, says why, no traceback, nothing in it changed
 #   o5  two images with the same basename, or an image named index.html:
 #       exit 1, both named, the out-dir not created
 #   o6  stdout is the path of index.html and nothing else; no server started
 #   o7  options may follow the positional arguments; after -- a name that
 #       starts with - is an image
 #   o8  --replace whose writing fails (a file-size limit below the new
-#       image's size): exit 3, "cannot write" on stderr, no traceback, the
-#       earlier page unchanged and no temporary directory left beside it
+#       image's size): exit 3, "cannot write the page in <out-dir>: File too
+#       large" on stderr, no traceback, the earlier page unchanged and no
+#       temporary directory left beside it
 #   o9  an out-dir that cannot be listed: exit 1, says so, no traceback
-#   o10 a parent directory that cannot be written: exit 3, "cannot write" on
-#       stderr, no traceback, nothing created
-#   o11 --replace on the current directory, which the swap would move: exit
-#       1, says so, the page unchanged
+#   o10 a parent directory that cannot be written: exit 3, "cannot write the
+#       page in <out-dir>: Permission denied" on stderr, no traceback,
+#       nothing created
+#   o11 --replace on the current directory when it holds a page, which the
+#       swap would move: exit 1, says so, the page unchanged
+# The f cases run the script inside a python harness, $ROOT/faulty.py, that
+# loads it as a module and makes the os call FAULT names fail, the one way to
+# reach a rename that fails between two that succeed:
+#   f1  the swap's rename into place fails (aside of the earlier page, it
+#       worked): the earlier page put back, exit 3 naming <out-dir> and the
+#       error, nothing left beside it
+#   f2  the swap fails and so does putting the earlier page back: exit 3,
+#       the swap's error, "<out-dir> is missing; the earlier page is at
+#       <dir>", and that directory holds the earlier page
+#   f3  moving the earlier page aside fails: exit 3, the page unchanged,
+#       nothing left beside it
+#   f4  removing the earlier page after the swap fails: exit 0, the new page
+#       in place, its path on stdout, a warning naming the leftover directory
+#   f5  into an empty out-dir, every move after the first fails: the list
+#       moved first, so --replace clears what is there; the move of
+#       index.html alone fails: everything else moved, and --replace clears it
 # usage: image-page.sh [image-page] [case ...]
 #        image-page.sh --list
 #   The script defaults to the repo's bash/.local/bin/image-page, the cases
@@ -83,7 +101,8 @@ CASES=(m1_density_scales m2_default_density m3_bad_density m4_formats m5_unreada
   c7_dark_tokens
   o1_out_dir_created o2_nonempty_refused o3_replace o4_replace_refuses_foreign o5_duplicate_basenames
   o6_prints_path_only o7_option_order o8_write_fails_keeps_page o9_unlistable_out_dir
-  o10_parent_not_writable o11_replace_current_dir m6_width_overflows)
+  o10_parent_not_writable o11_replace_current_dir m6_width_overflows f1_swap_fails_rolls_back
+  f2_rollback_fails_says_where f3_aside_fails f4_cleanup_fails_warns f5_empty_dir_move_fails)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -109,6 +128,54 @@ cat >"$ROOT/bin/preview-serve" <<EOF
 echo "preview-serve \$*" >>"$ROOT/served"
 EOF
 chmod +x "$ROOT/bin/preview-serve"
+cat >"$ROOT/faulty.py" <<'EOF'
+"""usage: faulty.py <image-page> <arg>...; FAULT names the os call to fail."""
+import errno, importlib.machinery, importlib.util, os, sys
+
+sut, argv, fault = sys.argv[1], sys.argv[2:], os.environ["FAULT"]
+loader = importlib.machinery.SourceFileLoader("image_page", sut)
+module = importlib.util.module_from_spec(importlib.util.spec_from_loader("image_page", loader))
+loader.exec_module(module)
+real_rename, real_rmdir = os.rename, os.rmdir
+moves = 0
+into_place = 0
+
+
+def temp(path):
+    return os.path.basename(path).startswith(".image-page-")
+
+
+def fail(code, path):
+    raise OSError(code, os.strerror(code), path)
+
+
+def rename(src, dst, **kw):
+    global moves, into_place
+    if temp(os.path.dirname(src)):  # a file moved into an empty out-dir
+        moves += 1
+        if fault == "after-first-move" and moves > 1 or fault == "index-move" and dst.endswith("/index.html"):
+            fail(errno.EIO, dst)
+    elif temp(dst):  # the earlier page moved aside
+        if fault == "aside":
+            fail(errno.EIO, dst)
+    elif temp(src):  # the new page, then on a failure the earlier one, into place
+        into_place += 1
+        if fault == "swap" and into_place == 1:
+            fail(errno.EIO, dst)
+        if fault == "rollback":
+            fail(errno.EIO if into_place == 1 else errno.EACCES, dst)
+    real_rename(src, dst, **kw)
+
+
+def rmdir(path, **kw):
+    if fault == "cleanup" and temp(path):
+        fail(errno.EBUSY, path)
+    real_rmdir(path, **kw)
+
+
+os.rename, os.rmdir = rename, rmdir
+sys.exit(module.main(argv))
+EOF
 
 python3 -I - "$FX" <<'EOF' || { echo "FAIL: the fixtures could not be written"; exit 1; }
 import os, pathlib, struct, sys, zlib
@@ -205,11 +272,22 @@ caption() { printf '<figcaption><span class="name">%s</span> <span class="size">
 # shown: the figcaption and img lines of index.html, in order, one per line.
 shown() { page | grep -E '<figcaption>|<img '; }
 no_traceback() { ! grep -q Traceback <<<"$ERR"; }
-# listing <dir>: the names in <dir>, dotfiles too, one per line, sorted.
-listing() { (cd "$1" && find . -mindepth 1 | sort); }
+# listing <dir>: the names in <dir>, dotfiles too, one per line, in byte order.
+listing() { (cd "$1" && find . -mindepth 1 | LC_ALL=C sort); }
 no_server() { [ ! -e "$ROOT/served" ]; }
 # lacks <regex> <file>: no line of <file> matches <regex>, case ignored.
 lacks() { ! grep -qiE -- "$1" "$2"; }
+
+# run_faulty <fault> <arg>...: as run, inside $ROOT/faulty.py with FAULT=<fault>;
+# -B, so loading the script as a module writes no __pycache__ beside it.
+run_faulty() {
+  local fault=$1
+  shift
+  RC=0
+  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" FAULT="$fault" \
+    python3 -I -B "$ROOT/faulty.py" "$SUT" "$@" 2>"$ROOT/stderr") || RC=$?
+  ERR=$(cat "$ROOT/stderr")
+}
 
 # run <arg>...: the script's stdout in $OUT, stderr in $ERR, exit code in $RC.
 run() {
@@ -475,21 +553,25 @@ o3_replace() {
   written
   run --replace "$OUTDIR" "$FX/base.jpg"
   written
+  check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
   check "wide.png gone: $(listing "$OUTDIR")" [ ! -e "$OUTDIR/wide.png" ]
   check "anim.gif gone: $(listing "$OUTDIR")" [ ! -e "$OUTDIR/anim.gif" ]
   check "the new image in place" cmp -s "$FX/base.jpg" "$OUTDIR/base.jpg"
   check "index.html shows only the new image: $(shown)" [ "$(page | grep -o 'src="[^"]*"')" = 'src="base.jpg"' ]
   run --replace "$OUTDIR" "$FX/base.jpg" "$FX/wide.png"
   written
+  check "nothing left beside it after the second: $(leftovers)" [ -z "$(leftovers)" ]
   check "the page rewritten again: $(page | grep -o 'src="[^"]*"' | tr '\n' ' ')" \
     [ "$(page | grep -o 'src="[^"]*"' | tr '\n' ' ')" = 'src="base.jpg" src="wide.png" ' ]
   OUTDIR=$ROOT/fresh
   run --replace "$OUTDIR" "$FX/wide.png"
   written
+  check "nothing left beside a new out-dir: $(leftovers)" [ -z "$(leftovers)" ]
   OUTDIR=$ROOT/empty
   mkdir "$OUTDIR"
   run --replace "$OUTDIR" "$FX/wide.png"
   written
+  check "nothing left beside an empty out-dir: $(leftovers)" [ -z "$(leftovers)" ]
 }
 
 o4_replace_refuses_foreign() {
@@ -516,6 +598,7 @@ o4_replace_refuses_foreign() {
   echo "<p>hand-made</p>" >"$OUTDIR/index.html"
   run --replace "$OUTDIR" "$FX/base.jpg"
   check "exit 1 without image-page's list, got $RC" [ "$RC" = 1 ]
+  check "says the list is missing: $ERR" grep -qF "$OUTDIR holds no .image-page.json" <<<"$ERR"
   check "the hand-made page kept" grep -qF hand-made "$OUTDIR/index.html"
   check "its image kept" [ -f "$OUTDIR/wide.png" ]
   local list
@@ -527,6 +610,15 @@ o4_replace_refuses_foreign() {
     check "says the list is none: $ERR" grep -qF ".image-page.json is no list of file names" <<<"$ERR"
     check "nothing changed with the list $list" [ "$(listing "$OUTDIR")" = "$before" ]
   done
+  echo '["wide.png"]' >"$OUTDIR/.image-page.json"
+  chmod 000 "$OUTDIR/.image-page.json"
+  before=$(listing "$OUTDIR")
+  run --replace "$OUTDIR" "$FX/base.jpg"
+  chmod 644 "$OUTDIR/.image-page.json"
+  check "exit 1 with an unreadable list, got $RC" [ "$RC" = 1 ]
+  check "says it cannot read the list: $ERR" grep -qF "cannot read $OUTDIR/.image-page.json: Permission denied" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+  check "nothing changed with an unreadable list" [ "$(listing "$OUTDIR")" = "$before" ]
 }
 
 o5_duplicate_basenames() {
@@ -580,7 +672,7 @@ o8_write_fails_keeps_page() {
     "$OUTDIR" "$FX/big.png" 2>"$ROOT/stderr") || RC=$?
   ERR=$(cat "$ROOT/stderr")
   check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
-  check "says it cannot write: $ERR" grep -q "^image-page: cannot write .*: File too large$" <<<"$ERR"
+  check "says it cannot write the page: $ERR" grep -qxF "image-page: cannot write the page in $OUTDIR: File too large" <<<"$ERR"
   check "no traceback: $ERR" no_traceback
   check "the earlier page unchanged: $(listing "$OUTDIR")" [ "$(the_page)" = "$before" ]
   check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
@@ -605,7 +697,7 @@ o10_parent_not_writable() {
   run "$OUTDIR" "$FX/wide.png"
   chmod 755 "$ROOT/locked"
   check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
-  check "says it cannot write: $ERR" grep -q "^image-page: cannot write .*: Permission denied$" <<<"$ERR"
+  check "says it cannot write the page: $ERR" grep -qF "image-page: cannot write the page in $OUTDIR: Permission denied (" <<<"$ERR"
   check "no traceback: $ERR" no_traceback
   check "nothing created: $(listing "$ROOT/locked")" [ -z "$(listing "$ROOT/locked")" ]
   check "nothing on stdout: $OUT" [ -z "$OUT" ]
@@ -621,6 +713,76 @@ o11_replace_current_dir() {
   check "exit 1, got $RC: $ERR" [ "$RC" = 1 ]
   check "says why: $ERR" grep -qF "is the current directory or holds it" <<<"$ERR"
   check "the page unchanged" [ "$(the_page)" = "$before" ]
+}
+
+# earlier_page: a page of wide.png in $OUTDIR, and $BEFORE as the_page sees it.
+earlier_page() {
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  BEFORE=$(the_page)
+}
+
+f1_swap_fails_rolls_back() {
+  earlier_page
+  run_faulty swap --replace "$OUTDIR" "$FX/base.jpg"
+  check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
+  check "names the out-dir and the error: $ERR" grep -qF "image-page: cannot write the page in $OUTDIR: Input/output error" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+  check "the earlier page put back" [ "$(the_page)" = "$BEFORE" ]
+  check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
+}
+
+f2_rollback_fails_says_where() {
+  earlier_page
+  run_faulty rollback --replace "$OUTDIR" "$FX/base.jpg"
+  local old
+  old=$(sed -n 's/.*the earlier page is at \(.*\)$/\1/p' <<<"$ERR")
+  check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
+  check "keeps the swap's error: $ERR" grep -qF "image-page: cannot write the page in $OUTDIR: Input/output error;" <<<"$ERR"
+  check "says the out-dir is missing: $ERR" grep -qF "$OUTDIR is missing; the earlier page is at $(dirname "$OUTDIR")/.image-page-" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+  check "the named directory holds the earlier page" \
+    [ "$(cat "$old/index.html" 2>/dev/null; listing "$old")" = "$BEFORE" ]
+}
+
+f3_aside_fails() {
+  earlier_page
+  run_faulty aside --replace "$OUTDIR" "$FX/base.jpg"
+  check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
+  check "names the out-dir: $ERR" grep -qF "image-page: cannot write the page in $OUTDIR: Input/output error" <<<"$ERR"
+  check "the page unchanged" [ "$(the_page)" = "$BEFORE" ]
+  check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
+}
+
+f4_cleanup_fails_warns() {
+  earlier_page
+  run_faulty cleanup --replace "$OUTDIR" "$FX/base.jpg"
+  check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
+  check "path on stdout: $OUT" [ "$OUT" = "$OUTDIR/index.html" ]
+  check "the new page in place" grep -qF 'src="base.jpg"' "$OUTDIR/index.html"
+  check "warns, naming the leftover: $ERR" grep -qF \
+    "image-page: the page is written, but $(dirname "$OUTDIR")/.image-page-" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+}
+
+f5_empty_dir_move_fails() {
+  mkdir "$OUTDIR"
+  run_faulty after-first-move "$OUTDIR" "$FX/wide.png" "$FX/anim.gif"
+  check "exit 3 when moves fail, got $RC: $ERR" [ "$RC" = 3 ]
+  check "the list moved first: $(listing "$OUTDIR")" [ "$(listing "$OUTDIR")" = ./.image-page.json ]
+  run --replace "$OUTDIR" "$FX/base.jpg"
+  written
+  check "--replace cleared it: $(listing "$OUTDIR")" \
+    [ "$(listing "$OUTDIR" | tr '\n' ' ')" = "./.image-page.json ./base.jpg ./index.html " ]
+  rm -rf "$OUTDIR"
+  mkdir "$OUTDIR"
+  run_faulty index-move "$OUTDIR" "$FX/wide.png" "$FX/anim.gif"
+  check "exit 3 when index.html cannot move, got $RC: $ERR" [ "$RC" = 3 ]
+  check "everything but index.html moved: $(listing "$OUTDIR")" \
+    [ "$(listing "$OUTDIR" | tr '\n' ' ')" = "./.image-page.json ./anim.gif ./wide.png " ]
+  run --replace "$OUTDIR" "$FX/base.jpg"
+  written
+  check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
 }
 
 missing=0
@@ -644,7 +806,8 @@ for CASE in "${all[@]}"; do
   FAILED=0
   OUTDIR=$ROOT/page
   rm -rf "$OUTDIR" "$ROOT/caller" "$ROOT/served" "$ROOT/a" "$ROOT/b" "$ROOT/deep" "$ROOT/plain-file" \
-    "$ROOT/fresh" "$ROOT/empty" "$ROOT/folder.png" "$ROOT/two words&more.png" "$ROOT/locked"
+    "$ROOT/fresh" "$ROOT/empty" "$ROOT/folder.png" "$ROOT/two words&more.png" "$ROOT/locked" \
+    "$ROOT"/.image-page-*
   mkdir -p "$ROOT/caller"
   if in_cases "$CASE"; then
     "$CASE"
