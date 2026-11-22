@@ -26,13 +26,15 @@ GH = re.compile(r"(?<![\w.-])gh(?![\w.-])")
 AZ = re.compile(r"(?<![\w.-])az(?![\w.-])")
 FEEDER = re.compile(r"(?<![\w.-])(xargs|parallel)(?![\w.-])")
 EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
-SHELL_WORD = re.compile(r"(?<![\w.-])(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
+SHELL_NAMES = ("bash", "sh", "zsh", "dash", "ksh", "ash", "fish")
+SHELL_WORD = re.compile(rf"(?<![\w.-])({'|'.join(SHELL_NAMES)})(?![\w.-])")
 SHELL_C_CLUSTER = re.compile(r"(?<!\S)-[a-z]*c[a-z]*(?!\S)")
 SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])[^\S\n]*(?:source|\.)(?=\s)")
-# A shell name at the start of a word part right after a pipe or a slash.
-SHELL_AFTER_PIPE = re.compile(r"(?:^|(?<=[|/]))(?:bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
-NON_BLANK_RUN = re.compile(r"\S+")
-PIPE_PIECE_END = re.compile(r"[;&\n()`]")
+# Operators and words of de-quoted text, for finding command words.
+COMMAND_TOKEN = re.compile(r"\|&|&&|\|\||[|;&()\n`]|[^\s|;&()`]+")
+COMMAND_OPERATORS = frozenset(["|&", "&&", "||", "|", ";", "&", "(", ")", "\n", "`"])
+REDIRECTION = re.compile(r"\d*[<>]")
+BARE_REDIRECTION = re.compile(r"\d*[<>]+[&|]?")
 # Commands that run a program named in their arguments or their data.
 TRAP = re.compile(r"(?<![\w.-])trap(?![\w.-])")
 SORT = re.compile(r"(?<![\w.-])sort(?![\w.-])")
@@ -241,41 +243,48 @@ def quote_parts(command: str) -> tuple[str, str]:
     return "".join(outside), "".join(double)
 
 
-def pipes_into_shell(lower: str) -> bool:
-    """Whether a pipe feeds a shell: a `|`, any blanks, then a word in which a shell name stands
-    at its start, after a later `|` or after a `/`, and ends there; or a command after a `|` that
-    starts with one of the WRAPPERS and names a shell, as a word or a path's basename, anywhere
-    after it (`| env bash`, `| sudo -u x sh`, `| timeout 5 bash`). Each run of non-blank
-    characters is read once, so the time stays linear."""
-    if pipes_into_wrapped_shell(lower):
-        return True
-    after_pipe = False  # the run before ended in |
-    for run in NON_BLANK_RUN.finditer(lower):
-        text = run.group()
-        pipe = text.find("|")
-        start = 0 if after_pipe else pipe + 1 if pipe >= 0 else -1
-        if start >= 0 and SHELL_AFTER_PIPE.search(text[start:]):
-            return True
-        after_pipe = text.endswith("|")
-    return False
-
-
-def pipes_into_wrapped_shell(lower: str) -> bool:
-    """Whether a command after a `|` starts with one of the WRAPPERS and names a shell later,
-    options and their arguments in between or not."""
-    for piece in PIPE_PIECE_END.split(lower):
-        for after_pipe in piece.split("|")[1:]:
-            words = [word.rsplit("/", 1)[-1] for word in after_pipe.split()]
-            if words and words[0] in WRAPPERS and any(SHELL_WORD.fullmatch(w) for w in words):
+def runs_a_shell(lower: str) -> bool:
+    """Whether a shell (SHELL_NAMES, as a word or a path's basename) is the command word of a
+    simple command anywhere in the de-quoted, lowercased text: at the start, after `|`, `|&`,
+    `;`, `&`, `&&`, `||`, a newline, a parenthesis or a backtick, past assignments,
+    redirections and the keywords `if`, `then`, `do`, `!`, `{` and the like, or after one of the
+    WRAPPERS, `coproc` or `busybox` with or without options. One pass over the words."""
+    expect = True  # the next word may be a command word
+    wrapped = False  # a wrapper stands earlier in this simple command
+    target = False  # the next word is a redirection's target
+    for token in COMMAND_TOKEN.findall(lower):
+        if token in COMMAND_OPERATORS:
+            expect, wrapped, target = True, False, False
+            continue
+        name = token.rsplit("/", 1)[-1]
+        if wrapped:
+            if name in SHELL_NAMES:
                 return True
+            continue
+        if not expect:
+            continue
+        if target:
+            target = False
+            continue
+        if REDIRECTION.match(token):
+            target = BARE_REDIRECTION.fullmatch(token) is not None
+            continue
+        if ASSIGNMENT.match(token) or token in KEYWORDS or token == "coproc":
+            continue
+        if name in WRAPPERS or name == "busybox":
+            wrapped = True
+            continue
+        if name in SHELL_NAMES:
+            return True
+        expect = False
     return False
 
 
 def rereads(lower: str) -> bool:
     """Whether the de-quoted, lowercased command hands text to a shell that reads it again, or
     to a command that runs a program from its arguments or data: a shell word followed later by
-    a `-c` option cluster, `eval`, `<<<`, `source` or `.` as a command, a pipe into a shell word,
-    `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`,
+    a `-c` option cluster, `eval`, `<<<`, `source` or `.` as a command, a shell as the command
+    word of any simple command (runs_a_shell), `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`,
     `xargs` or `parallel`. Quoting means nothing to such text, so the caller judges the whole
     text instead."""
     shell = SHELL_WORD.search(lower)
@@ -286,7 +295,7 @@ def rereads(lower: str) -> bool:
         or EVAL.search(lower)
         or "<<<" in lower
         or SOURCE_COMMAND.search(lower)
-        or pipes_into_shell(lower)
+        or runs_a_shell(lower)
         or TRAP.search(lower)
         or (sort and SORT_PROGRAM.search(lower, sort.end()))
         or (find and FIND_EXEC.search(lower, find.end()))
