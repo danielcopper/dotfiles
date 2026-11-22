@@ -64,6 +64,8 @@
 #       arguments unchanged; the cc alias runs through claude's function
 #   b2  claude installed but agent-env not: no function, claude runs as
 #       before
+#   b3  opencode and pi functions defined in ~/.bashrc.local, both installed
+#       and agent-env too: .bashrc keeps them, they run, the child does not
 #   s1  the claude function of host-steamdeck/.bashrc.local in place: .bashrc
 #       keeps it; it starts claude through agent-env and systemd-run in
 #       claude.slice, with the two worker caps and the secrets of its list;
@@ -85,7 +87,7 @@ set -uo pipefail
 CASES=(l1_shipped_lists f1_fresh_read d1_only_declared d2_caller_value_gone d3_declared_without_value
   a1_declared_from_file_only m1_missing_list m2_missing_secrets m3_unreadable_secrets m4_unparsable_secrets
   k1_kept_names x1_xtrace t1_part_of_a_name t2_no_final_newline t3_unset_reference c1_exit_code_and_args u1_usage u2_bad_harness
-  u3_bad_list_line b1_bashrc_functions b2_no_agent_env s1_steamdeck_claude)
+  u3_bad_list_line b1_bashrc_functions b2_no_agent_env b3_earlier_functions_kept s1_steamdeck_claude)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -479,6 +481,20 @@ b2_no_agent_env() {
   check "no function (got: $OUT)" eq "$OUT" file
   check "claude ran" eq "$(cat "$ROOT/child.name" 2>/dev/null)" claude
   check "it inherited the shell's OTHER_TOKEN" has OTHER_TOKEN other-dummy-1
+}
+
+b3_earlier_functions_kept() {
+  install opencode pi
+  with_agent_env
+  cat >"$HOME/.bashrc.local" <<'END'
+opencode() { printf 'own-opencode %s\n' "$*" >>"$HOME/own.log"; }
+pi() { printf 'own-pi %s\n' "$*" >>"$HOME/own.log"; }
+END
+  shell 'opencode a; pi b'
+  check "exit 0 (got $RC; stderr: $(err))" eq "$RC" 0
+  check "both earlier functions ran (got: $(cat "$HOME/own.log" 2>/dev/null))" \
+    eq "$(cat "$HOME/own.log" 2>/dev/null)" "$(printf '%s\n' 'own-opencode a' 'own-pi b')"
+  check "no child" not_ran
 }
 
 s1_steamdeck_claude() {
