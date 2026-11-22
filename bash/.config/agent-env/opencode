@@ -1,0 +1,4 @@
+# Secrets agent-env hands to opencode, one name per line; the values come from
+# ~/.bashrc.secrets (bash/.local/bin/agent-env).
+SONARQUBE_CLI_ORG
+SONARQUBE_CLI_TOKEN

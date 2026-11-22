@@ -45,7 +45,7 @@ A `mise install` that fails does not stop the steps after it: the run ends with 
 | `stow-packages.sh [--backup] <pkg>…` | Makes the directories real that must be ("Install / update"), stows the given packages and seeds missing live files of reference copies; with `--backup` it first moves conflicting files into the backup. `install-dotfiles.sh` and `mise run dotfiles-relink` stow through it. |
 | `bootstrap.sh <class>` | Wrapper that runs both `install-packages.sh` and `install-dotfiles.sh`. |
 | `samples/` | Snapshots that aren't dotfiles and aren't stow-managed (SDDM theme + login wallpapers — they live under `/usr/share/sddm/`, manual root deploy). Kept in repo as a record. |
-| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`), the bash startup (`tests/bash/startup.sh`), `preview-serve` (`tests/bash/preview-serve.sh`) and `image-page` (`tests/bash/image-page.sh`), for the herdr app's command check and board mod (`tests/herdr-app/`), and whether the Claude Code skills fire on the right prompts (`tests/skill-triggers/`); `tests/run-listed.sh` hands each named case to the test file that lists it. Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
+| `tests/` | Tests for scripts in this repo (`tests/memex-sync/`, `tests/install-dotfiles/`), for the Claude Code status line's width (`tests/statusline/width.sh`), the bash startup (`tests/bash/startup.sh`), `preview-serve` (`tests/bash/preview-serve.sh`), `image-page` (`tests/bash/image-page.sh`) and `agent-env` (`tests/bash/agent-env.sh`), for the herdr app's command check and board mod (`tests/herdr-app/`), and whether the Claude Code skills fire on the right prompts (`tests/skill-triggers/`); `tests/run-listed.sh` hands each named case to the test file that lists it. Not a stow package: `install-dotfiles.sh` stows only the packages it lists. |
 | `.stowrc` | Default stow flags (`--target=~`, ignores `install-*.sh`, `bootstrap.sh`, `packages/`, `samples/`, `host-*/`). |
 
 ## Adding or changing a file
@@ -69,6 +69,32 @@ mise run dotfiles-relink <app>
 printf '\nexport PATH="$HOME/extra:$PATH"\n' >> host-arch/.bashrc.local
 mise run dotfiles-relink host-arch
 ```
+
+## Secrets
+
+API keys and passwords (`SQLCMDPASSWORD`, the SonarQube CLI's token) live in
+`~/.bashrc.secrets`, which git ignores and which never goes into this repo.
+It is bash, `export NAME=value` lines, and a value may come from a `$(...)`.
+Every interactive shell sources it at the end of `.bashrc`.
+
+An agent harness does not take its secrets from the shell it starts in, which
+holds the values the file had when that shell started.
+`~/.local/bin/agent-env` (`bash` package) reads the file afresh at each start
+instead: `.bashrc` makes `claude`, `opencode` and `pi` functions that run
+`agent-env <harness> <harness> "$@"`, each only where agent-env and that
+harness are installed. agent-env passes on only the names the harness's list
+`~/.config/agent-env/<harness>` declares, one per line with `#` comments: it
+unsets every other name the file assigns, also where the starting shell
+holds a value for it. It prints no value, also under `bash -x`, and names on
+stderr a declared name without a value and a missing file, starting the
+harness all the same; a missing list stops the start. The script's header
+has the details.
+
+To give a harness another secret, add its `export NAME=...` line to
+`~/.bashrc.secrets` and the name to `bash/.config/agent-env/<harness>`, and
+commit the list. The next start of the harness passes it on; no shell needs
+to be restarted. A new harness needs a list of its own and a function beside
+the others at the end of `bash/.bashrc`.
 
 ## Debian server
 
@@ -636,8 +662,8 @@ throwaway homes. Each file's header lists its cases, `--list` prints their
 names, and naming cases runs only those. It needs stow, git and tar.
 
 `mise run shell-test` (without mise, `tests/statusline/width.sh`,
-`tests/bash/startup.sh`, `tests/bash/preview-serve.sh` and
-`tests/bash/image-page.sh`) checks how the
+`tests/bash/startup.sh`, `tests/bash/preview-serve.sh`,
+`tests/bash/image-page.sh` and `tests/bash/agent-env.sh`) checks how the
 Claude Code status line finds the terminal's width, and the startup of an
 interactive bash: the greeter, the TMUX variables a herdr terminal drops and,
 on wsl-arch, how a shell finds or starts the keyring daemon, and the one line
@@ -647,8 +673,11 @@ mkdir run through logging wrappers around the real tools, so no herdr or tmux
 server is asked and no real keyring daemon starts. It also checks how
 `preview-serve` picks its port, refuses a directory, waits for its server and
 stops it, with stand-ins for ip, ss and python3, so no real port is taken,
-and how `image-page` reads each format's pixel size, sizes and captions the
-images and refuses a directory it did not fill itself.
+how `image-page` reads each format's pixel size, sizes and captions the
+images and refuses a directory it did not fill itself, and which secrets
+`agent-env` and the harness functions of `.bashrc` hand a stand-in harness,
+from a throwaway `~/.bashrc.secrets` of dummy values, and that `bash -x`
+shows none of them.
 Each file's header lists its cases, `--list` prints their names, and naming
 cases runs only those. It needs jq, timeout, flock, setsid and python3.
 
