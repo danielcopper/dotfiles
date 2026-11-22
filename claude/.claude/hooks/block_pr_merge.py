@@ -518,6 +518,24 @@ def hidden_before(original: str, start: int, word: str) -> bool:
     return found is None or any(c in original[start : found.start()] for c in "'\"<>")
 
 
+def unknown_merge_subcommand(lower: str) -> bool:
+    """Whether gh or az has a word in its subcommand position, past any options, that is no
+    known subcommand and holds `merge` anywhere in it, such as `automerge` or `pr_merge`."""
+    tokens = TOKEN_SPLIT.split(lower)
+    for at, token in enumerate(tokens):
+        tool = token.rsplit("/", 1)[-1]
+        if tool not in ("gh", "az"):
+            continue
+        walked = subcommand_positions(tokens, at)
+        if walked is None or not walked[1]:
+            continue
+        word = tokens[walked[0][-1]]
+        known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
+        if word not in known and "merge" in word:
+            return True
+    return False
+
+
 def body_subcommand(lower: str, original: str) -> bool:
     """Whether gh or az may run a subcommand whose request body can merge: gh `api`, az `rest`,
     `devops invoke` or `repos pr` in the subcommand position, past any options - or a word there
@@ -942,6 +960,8 @@ def check(command: str) -> str | None:
         return "mentions a PR merge"
     if gh and (pr := PR_WORD.search(lower)) and MERGE_WORD.search(lower, pr.end()):
         return "mentions a PR merge"
+    if unknown_merge_subcommand(lower):
+        return "runs a gh or az subcommand it does not know, spelled with merge"
     if ALIAS.search(lower) and ALIAS_VERB.search(lower) and gh:
         return "defines a gh alias"
     if az and (

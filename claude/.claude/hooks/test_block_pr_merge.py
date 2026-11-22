@@ -200,6 +200,8 @@ PASSES = [
     # an @ inside a word, not at its start or after =
     "gh api 'users/x/repos?per_page=100' -q '.[] | [.name] | @tsv'",
     "gh api -X GET search/users -f q='\"agent for @\" in:bio' --jq .total_count",
+    # merge in an option's value before a known subcommand
+    "gh -R o/merge-tool pr view 1 | head -3",
 ]
 
 DENIED = [
@@ -673,6 +675,11 @@ DENIED = [
     "G=$(command -V gh); coproc $G api -X PUT x",
     "G=$(command -v gh); ssh host $G api -X PUT x",
     "G=$(command -v gh); flock f $G api -X PUT x",
+    # a gh or az subcommand it does not know, spelled with merge
+    "gh automerge 5",
+    "gh pr_merge 5",
+    "gh -R o/r automerge 5",
+    "az automerge x",
 ]
 
 REASONS = {

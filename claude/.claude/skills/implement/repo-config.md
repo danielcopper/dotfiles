@@ -38,7 +38,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     quotes no `$`, backtick or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command is denied
     when its text
     - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge, auto-merge or
-      merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge`);
+      merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge`), or runs `gh` or `az`
+      with a word in the subcommand position, past the options, that is no known subcommand and holds `merge`
+      anywhere (`automerge`, `pr_merge`);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
     - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
