@@ -15,10 +15,10 @@
 #       1e3, 1_0, " 2", 400 digits that overflow to infinity, 0. and 400
 #       zeros and a 1, which is 0 to a float): exit 2, that reason and the
 #       usage on stderr; a missing value, --title without its value, an
-#       unknown option, no image: exit 2, the usage on stderr; --title with a
-#       separate value that starts with -: exit 2, pointing to --title=; the
-#       out-dir not created in each; the usage names preview-serve <out-dir>;
-#       --title=-x gives the page the title -x
+#       unknown option, no image: exit 2, that reason and the usage on
+#       stderr; --title with a separate value that starts with -: exit 2,
+#       pointing to --title=; the out-dir not created in each; the usage
+#       names preview-serve <out-dir>; --title=-x gives the page the title -x
 #   m4  each format's size read from the file, width and height, as the CSS
 #       width and the caption show them: PNG, baseline and progressive JPEG
 #       (a DHT segment and fill bytes before the frame header), GIF, WebP as
@@ -374,9 +374,9 @@ m3_bad_density() {
     refused_usage "$reason"
   done
   run "$OUTDIR" "$FX/wide.png" --density
-  not_created 2 "usage: image-page"
+  refused_usage "--density needs a value"
   run "$OUTDIR" "$FX/wide.png" --title
-  not_created 2 "usage: image-page"
+  refused_usage "--title needs a value"
   run "$OUTDIR" --title -x "$FX/wide.png"
   refused_usage "give a value that starts with - as --title=-x"
   run "$OUTDIR" --title=-x "$FX/wide.png"
@@ -384,9 +384,9 @@ m3_bad_density() {
   check "--title=-x is the title: $(page | grep '<title>')" grep -qxF "<title>-x</title>" "$OUTDIR/index.html"
   rm -rf "$OUTDIR"
   run --size 3 "$OUTDIR" "$FX/wide.png"
-  not_created 2 "usage: image-page"
+  refused_usage "unknown option --size"
   run "$OUTDIR"
-  not_created 2 "usage: image-page"
+  refused_usage "an <out-dir> and at least one image are needed"
   run
   check "exit 2 without arguments, got $RC" [ "$RC" = 2 ]
   check "the usage says what to run next: $ERR" grep -qF "preview-serve <out-dir>" <<<"$ERR"
