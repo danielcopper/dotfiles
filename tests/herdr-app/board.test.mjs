@@ -5096,6 +5096,9 @@ test("UI: an unclear create of a Task under a Story says the Backlog cannot show
     "Ergebnis unklar: Azure hat keine Nummer des neuen Work Items genannt; lädt neu");
   assert.equal(host.notes.at(-1).title, "Anlegen von „Sample new task“");
   assert.equal(openAzb(host, "parent").length, 0, "no link without an id");
+  // The second create ends after the first one's refresh started (isDue
+  // compares milliseconds).
+  advance(5);
   await press(b, cx, "n");
   b.modal.input.set_value("Second story");
   await click(b, cx, "create-go");
