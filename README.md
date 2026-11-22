@@ -420,14 +420,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   to with the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
   refresh, the filter, a hidden column), open details close. The details of a
-  GitHub issue list its sub-issues ("UNTERAUFGABEN · 1/3"; the first 50, with
-  "erste 50 von N" where it has more) and the pull requests linked to it by a
-  closing keyword or by hand in its Development sidebar, open, merged or closed
-  ("VERKNÜPFTE PRS", where it has any), each with its key, title and state, a
-  closed or merged one dimmed, a draft marked. They are read when the details
-  open (one gh call more), kept until the view's next refresh, which reads
-  nothing for them, and read again on `r` while they are open. `Tab` moves the
-  keyboard into the details panel and back (`Esc` gives it back too): there
+  GitHub issue list its sub-issues ("UNTERAUFGABEN · 7/11", the count the
+  card shows; the first 50, with "erste 50 von N" where it has more) and the
+  pull requests linked to it by a closing keyword or by hand in its
+  Development sidebar, open, merged or closed ("VERKNÜPFTE PRS", where it has
+  any), each with its key, title and state, a closed or merged one dimmed, a
+  draft marked, and how many GitHub sent without access. What reading them
+  costs and what a refresh keeps of them, the header of
+  `mods/board/src/main.js` says; `r` reads them again while they are open.
+  While they show, `Tab` moves the keyboard into the details panel and back
+  (`Esc` gives it back too; elsewhere `Tab` stays herdr's): there
   `j/k` walk those lines, `Enter` selects a line's item on the board and shows
   its details, or opens it in the browser where the board does not show it,
   `o` opens it, and with no line selected `Enter` and `o` do what they do on

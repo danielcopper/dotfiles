@@ -300,42 +300,52 @@ export function parseGithubList(json, view, errors = []) {
   return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
 }
 
-// How many sub-issues and linked pull requests an issue's details read.
+// How many sub-issues and linked pull requests an issue's related items
+// read.
 export const SUB_ISSUES = 50;
 export const LINKED_PRS = 20;
 
-// One GraphQL request for the details of an issue: its sub-issues (the
-// first SUB_ISSUES, the count of all and of the completed ones) and the pull
-// requests linked to it. closedByPullRequestsReferences is GitHub's field for
-// the pull requests that close the issue when merged: those linked by a
-// closing keyword in their text and those linked by hand in the issue's
-// Development sidebar ("List of open pull requests referenced from this
-// issue", docs.github.com/en/graphql/reference/issues; userLinkedOnly and
+// One GraphQL request for the items related to an issue: its sub-issues
+// (the first SUB_ISSUES and how many it has; how many are done the board's
+// own query reads, as the item's sub) and the pull requests linked to it.
+// closedByPullRequestsReferences is GitHub's field for the pull requests
+// that close the issue when merged: those linked by a closing keyword in
+// their text and those linked by hand in the issue's Development sidebar
+// ("List of open pull requests referenced from this issue",
+// docs.github.com/en/graphql/reference/issues; userLinkedOnly and
 // excludeUserLinked pick one of the two kinds). It lists open ones only
 // unless includeClosedPrs, which adds the merged and closed ones. A pull
 // request that only mentions the issue is not in it.
-export const DETAILS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      subIssuesSummary { total completed }
-      subIssues(first: ${SUB_ISSUES}) { totalCount nodes { number title state url repository { nameWithOwner } } }
+      subIssues(first: ${SUB_ISSUES}) {
+        totalCount pageInfo { hasNextPage } nodes { number title state url repository { nameWithOwner } }
+      }
       closedByPullRequestsReferences(first: ${LINKED_PRS}, includeClosedPrs: true) {
-        totalCount nodes { number title state isDraft url repository { nameWithOwner } }
+        totalCount pageInfo { hasNextPage } nodes { number title state isDraft url repository { nameWithOwner } }
       }
     }
   }
 }`;
 
-export function githubDetailsArgs(item) {
+export function githubRelatedArgs(item) {
   const [owner, name] = item.repo.split("/");
-  return ["api", "graphql", "-f", `query=${DETAILS_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
+  return ["api", "graphql", "-f", `query=${RELATED_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
 }
 
-// A sub-issue or a linked pull request as a line of the details: kind
-// ("issue" or "pr"), its repo, number, title, url, state ("open", "closed"
-// or, for a pull request, "merged") and draft.
+// GitHub's states of an issue and a pull request as a line shows them: the
+// label, the theme color of its chip, and whether the item is done (dimmed).
+const RELATED_STATES = {
+  OPEN: { state: "offen", color: "ansi2", done: false },
+  CLOSED: { state: "geschlossen", color: "muted", done: true },
+  MERGED: { state: "gemerged", color: "ansi5", done: true },
+};
+
+// A sub-issue or a linked pull request as a line (related.js).
 function relatedLine(node, kind) {
   const repo = node.repository?.nameWithOwner ?? "";
+  const state = RELATED_STATES[node.state] ?? { state: String(node.state ?? "?").toLowerCase(), color: "muted", done: false };
   return {
     kind,
     source: "github",
@@ -344,33 +354,42 @@ function relatedLine(node, kind) {
     number: node.number,
     title: node.title ?? "(kein Zugriff)",
     url: node.url ?? null,
-    state: String(node.state ?? "").toLowerCase(),
+    ...state,
     draft: node.isDraft === true,
   };
 }
 
-// gh's answer for githubDetailsArgs (and the GraphQL errors that came with
-// its data) → { subIssues: { total, completed, count, lines }, prs: { count,
-// lines } } (total and completed: subIssuesSummary's; count: how many GitHub
-// has; lines: those it sent). A missing issue is explained by the error at
-// its path.
-export function parseGithubDetails(json, item, errors = []) {
+// Where each section's connection stands in the answer.
+const RELATED_PATHS = { subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"] };
+
+// A connection of the answer as a section (related.js); one GitHub did not
+// send carries the error at its path.
+function relatedSection(conn, kind, path, errors) {
+  if (!conn) {
+    const e = errorAt(errors, path);
+    return { count: null, sent: 0, cut: false, hidden: 0, error: e ? `GitHub: ${firstLine(e.message)}` : "GitHub schickte sie nicht", lines: [] };
+  }
+  const nodes = Array.isArray(conn.nodes) ? conn.nodes : [];
+  const lines = nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
+  return { count: conn.totalCount ?? lines.length, sent: nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: nodes.length - lines.length, error: null, lines };
+}
+
+// gh's answer for githubRelatedArgs (and the GraphQL errors that came with
+// its data) → { subIssues, prs, warnings } (related.js). A missing issue
+// is explained by the error at its path; the errors below a section are
+// its own (a node GitHub sent as null counts as hidden), the others are
+// warnings.
+export function parseGithubRelated(json, item, errors = []) {
   const issue = json?.data?.repository?.issue;
   if (!issue) {
     const e = errorAt(errors, ["repository"]);
     throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
   }
-  const subs = issue.subIssues ?? {};
-  const prs = issue.closedByPullRequestsReferences ?? {};
-  const nodes = (c) => (c.nodes ?? []).filter((n) => Number.isInteger(n?.number));
+  const own = (e) => Object.values(RELATED_PATHS).some((path) => errorAt([e], path));
   return {
-    subIssues: {
-      total: issue.subIssuesSummary?.total ?? 0,
-      completed: issue.subIssuesSummary?.completed ?? 0,
-      count: subs.totalCount ?? 0,
-      lines: nodes(subs).map((n) => relatedLine(n, "issue")),
-    },
-    prs: { count: prs.totalCount ?? 0, lines: nodes(prs).map((n) => relatedLine(n, "pr")) },
+    subIssues: relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors),
+    prs: relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors),
+    warnings: errors.filter((e) => !own(e)).map((e) => firstLine(e.message)).filter(Boolean),
   };
 }
 
@@ -437,18 +456,19 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // The GitHub source for the board: the name of the site `o` opens, why
 // "nur meine" cannot tell one's own items when GitHub did not name the
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
-// gives its hidden columns) and how a board writes a move; and the details
-// of an item it reads when they open (`reads(item)`: whether it has any, an
-// issue's; `load(item)`). gh runs by the path `paths` (toolPaths) finds.
+// gives its hidden columns) and how a board writes a move; and the items
+// related to an issue, its sub-issues and linked pull requests (related.js
+// says what `related` holds). gh runs by the path `paths` (toolPaths)
+// finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
-    details: {
+    related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
       async load(item) {
-        const { json, errors } = await gh(paths, githubDetailsArgs(item));
-        return parseGithubDetails(json, item, errors);
+        const { json, errors } = await gh(paths, githubRelatedArgs(item));
+        return parseGithubRelated(json, item, errors);
       },
     },
     views: {

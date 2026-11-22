@@ -32,11 +32,10 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh, and the details of
-// an issue in it one more when they open (its sub-issues and linked pull
-// requests), kept until the view's next refresh, which reads nothing for
-// them, and read again on `r` while they are open (readDetails). An Azure
-// team's Sprint two az calls (the taskboard's column of each work item, and one
+// Calls: a GitHub view costs one gh call per refresh, and an issue's
+// related items (its sub-issues and linked pull requests) one more when its
+// details open, and again on `r` while they are open (readRelated); what a
+// refresh keeps of them keptRelated says. An Azure team's Sprint two az calls (the taskboard's column of each work item, and one
 // WIQL query for their fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
 // their fields; one for an empty backlog); either one more while who az is
@@ -59,14 +58,14 @@
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection),
-// details.js (an item's details read when they open: what is kept, their
-// lines), sources/
+// related.js (the items related to an item, read when its details open:
+// what is kept, their lines), sources/
 // (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
 // index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
-// ui/helpers.js, ui/layer.js (the board layer), ui/details.js (the
-// details' lines as drawn), ui/shapes/ (how a view's
+// ui/helpers.js, ui/layer.js (the board layer), ui/related.js (the related
+// items as drawn), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
 // data logic is plain exported functions, tested with a few UI paths by
@@ -494,6 +493,17 @@ export function navigate(columns, sel, dir) {
 
 // The index of the column whose shown cards hold `key`; -1 for none.
 export const columnOf = (columns, key) => columns.findIndex((c) => c.shown.some((card) => card.key === key));
+
+// Where `item` (any item that names its source, kind, repo and number, such
+// as a related item's line) stands among the shown cards of `columns`, as
+// a selection { col, key }; null where none of them is that item.
+export function placeOf(columns, item) {
+  for (const [col, c] of columns.entries()) {
+    const card = c.shown.find((i) => i.source === item.source && i.kind === item.kind && i.repo === item.repo && i.number === item.number);
+    if (card) return { col, key: card.key };
+  }
+  return null;
+}
 
 // The selection after new data or a filter: its card's column again, else the
 // first card; a selected empty column stays selected.
@@ -2186,42 +2196,52 @@ export function parseGithubList(json, view, errors = []) {
   return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
 }
 
-// How many sub-issues and linked pull requests an issue's details read.
+// How many sub-issues and linked pull requests an issue's related items
+// read.
 export const SUB_ISSUES = 50;
 export const LINKED_PRS = 20;
 
-// One GraphQL request for the details of an issue: its sub-issues (the
-// first SUB_ISSUES, the count of all and of the completed ones) and the pull
-// requests linked to it. closedByPullRequestsReferences is GitHub's field for
-// the pull requests that close the issue when merged: those linked by a
-// closing keyword in their text and those linked by hand in the issue's
-// Development sidebar ("List of open pull requests referenced from this
-// issue", docs.github.com/en/graphql/reference/issues; userLinkedOnly and
+// One GraphQL request for the items related to an issue: its sub-issues
+// (the first SUB_ISSUES and how many it has; how many are done the board's
+// own query reads, as the item's sub) and the pull requests linked to it.
+// closedByPullRequestsReferences is GitHub's field for the pull requests
+// that close the issue when merged: those linked by a closing keyword in
+// their text and those linked by hand in the issue's Development sidebar
+// ("List of open pull requests referenced from this issue",
+// docs.github.com/en/graphql/reference/issues; userLinkedOnly and
 // excludeUserLinked pick one of the two kinds). It lists open ones only
 // unless includeClosedPrs, which adds the merged and closed ones. A pull
 // request that only mentions the issue is not in it.
-export const DETAILS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      subIssuesSummary { total completed }
-      subIssues(first: ${SUB_ISSUES}) { totalCount nodes { number title state url repository { nameWithOwner } } }
+      subIssues(first: ${SUB_ISSUES}) {
+        totalCount pageInfo { hasNextPage } nodes { number title state url repository { nameWithOwner } }
+      }
       closedByPullRequestsReferences(first: ${LINKED_PRS}, includeClosedPrs: true) {
-        totalCount nodes { number title state isDraft url repository { nameWithOwner } }
+        totalCount pageInfo { hasNextPage } nodes { number title state isDraft url repository { nameWithOwner } }
       }
     }
   }
 }`;
 
-export function githubDetailsArgs(item) {
+export function githubRelatedArgs(item) {
   const [owner, name] = item.repo.split("/");
-  return ["api", "graphql", "-f", `query=${DETAILS_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
+  return ["api", "graphql", "-f", `query=${RELATED_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
 }
 
-// A sub-issue or a linked pull request as a line of the details: kind
-// ("issue" or "pr"), its repo, number, title, url, state ("open", "closed"
-// or, for a pull request, "merged") and draft.
+// GitHub's states of an issue and a pull request as a line shows them: the
+// label, the theme color of its chip, and whether the item is done (dimmed).
+const RELATED_STATES = {
+  OPEN: { state: "offen", color: "ansi2", done: false },
+  CLOSED: { state: "geschlossen", color: "muted", done: true },
+  MERGED: { state: "gemerged", color: "ansi5", done: true },
+};
+
+// A sub-issue or a linked pull request as a line (related.js).
 function relatedLine(node, kind) {
   const repo = node.repository?.nameWithOwner ?? "";
+  const state = RELATED_STATES[node.state] ?? { state: String(node.state ?? "?").toLowerCase(), color: "muted", done: false };
   return {
     kind,
     source: "github",
@@ -2230,33 +2250,42 @@ function relatedLine(node, kind) {
     number: node.number,
     title: node.title ?? "(kein Zugriff)",
     url: node.url ?? null,
-    state: String(node.state ?? "").toLowerCase(),
+    ...state,
     draft: node.isDraft === true,
   };
 }
 
-// gh's answer for githubDetailsArgs (and the GraphQL errors that came with
-// its data) → { subIssues: { total, completed, count, lines }, prs: { count,
-// lines } } (total and completed: subIssuesSummary's; count: how many GitHub
-// has; lines: those it sent). A missing issue is explained by the error at
-// its path.
-export function parseGithubDetails(json, item, errors = []) {
+// Where each section's connection stands in the answer.
+const RELATED_PATHS = { subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"] };
+
+// A connection of the answer as a section (related.js); one GitHub did not
+// send carries the error at its path.
+function relatedSection(conn, kind, path, errors) {
+  if (!conn) {
+    const e = errorAt(errors, path);
+    return { count: null, sent: 0, cut: false, hidden: 0, error: e ? `GitHub: ${firstLine(e.message)}` : "GitHub schickte sie nicht", lines: [] };
+  }
+  const nodes = Array.isArray(conn.nodes) ? conn.nodes : [];
+  const lines = nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
+  return { count: conn.totalCount ?? lines.length, sent: nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: nodes.length - lines.length, error: null, lines };
+}
+
+// gh's answer for githubRelatedArgs (and the GraphQL errors that came with
+// its data) → { subIssues, prs, warnings } (related.js). A missing issue
+// is explained by the error at its path; the errors below a section are
+// its own (a node GitHub sent as null counts as hidden), the others are
+// warnings.
+export function parseGithubRelated(json, item, errors = []) {
   const issue = json?.data?.repository?.issue;
   if (!issue) {
     const e = errorAt(errors, ["repository"]);
     throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
   }
-  const subs = issue.subIssues ?? {};
-  const prs = issue.closedByPullRequestsReferences ?? {};
-  const nodes = (c) => (c.nodes ?? []).filter((n) => Number.isInteger(n?.number));
+  const own = (e) => Object.values(RELATED_PATHS).some((path) => errorAt([e], path));
   return {
-    subIssues: {
-      total: issue.subIssuesSummary?.total ?? 0,
-      completed: issue.subIssuesSummary?.completed ?? 0,
-      count: subs.totalCount ?? 0,
-      lines: nodes(subs).map((n) => relatedLine(n, "issue")),
-    },
-    prs: { count: prs.totalCount ?? 0, lines: nodes(prs).map((n) => relatedLine(n, "pr")) },
+    subIssues: relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors),
+    prs: relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors),
+    warnings: errors.filter((e) => !own(e)).map((e) => firstLine(e.message)).filter(Boolean),
   };
 }
 
@@ -2323,18 +2352,19 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // The GitHub source for the board: the name of the site `o` opens, why
 // "nur meine" cannot tell one's own items when GitHub did not name the
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
-// gives its hidden columns) and how a board writes a move; and the details
-// of an item it reads when they open (`reads(item)`: whether it has any, an
-// issue's; `load(item)`). gh runs by the path `paths` (toolPaths) finds.
+// gives its hidden columns) and how a board writes a move; and the items
+// related to an issue, its sub-issues and linked pull requests (related.js
+// says what `related` holds). gh runs by the path `paths` (toolPaths)
+// finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
-    details: {
+    related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
       async load(item) {
-        const { json, errors } = await gh(paths, githubDetailsArgs(item));
-        return parseGithubDetails(json, item, errors);
+        const { json, errors } = await gh(paths, githubRelatedArgs(item));
+        return parseGithubRelated(json, item, errors);
       },
     },
     views: {
@@ -2365,29 +2395,36 @@ export function makeGithub(paths) {
 
 export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGithub(paths) });
 
-// ==== src/details.js ====
+// ==== src/related.js ====
 
-// The details the board reads for an item when they open (on GitHub an
-// issue's sub-issues and the pull requests linked to it; the source says
-// which items have any: its details.reads): kept per view and item until the
-// view's next refresh, and the lines of them the detail panel walks when it
-// has the keyboard. The Board reads them (readDetails) and draws them
-// (ui/details.js).
+// The items related to an item, which the board reads when its details
+// open (on GitHub an issue's sub-issues and the pull requests linked to
+// it), what of them a view keeps (keptRelated), the lines the details
+// panel walks when it has the keyboard, and the heads of their sections.
+// The Board reads them (readRelated) and draws them (ui/related.js).
+//
+// A source that has related items gives `related: { reads(item), load(item)
+// }`: reads tells whether the item has any to read (no call); load reads
+// them, one call, into { subIssues, prs, warnings }. Each of subIssues and
+// prs is a section { count (how many the source has; null when it sent
+// none), sent (how many it sent), cut (it has more than it sent), hidden
+// (how many it sent that cannot be read), error (why it sent none; null),
+// lines (those it sent that can be read) }; a line { source, kind, repo, repoShort, number, title, url,
+// state (its label), color (its chip's theme color), done (dimmed), draft }.
+// warnings: what the source said besides, one line each.
 
-// The key the read details of an item are kept under in its view's state.
-export const detailsKey = (item) => `${item.source}\n${item.repo}\n${item.number}`;
-
-// What is kept of a view's details after a refresh starts: only those of
-// the item whose details show (`openKey`, null when none), so that a refresh
-// reads nothing for them (`r` reads them again: the Board's reload).
-export function keptDetails(details, openKey) {
-  const entry = openKey === null ? undefined : details.get(openKey);
-  return new Map(entry ? [[openKey, entry]] : []);
+// What a view keeps of its related items after a refresh starts: only
+// those read without failure of the item whose details show (`openKey`,
+// null when none), so that a refresh reads nothing for them, while a failed
+// read is tried again; `r` reads them again too (the Board's reload).
+export function keptRelated(related, openKey) {
+  const entry = openKey === null ? undefined : related.get(openKey);
+  return new Map(entry?.data ? [[openKey, entry]] : []);
 }
 
-// The lines of read details (`data`, or null while none are read), the
-// sub-issues first, then the linked pull requests.
-export const detailLines = (data) => (data ? [...data.subIssues.lines, ...data.prs.lines] : []);
+// The lines of read related items (`data`, or null while none are read),
+// the sub-issues first, then the linked pull requests.
+export const relatedLines = (data) => (data ? [...data.subIssues.lines, ...data.prs.lines] : []);
 
 // The line one step `dir` (+1 down, -1 up) from `line` (an index, or null
 // for none) over `count` lines: down from none to the first, up from the
@@ -2399,27 +2436,15 @@ export function stepLine(line, dir, count) {
   return next < 0 ? null : Math.min(next, count - 1);
 }
 
-// The item of a line among the columns that show (as navigate takes them),
-// as a selection { col, key }, or null when none of them holds it: the same
-// source, kind, repo and number.
-export function placeOf(columns, line) {
-  for (const [col, c] of columns.entries()) {
-    const item = c.shown.find((i) => i.source === line.source && i.kind === line.kind && i.repo === line.repo && i.number === line.number);
-    if (item) return { col, key: item.key };
-  }
-  return null;
-}
+// " · erste <sent> von <count>" for a section with more than it sent.
+const cutNote = (section) => (section.cut ? ` · erste ${section.sent} von ${section.count}` : "");
 
-// A line's state as the details show it.
-const STATE_LABELS = { open: "offen", closed: "geschlossen", merged: "gemerged" };
-export const lineState = (line) => STATE_LABELS[line.state] ?? line.state;
-
-// The head of the sub-issues' section: "UNTERAUFGABEN · <completed>/<total>",
-// and " · erste <sent> von <all>" where GitHub has more than it sent.
-export function subIssuesHead(subIssues) {
-  const cut = subIssues.count > subIssues.lines.length ? ` · erste ${subIssues.lines.length} von ${subIssues.count}` : "";
-  return `UNTERAUFGABEN · ${subIssues.completed}/${subIssues.total}${cut}`;
-}
+// The heads of the sections: the sub-issues' with how many of them are
+// done, as the item says (its sub, the one count the board and the details
+// share; none where the item has no sub-issues), the pull requests' with
+// how many there are.
+export const subIssuesHead = (item, section) => `UNTERAUFGABEN${item.sub ? ` · ${item.sub.done}/${item.sub.total}` : ""}${cutNote(section)}`;
+export const prsHead = (section) => `VERKNÜPFTE PRS${section.count === null ? "" : ` · ${section.count}`}${cutNote(section)}`;
 
 // ==== src/ui/layer.js ====
 
@@ -2687,9 +2712,10 @@ export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).c
 export const fieldFrame = (t, m, field, inner) =>
   h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
 
-// A section of the detail panel: a title over its rows.
+// A section of the detail panel: a title (sectionTitle) over its rows.
+export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
 export const detailSection = (t, title, ...kids) =>
-  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(sectionTitle(t, title)).children(kids);
 
 // The detail panel's parts of a work item (the sprint and the backlog
 // shape): its `state` as a pill on its theme `color`, a click opening the
@@ -3895,7 +3921,7 @@ function drawBoard(b, t, mono, view, st) {
         const { key, from } = b.drag;
         b.endDrag(cx);
         b.moveTo(view, key, col.id, cx);
-        if (from !== col.id) b.chooseDropped(view, key);
+        if (from !== col.id) b.chooseDropped(view, key, cx);
       })
       .child(head)
       .child(
@@ -4392,51 +4418,67 @@ const SPRINT_STATES = {
 
 export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
 
-// ==== src/ui/details.js ====
+// ==== src/ui/related.js ====
 
-// The detail panel's sections of an item's read details (details.js): its
-// sub-issues ("UNTERAUFGABEN · <completed>/<total>"), then, where it has
-// them, the pull requests linked to it ("VERKNÜPFTE PRS"); one line each
-// with its key, title and state (a closed or merged one dimmed, a pull
-// request's draft mark). While they load the sub-issues' section says "lädt
-// …", after a failure the reason; the rest of the details stays as it is.
-// The line the panel has selected while it has the keyboard is marked; a
-// click on a line is Enter on it (the Board's pickLine).
+// The detail panel's sections of an item's related items (related.js): its
+// sub-issues, then, where it has any or the source could not send them,
+// the pull requests linked to it; one line each with its key, title and
+// state (a done one dimmed, a draft marked), and below a section how many
+// it sent that cannot be read. While they load the sub-issues' section
+// says "lädt …", after a failure the reason; a section the source could
+// not send says why in its place; what the source said besides follows
+// at the end. The rest of the details stays as it is. The line the panel
+// has selected while it has the keyboard is marked; a click on a line is
+// Enter on it (the Board's pickLine).
 
-// What the details keep per Board, made when it starts (a ScrollHandle may
-// not be made while a view draws): the lines' scroll handle.
-export const detailsState = () => ({ scroll: ScrollHandle.new() });
+// What the related items keep per Board, made when it starts (why then:
+// ui/shapes/index.js): the lines' scroll handle.
+export const relatedState = () => ({ scroll: ScrollHandle.new() });
 
-// The theme color of a line's state.
-const STATE_COLORS = { open: "ansi2", merged: "ansi5", closed: "muted" };
-
-// The child of the scrolled block that holds line `at` (the sub-issues'
-// head, their lines or the line that says there are none, the pull
-// requests' head, their lines).
-export function lineChild(data, at) {
-  const subs = data.subIssues.lines.length;
-  return at < subs ? 1 + at : 1 + Math.max(subs, 1) + 1 + (at - subs);
-}
-
-// The sections of `entry` (the Board's kept details of an item: { data,
-// error }, both null while they load; null before a read starts), the line
-// `at` marked (null: none).
-export function detailsSections(b, t, mono, view, entry, at) {
-  const head = (text) => div().pt(4).text_size(11).text_color(t.muted).child(text);
-  const note = (text, color = t.muted) => div().text_size(12).text_color(color).child(text);
-  const block = v_flex().id("details-lines").min_h(0).px(18).py(12).gap(4).border_b(1).border_color(t.border).overflow_y_scrollbar().track_scroll(b.detailsUi.scroll);
+// The rows of the related items of `item` as drawn, in order, from `entry`
+// (the Board's kept read: { data, error }, both null while it loads; null
+// before a read starts): { kind: "head" | "note" | "line", text, tone
+// ("muted", "error", "warning") or, for a line, `line` and its index `n`
+// among the lines (relatedLines).
+export function relatedRows(item, entry) {
   const data = entry?.data;
   if (!data) {
-    return block.child(head("UNTERAUFGABEN")).child(entry?.error ? note(entry.error, t.ansi1) : note("lädt …"));
+    const why = entry?.error ? { kind: "note", text: entry.error, tone: "error" } : { kind: "note", text: "lädt …", tone: "muted" };
+    return [{ kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
-  let i = 0;
-  const line = (l) => {
-    const n = i++;
+  let n = 0;
+  const rows = [];
+  const body = (section, none) => {
+    if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
+    for (const line of section.lines) rows.push({ kind: "line", line, n: n++ });
+    if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", tone: "muted" });
+    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ohne Zugriff`, tone: "muted" });
+  };
+  rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
+  body(data.subIssues, true);
+  const prs = data.prs;
+  if (prs.lines.length || prs.error || prs.hidden) {
+    rows.push({ kind: "head", text: prsHead(prs) });
+    body(prs, false);
+  }
+  for (const text of data.warnings ?? []) rows.push({ kind: "note", text, tone: "warning" });
+  return rows;
+}
+
+// The child of the scrolled block that holds line `n`.
+export const lineChild = (item, entry, n) => relatedRows(item, entry).findIndex((r) => r.kind === "line" && r.n === n);
+
+// The block of the related items of `item` (relatedRows), the line `at`
+// marked (null: none).
+export function relatedSections(b, t, mono, view, item, entry, at) {
+  const tones = { muted: t.muted, error: t.ansi1, warning: t.ansi3 };
+  const row = (r) => {
+    if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
+    if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
+    const { line, n } = r;
     const marked = n === at;
-    const done = l.state !== "open";
-    const color = STATE_COLORS[l.state] ?? "muted";
     return h_flex()
-      .id(`detail-line-${n}`)
+      .id(`related-line-${n}`)
       .flex_none()
       .gap(8)
       .px(8)
@@ -4446,24 +4488,28 @@ export function detailsSections(b, t, mono, view, entry, at) {
       .border_1()
       .border_color(marked ? t.accent : t.chrome)
       .cursor_pointer()
-      .opacity(done ? 0.55 : 1)
+      .opacity(line.done ? 0.55 : 1)
       .when(marked, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
         if (!b.modal) b.pickLine(view, n, cx);
       })
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(l)))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).child(l.title))
-      .when(l.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(chip(t, lineState(l), t.background, t[color] ?? t.muted));
+      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
+      .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
+      .child(chip(t, line.state, t.background, t[line.color] ?? t.muted));
   };
-  const subs = data.subIssues;
-  let out = block.child(head(subIssuesHead(subs)));
-  out = subs.lines.length ? out.children(subs.lines.map(line)) : out.child(note("keine"));
-  const prs = data.prs;
-  if (!prs.lines.length) return out;
-  const cut = prs.count > prs.lines.length ? ` · erste ${prs.lines.length} von ${prs.count}` : "";
-  return out.child(head(`VERKNÜPFTE PRS · ${prs.count}${cut}`)).children(prs.lines.map(line));
+  return v_flex()
+    .id("related-lines")
+    .min_h(0)
+    .px(18)
+    .py(12)
+    .gap(4)
+    .border_b(1)
+    .border_color(t.border)
+    .overflow_y_scrollbar()
+    .track_scroll(b.relatedUi.scroll)
+    .children(relatedRows(item, entry).map(row));
 }
 
 // ==== src/main.js ====
@@ -4484,8 +4530,9 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // next or previous tab stop, and runs a matching binding's action before
 // on_key_down, so Tab never reaches a dialog's key handler, not even while
 // the dialog's text field has the keyboard; while a dialog with fields is
-// open, or the details of an item whose source reads details (for the
-// details panel), the board takes it as an action of its own. Of the matching
+// open, or the details of an item whose source has related items to read
+// (readsRelated; to move the keyboard into the details panel and back),
+// the board takes it as an action of its own. Of the matching
 // bindings, the one in the deepest context wins, so a binding in the
 // context of the board's root comes first (the leader mod binds the same
 // way and says more:
@@ -4536,9 +4583,9 @@ export default class Board extends View {
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
-    // What the details' lines keep (ui/details.js), and the details panel's
-    // keyboard: { view, key, line } while it has it (panelOf).
-    this.detailsUi = detailsState();
+    // What the related items' lines keep (ui/related.js), and the details
+    // panel's keyboard: { view, key, line } while it has it (panelOf).
+    this.relatedUi = relatedState();
     this.panel = null;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
@@ -4577,8 +4624,9 @@ export default class Board extends View {
     cx.timer.every(TICK_MS, (cx) => this.guarded("Neuladen", () => this.tick(cx)));
     cx.timer.every(WATCH_MS, (cx) => {
       this.guarded("Anzeige", () => this.watchShown(cx));
-      // Details that came to show by a way that did not read them yet.
-      this.guarded("Details", () => boardShown(this.isLayer()) && this.readDetails(cx));
+      // A safety net: details that came to show by a way that did not read
+      // their related items (readRelated) are read here.
+      this.guarded("Details", () => boardShown(this.isLayer()) && this.readRelated(cx));
     });
     this.reload(cx);
   }
@@ -4602,12 +4650,12 @@ export default class Board extends View {
   // Whether the board takes Tab and shift-Tab (BOARD_KEYS): while a dialog
   // with fields is open (its tab, MODALS), and, with no dialog and no filter
   // being typed, while the shown view's details are of an item whose source
-  // reads details (readsDetails), to move the keyboard into the details
-  // panel and back. Anything else leaves Tab to herdr: the root carries the
+  // has related items to read (readsRelated), to move the keyboard into the
+  // details panel and back. Anything else leaves Tab to herdr: the root carries the
   // board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
-    return !this.filtering && this.readsDetails(this.shownDetailsItem());
+    return !this.filtering && this.readsRelated(this.shownDetailsItem());
   }
 
   // Tab and shift-Tab (`back`), while the board takes them (takesTab): the
@@ -4631,13 +4679,13 @@ export default class Board extends View {
   // toggles and the hidden set), sel ({ col, key }, null before the first
   // data), picked (the key of the item the person chose, see clickItem),
   // runs (how many refreshes have started), want (an item to choose once a
-  // refresh has it: chooseWanted) and detail; details (what readDetails
-  // read, by detailsKey).
+  // refresh has it: chooseWanted) and detail; related (the related items
+  // readRelated read, by item key).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
-      details: new Map(),
+      related: new Map(),
     };
     return this.views[id];
   }
@@ -4723,10 +4771,10 @@ export default class Board extends View {
       const shown = this.view();
       if (!shown) return;
       this.sources[shown.source]?.forget?.(shown);
-      // The open details are read again too.
-      this.state(shown.id).details.clear();
+      // The open details' related items are read again too.
+      this.state(shown.id).related.clear();
       this.refresh(shown, cx);
-      this.readDetails(cx);
+      this.readRelated(cx);
     });
   }
 
@@ -4740,7 +4788,7 @@ export default class Board extends View {
     st.again = false;
     st.tried = Date.now();
     const open = st.detail ? this.selected(view) : null;
-    st.details = keptDetails(st.details, open ? detailsKey(open) : null);
+    st.related = keptRelated(st.related, open ? open.key : null);
     const started = st.tried;
     const run = ++st.runs;
     cx.spawn(async (cx) => {
@@ -4752,7 +4800,10 @@ export default class Board extends View {
         st.error = null;
         st.at = Date.now();
         this.keepSelection(view);
-        this.chooseWanted(view, run);
+        this.chooseWanted(view, run, cx);
+        // Related items of the open details whose read failed were not kept
+        // (keptRelated): they are read again now.
+        this.readRelated(cx);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
         st.error = report(e);
@@ -4777,13 +4828,13 @@ export default class Board extends View {
   // started after it asked (an earlier one may have read before the item
   // was there); where that refresh's data does not show it (the filter,
   // "nur meine"), nothing is chosen.
-  chooseWanted(view, run) {
+  chooseWanted(view, run, cx) {
     const st = this.state(view.id);
     const want = st.want;
     if (!want || run <= want.after) return;
     st.want = null;
     const col = columnOf(this.navColumns(view), want.key);
-    if (col >= 0) this.choose(view, { col, key: want.key });
+    if (col >= 0) this.choose(view, { col, key: want.key }, cx);
   }
 
   // After a refresh that succeeded: the writes whose outcome was open, came
@@ -4810,11 +4861,12 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // ---- details ----
+  // ---- related items, the details panel ----
 
-  // Whether the item's source reads details for it (its details.reads).
-  readsDetails(item) {
-    return Boolean(item && this.sources[item.source]?.details?.reads(item));
+  // Whether the item's source has related items to read for it (its
+  // related.reads, related.js).
+  readsRelated(item) {
+    return Boolean(item && this.sources[item.source]?.related?.reads(item));
   }
 
   // The item whose details show in the shown view, or null.
@@ -4823,23 +4875,23 @@ export default class Board extends View {
     return view && this.state(view.id).detail ? this.selected(view) : null;
   }
 
-  // What is kept of the item's details in the view: { data, error } (both
+  // What the view keeps of the item's related items: { data, error } (both
   // null while they load), or null before they are read.
-  detailsOf(view, item) {
-    return this.state(view.id).details.get(detailsKey(item)) ?? null;
+  relatedOf(view, item) {
+    return this.state(view.id).related.get(item.key) ?? null;
   }
 
-  // Reads the details of the item whose details show in the shown view,
-  // where its source reads some and none are kept: one call, kept until the
-  // view's next refresh (keptDetails) or `r` (reload).
-  readDetails(cx) {
+  // Reads the related items of the item whose details show in the shown
+  // view, where its source has some to read and the view keeps none
+  // (keptRelated says what a refresh keeps): one call (main.js, Calls).
+  readRelated(cx) {
     const view = this.view();
+    const item = this.shownDetailsItem();
     const st = view ? this.state(view.id) : null;
-    const item = st?.detail ? this.selected(view) : null;
-    if (!this.readsDetails(item) || st.details.has(detailsKey(item))) return;
+    if (!this.readsRelated(item) || st.related.has(item.key)) return;
     const entry = { data: null, error: null };
-    st.details.set(detailsKey(item), entry);
-    const source = this.sources[item.source].details;
+    st.related.set(item.key, entry);
+    const source = this.sources[item.source].related;
     cx.spawn(async (cx) => {
       try {
         entry.data = await source.load(item);
@@ -4855,31 +4907,29 @@ export default class Board extends View {
   // The details panel's keyboard ({ view, key, line }: the line selected,
   // null for none) while it has it in `view`, for the item whose details
   // show there; else null, when the board has it. Once it is not theirs
-  // (another view, item or the details closed) it is dropped, so that it
-  // does not come back with them.
+  // (another view or item, one without related items, or the details
+  // closed) it is dropped, so that it does not come back with them.
   panelOf(view) {
     const p = this.panel;
     const st = this.state(view.id);
-    if (p && p.view === view.id && st.detail && st.sel?.key === p.key) return p;
+    if (p && p.view === view.id && st.detail && st.sel?.key === p.key && this.readsRelated(this.selected(view))) return p;
     this.panel = null;
     return null;
   }
 
   // Tab: the keyboard into the details panel, no line selected, where the
-  // details of an item with read details show; back to the board where the
-  // panel has it. False where it does neither.
+  // details of an item with related items to read show; back to the board
+  // where the panel has it.
   togglePanel(view) {
-    const st = this.state(view.id);
-    const item = st.detail ? this.selected(view) : null;
-    if (!this.readsDetails(item)) return false;
+    const item = this.shownDetailsItem();
+    if (!this.readsRelated(item)) return;
     this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null };
-    return true;
   }
 
-  // The lines of the details that show in `view` (detailLines).
+  // The lines of the related items that show in `view` (relatedLines).
   linesOf(view) {
     const item = this.selected(view);
-    return detailLines(item ? this.detailsOf(view, item)?.data : null);
+    return relatedLines(item ? this.relatedOf(view, item)?.data : null);
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
@@ -4891,13 +4941,16 @@ export default class Board extends View {
     const lines = this.linesOf(view);
     if (dir) {
       panel.line = stepLine(panel.line, dir, lines.length);
-      if (panel.line !== null) this.detailsUi.scroll.scroll_to_item(lineChild(this.detailsOf(view, this.selected(view)).data, panel.line));
+      if (panel.line !== null) {
+        const item = this.selected(view);
+        this.relatedUi.scroll.scroll_to_item(lineChild(item, this.relatedOf(view, item), panel.line));
+      }
       return true;
     }
     if (k === "escape") return (this.panel = null), true;
     if ((k !== "enter" && k !== "o") || panel.line === null) return false;
-    // A line selected before `r` read the details again is gone until they
-    // come: the key does nothing.
+    // A line selected before `r` read the related items again is gone until
+    // they come: the key does nothing.
     const line = lines[panel.line];
     if (!line) return true;
     if (k === "enter") this.enterLine(view, line, cx);
@@ -4906,18 +4959,18 @@ export default class Board extends View {
   }
 
   // Enter on a line: its item selected on the board where a shown column
-  // holds it, its details shown, the panel keeping the keyboard with no
-  // line selected; else opened in the browser.
+  // holds it, its details shown; the panel keeps the keyboard, with no line
+  // selected, where that item has related items to read. Else the line
+  // opens in the browser.
   enterLine(view, line, cx) {
     const place = placeOf(this.navColumns(view), line);
     if (!place) return this.open(line, cx);
-    this.choose(view, place);
-    this.panel = { view: view.id, key: place.key, line: null };
-    this.readDetails(cx);
+    this.choose(view, place, cx);
+    this.panel = this.readsRelated(this.selected(view)) ? { view: view.id, key: place.key, line: null } : null;
   }
 
-  // A click on line `at` of the details: the keyboard into the panel on that
-  // line, and Enter on it.
+  // A click on line `at` of the related items: the keyboard into the panel
+  // on that line, and Enter on it.
   pickLine(view, at, cx) {
     const item = this.selected(view);
     const line = this.linesOf(view)[at];
@@ -4980,12 +5033,14 @@ export default class Board extends View {
   }
 
   // The item the person chose (what counts as a choice: clickItem): selected,
-  // kept as chosen and scrolled into view; open details follow it.
-  choose(view, sel) {
+  // kept as chosen and scrolled into view; open details follow it, and its
+  // related items are read (readRelated).
+  choose(view, sel, cx) {
     const st = this.state(view.id);
     st.sel = sel;
     st.picked = sel.key;
     this.scrollToSelection(view);
+    this.readRelated(cx);
   }
 
   scrollToSelection(view) {
@@ -5076,17 +5131,17 @@ export default class Board extends View {
   clickItem(view, sel, cx) {
     const st = this.state(view.id);
     if (st.picked === sel.key) st.detail = true;
-    else this.choose(view, sel);
+    else this.choose(view, sel, cx);
     this.handle.focus();
-    this.readDetails(cx);
+    this.readRelated(cx);
     cx.notify();
   }
 
   // A card dropped onto another column by a drag: chosen (clickItem), in the
   // column it is in now (its own, where the move was refused).
-  chooseDropped(view, key) {
+  chooseDropped(view, key, cx) {
     const col = columnOf(this.navColumns(view), key);
-    if (col >= 0) this.choose(view, { col, key });
+    if (col >= 0) this.choose(view, { col, key }, cx);
   }
 
   // Enter: details first, then the item's session (go to it, or start one).
@@ -5096,6 +5151,7 @@ export default class Board extends View {
     if (!item) return;
     if (!st.detail) {
       st.detail = true;
+      this.readRelated(cx);
       return cx.notify();
     }
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
@@ -5217,13 +5273,6 @@ export default class Board extends View {
 
   // ---- keys ----
 
-  // A key the board gets (on_key_down, or a bound key's action), then the
-  // details that came to show by it read (readDetails).
-  keyDown(e, cx) {
-    this.key(e, cx);
-    this.readDetails(cx);
-  }
-
   key(e, cx) {
     const k = e.key;
     const ch = e.key_char ?? "";
@@ -5279,7 +5328,7 @@ export default class Board extends View {
     const shape = this.shape(view);
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
-      if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir));
+      if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir), cx);
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
@@ -5329,7 +5378,7 @@ export default class Board extends View {
       .bg(t.background)
       .text_color(t.foreground)
       .text_size(13)
-      .on_key_down((e, cx) => this.keyDown(e, cx))
+      .on_key_down((e, cx) => this.key(e, cx))
       .on_mouse_down_out((_e, cx) => this.pressOutside(cx))
       .on_mouse_down("left", () => {
         if (!this.filtering && !this.modal) this.handle.focus();
@@ -5598,7 +5647,7 @@ export default class Board extends View {
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
       .children(parts.sections ?? [])
-      .when(this.readsDetails(item), (el) => el.child(detailsSections(this, t, mono, view, this.detailsOf(view, item), panel?.line ?? null)))
+      .when(this.readsRelated(item), (el) => el.child(relatedSections(this, t, mono, view, item, this.relatedOf(view, item), panel?.line ?? null)))
       .child(
         detailSection(
           t,
@@ -5641,23 +5690,24 @@ export default class Board extends View {
       );
   }
 
-  // The details panel's keys, where the details of an item with read
-  // details show: Tab into it, and in it its own.
+  // The details panel's keys, where the details of an item with related
+  // items to read show (readsRelated): Tab into it, and in it its own.
   panelHints(view) {
-    const st = this.state(view.id);
-    if (!st.detail || !this.readsDetails(this.selected(view))) return [];
-    if (!this.panelOf(view)) return [["Tab", "Unteraufgaben"]];
+    if (!view || !this.readsRelated(this.shownDetailsItem())) return [];
+    if (!this.panelOf(view)) return [["Tab", "Zeilen"]];
     return [["Tab", "zurück"], ["j/k", "Zeilen"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
-  // The keys of what shows: the top bar's (a team's v), then those of the
-  // shown view's shape.
+  // The keys of what shows: the top bar's (a team's v), those of the shown
+  // view's shape, the details panel's (panelHints), and those that always
+  // work; Esc gives the keyboard back while the panel has it.
   hints(t, view) {
     const context = this.context();
     const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
     const switches = hasViewSwitch(context) ? [["v", viewSwitchHint(context)]] : [];
-    const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
-    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...(view ? this.panelHints(view) : []), ...always];
+    const esc = view && this.panelOf(view) ? "zurück" : "schließen";
+    const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", esc]];
+    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...this.panelHints(view), ...always];
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

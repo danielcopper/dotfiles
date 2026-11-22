@@ -48,6 +48,17 @@ export function navigate(columns, sel, dir) {
 // The index of the column whose shown cards hold `key`; -1 for none.
 export const columnOf = (columns, key) => columns.findIndex((c) => c.shown.some((card) => card.key === key));
 
+// Where `item` (any item that names its source, kind, repo and number, such
+// as a related item's line) stands among the shown cards of `columns`, as
+// a selection { col, key }; null where none of them is that item.
+export function placeOf(columns, item) {
+  for (const [col, c] of columns.entries()) {
+    const card = c.shown.find((i) => i.source === item.source && i.kind === item.kind && i.repo === item.repo && i.number === item.number);
+    if (card) return { col, key: card.key };
+  }
+  return null;
+}
+
 // The selection after new data or a filter: its card's column again, else the
 // first card; a selected empty column stays selected.
 export function selectionAfter(columns, sel) {

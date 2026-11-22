@@ -194,9 +194,10 @@ export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).c
 export const fieldFrame = (t, m, field, inner) =>
   h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
 
-// A section of the detail panel: a title over its rows.
+// A section of the detail panel: a title (sectionTitle) over its rows.
+export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
 export const detailSection = (t, title, ...kids) =>
-  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(sectionTitle(t, title)).children(kids);
 
 // The detail panel's parts of a work item (the sprint and the backlog
 // shape): its `state` as a pill on its theme `color`, a click opening the

@@ -117,7 +117,7 @@ function drawBoard(b, t, mono, view, st) {
         const { key, from } = b.drag;
         b.endDrag(cx);
         b.moveTo(view, key, col.id, cx);
-        if (from !== col.id) b.chooseDropped(view, key);
+        if (from !== col.id) b.chooseDropped(view, key, cx);
       })
       .child(head)
       .child(
