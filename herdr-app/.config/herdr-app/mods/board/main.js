@@ -34,9 +34,11 @@
 //
 // Calls: a GitHub view costs one gh call per refresh, and an issue's
 // related items (its description, sub-issues and linked pull requests) one
-// more when its details open, and again on `r` while they are open (readRelated); what a
-// refresh keeps of them keptRelated says. An Azure team's Sprint two az calls (the taskboard's column of each work item, and one
-// WIQL query for their fields), its Backlog two, one after the other (the
+// more when its details open, again on `r` while they are open, and again
+// after a refresh where their last read failed (readRelated; what a refresh
+// keeps of them keptRelated says). An Azure team's Sprint two az calls (the
+// taskboard's column of each work item, and one WIQL query for their
+// fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
 // their fields; one for an empty backlog); either one more while who az is
 // stays unknown. What the Sprint and the Backlog read once and keep, and
@@ -2263,35 +2265,43 @@ function relatedLine(node, kind) {
 // Where each section's connection stands in the answer.
 const RELATED_PATHS = { subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"] };
 
-// A connection of the answer as a section (related.js); one GitHub did not
-// send carries the error at its path.
+// A connection of the answer as a section (related.js), and the error it
+// shows (`shown`, null for none). One GitHub did not send, or whose nodes
+// it did not send, shows the error at that path in their place.
 function relatedSection(conn, kind, path, errors) {
-  if (!conn) {
-    const e = errorAt(errors, path);
-    return { count: null, sent: 0, cut: false, hidden: 0, error: e ? `GitHub: ${firstLine(e.message)}` : "GitHub schickte sie nicht", lines: [] };
+  if (!conn || !Array.isArray(conn.nodes)) {
+    const shown = errorAt(errors, conn ? [...path, "nodes"] : path);
+    const error = shown ? `GitHub: ${firstLine(shown.message)}` : "GitHub schickte sie nicht";
+    return { section: { count: conn?.totalCount ?? null, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
   }
-  const nodes = Array.isArray(conn.nodes) ? conn.nodes : [];
-  const lines = nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
-  return { count: conn.totalCount ?? lines.length, sent: nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: nodes.length - lines.length, error: null, lines };
+  const lines = conn.nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
+  const section = {
+    count: conn.totalCount ?? lines.length, sent: conn.nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: conn.nodes.length - lines.length,
+    error: null, lines,
+  };
+  return { section, shown: null };
 }
 
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { description, subIssues, prs, warnings } (related.js). A missing issue
-// is explained by the error at its path; the errors below a section are
-// its own (a node GitHub sent as null counts as hidden), the others are
-// warnings.
+// its data) → { description, subIssues, prs, warnings } (related.js). A
+// missing issue is explained by the error at its path. An error is a
+// section's own only where the section shows it, in place of what GitHub
+// did not send; all others are warnings (a node GitHub sent as null counts
+// as hidden, and its error is one of them).
 export function parseGithubRelated(json, item, errors = []) {
   const issue = json?.data?.repository?.issue;
   if (!issue) {
     const e = errorAt(errors, ["repository"]);
     throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
   }
-  const own = (e) => Object.values(RELATED_PATHS).some((path) => errorAt([e], path));
+  const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors);
+  const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors);
+  const shown = [subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
-    subIssues: relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors),
-    prs: relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors),
-    warnings: errors.filter((e) => !own(e)).map((e) => firstLine(e.message)).filter(Boolean),
+    subIssues: subIssues.section,
+    prs: prs.section,
+    warnings: errors.filter((e) => !shown.includes(e)).map((e) => firstLine(e.message)).filter(Boolean),
   };
 }
 
@@ -2359,9 +2369,9 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // "nur meine" cannot tell one's own items when GitHub did not name the
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
 // gives its hidden columns) and how a board writes a move; and the items
-// related to an issue, its sub-issues and linked pull requests (related.js
-// says what `related` holds). gh runs by the path `paths` (toolPaths)
-// finds.
+// related to an issue, its sub-issues and linked pull requests, read with
+// its description (related.js says what `related` holds). gh runs by the
+// path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
@@ -2404,10 +2414,11 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // ==== src/related.js ====
 
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's description, its sub-issues and the pull
-// requests linked to it), what of them a view keeps (keptRelated), the
-// lines the details panel walks when it has the keyboard, the lines of the
-// description, and the heads of their sections.
+// open (on GitHub an issue's sub-issues and the pull requests linked to it;
+// the same read brings the issue's description beside them), what of them
+// a view keeps (keptRelated), the lines the details panel walks when it has
+// the keyboard, the lines of the description, and the heads of their
+// sections.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
 // A source that has related items gives `related: { reads(item), load(item)
@@ -2415,7 +2426,8 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // them, one call, into { description, subIssues, prs, warnings }.
 // description is the item's own text as the source has it ("" for none;
 // shown as written: descriptionLines). Each of subIssues and prs is a
-// section { count (how many the source has; null when it sent none), sent
+// section { count (how many the source has; null when it did not send the
+// section), sent
 // (how many it sent), cut (it has more than it sent), hidden (how many it
 // sent that cannot be read), error (why it sent none; null), lines (those
 // it sent that can be read) }; a line { source, kind, repo, repoShort,
@@ -2424,12 +2436,13 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // each.
 
 // What a view keeps of its related items after a refresh starts: only
-// those read without failure of the item whose details show (`openKey`,
-// null when none), so that a refresh reads nothing for them, while a failed
-// read is tried again; `r` reads them again too (the Board's reload).
+// those of the item whose details show (`openKey`, null when none), read
+// or still being read, so that a refresh reads nothing for them; a failed
+// read is dropped, so that it is tried again; `r` reads them again too
+// (the Board's reload).
 export function keptRelated(related, openKey) {
   const entry = openKey === null ? undefined : related.get(openKey);
-  return new Map(entry?.data ? [[openKey, entry]] : []);
+  return new Map(entry && !entry.error ? [[openKey, entry]] : []);
 }
 
 // The lines of read related items (`data`, or null while none are read),
@@ -2734,20 +2747,22 @@ export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).c
 export const fieldFrame = (t, m, field, inner) =>
   h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
 
-// The detail panel's width, its one home: a third of the board area (the
-// row it shares with the view's content), and no narrower than one of the
-// shape's `columns` that share the rest with it (as many as it draws side
-// by side, its shape's columns; none for a list), as a share of that area;
-// within DETAIL_MIN_W and DETAIL_MAX_W pixels. Gaps and padding are left
-// out of the share.
+// The detail panel's width, its one home, from the number of columns that
+// share the rest of the board area with it (its shape's columnCount; none
+// for a list): a third of that area (the row it shares with the view's
+// content), and no narrower than one of those columns, as a share of that
+// area (gaps and padding left out). The pixel bounds DETAIL_MIN_W and
+// DETAIL_MAX_W come last, so a wide area's 720 px can leave it narrower
+// than a column.
 export const DETAIL_MIN_W = 420;
 export const DETAIL_MAX_W = 720;
 export const detailWidth = (columns) => `${(100 * (columns > 0 ? Math.max(1 / 3, 1 / (columns + 1)) : 1 / 3)).toFixed(2)}%`;
 
-// A section of the detail panel: a title (sectionTitle) over its rows.
+// A section of the detail panel: its frame (sectionFrame), a title
+// (sectionTitle) over its rows.
+export const sectionFrame = (t) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border);
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
-export const detailSection = (t, title, ...kids) =>
-  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(sectionTitle(t, title)).children(kids);
+export const detailSection = (t, title, ...kids) => sectionFrame(t).child(sectionTitle(t, title)).children(kids);
 
 // The detail panel's parts of a work item (the sprint and the backlog
 // shape): its `state` as a pill on its theme `color`, a click opening the
@@ -3864,7 +3879,7 @@ const boardState = (b) => b.shapeState.board;
 export const boardShape = {
   state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
-  columns: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
+  columnCount: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
   // All items, whatever the filter: the cards of the shown columns.
@@ -4248,7 +4263,7 @@ export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
   nav: (b, st) => sprintColumns(b, st),
   // The taskboard's columns, without the stories' (STORY_WIDTH wide).
-  columns: (b, st) => sprintColumns(b, st).length - 1,
+  columnCount: (b, st) => sprintColumns(b, st).length - 1,
   selected: (b, st) => findSprintItem(st.data, st.sel?.key),
   // The row of the selected item, among the rows that show.
   scrollTo(b, view) {
@@ -4441,17 +4456,17 @@ const SPRINT_STATES = {
 // (the arrow directions that move), loads (false for the placeholder, which
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
-// where it has them, columns (how many columns it draws side by side,
-// which the detail panel is no narrower than one of: detailWidth; a list
-// has none), detailParts (its rows in the detail panel), settle
-// (b, view, due, data, cx: says how the unclear writes of its items ended
-// up), moveTo, toggleColumn, openStatusMenu, navigate (its own keyboard
-// movement in place of navigate's, select.js) and pickStatus (what a pick
-// in the status menu does in place of a move to that column). A shape keeps its own
-// state per Board in b.shapeState[name], which its state() makes once, when
-// the Board starts: herdr refuses a ScrollHandle made while a view draws
-// ("cannot run during render"). A new way to draw is a module here and its
-// entry in SHAPES.
+// where it has them, columnCount (how many columns it draws side by side,
+// which the detail panel's share of the width is no narrower than one of:
+// detailWidth; a list has none), detailParts (its rows in the detail
+// panel), settle (b, view, due, data, cx: says how the unclear writes of
+// its items ended up), moveTo, toggleColumn, openStatusMenu, navigate (its
+// own keyboard movement in place of navigate's, select.js) and pickStatus
+// (what a pick in the status menu does in place of a move to that column).
+// A shape keeps its own state per Board in b.shapeState[name], which its
+// state() makes once, when the Board starts: herdr refuses a ScrollHandle
+// made while a view draws ("cannot run during render"). A new way to draw
+// is a module here and its entry in SHAPES.
 
 export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
 
@@ -4459,15 +4474,15 @@ export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, b
 
 // The detail panel's sections of an item's related items (related.js): its
 // description ("BESCHREIBUNG", its lines as written, "keine Beschreibung"
-// where it has none), its sub-issues, then, where it has any or the source could not send them,
-// the pull requests linked to it; one line each with its key, title and
-// state (a done one dimmed, a draft marked), and below a section how many
-// it sent that cannot be read. While they load the description's and the
-// sub-issues' sections say "lädt …", after a failure the reason; a section the source could
-// not send says why in its place; what the source said besides follows
-// at the end. The rest of the details stays as it is. The line the panel
-// has selected while it has the keyboard is marked; a click on a line is
-// Enter on it (the Board's pickLine).
+// where it has none), its sub-issues, then, where it has any or the source
+// could not send them, the pull requests linked to it; one line each with
+// its key, title and state (a done one dimmed, a draft marked), and below
+// a section how many it sent that cannot be read. While they load the
+// description's and the sub-issues' sections say "lädt …", after a
+// failure the reason; a section the source could not send says why in its
+// place; what the source said besides follows at the end. The line the
+// panel has selected while it has the keyboard is marked; a click on a
+// line is Enter on it (the Board's pickLine).
 
 // What the related items keep per Board, made when it starts (why then:
 // ui/shapes/index.js): the lines' scroll handle.
@@ -4477,8 +4492,8 @@ export const relatedState = () => ({ scroll: ScrollHandle.new() });
 // (the Board's kept read: { data, error }, both null while it loads; null
 // before a read starts): { kind: "head" | "note" | "text" | "line", text,
 // tone ("muted", "error", "warning") or, for a line, `line` and its index
-// `n` among the lines (relatedLines); a "text" is a line of the
-// description ("" an empty one).
+// `n` among relatedLines (the one order of the lines); a "text" is a line
+// of the description ("" an empty one).
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
@@ -4486,14 +4501,14 @@ export function relatedRows(item, entry) {
     const why = entry?.error ? { kind: "note", text: entry.error, tone: "error" } : { kind: "note", text: "lädt …", tone: "muted" };
     return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
-  let n = 0;
+  const lines = relatedLines(data);
   const rows = [description];
   const text = descriptionLines(data.description);
   if (text.length) rows.push(...text.map((t) => ({ kind: "text", text: t })));
   else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
-    for (const line of section.lines) rows.push({ kind: "line", line, n: n++ });
+    for (const line of section.lines) rows.push({ kind: "line", line, n: lines.indexOf(line) });
     if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", tone: "muted" });
     if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ohne Zugriff`, tone: "muted" });
   };
@@ -4544,14 +4559,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
       .child(chip(t, line.state, t.background, t[line.color] ?? t.muted));
   };
-  return v_flex()
+  return sectionFrame(t)
     .id("related-lines")
     .min_h(0)
-    .px(18)
-    .py(12)
-    .gap(4)
-    .border_b(1)
-    .border_color(t.border)
     .overflow_y_scrollbar()
     .track_scroll(b.relatedUi.scroll)
     .children(relatedRows(item, entry).map(row));
@@ -4575,16 +4585,16 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // next or previous tab stop, and runs a matching binding's action before
 // on_key_down, so Tab never reaches a dialog's key handler, not even while
 // the dialog's text field has the keyboard; while a dialog with fields is
-// open, or the details of an item whose source has related items to read
-// (readsRelated; to move the keyboard into the details panel and back),
-// the board takes it as an action of its own. Of the matching
-// bindings, the one in the deepest context wins, so a binding in the
-// context of the board's root comes first (the leader mod binds the same
-// way and says more:
+// open, or, with no dialog and no filter being typed, the details of an
+// item whose source has related items to read (readsRelated; to move the
+// keyboard into the details panel and back), the board takes it as an
+// action of its own. Of the matching bindings, the one in the deepest
+// context wins, so a binding in the context of the board's root comes
+// first (the leader mod binds the same way and says more:
 // mods/leader/main.js, KEY_CONTEXT). The root carries that context only
 // while the board takes Tab (takesTab), and a binding matches only in a
-// context on the path to what has the keyboard, so with neither open herdr's
-// own Tab runs as before, also while the filter is typed. That matters: herdr's AppWindow runs every
+// context on the path to what has the keyboard, so otherwise herdr's own
+// Tab runs as before. That matters: herdr's AppWindow runs every
 // action the board does not stop as a command of its own, and says
 // "unknown command" for one it does not know (herdr's src/window.rs, its
 // ShellAction listener and run). Each action runs tabKey, the one place
@@ -4696,8 +4706,8 @@ export default class Board extends View {
   // with fields is open (its tab, MODALS), and, with no dialog and no filter
   // being typed, while the shown view's details are of an item whose source
   // has related items to read (readsRelated), to move the keyboard into the
-  // details panel and back. Anything else leaves Tab to herdr: the root carries the
-  // board's key context only while this holds.
+  // details panel and back. Anything else leaves Tab to herdr: the root
+  // carries the board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
     return !this.filtering && this.readsRelated(this.shownDetailsItem());
@@ -5002,10 +5012,11 @@ export default class Board extends View {
     return true;
   }
 
-  // Enter on a line: its item selected on the board where a shown column
-  // holds it, its details shown; the panel keeps the keyboard, with no line
-  // selected, where that item has related items to read. Else the line
-  // opens in the browser.
+  // Enter on a line: where a shown column holds the line's item, that item
+  // is selected and its details show; the panel keeps the keyboard (with no
+  // line selected) where that item has related items to read, else the
+  // board takes it back. Where no shown column holds it, the line opens in
+  // the browser.
   enterLine(view, line, cx) {
     const place = placeOf(this.navColumns(view), line);
     if (!place) return this.open(line, cx);
@@ -5654,7 +5665,7 @@ export default class Board extends View {
     const panel = this.panelOf(view);
     return v_flex()
       .id("detail")
-      .w(detailWidth(this.shape(view).columns?.(this, st) ?? 0))
+      .w(detailWidth(this.shape(view).columnCount?.(this, st) ?? 0))
       .min_w(DETAIL_MIN_W)
       .max_w(DETAIL_MAX_W)
       .flex_none()

@@ -420,8 +420,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   to with the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
   refresh, the filter, a hidden column), open details close. The details take
-  a third of the board's width, no less than one of the columns beside them,
-  between 420 and 720 pixels (detailWidth in `mods/board/src/ui/helpers.js`).
+  a third of the board's width, half of it beside a single column, but never
+  less than 420 or more than 720 pixels (detailWidth in
+  `mods/board/src/ui/helpers.js` has the rule).
   The details of a GitHub issue show its description as written (Markdown not
   rendered, a run of empty lines as one, "keine Beschreibung" where it has
   none), then list its sub-issues ("UNTERAUFGABEN · 7/11", the count the
@@ -433,7 +434,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   costs and what a refresh keeps of them, the header of
   `mods/board/src/main.js` says; `r` reads them again while they are open.
   While they show, `Tab` moves the keyboard into the details panel and back
-  (`Esc` gives it back too; elsewhere `Tab` stays herdr's): there
+  (`Esc` gives it back too; elsewhere, and while the filter is typed, `Tab`
+  stays herdr's): there
   `j/k` walk those lines, `Enter` selects a line's item on the board and shows
   its details, or opens it in the browser where the board does not show it,
   `o` opens it, and with no line selected `Enter` and `o` do what they do on

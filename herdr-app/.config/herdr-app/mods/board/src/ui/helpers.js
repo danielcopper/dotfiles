@@ -194,20 +194,22 @@ export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).c
 export const fieldFrame = (t, m, field, inner) =>
   h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
 
-// The detail panel's width, its one home: a third of the board area (the
-// row it shares with the view's content), and no narrower than one of the
-// shape's `columns` that share the rest with it (as many as it draws side
-// by side, its shape's columns; none for a list), as a share of that area;
-// within DETAIL_MIN_W and DETAIL_MAX_W pixels. Gaps and padding are left
-// out of the share.
+// The detail panel's width, its one home, from the number of columns that
+// share the rest of the board area with it (its shape's columnCount; none
+// for a list): a third of that area (the row it shares with the view's
+// content), and no narrower than one of those columns, as a share of that
+// area (gaps and padding left out). The pixel bounds DETAIL_MIN_W and
+// DETAIL_MAX_W come last, so a wide area's 720 px can leave it narrower
+// than a column.
 export const DETAIL_MIN_W = 420;
 export const DETAIL_MAX_W = 720;
 export const detailWidth = (columns) => `${(100 * (columns > 0 ? Math.max(1 / 3, 1 / (columns + 1)) : 1 / 3)).toFixed(2)}%`;
 
-// A section of the detail panel: a title (sectionTitle) over its rows.
+// A section of the detail panel: its frame (sectionFrame), a title
+// (sectionTitle) over its rows.
+export const sectionFrame = (t) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border);
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
-export const detailSection = (t, title, ...kids) =>
-  v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(sectionTitle(t, title)).children(kids);
+export const detailSection = (t, title, ...kids) => sectionFrame(t).child(sectionTitle(t, title)).children(kids);
 
 // The detail panel's parts of a work item (the sprint and the backlog
 // shape): its `state` as a pill on its theme `color`, a click opening the

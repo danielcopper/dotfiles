@@ -32,9 +32,11 @@
 //
 // Calls: a GitHub view costs one gh call per refresh, and an issue's
 // related items (its description, sub-issues and linked pull requests) one
-// more when its details open, and again on `r` while they are open (readRelated); what a
-// refresh keeps of them keptRelated says. An Azure team's Sprint two az calls (the taskboard's column of each work item, and one
-// WIQL query for their fields), its Backlog two, one after the other (the
+// more when its details open, again on `r` while they are open, and again
+// after a refresh where their last read failed (readRelated; what a refresh
+// keeps of them keptRelated says). An Azure team's Sprint two az calls (the
+// taskboard's column of each work item, and one WIQL query for their
+// fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
 // their fields; one for an empty backlog); either one more while who az is
 // stays unknown. What the Sprint and the Backlog read once and keep, and
@@ -140,16 +142,16 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // next or previous tab stop, and runs a matching binding's action before
 // on_key_down, so Tab never reaches a dialog's key handler, not even while
 // the dialog's text field has the keyboard; while a dialog with fields is
-// open, or the details of an item whose source has related items to read
-// (readsRelated; to move the keyboard into the details panel and back),
-// the board takes it as an action of its own. Of the matching
-// bindings, the one in the deepest context wins, so a binding in the
-// context of the board's root comes first (the leader mod binds the same
-// way and says more:
+// open, or, with no dialog and no filter being typed, the details of an
+// item whose source has related items to read (readsRelated; to move the
+// keyboard into the details panel and back), the board takes it as an
+// action of its own. Of the matching bindings, the one in the deepest
+// context wins, so a binding in the context of the board's root comes
+// first (the leader mod binds the same way and says more:
 // mods/leader/main.js, KEY_CONTEXT). The root carries that context only
 // while the board takes Tab (takesTab), and a binding matches only in a
-// context on the path to what has the keyboard, so with neither open herdr's
-// own Tab runs as before, also while the filter is typed. That matters: herdr's AppWindow runs every
+// context on the path to what has the keyboard, so otherwise herdr's own
+// Tab runs as before. That matters: herdr's AppWindow runs every
 // action the board does not stop as a command of its own, and says
 // "unknown command" for one it does not know (herdr's src/window.rs, its
 // ShellAction listener and run). Each action runs tabKey, the one place
@@ -261,8 +263,8 @@ export default class Board extends View {
   // with fields is open (its tab, MODALS), and, with no dialog and no filter
   // being typed, while the shown view's details are of an item whose source
   // has related items to read (readsRelated), to move the keyboard into the
-  // details panel and back. Anything else leaves Tab to herdr: the root carries the
-  // board's key context only while this holds.
+  // details panel and back. Anything else leaves Tab to herdr: the root
+  // carries the board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
     return !this.filtering && this.readsRelated(this.shownDetailsItem());
@@ -567,10 +569,11 @@ export default class Board extends View {
     return true;
   }
 
-  // Enter on a line: its item selected on the board where a shown column
-  // holds it, its details shown; the panel keeps the keyboard, with no line
-  // selected, where that item has related items to read. Else the line
-  // opens in the browser.
+  // Enter on a line: where a shown column holds the line's item, that item
+  // is selected and its details show; the panel keeps the keyboard (with no
+  // line selected) where that item has related items to read, else the
+  // board takes it back. Where no shown column holds it, the line opens in
+  // the browser.
   enterLine(view, line, cx) {
     const place = placeOf(this.navColumns(view), line);
     if (!place) return this.open(line, cx);
@@ -1219,7 +1222,7 @@ export default class Board extends View {
     const panel = this.panelOf(view);
     return v_flex()
       .id("detail")
-      .w(detailWidth(this.shape(view).columns?.(this, st) ?? 0))
+      .w(detailWidth(this.shape(view).columnCount?.(this, st) ?? 0))
       .min_w(DETAIL_MIN_W)
       .max_w(DETAIL_MAX_W)
       .flex_none()

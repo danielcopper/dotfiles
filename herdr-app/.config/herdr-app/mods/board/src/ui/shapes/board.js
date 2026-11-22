@@ -28,7 +28,7 @@ const boardState = (b) => b.shapeState.board;
 export const boardShape = {
   state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
-  columns: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
+  columnCount: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
   // All items, whatever the filter: the cards of the shown columns.

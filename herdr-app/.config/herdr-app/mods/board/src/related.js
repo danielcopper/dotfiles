@@ -1,8 +1,9 @@
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's description, its sub-issues and the pull
-// requests linked to it), what of them a view keeps (keptRelated), the
-// lines the details panel walks when it has the keyboard, the lines of the
-// description, and the heads of their sections.
+// open (on GitHub an issue's sub-issues and the pull requests linked to it;
+// the same read brings the issue's description beside them), what of them
+// a view keeps (keptRelated), the lines the details panel walks when it has
+// the keyboard, the lines of the description, and the heads of their
+// sections.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
 // A source that has related items gives `related: { reads(item), load(item)
@@ -10,7 +11,8 @@
 // them, one call, into { description, subIssues, prs, warnings }.
 // description is the item's own text as the source has it ("" for none;
 // shown as written: descriptionLines). Each of subIssues and prs is a
-// section { count (how many the source has; null when it sent none), sent
+// section { count (how many the source has; null when it did not send the
+// section), sent
 // (how many it sent), cut (it has more than it sent), hidden (how many it
 // sent that cannot be read), error (why it sent none; null), lines (those
 // it sent that can be read) }; a line { source, kind, repo, repoShort,
@@ -19,12 +21,13 @@
 // each.
 
 // What a view keeps of its related items after a refresh starts: only
-// those read without failure of the item whose details show (`openKey`,
-// null when none), so that a refresh reads nothing for them, while a failed
-// read is tried again; `r` reads them again too (the Board's reload).
+// those of the item whose details show (`openKey`, null when none), read
+// or still being read, so that a refresh reads nothing for them; a failed
+// read is dropped, so that it is tried again; `r` reads them again too
+// (the Board's reload).
 export function keptRelated(related, openKey) {
   const entry = openKey === null ? undefined : related.get(openKey);
-  return new Map(entry?.data ? [[openKey, entry]] : []);
+  return new Map(entry && !entry.error ? [[openKey, entry]] : []);
 }
 
 // The lines of read related items (`data`, or null while none are read),

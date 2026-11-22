@@ -367,35 +367,43 @@ function relatedLine(node, kind) {
 // Where each section's connection stands in the answer.
 const RELATED_PATHS = { subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"] };
 
-// A connection of the answer as a section (related.js); one GitHub did not
-// send carries the error at its path.
+// A connection of the answer as a section (related.js), and the error it
+// shows (`shown`, null for none). One GitHub did not send, or whose nodes
+// it did not send, shows the error at that path in their place.
 function relatedSection(conn, kind, path, errors) {
-  if (!conn) {
-    const e = errorAt(errors, path);
-    return { count: null, sent: 0, cut: false, hidden: 0, error: e ? `GitHub: ${firstLine(e.message)}` : "GitHub schickte sie nicht", lines: [] };
+  if (!conn || !Array.isArray(conn.nodes)) {
+    const shown = errorAt(errors, conn ? [...path, "nodes"] : path);
+    const error = shown ? `GitHub: ${firstLine(shown.message)}` : "GitHub schickte sie nicht";
+    return { section: { count: conn?.totalCount ?? null, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
   }
-  const nodes = Array.isArray(conn.nodes) ? conn.nodes : [];
-  const lines = nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
-  return { count: conn.totalCount ?? lines.length, sent: nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: nodes.length - lines.length, error: null, lines };
+  const lines = conn.nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
+  const section = {
+    count: conn.totalCount ?? lines.length, sent: conn.nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: conn.nodes.length - lines.length,
+    error: null, lines,
+  };
+  return { section, shown: null };
 }
 
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { description, subIssues, prs, warnings } (related.js). A missing issue
-// is explained by the error at its path; the errors below a section are
-// its own (a node GitHub sent as null counts as hidden), the others are
-// warnings.
+// its data) → { description, subIssues, prs, warnings } (related.js). A
+// missing issue is explained by the error at its path. An error is a
+// section's own only where the section shows it, in place of what GitHub
+// did not send; all others are warnings (a node GitHub sent as null counts
+// as hidden, and its error is one of them).
 export function parseGithubRelated(json, item, errors = []) {
   const issue = json?.data?.repository?.issue;
   if (!issue) {
     const e = errorAt(errors, ["repository"]);
     throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
   }
-  const own = (e) => Object.values(RELATED_PATHS).some((path) => errorAt([e], path));
+  const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors);
+  const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors);
+  const shown = [subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
-    subIssues: relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors),
-    prs: relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors),
-    warnings: errors.filter((e) => !own(e)).map((e) => firstLine(e.message)).filter(Boolean),
+    subIssues: subIssues.section,
+    prs: prs.section,
+    warnings: errors.filter((e) => !shown.includes(e)).map((e) => firstLine(e.message)).filter(Boolean),
   };
 }
 
@@ -463,9 +471,9 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // "nur meine" cannot tell one's own items when GitHub did not name the
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
 // gives its hidden columns) and how a board writes a move; and the items
-// related to an issue, its sub-issues and linked pull requests (related.js
-// says what `related` holds). gh runs by the path `paths` (toolPaths)
-// finds.
+// related to an issue, its sub-issues and linked pull requests, read with
+// its description (related.js says what `related` holds). gh runs by the
+// path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",

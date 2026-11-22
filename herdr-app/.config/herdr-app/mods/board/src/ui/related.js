@@ -1,20 +1,20 @@
 // The detail panel's sections of an item's related items (related.js): its
 // description ("BESCHREIBUNG", its lines as written, "keine Beschreibung"
-// where it has none), its sub-issues, then, where it has any or the source could not send them,
-// the pull requests linked to it; one line each with its key, title and
-// state (a done one dimmed, a draft marked), and below a section how many
-// it sent that cannot be read. While they load the description's and the
-// sub-issues' sections say "lädt …", after a failure the reason; a section the source could
-// not send says why in its place; what the source said besides follows
-// at the end. The rest of the details stays as it is. The line the panel
-// has selected while it has the keyboard is marked; a click on a line is
-// Enter on it (the Board's pickLine).
+// where it has none), its sub-issues, then, where it has any or the source
+// could not send them, the pull requests linked to it; one line each with
+// its key, title and state (a done one dimmed, a draft marked), and below
+// a section how many it sent that cannot be read. While they load the
+// description's and the sub-issues' sections say "lädt …", after a
+// failure the reason; a section the source could not send says why in its
+// place; what the source said besides follows at the end. The line the
+// panel has selected while it has the keyboard is marked; a click on a
+// line is Enter on it (the Board's pickLine).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { itemLabel } from "../shared.js";
-import { descriptionLines, prsHead, subIssuesHead } from "../related.js";
-import { chip, sectionTitle } from "./helpers.js";
+import { descriptionLines, prsHead, relatedLines, subIssuesHead } from "../related.js";
+import { chip, sectionFrame, sectionTitle } from "./helpers.js";
 
 // What the related items keep per Board, made when it starts (why then:
 // ui/shapes/index.js): the lines' scroll handle.
@@ -24,8 +24,8 @@ export const relatedState = () => ({ scroll: ScrollHandle.new() });
 // (the Board's kept read: { data, error }, both null while it loads; null
 // before a read starts): { kind: "head" | "note" | "text" | "line", text,
 // tone ("muted", "error", "warning") or, for a line, `line` and its index
-// `n` among the lines (relatedLines); a "text" is a line of the
-// description ("" an empty one).
+// `n` among relatedLines (the one order of the lines); a "text" is a line
+// of the description ("" an empty one).
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
@@ -33,14 +33,14 @@ export function relatedRows(item, entry) {
     const why = entry?.error ? { kind: "note", text: entry.error, tone: "error" } : { kind: "note", text: "lädt …", tone: "muted" };
     return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
-  let n = 0;
+  const lines = relatedLines(data);
   const rows = [description];
   const text = descriptionLines(data.description);
   if (text.length) rows.push(...text.map((t) => ({ kind: "text", text: t })));
   else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
-    for (const line of section.lines) rows.push({ kind: "line", line, n: n++ });
+    for (const line of section.lines) rows.push({ kind: "line", line, n: lines.indexOf(line) });
     if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", tone: "muted" });
     if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ohne Zugriff`, tone: "muted" });
   };
@@ -91,14 +91,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
       .child(chip(t, line.state, t.background, t[line.color] ?? t.muted));
   };
-  return v_flex()
+  return sectionFrame(t)
     .id("related-lines")
     .min_h(0)
-    .px(18)
-    .py(12)
-    .gap(4)
-    .border_b(1)
-    .border_color(t.border)
     .overflow_y_scrollbar()
     .track_scroll(b.relatedUi.scroll)
     .children(relatedRows(item, entry).map(row));
