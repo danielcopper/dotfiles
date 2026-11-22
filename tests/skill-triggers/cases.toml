@@ -295,3 +295,20 @@ quiet = ["to-issues"]
 prompt = """
 Set up a new branch and worktree for adding the CSV export feature, then I'll start coding there.
 """
+
+# --- show-page ----------------------------------------------------------------
+
+[[case]]
+name = "show_page_fires_on_screenshots_to_compare"
+fires = "show-page"
+quiet = ["prototype"]
+prompt = """
+I exported four screenshots of the onboarding screens to ./screenshots. Put them on a page I can open on my phone so I can compare them.
+"""
+
+[[case]]
+name = "show_page_quiet_on_image_conversion"
+quiet = ["show-page"]
+prompt = """
+Give me the shell command that converts every PNG in ./icons to WebP at quality 80.
+"""

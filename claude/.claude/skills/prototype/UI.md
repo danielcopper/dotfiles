@@ -87,7 +87,7 @@ Your own test runs of a terminal UI stay off the user's session, as `~/Memory/gl
 
 ### Static views
 
-When screens are shown as a static page instead (captured terminal screens, a layout study), they stack vertically, as `~/Memory/global/mockups-stack-vertically.md` says, and every string, value and width in them comes from the producing code, as `~/Memory/global/mockup-values-come-from-code.md` says. The page is served like any other, per "Show it".
+When screens are shown as a static page instead (captured terminal screens, a layout study), it is a mockup: build and serve it with the `show-page` skill.
 
 ### 5. Capture the answer
 

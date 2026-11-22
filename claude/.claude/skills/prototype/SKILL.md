@@ -26,7 +26,7 @@ The two branches produce very different artifacts, so getting this wrong wastes 
 
 ## Show it
 
-A page is shown as the global `CLAUDE.md`, "Showing a page or image", says, served the way `~/Memory/global/show-images-as-page.md` sets out; stop the server once the user has picked. A terminal UI runs in the user's own terminal instead: hand over the command, as [UI.md](UI.md) says.
+A page is shown with the `show-page` skill; the user is done with it once they have picked. A terminal UI runs in the user's own terminal instead: hand over the command, as [UI.md](UI.md) says.
 
 ## The user picks
 
