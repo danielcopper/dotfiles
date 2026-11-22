@@ -697,8 +697,8 @@ DENIED = [
     # a backslash-newline before #, case, or a brace that is an argument: the heredoc reading
     # gives up
     "echo x\\\n#'\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
-    "{ echo }; cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\necho {\n} | env bash",
-    "case x in (x) cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n;; esac | env bash",
+    "{ echo }; cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\necho {\n}",
+    "case x in (x) cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n;; esac",
     # a shell as the command word of any simple command re-reads the text: quotes hide nothing
     "gh pr view 1; bash x.sh $?",
     "gh pr view 1; /bin/bash x.sh $?",
