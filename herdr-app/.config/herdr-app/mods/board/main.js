@@ -4492,8 +4492,8 @@ export const relatedState = () => ({ scroll: ScrollHandle.new() });
 // (the Board's kept read: { data, error }, both null while it loads; null
 // before a read starts): { kind: "head" | "note" | "text" | "line", text,
 // tone ("muted", "error", "warning") or, for a line, `line` and its index
-// `n` among relatedLines (the one order of the lines); a "text" is a line
-// of the description ("" an empty one).
+// `n` among relatedLines (the one order of the lines); a "text" is the
+// description, one row, its `lines` ("" an empty one).
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
@@ -4504,7 +4504,7 @@ export function relatedRows(item, entry) {
   const lines = relatedLines(data);
   const rows = [description];
   const text = descriptionLines(data.description);
-  if (text.length) rows.push(...text.map((t) => ({ kind: "text", text: t })));
+  if (text.length) rows.push({ kind: "text", lines: text });
   else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
@@ -4533,8 +4533,11 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
   const row = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
-    // A line of the description wraps; an empty one keeps its height.
-    if (r.kind === "text") return div().text_size(12).line_height("18px").min_h(18).child(r.text);
+    // The description as one block, its lines with no gap between them: each
+    // wraps, an empty one keeps its height.
+    if (r.kind === "text") {
+      return v_flex().children(r.lines.map((l) => div().text_size(12).line_height("18px").min_h(18).child(l)));
+    }
     const { line, n } = r;
     const marked = n === at;
     return h_flex()

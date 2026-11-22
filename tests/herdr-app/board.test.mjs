@@ -5530,7 +5530,7 @@ test("GitHub has related items to read for an issue with a number and a repo onl
   );
 });
 
-test("the related lines: sub-issues first; a step from none goes to the first, up from the first to none, the last stays; a refresh keeps only the open item's read that succeeded; the heads", () => {
+test("the related lines: sub-issues first; a step from none goes to the first, up from the first to none, the last stays; a refresh keeps the open item's read unless it failed; the heads", () => {
   const d = board.parseGithubRelated(json("github-related.json"), issueItem());
   assert.deepEqual(board.relatedLines(d).map((l) => l.number), [3001, 3010, 12, 3020, 3015]);
   assert.deepEqual(board.relatedLines(null), []);
@@ -5788,10 +5788,10 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   await press(b, cx, "j");
   await press(b, cx, "down");
   assert.deepEqual([b.panel.line, marked(), st().sel.key], [1, [1], "PVTI_rec4"], "the lines move, the board's selection stays");
-  assert.equal(scrolledTo(b, host), 8, "scrolled to the second sub-issue's line, below the description's six rows");
+  assert.equal(scrolledTo(b, host), 4, "scrolled to the second sub-issue's line, below the description's two rows");
   for (let i = 0; i < 6; i++) await press(b, cx, "j");
   assert.equal(b.panel.line, 4, "the last stays");
-  assert.equal(scrolledTo(b, host), 12, "scrolled to the last pull request's line");
+  assert.equal(scrolledTo(b, host), 8, "scrolled to the last pull request's line");
   await press(b, cx, "k", { modifiers: { control: true } });
   await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
   assert.equal(b.panel.line, 4, "with Control or Shift a key is not the panel's");
@@ -5939,6 +5939,9 @@ test("UI: the details show the issue's description above its sub-issues, as writ
   assert.equal(readsOf(host).length, 0, "one call for all of it");
   assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "Rolls the sample tool out to the list readers.", "", "## Steps", "- read the list", "- page through it"]);
   assert.ok(relatedTexts(b).indexOf("BESCHREIBUNG") < relatedTexts(b).findIndex((t) => t.startsWith("UNTERAUFGABEN")), "above the sub-issues, in the same scrolled block");
+  const block = byId(detailPanel(b), "related-lines").kids[1];
+  assert.deepEqual([block.kind, block.kids.length, block.styles.includes("gap")], ["v_flex", 5, false], "one row, its lines with no gap between them");
+  assert.deepEqual(block.kids.map((l) => l.with.min_h[0]), [18, 18, 18, 18, 18], "an empty line keeps its height");
   await press(b, cx, "r");
   await answerRelated(host, ok(relatedAnswer()));
   assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "keine Beschreibung"]);
@@ -5947,7 +5950,7 @@ test("UI: the details show the issue's description above its sub-issues, as writ
   assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "GraphQL: Something broke"]);
 });
 
-test("UI: the detail panel takes a third of the board area, no less than one of the columns beside it, within 420 and 720 pixels", async () => {
+test("UI: the detail panel takes a third of the board area as a share, no narrower than one of the columns beside it, the 420 and 720 pixel bounds last", async () => {
   const { b, cx, host } = await openBoard();
   const width = () => {
     const panel = detailPanel(b);
@@ -5972,7 +5975,7 @@ test("UI: the detail panel takes a third of the board area, no less than one of 
   assert.equal(detailPanel(b).with.w[0], "33.33%", "a list has no columns");
 });
 
-test("UI: on a Sprint the detail panel is no narrower than one of its taskboard columns; the stories' column does not count", async () => {
+test("UI: on a Sprint the detail panel's share is no narrower than one of its taskboard columns; the stories' column does not count", async () => {
   const { b, cx, view, st } = await openSprint();
   await press(b, cx, "enter");
   assert.equal(st().detail, true);
