@@ -15,8 +15,10 @@
 #       1e3, 1_0, " 2", 400 digits that overflow to infinity, 0. and 400
 #       zeros and a 1, which is 0 to a float): exit 2, that reason and the
 #       usage on stderr; a missing value, --title without its value, an
-#       unknown option, no image: exit 2, the usage on stderr; the out-dir
-#       not created in each; the usage names preview-serve <out-dir>
+#       unknown option, no image: exit 2, the usage on stderr; --title with a
+#       separate value that starts with -: exit 2, pointing to --title=; the
+#       out-dir not created in each; the usage names preview-serve <out-dir>;
+#       --title=-x gives the page the title -x
 #   m4  each format's size read from the file, width and height, as the CSS
 #       width and the caption show them: PNG, baseline and progressive JPEG
 #       (a DHT segment and fill bytes before the frame header), GIF, WebP as
@@ -77,16 +79,19 @@
 #       an <h2> with the title, HTML-escaped, then its images in the order
 #       given, each section its own <section>; images before the first
 #       --section form one without a heading; without --section there is one
-#       such section; a --section right after <out-dir> makes no empty one
-#   l2  a --section without a title, with an empty title, with no image after
-#       it (at the end, or right before another --section), or before
-#       <out-dir>: exit 2, the reason and the usage on stderr, the out-dir not
-#       created; after -- a --section is an image name like any other
+#       such section; a --section right after <out-dir> makes no empty one;
+#       the meta line counts the images of every section
+#   l2  a --section without a title, with an empty or blank title, with a
+#       separate title that starts with - (pointing to --section=), with no
+#       image after it (at the end, or right before another --section), or
+#       before <out-dir>: exit 2, the reason and the usage on stderr, the
+#       out-dir not created, in each; --section=-x is the heading -x; after
+#       -- a --section is an image name like any other
 #   l3  the layout: each section's images in a grid whose column is its
 #       widest image's CSS width (--col) and that fits as many columns as the
 #       page allows, never wider than the screen; the page centered, as wide
-#       as its widest section with every image in one row (--page), and at
-#       least 40rem
+#       as its widest section with every image in one row (--page), whichever
+#       section that is, and at least 40rem
 # The f cases run the script inside a python harness, $ROOT/faulty.py, that
 # loads it as a module and makes the os calls the scenario FAULT names fail,
 # the one way to reach a rename that fails between two that succeed:
@@ -368,6 +373,13 @@ m3_bad_density() {
   not_created 2 "usage: image-page"
   run "$OUTDIR" "$FX/wide.png" --title
   not_created 2 "usage: image-page"
+  run "$OUTDIR" --title -x "$FX/wide.png"
+  not_created 2 "give a value that starts with - as --title=-x"
+  check "the usage with it: $ERR" grep -qF "usage: image-page" <<<"$ERR"
+  run "$OUTDIR" --title=-x "$FX/wide.png"
+  written
+  check "--title=-x is the title: $(page | grep '<title>')" grep -qxF "<title>-x</title>" "$OUTDIR/index.html"
+  rm -rf "$OUTDIR"
   run --size 3 "$OUTDIR" "$FX/wide.png"
   not_created 2 "usage: image-page"
   run "$OUTDIR"
@@ -823,6 +835,8 @@ l1_sections() {
   run "$OUTDIR" "$FX/anim.gif" --section "Monat <&>" "$FX/wide.png" "$FX/base.jpg" \
     --section=Woche "$FX/prog.jpg"
   written
+  check "the meta line counts every section's images: $(page | grep 'class="meta"')" \
+    grep -qxF '<p class="meta">4 images · density 1</p>' "$OUTDIR/index.html"
   check "sections in order: $(layout)" [ "$(layout | grep -v grid)" = '<section>
 <img src="anim.gif">
 <section>
@@ -845,18 +859,33 @@ l1_sections() {
 <img src="wide.png">' ]
 }
 
+# refused_usage <reason>: exit 2 before the out-dir exists, <reason> and the
+# usage on stderr.
+refused_usage() {
+  not_created 2 "$1"
+  check "the usage with '$1': $ERR" grep -qF "usage: image-page" <<<"$ERR"
+}
+
 l2_section_usage() {
   run "$OUTDIR" "$FX/wide.png" --section
-  not_created 2 "--section needs a value"
+  refused_usage "--section needs a value"
   run "$OUTDIR" --section "" "$FX/wide.png"
-  not_created 2 "--section needs a title"
+  refused_usage "--section needs a title"
+  run "$OUTDIR" --section "   " "$FX/wide.png"
+  refused_usage "--section needs a title"
+  run "$OUTDIR" --section --replace "$FX/wide.png"
+  refused_usage "give a value that starts with - as --section=--replace"
   run "$OUTDIR" "$FX/wide.png" --section Leer
-  not_created 2 "--section Leer has no image after it"
+  refused_usage "--section Leer has no image after it"
   run "$OUTDIR" --section Leer --section Voll "$FX/wide.png"
-  not_created 2 "--section Leer has no image after it"
+  refused_usage "--section Leer has no image after it"
   run --section Vorne "$OUTDIR" "$FX/wide.png"
-  not_created 2 "<out-dir> comes before the first --section"
+  refused_usage "<out-dir> comes before the first --section"
   check "the usage names --section: $ERR" grep -qF "[--section TITLE]" <<<"$ERR"
+  run "$OUTDIR" --section=-x "$FX/wide.png"
+  written
+  check "--section=-x is the heading -x: $(layout)" grep -qxF '<h2>-x</h2>' <<<"$(layout)"
+  rm -rf "$OUTDIR"
   cp "$FX/wide.png" "$ROOT/caller/--section"
   run "$OUTDIR" "$FX/anim.gif" -- --section
   written
@@ -880,6 +909,10 @@ l3_grid_layout() {
   check "the page centered, at least 40rem" \
     grep -qF '.page{width:100%;max-width:max(40rem,var(--page));margin-inline:auto' "$OUTDIR/index.html"
   check "each image still at its real size: $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]
+  run --replace --density 2.625 "$OUTDIR" --section A "$ROOT/caller/other.jpg" --section B "$FX/base.jpg" "$FX/wide.png"
+  written
+  check "the widest section counts when it is not first: $(page | grep '<main')" \
+    grep -qxF '<main class="page" style="--page:576px">' "$OUTDIR/index.html"
 }
 
 missing=0

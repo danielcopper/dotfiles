@@ -497,8 +497,7 @@ playbook's range and says so. The script's header has the details.
 serve this way: it copies PNG, JPEG, GIF or WebP images into `<out-dir>` and
 lays them out in an `index.html` side by side as they fit, at their real
 size, each CSS pixel `--density` image pixels (2.625 for an Android render
-drawn at that density); `--section TITLE` among the images groups them
-under a heading. Its header lists the options and what it refuses.
+drawn at that density). Its header lists the options and what it refuses.
 
 ## memex sync
 
