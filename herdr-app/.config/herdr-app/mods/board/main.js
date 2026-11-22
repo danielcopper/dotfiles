@@ -4263,10 +4263,11 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
 // on_key_down, so Tab never reaches a dialog's key handler, not even while
-// the dialog's text field has the keyboard; the board takes it as an
-// action of its own instead. Of the matching bindings, the one in the
-// deepest context wins, so a binding in the context of the board's root
-// comes first (the leader mod binds the same way and says more:
+// the dialog's text field has the keyboard; while a dialog with fields is
+// open, the board takes it as an action of its own. Of the matching
+// bindings, the one in the deepest context wins, so a binding in the
+// context of the board's root comes first (the leader mod binds the same
+// way and says more:
 // mods/leader/main.js, KEY_CONTEXT). The root carries that context only
 // while the board takes Tab (takesTab), and a binding matches only in a
 // context on the path to what has the keyboard, so with nothing open herdr's
