@@ -43,10 +43,10 @@ old files and a run that fails leaves the earlier page as it was, unless
 putting it back fails too (below). So the parent of <out-dir> must be
 writable, even when <out-dir> itself is. Into an empty <out-dir> it moves
 the files one by one, .image-page.json first and index.html last, so
---replace can clear what a failed move left there. When
-putting the new page in place fails and putting the earlier one back fails
-too, it says where the earlier page is; when only removing the earlier page
-afterwards fails, it warns and exits 0.
+--replace can clear what a failed move left there. When putting the new
+page in place fails and putting the earlier one back fails too, it says
+where the earlier page is; when only removing the earlier page afterwards
+fails, it warns and exits 0.
 
 It refuses, before it writes anything, and exits 1:
 - an image whose pixel size it cannot read, or that it cannot read at all;
@@ -165,7 +165,7 @@ def parse(argv):
                 if value is None:
                     usage(f"{name} needs a value")
                 # After a space a value that looks like an option is most
-                # likely a missing one: --section --replace, --title a.png --.
+                # likely a missing one: --section --replace, --title -- a.png.
                 if name != "--density" and value.startswith("-"):
                     usage(f"give a value that starts with - as {name}={value}")
             if name == "--section":

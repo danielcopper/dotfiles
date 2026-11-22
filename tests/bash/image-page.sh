@@ -331,6 +331,12 @@ not_created() { # not_created <rc> <stderr text>: refused before $OUTDIR exists
   check "nothing on stdout: $OUT" [ -z "$OUT" ]
   check "no traceback: $ERR" no_traceback
 }
+# refused_usage <reason>: exit 2 before the out-dir exists, <reason> and the
+# usage on stderr.
+refused_usage() {
+  not_created 2 "$1"
+  check "the usage with '$1': $ERR" grep -qF "usage: image-page" <<<"$ERR"
+}
 
 m1_density_scales() {
   run --density 2.625 "$OUTDIR" "$FX/wide.png" "$FX/five.png" "$FX/one.png"
@@ -363,19 +369,16 @@ m3_bad_density() {
   for value in 0 0.0 -1 abc "" nan inf 1e3 1_0 " 2" "1$(printf '0%.0s' {1..400})" \
     "0.$(printf '0%.0s' {1..400})1"; do
     run --density "$value" "$OUTDIR" "$FX/wide.png"
-    not_created 2 "usage: image-page"
-    check "the reason for ${value:0:12}: $ERR" grep -qF "$reason" <<<"$ERR"
+    refused_usage "$reason"
     run "--density=$value" "$OUTDIR" "$FX/wide.png"
-    not_created 2 "usage: image-page"
-    check "the reason for =${value:0:12}: $ERR" grep -qF "$reason" <<<"$ERR"
+    refused_usage "$reason"
   done
   run "$OUTDIR" "$FX/wide.png" --density
   not_created 2 "usage: image-page"
   run "$OUTDIR" "$FX/wide.png" --title
   not_created 2 "usage: image-page"
   run "$OUTDIR" --title -x "$FX/wide.png"
-  not_created 2 "give a value that starts with - as --title=-x"
-  check "the usage with it: $ERR" grep -qF "usage: image-page" <<<"$ERR"
+  refused_usage "give a value that starts with - as --title=-x"
   run "$OUTDIR" --title=-x "$FX/wide.png"
   written
   check "--title=-x is the title: $(page | grep '<title>')" grep -qxF "<title>-x</title>" "$OUTDIR/index.html"
@@ -857,13 +860,6 @@ l1_sections() {
   check "a first --section leaves no section without images: $(layout)" [ "$(layout | grep -v grid)" = '<section>
 <h2>Nur</h2>
 <img src="wide.png">' ]
-}
-
-# refused_usage <reason>: exit 2 before the out-dir exists, <reason> and the
-# usage on stderr.
-refused_usage() {
-  not_created 2 "$1"
-  check "the usage with '$1': $ERR" grep -qF "usage: image-page" <<<"$ERR"
 }
 
 l2_section_usage() {
