@@ -49,10 +49,12 @@
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
-// sprint's taskboard), kinds/backlog.js (a team's backlog), select.js
-// (filter, "nur meine", selection), sources/ (GitHub, Azure), tools.js
-// (running gh and az), actions/ (starting a session, writing a change at
-// once, moving a card, changing a state, creating a work item),
+// sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
+// (a state's color), select.js (filter, "nur meine", selection), sources/
+// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
+// index.js), tools.js (running gh and az), actions/ (starting a session,
+// writing a change at once, moving a card, changing a state, creating a
+// work item),
 // ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
@@ -82,9 +84,13 @@ export * from "./kinds/board.js";
 export * from "./kinds/index.js";
 export * from "./kinds/sprint.js";
 export * from "./kinds/backlog.js";
+export * from "./kinds/states.js";
 export * from "./select.js";
 export * from "./sources/github.js";
-export * from "./sources/azure.js";
+export * from "./sources/azure/common.js";
+export * from "./sources/azure/sprint.js";
+export * from "./sources/azure/backlog.js";
+export * from "./sources/azure/index.js";
 export * from "./tools.js";
 export * from "./actions/start.js";
 export * from "./actions/write.js";

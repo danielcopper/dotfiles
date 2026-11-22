@@ -3,12 +3,15 @@
 // row before Azure names the new id; and after a refresh, how unclear
 // creates and parent links ended up. The backlog shape creates so.
 
-import { itemLabel } from "../shared.js";
+import { itemKey, itemLabel } from "../shared.js";
 import { findBacklogItem } from "../kinds/backlog.js";
 import { writeAtOnce } from "./write.js";
 
 // The key a create is written under: one create at a time per view.
 export const CREATE_KEY = "create";
+
+// The key of the Azure work item `id` (itemKey).
+const workItemKey = (id) => itemKey({ source: "azure", kind: "workitem", number: id });
 
 // Creates a work item of `type` with `title`; a child type (type.child)
 // goes under `parent`. Nothing shows before Azure names the id; then the
@@ -28,7 +31,7 @@ export function createItem(b, view, { type, title, parent }, cx) {
     // The write's own cx (writeAtOnce): the one this was called with has
     // gone stale by now.
     landed(cx) {
-      if (!under) st.want = { key: itemLabel({ source: "azure", kind: "workitem", number: id }), after: st.runs };
+      if (!under) st.want = { key: workItemKey(id), after: st.runs };
       else linkParent(b, view, id, under, cx);
     },
     undo() {},
@@ -36,10 +39,10 @@ export function createItem(b, view, { type, title, parent }, cx) {
     again: true,
     texts: {
       pending: () => `${type.name} ${label} wird angelegt …`,
-      landed: () => (under ? `AB#${id} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `AB#${id} ${label} angelegt`),
+      landed: () => (under ? `${workItemKey(id)} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `${workItemKey(id)} ${label} angelegt`),
       unclear: `${type.name} ${label} anlegen`,
       refused: (why) => `${type.name} ${label} nicht angelegt: ${why}`,
-      landedBut: (why) => `AB#${id} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
+      landedBut: (why) => `${workItemKey(id)} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
       toasts: { unclear: `Anlegen von ${label}`, refused: `${label} nicht angelegt` },
     },
   }, cx);
@@ -49,7 +52,7 @@ export function createItem(b, view, { type, title, parent }, cx) {
 // the item is there either way, so a refusal says only that the link is
 // missing.
 function linkParent(b, view, id, parent, cx) {
-  const label = `AB#${id}`;
+  const label = workItemKey(id);
   const to = itemLabel(parent);
   writeAtOnce(b, view, {
     key: label,

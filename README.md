@@ -317,8 +317,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   the work items of the sprint in the team's areas, and its tasks are the work
   items of the types the taskboard's columns map. What it reads per refresh, the
   header of `mods/board/src/main.js` says, and makeAzure (in
-  `mods/board/src/sources/azure.js`) what it keeps; `r` reads the team's sprint,
-  areas and columns again. A team's Backlog lists its requirement level (its
+  `mods/board/src/sources/azure/index.js`) what it keeps; `r` reads the team's
+  sprint, areas and columns again. A team's Backlog lists its requirement level (its
   Stories, and Bugs where the team keeps them there) in backlog order, one row
   each with id, type, title, state, sprint ("—" for none) and assignee. It
   needs `az login`: the order comes through `az rest`, which takes no PAT, and

@@ -13,7 +13,7 @@ import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { itemLabel } from "../../shared.js";
 import { createTypes } from "../../kinds/backlog.js";
 import { createItem } from "../../actions/create.js";
-import { backdrop, button } from "../helpers.js";
+import { backdrop, button, cycleField, fieldFrame, fieldLabel, wireTextField } from "../helpers.js";
 
 // The fields Tab walks, in order.
 const CREATE_FIELDS = ["title", "type"];
@@ -40,16 +40,8 @@ export const createModal = {
       return b.say(`Das Team hat keinen ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
-    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", textField: "title", inputFocused: false, error: null };
-    input.on("focus", (_e, cx) => {
-      m.inputFocused = true;
-      if (b.modal === m) m.field = "title";
-      cx.notify();
-    });
-    input.on("blur", () => {
-      m.inputFocused = false;
-    });
-    input.on("submit", (_e, cx) => createModal.create(b, cx));
+    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
+    wireTextField(b, m, input, "title", (cx) => createModal.create(b, cx));
     b.modal = m;
     input.focus();
     cx.notify();
@@ -70,23 +62,15 @@ export const createModal = {
   },
 
   // Tab and shift-Tab (`back`): the next or previous field.
-  tab(b, back, cx) {
-    const m = b.modal;
-    const at = CREATE_FIELDS.indexOf(m.field);
-    m.field = CREATE_FIELDS[(at + (back ? -1 : 1) + CREATE_FIELDS.length) % CREATE_FIELDS.length];
-    b.takeKeyboard();
-    cx.notify();
-  },
+  tab: (b, back, cx) => cycleField(b, CREATE_FIELDS, back, cx),
 
-  // Every key but Esc (the Board's): Tab walks the fields; on the type h/l
-  // or the arrows change it, Enter creates. Typing goes to the title.
+  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey);
+  // on the type h/l or the arrows change it, Enter creates. Typing goes to
+  // the title.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
-    if (k === "tab") {
-      cx.stop_propagation();
-      return createModal.tab(b, Boolean(e.modifiers?.shift), cx);
-    }
+    if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
     if (m.field === "title") return;
     cx.stop_propagation();
     if (k === "enter") return createModal.create(b, cx);
@@ -96,9 +80,8 @@ export const createModal = {
 
   render(b, t) {
     const m = b.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+    const label = (text) => fieldLabel(t, text);
+    const frame = (field, inner) => fieldFrame(t, m, field, inner);
     const type = m.types[m.at];
     return backdrop(
       t,

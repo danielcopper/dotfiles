@@ -7,7 +7,7 @@
 // GitHub pull requests with their author, draft mark, checks and age. The
 // data: { shape: "backlog", meta: { level, childLevel, typeStates, states,
 // orderField, area, iteration, missing }, rows, viewer, noViewer, total,
-// limited, limit } (backlogList, sources/azure.js). View fields it reads:
+// limited, limit } (backlogList, sources/azure/backlog.js). View fields it reads:
 // id, source, layout (as writeAtOnce does), context (the create dialog).
 
 import { div } from "gpui-kit";
@@ -17,10 +17,11 @@ import { itemLabel } from "../../shared.js";
 import { backlogNav, backlogWarnings, findBacklogItem, withBacklogState } from "../../kinds/backlog.js";
 import { linkedSession } from "../../actions/start.js";
 import { tellOutcomes } from "../../actions/write.js";
-import { openStateMenu, setStateAtOnce, stateColor, unclearStateLines } from "../../actions/state.js";
+import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
+import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
 import { MODALS } from "../modals/index.js";
-import { button, chip, detailSection, sessionChip, shownOf, statusPill } from "../helpers.js";
+import { chip, sessionChip, shownOf, workItemDetail } from "../helpers.js";
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -72,18 +73,8 @@ export const backlogShape = {
   detailParts(b, t, view, item) {
     const st = b.state(view.id);
     if (!st.data) return {};
-    const openStatus = (cx) => {
-      if (!b.modal) b.openStatusMenu(view, cx);
-    };
-    const line = (label, value) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
-    return {
-      chips: [statusPill(t, item.state ?? "ohne Status", stateColor(st.data, item.state), openStatus)],
-      sections: [detailSection(t, "BACKLOG",
-        line("Sprint", item.sprint ?? "—"),
-        ...(item.area ? [line("Bereich", item.area)] : []),
-        ...(item.iteration ? [line("Iteration", item.iteration)] : []))],
-      buttons: [button(t, "act-status", "Status s", false, openStatus)],
-    };
+    const rows = [["Sprint", item.sprint ?? "—"], ...(item.area ? [["Bereich", item.area]] : []), ...(item.iteration ? [["Iteration", item.iteration]] : [])];
+    return workItemDetail(b, t, view, { state: item.state, color: stateColor(st.data, item.state), title: "BACKLOG", rows });
   },
 };
 

@@ -1,6 +1,6 @@
 // A team's backlog: its rows in backlog order, the item with a key, a state
 // change laid over the data, what a new work item may be, and the
-// backlog's warnings. backlogList (sources/azure.js) builds the data.
+// backlog's warnings. backlogList (sources/azure/backlog.js) builds the data.
 
 import { shows } from "../select.js";
 

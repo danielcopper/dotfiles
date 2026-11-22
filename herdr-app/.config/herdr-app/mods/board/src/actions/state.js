@@ -9,11 +9,8 @@
 // }).
 
 import { itemLabel } from "../shared.js";
+import { stateColor } from "../kinds/states.js";
 import { writeAtOnce } from "./write.js";
-
-// The theme color of a state, by its category (data.meta.states:
-// parseAzureTypes, parseBacklogConfig).
-export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
 
 // Opens the status menu for the selected item: the states of its type
 // (data.meta.typeStates), the one it shows marked.

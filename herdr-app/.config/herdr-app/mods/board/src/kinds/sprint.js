@@ -3,7 +3,7 @@
 // keys walk it, a task's state as shown, a state change laid over the data, and
 // its warnings (sprintWarnings). The data is a board's (kinds/board.js: its
 // columns hold the tasks, so moves, their rollback and H/L work on it as on a
-// board) plus its rows; sprintBoard (sources/azure.js) builds it.
+// board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
 
 import { navigate, shows } from "../select.js";
 import { findCard, shownColumns } from "./board.js";

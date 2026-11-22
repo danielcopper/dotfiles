@@ -51,10 +51,12 @@
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
-// sprint's taskboard), kinds/backlog.js (a team's backlog), select.js
-// (filter, "nur meine", selection), sources/ (GitHub, Azure), tools.js
-// (running gh and az), actions/ (starting a session, writing a change at
-// once, moving a card, changing a state, creating a work item),
+// sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
+// (a state's color), select.js (filter, "nur meine", selection), sources/
+// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
+// index.js), tools.js (running gh and az), actions/ (starting a session,
+// writing a change at once, moving a card, changing a state, creating a
+// work item),
 // ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
@@ -963,6 +965,215 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
   return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
 }
 
+// ==== src/sources/azure/common.js ====
+
+// Azure DevOps, what its two team views share: states and their
+// categories, what az's failures mean, how az is called, the work items'
+// fields and how az's answers are read, who az is, and a state change.
+// The Sprint's own calls are in sprint.js, the Backlog's in backlog.js, the
+// source as the board uses it in index.js (makeAzure).
+
+// Theme colors and column order for Azure's state categories.
+export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
+const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
+
+// States named with their categories → [{ id, name, category, color }],
+// each name once (its first category), in category order.
+export function categoryStates(pairs) {
+  const states = new Map();
+  for (const [name, category] of pairs) {
+    if (!states.has(name)) states.set(name, { id: name, name, category, color: CATEGORY_COLORS[category] ?? "muted" });
+  }
+  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
+  return [...states.values()].sort((a, b) => order(a) - order(b));
+}
+
+// The work item types' answer → { states: [{ id, name, category, color }] in
+// category order, types: { [type]: [state names] } }.
+export function parseAzureTypes(stdout) {
+  const value = azJson(stdout, "die Work-Item-Typen")?.value;
+  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
+  const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
+}
+
+// az's words for a request that may have reached Azure but got no clear
+// answer: msrest's "Error occurred in request., <requests exception>: …"
+// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
+const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
+// Azure's answers that it failed itself: the Azure DevOps client's
+// "Operation returned a 5xx status code.", TF400898 (an internal error), and
+// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
+// error responses"), which also names "Max retries" and is tested first.
+const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
+// ERROR: answers that are a refusal: rule errors (TF401320), something that
+// does not exist, az's own argument errors, and 4xx status lines.
+const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+
+// What went wrong with an az call that ran, from its ERROR: line (WARNING:
+// lines are left out; without an ERROR: line, from all it printed). Missing
+// sign-in or extension are marked unavailable (BoardError). With
+// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
+// sign-in, extension and project answers below; anything else (a request
+// without a clear answer, a server error, az's own crash or interrupt, a
+// failure without an ERROR: line) leaves open whether the change landed.
+export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
+  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const errorLine = lines.find((l) => /^ERROR:/.test(l));
+  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const az = on ? `az auf ${on}` : "az";
+  // A crash's traceback may hold any words; az's own line says what failed.
+  const subject = errorLine ? said : lines.join("\n");
+  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
+  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
+  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
+    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
+  }
+  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
+    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
+  }
+  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
+  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
+}
+
+// The organisation for az boards and az devops, and no guessing it from a
+// git checkout in the folder az runs in.
+export const azOrg = (org) => ["--org", org, "--detect", "false"];
+
+// az devops invoke on one REST resource (`area`, `resource`, the route's
+// parameters), always at api-version 7.1: its own default is 5.0, which
+// knows no taskboard.
+export function azInvokeArgs(c, area, resource, route, more = []) {
+  return [
+    "devops", "invoke", ...azOrg(c.org), "--area", area, "--resource", resource,
+    "--route-parameters", ...Object.entries(route).map(([k, v]) => `${k}=${v}`), "--api-version", "7.1", ...more, "-o", "json",
+  ];
+}
+
+// Calls both team views make: the team's areas, and a WIQL query (az
+// boards query takes no team or project for its macros).
+export const azAreasArgs = (c) => ["boards", "area", "team", "list", ...azOrg(c.org), "--project", c.project, "--team", c.team, "-o", "json"];
+export const azQueryArgs = (c, wiql) => ["boards", "query", ...azOrg(c.org), "--project", c.project, "--wiql", wiql, "-o", "json"];
+
+// Who az is signed in as (az login): the account's user, { name, type }. It
+// reads az's own profile and asks Azure nothing, so it has a short timeout
+// of its own.
+export const AZ_ME_ARGS = ["account", "show", "--query", "user", "-o", "json"];
+export const AZ_ME_TIMEOUT = 15000;
+
+// A text in a WIQL query: in single quotes, a quote in it doubled.
+export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
+// The fields read here are all System. ones. The field names that would
+// stand alone in quotes are built from SYSTEM: the command check
+// (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
+// for a herdr command.
+const SYSTEM = "System.";
+export const AREA_PATH = `${SYSTEM}AreaPath`;
+const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
+
+// The fields read of each work item.
+export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+
+// az's JSON answer for `what`; `empty` stands for no output at all (az
+// boards query prints nothing when nothing matches).
+export function azJson(stdout, what, empty) {
+  const text = String(stdout ?? "").trim();
+  if (!text && empty !== undefined) return empty;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new BoardError(`az lieferte für ${what} kein lesbares JSON`);
+  }
+}
+
+// az's answer as JSON, or null for anything else: an answer the reader
+// (who az is) or the checks of a write take for one that says nothing.
+export function jsonOrNull(stdout) {
+  try {
+    return JSON.parse(String(stdout ?? "").trim());
+  } catch {
+    return null;
+  }
+}
+
+// A list Azure sends either as it is or wrapped in { count, value } (az
+// devops invoke prints REST's wrapper, with its continuation_token).
+export const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
+
+// The team's areas → { field (the team field, System.AreaPath by default),
+// values: [{ value, includeChildren }] }.
+export function parseAreas(stdout) {
+  const json = azJson(stdout, "die Bereiche des Teams");
+  const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
+  if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
+  return { field: json.field?.referenceName ?? AREA_PATH, values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })) };
+}
+
+// The team's default area (the area a new work item gets) from its areas'
+// answer (azAreasArgs), or null.
+export function parseDefaultArea(stdout) {
+  const value = azJson(stdout, "die Bereiche des Teams")?.defaultValue;
+  return typeof value === "string" && value ? value : null;
+}
+
+// The address of a work item's page.
+export const workItemUrl = (c, id) => `${c.org}/${encodeURIComponent(c.project)}/_workitems/edit/${id}`;
+
+// A person as a work item names one: an identity ({ displayName,
+// uniqueName }), or older answers' "Name <login>" → { name, login } (login
+// in lower case, null where it is not given).
+export function azPerson(who) {
+  if (typeof who === "string") {
+    const login = who.match(/<([^>]+)>\s*$/)?.[1] ?? null;
+    return { name: who.replace(/\s*<[^>]*>\s*$/, "") || null, login: login?.toLowerCase() ?? null };
+  }
+  if (!isObject(who)) return { name: null, login: null };
+  return { name: who.displayName ?? who.uniqueName ?? null, login: who.uniqueName?.toLowerCase() ?? null };
+}
+
+// A work item of az boards query's answer as the board shows it, keyed as
+// itemKey names it; with an `orderField`, its value there as `order` (a
+// number, else null).
+export function azWorkItem(wi, c, orderField = null) {
+  const f = (name) => fieldOf(wi, name) ?? null;
+  const who = azPerson(f("AssignedTo"));
+  const item = {
+    source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
+    state: f("State"), assignees: who.name ? [who.name] : [], assigneeLogins: who.login ? [who.login] : [],
+    parent: f("Parent"), area: f("AreaPath"), iteration: f("IterationPath"),
+    url: workItemUrl(c, wi.id), labels: [], sub: null, branch: null,
+    ...(orderField ? { order: typeof wi.fields?.[orderField] === "number" ? wi.fields[orderField] : null } : {}),
+  };
+  return { key: itemKey(item), ...item };
+}
+
+// The most work items az boards query gives.
+export const AZ_QUERY_LIMIT = 1000;
+
+// The work items of az boards query's answer → [items] (azWorkItem, with
+// the order field where one is given), in its order; no output is none.
+export function parseWorkItems(stdout, c, orderField = null) {
+  const list = azList(azJson(stdout, "die Work Items", []));
+  if (!list) throw new BoardError("Azure lieferte keine Work Items");
+  return list.filter((wi) => Number.isInteger(wi?.id)).map((wi) => azWorkItem(wi, c, orderField));
+}
+
+// Who az is signed in as (the user's name), in lower case, or null.
+export function parseViewer(stdout) {
+  const name = jsonOrNull(stdout)?.name;
+  return typeof name === "string" && name ? name.toLowerCase() : null;
+}
+
+export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--state", state, "-o", "json"];
+
+// az's answer to a state change must name the state it set; anything else
+// leaves open whether the change landed.
+export function checkStateResult(stdout, state) {
+  const json = jsonOrNull(stdout);
+  if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
+}
+
 // ==== src/kinds/sprint.js ====
 
 // A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
@@ -970,7 +1181,7 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
 // keys walk it, a task's state as shown, a state change laid over the data, and
 // its warnings (sprintWarnings). The data is a board's (kinds/board.js: its
 // columns hold the tasks, so moves, their rollback and H/L work on it as on a
-// board) plus its rows; sprintBoard (sources/azure.js) builds it.
+// board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
 
 // The key of the row "Ohne Story", and the id of the column of stories the
 // keys walk first.
@@ -1059,116 +1270,21 @@ export function withItemState(data, key, state) {
   };
 }
 
-// ==== src/sources/azure.js ====
+// ==== src/sources/azure/sprint.js ====
 
-// Azure DevOps: work item types and their states, what az's failures mean,
-// the Sprint view's calls and what they answer, and the source as the board
-// uses it (makeAzure).
-
-// Theme colors and column order for Azure's state categories.
-export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
-const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
-
-// The work item types' answer → { states: [{ id, name, category, color }] in
-// category order, types: { [type]: [state names] } }.
-export function parseAzureTypes(stdout) {
-  const types = {};
-  const states = new Map();
-  const value = azJson(stdout, "die Work-Item-Typen")?.value;
-  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
-  for (const type of value) {
-    types[type.name] = (type.states ?? []).map((s) => s.name);
-    for (const s of type.states ?? []) {
-      if (!states.has(s.name)) states.set(s.name, { id: s.name, name: s.name, category: s.category, color: CATEGORY_COLORS[s.category] ?? "muted" });
-    }
-  }
-  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
-  return { states: [...states.values()].sort((a, b) => order(a) - order(b)), types };
-}
-
-// az's words for a request that may have reached Azure but got no clear
-// answer: msrest's "Error occurred in request., <requests exception>: …"
-// and the requests messages it wraps (ConnectionError, ReadTimeout, …).
-const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connection aborted|Read timed out|ReadTimeout|Max retries/i;
-// Azure's answers that it failed itself: the Azure DevOps client's
-// "Operation returned a 5xx status code.", TF400898 (an internal error), and
-// msrest's RetryError after retrying 408 and 5xx answers ("too many 503
-// error responses"), which also names "Max retries" and is tested first.
-const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
-// ERROR: answers that are a refusal: rule errors (TF401320), something that
-// does not exist, az's own argument errors, and 4xx status lines.
-const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
-
-// What went wrong with an az call that ran, from its ERROR: line (WARNING:
-// lines are left out; without an ERROR: line, from all it printed). Missing
-// sign-in or extension are marked unavailable (BoardError). With
-// `write`, a known refusal form (AZ_REFUSED) is a refusal, as are the
-// sign-in, extension and project answers below; anything else (a request
-// without a clear answer, a server error, az's own crash or interrupt, a
-// failure without an ERROR: line) leaves open whether the change landed.
-export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
-  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const errorLine = lines.find((l) => /^ERROR:/.test(l));
-  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
-  const az = on ? `az auf ${on}` : "az";
-  // A crash's traceback may hold any words; az's own line says what failed.
-  const subject = errorLine ? said : lines.join("\n");
-  if (AZ_SERVER_ERROR.test(subject)) return failure(`Azure antwortete mit einem Fehler (${az}): ${said}`, { write, unclear: true });
-  if (AZ_SENT_FAILURE.test(subject)) return failure(`Azure nicht erreichbar (${az}): ${said}`, { write, unclear: true });
-  if (/Before you can run Azure DevOps commands|az (devops )?login/i.test(said)) {
-    return new BoardError(`${az} ist nicht angemeldet (az login oder az devops login)`, { unavailable: true });
-  }
-  if (/'(boards|devops)' is misspelled or not recognized|is not in the 'az' command group/.test(said)) {
-    return new BoardError(`${az}: die Erweiterung azure-devops fehlt (az extension add --name azure-devops)`, { unavailable: true });
-  }
-  if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
-  return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
-}
-
-// The organisation for az boards and az devops, and no guessing it from a
-// git checkout in the folder az runs in.
-const azOrg = (org) => ["--org", org, "--detect", "false"];
-
-// az devops invoke on one REST resource (`area`, `resource`, the route's
-// parameters), always at api-version 7.1: its own default is 5.0, which
-// knows no taskboard.
-export function azInvokeArgs(c, area, resource, route, more = []) {
-  return [
-    "devops", "invoke", ...azOrg(c.org), "--area", area, "--resource", resource,
-    "--route-parameters", ...Object.entries(route).map(([k, v]) => `${k}=${v}`), "--api-version", "7.1", ...more, "-o", "json",
-  ];
-}
+// The Azure Sprint: its calls, what they answer, the sprint as the sprint
+// shape shows it (sprintBoard), a task's move on the taskboard, and the
+// view as makeAzure uses it (sprintView).
 
 // The Sprint view's calls for a team context `c` ({ org, project, team }):
-// its current iteration, its areas, its taskboard's columns, the project's
-// work item types with their states, and per refresh the taskboard's column
-// of each work item and the fields of the sprint's work items (azQueryArgs).
+// its current iteration, its areas (azAreasArgs), its taskboard's columns,
+// the project's work item types with their states, and per refresh the
+// taskboard's column of each work item and the fields of the sprint's work
+// items (azQueryArgs).
 export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ...azOrg(c.org), "--project", c.project, "--team", c.team, "--timeframe", "current", "-o", "json"];
-export const azAreasArgs = (c) => ["boards", "area", "team", "list", ...azOrg(c.org), "--project", c.project, "--team", c.team, "-o", "json"];
 export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
-export const azQueryArgs = (c, wiql) => ["boards", "query", ...azOrg(c.org), "--project", c.project, "--wiql", wiql, "-o", "json"];
-// Who az is signed in as (az login): the account's user, { name, type }. It
-// reads az's own profile and asks Azure nothing, so it has a short timeout
-// of its own.
-export const AZ_ME_ARGS = ["account", "show", "--query", "user", "-o", "json"];
-export const AZ_ME_TIMEOUT = 15000;
-
-// A text in a WIQL query: in single quotes, a quote in it doubled.
-const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
-
-// The fields read here are all System. ones. The field names that would
-// stand alone in quotes are built from SYSTEM: the command check
-// (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
-// for a herdr command.
-const SYSTEM = "System.";
-const AREA_PATH = `${SYSTEM}AreaPath`;
-const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
-
-// The fields read of each work item.
-export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
-
 // One WIQL query for the work items of the sprint `iteration` in the team's
 // areas (parseAreas), as Azure's taskboard shows them: in the iteration's
 // path, and in one of the team's area paths, those below it too where the
@@ -1181,32 +1297,6 @@ export function sprintWiql(iteration, areas) {
   return `SELECT ${WORK_ITEM_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.IterationPath] = ${wiqlText(iteration.path)} AND (${inArea}) ORDER BY [System.Id]`;
 }
 
-// az's JSON answer for `what`; `empty` stands for no output at all (az
-// boards query prints nothing when nothing matches).
-function azJson(stdout, what, empty) {
-  const text = String(stdout ?? "").trim();
-  if (!text && empty !== undefined) return empty;
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new BoardError(`az lieferte für ${what} kein lesbares JSON`);
-  }
-}
-
-// az's answer as JSON, or null for anything else: an answer the reader
-// (who az is) or the checks of a write take for one that says nothing.
-function jsonOrNull(stdout) {
-  try {
-    return JSON.parse(String(stdout ?? "").trim());
-  } catch {
-    return null;
-  }
-}
-
-// A list Azure sends either as it is or wrapped in { count, value } (az
-// devops invoke prints REST's wrapper, with its continuation_token).
-const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
-
 // The team's current iteration → { id, name, path, finish } (finish: the
 // start of its last day, as Azure gives it, or null).
 export function parseIteration(stdout) {
@@ -1215,15 +1305,6 @@ export function parseIteration(stdout) {
   const it = list.find((i) => i?.attributes?.timeFrame === "current") ?? list[0];
   if (!it?.id || !it.path) throw new BoardError("Das Team hat keinen laufenden Sprint");
   return { id: it.id, name: it.name ?? it.path, path: it.path, finish: it.attributes?.finishDate ?? null };
-}
-
-// The team's areas → { field (the team field, System.AreaPath by default),
-// values: [{ value, includeChildren }] }.
-export function parseAreas(stdout) {
-  const json = azJson(stdout, "die Bereiche des Teams");
-  const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
-  if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
-  return { field: json.field?.referenceName ?? AREA_PATH, values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })) };
 }
 
 // The taskboard's columns → [{ id, name, mappings: [{ type, state }] }] in
@@ -1245,52 +1326,6 @@ export function parseTaskboard(stdout) {
   const placed = list.filter((w) => Number.isInteger(w?.workItemId));
   if (list.length && !placed.length) throw new BoardError("Azure nannte keine Work Items in den Spalten des Taskboards");
   return new Map(placed.map((w) => [w.workItemId, { columnId: w.columnId, column: w.column, state: w.state }]));
-}
-
-// The address of a work item's page.
-export const workItemUrl = (c, id) => `${c.org}/${encodeURIComponent(c.project)}/_workitems/edit/${id}`;
-
-// A person as a work item names one: an identity ({ displayName,
-// uniqueName }), or older answers' "Name <login>" → { name, login } (login
-// in lower case, null where it is not given).
-export function azPerson(who) {
-  if (typeof who === "string") {
-    const login = who.match(/<([^>]+)>\s*$/)?.[1] ?? null;
-    return { name: who.replace(/\s*<[^>]*>\s*$/, "") || null, login: login?.toLowerCase() ?? null };
-  }
-  if (!isObject(who)) return { name: null, login: null };
-  return { name: who.displayName ?? who.uniqueName ?? null, login: who.uniqueName?.toLowerCase() ?? null };
-}
-
-// A work item of az boards query's answer as the board shows it, keyed as
-// itemKey names it.
-export function azWorkItem(wi, c) {
-  const f = (name) => fieldOf(wi, name) ?? null;
-  const who = azPerson(f("AssignedTo"));
-  const item = {
-    source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
-    state: f("State"), assignees: who.name ? [who.name] : [], assigneeLogins: who.login ? [who.login] : [],
-    parent: f("Parent"), area: f("AreaPath"), iteration: f("IterationPath"),
-    url: workItemUrl(c, wi.id), labels: [], sub: null, branch: null,
-  };
-  return { key: itemKey(item), ...item };
-}
-
-// The most work items az boards query gives.
-export const AZ_QUERY_LIMIT = 1000;
-
-// The work items of az boards query's answer → [items] (azWorkItem), in its
-// order; no output is none.
-export function parseWorkItems(stdout, c) {
-  const list = azList(azJson(stdout, "die Work Items", []));
-  if (!list) throw new BoardError("Azure lieferte keine Work Items");
-  return list.filter((wi) => Number.isInteger(wi?.id)).map((wi) => azWorkItem(wi, c));
-}
-
-// Who az is signed in as (the user's name), in lower case, or null.
-export function parseViewer(stdout) {
-  const name = jsonOrNull(stdout)?.name;
-  return typeof name === "string" && name ? name.toLowerCase() : null;
 }
 
 // The sprint as the sprint shape shows it (kinds/sprint.js). Its tasks are
@@ -1392,16 +1427,58 @@ export function checkTaskboardMove(stdout, card, column) {
   }
 }
 
-export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--state", state, "-o", "json"];
-
-// az's answer to a state change must name the state it set; anything else
-// leaves open whether the change landed.
-export function checkStateResult(stdout, state) {
-  const json = jsonOrNull(stdout);
-  if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
+// The Sprint as makeAzure uses it, on the source's shared parts `s` (see
+// makeAzure): what it keeps per team and project (settingsOf), how it
+// loads and writes, and what `r` or a refused write drops (forget: the
+// team's sprint, areas and columns, not the project's types).
+export function sprintView(s) {
+  async function settingsOf(c) {
+    const team = s.teamKey(c);
+    const project = `types\n${c.org}\n${c.project}`;
+    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(project)];
+    const [it, areas, columns, ty] = await Promise.all([
+      iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
+      board?.value.areas ?? s.az(azAreasArgs(c)).then(parseAreas),
+      board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
+      types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
+    ]);
+    const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
+    if (!iteration) s.kept.set(`iteration\n${team}`, { value: it, until });
+    if (!board) s.kept.set(`board\n${team}`, { value: { areas, columns }, until });
+    if (!types) s.kept.set(project, { value: ty, until });
+    return { iteration: it, areas, columns, types: ty };
+  }
+  const forget = (c) => {
+    s.kept.delete(`iteration\n${s.teamKey(c)}`);
+    s.kept.delete(`board\n${s.teamKey(c)}`);
+  };
+  const onRefusal = (c) => s.dropOnRefusal(forget, c);
+  return {
+    forget,
+    async load(view) {
+      const c = view.context;
+      const me = s.whoAmI();
+      const kept = await settingsOf(c);
+      const [places, items] = await Promise.all([s.az(azTaskboardArgs(c, kept.iteration.id)), s.az(azQueryArgs(c, sprintWiql(kept.iteration, kept.areas)))]);
+      const data = sprintBoard({ ...kept, items: parseWorkItems(items, c), places: parseTaskboard(places), viewer: await me });
+      s.noViewerOf(data);
+      if (data.meta.unknownColumns) forget(c);
+      return { data, warnings: [] };
+    },
+    async move(view, data, card, column) {
+      const file = await writeMoveBody(card.number, column);
+      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }).catch(onRefusal(view.context));
+      checkTaskboardMove(out, card, column);
+    },
+    setState: (view, item, state) => s.setState(view, item, state, onRefusal),
+  };
 }
 
-// ---- the Backlog ----
+// ==== src/sources/azure/backlog.js ====
+
+// The Azure Backlog: its calls, what they answer, the backlog as the
+// backlog shape shows it (backlogList), a create and a parent link, and
+// the view as makeAzure uses it (backlogView).
 
 // The Backlog view's calls for a team context `c`: the team's backlog
 // levels, its backlog configuration (the order field, each type's states
@@ -1427,10 +1504,10 @@ export const azBacklogIdsArgs = (c, levelId) => ["rest", "--method", "get", "--u
 // (AADSTS…) fails or Azure answers 401, the Backlog says what it needs.
 export const BACKLOG_NEEDS_LOGIN = "Der Backlog braucht az login (ein PAT reicht dafür nicht)";
 const AZ_REST_LOGIN = /az login|AADSTS\d+|Unauthorized|\b401\b/i;
-export function azRestFailure(r) {
+export function azRestFailure(r, on, options) {
   const said = String(r.stderr ?? "").split("\n").filter((l) => !/^WARNING:/.test(l)).join("\n");
   if (AZ_REST_LOGIN.test(said)) return new BoardError(BACKLOG_NEEDS_LOGIN, { unavailable: true });
-  return azFailure(r);
+  return azFailure(r, on, options);
 }
 
 // A backlog level of Azure's answer → { id, name, type ("portfolio",
@@ -1472,20 +1549,12 @@ const fieldName = (name) => (typeof name === "string" && /^[A-Za-z][\w.]*$/.test
 export function parseBacklogConfig(stdout) {
   const json = azJson(stdout, "die Backlog-Einstellungen");
   if (!isObject(json)) throw new BoardError("Azure lieferte keine Backlog-Einstellungen");
-  const typeStates = {};
-  const states = new Map();
-  for (const info of Array.isArray(json.workItemTypeMappedStates) ? json.workItemTypeMappedStates : []) {
-    if (typeof info?.workItemTypeName !== "string" || !isObject(info.states)) continue;
-    typeStates[info.workItemTypeName] = Object.keys(info.states);
-    for (const [name, category] of Object.entries(info.states)) {
-      if (!states.has(name)) states.set(name, { id: name, name, category, color: CATEGORY_COLORS[category] ?? "muted" });
-    }
-  }
-  const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
+  const infos = (Array.isArray(json.workItemTypeMappedStates) ? json.workItemTypeMappedStates : [])
+    .filter((info) => typeof info?.workItemTypeName === "string" && isObject(info.states));
   return {
     orderField: fieldName(json.backlogFields?.typeFields?.Order),
-    typeStates,
-    states: [...states.values()].sort((a, b) => order(a) - order(b)),
+    typeStates: Object.fromEntries(infos.map((info) => [info.workItemTypeName, Object.keys(info.states)])),
+    states: categoryStates(infos.flatMap((info) => Object.entries(info.states))),
     taskLevel: backlogLevel(json.taskBacklog),
   };
 }
@@ -1497,13 +1566,6 @@ export function parseTeamSettings(stdout) {
   const json = azJson(stdout, "die Einstellungen des Teams");
   const path = (it) => (typeof it?.path === "string" && it.path ? it.path : null);
   return { defaultIteration: path(json?.defaultIteration), backlogIteration: path(json?.backlogIteration) };
-}
-
-// The team's default area (the area a new work item gets) from its areas'
-// answer (azAreasArgs), or null.
-export function parseDefaultArea(stdout) {
-  const value = azJson(stdout, "die Bereiche des Teams")?.defaultValue;
-  return typeof value === "string" && value ? value : null;
 }
 
 // The ids of the level's work items, in the list's order, each once.
@@ -1531,16 +1593,16 @@ export function sprintName(path, backlogIteration) {
 
 // The backlog as the backlog shape shows it (kinds/backlog.js): one row
 // per work item of the level (`items`, parseWorkItems on the ids' query
-// with the order field in `orders`: id → value), each with its sprint
+// with the order field: each item's `order`), each with its sprint
 // (sprintName). The rows are sorted by the order field, as Azure's backlog
 // is: the REST reference does not say whether the list of ids
 // (parseBacklogIds) comes in backlog order, so it is not relied on; it
 // orders only what has no order value, after all that has one. Ids the
 // query did not find are counted (meta.missing); `limited` says the ids
 // were more than one query reads (AZ_QUERY_LIMIT).
-export function backlogList({ level, childLevel, config, settings, area, ids, items, orders, viewer }) {
+export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer }) {
   const at = new Map(ids.map((id, i) => [id, i]));
-  const rank = (i) => orders.get(i.number) ?? Infinity;
+  const rank = (i) => i.order ?? Infinity;
   const rows = items
     .filter((i) => at.has(i.number))
     .map((i) => ({ ...i, sprint: sprintName(i.iteration, settings.backlogIteration) }))
@@ -1558,13 +1620,6 @@ export function backlogList({ level, childLevel, config, settings, area, ids, it
     limited: ids.length > AZ_QUERY_LIMIT,
     limit: AZ_QUERY_LIMIT,
   };
-}
-
-// The order values of az boards query's answer → Map(id → number).
-export function parseOrders(stdout, orderField) {
-  const list = azList(azJson(stdout, "die Work Items", [])) ?? [];
-  if (!orderField) return new Map();
-  return new Map(list.filter((wi) => Number.isInteger(wi?.id) && typeof wi.fields?.[orderField] === "number").map((wi) => [wi.id, wi.fields[orderField]]));
 }
 
 // Creating a work item: of `type` with `title`, in the team's default area
@@ -1600,6 +1655,59 @@ export function checkParentLink(stdout, parent) {
 // How long the Backlog keeps a team's settings (ms): they change rarely.
 export const BACKLOG_KEEP_MS = 4 * 3600000;
 
+// The Backlog as makeAzure uses it, on the source's shared parts `s` (see
+// makeAzure): what it keeps per team (backlogSettingsOf), how it loads and
+// writes, and what `r` or a refused write drops (forget).
+export function backlogView(s) {
+  const key = (c) => `backlog\n${s.teamKey(c)}`;
+  async function backlogSettingsOf(c) {
+    const held = s.keptValue(key(c));
+    if (held) return held.value;
+    const [levels, config, settings, area] = await Promise.all([
+      s.az(azLevelsArgs(c)).then(parseBacklogLevels),
+      s.az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
+      s.az(azTeamSettingsArgs(c)).then(parseTeamSettings),
+      s.az(azAreasArgs(c)).then(parseDefaultArea),
+    ]);
+    const value = { ...backlogLevels(levels, config), config, settings, area };
+    s.kept.set(key(c), { value, until: Date.now() + BACKLOG_KEEP_MS });
+    return value;
+  }
+  const forget = (c) => s.kept.delete(key(c));
+  const onRefusal = (c) => s.dropOnRefusal(forget, c);
+  return {
+    forget,
+    async load(view) {
+      const c = view.context;
+      const me = s.whoAmI();
+      const kept = await backlogSettingsOf(c);
+      const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
+      const read = ids.slice(0, AZ_QUERY_LIMIT);
+      const out = read.length ? await s.az(azQueryArgs(c, backlogWiql(read, kept.config.orderField))) : "";
+      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me });
+      s.noViewerOf(data);
+      return { data, warnings: [] };
+    },
+    setState: (view, item, state) => s.setState(view, item, state, onRefusal),
+    // Creates a work item ({ type, title }) in the team's default area and
+    // iteration (data.meta), assigned to me; its id.
+    async create(view, data, { type, title }) {
+      const args = azCreateArgs(view.context, { type, title, area: data.meta.area, iteration: data.meta.iteration });
+      return parseCreated(await s.az(args, { write: true }).catch(onRefusal(view.context)));
+    },
+    // Makes the work item `id` a child of `parent`.
+    async addParent(view, id, parent) {
+      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true }), parent);
+    },
+  };
+}
+
+// ==== src/sources/azure/index.js ====
+
+// The Azure source as the board uses it (makeAzure); its team views'
+// calls and data are in sprint.js and backlog.js, what both use in
+// common.js.
+
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, and per layout of an Azure view how
 // it loads and writes. az runs by the path `paths` (toolPaths) finds.
@@ -1628,9 +1736,11 @@ export const BACKLOG_KEEP_MS = 4 * 3600000;
 // asked again with each refresh, and the data says why (noViewer: the
 // source's words and the error).
 export function makeAzure(paths) {
+  // An az call's output; a failed one throws what `failure` (azFailure by
+  // default) makes of it.
   const az = async (args, options = {}, timeout = AZ_TIMEOUT) => {
     const r = await call("az", args, null, timeout, { ...options, paths });
-    if (r.code !== 0) throw azFailure(r, null, options);
+    if (r.code !== 0) throw (options.failure ?? azFailure)(r, null, options);
     return r.stdout;
   };
   const kept = new Map();
@@ -1638,42 +1748,6 @@ export function makeAzure(paths) {
     const entry = kept.get(key);
     return entry && Date.now() < entry.until ? entry : null;
   };
-  const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
-  async function settingsOf(c) {
-    const team = teamKey(c);
-    const project = `types\n${c.org}\n${c.project}`;
-    const [iteration, board, types] = [keptValue(`iteration\n${team}`), keptValue(`board\n${team}`), keptValue(project)];
-    const [it, areas, columns, ty] = await Promise.all([
-      iteration?.value ?? az(azIterationArgs(c)).then(parseIteration),
-      board?.value.areas ?? az(azAreasArgs(c)).then(parseAreas),
-      board?.value.columns ?? az(azColumnsArgs(c)).then(parseColumns),
-      types?.value ?? az(azTypesArgs(c)).then(parseAzureTypes),
-    ]);
-    const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
-    if (!iteration) kept.set(`iteration\n${team}`, { value: it, until });
-    if (!board) kept.set(`board\n${team}`, { value: { areas, columns }, until });
-    if (!types) kept.set(project, { value: ty, until });
-    return { iteration: it, areas, columns, types: ty };
-  }
-  const forget = (c) => {
-    kept.delete(`iteration\n${teamKey(c)}`);
-    kept.delete(`board\n${teamKey(c)}`);
-  };
-  async function backlogSettingsOf(c) {
-    const key = `backlog\n${teamKey(c)}`;
-    const held = keptValue(key);
-    if (held) return held.value;
-    const [levels, config, settings, area] = await Promise.all([
-      az(azLevelsArgs(c)).then(parseBacklogLevels),
-      az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
-      az(azTeamSettingsArgs(c)).then(parseTeamSettings),
-      az(azAreasArgs(c)).then(parseDefaultArea),
-    ]);
-    const value = { ...backlogLevels(levels, config), config, settings, area };
-    kept.set(key, { value, until: Date.now() + BACKLOG_KEEP_MS });
-    return value;
-  }
-  const forgetBacklog = (c) => kept.delete(`backlog\n${teamKey(c)}`);
   let viewer = null;
   let viewerError = null;
   const whoAmI = () =>
@@ -1688,70 +1762,32 @@ export function makeAzure(paths) {
         return null;
       });
   const noViewer = "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)";
-  // A write Azure refused may have met settings that are out of date.
-  const dropOnRefusal = (drop, c) => (e) => {
-    if (!(e instanceof BoardError && e.unclear)) drop(c);
-    throw e;
+  // What the views share: az, what is kept, who az is (and the data's words
+  // for why it is not known), and a state change.
+  const shared = {
+    az, kept, keptValue, whoAmI,
+    teamKey: (c) => `${c.org}\n${c.project}\n${c.team}`,
+    noViewerOf(data) {
+      if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
+    },
+    // A write Azure refused may have met settings that are out of date:
+    // `drop` drops them.
+    dropOnRefusal: (drop, c) => (e) => {
+      if (!(e instanceof BoardError && e.unclear)) drop(c);
+      throw e;
+    },
+    setState: (view, item, state, onRefusal) =>
+      az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
   };
-  const forgetOnRefusal = (c) => dropOnRefusal(forget, c);
-  const forgetBacklogOnRefusal = (c) => dropOnRefusal(forgetBacklog, c);
-  const setState = (view, item, state, onRefusal) =>
-    az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state));
+  const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
   return {
     site: "Azure",
     noViewer,
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
-      if (view.context?.kind !== "team") return;
-      if (view.layout === "backlog") forgetBacklog(view.context);
-      else forget(view.context);
+      if (view.context?.kind === "team") views[view.layout]?.forget(view.context);
     },
-    views: {
-      sprint: {
-        async load(view) {
-          const c = view.context;
-          const me = whoAmI();
-          const s = await settingsOf(c);
-          const [places, items] = await Promise.all([az(azTaskboardArgs(c, s.iteration.id)), az(azQueryArgs(c, sprintWiql(s.iteration, s.areas)))]);
-          const data = sprintBoard({ ...s, items: parseWorkItems(items, c), places: parseTaskboard(places), viewer: await me });
-          if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
-          if (data.meta.unknownColumns) forget(c);
-          return { data, warnings: [] };
-        },
-        async move(view, data, card, column) {
-          const file = await writeMoveBody(card.number, column);
-          const out = await az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }).catch(forgetOnRefusal(view.context));
-          checkTaskboardMove(out, card, column);
-        },
-        setState: (view, item, state) => setState(view, item, state, forgetOnRefusal),
-      },
-      backlog: {
-        async load(view) {
-          const c = view.context;
-          const me = whoAmI();
-          const s = await backlogSettingsOf(c);
-          const r = await call("az", azBacklogIdsArgs(c, s.level.id), null, AZ_TIMEOUT, { paths });
-          if (r.code !== 0) throw azRestFailure(r);
-          const ids = parseBacklogIds(r.stdout);
-          const read = ids.slice(0, AZ_QUERY_LIMIT);
-          const out = read.length ? await az(azQueryArgs(c, backlogWiql(read, s.config.orderField))) : "";
-          const data = backlogList({ ...s, ids, items: parseWorkItems(out, c), orders: parseOrders(out, s.config.orderField), viewer: await me });
-          if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
-          return { data, warnings: [] };
-        },
-        setState: (view, item, state) => setState(view, item, state, forgetBacklogOnRefusal),
-        // Creates a work item ({ type, title }) in the team's default area
-        // and iteration (data.meta), assigned to me; its id.
-        async create(view, data, { type, title }) {
-          const args = azCreateArgs(view.context, { type, title, area: data.meta.area, iteration: data.meta.iteration });
-          return parseCreated(await az(args, { write: true }).catch(forgetBacklogOnRefusal(view.context)));
-        },
-        // Makes the work item `id` a child of `parent`.
-        async addParent(view, id, parent) {
-          checkParentLink(await az(azParentArgs(view.context, id, parent), { write: true }), parent);
-        },
-      },
-    },
+    views,
   };
 }
 
@@ -2383,9 +2419,58 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
+// A dialog's text field, the InputState `input` for the dialog m's field
+// `field`: m.inputFocused follows its focus (Board.boardHasKeyboard), a
+// focus moves the dialog onto that field, and Enter in it runs
+// `submit(cx)`.
+export function wireTextField(b, m, input, field, submit) {
+  m.textField = field;
+  m.inputFocused = false;
+  input.on("focus", (_e, cx) => {
+    m.inputFocused = true;
+    if (b.modal === m) m.field = field;
+    cx.notify();
+  });
+  input.on("blur", () => {
+    m.inputFocused = false;
+  });
+  input.on("submit", (_e, cx) => submit(cx));
+}
+
+// Tab and shift-Tab (`back`) in the open dialog: the next or previous of
+// its `fields`, the keyboard where that field wants it (Board.takeKeyboard).
+export function cycleField(b, fields, back, cx) {
+  const m = b.modal;
+  const at = fields.indexOf(m.field);
+  m.field = fields[(at + (back ? -1 : 1) + fields.length) % fields.length];
+  b.takeKeyboard();
+  cx.notify();
+}
+
+// A dialog field's label, and its frame, marked while the dialog is on it.
+export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).child(text);
+export const fieldFrame = (t, m, field, inner) =>
+  h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+
 // A section of the detail panel: a title over its rows.
 export const detailSection = (t, title, ...kids) =>
   v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+
+// The detail panel's parts of a work item (the sprint and the backlog
+// shape): its `state` as a pill on its theme `color`, a click opening the
+// status menu; a section `title` with `rows` ([label, value]) where there
+// are any; and Status s.
+export function workItemDetail(b, t, view, { state, color, title, rows }) {
+  const openStatus = (cx) => {
+    if (!b.modal) b.openStatusMenu(view, cx);
+  };
+  const line = ([label, value]) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
+  return {
+    chips: [statusPill(t, state ?? "ohne Status", color, openStatus)],
+    sections: rows.length ? [detailSection(t, title, ...rows.map(line))] : [],
+    buttons: [button(t, "act-status", "Status s", false, openStatus)],
+  };
+}
 
 // The theme color of a check state.
 export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 })[state] ?? t.dim;
@@ -2426,7 +2511,7 @@ export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] 
 
 // A team's backlog: its rows in backlog order, the item with a key, a state
 // change laid over the data, what a new work item may be, and the
-// backlog's warnings. backlogList (sources/azure.js) builds the data.
+// backlog's warnings. backlogList (sources/azure/backlog.js) builds the data.
 
 // The work item with `key`, or null.
 export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
@@ -2580,6 +2665,14 @@ export function tellOutcomes(b, lines, cx) {
   if (level === "warning") notify({ title: "Status nach dem Neuladen", body: text, level: "warning" });
 }
 
+// ==== src/kinds/states.js ====
+
+// A work item's state as the board shows it: its theme color.
+
+// The theme color of a state, by its category (data.meta.states:
+// parseAzureTypes, parseBacklogConfig).
+export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
+
 // ==== src/actions/state.js ====
 
 // Changing a work item's state: the status menu of its type's states, the
@@ -2591,10 +2684,6 @@ export function tellOutcomes(b, lines, cx) {
 // state), stateOf(data, item), where (where an item
 // no longer is: "im Sprint"), again (refresh after a change that landed)
 // }).
-
-// The theme color of a state, by its category (data.meta.states:
-// parseAzureTypes, parseBacklogConfig).
-export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
 
 // Opens the status menu for the selected item: the states of its type
 // (data.meta.typeStates), the one it shows marked.
@@ -2660,6 +2749,9 @@ export function unclearStateLines(due, data, how) {
 // The key a create is written under: one create at a time per view.
 export const CREATE_KEY = "create";
 
+// The key of the Azure work item `id` (itemKey).
+const workItemKey = (id) => itemKey({ source: "azure", kind: "workitem", number: id });
+
 // Creates a work item of `type` with `title`; a child type (type.child)
 // goes under `parent`. Nothing shows before Azure names the id; then the
 // backlog is read again and the new item, where the level holds its type,
@@ -2678,7 +2770,7 @@ export function createItem(b, view, { type, title, parent }, cx) {
     // The write's own cx (writeAtOnce): the one this was called with has
     // gone stale by now.
     landed(cx) {
-      if (!under) st.want = { key: itemLabel({ source: "azure", kind: "workitem", number: id }), after: st.runs };
+      if (!under) st.want = { key: workItemKey(id), after: st.runs };
       else linkParent(b, view, id, under, cx);
     },
     undo() {},
@@ -2686,10 +2778,10 @@ export function createItem(b, view, { type, title, parent }, cx) {
     again: true,
     texts: {
       pending: () => `${type.name} ${label} wird angelegt …`,
-      landed: () => (under ? `AB#${id} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `AB#${id} ${label} angelegt`),
+      landed: () => (under ? `${workItemKey(id)} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `${workItemKey(id)} ${label} angelegt`),
       unclear: `${type.name} ${label} anlegen`,
       refused: (why) => `${type.name} ${label} nicht angelegt: ${why}`,
-      landedBut: (why) => `AB#${id} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
+      landedBut: (why) => `${workItemKey(id)} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
       toasts: { unclear: `Anlegen von ${label}`, refused: `${label} nicht angelegt` },
     },
   }, cx);
@@ -2699,7 +2791,7 @@ export function createItem(b, view, { type, title, parent }, cx) {
 // the item is there either way, so a refusal says only that the link is
 // missing.
 function linkParent(b, view, id, parent, cx) {
-  const label = `AB#${id}`;
+  const label = workItemKey(id);
   const to = itemLabel(parent);
   writeAtOnce(b, view, {
     key: label,
@@ -2822,16 +2914,8 @@ export const createModal = {
       return b.say(`Das Team hat keinen ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
-    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", textField: "title", inputFocused: false, error: null };
-    input.on("focus", (_e, cx) => {
-      m.inputFocused = true;
-      if (b.modal === m) m.field = "title";
-      cx.notify();
-    });
-    input.on("blur", () => {
-      m.inputFocused = false;
-    });
-    input.on("submit", (_e, cx) => createModal.create(b, cx));
+    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
+    wireTextField(b, m, input, "title", (cx) => createModal.create(b, cx));
     b.modal = m;
     input.focus();
     cx.notify();
@@ -2852,23 +2936,15 @@ export const createModal = {
   },
 
   // Tab and shift-Tab (`back`): the next or previous field.
-  tab(b, back, cx) {
-    const m = b.modal;
-    const at = CREATE_FIELDS.indexOf(m.field);
-    m.field = CREATE_FIELDS[(at + (back ? -1 : 1) + CREATE_FIELDS.length) % CREATE_FIELDS.length];
-    b.takeKeyboard();
-    cx.notify();
-  },
+  tab: (b, back, cx) => cycleField(b, CREATE_FIELDS, back, cx),
 
-  // Every key but Esc (the Board's): Tab walks the fields; on the type h/l
-  // or the arrows change it, Enter creates. Typing goes to the title.
+  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey);
+  // on the type h/l or the arrows change it, Enter creates. Typing goes to
+  // the title.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
-    if (k === "tab") {
-      cx.stop_propagation();
-      return createModal.tab(b, Boolean(e.modifiers?.shift), cx);
-    }
+    if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
     if (m.field === "title") return;
     cx.stop_propagation();
     if (k === "enter") return createModal.create(b, cx);
@@ -2878,9 +2954,8 @@ export const createModal = {
 
   render(b, t) {
     const m = b.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+    const label = (text) => fieldLabel(t, text);
+    const frame = (field, inner) => fieldFrame(t, m, field, inner);
     const type = m.types[m.at];
     return backdrop(
       t,
@@ -2965,20 +3040,10 @@ export const startModal = {
     const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
     if (machine < 0) machine = 0;
     const m = {
-      kind: "start", view, item, settings, input, field: "message", textField: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
     };
-    // inputFocused: whether the message has the keyboard
-    // (Board.boardHasKeyboard).
-    input.on("focus", (_e, cx) => {
-      m.inputFocused = true;
-      if (b.modal === m) m.field = "message";
-      cx.notify();
-    });
-    input.on("blur", () => {
-      m.inputFocused = false;
-    });
-    input.on("submit", (_e, cx) => startModal.start(b, cx));
+    wireTextField(b, m, input, "message", (cx) => startModal.start(b, cx));
     b.modal = m;
     input.focus();
     loadAgents(b, cx);
@@ -3035,24 +3100,15 @@ export const startModal = {
   },
 
   // Tab and shift-Tab (`back`): the next or previous field.
-  tab(b, back, cx) {
-    const m = b.modal;
-    const at = FIELDS.indexOf(m.field);
-    m.field = FIELDS[(at + (back ? -1 : 1) + FIELDS.length) % FIELDS.length];
-    b.takeKeyboard();
-    cx.notify();
-  },
+  tab: (b, back, cx) => cycleField(b, FIELDS, back, cx),
 
-  // Every key but Esc (the Board's): Tab walks the fields (where it comes
-  // here at all: Board.dialogTab); h/l or the arrows change a choice, Enter
-  // starts. Typing goes to the message.
+  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey,
+  // where Tab comes here at all rather than as the board's action); h/l or
+  // the arrows change a choice, Enter starts. Typing goes to the message.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
-    if (k === "tab") {
-      cx.stop_propagation();
-      return startModal.tab(b, Boolean(e.modifiers?.shift), cx);
-    }
+    if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
     if (m.field === "message") return;
     cx.stop_propagation();
     if (k === "enter") return startModal.start(b, cx);
@@ -3062,17 +3118,8 @@ export const startModal = {
 
   render(b, t) {
     const m = b.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex()
-        .h(34)
-        .px(10)
-        .items_center()
-        .rounded(6)
-        .border_1()
-        .border_color(m.field === field ? t.accent : t.input)
-        .bg(t.background)
-        .child(inner);
+    const label = (text) => fieldLabel(t, text);
+    const frame = (field, inner) => fieldFrame(t, m, field, inner);
     const choice = (field, title, value) =>
       v_flex()
         .flex_1()
@@ -3262,7 +3309,7 @@ export const MODALS = { start: startModal, status: statusModal, columns: columns
 // GitHub pull requests with their author, draft mark, checks and age. The
 // data: { shape: "backlog", meta: { level, childLevel, typeStates, states,
 // orderField, area, iteration, missing }, rows, viewer, noViewer, total,
-// limited, limit } (backlogList, sources/azure.js). View fields it reads:
+// limited, limit } (backlogList, sources/azure/backlog.js). View fields it reads:
 // id, source, layout (as writeAtOnce does), context (the create dialog).
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
@@ -3315,18 +3362,8 @@ export const backlogShape = {
   detailParts(b, t, view, item) {
     const st = b.state(view.id);
     if (!st.data) return {};
-    const openStatus = (cx) => {
-      if (!b.modal) b.openStatusMenu(view, cx);
-    };
-    const line = (label, value) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
-    return {
-      chips: [statusPill(t, item.state ?? "ohne Status", stateColor(st.data, item.state), openStatus)],
-      sections: [detailSection(t, "BACKLOG",
-        line("Sprint", item.sprint ?? "—"),
-        ...(item.area ? [line("Bereich", item.area)] : []),
-        ...(item.iteration ? [line("Iteration", item.iteration)] : []))],
-      buttons: [button(t, "act-status", "Status s", false, openStatus)],
-    };
+    const rows = [["Sprint", item.sprint ?? "—"], ...(item.area ? [["Bereich", item.area]] : []), ...(item.iteration ? [["Iteration", item.iteration]] : [])];
+    return workItemDetail(b, t, view, { state: item.state, color: stateColor(st.data, item.state), title: "BACKLOG", rows });
   },
 };
 
@@ -3849,7 +3886,7 @@ function scrollToRow(b, view, key) {
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
 // states, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
 // count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
-// noViewer, total, limited, limit } (sprintBoard, sources/azure.js). View
+// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js). View
 // fields it reads: id, source, layout (as writeAtOnce does).
 
 // How wide the stories' column is.
@@ -3918,20 +3955,12 @@ export const sprintShape = {
     if (!st.data) return {};
     const column = isTask(item) ? findCard(st.data, item.key)?.column : null;
     const state = shownState(item, column);
-    const openStatus = (cx) => {
-      if (!b.modal) b.openStatusMenu(view, cx);
-    };
-    const line = (label, value) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
     const rows = [
-      ...(column ? [line("Spalte", column.name)] : []),
-      ...(item.area ? [line("Bereich", item.area)] : []),
-      ...(item.iteration ? [line("Iteration", item.iteration)] : []),
+      ...(column ? [["Spalte", column.name]] : []),
+      ...(item.area ? [["Bereich", item.area]] : []),
+      ...(item.iteration ? [["Iteration", item.iteration]] : []),
     ];
-    return {
-      chips: [statusPill(t, state ?? "ohne Status", stateColor(st.data, state), openStatus)],
-      sections: rows.length ? [detailSection(t, isTask(item) ? "TASK" : "STORY", ...rows)] : [],
-      buttons: [button(t, "act-status", "Status s", false, openStatus)],
-    };
+    return workItemDetail(b, t, view, { state, color: stateColor(st.data, state), title: isTask(item) ? "TASK" : "STORY", rows });
   },
 };
 

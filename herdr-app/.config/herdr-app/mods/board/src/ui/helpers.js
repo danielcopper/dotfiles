@@ -161,9 +161,58 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
+// A dialog's text field, the InputState `input` for the dialog m's field
+// `field`: m.inputFocused follows its focus (Board.boardHasKeyboard), a
+// focus moves the dialog onto that field, and Enter in it runs
+// `submit(cx)`.
+export function wireTextField(b, m, input, field, submit) {
+  m.textField = field;
+  m.inputFocused = false;
+  input.on("focus", (_e, cx) => {
+    m.inputFocused = true;
+    if (b.modal === m) m.field = field;
+    cx.notify();
+  });
+  input.on("blur", () => {
+    m.inputFocused = false;
+  });
+  input.on("submit", (_e, cx) => submit(cx));
+}
+
+// Tab and shift-Tab (`back`) in the open dialog: the next or previous of
+// its `fields`, the keyboard where that field wants it (Board.takeKeyboard).
+export function cycleField(b, fields, back, cx) {
+  const m = b.modal;
+  const at = fields.indexOf(m.field);
+  m.field = fields[(at + (back ? -1 : 1) + fields.length) % fields.length];
+  b.takeKeyboard();
+  cx.notify();
+}
+
+// A dialog field's label, and its frame, marked while the dialog is on it.
+export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).child(text);
+export const fieldFrame = (t, m, field, inner) =>
+  h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+
 // A section of the detail panel: a title over its rows.
 export const detailSection = (t, title, ...kids) =>
   v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border).child(div().text_size(11).text_color(t.muted).child(title)).children(kids);
+
+// The detail panel's parts of a work item (the sprint and the backlog
+// shape): its `state` as a pill on its theme `color`, a click opening the
+// status menu; a section `title` with `rows` ([label, value]) where there
+// are any; and Status s.
+export function workItemDetail(b, t, view, { state, color, title, rows }) {
+  const openStatus = (cx) => {
+    if (!b.modal) b.openStatusMenu(view, cx);
+  };
+  const line = ([label, value]) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
+  return {
+    chips: [statusPill(t, state ?? "ohne Status", color, openStatus)],
+    sections: rows.length ? [detailSection(t, title, ...rows.map(line))] : [],
+    buttons: [button(t, "act-status", "Status s", false, openStatus)],
+  };
+}
 
 // The theme color of a check state.
 export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 })[state] ?? t.dim;

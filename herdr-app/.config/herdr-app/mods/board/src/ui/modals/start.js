@@ -13,7 +13,7 @@ import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine, report } from 
 import { startSettings } from "../../config.js";
 import { call } from "../../tools.js";
 import { checkoutArgs, renderTemplate, sessionName, spaceForTab, startCommand, templateVars } from "../../actions/start.js";
-import { backdrop, button, machineName, onMachine } from "../helpers.js";
+import { backdrop, button, cycleField, fieldFrame, fieldLabel, machineName, onMachine, wireTextField } from "../helpers.js";
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
@@ -42,20 +42,10 @@ export const startModal = {
     const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
     if (machine < 0) machine = 0;
     const m = {
-      kind: "start", view, item, settings, input, field: "message", textField: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
     };
-    // inputFocused: whether the message has the keyboard
-    // (Board.boardHasKeyboard).
-    input.on("focus", (_e, cx) => {
-      m.inputFocused = true;
-      if (b.modal === m) m.field = "message";
-      cx.notify();
-    });
-    input.on("blur", () => {
-      m.inputFocused = false;
-    });
-    input.on("submit", (_e, cx) => startModal.start(b, cx));
+    wireTextField(b, m, input, "message", (cx) => startModal.start(b, cx));
     b.modal = m;
     input.focus();
     loadAgents(b, cx);
@@ -112,24 +102,15 @@ export const startModal = {
   },
 
   // Tab and shift-Tab (`back`): the next or previous field.
-  tab(b, back, cx) {
-    const m = b.modal;
-    const at = FIELDS.indexOf(m.field);
-    m.field = FIELDS[(at + (back ? -1 : 1) + FIELDS.length) % FIELDS.length];
-    b.takeKeyboard();
-    cx.notify();
-  },
+  tab: (b, back, cx) => cycleField(b, FIELDS, back, cx),
 
-  // Every key but Esc (the Board's): Tab walks the fields (where it comes
-  // here at all: Board.dialogTab); h/l or the arrows change a choice, Enter
-  // starts. Typing goes to the message.
+  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey,
+  // where Tab comes here at all rather than as the board's action); h/l or
+  // the arrows change a choice, Enter starts. Typing goes to the message.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
-    if (k === "tab") {
-      cx.stop_propagation();
-      return startModal.tab(b, Boolean(e.modifiers?.shift), cx);
-    }
+    if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
     if (m.field === "message") return;
     cx.stop_propagation();
     if (k === "enter") return startModal.start(b, cx);
@@ -139,17 +120,8 @@ export const startModal = {
 
   render(b, t) {
     const m = b.modal;
-    const label = (text) => div().text_size(12).text_color(t.muted).child(text);
-    const frame = (field, inner) =>
-      h_flex()
-        .h(34)
-        .px(10)
-        .items_center()
-        .rounded(6)
-        .border_1()
-        .border_color(m.field === field ? t.accent : t.input)
-        .bg(t.background)
-        .child(inner);
+    const label = (text) => fieldLabel(t, text);
+    const frame = (field, inner) => fieldFrame(t, m, field, inner);
     const choice = (field, title, value) =>
       v_flex()
         .flex_1()

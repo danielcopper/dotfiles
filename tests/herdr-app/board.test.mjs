@@ -4742,7 +4742,7 @@ function backlogData({ ids = fixture("azure-backlog-ids.json"), items = fixture(
   return board.backlogList({
     ...board.backlogLevels(board.parseBacklogLevels(fixture("azure-backlog-levels.json")), config), config,
     settings: board.parseTeamSettings(fixture("azure-backlog-settings.json")), area: board.parseDefaultArea(fixture("azure-sprint-areas.json")),
-    ids: board.parseBacklogIds(ids), items: board.parseWorkItems(items, sprintTeam()), orders: board.parseOrders(items, config.orderField), viewer,
+    ids: board.parseBacklogIds(ids), items: board.parseWorkItems(items, sprintTeam(), config.orderField), viewer,
   });
 }
 

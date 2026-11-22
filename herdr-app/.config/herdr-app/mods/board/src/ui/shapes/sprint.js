@@ -10,7 +10,7 @@
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
 // states, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
 // count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
-// noViewer, total, limited, limit } (sprintBoard, sources/azure.js). View
+// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js). View
 // fields it reads: id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
@@ -22,8 +22,9 @@ import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, spri
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
-import { openStateMenu, setStateAtOnce, stateColor, unclearStateLines } from "../../actions/state.js";
-import { button, chip, columnHead, detailSection, sessionChip, shownOf, statusPill } from "../helpers.js";
+import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
+import { stateColor } from "../../kinds/states.js";
+import { chip, columnHead, sessionChip, shownOf, workItemDetail } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -91,20 +92,12 @@ export const sprintShape = {
     if (!st.data) return {};
     const column = isTask(item) ? findCard(st.data, item.key)?.column : null;
     const state = shownState(item, column);
-    const openStatus = (cx) => {
-      if (!b.modal) b.openStatusMenu(view, cx);
-    };
-    const line = (label, value) => div().text_size(12).text_color(t.muted).child(`${label}: ${value}`);
     const rows = [
-      ...(column ? [line("Spalte", column.name)] : []),
-      ...(item.area ? [line("Bereich", item.area)] : []),
-      ...(item.iteration ? [line("Iteration", item.iteration)] : []),
+      ...(column ? [["Spalte", column.name]] : []),
+      ...(item.area ? [["Bereich", item.area]] : []),
+      ...(item.iteration ? [["Iteration", item.iteration]] : []),
     ];
-    return {
-      chips: [statusPill(t, state ?? "ohne Status", stateColor(st.data, state), openStatus)],
-      sections: rows.length ? [detailSection(t, isTask(item) ? "TASK" : "STORY", ...rows)] : [],
-      buttons: [button(t, "act-status", "Status s", false, openStatus)],
-    };
+    return workItemDetail(b, t, view, { state, color: stateColor(st.data, state), title: isTask(item) ? "TASK" : "STORY", rows });
   },
 };
 
