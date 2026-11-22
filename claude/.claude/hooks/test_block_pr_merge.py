@@ -51,17 +51,21 @@ sys.exit(hook.main())
 """
 
 
-def patched_output(patch: str, command: str) -> dict[str, str] | None:
-    """The decision of the hook with *patch* run in its module, for *command*."""
+def patched_run(patch: str, command: str) -> subprocess.CompletedProcess[str]:
+    """The hook run with *patch* run in its module, for *command*; it must exit 0."""
     payload = json.dumps({"tool_input": {"command": command}})
-    proc = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", PATCHED, str(HOOK), patch],
         input=payload,
         capture_output=True,
         text=True,
         check=True,
     )
-    return parsed(proc.stdout)
+
+
+def patched_output(patch: str, command: str) -> dict[str, str] | None:
+    """The decision of the hook with *patch* run in its module, for *command*."""
+    return parsed(patched_run(patch, command).stdout)
 
 
 PASSES = [
@@ -849,6 +853,11 @@ class MergeBlock(unittest.TestCase):
         self.assertIn("could not be checked (RuntimeError: lost the thread)", reason)
         self.assertIn("a bug in the merge hook - report it to the owner", reason)
         self.assertIn("split or simplify the command meanwhile", reason)
+
+    def test_an_error_while_checking_is_named_on_stderr(self):
+        patch = "def check(command):\n    raise RuntimeError('lost the thread')\n"
+        stderr = patched_run(patch, "gh pr view 1").stderr
+        self.assertIn("block_pr_merge: denying the call after an error: RuntimeError", stderr)
 
     def test_unbalanced_quotes_still_checked(self):
         self.assertEqual(run("gh pr merge 3 --body 'unclosed"), "deny")

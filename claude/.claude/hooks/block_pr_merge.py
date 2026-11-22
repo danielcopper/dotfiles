@@ -7,13 +7,11 @@ What it refuses, what passes, and what is left to the policy is written once, in
 
 import itertools
 import json
-import logging
 import re
 import signal
 import sys
 from dataclasses import dataclass
 
-LOG = logging.getLogger(__name__)
 MAX_LENGTH = 100_000
 DEADLINE = 5.0  # seconds a check may take before the hook denies
 MAX_EVALS = 5
@@ -109,6 +107,7 @@ AZ_SUBCOMMANDS = frozenset(
     ]
 )
 EXTENSION_WORDS = frozenset(["extension", "extensions", "ext"])  # gh extension exec <name>
+SUBCOMMANDS = {"gh": GH_SUBCOMMANDS, "az": AZ_SUBCOMMANDS}
 PR_WORD = re.compile(r"\bpr\b")
 # The merge word of the "pr followed later by merge" rule, next to gh; MERGE_TERM below is the
 # narrower vocabulary of the body-tool and run-time rules.
@@ -188,7 +187,7 @@ WRAPPERS = frozenset(
 )
 KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
 DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
-WORD_END = set(" \t\n;&|()<>`")
+WORD_END = SHELL_OPS | set(" \t\n")
 
 # Heredocs whose body the run-time rules do not read (merge_policy).
 DELIMITER = r"[A-Za-z_][\w-]*"
@@ -442,7 +441,7 @@ def gh_az_body_tokens(words: list[Token]) -> bool:
         tool = token.text.lower().rsplit("/", 1)[-1]
         if token.op or tool not in ("gh", "az"):
             continue
-        known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
+        known = SUBCOMMANDS[tool]
         after_option = False
         for step, current in enumerate(words[at + 1 :]):
             if step >= MAX_OPTION_WALK:
@@ -566,7 +565,7 @@ def unknown_merge_subcommand(lower: str) -> bool:
         if walked is None:
             continue
         positions, has_final = walked
-        known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
+        known = SUBCOMMANDS[tool]
         if any(tokens[i] not in known and "merge" in tokens[i] for i in positions):
             return True
         if tool == "gh" and has_final and tokens[positions[-1]] in EXTENSION_WORDS:
@@ -609,7 +608,7 @@ def body_subcommand(lower: str, original: str) -> bool:
                 pair[0] == "rest" or pair in (("devops", "invoke"), ("repos", "pr"))
             ):
                 return True
-        known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
+        known = SUBCOMMANDS[tool]
         if has_final and tokens[positions[-1]] not in known:
             return True
         if has_final and hidden_before(original, tool_starts[tool][ordinal], tokens[positions[-1]]):
@@ -760,22 +759,9 @@ def without_output_targets(raw: str) -> str:
     """*raw*, one simple command, without its output redirections and their target words: an
     unquoted `>`, `>>`, `>|`, `>&`, `&>` or `&>>` (not `<>`) and the word after it."""
     out: list[str] = []
-    quote = ""
     i = 0
     while i < len(raw):
         c = raw[i]
-        if quote or c in "'\"\\":
-            if quote and c == quote:
-                quote = ""
-            elif not quote and c in "'\"":
-                quote = c
-            elif c == "\\" and quote != "'":
-                out.append(raw[i : i + 2])
-                i += 2
-                continue
-            out.append(c)
-            i += 1
-            continue
         if (c == ">" and raw[i - 1 : i] != "<") or raw.startswith("&>", i):
             i += 2 if c == "&" else 1
             while i < len(raw) and raw[i] in ">|&":
@@ -784,9 +770,13 @@ def without_output_targets(raw: str) -> str:
                 i += 1
             i = word_end(raw, i)
             out.append(" ")
-            continue
-        out.append(c)
-        i += 1
+        elif c in WORD_END:
+            out.append(c)
+            i += 1
+        else:
+            end = word_end(raw, i)
+            out.append(raw[i:end])
+            i = end
     return "".join(out)
 
 
@@ -1141,8 +1131,8 @@ def main() -> int:
             signal.setitimer(signal.ITIMER_REAL, 0)
     except TookTooLong:
         what = "took too long to check; split or simplify the command"
-    except Exception as error:  # fail closed: a filter that cannot check refuses
-        LOG.exception("the merge filter could not check the command")
+    except Exception as error:  # noqa: BLE001 - a filter that cannot check refuses
+        print(f"block_pr_merge: denying the call after an error: {error!r}", file=sys.stderr)
         what = (
             f"could not be checked ({type(error).__name__}: {error}), a bug in the merge hook -"
             " report it to the owner; split or simplify the command meanwhile"
