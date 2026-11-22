@@ -83,12 +83,13 @@ holds the values the file had when that shell started.
 instead: `.bashrc` makes `claude`, `opencode` and `pi` functions that run
 `agent-env <harness> <harness> "$@"`, each only where agent-env and that
 harness are installed. agent-env passes on only the names the harness's list
-`~/.config/agent-env/<harness>` declares, one per line with `#` comments: it
-unsets every other name the file assigns, also where the starting shell
-holds a value for it. It prints no value, also under `bash -x`, and names on
-stderr a declared name without a value and a missing file, starting the
-harness all the same; a missing list stops the start. The script's header
-has the details.
+`~/.config/agent-env/<harness>` declares, one per line with `#` comments, and
+only with the values the file gives them: it unsets every other name the file
+assigns, also where the starting shell holds a value for it, but never
+`PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME` or `TERM`. It prints no value, also
+under `bash -x`. A missing file is named on stderr and the harness starts
+without its secrets; a missing list, or a file that cannot be read or does
+not parse, stops the start. The script's header has the details.
 
 To give a harness another secret, add its `export NAME=...` line to
 `~/.bashrc.secrets` and the name to `bash/.config/agent-env/<harness>`, and

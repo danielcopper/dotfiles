@@ -1,29 +1,37 @@
 #!/usr/bin/env bash
 # agent-env: start an agent harness with the secrets its list declares, read
-# fresh from ~/.bashrc.secrets at this start, and without the others.
+# afresh from ~/.bashrc.secrets at this start, and without the file's others.
 #
 # usage: agent-env <harness> <command> [arg ...]
 #
 # A shell keeps the values ~/.bashrc.secrets held when it started, so a
 # harness started from an older shell would miss a token added since. This
-# script sources the file itself, in its own process, each time:
+# script sources the file itself, in its own process, at each start:
 #   - ~/.config/agent-env/<harness> lists the names the harness gets, one per
 #     line; "#" starts a comment, blank lines are skipped. A missing list, a
 #     harness name other than letters, digits, ".", "_" and "-" (not starting
 #     with "."), or a line that is no variable name stops the start.
-#   - ~/.bashrc.secrets is sourced with xtrace and verbose off, so `bash -x`
-#     shows none of it. Without the file the command starts without it, after
-#     one line on stderr.
-#   - Every name the file assigns (a line `NAME=...` or `export NAME=...`)
-#     that the list does not declare is unset, a value the calling shell held
-#     included. Each declared name with a value is exported; one without a
-#     value is named in one line on stderr and not passed.
+#   - The declared names are unset first, so their values come from the file
+#     alone, never from the calling shell.
+#   - ~/.bashrc.secrets is checked with `bash -n`, then sourced with xtrace
+#     and verbose off, so `bash -x` shows none of it. A file that cannot be
+#     read or does not parse stops the start; its content is not shown.
+#   - The names the file assigns are every name a line assigns first
+#     (`NAME=…` / `export NAME=…`); one assignment per line. After sourcing,
+#     each of them the list does not declare is unset, a value the calling
+#     shell held included; PATH, HOME, SHELL, USER, LOGNAME and TERM are never
+#     unset. Each declared name with a value is exported; one without a value
+#     is not passed.
+#   - Without the file the command starts without its secrets, after one line
+#     on stderr. Which other names the file would assign is unknown then, so
+#     the calling shell's values of those pass through.
 #   - <command> then replaces this process, with its arguments as given; its
 #     exit code is the script's.
 # Values are never printed and never put in an argument list.
 #
-# Exit codes: 2 for a usage error, 1 for a missing or broken list, otherwise
-# those of <command> (127 when it is not found).
+# Exit codes: 2 for a usage error; 1 for a missing or broken list, or a
+# secrets file that cannot be read or does not parse; otherwise those of
+# <command> (127 when it is not found).
 set -u
 
 if [ $# -lt 2 ]; then
@@ -62,15 +70,36 @@ while IFS= read -r line || [ -n "$line" ]; do
 done <"$list"
 
 _agent_env_secrets=$HOME/.bashrc.secrets
+# Checked before anything is read, and traced: only the path shows. The
+# parse's stderr would quote the file, so it is dropped.
+_agent_env_found=1
+if ! [ -e "$_agent_env_secrets" ]; then
+  _agent_env_found=0
+elif ! [ -f "$_agent_env_secrets" ] || ! [ -r "$_agent_env_secrets" ]; then
+  echo "agent-env: cannot read $_agent_env_secrets, not starting $1" >&2
+  exit 1
+elif ! "$BASH" -n "$_agent_env_secrets" 2>/dev/null; then
+  echo "agent-env: $_agent_env_secrets does not parse as bash, not starting $1" >&2
+  exit 1
+fi
+
+# _agent_env_unset <name>: unset it, unless the session needs it.
+_agent_env_unset() {
+  case $1 in
+    PATH | HOME | SHELL | USER | LOGNAME | TERM) ;;
+    *) unset -v "$1" ;;
+  esac
+}
+
 # From here to the restore nothing may be traced: the lines read and the
 # values tested hold the secrets.
 _agent_env_opts=$-
 set +xv
-_agent_env_assigned=()
-_agent_env_missing=()
-_agent_env_found=0
-if [ -f "$_agent_env_secrets" ] && [ -r "$_agent_env_secrets" ]; then
-  _agent_env_found=1
+for _agent_env_name in "${_agent_env_declared[@]}"; do
+  _agent_env_unset "$_agent_env_name"
+done
+if [ "$_agent_env_found" = 1 ]; then
+  _agent_env_assigned=()
   while IFS= read -r _agent_env_line || [ -n "$_agent_env_line" ]; do
     if [[ $_agent_env_line =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)= ]]; then
       _agent_env_assigned+=("${BASH_REMATCH[2]}")
@@ -84,7 +113,7 @@ if [ -f "$_agent_env_secrets" ] && [ -r "$_agent_env_secrets" ]; then
   for _agent_env_name in "${_agent_env_assigned[@]}"; do
     case " ${_agent_env_declared[*]} " in
       *" $_agent_env_name "*) ;;
-      *) unset -v "$_agent_env_name" ;;
+      *) _agent_env_unset "$_agent_env_name" ;;
     esac
   done
 fi
@@ -92,18 +121,13 @@ for _agent_env_name in "${_agent_env_declared[@]}"; do
   if [ -n "${!_agent_env_name-}" ]; then
     export "${_agent_env_name?}"
   else
-    unset -v "$_agent_env_name"
-    _agent_env_missing+=("$_agent_env_name")
+    _agent_env_unset "$_agent_env_name"
   fi
 done
 case $_agent_env_opts in *x*) set -x ;; esac
 case $_agent_env_opts in *v*) set -v ;; esac
 
 if [ "$_agent_env_found" = 0 ]; then
-  echo "agent-env: no $_agent_env_secrets, starting $1 without it" >&2
-else
-  for _agent_env_name in "${_agent_env_missing[@]}"; do
-    echo "agent-env: $_agent_env_name has no value in $_agent_env_secrets, not passed to $1" >&2
-  done
+  echo "agent-env: no $_agent_env_secrets, starting $1 without its secrets" >&2
 fi
 exec "$@"

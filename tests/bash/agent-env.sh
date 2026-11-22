@@ -25,11 +25,21 @@
 #       does not declare is gone, exported by the file or not; a declared one
 #       gets the file's value; a caller's name the file does not assign stays
 #   d3  a declared name the file leaves without a value, or does not assign
-#       at all: one stderr line each, naming it, not passed, the child runs
+#       at all: not passed, nothing on stderr, the child runs
+#   a1  a value the caller holds for a declared name is gone where the file
+#       does not assign it, and also without a file; without a file the
+#       caller's value of a name the file would assign stays
 #   m1  a missing list: exit 1, the error names its path, the child does not
 #       run
 #   m2  no secrets file: the child runs without the secrets, one stderr line
-#       naming the file
+#       naming the file and saying so
+#   m3  a secrets file that cannot be read (mode 000, a directory): exit 1,
+#       one line naming it, no child
+#   m4  a secrets file that does not parse: exit 1, one line naming it and
+#       none of its content, no child; one that parses but whose command
+#       fails at run time keeps the shell's error on stderr and starts
+#   k1  PATH, HOME, SHELL, USER, LOGNAME and TERM, assigned by the file and
+#       not declared, still reach the child
 #   x1  under `bash -x` and `bash -xv` no value shows on stderr, the trace is
 #       on before and after the secrets are read, and the child gets them
 #   c1  the child's exit code is the script's, its arguments arrive as given
@@ -56,7 +66,8 @@
 set -uo pipefail
 
 CASES=(l1_shipped_lists f1_fresh_read d1_only_declared d2_caller_value_gone d3_declared_without_value
-  m1_missing_list m2_missing_secrets x1_xtrace c1_exit_code_and_args u1_usage u2_bad_harness
+  a1_declared_from_file_only m1_missing_list m2_missing_secrets m3_unreadable_secrets m4_unparsable_secrets
+  k1_kept_names x1_xtrace c1_exit_code_and_args u1_usage u2_bad_harness
   u3_bad_list_line b1_bashrc_functions b2_no_agent_env)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
@@ -235,12 +246,21 @@ d3_declared_without_value() {
   check "token passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
   check "NOT_IN_FILE not passed" lacks NOT_IN_FILE
   check "EMPTY_ONE not passed" lacks EMPTY_ONE
-  check "two lines on stderr (got: $(err))" eq "$(err_lines)" 2
-  check "NOT_IN_FILE named" grep -qx "agent-env: NOT_IN_FILE has no value in $HOME/.bashrc.secrets, not passed to child" \
-    "$ROOT/stderr"
-  check "EMPTY_ONE named" grep -qx "agent-env: EMPTY_ONE has no value in $HOME/.bashrc.secrets, not passed to child" \
-    "$ROOT/stderr"
-  check "no value on stderr" no_value_on_stderr
+  check "nothing on stderr (got: $(err))" eq "$(err)" ""
+}
+
+a1_declared_from_file_only() {
+  printf '%s\n' 'export SONARQUBE_CLI_TOKEN=tok-dummy-1' >"$HOME/.bashrc.secrets"
+  list SONARQUBE_CLI_TOKEN SONARQUBE_CLI_ORG
+  agent_env SONARQUBE_CLI_ORG=stale-dummy-9 -- t child
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the file's token passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
+  check "the caller's org, not in the file, gone" lacks SONARQUBE_CLI_ORG
+  rm "$HOME/.bashrc.secrets"
+  agent_env SONARQUBE_CLI_TOKEN=stale-dummy-9 OTHER_TOKEN=stale-dummy-9 -- t child
+  check "no file: exit 0 (got $RC)" eq "$RC" 0
+  check "no file: the caller's token gone" lacks SONARQUBE_CLI_TOKEN
+  check "no file: an undeclared caller name stays" has OTHER_TOKEN stale-dummy-9
 }
 
 m1_missing_list() {
@@ -257,8 +277,57 @@ m2_missing_secrets() {
   check "exit 0 (got $RC)" eq "$RC" 0
   check "the child ran" ran
   check "one line on stderr (got: $(err))" eq "$(err_lines)" 1
-  check "it names the file" grep -qF "$HOME/.bashrc.secrets" "$ROOT/stderr"
+  check "it names the file and says so" grep -qxF \
+    "agent-env: no $HOME/.bashrc.secrets, starting child without its secrets" "$ROOT/stderr"
   check "no token" lacks SONARQUBE_CLI_TOKEN
+}
+
+m3_unreadable_secrets() {
+  local how
+  for how in mode-000 directory; do
+    if [ "$how" = directory ]; then
+      rm -f "$HOME/.bashrc.secrets"
+      mkdir "$HOME/.bashrc.secrets"
+    else
+      chmod 000 "$HOME/.bashrc.secrets"
+    fi
+    agent_env -- claude child
+    check "$how: exit 1 (got $RC)" eq "$RC" 1
+    check "$how: one line naming it (got: $(err))" grep -qxF \
+      "agent-env: cannot read $HOME/.bashrc.secrets, not starting child" "$ROOT/stderr"
+    check "$how: only that line" eq "$(err_lines)" 1
+    check "$how: no child" not_ran
+  done
+}
+
+m4_unparsable_secrets() {
+  printf '%s%s\n' "$SECRETS" 'if then dummy-in-the-broken-line (' >"$HOME/.bashrc.secrets"
+  agent_env -- claude child
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "one line naming it (got: $(err))" grep -qxF \
+    "agent-env: $HOME/.bashrc.secrets does not parse as bash, not starting child" "$ROOT/stderr"
+  check "only that line" eq "$(err_lines)" 1
+  check "none of its content" no_value_on_stderr
+  check "no child" not_ran
+  printf '%s%s\n' "$SECRETS" 'no-such-command-of-the-test' >"$HOME/.bashrc.secrets"
+  agent_env -- claude child
+  check "run-time error: exit 0 (got $RC)" eq "$RC" 0
+  check "run-time error: on stderr (got: $(err))" grep -q 'no-such-command-of-the-test: command not found' \
+    "$ROOT/stderr"
+  check "run-time error: the token passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
+}
+
+k1_kept_names() {
+  { printf '%s' "$SECRETS"; printf '%s\n' "export PATH=\$PATH" "export HOME=\$HOME" 'export SHELL=/kept/sh' \
+    'export USER=kept-user' 'LOGNAME=kept-logname' 'export TERM=kept-term'; } >"$HOME/.bashrc.secrets"
+  agent_env SHELL=/caller/sh USER=caller-user LOGNAME=caller-logname TERM=caller-term -- claude child
+  check "exit 0 (got $RC; stderr: $(err))" eq "$RC" 0
+  check "PATH kept" has PATH "$ROOT/bin"
+  check "HOME kept" has HOME "$HOME"
+  check "SHELL kept" has SHELL /kept/sh
+  check "USER kept" has USER kept-user
+  check "LOGNAME kept" has LOGNAME kept-logname
+  check "TERM kept" has TERM kept-term
 }
 
 x1_xtrace() {
