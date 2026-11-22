@@ -73,6 +73,20 @@
 #       nothing created
 #   o11 --replace on the current directory when it holds a page, which the
 #       swap would move: exit 1, says so, the page unchanged
+#   l1  --section TITLE (or --section=TITLE) between images starts a section:
+#       an <h2> with the title, HTML-escaped, then its images in the order
+#       given, each section its own <section>; images before the first
+#       --section form one without a heading; without --section there is one
+#       such section; a --section right after <out-dir> makes no empty one
+#   l2  a --section without a title, with an empty title, with no image after
+#       it (at the end, or right before another --section), or before
+#       <out-dir>: exit 2, the reason and the usage on stderr, the out-dir not
+#       created; after -- a --section is an image name like any other
+#   l3  the layout: each section's images in a grid whose column is its
+#       widest image's CSS width (--col) and that fits as many columns as the
+#       page allows, never wider than the screen; the page centered, as wide
+#       as its widest section with every image in one row (--page), and at
+#       least 40rem
 # The f cases run the script inside a python harness, $ROOT/faulty.py, that
 # loads it as a module and makes the os calls the scenario FAULT names fail,
 # the one way to reach a rename that fails between two that succeed:
@@ -105,7 +119,8 @@ CASES=(m1_density_scales m2_default_density m3_bad_density m4_formats m5_unreada
   o1_out_dir_created o2_nonempty_refused o3_replace o4_replace_refuses_foreign o5_duplicate_basenames
   o6_prints_path_only o7_option_order o8_write_fails_keeps_page o9_unlistable_out_dir
   o10_parent_not_writable o11_replace_current_dir m6_width_overflows f1_swap_fails_rolls_back
-  f2_rollback_fails_says_where f3_aside_fails f4_cleanup_fails_warns f5_empty_dir_move_fails)
+  f2_rollback_fails_says_where f3_aside_fails f4_cleanup_fails_warns f5_empty_dir_move_fails
+  l1_sections l2_section_usage l3_grid_layout)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -796,6 +811,75 @@ f5_empty_dir_move_fails() {
   run --replace "$OUTDIR" "$FX/base.jpg"
   written
   check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
+}
+
+# layout: the section, h2, grid and img lines of index.html, in order, the
+# img lines cut to their src.
+layout() {
+  page | grep -E '<section>|<h2>|class="grid"|<img ' | sed 's/\(<img src="[^"]*"\).*/\1>/'
+}
+
+l1_sections() {
+  run "$OUTDIR" "$FX/anim.gif" --section "Monat <&>" "$FX/wide.png" "$FX/base.jpg" \
+    --section=Woche "$FX/prog.jpg"
+  written
+  check "sections in order: $(layout)" [ "$(layout | grep -v grid)" = '<section>
+<img src="anim.gif">
+<section>
+<h2>Monat &lt;&amp;&gt;</h2>
+<img src="wide.png">
+<img src="base.jpg">
+<section>
+<h2>Woche</h2>
+<img src="prog.jpg">' ]
+  check "each section closed: $(page | grep -c '</section>')" [ "$(page | grep -c '</section>')" = 3 ]
+  run --replace "$OUTDIR" "$FX/wide.png" "$FX/anim.gif"
+  written
+  check "one section without a heading: $(layout)" [ "$(layout | grep -v grid)" = '<section>
+<img src="wide.png">
+<img src="anim.gif">' ]
+  run --replace "$OUTDIR" --section Nur "$FX/wide.png"
+  written
+  check "a first --section leaves no section without images: $(layout)" [ "$(layout | grep -v grid)" = '<section>
+<h2>Nur</h2>
+<img src="wide.png">' ]
+}
+
+l2_section_usage() {
+  run "$OUTDIR" "$FX/wide.png" --section
+  not_created 2 "--section needs a value"
+  run "$OUTDIR" --section "" "$FX/wide.png"
+  not_created 2 "--section needs a title"
+  run "$OUTDIR" "$FX/wide.png" --section Leer
+  not_created 2 "--section Leer has no image after it"
+  run "$OUTDIR" --section Leer --section Voll "$FX/wide.png"
+  not_created 2 "--section Leer has no image after it"
+  run --section Vorne "$OUTDIR" "$FX/wide.png"
+  not_created 2 "<out-dir> comes before the first --section"
+  check "the usage names --section: $ERR" grep -qF "[--section TITLE]" <<<"$ERR"
+  cp "$FX/wide.png" "$ROOT/caller/--section"
+  run "$OUTDIR" "$FX/anim.gif" -- --section
+  written
+  check "after -- it is an image: $(layout)" grep -qF '<img src="--section">' <<<"$(layout)"
+}
+
+l3_grid_layout() {
+  # At 2.625: wide.png 725 px is 276 CSS px, base.jpg 641 px is 244.
+  cp "$FX/base.jpg" "$ROOT/caller/other.jpg"
+  run --density 2.625 "$OUTDIR" --section A "$FX/base.jpg" "$FX/wide.png" --section B "$ROOT/caller/other.jpg"
+  written
+  check "each grid's column is its widest image: $(page | grep 'class="grid"')" \
+    [ "$(page | grep 'class="grid"')" = '<div class="grid" style="--col:276px">
+<div class="grid" style="--col:244px">' ]
+  check "the page as wide as section A in one row, 276+24+276: $(page | grep '<main')" \
+    grep -qxF '<main class="page" style="--page:576px">' "$OUTDIR/index.html"
+  check "the header first inside the page" [ "$(page | grep -A1 '^<main' | tail -1)" = '<header>' ]
+  # The 24px column gap is the one the page width above counts.
+  check "the grid fits columns of --col, never wider than the screen" \
+    grep -qF '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--col)),var(--col)));gap:32px 24px;' "$OUTDIR/index.html"
+  check "the page centered, at least 40rem" \
+    grep -qF '.page{width:100%;max-width:max(40rem,var(--page));margin-inline:auto' "$OUTDIR/index.html"
+  check "each image still at its real size: $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]
 }
 
 missing=0

@@ -1,7 +1,8 @@
 #!/usr/bin/env -S python3 -I
-"""Write a page that shows images at their real size, stacked one below the other.
+"""Write a page that shows images at their real size, side by side as they fit.
 
-usage: image-page [--density D] [--title T] [--replace] <out-dir> <image>[::caption] ...
+usage: image-page [--density D] [--title T] [--replace] <out-dir>
+                  [--section TITLE] <image>[::caption] ... [--section TITLE <image> ...]
 
 Copies each image into <out-dir>, under its own basename, and writes
 <out-dir>/index.html: the images in the order given, each with its caption
@@ -9,7 +10,16 @@ above it, the basename without its extension unless <image>::caption gives
 one (an empty caption falls back to that default), and the image's pixel
 size beside the caption. Each image's CSS width is its pixel width divided
 by D, rounded half up and at least 1 px, its height follows, and
-max-width:100% keeps it inside a narrow screen. D is the density the image
+max-width:100% keeps it inside a narrow screen.
+
+--section TITLE (or --section=TITLE) among the images starts a section: a
+heading, then the images after it up to the next --section. Images before
+the first --section form a section without a heading. Each section lays its
+images out in a grid of columns as wide as its widest image, as many side
+by side as the screen holds and one on a phone; the page is centered and as
+wide as its widest section with all its images in one row, at least 40rem.
+Every --section needs a title and an image after it, and <out-dir> comes
+before the first one; after -- a --section is an image name. D is the density the image
 was drawn at, in pixels per CSS pixel, such as an Android render's 2.625;
 a screenshot takes the scale of the screen it was taken on (a phone's
 density, a desktop's scale factor); photos take none, and without --density
@@ -49,7 +59,8 @@ It refuses, before it writes anything, and exits 1:
   page: the swap would move it away from under the caller.
 
 Exit codes: 0 written, 1 refused, 2 usage (an unknown option, an option
-without its value, a --density that is no positive decimal number, too
+without its value, a --section without a title or an image after it, a
+--density that is no positive decimal number, too
 large for a float or too small to be told from 0, no <out-dir> or no
 image), 3 the page could not be written in <out-dir> (a full disk, a
 directory it may not write); the earlier page, if any, stays, or the
@@ -71,25 +82,33 @@ from typing import NoReturn
 MANIFEST = ".image-page.json"
 INDEX = "index.html"
 USAGE = """\
-usage: image-page [--density D] [--title T] [--replace] <out-dir> <image>[::caption] ...
+usage: image-page [--density D] [--title T] [--replace] <out-dir> [--section TITLE] <image>[::caption] ...
   Writes <out-dir>/index.html with the images at their real size, each CSS
-  pixel D image pixels (default 1); show it with: preview-serve <out-dir>"""
-# One column of figures at their real size, left-aligned, each caption above
-# its image; the page's own colors are tokens, light first, dark redefined.
+  pixel D image pixels (default 1), side by side as they fit; --section
+  TITLE before an image starts a section with that heading. Show it with:
+  preview-serve <out-dir>"""
+# The grid's gap between columns, in CSS px; the .grid rule in STYLE uses it.
+COLUMN_GAP = 24
+# A centered page of sections, each a grid of figures at their real size,
+# each caption above its image; the page's own colors are tokens, light
+# first, dark redefined.
 STYLE = """\
 :root{--bg:#f1f3f6;--fg:#1b1f27;--muted:#596173;--rule:#d8dce3;\
 --font-text:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;\
 --font-mono:ui-monospace,"SF Mono","Cascadia Mono","DejaVu Sans Mono",monospace;color-scheme:light}
 @media (prefers-color-scheme: dark){:root{--bg:#15181d;--fg:#e4e7ec;--muted:#99a1af;--rule:#2c313a;color-scheme:dark}}
-body{margin:0;display:grid;gap:24px;align-content:start;padding-block:24px 48px;\
+body{margin:0;padding-block:24px 48px;\
 padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));\
 background:var(--bg);color:var(--fg);font:16px/1.5 var(--font-text)}
+.page{width:100%;max-width:max(40rem,var(--page));margin-inline:auto;display:grid;gap:32px;min-width:0}
 header{display:grid;gap:4px;padding-bottom:16px;border-bottom:1px solid var(--rule);min-width:0}
 h1{margin:0;font-size:1.375rem;font-weight:600;line-height:1.25;text-wrap:balance;overflow-wrap:anywhere}
 .meta,.size{color:var(--muted);font-family:var(--font-mono);font-size:0.8125rem;font-weight:400;font-variant-numeric:tabular-nums}
 .meta{margin:0}
-main{display:grid;gap:32px;min-width:0}
-figure{margin:0;display:grid;gap:8px;justify-items:start;min-width:0}
+section{display:grid;gap:12px;min-width:0}
+h2{margin:0;font-size:1.0625rem;font-weight:600;line-height:1.3;text-wrap:balance;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--col)),var(--col)));gap:32px 24px;justify-content:start}
+figure{margin:0;display:grid;gap:8px;align-content:start;justify-items:start;min-width:0}
 figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;font-size:0.9375rem;font-weight:500;overflow-wrap:anywhere}
 img{display:block;height:auto;max-width:100%}
 """
@@ -122,7 +141,12 @@ def density(value):
     return float(value)
 
 
+class Section(str):
+    """A --section title among the image arguments."""
+
+
 def parse(argv):
+    """(options, <out-dir>, the images and Section titles in the order given)."""
     opts = {"density": 1.0, "title": None, "replace": False}
     positional = []
     args = iter(argv)
@@ -131,21 +155,43 @@ def parse(argv):
             positional.extend(args)
             break
         name, eq, value = arg.partition("=")
-        if name in ("--density", "--title"):
+        if name in ("--density", "--title", "--section"):
             if not eq:
                 value = next(args, None)
                 if value is None:
                     usage(f"{name} needs a value")
-            opts[name[2:]] = density(value) if name == "--density" else value
+            if name == "--section":
+                if not value:
+                    usage("--section needs a title")
+                positional.append(Section(value))
+            else:
+                opts[name[2:]] = density(value) if name == "--density" else value
         elif arg == "--replace":
             opts["replace"] = True
         elif arg.startswith("-") and arg != "-":
             usage(f"unknown option {arg}")
         else:
             positional.append(arg)
+    if positional and isinstance(positional[0], Section):
+        usage("<out-dir> comes before the first --section")
+    for item, after in zip(positional, [*positional[1:], None]):
+        if isinstance(item, Section) and (after is None or isinstance(after, Section)):
+            usage(f"--section {item} has no image after it")
     if len(positional) < 2:
         usage("an <out-dir> and at least one image are needed")
     return opts, positional[0], positional[1:]
+
+
+def sections(items, images):
+    """[(heading or None, images)]: the loaded images grouped by the Section before them."""
+    groups: list[tuple[str | None, list]] = [(None, [])]
+    loaded = iter(images)
+    for item in items:
+        if isinstance(item, Section):
+            groups.append((str(item), []))
+        else:
+            groups[-1][1].append(next(loaded))
+    return [group for group in groups if group[0] is not None or group[1]]
 
 
 def png_size(data):
@@ -291,10 +337,15 @@ def css_width(source, width, density_):
     return max(1, int(css))
 
 
-def render(out, images, title, density_):
+def render(out, groups, title, density_):
     esc = html.escape
     head_title = title if title is not None else os.path.basename(os.path.abspath(out))
-    count = f"{len(images)} image{'' if len(images) == 1 else 's'}"
+    total = sum(len(images) for _, images in groups)
+    count = f"{total} image{'' if total == 1 else 's'}"
+    widths = [[css_width(source, size[0], density_) for source, _, _, _, size in images] for _, images in groups]
+    # As wide as the widest section with all its images in one row of its
+    # grid, whose columns are each as wide as its widest image.
+    page_width = max(len(row) * max(row) + COLUMN_GAP * (len(row) - 1) for row in widths)
     lines = [
         "<!doctype html>",
         "<html>",
@@ -305,19 +356,25 @@ def render(out, images, title, density_):
         f"<style>\n{STYLE}</style>",
         "</head>",
         "<body>",
+        f'<main class="page" style="--page:{page_width}px">',
         "<header>",
     ]
     if title is not None:
         lines.append(f"<h1>{esc(title)}</h1>")
-    lines += [f'<p class="meta">{count} · density {density_:g}</p>', "</header>", "<main>"]
-    for source, name, caption, _, (width, height) in images:
-        css = css_width(source, width, density_)
-        lines += [
-            "<figure>",
-            f'<figcaption><span class="name">{esc(caption)}</span> <span class="size">{width} × {height} px</span></figcaption>',
-            f'<img src="{esc(urllib.parse.quote(name))}" alt="{esc(caption)}" style="width:{css}px">',
-            "</figure>",
-        ]
+    lines += [f'<p class="meta">{count} · density {density_:g}</p>', "</header>"]
+    for (heading, images), row in zip(groups, widths):
+        lines.append("<section>")
+        if heading is not None:
+            lines.append(f"<h2>{esc(heading)}</h2>")
+        lines.append(f'<div class="grid" style="--col:{max(row)}px">')
+        for (_, name, caption, _, (width, height)), css in zip(images, row):
+            lines += [
+                "<figure>",
+                f'<figcaption><span class="name">{esc(caption)}</span> <span class="size">{width} × {height} px</span></figcaption>',
+                f'<img src="{esc(urllib.parse.quote(name))}" alt="{esc(caption)}" style="width:{css}px">',
+                "</figure>",
+            ]
+        lines += ["</div>", "</section>"]
     lines += ["</main>", "</body>", "</html>", ""]
     return "\n".join(lines)
 
@@ -401,11 +458,11 @@ def write_error(out, e):
 
 
 def main(argv):
-    opts, out, specs = parse(argv)
+    opts, out, items = parse(argv)
     try:
-        images = load(specs)
+        images = load([item for item in items if not isinstance(item, Section)])
         state, stale = prepare(out, opts["replace"])
-        page = render(out, images, opts["title"], opts["density"])
+        page = render(out, sections(items, images), opts["title"], opts["density"])
     except Refused as e:
         print(f"image-page: {e}", file=sys.stderr)
         return 1
