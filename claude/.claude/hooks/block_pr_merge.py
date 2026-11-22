@@ -908,8 +908,8 @@ def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
     substitutions, fed to a command reads_data() accepts, with at most an output redirection to a
     plain word after the marker on its line, and a line that ends the body. No span at all when
     the text holds what this reading does not follow: a backtick, a `$'` string, a substitution
-    or `${` inside double quotes, a process substitution, `((`, `case`, a `{` or `}` that is no
-    command word, a backslash-newline before a `#`, or a `<<` that is no heredoc marker it
+    or `${` inside double quotes, a process substitution, `((`, `$[`, `case`, a `{` or `}` that is
+    no command word, a backslash escape right before a `#`, or a `<<` that is no heredoc marker it
     reads."""
     spans: list[tuple[int, int]] = []
     pending: list[tuple[str, bool, bool]] = []  # delimiter, tabs stripped, body spared
@@ -930,11 +930,11 @@ def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
             i += 1
             continue
         if c == "\\":
-            if command.startswith("\n#", i + 1):  # the # continues a word, no comment
+            if command[i + 2 : i + 3] == "#":  # the # continues a word, no comment
                 return []
             i += 2
             continue
-        if c == "`" or command.startswith(("$'", "<(", ">(", "(("), i):
+        if c == "`" or command.startswith(("$'", "$[", "<(", ">(", "(("), i):
             return []
         if command.startswith("case", i) and standalone_word(command, i, 4):
             return []
