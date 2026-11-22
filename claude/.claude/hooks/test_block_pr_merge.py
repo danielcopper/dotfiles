@@ -514,6 +514,16 @@ DENIED = [
     "/tmp/x/gh pr view 1; echo $?",
     "echo az $?",
     "echo wget $?",
+    # the GraphQL merge queue
+    (
+        'gh api graphql -f query=\'mutation { enqueuePullRequest(input: {pullRequestId: "x"})'
+        " { clientMutationId } }'"
+    ),
+    "gh api graphql -f query='mutation { enqueuePullRequest(input: {}) { mergeQueueEntry { id } } }'",
+    (
+        "curl -s -H 'Authorization: bearer x' https://api.github.com/graphql"
+        ' -d \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\''
+    ),
 ]
 
 REASONS = {

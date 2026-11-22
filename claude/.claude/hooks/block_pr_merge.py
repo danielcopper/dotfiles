@@ -96,7 +96,8 @@ PR_WORD = re.compile(r"\bpr\b")
 MERGE_WORD = re.compile(r"\bmerge\b")
 
 PR_MERGE = re.compile(
-    r"\bpr\s+merge\b|pulls/[^\s/]+/merge|/merges\b|mergepullrequest|enablepullrequestautomerge"
+    r"\bpr\s+merge\b|pulls/[^\s/]+/merge|/merges\b"
+    r"|mergepullrequest|enablepullrequestautomerge|enqueuepullrequest"
 )
 ALIAS = re.compile(r"\balias\b")
 ALIAS_VERB = re.compile(r"\b(set|import)\b")

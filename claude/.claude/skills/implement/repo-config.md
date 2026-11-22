@@ -37,8 +37,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     included, where quoted strings may be values: outside the quotes no shell syntax or backslash, inside double
     quotes no `$`, backtick or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command is denied
     when its text
-    - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge or auto-merge
-      mutation, or with `gh` the word `pr` followed later by the word `merge`);
+    - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge, auto-merge or
+      merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge`);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
     - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
