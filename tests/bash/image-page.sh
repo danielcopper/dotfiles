@@ -7,8 +7,9 @@
 # the cases, by the python at the top of this file: a PNG that decodes, and
 # headers of the other formats with the size where each format keeps it.
 #   m1  a 725 px PNG at --density 2.625: CSS width 276; 5 px at 2: 3 (half
-#       up); 1 px at 3: 1, never 0; the copy is the same bytes as the source
-#   m2  without --density: the pixel width, 725
+#       up); 1 px at 3: 1, never 0; the copy is the same bytes as the source;
+#       the page's meta line says "3 images · density 2.625"
+#   m2  without --density: the pixel width, 725, and "1 image · density 1"
 #   m3  a density that is no positive decimal number (0, 0.0, -1, abc, empty,
 #       nan, inf, 1e3, 1_0, " 2", a missing value), an unknown option, no
 #       image: exit 2, the usage on stderr, the out-dir not created; the
@@ -20,7 +21,8 @@
 #       JPEG without a frame header, a WebP without a known chunk, a missing
 #       file, a directory): exit 1, the file named on stderr, the out-dir not
 #       created
-#   c1  without a caption: the basename without its extension, above the
+#   c1  without a caption: the basename without its extension, with the
+#       image's pixel size beside it, above the
 #       image
 #   c2  image::caption: that caption, above the image, the rest of the path
 #       read as the image; an empty caption falls back to the default
@@ -31,6 +33,10 @@
 #       name and there is no <h1>
 #   c6  the page loads nothing from outside: no URL in it, every src a file
 #       beside it
+#   c7  light and dark: every color token of the bare :root block is
+#       redefined in a prefers-color-scheme: dark block that sets only tokens
+#       and color-scheme: dark, body takes its colors from the tokens, and
+#       no color literal stands outside the two token blocks
 #   o1  a missing out-dir is created, parents too; an out-dir that is a file:
 #       exit 1
 #   o2  a non-empty out-dir is refused without --replace, also one holding
@@ -58,6 +64,7 @@ set -uo pipefail
 
 CASES=(m1_density_scales m2_default_density m3_bad_density m4_formats m5_unreadable_size
   c1_caption_default c2_caption_given c3_order_kept c4_escaping c5_title c6_no_external_resources
+  c7_dark_tokens
   o1_out_dir_created o2_nonempty_refused o3_replace o4_replace_refuses_foreign o5_duplicate_basenames
   o6_prints_path_only o7_option_order)
 if [ "${1:-}" = --list ]; then
@@ -168,6 +175,8 @@ img_width() {
   page | sed -n "s|.*<img src=\"$1\"[^>]*style=\"width:\([0-9]*\)px\".*|\1|p"
 }
 # shown: the figcaption and img lines of index.html, in order, one per line.
+# caption <html> <w × h>: the figcaption line shown() expects for an image.
+caption() { printf '<figcaption><span class="name">%s</span> <span class="size">%s px</span></figcaption>' "$1" "$2"; }
 shown() { page | grep -E '<figcaption>|<img '; }
 # listing <dir>: the names in <dir>, dotfiles too, one per line, sorted.
 listing() { (cd "$1" && find . -mindepth 1 | sort); }
@@ -196,6 +205,8 @@ m1_density_scales() {
   run --density 2.625 "$OUTDIR" "$FX/wide.png" "$FX/five.png" "$FX/one.png"
   written
   check "725 px at 2.625 is 276 px, got $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]
+  check "meta line names count and density: $(page | grep 'class="meta"')" \
+    grep -qxF '<p class="meta">3 images · density 2.625</p>' "$OUTDIR/index.html"
   run --replace --density 2 "$OUTDIR" "$FX/five.png"
   written
   check "5 px at 2 is 3 px, got $(img_width five.png)" [ "$(img_width five.png)" = 3 ]
@@ -211,6 +222,8 @@ m2_default_density() {
   run "$OUTDIR" "$FX/wide.png"
   written
   check "725 px without --density, got $(img_width wide.png)" [ "$(img_width wide.png)" = 725 ]
+  check "meta line for one image at density 1: $(page | grep 'class="meta"')" \
+    grep -qxF '<p class="meta">1 image · density 1</p>' "$OUTDIR/index.html"
 }
 
 m3_bad_density() {
@@ -259,18 +272,18 @@ m5_unreadable_size() {
 c1_caption_default() {
   run "$OUTDIR" "$FX/wide.png" "$FX/lossless.webp"
   written
-  check "each caption above its image: $(shown)" [ "$(shown)" = "<figcaption>wide</figcaption>
+  check "each caption above its image: $(shown)" [ "$(shown)" = "$(caption wide '725 × 4')
 <img src=\"wide.png\" alt=\"wide\" style=\"width:725px\">
-<figcaption>lossless</figcaption>
+$(caption lossless '9999 × 13')
 <img src=\"lossless.webp\" alt=\"lossless\" style=\"width:9999px\">" ]
 }
 
 c2_caption_given() {
   run "$OUTDIR" "$FX/wide.png::Woche :: dark" "$FX/anim.gif::"
   written
-  check "the given caption and the default: $(shown)" [ "$(shown)" = "<figcaption>Woche :: dark</figcaption>
+  check "the given caption and the default: $(shown)" [ "$(shown)" = "$(caption 'Woche :: dark' '725 × 4')
 <img src=\"wide.png\" alt=\"Woche :: dark\" style=\"width:725px\">
-<figcaption>anim</figcaption>
+$(caption anim '333 × 9')
 <img src=\"anim.gif\" alt=\"anim\" style=\"width:333px\">" ]
 }
 
@@ -286,9 +299,9 @@ c4_escaping() {
   cp "$FX/wide.png" "$ROOT/two words&more.png"
   run --title "<i>Tom & \"Jerry's\"</i>" "$OUTDIR" "$FX/anim.gif::<b>&\"x'</b>" "$ROOT/two words&more.png"
   written
-  check "caption escaped: $(shown)" [ "$(shown)" = "<figcaption>&lt;b&gt;&amp;&quot;x&#x27;&lt;/b&gt;</figcaption>
+  check "caption escaped: $(shown)" [ "$(shown)" = "$(caption '&lt;b&gt;&amp;&quot;x&#x27;&lt;/b&gt;' '333 × 9')
 <img src=\"anim.gif\" alt=\"&lt;b&gt;&amp;&quot;x&#x27;&lt;/b&gt;\" style=\"width:333px\">
-<figcaption>two words&amp;more</figcaption>
+$(caption 'two words&amp;more' '725 × 4')
 <img src=\"two%20words%26more.png\" alt=\"two words&amp;more\" style=\"width:725px\">" ]
   local esc='&lt;i&gt;Tom &amp; &quot;Jerry&#x27;s&quot;&lt;/i&gt;'
   check "title escaped: $(page | grep '<title>')" grep -qxF "<title>$esc</title>" <<<"$(page)"
@@ -317,6 +330,46 @@ c6_no_external_resources() {
     check "src $src lies beside the page" [ -f "$OUTDIR/$src" ]
   done < <(page | sed -n 's/.*src="\([^"]*\)".*/\1/p')
   check "the page names its images: $(page | grep -c 'src=')" [ "$(page | grep -c 'src=')" = 2 ]
+}
+
+c7_dark_tokens() {
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  local verdict
+  verdict=$(python3 -I - "$OUTDIR/index.html" 2>&1 <<'EOF'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+style = re.search(r"<style>(.*?)</style>", page, re.S)
+if not style:
+    sys.exit("no <style> block")
+css = style.group(1)
+light = re.search(r"(?m)^:root\{([^}]*)\}", css)
+dark = re.search(r"@media \(prefers-color-scheme: ?dark\)\{:root\{([^}]*)\}\}", css)
+if not light or not dark:
+    sys.exit("no bare :root block or no prefers-color-scheme: dark block")
+def decls(block):
+    return dict(d.split(":", 1) for d in block.split(";") if d.strip())
+light_d, dark_d = decls(light.group(1)), decls(dark.group(1))
+color = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(rgb|hsl|oklch|lab)a?\(")
+colors = sorted(k for k, v in light_d.items() if k.startswith("--") and color.search(v))
+if len(colors) < 3:
+    sys.exit(f"fewer than 3 color tokens on :root: {colors}")
+missing = [k for k in colors if k not in dark_d]
+if missing:
+    sys.exit(f"not redefined for dark: {missing}")
+extra = [k for k in dark_d if not k.startswith("--") and k != "color-scheme"]
+if extra or dark_d.get("color-scheme") != "dark":
+    sys.exit(f"the dark block sets {extra} or lacks color-scheme:dark")
+rest = css.replace(light.group(0), "").replace(dark.group(0), "")
+if color.search(rest):
+    sys.exit(f"a color literal outside the token blocks: {color.search(rest).group(0)}")
+body = re.search(r"(?m)^body\{([^}]*)\}", rest)
+if not body or "background:var(--bg)" not in body.group(1) or "color:var(--fg)" not in body.group(1):
+    sys.exit("body does not take background and color from the tokens")
+print("ok")
+EOF
+  )
+  check "dark-mode tokens: $verdict" [ "$verdict" = ok ]
 }
 
 o1_out_dir_created() {

@@ -6,15 +6,17 @@ usage: image-page [--density D] [--title T] [--replace] <out-dir> <image>[::capt
 Copies each image into <out-dir>, under its own basename, and writes
 <out-dir>/index.html: the images in the order given, each with its caption
 above it, the basename without its extension unless <image>::caption gives
-one (an empty caption falls back to that default). Each image's CSS width is
-its pixel width divided by D, rounded half up and at least 1 px, its height
-follows, and max-width:100% keeps it inside a narrow screen. D is the
-density the image was drawn at, in pixels per CSS pixel, such as an Android
-render's 2.625; without --density it is 1, for photos and screenshots. The
-pixel width is read from the file itself: PNG, JPEG, GIF or WebP. --title
-sets the page's <title> and an <h1>; without it the <title> is the
-out-dir's name. Captions, title and file names are HTML-escaped, and the
-page loads nothing from elsewhere. Options may stand anywhere before --.
+one (an empty caption falls back to that default), and the image's pixel
+size beside the caption. Each image's CSS width is its pixel width divided
+by D, rounded half up and at least 1 px, its height follows, and
+max-width:100% keeps it inside a narrow screen. D is the density the image
+was drawn at, in pixels per CSS pixel, such as an Android render's 2.625;
+without --density it is 1, for photos and screenshots. The pixel size is
+read from the file itself: PNG, JPEG, GIF or WebP. A line at the top names
+the number of images and D. --title sets the page's <title> and an <h1>;
+without it the <title> is the out-dir's name. Captions, title and file names
+are HTML-escaped. The page follows the viewer's light or dark setting and
+loads nothing from elsewhere. Options may stand anywhere before --.
 
 It creates <out-dir>, parents too, when it is missing, prints the path of
 index.html and starts no server: run `preview-serve <out-dir>` to show it.
@@ -50,13 +52,25 @@ USAGE = """\
 usage: image-page [--density D] [--title T] [--replace] <out-dir> <image>[::caption] ...
   Writes <out-dir>/index.html with the images at their real size, each CSS
   pixel D image pixels (default 1); show it with: preview-serve <out-dir>"""
-STYLE = (
-    "body{margin:0;padding:16px;background:#eee;color:#222;font-family:sans-serif}"
-    "h1{margin:0 0 16px;font-size:1.25rem}"
-    "figure{margin:0 0 24px}"
-    "figcaption{margin:0 0 4px;font-size:0.8rem;color:#555}"
-    "img{display:block;height:auto;max-width:100%}"
-)
+# One column of figures at their real size, left-aligned, each caption above
+# its image; the page's own colors are tokens, light first, dark redefined.
+STYLE = """\
+:root{--bg:#f1f3f6;--fg:#1b1f27;--muted:#596173;--rule:#d8dce3;\
+--font-text:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;\
+--font-mono:ui-monospace,"SF Mono","Cascadia Mono","DejaVu Sans Mono",monospace;color-scheme:light}
+@media (prefers-color-scheme: dark){:root{--bg:#15181d;--fg:#e4e7ec;--muted:#99a1af;--rule:#2c313a;color-scheme:dark}}
+body{margin:0;display:grid;gap:24px;align-content:start;padding-block:24px 48px;\
+padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));\
+background:var(--bg);color:var(--fg);font:16px/1.5 var(--font-text)}
+header{display:grid;gap:4px;padding-bottom:16px;border-bottom:1px solid var(--rule);min-width:0}
+h1{margin:0;font-size:1.375rem;font-weight:600;line-height:1.25;text-wrap:balance;overflow-wrap:anywhere}
+.meta,.size{color:var(--muted);font-family:var(--font-mono);font-size:0.8125rem;font-weight:400;font-variant-numeric:tabular-nums}
+.meta{margin:0}
+main{display:grid;gap:32px;min-width:0}
+figure{margin:0;display:grid;gap:8px;justify-items:start;min-width:0}
+figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;font-size:0.9375rem;font-weight:500;overflow-wrap:anywhere}
+img{display:block;height:auto;max-width:100%}
+"""
 
 
 class Refused(Exception):
@@ -168,7 +182,7 @@ def pixel_size(data):
 
 
 def load(specs):
-    """Reads every image: [(source, name, caption, data, width)]."""
+    """Reads every image: [(source, name, caption, data, (width, height))]."""
     images, seen = [], {}
     for spec in specs:
         source, sep, caption = spec.partition("::")
@@ -188,7 +202,7 @@ def load(specs):
         seen[name] = source
         if not (sep and caption):
             caption = os.path.splitext(name)[0]
-        images.append((source, name, caption, data, size[0]))
+        images.append((source, name, caption, data, size))
     return images
 
 
@@ -227,28 +241,31 @@ def prepare(out, replace):
 def render(out, images, title, density_):
     esc = html.escape
     head_title = title if title is not None else os.path.basename(os.path.abspath(out))
+    count = f"{len(images)} image{'' if len(images) == 1 else 's'}"
     lines = [
         "<!doctype html>",
         "<html>",
         "<head>",
         '<meta charset="utf-8">',
-        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
         f"<title>{esc(head_title)}</title>",
-        f"<style>{STYLE}</style>",
+        f"<style>\n{STYLE}</style>",
         "</head>",
         "<body>",
+        "<header>",
     ]
     if title is not None:
         lines.append(f"<h1>{esc(title)}</h1>")
-    for _, name, caption, _, width in images:
+    lines += [f'<p class="meta">{count} · density {density_:g}</p>', "</header>", "<main>"]
+    for _, name, caption, _, (width, height) in images:
         css = max(1, int(width / density_ + 0.5))
         lines += [
             "<figure>",
-            f"<figcaption>{esc(caption)}</figcaption>",
+            f'<figcaption><span class="name">{esc(caption)}</span> <span class="size">{width} × {height} px</span></figcaption>',
             f'<img src="{esc(urllib.parse.quote(name))}" alt="{esc(caption)}" style="width:{css}px">',
             "</figure>",
         ]
-    lines += ["</body>", "</html>", ""]
+    lines += ["</main>", "</body>", "</html>", ""]
     return "\n".join(lines)
 
 
