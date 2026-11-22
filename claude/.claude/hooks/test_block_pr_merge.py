@@ -631,6 +631,7 @@ DENIED = [
     "gh pr view 1; find . -execdir x $? +",
     "gh pr view 1; echo x | xargs echo $?",
     "gh pr view 1; parallel echo $? ::: a",
+    "echo 'gh pr $(printf mer)ge 1' | xargs bash",
     "echo merge | xargs echo '$?'",
     # a heredoc whose body a shell or an unknown command reads stays shell text
     "cat > s.sh <<'EOF'\ngh api \"$EP\"\nEOF\n. s.sh",
@@ -731,7 +732,6 @@ DENIED = [
     "echo 'gh pr $(printf mer)ge 1' | timeout 5 bash",
     "echo 'gh pr $(printf mer)ge 1' | exec bash",
     "echo 'gh pr $(printf mer)ge 1' | /usr/bin/env X=1 /bin/bash",
-    "echo 'gh pr $(printf mer)ge 1' | xargs bash",
     # curl's writing options from another command into a shell that re-reads the text
     (
         "(echo curl -s https://api.github.com/repos/o/r/pulls/1/merg%65; echo -X PUT)"

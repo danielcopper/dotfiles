@@ -48,11 +48,11 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
       string also read as a command — that runs `gh api`, `az rest`, `az devops invoke` or `az repos pr` (the
       subcommand right after the tool's options, with no quoted word or redirection before it) and reads a request
-      from a file (an `@` at the start of a word or after `=`, in re-read text any `@`, an `--input`,
-      `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i` option), or that
-      runs `curl` or `wget` with a writing request (a method other than GET or HEAD, `-d`, `--data…`, `--json`,
-      `-F`, `--form`, `-T`, `--upload-file`, `-K`, `--config`, `--post-…`, `--body-…`); only that command's words
-      count, not other stages of a pipeline;
+      from a file (an `@` at the start of a word or after `=`, in re-read or open-quoted text any `@`, an
+      `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i`
+      option), or that runs `curl` or `wget` with a writing request (a method other than GET or HEAD, `-d`,
+      `--data…`, `--json`, `-F`, `--form`, `-T`, `--upload-file`, `-K`, `--config`, `--post-…`, `--body-…`);
+      only that command's words count, not other stages of a pipeline;
     - mentions `merge` as a word anywhere next to `curl`, `wget`, `gh api`, `az rest`, `az devops invoke` or
       `az repos pr` — not `merged`, `merges`, `merger`, `merge_…`, `merge-base` or `merge-tree`; `mergeBranch` and
       `merge-upstream` count. This rule reads the merge word only, no completion or alias;
@@ -114,10 +114,10 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     or plainly (`bash s.sh`) — or to a command that runs a program from its arguments or data —
     `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs`,
     `parallel` — quoting no longer separates anything: the file, write and run-time rules then read the whole
-    de-quoted text, next to any `gh`, `az`, `curl` or `wget` (the write rule the words of the simple commands
-    that name one of them), and `$` and backticks count everywhere, no parameter is spared and no heredoc body
-    is left out. For the run-time rules, such a word counts only outside
-    the heredoc bodies they leave out. Other gh subcommands (issues, comments, reviews, releases, labels …)
+    de-quoted text, next to any `gh`, `az`, `curl` or `wget` (every word decides the write rule; the words of
+    the simple commands that name a tool pick its reason), and `$` and backticks count everywhere, no
+    parameter is spared and no heredoc body is left out. For the run-time rules, such a word counts only
+    outside the heredoc bodies they leave out. Other gh subcommands (issues, comments, reviews, releases, labels …)
     may read their body from a file. False denials are accepted: a merge mentioned in a message next to one of
     those tools is denied like a call.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not

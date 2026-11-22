@@ -124,12 +124,12 @@ ALIAS_VERB = re.compile(r"\b(set|import)\b")
 AZ_COMPLETE = re.compile(r"\b(?:completed\b|auto-?complete)")
 DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
 FILE_LONG_FLAGS = re.compile(r"--input|--upload-file|--config|--post-file|--body-file|--in-file")
-FILE_FLAGS = re.compile("@|" + FILE_LONG_FLAGS.pattern)  # re-read text: any @ counts
+FILE_FLAGS = re.compile("@|" + FILE_LONG_FLAGS.pattern)  # re-read or open-quoted: any @
 FILE_REFERENCE = re.compile(r"^@|=@")  # an @ at a word's start or after =
 FILE_SHORT_FLAGS = re.compile(r"(?<!\S)-[A-Za-z]*[TK]|(?<!\S)-i(?!\S)")  # case-sensitive
-# The merge vocabulary of the body-tool and run-time rules, as words: merge itself (not merged,
-# merges, merger, merge-base or merge-tree), mergeBranch and merge-upstream. COMPLETION, a completion only
-# as a status or auto-complete, counts for the run-time rule only.
+# The vocabulary of the body-tool and run-time rules: merge as a word, without merge-base and
+# merge-tree, with mergeBranch and merge-upstream. COMPLETION, a completion only as a status or
+# auto-complete, counts for the run-time rule only.
 MERGE_TERM = re.compile(r"(?<!\w)merge(?!\w)(?!-(?:base|tree)\b)|mergebranch|merge-upstream")
 COMPLETION = re.compile(r"auto-?complete|(?:status|-s)\W{1,4}completed\b")
 # The part before the first comma or `..` cannot hold one, so a long open brace is scanned once.
@@ -207,7 +207,8 @@ REASON = (
 
 
 def stripped(command: str) -> str:
-    """*command* with backslash-newlines joined and every quote, backslash and $'/$" prefix removed."""
+    """*command* with backslash-newlines joined and every quote, backslash and $'/$" prefix
+    removed."""
     text = command.replace("\\\n", "").replace("$'", "").replace('$"', "")
     return text.replace("'", "").replace('"', "").replace("\\", "")
 
@@ -284,9 +285,9 @@ def rereads(lower: str) -> bool:
     """Whether the de-quoted, lowercased command hands text to a shell that reads it again, or
     to a command that runs a program from its arguments or data: a shell word followed later by
     a `-c` option cluster, `eval`, `<<<`, `source` or `.` as a command, a shell as the command
-    word of any simple command (runs_a_shell), `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`,
-    `xargs` or `parallel`. Quoting means nothing to such text, so the caller judges the whole
-    text instead."""
+    word of any simple command (runs_a_shell), `trap`, `sort` with `--compress-program`, `find`
+    with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs` or `parallel`. Quoting means nothing to
+    such text, so the caller judges the whole text instead."""
     shell = SHELL_WORD.search(lower)
     sort = SORT.search(lower)
     find = FIND.search(lower)
