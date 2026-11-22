@@ -11,11 +11,13 @@ A page the user looks at gets the craft of a Claude Artifact: written after the 
 
 **The design pass.** Load the `artifact-design` skill and apply its design guidance to every page you style yourself. Its Page contract (the Artifact tool's own rules) and its publishing steps belong to the Artifact tool and stay there. Here the page is a whole document of its own (doctype, charset and viewport meta) and self-contained: CSS and scripts inline, images beside it, an external request only for a library the page needs. A page inside an existing app, such as a prototype mounted in one of its screens, takes that app's styles instead.
 
-**Images** (renders, screenshots, photos, before and after): `image-page [--density D] [--title T] <dir> <image>[::caption] ...` copies them into `<dir>` and writes an `index.html` that stacks them, captioned, at their real size; its page already follows that guidance, so use it as it is. `--density` is the density a device drew the image at: a render's own (an Android render's, such as 2.625), and for a screenshot the scale of the screen it was taken on (a phone's density, a desktop's scale factor). Photos take none. The rest, `--replace` among it, is in the header of `~/.local/bin/image-page`.
+**Use the width.** A page you build is centered and uses the screen's width: images and mockup screens flow in a wrapping grid, as many side by side as fit at their real size, one column on a phone, and the page never scrolls sideways.
+
+**Images** (renders, screenshots, photos, before and after): `image-page [--density D] [--title T] <dir> [--section TITLE] <image>[::caption] ...` copies them into `<dir>` and writes an `index.html` that lays them out that way, captioned, at their real size; `--section TITLE` before a group of images gives the images that belong together a heading and rows of their own. Its page already follows that guidance, so use it as it is. `--density` is the density a device drew the image at: a render's own (an Android render's, such as 2.625), and for a screenshot the scale of the screen it was taken on (a phone's density, a desktop's scale factor). Photos take none. The rest, `--replace` among it, is in the header of `~/.local/bin/image-page`.
 
 **Mockups and other pages** are written by hand, after the design pass:
 
-- Screens stack in one column, one below the other. A design canvas does not scroll sideways, not even with Shift+scroll: there every artboard takes the same `x`, and `y` steps by the artboard's height plus 120 px.
+- Only a design canvas stacks its screens one below the other, as it cannot scroll sideways, not even with Shift+scroll: there every artboard takes the same `x`, and `y` steps by the artboard's height plus 120 px.
 - A mockup is a specification, and an implementer takes measurements from it. So every string, value and width in it comes from the code that produces it (the formatter, the registration call, the API field), read before you draw. A width that matters is measured from the font tables or the live DOM. A page drawn inside another program takes the host's styles and its real viewport: measure the live page first.
 
 ## 2. Serve it
