@@ -1100,20 +1100,19 @@ def check(command: str) -> str | None:
 
 
 def judge(payload: str) -> str | None:
-    """What makes the hook input *payload* a possible merge, or None. ValueError when it is no
-    JSON, TypeError when it is no object or its command no string."""
+    """What makes the hook input *payload* a possible merge, or None; None for an empty command.
+    ValueError when it is no JSON, TypeError when it is no object, has no tool_input object or
+    no command string."""
     data = json.loads(payload)
     if not isinstance(data, dict):
         raise TypeError("no JSON object")
-    tool_input = data.get("tool_input") or {}
+    tool_input = data.get("tool_input")
     if not isinstance(tool_input, dict):
-        raise TypeError("tool_input is no object")
+        raise TypeError("no tool_input object")
     command = tool_input.get("command")
-    if command is None or command == "":
-        return None
     if not isinstance(command, str):
-        raise TypeError("command is no string")
-    return check(command)
+        raise TypeError("no command string")
+    return check(command) if command else None
 
 
 class TookTooLong(Exception):

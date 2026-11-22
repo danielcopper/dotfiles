@@ -808,6 +808,9 @@ class MergeBlock(unittest.TestCase):
         for payload in (
             "not json",
             "[1]",
+            "{}",
+            json.dumps({"tool_input": None}),
+            json.dumps({"tool_input": {}}),
             json.dumps({"tool_input": "x"}),
             json.dumps({"tool_input": {"command": 5}}),
             json.dumps({"tool_input": {"command": ["gh", "pr", "view"]}}),
@@ -818,10 +821,8 @@ class MergeBlock(unittest.TestCase):
                 self.assertEqual(out["permissionDecision"], "deny")
                 self.assertIn("could not be checked", out["permissionDecisionReason"])
 
-    def test_no_command_passes(self):
-        for payload in ("{}", json.dumps({"tool_input": {}}), json.dumps({"tool_input": None})):
-            with self.subTest(payload=payload):
-                self.assertIsNone(hook_output(payload))
+    def test_an_empty_command_passes(self):
+        self.assertIsNone(hook_output(json.dumps({"tool_input": {"command": ""}})))
 
     def test_a_check_past_the_deadline_is_denied(self):
         patch = "import time\nDEADLINE = 0.3\ndef check(command):\n    time.sleep(30)\n"
