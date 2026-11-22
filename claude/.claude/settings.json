@@ -87,6 +87,7 @@
       "Bash(*gh api *pulls/*/merge*)",
       "Bash(*mergePullRequest*)",
       "Bash(*enablePullRequestAutoMerge*)",
+      "Bash(*enqueuePullRequest*)",
       "Bash(*gh api *repos/*/merges*)",
       "Bash(*gh alias set*)",
       "Bash(*gh alias import*)",
