@@ -16,19 +16,52 @@ HOOK = Path(__file__).with_name("block_pr_merge.py")
 
 def decide(command: str) -> dict[str, str] | None:
     payload = json.dumps({"tool_input": {"command": command}, "cwd": "/home/someone/project"})
-    proc = subprocess.run(
-        [sys.executable, str(HOOK)], input=payload, capture_output=True, text=True, check=True
-    )
-    if not proc.stdout.strip():
-        return None
-    out = json.loads(proc.stdout)["hookSpecificOutput"]
-    assert out["hookEventName"] == "PreToolUse"
-    return out
+    return hook_output(payload)
 
 
 def run(command: str) -> str | None:
     out = decide(command)
     return None if out is None else out["permissionDecision"]
+
+
+def parsed(stdout: str) -> dict[str, str] | None:
+    if not stdout.strip():
+        return None
+    out = json.loads(stdout)["hookSpecificOutput"]
+    assert out["hookEventName"] == "PreToolUse"
+    return out
+
+
+def hook_output(payload: str) -> dict[str, str] | None:
+    """The hook's decision for raw hook input *payload*; it must exit 0."""
+    proc = subprocess.run(
+        [sys.executable, str(HOOK)], input=payload, capture_output=True, text=True, check=True
+    )
+    return parsed(proc.stdout)
+
+
+# Loads the hook as a module, runs *patch* in its namespace, then its main() on the input.
+PATCHED = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("hook", sys.argv[1])
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+exec(sys.argv[2], hook.__dict__)
+sys.exit(hook.main())
+"""
+
+
+def patched_output(patch: str, command: str) -> dict[str, str] | None:
+    """The decision of the hook with *patch* run in its module, for *command*."""
+    payload = json.dumps({"tool_input": {"command": command}})
+    proc = subprocess.run(
+        [sys.executable, "-c", PATCHED, str(HOOK), patch],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return parsed(proc.stdout)
 
 
 PASSES = [
@@ -702,16 +735,30 @@ class MergeBlock(unittest.TestCase):
                 run(command)
                 self.assertLess(time.monotonic() - started, 1.0)
 
-    def test_garbage_input_passes(self):
-        proc = subprocess.run(
-            [sys.executable, str(HOOK)],
-            input="not json",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(proc.returncode, 0)
-        self.assertEqual(proc.stdout, "")
+    def test_input_it_cannot_read_is_denied(self):
+        for payload in (
+            "not json",
+            "[1]",
+            json.dumps({"tool_input": "x"}),
+            json.dumps({"tool_input": {"command": 5}}),
+            json.dumps({"tool_input": {"command": ["gh", "pr", "view"]}}),
+        ):
+            with self.subTest(payload=payload):
+                out = hook_output(payload)
+                assert out is not None, f"{payload} was not denied"
+                self.assertEqual(out["permissionDecision"], "deny")
+                self.assertIn("could not be checked", out["permissionDecisionReason"])
+
+    def test_no_command_passes(self):
+        for payload in ("{}", json.dumps({"tool_input": {}}), json.dumps({"tool_input": None})):
+            with self.subTest(payload=payload):
+                self.assertIsNone(hook_output(payload))
+
+    def test_an_error_while_checking_is_denied(self):
+        out = patched_output("def check(command):\n    raise RuntimeError('x')\n", "gh pr view 1")
+        assert out is not None, "an error while checking was not denied"
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("could not be checked", out["permissionDecisionReason"])
 
     def test_unbalanced_quotes_still_checked(self):
         self.assertEqual(run("gh pr merge 3 --body 'unclosed"), "deny")

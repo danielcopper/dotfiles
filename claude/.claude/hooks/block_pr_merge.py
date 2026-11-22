@@ -7,10 +7,12 @@ What it refuses, what passes, and what is left to the policy is written once, in
 
 import itertools
 import json
+import logging
 import re
 import sys
 from dataclasses import dataclass
 
+LOG = logging.getLogger(__name__)
 MAX_LENGTH = 100_000
 MAX_EVALS = 5
 MAX_SUBSTITUTIONS = 64
@@ -973,13 +975,31 @@ def check(command: str) -> str | None:
     return None
 
 
+def judge(payload: str) -> str | None:
+    """What makes the hook input *payload* a possible merge, or None. ValueError when it is no
+    JSON, TypeError when it is no object or its command no string."""
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        raise TypeError("no JSON object")
+    tool_input = data.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        raise TypeError("tool_input is no object")
+    command = tool_input.get("command")
+    if command is None or command == "":
+        return None
+    if not isinstance(command, str):
+        raise TypeError("command is no string")
+    return check(command)
+
+
 def main() -> int:
+    """Read the hook input and deny what judge() names; input it cannot read, and any error while
+    checking, deny too."""
     try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-    command = (data.get("tool_input") or {}).get("command") or ""
-    what = check(command) if command else None
+        what = judge(sys.stdin.read())
+    except Exception:  # fail closed: a filter that cannot check refuses
+        LOG.exception("the merge filter could not check the command")
+        what = "could not be checked"
     if what:
         print(
             json.dumps(
