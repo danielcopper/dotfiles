@@ -90,8 +90,8 @@ usage: image-page [--density D] [--title T] [--replace] <out-dir> [--section TIT
   pixel D image pixels (default 1), side by side as they fit; --section
   TITLE before an image starts a section with that heading. Show it with:
   preview-serve <out-dir>"""
-# The grid's gap between columns, in CSS px: the .grid rule in STYLE and the
-# page width in render() both take it from here.
+# The gap between figures in a row, in CSS px: the .grid rule in STYLE and
+# the page width in render() both take it from here.
 COLUMN_GAP = 24
 # A centered page of sections, each in centered rows of figures at their
 # real size that wrap (flex, so a short last row is centered too, which a
@@ -112,7 +112,7 @@ h1{margin:0;font-size:1.375rem;font-weight:600;line-height:1.25;text-wrap:balanc
 .meta{margin:0}
 section{display:grid;gap:12px;min-width:0}
 h2{margin:0;font-size:1.0625rem;font-weight:600;line-height:1.3;text-wrap:balance;overflow-wrap:anywhere}
-.grid{display:flex;flex-wrap:wrap;justify-content:center;gap:32px COLUMN_GAPpx}
+.grid{display:flex;flex-wrap:wrap;justify-content:center;gap:32px COLUMN_GAPpx;min-width:0}
 .grid>figure{flex:0 0 var(--col);max-width:100%}
 figure{margin:0;display:grid;gap:8px;align-content:start;justify-items:start;min-width:0}
 figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;font-size:0.9375rem;font-weight:500;overflow-wrap:anywhere}
@@ -353,8 +353,8 @@ def render(out, groups, title, density_):
     total = sum(len(images) for _, images in groups)
     count = f"{total} image{'' if total == 1 else 's'}"
     widths = [[css_width(source, size[0], density_) for source, _, _, _, size in images] for _, images in groups]
-    # As wide as the widest section with all its images in one row of its
-    # grid, whose columns are each as wide as its widest image.
+    # As wide as the widest section with all its images in one row, each
+    # figure as wide as its widest image.
     page_width = max(len(row) * max(row) + COLUMN_GAP * (len(row) - 1) for row in widths)
     lines = [
         "<!doctype html>",

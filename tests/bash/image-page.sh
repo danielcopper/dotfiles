@@ -903,7 +903,7 @@ l3_grid_layout() {
   check "the header first inside the page" [ "$(page | grep -A1 '^<main' | tail -1)" = '<header>' ]
   # The 24px column gap is the one the page width above counts.
   check "each row wraps and centers itself" \
-    grep -qxF '.grid{display:flex;flex-wrap:wrap;justify-content:center;gap:32px 24px}' "$OUTDIR/index.html"
+    grep -qxF '.grid{display:flex;flex-wrap:wrap;justify-content:center;gap:32px 24px;min-width:0}' "$OUTDIR/index.html"
   check "each figure --col wide, never wider than the screen" \
     grep -qxF '.grid>figure{flex:0 0 var(--col);max-width:100%}' "$OUTDIR/index.html"
   # A column grid centers its set of columns, not each row: a short last row
