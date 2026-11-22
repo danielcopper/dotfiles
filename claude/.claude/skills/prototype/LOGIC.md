@@ -45,7 +45,7 @@ Lay it out with a clean hierarchy, top to bottom:
 
 Choose scenarios that demonstrate the awkward cases, the ones hard to reason about on paper: the happy path, a tricky edge case, an attempt at something that should be illegal.
 
-Keep it beautiful but restrained: clean typography, generous spacing, one accent colour. No animations, no gimmicks: nothing that competes with the state and the buttons.
+Its look comes from the `show-page` skill's design pass, kept quiet: nothing on the page competes with the state and the buttons.
 
 ### 4. Hand it over
 
