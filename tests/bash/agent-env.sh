@@ -42,7 +42,15 @@
 #   k1  PATH, HOME, SHELL, USER, LOGNAME and TERM, assigned by the file and
 #       not declared, still reach the child
 #   x1  under `bash -x` and `bash -xv` no value shows on stderr, the trace is
-#       on before and after the secrets are read, and the child gets them
+#       on before and after the secrets are read, and the child gets them;
+#       under -xv a source line after the read is echoed again
+#   t1  an undeclared name that is part of a declared one (CLI_TOKEN beside
+#       SONARQUBE_CLI_TOKEN) is not passed
+#   t2  a secrets file and a list whose last lines end without a newline:
+#       the undeclared export on the file's last line is not passed, the
+#       name on the list's last line is
+#   t3  a secrets line that refers to an unset variable: exit 0, the value
+#       around it passed
 #   c1  the child's exit code is the script's, its arguments arrive as given
 #       (an empty one and one with blanks included); a command not found
 #       exits 127
@@ -76,7 +84,7 @@ set -uo pipefail
 
 CASES=(l1_shipped_lists f1_fresh_read d1_only_declared d2_caller_value_gone d3_declared_without_value
   a1_declared_from_file_only m1_missing_list m2_missing_secrets m3_unreadable_secrets m4_unparsable_secrets
-  k1_kept_names x1_xtrace c1_exit_code_and_args u1_usage u2_bad_harness
+  k1_kept_names x1_xtrace t1_part_of_a_name t2_no_final_newline t3_unset_reference c1_exit_code_and_args u1_usage u2_bad_harness
   u3_bad_list_line b1_bashrc_functions b2_no_agent_env s1_steamdeck_claude)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
@@ -362,6 +370,34 @@ x1_xtrace() {
     check "$opts: traced after the read" grep -qx '+ exec child' "$ROOT/stderr"
     check "$opts: no value on stderr (got: $(grep dummy "$ROOT/stderr"))" no_value_on_stderr
   done
+  check "-xv: verbose after the read" grep -qxF 'exec "$@"' "$ROOT/stderr"
+}
+
+t1_part_of_a_name() {
+  { printf '%s' "$SECRETS"; printf '%s\n' 'export CLI_TOKEN=cli-dummy-1'; } >"$HOME/.bashrc.secrets"
+  agent_env -- claude child
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the declared token passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
+  check "CLI_TOKEN not passed" lacks CLI_TOKEN
+}
+
+t2_no_final_newline() {
+  printf '%s%s' "$SECRETS" 'export LAST_UNDECLARED=last-dummy-1' >"$HOME/.bashrc.secrets"
+  printf '%s\n%s' SONARQUBE_CLI_ORG SONARQUBE_CLI_TOKEN >"$HOME/.config/agent-env/t"
+  agent_env -- t child
+  check "exit 0 (got $RC)" eq "$RC" 0
+  check "the file's last export not passed" lacks LAST_UNDECLARED
+  check "the list's last name passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
+  check "the list's first name passed" has SONARQUBE_CLI_ORG org-dummy-1
+}
+
+t3_unset_reference() {
+  printf '%s\n' "export SONARQUBE_CLI_ORG=org-\${AGENT_ENV_TEST_UNSET}dummy-1" \
+    'export SONARQUBE_CLI_TOKEN=tok-dummy-1' >"$HOME/.bashrc.secrets"
+  agent_env -- claude child
+  check "exit 0 (got $RC; stderr: $(err))" eq "$RC" 0
+  check "the value around it passed" has SONARQUBE_CLI_ORG org-dummy-1
+  check "the next line's value passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
 }
 
 c1_exit_code_and_args() {
