@@ -55,6 +55,14 @@
 #       arguments unchanged; the cc alias runs through claude's function
 #   b2  claude installed but agent-env not: no function, claude runs as
 #       before
+#   s1  the claude function of host-steamdeck/.bashrc.local in place: .bashrc
+#       keeps it; it starts claude through agent-env and systemd-run in
+#       claude.slice, with the two worker caps and the secrets of its list;
+#       without agent-env through systemd-run alone, as before. A stand-in
+#       systemd-run logs its arguments to $ROOT/systemd-run.args and runs
+#       the command after "--". Only that function is copied to
+#       ~/.bashrc.local: the rest of the file runs brew and nix, which on the
+#       Deck would put real tools on PATH.
 # usage: agent-env.sh [agent-env [bashrc]] [case ...]
 #        agent-env.sh --list
 #   The files default to the repo's bash/.local/bin/agent-env and
@@ -68,7 +76,7 @@ set -uo pipefail
 CASES=(l1_shipped_lists f1_fresh_read d1_only_declared d2_caller_value_gone d3_declared_without_value
   a1_declared_from_file_only m1_missing_list m2_missing_secrets m3_unreadable_secrets m4_unparsable_secrets
   k1_kept_names x1_xtrace c1_exit_code_and_args u1_usage u2_bad_harness
-  u3_bad_list_line b1_bashrc_functions b2_no_agent_env)
+  u3_bad_list_line b1_bashrc_functions b2_no_agent_env s1_steamdeck_claude)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -79,6 +87,7 @@ REPO=$(readlink -f "$HERE/../..")
 SUT=$REPO/bash/.local/bin/agent-env
 BASHRC=$REPO/bash/.bashrc
 LISTS=$REPO/bash/.config/agent-env
+STEAMDECK_LOCAL=$REPO/host-steamdeck/.bashrc.local
 if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
@@ -103,6 +112,14 @@ exit "\${CHILD_EXIT:-0}"
 EOF
 chmod +x "$ROOT/stand-in/child"
 ln -s "$ROOT/stand-in/child" "$ROOT/bin/child"
+cat >"$ROOT/stand-in/systemd-run" <<EOF
+#!$BASH_BIN
+printf '%s\n' "\$*" >"$ROOT/systemd-run.args"
+while [ \$# -gt 0 ] && [ "\$1" != -- ]; do shift; done
+shift
+exec "\$@"
+EOF
+chmod +x "$ROOT/stand-in/systemd-run"
 
 # The secrets file of every case. The token comes from a $(...), whose text
 # holds no value; PLAIN_SECRET is assigned without export.
@@ -138,10 +155,11 @@ has() { grep -qxF "declare -x $1=\"$2\"" "$ROOT/child.env"; }
 lacks() { ran && absent "^declare -x $1\(=\|$\)" "$ROOT/child.env"; }
 no_value_on_stderr() { absent dummy "$ROOT/stderr"; }
 
-# install <harness>...: these stand-ins on PATH, the others removed.
+# install <harness>...: these stand-ins on PATH, the others and systemd-run
+# removed.
 install() {
   local h
-  rm -f "$ROOT/bin/claude" "$ROOT/bin/opencode" "$ROOT/bin/pi"
+  rm -f "$ROOT/bin/claude" "$ROOT/bin/opencode" "$ROOT/bin/pi" "$ROOT/bin/systemd-run"
   for h in "$@"; do ln -s "$ROOT/stand-in/child" "$ROOT/bin/$h"; done
 }
 list() { printf '%s\n' "$@" >"$HOME/.config/agent-env/t"; } # list <line>...: the list of harness t
@@ -419,6 +437,34 @@ b2_no_agent_env() {
   check "no function (got: $OUT)" eq "$OUT" file
   check "claude ran" eq "$(cat "$ROOT/child.name" 2>/dev/null)" claude
   check "it inherited the shell's OTHER_TOKEN" has OTHER_TOKEN other-dummy-1
+}
+
+s1_steamdeck_claude() {
+  local how
+  sed -n '/^claude() {$/,/^}$/p' "$STEAMDECK_LOCAL" >"$HOME/.bashrc.local"
+  check "the function copied" grep -q '^claude() {$' "$HOME/.bashrc.local"
+  install claude
+  ln -s "$ROOT/stand-in/systemd-run" "$ROOT/bin/systemd-run"
+  for how in agent-env plain; do
+    if [ "$how" = agent-env ]; then with_agent_env; else rm "$HOME/.local/bin/agent-env"; fi
+    rm -f "$ROOT/systemd-run.args"
+    # shellcheck disable=SC2016 # expanded by the inner bash
+    shell 'printf "%s\n" "$(type -t claude)"; claude a "b c"'
+    check "$how: exit 0 (got $RC; stderr: $(err))" eq "$RC" 0
+    check "$how: a function (got: $OUT)" eq "$OUT" function
+    check "$how: systemd-run in claude.slice (got: $(cat "$ROOT/systemd-run.args" 2>/dev/null))" \
+      eq "$(cat "$ROOT/systemd-run.args" 2>/dev/null)" "--user --scope --quiet --slice=claude.slice -- claude a b c"
+    check "$how: claude ran" eq "$(cat "$ROOT/child.name" 2>/dev/null)" claude
+    check "$how: arguments unchanged (got: $(args))" eq "$(args)" "$(printf 'arg %q\n' a "b c")"
+    check "$how: vitest cap" has VITEST_MAX_WORKERS 4
+    check "$how: pytest cap" has PYTEST_XDIST_AUTO_NUM_WORKERS 4
+    check "$how: the token passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
+    if [ "$how" = agent-env ]; then
+      check "$how: OTHER_TOKEN, exported by .bashrc, not passed" lacks OTHER_TOKEN
+    else
+      check "$how: the shell's OTHER_TOKEN inherited, as before" has OTHER_TOKEN other-dummy-1
+    fi
+  done
 }
 
 # in_cases <name>: the name is in CASES.

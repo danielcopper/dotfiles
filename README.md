@@ -82,7 +82,9 @@ holds the values the file had when that shell started.
 `~/.local/bin/agent-env` (`bash` package) reads the file afresh at each start
 instead: `.bashrc` makes `claude`, `opencode` and `pi` functions that run
 `agent-env <harness> <harness> "$@"`, each only where agent-env and that
-harness are installed. agent-env passes on only the names the harness's list
+harness are installed and no function of that name exists yet: the Deck's
+`claude` in `host-steamdeck/.bashrc.local` starts its slice through agent-env
+itself ("Memory protection on the Steam Deck"). agent-env passes on only the names the harness's list
 `~/.config/agent-env/<harness>` declares, one per line with `#` comments, and
 only with the values the file gives them: it unsets every other name the file
 assigns, also where the starting shell holds a value for it, but never

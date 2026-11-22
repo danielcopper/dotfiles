@@ -127,9 +127,16 @@ export PATH=$HOME/.opencode/bin:$PATH
 # PATH line, so its check finds opencode. A function only where agent-env and
 # the harness are both installed; agent-env runs in a process of its own,
 # without these functions, and finds the harness on PATH. The functions pass
-# no flags (see the cc alias above).
+# no flags (see the cc alias above). A function defined earlier, such as the
+# steamdeck claude in .bashrc.local, is left alone.
 if command -v agent-env >/dev/null; then
-  if command -v claude >/dev/null; then claude() { agent-env claude claude "$@"; }; fi
-  if command -v opencode >/dev/null; then opencode() { agent-env opencode opencode "$@"; }; fi
-  if command -v pi >/dev/null; then pi() { agent-env pi pi "$@"; }; fi
+  if ! declare -F claude >/dev/null && command -v claude >/dev/null; then
+    claude() { agent-env claude claude "$@"; }
+  fi
+  if ! declare -F opencode >/dev/null && command -v opencode >/dev/null; then
+    opencode() { agent-env opencode opencode "$@"; }
+  fi
+  if ! declare -F pi >/dev/null && command -v pi >/dev/null; then
+    pi() { agent-env pi pi "$@"; }
+  fi
 fi
