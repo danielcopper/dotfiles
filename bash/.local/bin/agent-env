@@ -22,7 +22,7 @@
 #     shell held included; PATH, HOME, SHELL, USER, LOGNAME and TERM are never
 #     unset. Each declared name with a value is exported; one without a value
 #     is not passed.
-#   - Without the file the command starts without its secrets, after one line
+#   - Without the file the harness starts without its secrets, after one line
 #     on stderr. Which other names the file would assign is unknown then, so
 #     the calling shell's values of those pass through.
 #   - <command> then replaces this process, with its arguments as given; its
@@ -77,10 +77,10 @@ _agent_env_found=1
 if ! [ -e "$_agent_env_secrets" ]; then
   _agent_env_found=0
 elif ! [ -f "$_agent_env_secrets" ] || ! [ -r "$_agent_env_secrets" ]; then
-  echo "agent-env: cannot read $_agent_env_secrets, not starting $1" >&2
+  echo "agent-env: cannot read $_agent_env_secrets, not starting $harness" >&2
   exit 1
 elif ! "$BASH" -n "$_agent_env_secrets" 2>/dev/null; then
-  echo "agent-env: $_agent_env_secrets does not parse as bash, not starting $1" >&2
+  echo "agent-env: $_agent_env_secrets does not parse as bash, not starting $harness" >&2
   exit 1
 fi
 
@@ -129,6 +129,6 @@ case $_agent_env_opts in *x*) set -x ;; esac
 case $_agent_env_opts in *v*) set -v ;; esac
 
 if [ "$_agent_env_found" = 0 ]; then
-  echo "agent-env: no $_agent_env_secrets, starting $1 without its secrets" >&2
+  echo "agent-env: no $_agent_env_secrets, starting $harness without its secrets" >&2
 fi
 exec "$@"

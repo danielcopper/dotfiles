@@ -33,11 +33,11 @@
 #   m1  a missing list: exit 1, the error names its path, the child does not
 #       run
 #   m2  no secrets file: the child runs without the secrets, one stderr line
-#       naming the file and saying so
+#       naming the file and the harness
 #   m3  a secrets file that cannot be read (mode 000, a directory): exit 1,
-#       one line naming it, no child
+#       one line naming it and the harness, no child
 #   m4  a secrets file that does not parse: exit 1, one line naming it and
-#       none of its content, no child; one that parses but whose command
+#       the harness and none of its content, no child; one that parses but whose command
 #       fails at run time keeps the shell's error on stderr and starts
 #   k1  PATH, HOME, SHELL, USER, LOGNAME and TERM, assigned by the file and
 #       not declared, still reach the child
@@ -302,17 +302,19 @@ m1_missing_list() {
 
 m2_missing_secrets() {
   rm "$HOME/.bashrc.secrets"
-  agent_env -- claude child
+  list SONARQUBE_CLI_TOKEN
+  agent_env -- t child
   check "exit 0 (got $RC)" eq "$RC" 0
   check "the child ran" ran
   check "one line on stderr (got: $(err))" eq "$(err_lines)" 1
   check "it names the file and says so" grep -qxF \
-    "agent-env: no $HOME/.bashrc.secrets, starting child without its secrets" "$ROOT/stderr"
+    "agent-env: no $HOME/.bashrc.secrets, starting t without its secrets" "$ROOT/stderr"
   check "no token" lacks SONARQUBE_CLI_TOKEN
 }
 
 m3_unreadable_secrets() {
   local how
+  list SONARQUBE_CLI_TOKEN
   for how in mode-000 directory; do
     if [ "$how" = directory ]; then
       rm -f "$HOME/.bashrc.secrets"
@@ -320,26 +322,27 @@ m3_unreadable_secrets() {
     else
       chmod 000 "$HOME/.bashrc.secrets"
     fi
-    agent_env -- claude child
+    agent_env -- t child
     check "$how: exit 1 (got $RC)" eq "$RC" 1
     check "$how: one line naming it (got: $(err))" grep -qxF \
-      "agent-env: cannot read $HOME/.bashrc.secrets, not starting child" "$ROOT/stderr"
+      "agent-env: cannot read $HOME/.bashrc.secrets, not starting t" "$ROOT/stderr"
     check "$how: only that line" eq "$(err_lines)" 1
     check "$how: no child" not_ran
   done
 }
 
 m4_unparsable_secrets() {
+  list SONARQUBE_CLI_TOKEN
   printf '%s%s\n' "$SECRETS" 'if then dummy-in-the-broken-line (' >"$HOME/.bashrc.secrets"
-  agent_env -- claude child
+  agent_env -- t child
   check "exit 1 (got $RC)" eq "$RC" 1
   check "one line naming it (got: $(err))" grep -qxF \
-    "agent-env: $HOME/.bashrc.secrets does not parse as bash, not starting child" "$ROOT/stderr"
+    "agent-env: $HOME/.bashrc.secrets does not parse as bash, not starting t" "$ROOT/stderr"
   check "only that line" eq "$(err_lines)" 1
   check "none of its content" no_value_on_stderr
   check "no child" not_ran
   printf '%s%s\n' "$SECRETS" 'no-such-command-of-the-test' >"$HOME/.bashrc.secrets"
-  agent_env -- claude child
+  agent_env -- t child
   check "run-time error: exit 0 (got $RC)" eq "$RC" 0
   check "run-time error: on stderr (got: $(err))" grep -q 'no-such-command-of-the-test: command not found' \
     "$ROOT/stderr"
