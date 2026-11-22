@@ -1134,10 +1134,13 @@ def main() -> int:
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
     except TookTooLong:
-        what = "took too long to check"
-    except Exception:  # fail closed: a filter that cannot check refuses
+        what = "took too long to check; split or simplify the command"
+    except Exception as error:  # fail closed: a filter that cannot check refuses
         LOG.exception("the merge filter could not check the command")
-        what = "could not be checked"
+        what = (
+            f"could not be checked ({type(error).__name__}: {error}), a bug in the merge hook -"
+            " report it to the owner; split or simplify the command meanwhile"
+        )
     if what:
         print(
             json.dumps(

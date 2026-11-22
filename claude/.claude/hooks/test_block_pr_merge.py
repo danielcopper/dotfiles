@@ -831,13 +831,19 @@ class MergeBlock(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 10.0)
         assert out is not None, "a check past the deadline was not denied"
         self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("took too long to check", out["permissionDecisionReason"])
+        self.assertIn(
+            "took too long to check; split or simplify the command", out["permissionDecisionReason"]
+        )
 
     def test_an_error_while_checking_is_denied(self):
-        out = patched_output("def check(command):\n    raise RuntimeError('x')\n", "gh pr view 1")
+        patch = "def check(command):\n    raise RuntimeError('lost the thread')\n"
+        out = patched_output(patch, "gh pr view 1")
         assert out is not None, "an error while checking was not denied"
         self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("could not be checked", out["permissionDecisionReason"])
+        reason = out["permissionDecisionReason"]
+        self.assertIn("could not be checked (RuntimeError: lost the thread)", reason)
+        self.assertIn("a bug in the merge hook - report it to the owner", reason)
+        self.assertIn("split or simplify the command meanwhile", reason)
 
     def test_unbalanced_quotes_still_checked(self):
         self.assertEqual(run("gh pr merge 3 --body 'unclosed"), "deny")

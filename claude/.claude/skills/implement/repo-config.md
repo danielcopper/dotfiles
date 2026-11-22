@@ -74,6 +74,12 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       Both run-time rules leave out the parameters named below;
     - is nested too deep, too long or holds too many substitutions to check.
 
+    The hook fails closed on itself too. Input that is no JSON object, has no `tool_input` object or no
+    `command` string, and any error while checking, are denied as "could not be checked", with the error's
+    class and message: a bug in the hook, to report to the owner. A check that runs past five seconds is
+    denied as "took too long to check". In both cases, split or simplify the command. Only an empty command
+    passes unchecked.
+
     The two run-time rules do not read the body of a heredoc with a quoted delimiter (`<<'D'`, `<<"D"`, `<<\D`,
     also with `<<-`) fed to `cat`, `tee`, `python`, `python3`, or `git commit`, `tag` or `notes` without `-c`,
     when no word of that command is a shell word, at most an output redirection to a plain word follows the
