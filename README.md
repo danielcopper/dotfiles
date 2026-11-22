@@ -423,6 +423,14 @@ herdr-app`. Which files of the package git tracks is set in the root
   a third of the board's width, half of it beside a single column, but never
   less than 420 or more than 720 pixels (detailWidth in
   `mods/board/src/ui/helpers.js` has the rule).
+  The board's colors are the theme's, or tints of them
+  (`mods/board/src/ui/tones.js` has the rules): a column's head sits on a
+  tint of its status color, and each card, on the Sprint's taskboard too,
+  has a narrow edge in it. Labels and issue types are chips in their GitHub
+  color, brought onto the theme's red, green, yellow, blue, violet or teal by
+  hue, grey ones muted; an Epic by its "[Epic]" title alone takes its "epic"
+  label's color. A selected card or row sits on a tint of the accent, so its
+  chips stay readable.
   The details of a GitHub issue show its description as written (Markdown not
   rendered, a run of empty lines as one, "keine Beschreibung" where it has
   none), then list its sub-issues ("UNTERAUFGABEN · 7/11", the count the

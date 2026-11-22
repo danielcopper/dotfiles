@@ -5,7 +5,8 @@
 import { CONFIG_NAME, BoardError, failure, firstLine } from "../shared.js";
 import { GH_TIMEOUT, call } from "../tools.js";
 
-// Theme colors for a Projects v2 option color.
+// Theme colors for GitHub's named colors: a Projects v2 option's and an
+// issue type's (IssueTypeColor), which share the names.
 const GITHUB_COLORS = {
   GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5",
 };
@@ -21,11 +22,11 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
   content {
     __typename
-    ... on Issue { number title url issueType { name } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
+    ... on Issue { number title url issueType { name color } repository { nameWithOwner } author { login }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login } }
       parent { number } subIssuesSummary { total completed } }
     ... on PullRequest { number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login } } }
   }`;
@@ -65,6 +66,13 @@ export function githubBoardArgs(view, hidden) {
 // or one whose reviewer is gone, names no one.
 const reviewerLogins = (requests) => (requests?.nodes ?? []).map((r) => r?.requestedReviewer?.login).filter(Boolean);
 
+// A label's color as GitHub gives it (rrggbb, no #) → "#rrggbb", or null.
+export const labelColor = (color) => (/^[0-9a-f]{6}$/i.test(color ?? "") ? `#${color.toLowerCase()}` : null);
+
+// A card's labels' colors by label name (labelColor; the tone is drawn from
+// the theme, tones.js hueTone).
+const labelColors = (labels) => Object.fromEntries((labels?.nodes ?? []).map((l) => [l.name, labelColor(l.color)]));
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
@@ -79,10 +87,12 @@ function githubCard(node) {
     title: c.title ?? "(kein Zugriff)",
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
+    labelColors: labelColors(c.labels),
     assignees: (c.assignees?.nodes ?? []).map((a) => a.login),
     author: c.author?.login ?? c.creator?.login ?? null,
     reviewers: reviewerLogins(c.reviewRequests),
     type: c.issueType?.name ?? null,
+    typeColor: GITHUB_COLORS[c.issueType?.color] ?? null,
     parent: c.parent?.number ?? null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
     branch: c.headRefName ?? null,

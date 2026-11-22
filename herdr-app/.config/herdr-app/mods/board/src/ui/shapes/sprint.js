@@ -24,7 +24,8 @@ import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { chip, columnHead, sessionChip, shownOf, workItemDetail } from "../helpers.js";
+import { cardEdge, chip, columnHead, sessionChip, shownOf, workItemDetail } from "../helpers.js";
+import { selectedBg } from "../tones.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -170,7 +171,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
     .rounded(8)
     .border_1()
     .border_color(selected ? t.accent : t.background)
-    .when(selected, (el) => el.bg(t.selected))
+    .when(selected, (el) => el.bg(selectedBg(t)))
     .opacity(shown ? (st.pending[story.key] ? 0.7 : 1) : 0.5)
     .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
@@ -185,33 +186,38 @@ function storyCell(b, t, mono, view, st, r, nav) {
 
 const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, t[stateColor(data, state)] ?? t.muted).flex_none();
 
-// A task's card: its key, title, own state, assignee and session; a click
-// selects it (clickItem).
+// A task's card: its left edge in its column's color, its key, title, own
+// state, assignee and session; a click selects it (clickItem).
 function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
   const session = linkedSession(card, allSpaces);
-  return v_flex()
+  return h_flex()
     .id(`card-${card.key}`)
     .flex_none()
-    .p(8)
-    .gap(5)
+    .items_stretch()
+    .py(8)
+    .pl(5)
+    .pr(8)
+    .gap(7)
     .rounded(8)
     .border_1()
     .border_color(selected ? t.accent : t.border)
-    .bg(selected ? t.selected : t.background)
+    .bg(selected ? selectedBg(t) : t.background)
     .opacity(st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: ci, key: card.key }, cx);
     })
-    .child(h_flex().gap(6).items_center()
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
-      .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
-    .child(div().text_size(12.5).line_height("17px").child(card.title))
-    .child(h_flex().gap(5).flex_wrap().items_center()
-      .child(stateChip(t, st.data, shownState(card, col)))
-      .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-      .when(Boolean(session), (el) => el.child(sessionChip(t, session))));
+    .child(cardEdge(t, col))
+    .child(v_flex().flex_1().min_w(0).gap(5)
+      .child(h_flex().gap(6).items_center()
+        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+        .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+      .child(div().text_size(12.5).line_height("17px").child(card.title))
+      .child(h_flex().gap(5).flex_wrap().items_center()
+        .child(stateChip(t, st.data, shownState(card, col)))
+        .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))));
 }
 
 // How the sprint finds, changes and shows its items' states (actions/state.js).

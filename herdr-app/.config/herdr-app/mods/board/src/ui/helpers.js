@@ -1,8 +1,9 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu and its keys, a detail
-// section, a check's color, a status pill, a column's head, a card's chip
-// and a session's).
+// section, a check's color, a status pill, a column's head, a card's edge,
+// a card's chip in a tone, for a label, for its type and for a session).
+// Which colors they take: tones.js.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
@@ -11,6 +12,7 @@ import { MOD } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
+import { CHIP_ALPHA, HEAD_ALPHA, cardType, hueTone, tintOr, typeTone } from "./tones.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -247,17 +249,47 @@ export function statusPill(t, label, color, open) {
     .child(`${label} ▾`);
 }
 
-// A column's head: its color, its name and `count`.
+// A column's color: its theme color, "muted" where the theme has none.
+export const columnColor = (t, col) => t[col.color] ?? t.muted;
+
+// A column's head, on a tint of its color: its color as a dot, its name and
+// `count`.
 export const columnHead = (t, col, count) =>
   h_flex()
     .gap(6)
+    .px(8)
+    .py(4)
+    .rounded(6)
     .items_center()
-    .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
+    .bg(tintOr(columnColor(t, col), HEAD_ALPHA, t.raised))
+    .child(div().size(9).flex_none().rounded(5).bg(columnColor(t, col)))
     .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
     .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
 
+// A card's left edge: a narrow bar in its column's color, as tall as the
+// card's content beside it.
+export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
+
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
+
+// A chip in a `tone` (a theme name): `text` in that color on a tint of it.
+// A tone the theme does not have gives the plain chip (chip's defaults); one
+// it cannot tint, its text on `raised`.
+export const toneChip = (t, text, tone) => chip(t, text, t[tone], tintOr(t[tone], CHIP_ALPHA, t.raised));
+
+// A card's chip for its label `name`, in the label's color brought onto the
+// theme (hueTone).
+export const labelChip = (t, item, name) => toneChip(t, name, hueTone(t, item.labelColors?.[name]));
+
+// A card's chip for its type (cardType), in its color (typeTone); a type
+// without one keeps the plain chip in the foreground. Null for no type.
+export function typeChip(t, item) {
+  const type = cardType(item);
+  if (!type) return null;
+  const tone = typeTone(t, item);
+  return tone ? toneChip(t, type, tone) : chip(t, type, t.foreground);
+}
 
 // A card's chip for its session (linkedSession): what its agent does.
 export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);

@@ -66,7 +66,8 @@
 // index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
-// ui/helpers.js, ui/layer.js (the board layer), ui/related.js (the related
+// ui/helpers.js, ui/tones.js (the board's colors), ui/layer.js (the board
+// layer), ui/related.js (the related
 // items as drawn), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
@@ -1903,7 +1904,8 @@ export function makeAzure(paths) {
 // parsing, the status mutation, what gh's answers and failures mean, and the
 // source as the board uses it (makeGithub).
 
-// Theme colors for a Projects v2 option color.
+// Theme colors for GitHub's named colors: a Projects v2 option's and an
+// issue type's (IssueTypeColor), which share the names.
 const GITHUB_COLORS = {
   GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5",
 };
@@ -1919,11 +1921,11 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
   content {
     __typename
-    ... on Issue { number title url issueType { name } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
+    ... on Issue { number title url issueType { name color } repository { nameWithOwner } author { login }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login } }
       parent { number } subIssuesSummary { total completed } }
     ... on PullRequest { number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name } } assignees(first: 5) { nodes { login } }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login } } }
   }`;
@@ -1963,6 +1965,13 @@ export function githubBoardArgs(view, hidden) {
 // or one whose reviewer is gone, names no one.
 const reviewerLogins = (requests) => (requests?.nodes ?? []).map((r) => r?.requestedReviewer?.login).filter(Boolean);
 
+// A label's color as GitHub gives it (rrggbb, no #) → "#rrggbb", or null.
+export const labelColor = (color) => (/^[0-9a-f]{6}$/i.test(color ?? "") ? `#${color.toLowerCase()}` : null);
+
+// A card's labels' colors by label name (labelColor; the tone is drawn from
+// the theme, tones.js hueTone).
+const labelColors = (labels) => Object.fromEntries((labels?.nodes ?? []).map((l) => [l.name, labelColor(l.color)]));
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
@@ -1977,10 +1986,12 @@ function githubCard(node) {
     title: c.title ?? "(kein Zugriff)",
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
+    labelColors: labelColors(c.labels),
     assignees: (c.assignees?.nodes ?? []).map((a) => a.login),
     author: c.author?.login ?? c.creator?.login ?? null,
     reviewers: reviewerLogins(c.reviewRequests),
     type: c.issueType?.name ?? null,
+    typeColor: GITHUB_COLORS[c.issueType?.color] ?? null,
     parent: c.parent?.number ?? null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
     branch: c.headRefName ?? null,
@@ -2557,13 +2568,116 @@ function leaveLayer(options) {
 // export, so it carries no `export` of its own.
 export const layers = { boardLayer, showTab, leaveLayer };
 
+// ==== src/ui/tones.js ====
+
+// The board's colors, their one home: which theme color (a tone: a theme
+// name such as "ansi4" or "muted") a label, an issue type and a status
+// take, and the tints the board draws with. Everything is a theme name or
+// a tint of one, so a theme with other colors, or with surfaces of its own,
+// changes the board with it.
+
+// How strong a tint is (the alpha byte after #rrggbb): a chip's background
+// (CHIP_ALPHA, under text in the chip's own tone), a column head's
+// (HEAD_ALPHA, under its name and its muted count) and a selected card's or
+// row's (SELECTED_ALPHA, under the card's chips). Measured against the
+// copper themes: that text stays at 4.5:1 or more, a chip's over a card and
+// over a selected one, a head's over the column, in copper-dark and
+// copper-light (board.test.mjs).
+export const CHIP_ALPHA = "1a";
+export const HEAD_ALPHA = "14";
+export const SELECTED_ALPHA = "14";
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+// `hex` with `alpha`, where it is a #rrggbb color; anything else (a theme
+// color with alpha of its own, a missing one) gives `fallback`.
+export const tintOr = (hex, alpha, fallback) => (HEX.test(hex ?? "") ? `${hex}${alpha}` : fallback);
+
+// A selected card's or row's background, in every shape alike: a tint of
+// the accent, whose border marks it too. The theme's `selected` would equal
+// `raised` in some themes, and a chip on it would vanish.
+export const selectedBg = (t) => tintOr(t.accent, SELECTED_ALPHA, t.selected);
+
+// The tones a label or type can take: the theme's red, green, yellow, blue,
+// violet and teal. Their bright variants (ansi9 to ansi14) read too weak as
+// text on a light theme's card.
+export const HUE_TONES = ["ansi1", "ansi2", "ansi3", "ansi4", "ansi5", "ansi6"];
+// Below this OKLCH chroma a color counts as grey: it takes "muted".
+export const GREY_CHROMA = 0.03;
+
+const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const seen = new Map();
+
+// A #rrggbb color's OKLCH chroma and hue (degrees), or null for anything
+// else.
+export function oklch(hex) {
+  if (!HEX.test(hex ?? "")) return null;
+  if (seen.has(hex)) return seen.get(hex);
+  const [r, g, b] = [1, 3, 5].map((i) => linear(parseInt(hex.slice(i, i + 2), 16) / 255));
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  const found = { c: Math.hypot(a, bb), h: ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360 };
+  seen.set(hex, found);
+  return found;
+}
+
+// The tone of a color from outside the theme (a GitHub label's): the
+// HUE_TONES color of the theme `t` nearest to it by OKLCH hue; a grey one
+// (GREY_CHROMA), one that is no #rrggbb, or a theme without those colors
+// gives "muted".
+export function hueTone(t, hex) {
+  const own = oklch(hex);
+  if (!own || own.c < GREY_CHROMA) return "muted";
+  let best = "muted";
+  let distance = Infinity;
+  for (const name of HUE_TONES) {
+    const theirs = oklch(t[name]);
+    if (!theirs) continue;
+    const d = Math.min(Math.abs(own.h - theirs.h), 360 - Math.abs(own.h - theirs.h));
+    if (d < distance) [best, distance] = [name, d];
+  }
+  return best;
+}
+
+// The tone text takes for a source's color name (a column's or a type's,
+// from GITHUB_COLORS or Azure's categories): a bright variant becomes its
+// HUE_TONES color (ansi11 → ansi3), the rest stays.
+export function chipTone(name) {
+  const n = /^ansi(9|1[0-4])$/.exec(name ?? "")?.[1];
+  return n ? `ansi${Number(n) - 8}` : name;
+}
+
+// An item that is an Epic by its title alone: "[Epic] …", the convention of
+// a project without issue types.
+const EPIC_TITLE = /^\[epic\]/i;
+
+// An item's type as the board marks it: its own (an issue type, a work item
+// type), else "Epic" for an Epic by its title; null for none.
+export const cardType = (item) => item.type ?? (EPIC_TITLE.test(item.title ?? "") ? "Epic" : null);
+
+// The tone of an item's type marker in the theme `t`, or null for a type
+// without a color (it keeps the plain chip). An issue type's own color
+// (typeColor) wins; an Epic by its title alone takes its "epic" label's
+// color, the owner's pick on GitHub (hueTone), and "muted" without such a
+// label.
+export function typeTone(t, item) {
+  if (item.type) return item.typeColor ? chipTone(item.typeColor) : null;
+  if (!cardType(item)) return null;
+  const label = (item.labels ?? []).find((l) => l.toLowerCase() === "epic");
+  return label ? hueTone(t, item.labelColors?.[label]) : "muted";
+}
+
 // ==== src/ui/helpers.js ====
 
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu and its keys, a detail
-// section, a check's color, a status pill, a column's head, a card's chip
-// and a session's).
+// section, a check's color, a status pill, a column's head, a card's edge,
+// a card's chip in a tone, for a label, for its type and for a session).
+// Which colors they take: tones.js.
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -2800,17 +2914,47 @@ export function statusPill(t, label, color, open) {
     .child(`${label} ▾`);
 }
 
-// A column's head: its color, its name and `count`.
+// A column's color: its theme color, "muted" where the theme has none.
+export const columnColor = (t, col) => t[col.color] ?? t.muted;
+
+// A column's head, on a tint of its color: its color as a dot, its name and
+// `count`.
 export const columnHead = (t, col, count) =>
   h_flex()
     .gap(6)
+    .px(8)
+    .py(4)
+    .rounded(6)
     .items_center()
-    .child(div().size(9).flex_none().rounded(5).bg(t[col.color] ?? t.muted))
+    .bg(tintOr(columnColor(t, col), HEAD_ALPHA, t.raised))
+    .child(div().size(9).flex_none().rounded(5).bg(columnColor(t, col)))
     .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
     .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
 
+// A card's left edge: a narrow bar in its column's color, as tall as the
+// card's content beside it.
+export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
+
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
+
+// A chip in a `tone` (a theme name): `text` in that color on a tint of it.
+// A tone the theme does not have gives the plain chip (chip's defaults); one
+// it cannot tint, its text on `raised`.
+export const toneChip = (t, text, tone) => chip(t, text, t[tone], tintOr(t[tone], CHIP_ALPHA, t.raised));
+
+// A card's chip for its label `name`, in the label's color brought onto the
+// theme (hueTone).
+export const labelChip = (t, item, name) => toneChip(t, name, hueTone(t, item.labelColors?.[name]));
+
+// A card's chip for its type (cardType), in its color (typeTone); a type
+// without one keeps the plain chip in the foreground. Null for no type.
+export function typeChip(t, item) {
+  const type = cardType(item);
+  if (!type) return null;
+  const tone = typeTone(t, item);
+  return tone ? toneChip(t, type, tone) : chip(t, type, t.foreground);
+}
 
 // A card's chip for its session (linkedSession): what its agent does.
 export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);
@@ -3760,7 +3904,7 @@ function drawBacklog(b, t, mono, view, st) {
       .items_center()
       .border_l(2)
       .border_color(selected ? t.accent : t.background)
-      .when(selected, (el) => el.bg(t.selected))
+      .when(selected, (el) => el.bg(selectedBg(t)))
       .opacity(st.pending[r.key] ? 0.7 : 1)
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
@@ -3980,7 +4124,7 @@ function drawBoard(b, t, mono, view, st) {
           .gap(6)
           .overflow_y_scrollbar()
           .track_scroll(boardState(b).scrolls[ci % SCROLLS])
-          .children(col.shown.map((card) => drawCard(b, t, mono, view, st, card, ci, allSpaces)))
+          .children(col.shown.map((card) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces)))
           .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
   };
@@ -4032,19 +4176,25 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
+// A card in its column `col`: its left edge in the column's color, its
+// key, title and chips (its type, labels, sub-issues, assignees, session).
+function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const session = linkedSession(card, allSpaces);
-  return v_flex()
+  const type = typeChip(t, card);
+  return h_flex()
     .id(`card-${card.key}`)
     .flex_none()
-    .p(9)
-    .gap(6)
+    .items_stretch()
+    .py(9)
+    .pl(5)
+    .pr(9)
+    .gap(7)
     .rounded(8)
     .border_1()
     .border_color(selected ? t.accent : t.border)
-    .bg(selected ? t.selected : t.background)
+    .bg(selected ? selectedBg(t) : t.background)
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_mouse_down("left", (_e, cx) => {
@@ -4066,26 +4216,28 @@ function drawCard(b, t, mono, view, st, card, ci, allSpaces) {
       b.endDrag(cx);
       b.clickItem(view, { col: ci, key: card.key }, cx);
     })
-    .child(
-      h_flex()
-        .gap(6)
-        .items_center()
-        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
-        .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
-    )
-    .child(div().text_size(12.5).line_height("17px").child(card.title))
-    .child(
-      h_flex()
-        .gap(5)
-        .flex_wrap()
-        .items_center()
-        .when(Boolean(card.type), (el) => el.child(chip(t, card.type, t.foreground)))
-        .children(card.labels.slice(0, 3).map((l) => chip(t, l)))
-        .when(card.labels.length > 3, (el) => el.child(chip(t, `+${card.labels.length - 3}`)))
-        .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
-        .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-        .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
-    );
+    .child(cardEdge(t, col))
+    .child(v_flex().flex_1().min_w(0).gap(6)
+      .child(
+        h_flex()
+          .gap(6)
+          .items_center()
+          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+          .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
+      )
+      .child(div().text_size(12.5).line_height("17px").child(card.title))
+      .child(
+        h_flex()
+          .gap(5)
+          .flex_wrap()
+          .items_center()
+          .when(Boolean(type), (el) => el.child(type))
+          .children(card.labels.slice(0, 3).map((l) => labelChip(t, card, l)))
+          .when(card.labels.length > 3, (el) => el.child(chip(t, `+${card.labels.length - 3}`)))
+          .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
+          .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+          .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
+      ));
 }
 
 // Hides a shown column or shows a hidden one; the selection follows
@@ -4194,7 +4346,7 @@ function drawPrs(b, t, mono, view, st) {
       .items_center()
       .border_l(2)
       .border_color(selected ? t.accent : t.background)
-      .when(selected, (el) => el.bg(t.selected))
+      .when(selected, (el) => el.bg(selectedBg(t)))
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
@@ -4391,7 +4543,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
     .rounded(8)
     .border_1()
     .border_color(selected ? t.accent : t.background)
-    .when(selected, (el) => el.bg(t.selected))
+    .when(selected, (el) => el.bg(selectedBg(t)))
     .opacity(shown ? (st.pending[story.key] ? 0.7 : 1) : 0.5)
     .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
@@ -4406,33 +4558,38 @@ function storyCell(b, t, mono, view, st, r, nav) {
 
 const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, t[stateColor(data, state)] ?? t.muted).flex_none();
 
-// A task's card: its key, title, own state, assignee and session; a click
-// selects it (clickItem).
+// A task's card: its left edge in its column's color, its key, title, own
+// state, assignee and session; a click selects it (clickItem).
 function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
   const session = linkedSession(card, allSpaces);
-  return v_flex()
+  return h_flex()
     .id(`card-${card.key}`)
     .flex_none()
-    .p(8)
-    .gap(5)
+    .items_stretch()
+    .py(8)
+    .pl(5)
+    .pr(8)
+    .gap(7)
     .rounded(8)
     .border_1()
     .border_color(selected ? t.accent : t.border)
-    .bg(selected ? t.selected : t.background)
+    .bg(selected ? selectedBg(t) : t.background)
     .opacity(st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: ci, key: card.key }, cx);
     })
-    .child(h_flex().gap(6).items_center()
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
-      .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
-    .child(div().text_size(12.5).line_height("17px").child(card.title))
-    .child(h_flex().gap(5).flex_wrap().items_center()
-      .child(stateChip(t, st.data, shownState(card, col)))
-      .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-      .when(Boolean(session), (el) => el.child(sessionChip(t, session))));
+    .child(cardEdge(t, col))
+    .child(v_flex().flex_1().min_w(0).gap(5)
+      .child(h_flex().gap(6).items_center()
+        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+        .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+      .child(div().text_size(12.5).line_height("17px").child(card.title))
+      .child(h_flex().gap(5).flex_wrap().items_center()
+        .child(stateChip(t, st.data, shownState(card, col)))
+        .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))));
 }
 
 // How the sprint finds, changes and shows its items' states (actions/state.js).

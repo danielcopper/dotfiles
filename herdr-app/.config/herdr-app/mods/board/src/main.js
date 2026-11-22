@@ -64,7 +64,8 @@
 // index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
-// ui/helpers.js, ui/layer.js (the board layer), ui/related.js (the related
+// ui/helpers.js, ui/tones.js (the board's colors), ui/layer.js (the board
+// layer), ui/related.js (the related
 // items as drawn), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
@@ -112,6 +113,7 @@ export * from "./actions/state.js";
 export * from "./actions/create.js";
 export * from "./sources/index.js";
 export * from "./ui/helpers.js";
+export * from "./ui/tones.js";
 export * from "./ui/layer.js";
 export * from "./ui/related.js";
 export * from "./ui/shapes/index.js";

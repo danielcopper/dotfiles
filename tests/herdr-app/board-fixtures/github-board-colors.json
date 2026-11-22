@@ -1,0 +1,262 @@
+{
+ "data": {
+  "viewer": {
+   "login": "sample-user"
+  },
+  "repositoryOwner": {
+   "projectV2": {
+    "id": "PVT_sample",
+    "title": "Sample",
+    "url": "https://github.com/users/sample-user/projects/7",
+    "field": {
+     "id": "PVTSSF_sample",
+     "name": "Status",
+     "options": [
+      {
+       "id": "opt-parked",
+       "name": "Parked",
+       "color": "GRAY"
+      },
+      {
+       "id": "opt-backlog",
+       "name": "Backlog",
+       "color": "GREEN"
+      },
+      {
+       "id": "opt-ready",
+       "name": "Ready",
+       "color": "BLUE"
+      },
+      {
+       "id": "opt-in-progress",
+       "name": "In progress",
+       "color": "YELLOW"
+      },
+      {
+       "id": "opt-done",
+       "name": "Done",
+       "color": "PURPLE"
+      }
+     ]
+    },
+    "items": {
+     "totalCount": 5,
+     "pageInfo": {
+      "hasNextPage": false
+     },
+     "nodes": [
+      {
+       "id": "PVTI_col1",
+       "fieldValueByName": {
+        "optionId": "opt-ready",
+        "name": "Ready"
+       },
+       "content": {
+        "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
+        "number": 4001,
+        "title": "fix(view): keep the sample colors",
+        "url": "https://github.com/example/tender/issues/4001",
+        "issueType": {
+         "name": "Bug",
+         "color": "RED"
+        },
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": [
+          {
+           "name": "bug",
+           "color": "d73a4a"
+          },
+          {
+           "name": "docs",
+           "color": "0075CA"
+          },
+          {
+           "name": "chore",
+           "color": "cfd3d7"
+          }
+         ]
+        },
+        "assignees": {
+         "nodes": []
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      },
+      {
+       "id": "PVTI_col2",
+       "fieldValueByName": {
+        "optionId": "opt-in-progress",
+        "name": "In progress"
+       },
+       "content": {
+        "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
+        "number": 4002,
+        "title": "chore: sort the sample list",
+        "url": "https://github.com/example/tender/issues/4002",
+        "issueType": {
+         "name": "Task",
+         "color": "ORANGE"
+        },
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": [
+          {
+           "name": "help wanted",
+           "color": "008672"
+          },
+          {
+           "name": "question",
+           "color": "7057ff"
+          },
+          {
+           "name": "unread"
+          }
+         ]
+        },
+        "assignees": {
+         "nodes": []
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      },
+      {
+       "id": "PVTI_col3",
+       "fieldValueByName": {
+        "optionId": "opt-parked",
+        "name": "Parked"
+       },
+       "content": {
+        "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
+        "number": 4003,
+        "title": "[Epic] sample color rollout",
+        "url": "https://github.com/example/tender/issues/4003",
+        "issueType": null,
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": [
+          {
+           "name": "Epic",
+           "color": "5319e7"
+          },
+          {
+           "name": "area:ui",
+           "color": "fbca04"
+          }
+         ]
+        },
+        "assignees": {
+         "nodes": []
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      },
+      {
+       "id": "PVTI_col4",
+       "fieldValueByName": {
+        "optionId": "opt-ready",
+        "name": "Ready"
+       },
+       "content": {
+        "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
+        "number": 4004,
+        "title": "[Epic] plain sample rollout",
+        "url": "https://github.com/example/tender/issues/4004",
+        "issueType": null,
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": []
+        },
+        "assignees": {
+         "nodes": []
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      },
+      {
+       "id": "PVTI_col5",
+       "fieldValueByName": {
+        "optionId": "opt-ready",
+        "name": "Ready"
+       },
+       "content": {
+        "__typename": "Issue",
+        "author": {
+         "login": "sample-contributor"
+        },
+        "number": 4005,
+        "title": "[Epic] typed sample rollout",
+        "url": "https://github.com/example/tender/issues/4005",
+        "issueType": {
+         "name": "Epic",
+         "color": "GREEN"
+        },
+        "repository": {
+         "nameWithOwner": "example/tender"
+        },
+        "labels": {
+         "nodes": [
+          {
+           "name": "epic",
+           "color": "d73a4a"
+          }
+         ]
+        },
+        "assignees": {
+         "nodes": []
+        },
+        "parent": null,
+        "subIssuesSummary": {
+         "total": 0,
+         "completed": 0
+        }
+       }
+      }
+     ]
+    },
+    "h0": {
+     "totalCount": 0
+    },
+    "h1": {
+     "totalCount": 0
+    }
+   }
+  }
+ }
+}

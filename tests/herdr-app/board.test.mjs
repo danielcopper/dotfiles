@@ -31,6 +31,10 @@
 //   assignees and review requests in github-list.json and the pull
 //   request's in github-board-cases.json, a review request whose reviewer
 //   is gone (null) and an issue whose author is gone (null);
+// - written from GitHub's GraphQL reference (Label's color, IssueType's
+//   color), with made-up names and colors, not recorded:
+//   github-board-colors.json (labels with colors, one without, issue types
+//   with colors, and Epics by their "[Epic]" title);
 // - written from GitHub's GraphQL reference (Issue's subIssues and
 //   closedByPullRequestsReferences), with made-up names, not recorded:
 //   github-related.json (an issue's sub-issues and linked pull requests)
@@ -5986,4 +5990,202 @@ test("UI: on a Sprint the detail panel's share is no narrower than one of its ta
   assert.ok(columns >= 2);
   assert.equal(b.shape(view).columnCount(b, st()), columns);
   assert.equal(detailPanel(b).with.w[0], board.detailWidth(columns));
+});
+
+// ---- Colors: labels, types, statuses and the selected look (ui/tones.js) ----
+
+// A copper theme as theme() gives it, from its file in themes/: its colors,
+// background, foreground and ansi0..ansi15. herdr derives the surfaces
+// (raised, selected, chrome, border); these stand in for them, raised and
+// selected alike, as copper-dark has them.
+function copperTheme(mode) {
+  const file = JSON.parse(readFileSync(resolve(modDir, `../../themes/copper-${mode}.json`), "utf8"));
+  const ansi = Object.fromEntries(file.ansi.map((c, i) => [`ansi${i}`, c]));
+  const surface = mode === "dark" ? "#2e2c38" : "#f6f1ea";
+  return { ...file.colors, ...ansi, background: file.background, foreground: file.foreground, raised: surface, selected: surface,
+    chrome: mode === "dark" ? "#111018" : "#f1efe9", border: mode === "dark" ? "#2f2d39" : "#e8e3dd" };
+}
+const COPPER = ["dark", "light"];
+const colorsBoard = () => board.parseGithubBoard(json("github-board-colors.json"), githubView(), HIDDEN);
+// WCAG's contrast of two #rrggbb colors, and #rrggbbaa laid over #rrggbb.
+const luminance = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+const over = (top, ground) => {
+  const alpha = top.length === 9 ? parseInt(top.slice(7), 16) / 255 : 1;
+  return `#${[1, 3, 5].map((i) => Math.round(parseInt(top.slice(i, i + 2), 16) * alpha + parseInt(ground.slice(i, i + 2), 16) * (1 - alpha)).toString(16).padStart(2, "0")).join("")}`;
+};
+// The chip under `el` whose text is `text`.
+const chipOf = (el, text) => chainTo(el, (e) => e.kids?.length === 1 && e.kids[0] === text)?.at(-1) ?? null;
+const chipLook = (el) => [el.with.text_color[0], el.with.bg[0]];
+
+test("a card carries its labels' colors and its issue type's color, which the board's query asks for", () => {
+  const doc = board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query="));
+  assert.equal(doc.match(/labels\(first: 10\) \{ nodes \{ name color \} \}/g).length, 2, "an issue's labels and a pull request's");
+  assert.match(doc, /issueType \{ name color \}/);
+  const b = colorsBoard();
+  const card = (key) => board.findCard(b, key).card;
+  assert.deepEqual(card("PVTI_col1").labelColors, { bug: "#d73a4a", docs: "#0075ca", chore: "#cfd3d7" }, "with a #, in lower case");
+  assert.deepEqual(card("PVTI_col2").labelColors, { "help wanted": "#008672", question: "#7057ff", unread: null }, "a label without a color: null");
+  assert.deepEqual(card("PVTI_col1").labels, ["bug", "docs", "chore"], "the labels stay their names");
+  assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col3", "PVTI_col5"].map((k) => [card(k).type, card(k).typeColor]),
+    [["Bug", "ansi1"], ["Task", "ansi11"], [null, null], ["Epic", "ansi2"]]);
+  assert.deepEqual(board.findCard(githubBoard(), "PVTI_rec1").card.labelColors, { enhancement: null, "area:architecture": null, epic: null }, "an answer without colors");
+  assert.deepEqual(["d73a4a", "ABCDEF", "#d73a4a", "fff", "zzzzzz", null, undefined].map(board.labelColor),
+    ["#d73a4a", "#abcdef", null, null, null, null, null]);
+});
+
+test("a label's color takes the theme's red, green, yellow, blue, violet or teal nearest by hue, a grey or unreadable one muted, in copper-dark and copper-light alike", () => {
+  const cases = [
+    ["d73a4a", "ansi1"], ["b60205", "ansi1"], ["e99695", "ansi1"], ["d93f0b", "ansi1"], ["e4007c", "ansi1"],
+    ["0e8a16", "ansi2"], ["c2e0c6", "ansi2"], ["e4e669", "ansi2"],
+    ["fbca04", "ansi3"], ["fef2c0", "ansi3"],
+    ["0075ca", "ansi4"], ["1d76db", "ansi4"], ["c5def5", "ansi4"],
+    ["7057ff", "ansi5"], ["5319e7", "ansi5"], ["d876e3", "ansi5"],
+    ["008672", "ansi6"], ["a2eeef", "ansi6"],
+    ["cfd3d7", "muted"], ["ffffff", "muted"], ["000000", "muted"], ["8b949e", "muted"], ["bfdadc", "muted"],
+  ];
+  for (const mode of COPPER) {
+    const t = copperTheme(mode);
+    assert.deepEqual(cases.map(([hex]) => [hex, board.hueTone(t, `#${hex}`)]), cases, mode);
+    assert.deepEqual([null, undefined, "#fff", "red", "#d73a4a80"].map((c) => board.hueTone(t, c)), ["muted", "muted", "muted", "muted", "muted"], `${mode}: no #rrggbb`);
+  }
+  assert.equal(board.hueTone({ muted: "#808080" }, "#d73a4a"), "muted", "a theme without those colors");
+  assert.equal(board.hueTone({ ansi1: "#ff0000", ansi4: "#0000ff", ansi2: "nope" }, "#00ff00"), "ansi1", "the nearest of the colors the theme has");
+});
+
+test("a chip's text on its tint reads at 4.5:1 or more on a card and on a selected card, for every tone, in copper-dark and copper-light", () => {
+  globalThis.__boardHost = fakeHost();
+  const ratios = {};
+  for (const mode of COPPER) {
+    const t = copperTheme(mode);
+    const selected = over(board.selectedBg(t), t.background);
+    for (const tone of [...board.HUE_TONES, "muted"]) {
+      const [fg, bg] = chipLook(board.toneChip(t, "x", tone));
+      assert.equal(fg, t[tone], `${mode} ${tone}: text in its tone`);
+      assert.equal(bg, `${t[tone]}${board.CHIP_ALPHA}`, `${mode} ${tone}: on its tint`);
+      ratios[`${mode} ${tone}`] = [contrast(fg, over(bg, t.background)), contrast(fg, over(bg, selected))].map((r) => Math.round(r * 100) / 100);
+    }
+  }
+  const weak = Object.entries(ratios).filter(([, rs]) => rs.some((r) => r < 4.5));
+  assert.deepEqual(weak, [], JSON.stringify(ratios));
+});
+
+test("a column head's name and muted count read at 4.5:1 or more on its tint over the column, for every status color, in copper-dark and copper-light", () => {
+  globalThis.__boardHost = fakeHost();
+  const ratios = {};
+  for (const mode of COPPER) {
+    const t = copperTheme(mode);
+    for (const color of ["muted", "dim", "ansi1", "ansi2", "ansi3", "ansi4", "ansi5", "ansi11", "ansi13"]) {
+      const head = board.columnHead(t, { name: "x", color }, "1");
+      assert.equal(head.with.bg[0], `${t[color]}${board.HEAD_ALPHA}`);
+      const ground = over(head.with.bg[0], t.chrome);
+      ratios[`${mode} ${color}`] = [t.foreground, t.muted].map((fg) => Math.round(contrast(fg, ground) * 100) / 100);
+    }
+  }
+  const weak = Object.entries(ratios).filter(([, rs]) => rs.some((r) => r < 4.5));
+  assert.deepEqual(weak, [], JSON.stringify(ratios));
+});
+
+test("a tone the theme has no #rrggbb for keeps the plain chip; the selected look falls back to the theme's selected without an accent to tint", () => {
+  globalThis.__boardHost = fakeHost();
+  const t = { muted: "#muted", raised: "#raised", accent: "#ffffff17", selected: "#selected", ansi4: "#0000ff" };
+  assert.deepEqual(chipLook(board.toneChip(t, "x", "ansi1")), ["#muted", "#raised"], "no such color");
+  assert.deepEqual(chipLook(board.toneChip(t, "x", "muted")), ["#muted", "#raised"], "no #rrggbb to tint");
+  assert.deepEqual(chipLook(board.toneChip(t, "x", "ansi4")), ["#0000ff", `#0000ff${board.CHIP_ALPHA}`]);
+  assert.equal(board.selectedBg(t), "#selected");
+  assert.equal(board.selectedBg({ ...t, accent: "#71b8f4" }), `#71b8f4${board.SELECTED_ALPHA}`);
+});
+
+test("a type's marker: an issue type in its color (a bright one as its plain color), an Epic by its title in its epic label's color or muted without one, a type without color plain", () => {
+  const t = copperTheme("dark");
+  const b = colorsBoard();
+  const card = (key) => board.findCard(b, key).card;
+  assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col3", "PVTI_col4", "PVTI_col5"].map((k) => [board.cardType(card(k)), board.typeTone(t, card(k))]),
+    [["Bug", "ansi1"], ["Task", "ansi3"], ["Epic", "ansi5"], ["Epic", "muted"], ["Epic", "ansi2"]],
+    "RED; ORANGE (ansi11) as ansi3; the Epic label's violet; no epic label; the issue type's GREEN wins over the red epic label");
+  const azure = { type: "User Story", title: "[Epic] not by its title", labels: [] };
+  assert.deepEqual([board.cardType(azure), board.typeTone(t, azure)], ["User Story", null], "a type of its own, without a color");
+  assert.deepEqual([board.cardType({ type: null, title: "fix: an [Epic] inside" }), board.typeTone(t, { type: null, title: "x", labels: [] })], [null, null]);
+  assert.deepEqual(["ansi9", "ansi11", "ansi13", "ansi14", "ansi15", "ansi8", "ansi4", "muted", "dim", null].map(board.chipTone),
+    ["ansi1", "ansi3", "ansi5", "ansi6", "ansi15", "ansi8", "ansi4", "muted", "dim", null]);
+});
+
+test("UI: the board draws labels and types as chips in their tones, each column's head on a tint of its color, each card's edge in its column's color, and a selected card on an accent tint that keeps its chips", async () => {
+  const { b, cx, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const tinted = (name) => `${t[name]}${board.CHIP_ALPHA}`;
+  let root = b.render();
+  const col1 = byId(root, "card-PVTI_col1");
+  assert.deepEqual(["Bug", "bug", "docs", "chore"].map((n) => chipLook(chipOf(col1, n))),
+    [[t.ansi1, tinted("ansi1")], [t.ansi1, tinted("ansi1")], [t.ansi4, tinted("ansi4")], [t.muted, tinted("muted")]]);
+  const col2 = byId(root, "card-PVTI_col2");
+  assert.deepEqual(["Task", "help wanted", "question", "unread"].map((n) => chipLook(chipOf(col2, n))),
+    [[t.ansi3, tinted("ansi3")], [t.ansi6, tinted("ansi6")], [t.ansi5, tinted("ansi5")], [t.muted, tinted("muted")]]);
+  assert.deepEqual(chipLook(chipOf(byId(root, "card-PVTI_col3"), "Epic")), [t.ansi5, tinted("ansi5")], "an Epic by its title");
+  assert.deepEqual(chipLook(chipOf(byId(root, "card-PVTI_col4"), "Epic")), [t.muted, tinted("muted")]);
+  const cols = b.navColumns(b.view());
+  assert.deepEqual(cols.map((c) => [c.name, c.color]), [["Parked", "muted"], ["Ready", "ansi4"], ["In progress", "ansi3"]]);
+  cols.forEach((col, ci) => {
+    const head = byId(root, `col-${ci}`).kids[0];
+    assert.equal(head.with.bg[0], `${t[col.color]}${board.HEAD_ALPHA}`, `${col.name}: its head`);
+    assert.equal(head.kids[0].with.bg[0], t[col.color], `${col.name}: its dot`);
+    for (const card of col.shown) {
+      const edge = byId(root, `card-${card.key}`).kids[0];
+      assert.deepEqual([edge.with.w[0], edge.with.bg[0]], [3, t[col.color]], `${card.key}: its edge`);
+    }
+  });
+  await clickCard(b, cx, "PVTI_col1");
+  root = b.render();
+  const selected = byId(root, "card-PVTI_col1");
+  assert.deepEqual([selected.with.bg[0], selected.with.border_color[0]], [`${t.accent}${board.SELECTED_ALPHA}`, t.accent]);
+  assert.notEqual(selected.with.bg[0], t.selected);
+  assert.deepEqual(chipLook(chipOf(selected, "bug")), [t.ansi1, tinted("ansi1")], "its chips as before");
+  assert.deepEqual([byId(root, "card-PVTI_col2").with.bg[0], byId(root, "card-PVTI_col2").with.border_color[0]], [t.background, t.border], "the others plain");
+});
+
+test("UI: the Sprint draws its taskboard columns' heads on a tint of their color, each task's edge in its column's color, and a selected story and task on an accent tint", async () => {
+  const { b, cx, host, view, st } = await openSprint({ iteration: fixture("azure-sprint-iteration.json") });
+  const t = copperTheme("light");
+  host.theme = () => t;
+  let root = b.render();
+  const [, ...cols] = b.navColumns(view);
+  assert.deepEqual(cols.map((c) => c.color), ["muted", "ansi4", "ansi4", "ansi2"]);
+  const heads = byId(root, "sprint-head").kids.slice(1);
+  assert.deepEqual(heads.map((h) => h.with.bg[0]), cols.map((c) => `${t[c.color]}${board.HEAD_ALPHA}`));
+  for (const col of cols) {
+    for (const card of col.shown) assert.equal(byId(root, `card-${card.key}`).kids[0].with.bg[0], t[col.color], `${card.key} in ${col.name}`);
+  }
+  assert.ok(cols.some((c) => c.shown.length), "cards to look at");
+  await click(b, cx, "card-AB#311");
+  assert.equal(st().sel?.key, "AB#311");
+  root = b.render();
+  assert.deepEqual([byId(root, "card-AB#311").with.bg[0], byId(root, "card-AB#311").with.border_color[0]], [`${t.accent}${board.SELECTED_ALPHA}`, t.accent]);
+  await click(b, cx, "story-AB#301");
+  root = b.render();
+  assert.deepEqual([byId(root, "story-AB#301").with.bg[0], byId(root, "story-AB#301").with.border_color[0]], [`${t.accent}${board.SELECTED_ALPHA}`, t.accent]);
+  assert.equal(byId(root, "card-AB#311").with.bg[0], t.background);
+});
+
+test("UI: a selected row of the Backlog and of a PR list is on an accent tint", async () => {
+  const t = copperTheme("dark");
+  const backlog = await openBacklog();
+  backlog.host.theme = () => t;
+  await click(backlog.b, backlog.cx, "row-AB#401");
+  let row = byId(backlog.b.render(), "row-AB#401");
+  assert.deepEqual([row.with.bg[0], row.with.border_color[0]], [`${t.accent}${board.SELECTED_ALPHA}`, t.accent]);
+  const prs = await openBoard();
+  prs.host.theme = () => t;
+  await press(prs.b, prs.cx, "2");
+  await prs.host.answer("gh", ok(fixture("github-list.json")));
+  const [first] = prs.b.navColumns(prs.b.view())[0].shown;
+  await click(prs.b, prs.cx, `row-${first.key}`);
+  row = byId(prs.b.render(), `row-${first.key}`);
+  assert.deepEqual([row.with.bg[0], row.with.border_color[0]], [`${t.accent}${board.SELECTED_ALPHA}`, t.accent]);
 });
