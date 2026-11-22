@@ -20,7 +20,8 @@ MAX_EVALS = 5
 MAX_SUBSTITUTIONS = 64
 
 # A command word as a whole word or a path's basename, not part of gh-pages or gh.io.
-NETWORK = re.compile(r"(?<![\w.-])(gh|az|curl|wget)(?![\w.-])")
+NETWORK_TOOLS = ("gh", "az", "curl", "wget")
+NETWORK = re.compile(rf"(?<![\w.-])({'|'.join(NETWORK_TOOLS)})(?![\w.-])")
 GH = re.compile(r"(?<![\w.-])gh(?![\w.-])")
 AZ = re.compile(r"(?<![\w.-])az(?![\w.-])")
 FEEDER = re.compile(r"(?<![\w.-])(xargs|parallel)(?![\w.-])")
@@ -105,6 +106,8 @@ AZ_SUBCOMMANDS = frozenset(
     ]
 )
 PR_WORD = re.compile(r"\bpr\b")
+# The merge word of the "pr followed later by merge" rule, next to gh; MERGE_TERM below is the
+# narrower vocabulary of the body-tool and run-time rules.
 MERGE_WORD = re.compile(r"\bmerge\b")
 
 PR_MERGE = re.compile(
@@ -113,15 +116,17 @@ PR_MERGE = re.compile(
 )
 ALIAS = re.compile(r"\balias\b")
 ALIAS_VERB = re.compile(r"\b(set|import)\b")
-# auto-complete also as the start of a name, such as autoCompleteSetBy
+# The Azure DevOps completion rule, next to az; auto-complete also as the start of a name, such
+# as autoCompleteSetBy. COMPLETION below is the run-time rule's narrower reading.
 AZ_COMPLETE = re.compile(r"\b(?:completed\b|auto-?complete)")
 DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
-FILE_FLAGS = re.compile(r"@|--input|--upload-file|--config|--post-file|--body-file|--in-file")
 FILE_LONG_FLAGS = re.compile(r"--input|--upload-file|--config|--post-file|--body-file|--in-file")
+FILE_FLAGS = re.compile("@|" + FILE_LONG_FLAGS.pattern)  # re-read text: any @ counts
 FILE_REFERENCE = re.compile(r"^@|=@")  # an @ at a word's start or after =
 FILE_SHORT_FLAGS = re.compile(r"(?<!\S)-[A-Za-z]*[TK]|(?<!\S)-i(?!\S)")  # case-sensitive
-# The merge vocabulary as words: merge itself (not merged, merges, merger, merge-base or
-# merge-tree), mergeBranch and merge-upstream; a completion only as a status or auto-complete.
+# The merge vocabulary of the body-tool and run-time rules, as words: merge itself (not merged,
+# merges, merger, merge-base or merge-tree), mergeBranch and merge-upstream. COMPLETION, a completion only
+# as a status or auto-complete, counts for the run-time rule only.
 MERGE_TERM = re.compile(r"(?<!\w)merge(?!\w)(?!-(?:base|tree)\b)|mergebranch|merge-upstream")
 COMPLETION = re.compile(r"auto-?complete|(?:status|-s)\W{1,4}completed\b")
 # The part before the first comma or `..` cannot hold one, so a long open brace is scanned once.
@@ -180,7 +185,6 @@ WRAPPERS = frozenset(
 KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
 DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
 WORD_END = set(" \t\n;&|()<>`")
-NETWORK_TOOLS = frozenset(["gh", "az", "curl", "wget"])
 
 # Heredocs whose body the run-time rules do not read (merge_policy).
 DELIMITER = r"[A-Za-z_][\w-]*"
@@ -290,14 +294,9 @@ def runs_at_run_time(command: str, whole: bool = False) -> bool:
 
 
 def built(word: str) -> bool:
-    """Whether a word, its quoting already removed, may be built at run time: a `$` or a
-    backtick anywhere, or a brace expansion or a glob next to a letter."""
-    return (
-        "$" in word
-        or "`" in word
-        or bool(BRACE_EXPANSION.search(word))
-        or bool(GLOB_NEXT_TO_LETTER.search(word))
-    )
+    """Whether a word, its quoting already removed, may be built at run time: any construct
+    runs_at_run_time() counts, wherever it stands in the word."""
+    return runs_at_run_time(word, whole=True)
 
 
 def mentions_merge(lower: str) -> bool:
@@ -1031,18 +1030,19 @@ def check(command: str) -> str | None:
     # The two run-time rules do not read data heredoc bodies, unless the text around them is
     # re-read: then the whole text counts. Otherwise the spared parameters do not count either,
     # and the rule next to gh, az, curl or wget is judged per simple command where it can be.
-    data = without_data_heredocs(command)
-    data_lower = stripped(data).lower()
-    whole = rereads(data_lower) if data != command else reread
-    if whole:
-        data, data_lower = command, lower
+    runtime_text = without_data_heredocs(command)
+    runtime_lower = stripped(runtime_text).lower()
+    runtime_whole = rereads(runtime_lower) if runtime_text != command else reread
+    if runtime_whole:
+        runtime_text, runtime_lower = command, lower
     else:
-        data = without_spared_parameters(data)
-    if runs_at_run_time(data, whole=whole) and mentions_merge(data_lower):
+        runtime_text = without_spared_parameters(runtime_text)
+    runtime = runs_at_run_time(runtime_text, whole=runtime_whole)
+    if runtime and mentions_merge(runtime_lower):
         return "builds a word at run time next to a merge mention"
-    if NETWORK.search(data_lower):
-        by_command = None if whole else network_runtime_by_command(data)
-        if runs_at_run_time(data, whole=whole) if by_command is None else by_command:
+    if NETWORK.search(runtime_lower):
+        by_command = None if runtime_whole else network_runtime_by_command(runtime_text)
+        if runtime if by_command is None else by_command:
             return "builds a word at run time next to gh, az, curl or wget"
     if len(EVAL.findall(lower)) > MAX_EVALS:
         return "is nested too deep to check"
