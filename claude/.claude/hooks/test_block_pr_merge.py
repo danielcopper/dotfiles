@@ -702,6 +702,9 @@ PATHOLOGICAL = [
     "gh pr view " + '"$N" ' * 19_000,
     "a=b; " * 19_000 + "echo $?",
     "echo\n" + "\n" * 99_000,
+    "|" * 99_000,
+    "|a" * 49_000,
+    "a" + " " * 99_000,
     "cat <<'A' " * 9_000,
     "cat <<'A'\n" * 9_000,
     "cat <<'A'\nA\n" * 8_000,
@@ -753,6 +756,15 @@ class MergeBlock(unittest.TestCase):
         for payload in ("{}", json.dumps({"tool_input": {}}), json.dumps({"tool_input": None})):
             with self.subTest(payload=payload):
                 self.assertIsNone(hook_output(payload))
+
+    def test_a_check_past_the_deadline_is_denied(self):
+        patch = "import time\nDEADLINE = 0.3\ndef check(command):\n    time.sleep(30)\n"
+        started = time.monotonic()
+        out = patched_output(patch, "gh pr view 1")
+        self.assertLess(time.monotonic() - started, 10.0)
+        assert out is not None, "a check past the deadline was not denied"
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("took too long to check", out["permissionDecisionReason"])
 
     def test_an_error_while_checking_is_denied(self):
         out = patched_output("def check(command):\n    raise RuntimeError('x')\n", "gh pr view 1")

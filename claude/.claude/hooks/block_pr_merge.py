@@ -9,11 +9,13 @@ import itertools
 import json
 import logging
 import re
+import signal
 import sys
 from dataclasses import dataclass
 
 LOG = logging.getLogger(__name__)
 MAX_LENGTH = 100_000
+DEADLINE = 5.0  # seconds a check may take before the hook denies
 MAX_EVALS = 5
 MAX_SUBSTITUTIONS = 64
 
@@ -26,7 +28,9 @@ EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
 SHELL_WORD = re.compile(r"(?<![\w.-])(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
 SHELL_C_CLUSTER = re.compile(r"(?<!\S)-[a-z]*c[a-z]*(?!\S)")
 SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])[^\S\n]*(?:source|\.)(?=\s)")
-PIPE_INTO_SHELL = re.compile(r"\|\s*(?:\S*/)?(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
+# A shell name at the start of a word part right after a pipe or a slash.
+SHELL_AFTER_PIPE = re.compile(r"(?:^|(?<=[|/]))(?:bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
+NON_BLANK_RUN = re.compile(r"\S+")
 # Commands that run a program named in their arguments or their data.
 TRAP = re.compile(r"(?<![\w.-])trap(?![\w.-])")
 SORT = re.compile(r"(?<![\w.-])sort(?![\w.-])")
@@ -151,7 +155,9 @@ PLAIN_COMMAND = re.compile(
     rf"[ \t\n]*+{PLAIN_SIMPLE}(?:{PLAIN_SEPARATOR}{PLAIN_SIMPLE})*+[ \t]*+(?:[;\n][ \t\n]*+)?"
 )
 PLAIN_PIECE = re.compile(
-    rf"(?P<redirect>{PLAIN_REDIRECT})|(?P<word>{PLAIN_WORD})|(?P<separator>{PLAIN_SEPARATOR})"
+    rf"(?P<redirect>{PLAIN_REDIRECT})|(?P<word>{PLAIN_WORD})"
+    # the separator without the blanks before it, which finditer skips: linear time
+    r"|(?P<separator>(?:;|&&|\|\||\||\n)[ \t\n]*+)"
 )
 ASSIGNMENT = re.compile(rf"{NAME}=")
 ALLOWED_COMMANDS = frozenset(
@@ -220,6 +226,21 @@ def quote_parts(command: str) -> tuple[str, str]:
     return "".join(outside), "".join(double)
 
 
+def pipes_into_shell(lower: str) -> bool:
+    """Whether a pipe feeds a shell: a `|`, any blanks, then a word in which a shell name stands
+    at its start, after a later `|` or after a `/`, and ends there. Each run of non-blank
+    characters is read once, so the time stays linear."""
+    after_pipe = False  # the run before ended in |
+    for run in NON_BLANK_RUN.finditer(lower):
+        text = run.group()
+        pipe = text.find("|")
+        start = 0 if after_pipe else pipe + 1 if pipe >= 0 else -1
+        if start >= 0 and SHELL_AFTER_PIPE.search(text[start:]):
+            return True
+        after_pipe = text.endswith("|")
+    return False
+
+
 def rereads(lower: str) -> bool:
     """Whether the de-quoted, lowercased command hands text to a shell that reads it again, or
     to a command that runs a program from its arguments or data: a shell word followed later by
@@ -235,7 +256,7 @@ def rereads(lower: str) -> bool:
         or EVAL.search(lower)
         or "<<<" in lower
         or SOURCE_COMMAND.search(lower)
-        or PIPE_INTO_SHELL.search(lower)
+        or pipes_into_shell(lower)
         or TRAP.search(lower)
         or (sort and SORT_PROGRAM.search(lower, sort.end()))
         or (find and FIND_EXEC.search(lower, find.end()))
@@ -992,11 +1013,26 @@ def judge(payload: str) -> str | None:
     return check(command)
 
 
+class TookTooLong(Exception):
+    """The check ran past DEADLINE."""
+
+
+def past_deadline(signum: int, frame: object) -> None:
+    raise TookTooLong
+
+
 def main() -> int:
-    """Read the hook input and deny what judge() names; input it cannot read, and any error while
-    checking, deny too."""
+    """Read the hook input and deny what judge() names; input it cannot read, any error while
+    checking, and a check that runs past DEADLINE deny too."""
     try:
-        what = judge(sys.stdin.read())
+        signal.signal(signal.SIGALRM, past_deadline)
+        signal.setitimer(signal.ITIMER_REAL, DEADLINE)
+        try:
+            what = judge(sys.stdin.read())
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+    except TookTooLong:
+        what = "took too long to check"
     except Exception:  # fail closed: a filter that cannot check refuses
         LOG.exception("the merge filter could not check the command")
         what = "could not be checked"
