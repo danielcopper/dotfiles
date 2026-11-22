@@ -31,8 +31,8 @@
 // with.
 //
 // Calls: a GitHub view costs one gh call per refresh, and an issue's
-// related items (its sub-issues and linked pull requests) one more when its
-// details open, and again on `r` while they are open (readRelated); what a
+// related items (its description, sub-issues and linked pull requests) one
+// more when its details open, and again on `r` while they are open (readRelated); what a
 // refresh keeps of them keptRelated says. An Azure team's Sprint two az calls (the taskboard's column of each work item, and one
 // WIQL query for their fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
@@ -82,7 +82,7 @@ import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
 import { keptRelated, relatedLines, stepLine } from "./related.js";
-import { store, migrateShownView, boardShown, shownOf, button, detailSection } from "./ui/helpers.js";
+import { store, migrateShownView, boardShown, shownOf, button, detailSection, detailWidth, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
@@ -1219,7 +1219,9 @@ export default class Board extends View {
     const panel = this.panelOf(view);
     return v_flex()
       .id("detail")
-      .w(360)
+      .w(detailWidth(this.shape(view).columns?.(this, st) ?? 0))
+      .min_w(DETAIL_MIN_W)
+      .max_w(DETAIL_MAX_W)
       .flex_none()
       .bg(t.chrome)
       .border_l(1)

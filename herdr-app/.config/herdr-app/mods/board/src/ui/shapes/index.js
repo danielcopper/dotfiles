@@ -10,7 +10,9 @@
 // (the arrow directions that move), loads (false for the placeholder, which
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
-// where it has them, detailParts (its rows in the detail panel), settle
+// where it has them, columns (how many columns it draws side by side,
+// which the detail panel is no narrower than one of: detailWidth; a list
+// has none), detailParts (its rows in the detail panel), settle
 // (b, view, due, data, cx: says how the unclear writes of its items ended
 // up), moveTo, toggleColumn, openStatusMenu, navigate (its own keyboard
 // movement in place of navigate's, select.js) and pickStatus (what a pick

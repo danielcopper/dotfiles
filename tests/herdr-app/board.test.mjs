@@ -5407,13 +5407,23 @@ test("UI: a team whose default iteration follows the current one has it read aga
   assert.equal(b.notice.text, "User Story „Another“ nicht angelegt: Das Team nennt gerade keine Standard-Iteration (Team-Einstellungen in Azure)");
 });
 
-// ---- An issue's related items: sub-issues and linked pull requests ----
+// ---- An issue's related items: description, sub-issues and linked pull requests ----
 
 const issueItem = () => githubBoard().columns.flatMap((c) => c.cards).find((c) => c.number === 3004);
 // The detail panel as the board draws it now, and the texts of its related
 // items' block.
 const detailPanel = (b) => byId(b.render(), "detail");
 const relatedTexts = (b) => texts(byId(detailPanel(b), "related-lines"));
+// Those texts from the sub-issues' head on, and those before it (the
+// description's).
+const sectionTexts = (b) => {
+  const all = relatedTexts(b);
+  return all.slice(all.findIndex((t) => t.startsWith("UNTERAUFGABEN")));
+};
+const descriptionTexts = (b) => {
+  const all = relatedTexts(b);
+  return all.slice(0, all.findIndex((t) => t.startsWith("UNTERAUFGABEN")));
+};
 // The related items' lines as drawn, each as its texts: key, title, draft
 // mark, state.
 const drawnLines = (b) =>
@@ -5555,7 +5565,7 @@ test("UI: an issue's related items are read once when its details open, „lädt
   const calls = host.open("gh");
   assert.equal(calls.length, 1);
   assert.ok(isRelatedCall(calls[0].args) && calls[0].args.includes("number=3004") && calls[0].args.includes("name=tender"));
-  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "lädt …"], "the head's count is the card's");
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "lädt …"], "the head's count is the card's");
   await cx.look();
   assert.equal(host.open("gh").length, 1, "one read while it loads");
   await answerRelated(host, ok(fixture("github-related.json")));
@@ -5621,7 +5631,7 @@ test("UI: a refresh keeps the open related items and reads nothing for them; ano
   await answerRelated(host, ok(relatedAnswer({ n: 1 })));
   await press(b, cx, "r");
   assert.deepEqual(host.open("gh").map((c) => (isRelatedCall(c.args) ? "related" : isBoardCall(c.args) ? "board" : "?")).sort(), ["board", "related"], "r: the view and the open related items");
-  assert.equal(relatedTexts(b).at(-1), "lädt …");
+  assert.equal(sectionTexts(b).at(-1), "lädt …");
   await answerRelated(host, ok(relatedAnswer({ n: 2 })));
   assert.equal(drawnLines(b).length, 2);
 });
@@ -5630,7 +5640,7 @@ test("UI: related items that fail to read say the first line of gh's reason, the
   const { b, cx, host } = await openBoard();
   await press(b, cx, "enter");
   await answerRelated(host, { code: 1, stdout: "", stderr: "gh: GraphQL: Something broke\nat line 2\n" });
-  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "GraphQL: Something broke"], "the first line only");
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "GraphQL: Something broke"], "the first line only");
   assert.ok(pathTo(detailPanel(b), "SITZUNG") && pathTo(detailPanel(b), "feat(api): page through long lists"), "the rest of the details");
   advance(3 * 60000);
   // The refresh timer alone, without the look that reads what it missed.
@@ -5640,7 +5650,7 @@ test("UI: related items that fail to read say the first line of gh's reason, the
   await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
   assert.equal(readsOf(host, 3004).length, 1, "the next refresh reads them again");
   await answerRelated(host, { code: 1, stdout: fixture("github-related-not-found.json"), stderr: "gh: Could not resolve to an Issue with the number of 3004.\n" });
-  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Could not resolve to an Issue with the number of 3004."]);
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Could not resolve to an Issue with the number of 3004."]);
   await press(b, cx, "r");
   await press(b, cx, "r");
   const [older, newer] = readsOf(host);
@@ -5658,17 +5668,17 @@ test("UI: more than GitHub sends: the first it sent of how many there are; none:
   const { b, cx, host } = await openBoard();
   await press(b, cx, "enter");
   await answerRelated(host, ok(relatedAnswer({ n: 50, count: 60, more: true })));
-  assert.equal(relatedTexts(b)[0], "UNTERAUFGABEN · 11/11 · erste 50 von 60");
+  assert.equal(sectionTexts(b)[0], "UNTERAUFGABEN · 11/11 · erste 50 von 60");
   assert.equal(drawnLines(b).length, 50);
-  assert.ok(!relatedTexts(b).some((s) => s.startsWith("VERKNÜPFTE")));
+  assert.ok(!sectionTexts(b).some((s) => s.startsWith("VERKNÜPFTE")));
   await press(b, cx, "r");
   await answerRelated(host, ok(relatedAnswer()));
-  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "keine"]);
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "keine"]);
   await press(b, cx, "r");
   const many = JSON.parse(relatedAnswer({ prs: [prNode(1), prNode(2)], prCount: 25 }));
   many.data.repository.issue.closedByPullRequestsReferences.pageInfo.hasNextPage = true;
   await answerRelated(host, ok(JSON.stringify(many)));
-  assert.equal(relatedTexts(b).find((s) => s.startsWith("VERKNÜPFTE")), "VERKNÜPFTE PRS · 25 · erste 2 von 25");
+  assert.equal(sectionTexts(b).find((s) => s.startsWith("VERKNÜPFTE")), "VERKNÜPFTE PRS · 25 · erste 2 von 25");
 });
 
 test("UI: a node GitHub sent as null is counted as without access; a section it did not send says why in its place; other errors follow at the end", async () => {
@@ -5683,7 +5693,7 @@ test("UI: a node GitHub sent as null is counted as without access; a section it 
     { message: "Something else went wrong" },
   ];
   await answerRelated(host, { code: 1, stdout: JSON.stringify(answer), stderr: "gh: Resource not accessible by integration\n" });
-  assert.deepEqual(relatedTexts(b), [
+  assert.deepEqual(sectionTexts(b), [
     "UNTERAUFGABEN · 11/11", "tender#4000", "step 0", "offen", "1 ohne Zugriff",
     "VERKNÜPFTE PRS", "GitHub: Pull requests are hidden",
     "Something else went wrong",
@@ -5692,13 +5702,13 @@ test("UI: a node GitHub sent as null is counted as without access; a section it 
   const hidden = JSON.parse(relatedAnswer({ count: 1 }));
   hidden.data.repository.issue.subIssues.nodes = [null];
   await answerRelated(host, ok(JSON.stringify(hidden)));
-  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "1 ohne Zugriff"], "not „keine“");
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "1 ohne Zugriff"], "not „keine“");
   await press(b, cx, "r");
   const unsent = JSON.parse(relatedAnswer());
   unsent.data.repository.issue.subIssues = null;
   unsent.errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "subIssues"], message: "Sub-issues are hidden" }];
   await answerRelated(host, { code: 1, stdout: JSON.stringify(unsent), stderr: "gh: Sub-issues are hidden\n" });
-  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Sub-issues are hidden"], "the error in their place, not „keine“");
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Sub-issues are hidden"], "the error in their place, not „keine“");
 });
 
 test("UI: a pull request's row, a pull request's card and a draft read no related items and have no such section", async () => {
@@ -5748,10 +5758,10 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   await press(b, cx, "j");
   await press(b, cx, "down");
   assert.deepEqual([b.panel.line, marked(), st().sel.key], [1, [1], "PVTI_rec4"], "the lines move, the board's selection stays");
-  assert.equal(scrolledTo(b, host), 2, "scrolled to the second sub-issue's line");
+  assert.equal(scrolledTo(b, host), 8, "scrolled to the second sub-issue's line, below the description's six rows");
   for (let i = 0; i < 6; i++) await press(b, cx, "j");
   assert.equal(b.panel.line, 4, "the last stays");
-  assert.equal(scrolledTo(b, host), 6, "scrolled to the last pull request's line");
+  assert.equal(scrolledTo(b, host), 12, "scrolled to the last pull request's line");
   await press(b, cx, "k", { modifiers: { control: true } });
   await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
   assert.equal(b.panel.line, 4, "with Control or Shift a key is not the panel's");
@@ -5778,13 +5788,13 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   assert.equal(takesTab(b), false, "nor does the root take it: herdr's own Tab runs");
 });
 
-test("UI: with no sub-issues the first pull request's line is the block's fourth child", async () => {
+test("UI: with no description and no sub-issues the first pull request's line is the block's sixth child", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "enter");
   await answerRelated(host, ok(relatedAnswer({ prs: [prNode(3020)] })));
   await tab(b, cx);
   await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [0, 3], "the head, „keine“, the pull requests' head, the line");
+  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [0, 5], "the description's head, „keine Beschreibung“, the sub-issues' head, „keine“, the pull requests' head, the line");
 });
 
 test("UI: the details panel has the keyboard only for the item and view it took it in, with the details open", async () => {
@@ -5879,4 +5889,64 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   await answerRelated(host, ok(fixture("github-related.json")));
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
+});
+
+test("a description as the details show it: line breaks kept, trailing blanks cut, a run of empty lines as one, none at either end, Markdown as written", () => {
+  assert.deepEqual(board.descriptionLines("\r\n\nRolls it out.  \r\n\r\n\r\n## Steps\r- one\n\n\n- **two**\n\n"), ["Rolls it out.", "", "## Steps", "- one", "", "- **two**"]);
+  assert.deepEqual([board.descriptionLines(""), board.descriptionLines("  \n \n"), board.descriptionLines(null)], [[], [], []]);
+  const d = board.parseGithubRelated(json("github-related.json"), issueItem());
+  assert.equal(d.description, json("github-related.json").data.repository.issue.body, "the issue's body, as GitHub sends it");
+  assert.equal(board.parseGithubRelated(JSON.parse(relatedAnswer()), issueItem()).description, "", "none");
+  assert.match(board.githubRelatedArgs(issueItem())[3].replace(/\s+/g, " "), /issue\(number: \$number\) \{ body subIssues\(/, "read in the same query");
+});
+
+test("UI: the details show the issue's description above its sub-issues, as written, „lädt …“ until it comes, the reason after a failure, „keine Beschreibung“ for none", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "enter");
+  assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "lädt …"]);
+  await answerRelated(host, ok(fixture("github-related.json")));
+  assert.equal(readsOf(host).length, 0, "one call for all of it");
+  assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "Rolls the sample tool out to the list readers.", "", "## Steps", "- read the list", "- page through it"]);
+  assert.ok(relatedTexts(b).indexOf("BESCHREIBUNG") < relatedTexts(b).findIndex((t) => t.startsWith("UNTERAUFGABEN")), "above the sub-issues, in the same scrolled block");
+  await press(b, cx, "r");
+  await answerRelated(host, ok(relatedAnswer()));
+  assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "keine Beschreibung"]);
+  await press(b, cx, "r");
+  await answerRelated(host, { code: 1, stdout: "", stderr: "gh: GraphQL: Something broke\n" });
+  assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "GraphQL: Something broke"]);
+});
+
+test("UI: the detail panel takes a third of the board area, no less than one of the columns beside it, within 420 and 720 pixels", async () => {
+  const { b, cx, host } = await openBoard();
+  const width = () => {
+    const panel = detailPanel(b);
+    return [panel.with.w[0], panel.with.min_w[0], panel.with.max_w[0], panel.styles.includes("flex_none")];
+  };
+  await press(b, cx, "enter");
+  assert.equal(b.navColumns(b.view()).length, 3);
+  assert.deepEqual(width(), ["33.33%", 420, 720, true], "three columns: a third");
+  // Ready hidden, then the empty column right of In progress.
+  for (const [move, left] of [[null, 2], ["l", 1]]) {
+    if (move) await press(b, cx, move);
+    await press(b, cx, "x");
+    await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+    assert.equal(b.navColumns(b.view()).length, left);
+  }
+  await press(b, cx, "enter");
+  assert.deepEqual(width(), ["50.00%", 420, 720, true], "one column: as wide as it");
+  assert.deepEqual([0, 1, 2, 3, 6].map((n) => board.detailWidth(n)), ["33.33%", "50.00%", "33.33%", "33.33%", "33.33%"]);
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")), (args) => args.some((a) => String(a).includes("search(type: ISSUE")));
+  await press(b, cx, "enter");
+  assert.equal(detailPanel(b).with.w[0], "33.33%", "a list has no columns");
+});
+
+test("UI: on a Sprint the detail panel is no narrower than one of its taskboard columns; the stories' column does not count", async () => {
+  const { b, cx, view, st } = await openSprint();
+  await press(b, cx, "enter");
+  assert.equal(st().detail, true);
+  const columns = b.navColumns(view).length - 1;
+  assert.ok(columns >= 2);
+  assert.equal(b.shape(view).columns(b, st()), columns);
+  assert.equal(detailPanel(b).with.w[0], board.detailWidth(columns));
 });

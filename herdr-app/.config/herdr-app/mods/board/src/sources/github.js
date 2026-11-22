@@ -315,10 +315,15 @@ export const LINKED_PRS = 20;
 // docs.github.com/en/graphql/reference/issues; userLinkedOnly and
 // excludeUserLinked pick one of the two kinds). It lists open ones only
 // unless includeClosedPrs, which adds the merged and closed ones. A pull
-// request that only mentions the issue is not in it.
+// request that only mentions the issue is not in it. The same request reads
+// the issue's description: `body` ("Identifies the body of the issue"), the
+// text as it was written, its line breaks as typed and its Markdown not
+// rendered; `bodyText` is the body "rendered to text", and how that keeps
+// line breaks the reference does not say.
 export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
+      body
       subIssues(first: ${SUB_ISSUES}) {
         totalCount pageInfo { hasNextPage } nodes { number title state url repository { nameWithOwner } }
       }
@@ -375,7 +380,7 @@ function relatedSection(conn, kind, path, errors) {
 }
 
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { subIssues, prs, warnings } (related.js). A missing issue
+// its data) → { description, subIssues, prs, warnings } (related.js). A missing issue
 // is explained by the error at its path; the errors below a section are
 // its own (a node GitHub sent as null counts as hidden), the others are
 // warnings.
@@ -387,6 +392,7 @@ export function parseGithubRelated(json, item, errors = []) {
   }
   const own = (e) => Object.values(RELATED_PATHS).some((path) => errorAt([e], path));
   return {
+    description: typeof issue.body === "string" ? issue.body : "",
     subIssues: relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors),
     prs: relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors),
     warnings: errors.filter((e) => !own(e)).map((e) => firstLine(e.message)).filter(Boolean),

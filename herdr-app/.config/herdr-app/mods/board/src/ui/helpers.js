@@ -194,6 +194,16 @@ export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).c
 export const fieldFrame = (t, m, field, inner) =>
   h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
 
+// The detail panel's width, its one home: a third of the board area (the
+// row it shares with the view's content), and no narrower than one of the
+// shape's `columns` that share the rest with it (as many as it draws side
+// by side, its shape's columns; none for a list), as a share of that area;
+// within DETAIL_MIN_W and DETAIL_MAX_W pixels. Gaps and padding are left
+// out of the share.
+export const DETAIL_MIN_W = 420;
+export const DETAIL_MAX_W = 720;
+export const detailWidth = (columns) => `${(100 * (columns > 0 ? Math.max(1 / 3, 1 / (columns + 1)) : 1 / 3)).toFixed(2)}%`;
+
 // A section of the detail panel: a title (sectionTitle) over its rows.
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
 export const detailSection = (t, title, ...kids) =>

@@ -419,8 +419,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   card or a list's row selects it; a click on one I chose (clicked before, moved
   to with the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
-  refresh, the filter, a hidden column), open details close. The details of a
-  GitHub issue list its sub-issues ("UNTERAUFGABEN · 7/11", the count the
+  refresh, the filter, a hidden column), open details close. The details take
+  a third of the board's width, no less than one of the columns beside them,
+  between 420 and 720 pixels (detailWidth in `mods/board/src/ui/helpers.js`).
+  The details of a GitHub issue show its description as written (Markdown not
+  rendered, a run of empty lines as one, "keine Beschreibung" where it has
+  none), then list its sub-issues ("UNTERAUFGABEN · 7/11", the count the
   card shows; the first 50, with "erste 50 von N" where it has more) and the
   pull requests linked to it by a closing keyword or by hand in its
   Development sidebar, open, merged or closed ("VERKNÜPFTE PRS", where it has

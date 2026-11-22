@@ -1,9 +1,10 @@
 // The detail panel's sections of an item's related items (related.js): its
-// sub-issues, then, where it has any or the source could not send them,
+// description ("BESCHREIBUNG", its lines as written, "keine Beschreibung"
+// where it has none), its sub-issues, then, where it has any or the source could not send them,
 // the pull requests linked to it; one line each with its key, title and
 // state (a done one dimmed, a draft marked), and below a section how many
-// it sent that cannot be read. While they load the sub-issues' section
-// says "lädt …", after a failure the reason; a section the source could
+// it sent that cannot be read. While they load the description's and the
+// sub-issues' sections say "lädt …", after a failure the reason; a section the source could
 // not send says why in its place; what the source said besides follows
 // at the end. The rest of the details stays as it is. The line the panel
 // has selected while it has the keyboard is marked; a click on a line is
@@ -12,7 +13,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { itemLabel } from "../shared.js";
-import { prsHead, subIssuesHead } from "../related.js";
+import { descriptionLines, prsHead, subIssuesHead } from "../related.js";
 import { chip, sectionTitle } from "./helpers.js";
 
 // What the related items keep per Board, made when it starts (why then:
@@ -21,17 +22,22 @@ export const relatedState = () => ({ scroll: ScrollHandle.new() });
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
 // (the Board's kept read: { data, error }, both null while it loads; null
-// before a read starts): { kind: "head" | "note" | "line", text, tone
-// ("muted", "error", "warning") or, for a line, `line` and its index `n`
-// among the lines (relatedLines).
+// before a read starts): { kind: "head" | "note" | "text" | "line", text,
+// tone ("muted", "error", "warning") or, for a line, `line` and its index
+// `n` among the lines (relatedLines); a "text" is a line of the
+// description ("" an empty one).
 export function relatedRows(item, entry) {
   const data = entry?.data;
+  const description = { kind: "head", text: "BESCHREIBUNG" };
   if (!data) {
     const why = entry?.error ? { kind: "note", text: entry.error, tone: "error" } : { kind: "note", text: "lädt …", tone: "muted" };
-    return [{ kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
+    return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
   let n = 0;
-  const rows = [];
+  const rows = [description];
+  const text = descriptionLines(data.description);
+  if (text.length) rows.push(...text.map((t) => ({ kind: "text", text: t })));
+  else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
     for (const line of section.lines) rows.push({ kind: "line", line, n: n++ });
@@ -59,6 +65,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
   const row = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
+    // A line of the description wraps; an empty one keeps its height.
+    if (r.kind === "text") return div().text_size(12).line_height("18px").min_h(18).child(r.text);
     const { line, n } = r;
     const marked = n === at;
     return h_flex()

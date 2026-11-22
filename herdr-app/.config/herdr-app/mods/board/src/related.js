@@ -1,18 +1,22 @@
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's sub-issues and the pull requests linked to
-// it), what of them a view keeps (keptRelated), the lines the details
-// panel walks when it has the keyboard, and the heads of their sections.
+// open (on GitHub an issue's description, its sub-issues and the pull
+// requests linked to it), what of them a view keeps (keptRelated), the
+// lines the details panel walks when it has the keyboard, the lines of the
+// description, and the heads of their sections.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
 // A source that has related items gives `related: { reads(item), load(item)
 // }`: reads tells whether the item has any to read (no call); load reads
-// them, one call, into { subIssues, prs, warnings }. Each of subIssues and
-// prs is a section { count (how many the source has; null when it sent
-// none), sent (how many it sent), cut (it has more than it sent), hidden
-// (how many it sent that cannot be read), error (why it sent none; null),
-// lines (those it sent that can be read) }; a line { source, kind, repo, repoShort, number, title, url,
-// state (its label), color (its chip's theme color), done (dimmed), draft }.
-// warnings: what the source said besides, one line each.
+// them, one call, into { description, subIssues, prs, warnings }.
+// description is the item's own text as the source has it ("" for none;
+// shown as written: descriptionLines). Each of subIssues and prs is a
+// section { count (how many the source has; null when it sent none), sent
+// (how many it sent), cut (it has more than it sent), hidden (how many it
+// sent that cannot be read), error (why it sent none; null), lines (those
+// it sent that can be read) }; a line { source, kind, repo, repoShort,
+// number, title, url, state (its label), color (its chip's theme color),
+// done (dimmed), draft }. warnings: what the source said besides, one line
+// each.
 
 // What a view keeps of its related items after a refresh starts: only
 // those read without failure of the item whose details show (`openKey`,
@@ -35,6 +39,18 @@ export function stepLine(line, dir, count) {
   if (line === null) return dir > 0 ? 0 : null;
   const next = line + dir;
   return next < 0 ? null : Math.min(next, count - 1);
+}
+
+// A description as the details show it, one entry per line: line breaks
+// kept (any of \r\n, \r, \n), trailing blanks cut, a run of empty lines
+// as one "", none at the start or end; [] for an empty one. Markdown stays
+// as written.
+export function descriptionLines(text) {
+  const lines = String(text ?? "").split(/\r\n|\r|\n/).map((l) => l.trimEnd());
+  const out = [];
+  for (const line of lines) if (line || (out.length && out.at(-1))) out.push(line);
+  while (out.length && !out.at(-1)) out.pop();
+  return out;
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.

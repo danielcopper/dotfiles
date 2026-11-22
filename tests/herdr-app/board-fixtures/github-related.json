@@ -2,6 +2,7 @@
   "data": {
     "repository": {
       "issue": {
+        "body": "Rolls the sample tool out to the list readers.\r\n\r\n\r\n## Steps\r\n- read the list   \r\n- page through it\r\n\r\n",
         "subIssues": {
           "totalCount": 3,
           "pageInfo": {

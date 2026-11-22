@@ -41,6 +41,8 @@ const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
   nav: (b, st) => sprintColumns(b, st),
+  // The taskboard's columns, without the stories' (STORY_WIDTH wide).
+  columns: (b, st) => sprintColumns(b, st).length - 1,
   selected: (b, st) => findSprintItem(st.data, st.sel?.key),
   // The row of the selected item, among the rows that show.
   scrollTo(b, view) {

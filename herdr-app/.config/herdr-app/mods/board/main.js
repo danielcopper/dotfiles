@@ -33,8 +33,8 @@
 // with.
 //
 // Calls: a GitHub view costs one gh call per refresh, and an issue's
-// related items (its sub-issues and linked pull requests) one more when its
-// details open, and again on `r` while they are open (readRelated); what a
+// related items (its description, sub-issues and linked pull requests) one
+// more when its details open, and again on `r` while they are open (readRelated); what a
 // refresh keeps of them keptRelated says. An Azure team's Sprint two az calls (the taskboard's column of each work item, and one
 // WIQL query for their fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
@@ -2211,10 +2211,15 @@ export const LINKED_PRS = 20;
 // docs.github.com/en/graphql/reference/issues; userLinkedOnly and
 // excludeUserLinked pick one of the two kinds). It lists open ones only
 // unless includeClosedPrs, which adds the merged and closed ones. A pull
-// request that only mentions the issue is not in it.
+// request that only mentions the issue is not in it. The same request reads
+// the issue's description: `body` ("Identifies the body of the issue"), the
+// text as it was written, its line breaks as typed and its Markdown not
+// rendered; `bodyText` is the body "rendered to text", and how that keeps
+// line breaks the reference does not say.
 export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
+      body
       subIssues(first: ${SUB_ISSUES}) {
         totalCount pageInfo { hasNextPage } nodes { number title state url repository { nameWithOwner } }
       }
@@ -2271,7 +2276,7 @@ function relatedSection(conn, kind, path, errors) {
 }
 
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { subIssues, prs, warnings } (related.js). A missing issue
+// its data) → { description, subIssues, prs, warnings } (related.js). A missing issue
 // is explained by the error at its path; the errors below a section are
 // its own (a node GitHub sent as null counts as hidden), the others are
 // warnings.
@@ -2283,6 +2288,7 @@ export function parseGithubRelated(json, item, errors = []) {
   }
   const own = (e) => Object.values(RELATED_PATHS).some((path) => errorAt([e], path));
   return {
+    description: typeof issue.body === "string" ? issue.body : "",
     subIssues: relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors),
     prs: relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors),
     warnings: errors.filter((e) => !own(e)).map((e) => firstLine(e.message)).filter(Boolean),
@@ -2398,20 +2404,24 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // ==== src/related.js ====
 
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's sub-issues and the pull requests linked to
-// it), what of them a view keeps (keptRelated), the lines the details
-// panel walks when it has the keyboard, and the heads of their sections.
+// open (on GitHub an issue's description, its sub-issues and the pull
+// requests linked to it), what of them a view keeps (keptRelated), the
+// lines the details panel walks when it has the keyboard, the lines of the
+// description, and the heads of their sections.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
 // A source that has related items gives `related: { reads(item), load(item)
 // }`: reads tells whether the item has any to read (no call); load reads
-// them, one call, into { subIssues, prs, warnings }. Each of subIssues and
-// prs is a section { count (how many the source has; null when it sent
-// none), sent (how many it sent), cut (it has more than it sent), hidden
-// (how many it sent that cannot be read), error (why it sent none; null),
-// lines (those it sent that can be read) }; a line { source, kind, repo, repoShort, number, title, url,
-// state (its label), color (its chip's theme color), done (dimmed), draft }.
-// warnings: what the source said besides, one line each.
+// them, one call, into { description, subIssues, prs, warnings }.
+// description is the item's own text as the source has it ("" for none;
+// shown as written: descriptionLines). Each of subIssues and prs is a
+// section { count (how many the source has; null when it sent none), sent
+// (how many it sent), cut (it has more than it sent), hidden (how many it
+// sent that cannot be read), error (why it sent none; null), lines (those
+// it sent that can be read) }; a line { source, kind, repo, repoShort,
+// number, title, url, state (its label), color (its chip's theme color),
+// done (dimmed), draft }. warnings: what the source said besides, one line
+// each.
 
 // What a view keeps of its related items after a refresh starts: only
 // those read without failure of the item whose details show (`openKey`,
@@ -2434,6 +2444,18 @@ export function stepLine(line, dir, count) {
   if (line === null) return dir > 0 ? 0 : null;
   const next = line + dir;
   return next < 0 ? null : Math.min(next, count - 1);
+}
+
+// A description as the details show it, one entry per line: line breaks
+// kept (any of \r\n, \r, \n), trailing blanks cut, a run of empty lines
+// as one "", none at the start or end; [] for an empty one. Markdown stays
+// as written.
+export function descriptionLines(text) {
+  const lines = String(text ?? "").split(/\r\n|\r|\n/).map((l) => l.trimEnd());
+  const out = [];
+  for (const line of lines) if (line || (out.length && out.at(-1))) out.push(line);
+  while (out.length && !out.at(-1)) out.pop();
+  return out;
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.
@@ -2711,6 +2733,16 @@ export function cycleField(b, fields, back, cx) {
 export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).child(text);
 export const fieldFrame = (t, m, field, inner) =>
   h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+
+// The detail panel's width, its one home: a third of the board area (the
+// row it shares with the view's content), and no narrower than one of the
+// shape's `columns` that share the rest with it (as many as it draws side
+// by side, its shape's columns; none for a list), as a share of that area;
+// within DETAIL_MIN_W and DETAIL_MAX_W pixels. Gaps and padding are left
+// out of the share.
+export const DETAIL_MIN_W = 420;
+export const DETAIL_MAX_W = 720;
+export const detailWidth = (columns) => `${(100 * (columns > 0 ? Math.max(1 / 3, 1 / (columns + 1)) : 1 / 3)).toFixed(2)}%`;
 
 // A section of the detail panel: a title (sectionTitle) over its rows.
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
@@ -3832,6 +3864,7 @@ const boardState = (b) => b.shapeState.board;
 export const boardShape = {
   state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
+  columns: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
   // All items, whatever the filter: the cards of the shown columns.
@@ -4214,6 +4247,8 @@ const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
   nav: (b, st) => sprintColumns(b, st),
+  // The taskboard's columns, without the stories' (STORY_WIDTH wide).
+  columns: (b, st) => sprintColumns(b, st).length - 1,
   selected: (b, st) => findSprintItem(st.data, st.sel?.key),
   // The row of the selected item, among the rows that show.
   scrollTo(b, view) {
@@ -4406,7 +4441,9 @@ const SPRINT_STATES = {
 // (the arrow directions that move), loads (false for the placeholder, which
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
-// where it has them, detailParts (its rows in the detail panel), settle
+// where it has them, columns (how many columns it draws side by side,
+// which the detail panel is no narrower than one of: detailWidth; a list
+// has none), detailParts (its rows in the detail panel), settle
 // (b, view, due, data, cx: says how the unclear writes of its items ended
 // up), moveTo, toggleColumn, openStatusMenu, navigate (its own keyboard
 // movement in place of navigate's, select.js) and pickStatus (what a pick
@@ -4421,11 +4458,12 @@ export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, b
 // ==== src/ui/related.js ====
 
 // The detail panel's sections of an item's related items (related.js): its
-// sub-issues, then, where it has any or the source could not send them,
+// description ("BESCHREIBUNG", its lines as written, "keine Beschreibung"
+// where it has none), its sub-issues, then, where it has any or the source could not send them,
 // the pull requests linked to it; one line each with its key, title and
 // state (a done one dimmed, a draft marked), and below a section how many
-// it sent that cannot be read. While they load the sub-issues' section
-// says "lädt …", after a failure the reason; a section the source could
+// it sent that cannot be read. While they load the description's and the
+// sub-issues' sections say "lädt …", after a failure the reason; a section the source could
 // not send says why in its place; what the source said besides follows
 // at the end. The rest of the details stays as it is. The line the panel
 // has selected while it has the keyboard is marked; a click on a line is
@@ -4437,17 +4475,22 @@ export const relatedState = () => ({ scroll: ScrollHandle.new() });
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
 // (the Board's kept read: { data, error }, both null while it loads; null
-// before a read starts): { kind: "head" | "note" | "line", text, tone
-// ("muted", "error", "warning") or, for a line, `line` and its index `n`
-// among the lines (relatedLines).
+// before a read starts): { kind: "head" | "note" | "text" | "line", text,
+// tone ("muted", "error", "warning") or, for a line, `line` and its index
+// `n` among the lines (relatedLines); a "text" is a line of the
+// description ("" an empty one).
 export function relatedRows(item, entry) {
   const data = entry?.data;
+  const description = { kind: "head", text: "BESCHREIBUNG" };
   if (!data) {
     const why = entry?.error ? { kind: "note", text: entry.error, tone: "error" } : { kind: "note", text: "lädt …", tone: "muted" };
-    return [{ kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
+    return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
   let n = 0;
-  const rows = [];
+  const rows = [description];
+  const text = descriptionLines(data.description);
+  if (text.length) rows.push(...text.map((t) => ({ kind: "text", text: t })));
+  else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
     for (const line of section.lines) rows.push({ kind: "line", line, n: n++ });
@@ -4475,6 +4518,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
   const row = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
+    // A line of the description wraps; an empty one keeps its height.
+    if (r.kind === "text") return div().text_size(12).line_height("18px").min_h(18).child(r.text);
     const { line, n } = r;
     const marked = n === at;
     return h_flex()
@@ -5609,7 +5654,9 @@ export default class Board extends View {
     const panel = this.panelOf(view);
     return v_flex()
       .id("detail")
-      .w(360)
+      .w(detailWidth(this.shape(view).columns?.(this, st) ?? 0))
+      .min_w(DETAIL_MIN_W)
+      .max_w(DETAIL_MAX_W)
       .flex_none()
       .bg(t.chrome)
       .border_l(1)
