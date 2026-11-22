@@ -12,7 +12,7 @@ B=https://dev.azure.com/<org>/<project>/_apis/git/repositories/<repoId>
 
 ## Auth
 
-**PAT first.** `AZURE_DEVOPS_EXT_PAT` is set in the environment (check `[ -n "$AZURE_DEVOPS_EXT_PAT" ]`). `az repos` / `az boards` pick it up directly; use them where they cover the call. For REST, authenticate as HTTP Basic with an empty user:
+**PAT first.** `AZURE_DEVOPS_EXT_PAT` comes from untracked `~/.bashrc.secrets` and reaches the session through the `AZURE_DEVOPS_EXT_PAT` line of agent-env's list for the harness (`~/.config/agent-env/<harness>`); check `[ -n "$AZURE_DEVOPS_EXT_PAT" ]`. `az repos` / `az boards` pick it up directly; use them where they cover the call. For REST, authenticate as HTTP Basic with an empty user:
 
 ```bash
 curl -s -u ":$AZURE_DEVOPS_EXT_PAT" "$B/pullRequests/<id>/threads?api-version=7.1"
