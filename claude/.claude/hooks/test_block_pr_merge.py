@@ -725,6 +725,15 @@ DENIED = [
     "echo 'gh pr $(printf mer)ge 1' | exec bash",
     "echo 'gh pr $(printf mer)ge 1' | /usr/bin/env X=1 /bin/bash",
     "echo 'gh pr $(printf mer)ge 1' | xargs bash",
+    # curl's writing options from another command into a shell that re-reads the text
+    (
+        "(echo curl -s https://api.github.com/repos/o/r/pulls/1/merg%65; echo -X PUT)"
+        " | paste -sd ' ' | sh"
+    ),
+    (
+        "{ echo curl -s https://api.github.com/repos/o/r/pulls/1/merg%65; echo -X PUT; }"
+        " | paste -sd ' ' | sh"
+    ),
     # an escaped quote opens no quoting that would hide what follows
     "gh api -X PUT -f a=\\' repos/o/r/pulls/1/$(printf me)rge -f b=\\'",
     # auto-complete set through the REST API

@@ -1005,8 +1005,8 @@ def without_data_heredocs(command: str) -> str:
 
 def network_words(command: str, plain: str) -> list[str]:
     """The de-quoted words of the simple commands of *command* that name gh, az, curl or wget,
-    for the whole-text write rule; every word of *plain* when the command cannot be cut. Another
-    command's options, such as find's -execdir, are no curl options."""
+    which pick the whole-text write rule's reason; every word of *plain* when the command cannot
+    be cut."""
     parts = raw_commands(command)
     if parts is None:
         return plain.split()
@@ -1043,6 +1043,7 @@ def check(command: str) -> str | None:
     ):
         return "completes an Azure DevOps pull request"
     reread = rereads(lower)
+    write_words = False  # re-read text holds curl's writing options outside a tool's command
     whole = reread  # a shell reads the text again: judge the whole de-quoted text
     body = None
     if not reread:
@@ -1055,8 +1056,13 @@ def check(command: str) -> str | None:
         near = network if reread else body_tool
         if near and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
             body = "reads a request from a file"
-        elif near and writes_with_curl(network_words(command, plain)):
-            body = "sends a writing request with curl or wget"
+        elif near and writes_with_curl(plain.split()):
+            # every word decides; when only another command's option reads like curl's, such as
+            # find's -execdir, a later rule may name the reason, and the end of check denies
+            if writes_with_curl(network_words(command, plain)):
+                body = "sends a writing request with curl or wget"
+            else:
+                write_words = True
         else:
             body = None
     if body:
@@ -1088,6 +1094,8 @@ def check(command: str) -> str | None:
         return "is nested too deep to check"
     if command.count("$(") + command.count("`") // 2 > MAX_SUBSTITUTIONS:
         return "holds too many substitutions to check"
+    if write_words:
+        return "sends a writing request with curl or wget"
     return None
 
 
