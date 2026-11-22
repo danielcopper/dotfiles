@@ -1,30 +1,41 @@
 # HTML Report Format
 
-The architectural review is rendered as a single self-contained HTML file in the session scratchpad. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped diagrams reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections). Mix the two — don't lean on Mermaid for everything, it'll start to look generic.
+The architectural review is rendered as a single self-contained HTML file in the session scratchpad. Tailwind and Mermaid both come from CDNs, each pinned to an exact version. Mermaid handles graph-shaped diagrams reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections). Mix the two — don't lean on Mermaid for everything, it'll start to look generic.
 
 ## Scaffold
+
+The page's colours, typography and spacing come from the `show-page` skill's design pass; the scaffold only fixes where they go. Tailwind supplies layout utilities; every colour is a token, used through `var(--…)`, also inside Tailwind's arbitrary values (`bg-[var(--surface)]`).
 
 ```html
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Architecture review — {{repo name}}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
     <script type="module">
-      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+      const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+      mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral", securityLevel: "loose" });
     </script>
     <style>
+      /* Tokens from the design pass: light values here, dark ones below. */
+      :root { --bg: …; --surface: …; --fg: …; --muted: …; --rule: …; --accent: …; --leak: …; --warn: …; color-scheme: light; }
+      @media (prefers-color-scheme: dark) { :root { --bg: …; /* every token again */ color-scheme: dark; } }
+      body { background: var(--bg); color: var(--fg); }
       /* small custom layer for things Tailwind doesn't cover cleanly:
          dashed seam lines, hand-drawn-feeling arrow heads, etc. */
       .seam { stroke-dasharray: 4 4; }
-      .leak { stroke: #dc2626; }
-      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .leak { stroke: var(--leak); }
+      .deep { background: var(--fg); color: var(--bg); }
+      /* Before and after side by side on a wide screen, one below the other on a phone. */
+      .before-after { display: grid; gap: 1.5rem; }
+      @media (min-width: 48rem) { .before-after { grid-template-columns: 1fr 1fr; } }
     </style>
   </head>
-  <body class="bg-stone-50 text-slate-900 font-sans">
-    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+  <body>
+    <main class="max-w-5xl mx-auto py-12 space-y-12">
       <header>...</header>
       <section id="candidates" class="space-y-10">...</section>
       <section id="top-recommendation">...</section>
@@ -44,13 +55,13 @@ The diagrams carry the weight. Prose is sparse, plain, and uses the glossary ter
 Each candidate is one `<article>`:
 
 - **Title** — short, names the deepening (e.g. "Collapse the Order intake pipeline").
-- **Badge row** — recommendation strength (`Strong` = emerald, `Worth exploring` = amber, `Speculative` = slate), plus a tag for the dependency category (`in-process`, `local-substitutable`, `ports & adapters`, `mock`).
+- **Badge row** — recommendation strength (`Strong`, `Worth exploring`, `Speculative`, each in a colour token of its own), plus a tag for the dependency category (`in-process`, `local-substitutable`, `ports & adapters`, `mock`).
 - **Files** — monospaced list, `font-mono text-sm`.
-- **Before / After diagram** — the centrepiece. Two columns, side by side. See patterns below.
+- **Before / After diagram** — the centrepiece. Two columns side by side, one below the other at phone width (`.before-after`). See patterns below.
 - **Problem** — one sentence. What hurts.
 - **Solution** — one sentence. What changes.
 - **Wins** — bullets, ≤6 words each. e.g. "Tests hit one interface", "Pricing logic stops leaking", "Delete 4 shallow wrappers".
-- **ADR callout** (if applicable) — one line in an amber-tinted box.
+- **ADR callout** (if applicable) — one line in a box tinted with the `--warn` token.
 
 No paragraphs of explanation. If the diagram needs a paragraph to be understood, redraw the diagram.
 
@@ -60,10 +71,10 @@ Pick the pattern that fits the candidate. Mix them. Don't make every diagram loo
 
 ### Mermaid graph (the workhorse for dependencies / call flow)
 
-Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and look at the mess." Wrap it in a Tailwind-styled card so it doesn't feel parachuted in. Style with classDef to colour leakage edges red and the deep module dark. Sequence diagrams work well for "before: 6 round-trips; after: 1."
+Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and look at the mess." Wrap it in a card styled from the tokens so it doesn't feel parachuted in. Style with classDef to colour leakage edges and the deep module; classDef takes literal colours, so pick ones that read on both themes' backgrounds. Sequence diagrams work well for "before: 6 round-trips; after: 1."
 
 ```html
-<div class="rounded-lg border border-slate-200 bg-white p-4">
+<div class="rounded-lg border border-[color:var(--rule)] bg-[var(--surface)] p-4">
   <pre class="mermaid">
     flowchart LR
       A[OrderHandler] --> B[OrderValidator]
@@ -93,9 +104,9 @@ Before: a tree of function calls rendered as nested boxes. After: the same tree 
 
 ## Style guidance
 
-- Lean editorial, not corporate-dashboard. Generous whitespace. Serif optional for headings (`font-serif` works well with stone/slate).
-- Colour sparingly: one accent (emerald or indigo) plus red for leakage and amber for warnings.
-- Keep diagrams ~320px tall so before/after sits comfortably side by side without scrolling.
+- Lean editorial, not corporate-dashboard; palette, type and spacing come from the design pass.
+- Colour by role, each role a token: one accent, one colour for leakage, one for warnings.
+- Keep diagrams ~320px tall so before/after sits comfortably side by side on a wide screen without scrolling.
 - Use `text-xs uppercase tracking-wider` for module labels inside diagrams — they should read as schematic, not as UI.
 - The only scripts are the Tailwind CDN and the Mermaid ESM import. The report is otherwise static — no app code, no interactivity beyond Mermaid's own rendering.
 
