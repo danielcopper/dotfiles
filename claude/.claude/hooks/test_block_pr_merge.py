@@ -201,8 +201,6 @@ PASSES = [
     # an @ inside a word, not at its start or after =
     "gh api 'users/x/repos?per_page=100' -q '.[] | [.name] | @tsv'",
     "gh api -X GET search/users -f q='\"agent for @\" in:bio' --jq .total_count",
-    # merge in an option's value before a known subcommand
-    "gh -R o/merge-tool pr view 1 | head -3",
 ]
 
 DENIED = [
@@ -687,6 +685,11 @@ DENIED = [
     "gh pr_merge 5",
     "gh -R o/r automerge 5",
     "az automerge x",
+    "gh --repo=o/r automerge 5",
+    "gh extension exec automerge 5",
+    "gh ext exec gh-automerge 5",
+    # accepted false refusal: a word right after an option may be the subcommand
+    "gh -R o/merge-tool pr view 1 | head -3",
     # a backslash-newline before #, case, or a brace that is an argument: the heredoc reading
     # gives up
     "echo x\\\n#'\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",

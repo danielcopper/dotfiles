@@ -108,6 +108,7 @@ AZ_SUBCOMMANDS = frozenset(
         "version",
     ]
 )
+EXTENSION_WORDS = frozenset(["extension", "extensions", "ext"])  # gh extension exec <name>
 PR_WORD = re.compile(r"\bpr\b")
 # The merge word of the "pr followed later by merge" rule, next to gh; MERGE_TERM below is the
 # narrower vocabulary of the body-tool and run-time rules.
@@ -553,20 +554,25 @@ def hidden_before(original: str, start: int, word: str) -> bool:
 
 
 def unknown_merge_subcommand(lower: str) -> bool:
-    """Whether gh or az has a word in its subcommand position, past any options, that is no
-    known subcommand and holds `merge` anywhere in it, such as `automerge` or `pr_merge`."""
+    """Whether gh or az has a word that can be its subcommand, past any options and also right
+    after one, that is no known subcommand and holds `merge` anywhere in it, such as `automerge`
+    or `pr_merge` - or whether gh's `extension exec` runs an extension so named."""
     tokens = TOKEN_SPLIT.split(lower)
     for at, token in enumerate(tokens):
         tool = token.rsplit("/", 1)[-1]
         if tool not in ("gh", "az"):
             continue
         walked = subcommand_positions(tokens, at)
-        if walked is None or not walked[1]:
+        if walked is None:
             continue
-        word = tokens[walked[0][-1]]
+        positions, has_final = walked
         known = GH_SUBCOMMANDS if tool == "gh" else AZ_SUBCOMMANDS
-        if word not in known and "merge" in word:
+        if any(tokens[i] not in known and "merge" in tokens[i] for i in positions):
             return True
+        if tool == "gh" and has_final and tokens[positions[-1]] in EXTENSION_WORDS:
+            rest = [word for word in tokens[positions[-1] + 1 : positions[-1] + 5] if word]
+            if rest[:1] == ["exec"] and len(rest) > 1 and "merge" in rest[1]:
+                return True
     return False
 
 

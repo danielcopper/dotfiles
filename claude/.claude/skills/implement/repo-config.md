@@ -39,8 +39,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     when its text
     - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge, auto-merge or
       merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge`), or runs `gh` or `az`
-      with a word in the subcommand position, past the options, that is no known subcommand and holds `merge`
-      anywhere (`automerge`, `pr_merge`);
+      with a word that can be the subcommand — past the options, also right after one, where it may be the
+      option's value (`gh -R o/merge-tool pr view` is refused) — that is no known subcommand and holds `merge`
+      anywhere (`automerge`, `pr_merge`), or runs `gh extension exec` with an extension so named;
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, also as the start of a name such as `autoCompleteSetBy`, or
       `devops invoke` on pull requests);
