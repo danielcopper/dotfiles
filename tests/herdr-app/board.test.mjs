@@ -3852,8 +3852,8 @@ async function boardButton({ tree = () => null } = {}) {
   return { host, view, cx, render, press };
 }
 
-test("the leader, the board button and the board hold the same board layer block, the leader and the button the same toggle", () => {
-  const files = [join(buttonDir, "main.js"), resolve(modDir, "../leader/main.js"), join(modDir, "src/ui/layer.js")];
+test("the leader, the board button, focus-history and the board hold the same board layer block, the leader and the button the same toggle", () => {
+  const files = [join(buttonDir, "main.js"), resolve(modDir, "../leader/main.js"), resolve(modDir, "../focus-history/main.js"), join(modDir, "src/ui/layer.js")];
   const layer = markedCopy(files[0], "layer");
   assert.ok(layer?.includes("function boardLayer(root) {") && layer.includes("function leaveLayer(options) {"), "the button has the layer block");
   for (const file of files.slice(1)) assert.equal(markedCopy(file, "layer"), layer, file);

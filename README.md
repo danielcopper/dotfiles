@@ -185,10 +185,12 @@ opens a second level for files: `f f` and `f g`, the keys of nvim's
 right panel on Files or Changes; `Z` switches that panel between its normal
 width and about two thirds of the space beside the sidebar; `ctrl-space
 ctrl-space <key>` is for a tmux in the focused terminal, see below),
-`mods/focus-history/` (it remembers the previously focused pane for the
-leader's `Tab`), `mods/file-popup/` (a popup with the files of the focused
-pane's repo or folder, or with the repo's changed files, that opens the
-picked one in nvim in a new pane on the right), `mods/board/` (the board
+`mods/focus-history/` (it remembers the previous place for the leader's
+`Tab`: a pane, or the board while the personal layout shows it, so `Tab`
+from the board goes to the pane under it and back), `mods/file-popup/` (a
+popup with the files of the focused pane's repo or folder, or with the
+repo's changed files, that opens the picked one in nvim in a new pane on
+the right), `mods/board/` (the board
 the leader's `b` shows, see below) and `mods/board-button/` (a button at the
 start of the tab row that does the same), the layout `layouts/personal.json`
 (herdr's `main`, cloned, plus an empty block that keeps focus-history
@@ -238,7 +240,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   one from another mod's folder. So `mods/file-popup/` keeps its listers in
   `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
   own marked copies of the leader's board layer block and board toggle; the
-  board's `src/ui/layer.js` holds the layer block too. An icon is no module:
+  board's `src/ui/layer.js` and `mods/focus-history/` hold the layer block
+  too. An icon is no module:
   `mods/board-button/board.svg` draws through its link. The board is
   written as modules in `mods/board/src/` and built into its `main.js` by
   `mise run herdr-board-build`; the header of `mods/board/build.mjs` says
@@ -280,12 +283,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   `mods/leader/main.js` says how and why. `mise run herdr-leader-test`
   (without mise, `node --test tests/herdr-app/leader.test.mjs` from the
   repo) tests what the leader binds and what Tab, shift-Tab and Esc then
-  do, in the leader and on their way to tmux. It needs node.
+  do, in the leader and on their way to tmux, and what focus-history
+  records for Tab. It needs node.
 - **The board (`mods/board/`) shows my own work.** In the personal layout it is
   a layer of the work area, not a tab: a stack in the layout with the shown
   tab's content and a board block whose props say `layer`. The board button left
   of the tabs (a press of any mouse button) and the leader's `b` show the board
   in place of the tab's content; the button is highlighted while it shows.
+  The leader's `Tab` counts the board as a place, like a pane: from the board
+  it brings the tab's content back with the place before the board, the pane
+  under it too, and from there it shows the board again.
   Whenever the board comes to show, there or in a Board tab, it takes the
   keyboard: the start dialog's message while the dialog is on that field, else
   the filter being typed, else the board itself; to show the layer's board, the

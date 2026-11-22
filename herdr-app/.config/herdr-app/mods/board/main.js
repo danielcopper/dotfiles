@@ -2282,7 +2282,7 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // The board layer: how the board finds the stack that shows it in place of
 // the shown tab's content, and how it shows that content again.
 
-// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
+// ---- layer: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that the copies match.)
 // The board layer (README, "herdr app") is a stack in the layout with a

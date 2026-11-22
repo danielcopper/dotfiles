@@ -23,33 +23,52 @@ const PANEL = "panel";
 const PANEL_BODY = "panel-body";
 const PANEL_PX = 368;
 
-// From a focused pane it focuses the pane focus-history saw before it, and
-// pressed again (ctrl-space Tab) it jumps back; pane.focus also shows its
-// space and tab, so focus changes once. It trusts the history only in a
-// layout with a focus-history block, and with a pane focused only while the
-// history's current pane is that one; otherwise it says the focus history is
-// not recording here and focuses nothing: where focus-history does not run,
-// the history stays where it was left, even across a restart.
+// The place of the board layer's board in focus-history's record; the same
+// in focus-history/main.js.
+const BOARD = "board";
+
+// Goes to the place focus-history saw before the one the focus is in, and
+// pressed again (ctrl-space Tab) it jumps back. A place is a pane, or the
+// board while the layout's board layer shows it (focus-history's header). To
+// the board it shows the board as b does (showBoard); to a pane it focuses
+// that pane, and while the board shows it first shows the tab's content
+// again, so Tab from the board reaches the pane under it too, which is
+// already herdr's focused pane. pane.focus also shows the pane's space and
+// tab, so focus changes once. It trusts the history only in a layout with a
+// focus-history block, and only while the history's current place is the
+// one the focus is in; otherwise it says the focus history is not recording
+// here and goes nowhere: where focus-history does not run, the history
+// stays where it was left, even across a restart.
 // focus-history's header says where it runs and that it does not record a
 // focused layout terminal block. From such a block, whose pane is null
-// (AGENTS.md, focused()), it focuses the history's current pane, the one
-// just left, like tmux's last-pane. With no pane to go to, or one that is
-// gone, it shows "No previous pane".
+// (AGENTS.md, focused()), with the board not shown, it goes to the
+// history's current place, the one just left, like tmux's last-pane; a
+// second Tab from there goes on to the place before that one, not back to
+// the block. With no place to go to, a pane that is gone, or the board in
+// a layout without a board layer, it shows "No previous pane".
 function focusPrevious() {
   const title = "Focus history is not recording here";
-  if (!findNode(layout(), (n) => n.content?.mod === "focus-history")) {
+  const root = layout();
+  if (!findNode(root, (n) => n.content?.mod === "focus-history")) {
     notify({ title, body: "This layout has no focus-history block; the personal layout has one", level: "info" });
     return;
   }
   const history = shared("focus.history");
-  const focusedPane = focused()?.pane;
-  if (focusedPane && history?.current !== focusedPane) {
-    notify({ title, body: "It has not recorded the focused pane", level: "info" });
+  const layer = boardLayer(root);
+  const here = layer?.shown ? BOARD : focused()?.pane;
+  if (here && history?.current !== here) {
+    const what = here === BOARD ? "the board" : "the focused pane";
+    notify({ title, body: `It has not recorded ${what}`, level: "info" });
     return;
   }
-  const pane = focusedPane ? history?.previous : history?.current;
-  if (pane && panes().some((p) => p.pane === pane)) run("pane.focus", { pane });
-  else notify({ title: "No previous pane", level: "info" });
+  const place = here ? history?.previous : history?.current;
+  if (place === BOARD && layer) return showBoard(layer);
+  if (!place || !panes().some((p) => p.pane === place)) {
+    notify({ title: "No previous pane", level: "info" });
+    return;
+  }
+  if (layer?.shown) showTab(layer, { keyboard: false });
+  run("pane.focus", { pane: place });
 }
 
 // Finds a tmux client among the tmux servers in the user's socket folder
@@ -297,7 +316,7 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
-// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
+// ---- layer: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that the copies match.)
 // The board layer (README, "herdr app") is a stack in the layout with a

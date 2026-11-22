@@ -12,7 +12,7 @@ import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { focused, layout, notify, panes, run, shared, theme } from "herdr";
 
-// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
+// ---- layer: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
 // that the copies match.)
 // The board layer (README, "herdr app") is a stack in the layout with a
