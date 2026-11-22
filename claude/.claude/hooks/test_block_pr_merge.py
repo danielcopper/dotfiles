@@ -623,6 +623,10 @@ DENIED = [
     # a file reference in a gh api or az rest word
     "gh api graphql -F query=@q.graphql",
     "az rest --method patch --uri u --body @b.json",
+    # a > inside quotes is no redirection: what follows it in the word still counts
+    "gh api graphql -f query='#>'\"$Q\"",
+    'gh api graphql -f query="#>$Q"',
+    'gh pr "x >$X"',
 ]
 
 REASONS = {

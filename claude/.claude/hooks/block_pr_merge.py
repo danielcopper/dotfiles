@@ -170,9 +170,7 @@ WRAPPERS = frozenset(
 )
 KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
 DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
-OUTPUT_REDIRECT = re.compile(
-    r"(?<![<\w])(?:\d*>>?\|?|&>>?)\s*(?:\"[^\"]*\"|'[^']*'|[^\s;&|()<>`]+)"
-)
+WORD_END = set(" \t\n;&|()<>`")
 NETWORK_TOOLS = frozenset(["gh", "az", "curl", "wget"])
 
 # Heredocs whose body the run-time rules do not read (merge_policy).
@@ -656,6 +654,61 @@ def raw_commands(command: str) -> list[str] | None:
     return parts
 
 
+def word_end(raw: str, i: int) -> int:
+    """Where the shell word that starts at *i* of *raw* ends: at an unquoted blank, newline or
+    operator character; quotes and backslashes inside it are part of the word."""
+    quote = ""
+    while i < len(raw):
+        c = raw[i]
+        if quote:
+            if c == quote:
+                quote = ""
+            elif c == "\\" and quote == '"':
+                i += 1
+        elif c == "\\":
+            i += 1
+        elif c in "'\"":
+            quote = c
+        elif c in WORD_END:
+            return i
+        i += 1
+    return len(raw)
+
+
+def without_output_targets(raw: str) -> str:
+    """*raw*, one simple command, without its output redirections and their target words: an
+    unquoted `>`, `>>`, `>|`, `>&`, `&>` or `&>>` (not `<>`) and the word after it."""
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        if quote or c in "'\"\\":
+            if quote and c == quote:
+                quote = ""
+            elif not quote and c in "'\"":
+                quote = c
+            elif c == "\\" and quote != "'":
+                out.append(raw[i : i + 2])
+                i += 2
+                continue
+            out.append(c)
+            i += 1
+            continue
+        if (c == ">" and raw[i - 1 : i] != "<") or raw.startswith("&>", i):
+            i += 2 if c == "&" else 1
+            while i < len(raw) and raw[i] in ">|&":
+                i += 1
+            while i < len(raw) and raw[i] in " \t":
+                i += 1
+            i = word_end(raw, i)
+            out.append(" ")
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def command_word_index(words: list[Token]) -> int | None:
     """Index of the word a simple command runs: past assignments, the keywords in KEYWORDS, and
     the WRAPPERS with their options (and timeout's duration). The length of *words* when only
@@ -715,7 +768,7 @@ def network_runtime_by_command(command: str) -> bool | None:
             hit = True
         if at is None and named and any(built(word.text) for word in words if not word.op):
             hit = True
-        if runs and runs_at_run_time(OUTPUT_REDIRECT.sub(" ", raw)):
+        if runs and runs_at_run_time(without_output_targets(raw)):
             hit = True
     return hit
 
