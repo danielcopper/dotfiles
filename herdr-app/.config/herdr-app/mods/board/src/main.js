@@ -138,11 +138,11 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // mods/leader/main.js, KEY_CONTEXT). The root carries that context only
 // while the board takes Tab (takesTab), and a binding matches only in a
 // context on the path to what has the keyboard, so with nothing open herdr's
-// own Tab runs as before. That matters: herdr's window runs every action
-// the board does not stop as a command of its own, and says "unknown
-// command" for one it does not know (herdr's src/window.rs, the
-// ShellAction listener). Each action runs tabKey, the one place that says
-// what Tab does on the board.
+// own Tab runs as before. That matters: herdr's AppWindow runs every
+// action the board does not stop as a command of its own, and says
+// "unknown command" for one it does not know (herdr's src/window.rs, its
+// ShellAction listener and run). Each action runs tabKey, the one place
+// that says what Tab does on the board.
 export const BOARD_KEY_CONTEXT = "Board";
 export const BOARD_KEYS = [
   { keystroke: "tab", action: "board_tab", back: false },
