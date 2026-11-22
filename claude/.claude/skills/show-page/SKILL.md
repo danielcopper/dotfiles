@@ -15,7 +15,7 @@ A page the user looks at gets the craft of a Claude Artifact: written after the 
 
 **Mockups and other pages** are written by hand, after the design pass:
 
-- Screens stack in one column, one below the other: the user cannot scroll sideways, not in a browser and not in a design canvas.
+- Screens stack in one column, one below the other: the user cannot scroll sideways, not in a browser and not in a design canvas (there every artboard takes the same `x`, and `y` steps by the artboard's height plus 120 px).
 - A mockup is a specification, and an implementer takes measurements from it. So every string, value and width in it comes from the code that produces it (the formatter, the registration call, the API field), read before you draw. A width that matters is measured from the font tables or the live DOM. A page drawn inside another program takes the host's styles and its real viewport: measure the live page first.
 
 ## 2. Serve it
