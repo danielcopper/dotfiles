@@ -1696,7 +1696,7 @@ const STALE_CX = "cx is no longer valid: it was captured during an earlier call 
 // look() run, and every use of a stale cx throws herdr's words. The cx this
 // returns stands for a call the test keeps open: it never goes stale.
 function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
-  const cx = { later: [], every: [], bound: [], stopped: 0, propagated: 0 };
+  const cx = { later: [], every: [], bound: [], stopped: 0 };
   // A cx for one call; `lasting`: cx.spawn's, which never goes stale.
   const scope = (lasting) => {
     let valid = true;
@@ -1736,9 +1736,6 @@ function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
       notify: live(() => {}),
       stop_propagation: live(() => {
         cx.stopped++;
-      }),
-      propagate: live(() => {
-        cx.propagated++;
       }),
       open_url: live((url) => {
         (cx.opened ??= []).push(url);
@@ -5226,36 +5223,47 @@ test("UI: a backlog longer than one query reads asks for the first ones and says
 // ---- Tab in the board's dialogs ----
 
 // The board's root's handler for a bound action (BOARD_KEYS), as herdr
-// calls it: with a cx whose stop_propagation is counted.
-// Returns how often it stopped the key, and `propagate` (set on the
-// function) how often it handed it on.
+// calls it: with a cx whose stop_propagation is counted. Returns how often
+// it stopped the key.
 function boardAction(b, action) {
   const root = b.render();
   const handler = root.calls.find((c) => c[0] === "on_action" && c[1] === action)?.[2];
   assert.ok(handler, `no on_action ${action}`);
   const cx = fakeCx();
   cx.call((own) => handler({}, own));
-  boardAction.propagated = cx.propagated;
   return cx.stopped;
 }
 
-test("the board binds Tab and shift-Tab in its own key context, which its root carries with a handler for each", async () => {
-  const { b, cx } = await openBoard();
-  assert.deepEqual(cx.bound, board.BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: board.BOARD_KEY_CONTEXT })));
-  assert.deepEqual(board.BOARD_KEYS.map((k) => [k.keystroke, k.back]), [["tab", false], ["shift-tab", true]]);
+// Whether the board's root carries the board's key context and its Tab
+// actions: a binding in that context matches only then.
+function takesTab(b) {
   const root = b.render();
-  assert.deepEqual(root.with.key_context, [board.BOARD_KEY_CONTEXT]);
-  assert.deepEqual(root.calls.filter((c) => c[0] === "on_action").map((c) => c[1]), ["board_tab", "board_shift_tab"]);
-  assert.deepEqual([boardAction(b, "board_tab"), boardAction.propagated], [0, 1], "without a dialog the board hands Tab on to herdr's own");
+  const context = root.with.key_context?.[0] ?? null;
+  const actions = root.calls.filter((c) => c[0] === "on_action").map((c) => c[1]);
+  assert.equal(context === board.BOARD_KEY_CONTEXT, actions.length > 0, "the context and the actions come together");
+  if (context) assert.deepEqual(actions, ["board_tab", "board_shift_tab"]);
+  return Boolean(context);
+}
+
+test("the board binds Tab and shift-Tab in its own key context, which its root carries only while a dialog with fields is open", async () => {
+  const { b, cx } = await openBoard();
+  assert.deepEqual(cx.bound, board.BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: board.BOARD_KEY_CONTEXT })), "bound in that context only");
+  assert.deepEqual(board.BOARD_KEYS.map((k) => [k.keystroke, k.back]), [["tab", false], ["shift-tab", true]]);
+  assert.equal(takesTab(b), false, "nothing open: no context, no Tab action, herdr's own Tab runs");
+  await openStart(b, cx);
+  assert.equal(takesTab(b), true);
+  await press(b, cx, "escape");
+  assert.equal(takesTab(b), false, "closed again");
 });
 
 test("UI: Tab and shift-Tab move between the start dialog's fields, also while its message has the keyboard", async () => {
   const { b, cx } = await openBoard();
   await openStart(b, cx);
   const m = b.modal;
-  assert.deepEqual([m.kind, m.field, m.inputFocused], ["start", "message", true]);
+  assert.deepEqual([m.kind, m.field, m.inputFocused, takesTab(b)], ["start", "message", true, true], "the root's context is on the message's path");
   assert.equal(boardAction(b, "board_tab"), 1, "taken");
   assert.deepEqual([m.field, m.inputFocused, b.handle.is_focused()], ["agent", false, true], "the board has the keyboard for the choice");
+  assert.equal(takesTab(b), true, "and on the root's own, where the board's handle has the keyboard");
   boardAction(b, "board_tab");
   boardAction(b, "board_tab");
   assert.equal(m.field, "open");
@@ -5276,7 +5284,9 @@ test("UI: Tab and shift-Tab move between the create dialog's title and type", as
   await press(b, cx, "escape");
   await press(b, cx, "s");
   assert.equal(b.modal.kind, "status");
-  assert.deepEqual([boardAction(b, "board_tab"), boardAction.propagated], [0, 1], "a menu without fields hands Tab on");
+  assert.equal(takesTab(b), false, "a menu without fields leaves Tab to herdr");
+  assert.doesNotThrow(() => cx.call((own) => b.tabKey(false, own)), "tabKey there does nothing");
+  assert.equal(b.modal.kind, "status");
 });
 
 test("UI: a bind_keys that fails is said in a toast, and the board works on", async () => {
