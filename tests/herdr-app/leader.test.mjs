@@ -283,7 +283,7 @@ for (const [how, press] of [
       const { leader, cx, host } = await openLeader({ history });
       await press(leader, cx, "tab");
       assert.deepEqual(host.runs, []);
-      assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[NOT_RECORDING, "It has not recorded the focused pane yet", "info"]]);
+      assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[NOT_RECORDING, "It has not recorded the focused pane", "info"]]);
       assert.deepEqual(host.closed, ["mod-leader"]);
     });
   }

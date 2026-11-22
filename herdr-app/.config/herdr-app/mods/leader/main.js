@@ -23,12 +23,13 @@ const PANEL = "panel";
 const PANEL_BODY = "panel-body";
 const PANEL_PX = 368;
 
-// Focuses the pane focus-history saw before the current one; pane.focus also
-// shows its space and tab, so focus changes once. Pressed again (ctrl-space
-// Tab), it jumps back. It trusts the history only in a layout with a
-// focus-history block, and with a pane focused only while the history's
-// current pane is that one; otherwise it says the focus history is not
-// recording here and focuses nothing, since shared values outlive a restart.
+// From a focused pane it focuses the pane focus-history saw before it, and
+// pressed again (ctrl-space Tab) it jumps back; pane.focus also shows its
+// space and tab, so focus changes once. It trusts the history only in a
+// layout with a focus-history block, and with a pane focused only while the
+// history's current pane is that one; otherwise it says the focus history is
+// not recording here and focuses nothing: where focus-history does not run,
+// the history stays where it was left, even across a restart.
 // focus-history's header says where it runs and that it does not record a
 // focused layout terminal block. From such a block, whose pane is null
 // (AGENTS.md, focused()), it focuses the history's current pane, the one
@@ -43,7 +44,7 @@ function focusPrevious() {
   const history = shared("focus.history");
   const focusedPane = focused()?.pane;
   if (focusedPane && history?.current !== focusedPane) {
-    notify({ title, body: "It has not recorded the focused pane yet", level: "info" });
+    notify({ title, body: "It has not recorded the focused pane", level: "info" });
     return;
   }
   const pane = focusedPane ? history?.previous : history?.current;
