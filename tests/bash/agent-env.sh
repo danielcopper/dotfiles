@@ -75,6 +75,10 @@
 #       the command after "--". Only that function is copied to
 #       ~/.bashrc.local: the rest of the file runs brew and nix, which on the
 #       Deck would put real tools on PATH.
+#   n1  nvim's claudecode.lua, loaded by nvim with stand-ins for vim.pack and
+#       the plugin: with agent-env on PATH it sets terminal_cmd to
+#       "agent-env claude claude", without it leaves terminal_cmd nil, the
+#       plugin's default
 # usage: agent-env.sh [agent-env [bashrc]] [case ...]
 #        agent-env.sh --list
 #   The files default to the repo's bash/.local/bin/agent-env and
@@ -82,13 +86,14 @@
 #   path, so a case name is never taken for a file.
 # Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
 # case failed. HOME points into a temporary directory for the whole run, which
-# is removed at the end. Needs timeout.
+# is removed at the end. Needs timeout and nvim.
 set -uo pipefail
 
 CASES=(l1_shipped_lists f1_fresh_read d1_only_declared d2_caller_value_gone d3_declared_without_value
   a1_declared_from_file_only m1_missing_list m2_missing_secrets m3_unreadable_secrets m4_unparsable_secrets
   k1_kept_names x1_xtrace t1_part_of_a_name t2_no_final_newline t3_unset_reference c1_exit_code_and_args u1_usage u2_bad_harness
-  u3_bad_list_line b1_bashrc_functions b2_no_agent_env b3_earlier_functions_kept s1_steamdeck_claude)
+  u3_bad_list_line b1_bashrc_functions b2_no_agent_env b3_earlier_functions_kept s1_steamdeck_claude
+  n1_nvim_terminal_cmd)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -100,6 +105,7 @@ SUT=$REPO/bash/.local/bin/agent-env
 BASHRC=$REPO/bash/.bashrc
 LISTS=$REPO/bash/.config/agent-env
 STEAMDECK_LOCAL=$REPO/host-steamdeck/.bashrc.local
+CLAUDECODE_LUA=$REPO/nvim/.config/nvim/plugin/claudecode.lua
 if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
   SUT=$(readlink -f "$1")
   shift
@@ -110,6 +116,10 @@ if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
 fi
 ROOT=$(mktemp -d "${TMPDIR:-/tmp}/agent-env-test.XXXXXX")
 trap 'rm -rf "$ROOT"' EXIT
+# The nvim binary itself, asked while HOME is still the real one: a mise shim
+# on PATH finds its tool only with the real HOME.
+printf '%s\n' 'io.write(vim.v.progpath)' >"$ROOT/progpath.lua"
+NVIM_BIN=$(nvim --clean --headless -l "$ROOT/progpath.lua" 2>/dev/null)
 export HOME=$ROOT/home
 BASH_BIN=$(command -v bash)
 mkdir -p "$ROOT/bin" "$ROOT/stand-in"
@@ -528,6 +538,34 @@ s1_steamdeck_claude() {
       check "$how: OTHER_TOKEN, exported by .bashrc, not passed" lacks OTHER_TOKEN
     else
       check "$how: the shell's OTHER_TOKEN inherited, as before" has OTHER_TOKEN other-dummy-1
+    fi
+  done
+}
+
+n1_nvim_terminal_cmd() {
+  local how
+  if ! [ -x "$NVIM_BIN" ]; then
+    fail "no nvim found (got '$NVIM_BIN')"
+    return
+  fi
+  cat >"$ROOT/probe.lua" <<'END'
+-- Stand-ins for the plugin manager and the plugin; prints terminal_cmd.
+vim.pack = { add = function() end }
+local seen
+package.preload["claudecode"] = function()
+  return { setup = function(opts) seen = opts end }
+end
+dofile(arg[1])
+io.write(tostring(seen and seen.terminal_cmd))
+END
+  for how in agent-env plain; do
+    if [ "$how" = agent-env ]; then with_agent_env; else rm "$HOME/.local/bin/agent-env"; fi
+    run PATH="$HOME/.local/bin:$ROOT/bin" -- "$NVIM_BIN" --clean --headless -l "$ROOT/probe.lua" "$CLAUDECODE_LUA"
+    check "$how: exit 0 (got $RC; stderr: $(err))" eq "$RC" 0
+    if [ "$how" = agent-env ]; then
+      check "$how: terminal_cmd (got: $OUT)" eq "$OUT" "agent-env claude claude"
+    else
+      check "$how: terminal_cmd nil (got: $OUT)" eq "$OUT" nil
     fi
   done
 }

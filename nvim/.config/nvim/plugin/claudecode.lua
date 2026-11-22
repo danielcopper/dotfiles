@@ -1,8 +1,17 @@
 vim.pack.add({ "https://github.com/coder/claudecode.nvim" })
 
+-- Where agent-env is installed Claude starts through it, for the secrets of
+-- its list read afresh (bash/.local/bin/agent-env); otherwise nil leaves the
+-- plugin's default, claude on PATH.
+local terminal_cmd = nil
+if vim.fn.executable("agent-env") == 1 then
+  terminal_cmd = "agent-env claude claude"
+end
+
 require("claudecode").setup({
   auto_start = true,
   log_level = "warn",
+  terminal_cmd = terminal_cmd,
 
   terminal = {
     provider = "native",

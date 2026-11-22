@@ -85,7 +85,9 @@ instead: `.bashrc` makes `claude`, `opencode` and `pi` functions that run
 `agent-env <harness> <harness> "$@"`, each only where agent-env and that
 harness are installed and no function of that name exists yet: the Deck's
 `claude` in `host-steamdeck/.bashrc.local` starts its slice through agent-env
-itself ("Memory protection on the Steam Deck").
+itself ("Memory protection on the Steam Deck"). nvim's claudecode.nvim
+(`nvim/.config/nvim/plugin/claudecode.lua`) starts Claude through agent-env
+too, where it is installed.
 
 agent-env passes on only the names the harness's list
 `~/.config/agent-env/<harness>` declares, one per line with `#` comments, and
@@ -688,7 +690,7 @@ images and refuses a directory it did not fill itself, and which secrets
 from a throwaway `~/.bashrc.secrets` of dummy values, and that `bash -x`
 shows none of them.
 Each file's header lists its cases, `--list` prints their names, and naming
-cases runs only those. It needs jq, timeout, flock, setsid and python3.
+cases runs only those. It needs jq, timeout, flock, setsid, python3 and nvim.
 
 `mise run skill-trigger-test` (without mise, `python3 -I
 tests/skill-triggers/run.py`) checks that the skills under
