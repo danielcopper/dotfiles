@@ -1,12 +1,13 @@
 // Remembers the place the focus is and the one before it, across tabs and
 // spaces, for the leader's Tab, like tmux.conf's Tab across sessions
 // (@alt_cur/@alt_prev). A place is the focused pane, or the board while the
-// layout's board layer shows it (BOARD), since showing the board leaves
-// herdr's focused pane where it was. Herdr re-renders every mod when its
-// live data changes, the focus and the layout among it (AGENTS.md), so
-// render compares the place with the last one it saw and, when it changed,
-// moves current to previous in one shared value:
-//   shared("focus.history") = { current, previous }   (pane ids or BOARD)
+// layout's board layer shows it (place), since showing the board leaves
+// herdr's focused pane where it was. Herdr re-renders a mod when live data
+// it read changes, the focus and the layout among it (AGENTS.md, live
+// data), so render compares the place with the last one it saw and, when
+// it changed, moves current to previous in one shared value:
+//   shared("focus.history") = { current, previous }
+//   (pane ids, or the id of the layer's board child)
 // So it records the board however it comes to show or goes away (the board
 // button, the leader's b or Tab, a focus change that brings the tab's
 // content back): showing it makes the pane under it previous, and the pane
@@ -32,16 +33,26 @@
 // drops whatever state was left.
 
 import { View, div } from "gpui-kit";
-import { focused, shared, setShared, run, nextCommand, checking, layout, notify } from "herdr";
+import { focused, shared, setShared, run, nextCommand, checking, layout } from "herdr";
 
 const LEADER_STALE_MS = 10000;
-// The place of the board layer's board in the history; the same in
-// leader/main.js, which shows the board when Tab goes there.
-const BOARD = "board";
 
-// ---- layer: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
+// ---- place: the same in leader/main.js and focus-history/main.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
-// that the copies match.)
+// that both copies match.)
+// The place the focus is in, as focus-history records it for the leader's
+// Tab: the board layer's board child (its id in the layout) while the layer
+// `layer` shows the board, else the focused pane; null for a focused layout
+// terminal block, which has no pane.
+function place(layer) {
+  return layer?.shown ? layer.board : (focused()?.pane ?? null);
+}
+// ---- end place ----
+
+// The board layer's shape, a part of the leader's layer block (a mod here
+// is one main.js: README, "herdr app"; board.test.mjs checks that the
+// copies match).
+// ---- layer shape: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // The board layer (README, "herdr app") is a stack in the layout with a
 // block that shows the board mod with props { layer: true } and a block
 // that shows the shown tab. It is found by that shape, so its ids live in
@@ -70,37 +81,7 @@ function boardLayer(root) {
   const board = stack.children.find(isBoard).id;
   return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
-
-// Shows the shown tab's content in place of the board. With `keyboard`, it
-// also gives the keyboard to the focused pane, or the focused terminal
-// outside a pane, since layout.select leaves the keyboard where it was.
-// Each failure says what failed.
-function showTab(layer, { keyboard = true } = {}) {
-  try {
-    run("layout.select", { stack: layer.stack, child: layer.tab });
-  } catch (e) {
-    notify({ title: `Could not show "${layer.tab}" in "${layer.stack}"`, body: String(e?.message ?? e), level: "error" });
-    return;
-  }
-  if (!keyboard) return;
-  const f = focused();
-  const target = f?.pane ? { pane: f.pane } : f?.terminal ? { terminal: f.terminal } : null;
-  if (!target) return;
-  try {
-    run("pane.focus", target);
-  } catch (e) {
-    const [kind, id] = Object.entries(target)[0];
-    notify({ title: `Could not give ${kind} ${id} the keyboard`, body: String(e?.message ?? e), level: "error" });
-  }
-}
-
-// Shows the tab's content again where the layout's board layer shows the
-// board (showTab).
-function leaveLayer(options) {
-  const layer = boardLayer(layout());
-  if (layer?.shown) showTab(layer, options);
-}
-// ---- end layer ----
+// ---- end layer shape ----
 
 function leaderKey() {
   const state = shared("leader.state");
@@ -129,10 +110,10 @@ export default class FocusHistory extends View {
   }
 
   render() {
-    const place = boardLayer(layout())?.shown ? BOARD : focused()?.pane;
+    const here = place(boardLayer(layout()));
     const history = shared("focus.history");
-    if (place && history?.current !== place) {
-      setShared("focus.history", { current: place, previous: history?.current ?? null });
+    if (here && history?.current !== here) {
+      setShared("focus.history", { current: here, previous: history?.current ?? null });
     }
     return div();
   }

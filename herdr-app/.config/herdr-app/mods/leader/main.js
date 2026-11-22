@@ -23,9 +23,17 @@ const PANEL = "panel";
 const PANEL_BODY = "panel-body";
 const PANEL_PX = 368;
 
-// The place of the board layer's board in focus-history's record; the same
-// in focus-history/main.js.
-const BOARD = "board";
+// ---- place: the same in leader/main.js and focus-history/main.js ----
+// (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
+// that both copies match.)
+// The place the focus is in, as focus-history records it for the leader's
+// Tab: the board layer's board child (its id in the layout) while the layer
+// `layer` shows the board, else the focused pane; null for a focused layout
+// terminal block, which has no pane.
+function place(layer) {
+  return layer?.shown ? layer.board : (focused()?.pane ?? null);
+}
+// ---- end place ----
 
 // Goes to the place focus-history saw before the one the focus is in, and
 // pressed again (ctrl-space Tab) it jumps back. A place is a pane, or the
@@ -35,10 +43,10 @@ const BOARD = "board";
 // again, so Tab from the board reaches the pane under it too, which is
 // already herdr's focused pane. pane.focus also shows the pane's space and
 // tab, so focus changes once. It trusts the history only in a layout with a
-// focus-history block, and only while the history's current place is the
-// one the focus is in; otherwise it says the focus history is not recording
-// here and goes nowhere: where focus-history does not run, the history
-// stays where it was left, even across a restart.
+// focus-history block, and, from a pane or the board, only while the
+// history's current place is the one the focus is in; otherwise it says the
+// focus history is not recording here and goes nowhere: where focus-history
+// does not run, the history stays where it was left, even across a restart.
 // focus-history's header says where it runs and that it does not record a
 // focused layout terminal block. From such a block, whose pane is null
 // (AGENTS.md, focused()), with the board not shown, it goes to the
@@ -55,20 +63,20 @@ function focusPrevious() {
   }
   const history = shared("focus.history");
   const layer = boardLayer(root);
-  const here = layer?.shown ? BOARD : focused()?.pane;
+  const here = place(layer);
   if (here && history?.current !== here) {
-    const what = here === BOARD ? "the board" : "the focused pane";
+    const what = layer?.shown ? "the board" : "the focused pane";
     notify({ title, body: `It has not recorded ${what}`, level: "info" });
     return;
   }
-  const place = here ? history?.previous : history?.current;
-  if (place === BOARD && layer) return showBoard(layer);
-  if (!place || !panes().some((p) => p.pane === place)) {
+  const target = here ? history?.previous : history?.current;
+  if (layer && target === layer.board) return showBoard(layer);
+  if (!target || !panes().some((p) => p.pane === target)) {
     notify({ title: "No previous pane", level: "info" });
     return;
   }
   if (layer?.shown) showTab(layer, { keyboard: false });
-  run("pane.focus", { pane: place });
+  run("pane.focus", { pane: target });
 }
 
 // Finds a tmux client among the tmux servers in the user's socket folder
@@ -316,9 +324,11 @@ function openFilePopup(mode) {
   openOverlay({ mod: "file-popup", kind: "popup", at: "top", offset: 40, width: 720, height: 0.8, props: { mode } });
 }
 
-// ---- layer: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
+// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
-// that the copies match.)
+// that the copies match.) Its layer shape is in focus-history/main.js too.
+
+// ---- layer shape: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // The board layer (README, "herdr app") is a stack in the layout with a
 // block that shows the board mod with props { layer: true } and a block
 // that shows the shown tab. It is found by that shape, so its ids live in
@@ -347,6 +357,7 @@ function boardLayer(root) {
   const board = stack.children.find(isBoard).id;
   return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
+// ---- end layer shape ----
 
 // Shows the shown tab's content in place of the board. With `keyboard`, it
 // also gives the keyboard to the focused pane, or the focused terminal
@@ -499,7 +510,7 @@ const FILES = level("Leader f", [
   ["G", "changes panel", "Panel", () => togglePanelTab("changes", "Changes"), {}],
 ]);
 const ACTIONS = [
-  ["Tab", "last pane", "Panes", focusPrevious, {}],
+  ["Tab", "last place", "Panes", focusPrevious, {}],
   ["|", "split right", "Panes", "pane.split", { direction: "right" }],
   ["-", "split down", "Panes", "pane.split", { direction: "down" }],
   ["h", "go left", "Panes", "pane.go", { direction: "left" }, true],

@@ -2282,9 +2282,11 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // The board layer: how the board finds the stack that shows it in place of
 // the shown tab's content, and how it shows that content again.
 
-// ---- layer: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
+// ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
-// that the copies match.)
+// that the copies match.) Its layer shape is in focus-history/main.js too.
+
+// ---- layer shape: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // The board layer (README, "herdr app") is a stack in the layout with a
 // block that shows the board mod with props { layer: true } and a block
 // that shows the shown tab. It is found by that shape, so its ids live in
@@ -2313,6 +2315,7 @@ function boardLayer(root) {
   const board = stack.children.find(isBoard).id;
   return { stack: stack.id, board, tab: stack.children.find(isTab).id, shown: stack.active === board };
 }
+// ---- end layer shape ----
 
 // Shows the shown tab's content in place of the board. With `keyboard`, it
 // also gives the keyboard to the focused pane, or the focused terminal

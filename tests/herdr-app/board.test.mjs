@@ -3852,14 +3852,22 @@ async function boardButton({ tree = () => null } = {}) {
   return { host, view, cx, render, press };
 }
 
-test("the leader, the board button, focus-history and the board hold the same board layer block, the leader and the button the same toggle", () => {
-  const files = [join(buttonDir, "main.js"), resolve(modDir, "../leader/main.js"), resolve(modDir, "../focus-history/main.js"), join(modDir, "src/ui/layer.js")];
+test("the leader, the board button and the board hold the same board layer block, focus-history its layer shape, the leader and the button the same toggle, the leader and focus-history the same place", () => {
+  const history = resolve(modDir, "../focus-history/main.js");
+  const files = [join(buttonDir, "main.js"), resolve(modDir, "../leader/main.js"), join(modDir, "src/ui/layer.js")];
   const layer = markedCopy(files[0], "layer");
   assert.ok(layer?.includes("function boardLayer(root) {") && layer.includes("function leaveLayer(options) {"), "the button has the layer block");
   for (const file of files.slice(1)) assert.equal(markedCopy(file, "layer"), layer, file);
+  const shape = markedCopy(files[0], "layer shape");
+  assert.ok(shape?.includes("function boardLayer(root) {") && !shape.includes("function showTab("), "the button's layer block has the layer shape");
+  for (const file of [...files.slice(1), history]) assert.equal(markedCopy(file, "layer shape"), shape, file);
+  assert.equal(markedCopy(history, "layer"), null, "focus-history has the layer shape alone");
   const toggle = markedCopy(files[0], "board");
   assert.ok(toggle?.includes("function toggleBoard() {") && toggle.includes("function openBoard() {"), "the button has the board block");
   assert.equal(markedCopy(files[1], "board"), toggle, "the leader's");
+  const place = markedCopy(files[1], "place");
+  assert.ok(place?.includes("function place(layer) {"), "the leader has the place block");
+  assert.equal(markedCopy(history, "place"), place, "focus-history's");
 });
 
 test("UI: in a layout without a board layer a press on the board button shows the board's tab wherever it is, else opens one named Board", async () => {

@@ -1,11 +1,12 @@
 // Tests for the herdr leader mod (herdr-app/.config/herdr-app/mods/leader/main.js):
-// how Tab, shift-Tab and Esc reach it, driven through the Leader class with a fake
+// how Tab, shift-Tab and Esc reach it, and what focus-history records for the
+// leader's Tab, driven through the Leader and FocusHistory classes with a fake
 // herdr. Run with `mise run herdr-leader-test` (README, "herdr app"), or from
 // the repo root with `node --test tests/herdr-app/leader.test.mjs`.
 //
-// The mod imports "gpui-kit", "gpui-base" and "herdr", which only herdr
+// The mods import "gpui-kit", "gpui-base" and "herdr", which only herdr
 // provides. A resolve/load hook hands node a stand-in for each that exports
-// every name the mod imports: View as an empty class, everything else as a
+// every name the importing mod asks for: View as an empty class, everything else as a
 // function that calls the fake host a test puts in globalThis.__leaderHost,
 // and throws when there is none. Elements (div, h_flex, v_flex) record the
 // builder calls made on them, so a test can find the handlers render
@@ -15,7 +16,8 @@
 // reads and whose render the tests here drive too.
 //
 // These tests check what the leader binds and what its handlers and its
-// on_key_down then do. That the leader's bindings come before herdr's own
+// on_key_down then do, and what focus-history records for the leader's Tab.
+// That the leader's bindings come before herdr's own
 // bindings of those keys is the app's behaviour, which no test here covers.
 
 import { test } from "node:test";
@@ -456,11 +458,14 @@ test("keys.json still hands the leader a second ctrl-space and Esc", () => {
 // ---- The board as a place in the focus history ----
 
 // layouts/personal.json, its work-stack showing `active`: "main" (the shown
-// tab's content) or "board".
-function personal(active) {
+// tab's content) or "board". `board` renames the stack's board child to that
+// id (`active` names it by the new id then).
+function personal(active, board = "board") {
   const tree = JSON.parse(readFileSync(personalPath, "utf8"));
   const find = (n) => (n.id === "work-stack" ? n : (n.children ?? []).map(find).find(Boolean));
-  find(tree).active = active;
+  const stack = find(tree);
+  stack.children.find((c) => c.id === "board").id = board;
+  stack.active = active;
   return tree;
 }
 const SHOW_BOARD = [["layout.select", { stack: "work-stack", child: "board" }], ["board.focus", undefined]];
@@ -500,6 +505,25 @@ test("Tab with a history that has not recorded the board's place, shown or gone,
   }
 });
 
+test("Tab from a layout terminal block with no focus history at all in a layout without a board layer says there is no previous pane", async () => {
+  const { cx, leader, host } = await openLeader({ focusedPane: null, history: null });
+  await pressBound(leader, cx, "tab");
+  assert.deepEqual(host.runs, []);
+  assert.deepEqual(host.notes.map((n) => n.title), ["No previous pane"]);
+});
+
+// Every string an element and the elements under it were given.
+const textsOf = (el) =>
+  el.calls.flatMap((c) => c.slice(1)).flatMap((a) => (Array.isArray(a) ? a : [a])).flatMap((a) => (typeof a === "string" ? [a] : Array.isArray(a?.calls) ? textsOf(a) : []));
+
+test("the key list names Tab's action last place, since it goes to the board too", async () => {
+  const { leader, cx } = await openLeader();
+  leader.expanded = true;
+  const texts = textsOf(leader.render(cx));
+  assert.ok(texts.includes("last place"), texts.join(" | "));
+  assert.ok(!texts.includes("last pane"));
+});
+
 test("Tab to the board in a layout without a board layer says there is no previous pane", async () => {
   const { cx, leader, host } = await openLeader({ history: { current: "p1", previous: "board" } });
   await pressBound(leader, cx, "tab");
@@ -508,15 +532,16 @@ test("Tab to the board in a layout without a board layer says there is no previo
 });
 
 // A fake herdr in the personal layout whose pane.focus and layout.select
-// change what focused() and layout() say, with focus-history rendering
-// after each change, as herdr re-renders it. `world` holds the focused pane
-// and what the work-stack shows; change(fn) changes it as the person or
-// another mod would.
-function personalWorld() {
+// change what focused() and layout() say. focus-history renders once after
+// each change and after each Tab, not after each command a handler runs, as
+// herdr refreshes at the next draw. `world` holds the focused pane and what
+// the work-stack shows; change(fn) changes it as the person or another mod
+// would.
+function personalWorld(board = "board") {
   const world = { pane: "p1", active: "main" };
   const host = fakeHost({ history: null });
   host.focused = () => ({ pane: world.pane, terminal: "t1", shown: null });
-  host.layout = () => personal(world.active);
+  host.layout = () => personal(world.active, board);
   globalThis.__leaderHost = host;
   const history = new historyModule.default();
   const record = host.run;
@@ -524,7 +549,6 @@ function personalWorld() {
     record(name, args);
     if (name === "pane.focus") world.pane = args.pane;
     if (name === "layout.select" && args.stack === "work-stack") world.active = args.child;
-    history.render();
   };
   const change = (fn) => {
     fn(world);
@@ -533,6 +557,7 @@ function personalWorld() {
   const tab = async () => {
     const { leader, cx } = await openLeader({ host });
     await pressBound(leader, cx, "tab");
+    history.render();
     assert.deepEqual(host.notes, []);
   };
   history.render();
@@ -554,7 +579,7 @@ test("focus-history records the board as a place while it shows: the pane under 
   assert.deepEqual(recorded(), { current: "p1", previous: "board" });
 });
 
-test("focus-history in a layout without a board layer records the focused pane alone, as before", () => {
+test("focus-history in a layout without a board layer records the focused pane alone", () => {
   const host = fakeHost({ history: null, layout: historyLayout() });
   let pane = "p1";
   host.focused = () => ({ pane, terminal: "t1", shown: null });
@@ -569,18 +594,20 @@ test("focus-history in a layout without a board layer records the focused pane a
   assert.deepEqual(host.shared("focus.history"), { current: "p2", previous: "p1" }, "a layout terminal block is not recorded");
 });
 
-test("pane A, pane B, the board: Tab goes to B with the board hidden, Tab again to the board, and back and forth", async () => {
-  const { world, host, change, tab, recorded } = personalWorld();
-  change((w) => (w.pane = "p2"));
-  change((w) => (w.active = "board"));
-  await tab();
-  assert.deepEqual([world.active, world.pane], ["main", "p2"]);
-  assert.deepEqual(recorded(), { current: "p2", previous: "board" });
-  await tab();
-  assert.deepEqual([world.active, world.pane], ["board", "p2"]);
-  assert.deepEqual(host.runs.slice(-2), SHOW_BOARD);
-  await tab();
-  assert.deepEqual([world.active, world.pane], ["main", "p2"]);
+test("pane A, pane B, the board: Tab goes to B with the board hidden, Tab again to the board, and back and forth, whatever the board child's id", async () => {
+  for (const board of ["board", "layer-b"]) {
+    const { world, host, change, tab, recorded } = personalWorld(board);
+    change((w) => (w.pane = "p2"));
+    change((w) => (w.active = board));
+    await tab();
+    assert.deepEqual([world.active, world.pane], ["main", "p2"], board);
+    assert.deepEqual(recorded(), { current: "p2", previous: board }, board);
+    await tab();
+    assert.deepEqual([world.active, world.pane], [board, "p2"], board);
+    assert.deepEqual(host.runs.slice(-2), [["layout.select", { stack: "work-stack", child: board }], ["board.focus", undefined]], board);
+    await tab();
+    assert.deepEqual([world.active, world.pane], ["main", "p2"], board);
+  }
 });
 
 test("the board, then a press in pane A that brings the tab's content back: Tab goes to the board, Tab again to A", async () => {
