@@ -4,7 +4,7 @@ The architectural review is rendered as a single self-contained HTML file in the
 
 ## Scaffold
 
-The page's colours, typography and spacing come from the `show-page` skill's design pass; the scaffold only fixes where they go. Tailwind supplies layout utilities; every colour is a token, used through `var(--…)`, also inside Tailwind's arbitrary values (`bg-[var(--surface)]`).
+The page's colours, typography and spacing come from the `show-page` skill's design pass; the scaffold only fixes where they go. Tailwind supplies layout utilities; every colour outside Mermaid's `classDef` is a token, used through `var(--…)`, also inside Tailwind's arbitrary values (`bg-[var(--surface)]`).
 
 ```html
 <!doctype html>
@@ -21,9 +21,11 @@ The page's colours, typography and spacing come from the `show-page` skill's des
     </script>
     <style>
       /* Tokens from the design pass: light values here, dark ones below. */
-      :root { --bg: …; --surface: …; --fg: …; --muted: …; --rule: …; --accent: …; --leak: …; --warn: …; color-scheme: light; }
+      :root { --bg: …; --surface: …; --fg: …; --muted: …; --rule: …; --accent: …; --leak: …; --warn: …;
+              --strong: …; --explore: …; --speculative: …; color-scheme: light; }
       @media (prefers-color-scheme: dark) { :root { --bg: …; /* every token again */ color-scheme: dark; } }
       body { background: var(--bg); color: var(--fg); }
+      main { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
       /* small custom layer for things Tailwind doesn't cover cleanly:
          dashed seam lines, hand-drawn-feeling arrow heads, etc. */
       .seam { stroke-dasharray: 4 4; }
@@ -46,7 +48,7 @@ The page's colours, typography and spacing come from the `show-page` skill's des
 
 ## Header
 
-Repo name, date, and a compact legend: solid box = module, dashed line = seam, red arrow = leakage, thick dark box = deep module. No introduction paragraph — straight into the candidates.
+Repo name, date, and a compact legend: solid box = module, dashed line = seam, a `--leak` arrow = leakage, a thick filled box = deep module. No introduction paragraph — straight into the candidates.
 
 ## Candidate card
 
@@ -55,7 +57,7 @@ The diagrams carry the weight. Prose is sparse, plain, and uses the glossary ter
 Each candidate is one `<article>`:
 
 - **Title** — short, names the deepening (e.g. "Collapse the Order intake pipeline").
-- **Badge row** — recommendation strength (`Strong`, `Worth exploring`, `Speculative`, each in a colour token of its own), plus a tag for the dependency category (`in-process`, `local-substitutable`, `ports & adapters`, `mock`).
+- **Badge row** — recommendation strength (`Strong`, `Worth exploring`, `Speculative`, in the `--strong`, `--explore` and `--speculative` tokens), plus a tag for the dependency category (`in-process`, `local-substitutable`, `ports & adapters`, `mock`).
 - **Files** — monospaced list, `font-mono text-sm`.
 - **Before / After diagram** — the centrepiece. Two columns side by side, one below the other at phone width (`.before-after`). See patterns below.
 - **Problem** — one sentence. What hurts.
@@ -71,7 +73,7 @@ Pick the pattern that fits the candidate. Mix them. Don't make every diagram loo
 
 ### Mermaid graph (the workhorse for dependencies / call flow)
 
-Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and look at the mess." Wrap it in a card styled from the tokens so it doesn't feel parachuted in. Style with classDef to colour leakage edges and the deep module; classDef takes literal colours, so pick ones that read on both themes' backgrounds. Sequence diagrams work well for "before: 6 round-trips; after: 1."
+Use a Mermaid `flowchart` or `graph` when the point is "X calls Y calls Z, and look at the mess." Wrap it in a card styled from the tokens so it doesn't feel parachuted in. Style with classDef to colour leakage edges and the deep module; classDef takes literal colours only (a `var(--leak)` there is a syntax error in Mermaid 11.4.1), so pick ones that read on both themes' backgrounds. Sequence diagrams work well for "before: 6 round-trips; after: 1."
 
 ```html
 <div class="rounded-lg border border-[color:var(--rule)] bg-[var(--surface)] p-4">
@@ -105,7 +107,7 @@ Before: a tree of function calls rendered as nested boxes. After: the same tree 
 ## Style guidance
 
 - Lean editorial, not corporate-dashboard; palette, type and spacing come from the design pass.
-- Colour by role, each role a token: one accent, one colour for leakage, one for warnings.
+- Colour by role, each role a token: one accent, one colour for leakage, one for warnings, one per recommendation strength.
 - Keep diagrams ~320px tall so before/after sits comfortably side by side on a wide screen without scrolling.
 - Use `text-xs uppercase tracking-wider` for module labels inside diagrams — they should read as schematic, not as UI.
 - The only scripts are the Tailwind CDN and the Mermaid ESM import. The report is otherwise static — no app code, no interactivity beyond Mermaid's own rendering.
