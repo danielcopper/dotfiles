@@ -494,11 +494,12 @@ test("Tab to the board shows the board layer's board and gives it the keyboard a
 });
 
 test("Tab with a history that has not recorded the board's place, shown or gone, says so and goes nowhere", async () => {
-  for (const [active, history, body] of [
+  for (const [active, history, body, board] of [
     ["board", { current: "p1", previous: "p2" }, "It has not recorded the board"],
+    ["layer-b", { current: "p1", previous: "p2" }, "It has not recorded the board", "layer-b"],
     ["main", { current: "board", previous: "p1" }, "It has not recorded the focused pane"],
   ]) {
-    const { cx, leader, host } = await openLeader({ layout: personal(active), history });
+    const { cx, leader, host } = await openLeader({ layout: personal(active, board), history });
     await pressBound(leader, cx, "tab");
     assert.deepEqual(host.runs, [], active);
     assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[NOT_RECORDING, body, "info"]], active);
