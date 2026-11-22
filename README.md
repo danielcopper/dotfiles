@@ -419,7 +419,19 @@ herdr-app`. Which files of the package git tracks is set in the root
   card or a list's row selects it; a click on one I chose (clicked before, moved
   to with the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
-  refresh, the filter, a hidden column), open details close. `Enter` opens the
+  refresh, the filter, a hidden column), open details close. The details of a
+  GitHub issue list its sub-issues ("UNTERAUFGABEN · 1/3"; the first 50, with
+  "erste 50 von N" where it has more) and the pull requests linked to it by a
+  closing keyword or by hand in its Development sidebar, open, merged or closed
+  ("VERKNÜPFTE PRS", where it has any), each with its key, title and state, a
+  closed or merged one dimmed, a draft marked. They are read when the details
+  open (one gh call more), kept until the view's next refresh, which reads
+  nothing for them, and read again on `r` while they are open. `Tab` moves the
+  keyboard into the details panel and back (`Esc` gives it back too): there
+  `j/k` walk those lines, `Enter` selects a line's item on the board and shows
+  its details, or opens it in the browser where the board does not show it,
+  `o` opens it, and with no line selected `Enter` and `o` do what they do on
+  the board; a click on a line does what `Enter` on it does. `Enter` opens the
   details, a second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a

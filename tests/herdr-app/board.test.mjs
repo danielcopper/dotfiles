@@ -31,6 +31,12 @@
 //   assignees and review requests in github-list.json and the pull
 //   request's in github-board-cases.json, a review request whose reviewer
 //   is gone (null) and an issue whose author is gone (null);
+// - written from GitHub's GraphQL reference (Issue's subIssues,
+//   subIssuesSummary and closedByPullRequestsReferences), with made-up
+//   names, not recorded: github-details.json (an issue's sub-issues and
+//   linked pull requests) and github-details-not-found.json (an issue
+//   GitHub does not find; the error in the shape of the other NOT_FOUND
+//   answers);
 // - written from az's documentation (`az devops invoke` for work item
 //   types), not recorded: azure-types.json;
 // - written in the shapes az prints for the Sprint view's calls (the REST
@@ -1826,10 +1832,13 @@ async function openBoard(options = {}) {
 
 const key = (k, extra = {}) => ({ key: k, key_char: extra.char ?? (k.length === 1 ? k : undefined), keystroke: k, modifiers: extra.modifiers ?? {} });
 async function press(b, cx, k, extra) {
-  cx.call((own) => b.key(key(k, extra), own));
+  cx.call((own) => b.keyDown(key(k, extra), own));
   await settle();
 }
 const shiftL = { char: "L", modifiers: { shift: true } };
+// A gh call for a board view's items, and one for an issue's details.
+const isBoardCall = (args) => args.some((a) => String(a).includes("projectV2(number"));
+const isDetailsCall = (args) => args.some((a) => String(a).includes("closedByPullRequestsReferences"));
 const confirmed = (id) => ok(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id } } } }));
 
 test("UI: on the shipped views.json, with nothing remembered, the board opens on GitHub, its first view", async () => {
@@ -3427,7 +3436,7 @@ test("UI: a click on a card selects it; a click on the card the person chose ope
   await press(b, cx, "escape");
   await mouse(b, cx, "card-PVTI_rec2", "on_mouse_up");
   assert.equal(st().detail, false, "a release without a press on the card is no click");
-  assert.equal(host.open("gh").length, 1, "only H wrote");
+  assert.equal(host.open("gh").filter((c) => !isDetailsCall(c.args)).length, 1, "only H wrote");
 });
 
 test("UI: a selection the board sets on another card closes open details: after a filter or a refresh; on the same card they stay", async () => {
@@ -3439,10 +3448,10 @@ test("UI: a selection the board sets on another card closes open details: after 
   b.filterText = "";
   await press(b, cx, "enter");
   await press(b, cx, "r");
-  await host.answer("gh", ok(fixture("github-board.json")));
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
   assert.deepEqual([st().sel.key, st().detail], ["PVTI_rec6", true], "a refresh keeping the card keeps the details");
   await press(b, cx, "r");
-  await host.answer("gh", ok(boardWith((nodes) => nodes.splice(nodes.findIndex((n) => n.id === "PVTI_rec6"), 1))));
+  await host.answer("gh", ok(boardWith((nodes) => nodes.splice(nodes.findIndex((n) => n.id === "PVTI_rec6"), 1))), isBoardCall);
   assert.deepEqual([st().sel.key, st().detail], ["PVTI_rec4", false], "a refresh without the card");
 });
 
@@ -5258,7 +5267,7 @@ function takesTab(b) {
   return Boolean(context);
 }
 
-test("the board binds Tab and shift-Tab in its own key context, which its root carries only while a dialog with fields is open", async () => {
+test("the board binds Tab and shift-Tab in its own key context, which its root carries only while a dialog with fields or an issue's details are open", async () => {
   const { b, cx } = await openBoard();
   assert.deepEqual(cx.bound, board.BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: board.BOARD_KEY_CONTEXT })), "bound in that context only");
   assert.deepEqual(board.BOARD_KEYS.map((k) => [k.keystroke, k.back]), [["tab", false], ["shift-tab", true]]);
@@ -5266,7 +5275,12 @@ test("the board binds Tab and shift-Tab in its own key context, which its root c
   await openStart(b, cx);
   assert.equal(takesTab(b), true);
   await press(b, cx, "escape");
-  assert.equal(takesTab(b), false, "closed again");
+  assert.equal(takesTab(b), true, "the dialog closed, the issue's details are open: Tab is the details panel's");
+  b.filtering = true;
+  assert.equal(takesTab(b), false, "while the filter is typed, Tab is herdr's");
+  b.filtering = false;
+  await press(b, cx, "escape");
+  assert.equal(takesTab(b), false, "the details closed too");
 });
 
 test("UI: Tab and shift-Tab move between the start dialog's fields, also while its message has the keyboard", async () => {
@@ -5392,4 +5406,366 @@ test("UI: a team whose default iteration follows the current one has it read aga
   await host.answer("az", ok(JSON.stringify({ ...later, defaultIteration: null })), AZB.settings);
   assert.equal(openAzb(host, "create").length, 0);
   assert.equal(b.notice.text, "User Story „Another“ nicht angelegt: Das Team nennt gerade keine Standard-Iteration (Team-Einstellungen in Azure)");
+});
+
+// ---- An issue's details: sub-issues and linked pull requests ----
+
+const detailsItem = () => githubBoard().columns.flatMap((c) => c.cards).find((c) => c.number === 3004);
+// The detail panel as the board draws it now, and the texts of its details'
+// lines block.
+const detailPanel = (b) => byId(b.render(), "detail");
+const detailTexts = (b) => texts(byId(detailPanel(b), "details-lines"));
+// The details' lines as drawn, each as its texts: key, title, draft mark, state.
+const drawnLines = (b) =>
+  byId(detailPanel(b), "details-lines").kids.filter((k) => /^detail-line-/.test(k.with.id?.[0] ?? "")).map((k) => texts(k));
+const answerDetails = (host, result) => host.answer("gh", result, isDetailsCall);
+// A details answer with `n` sub-issues of `count`, none completed, and no
+// pull requests.
+function manySubIssues(n, count) {
+  const nodes = Array.from({ length: n }, (_, i) => ({
+    number: 4000 + i, title: `step ${i}`, state: "OPEN", url: `https://github.com/example/tender/issues/${4000 + i}`, repository: { nameWithOwner: "example/tender" },
+  }));
+  const issue = { subIssuesSummary: { total: count, completed: 0 }, subIssues: { totalCount: count, nodes }, closedByPullRequestsReferences: { totalCount: 0, nodes: [] } };
+  return JSON.stringify({ data: { repository: { issue } } });
+}
+// A Board whose first card's (tender#3004) details are open, read from
+// github-details.json.
+async function openDetails() {
+  const opened = await openBoard();
+  await press(opened.b, opened.cx, "enter");
+  await answerDetails(opened.host, ok(fixture("github-details.json")));
+  return opened;
+}
+// Tab or shift-Tab as on_key_down gets it, and as the root's bound action.
+const tab = (b, cx, shift = false) => press(b, cx, "tab", { modifiers: { shift } });
+async function action(b, cx, name) {
+  const handler = b.render().calls.find(([p, a]) => p === "on_action" && a === name)?.[2];
+  assert.ok(handler, `no action ${name}`);
+  cx.call((own) => handler({}, own));
+  await settle();
+}
+const readsOf = (host, number) => host.open("gh").filter((c) => isDetailsCall(c.args) && (number === undefined || c.args.includes(`number=${number}`)));
+
+test("an issue's details are one GraphQL query: its first 50 sub-issues with their count and summary, and its linked pull requests, merged and closed ones too", () => {
+  const args = board.githubDetailsArgs(detailsItem());
+  assert.deepEqual(args.slice(0, 3), ["api", "graphql", "-f"]);
+  assert.deepEqual(args.slice(4), ["-f", "owner=example", "-f", "name=tender", "-F", "number=3004"]);
+  const query = args[3].replace(/\s+/g, " ");
+  assert.match(query, /repository\(owner: \$owner, name: \$name\) \{ issue\(number: \$number\) \{/);
+  assert.match(query, /subIssuesSummary \{ total completed \}/);
+  assert.match(query, /subIssues\(first: 50\) \{ totalCount nodes \{ number title state url repository \{ nameWithOwner \} \} \}/);
+  assert.match(query, /closedByPullRequestsReferences\(first: 20, includeClosedPrs: true\) \{ totalCount nodes \{ number title state isDraft url repository \{ nameWithOwner \} \} \}/);
+});
+
+test("an issue's details: its sub-issues and linked pull requests as lines with key, state and draft; a missing issue says why", () => {
+  const d = board.parseGithubDetails(json("github-details.json"), detailsItem());
+  assert.deepEqual([d.subIssues.total, d.subIssues.completed, d.subIssues.count], [3, 1, 3]);
+  assert.deepEqual(d.subIssues.lines.map((l) => [board.itemLabel(l), l.kind, l.state, l.draft]), [
+    ["tender#3001", "issue", "open", false], ["tender#3010", "issue", "closed", false], ["other-tool#12", "issue", "open", false],
+  ]);
+  assert.equal(d.subIssues.lines[2].url, "https://github.com/example/other-tool/issues/12");
+  assert.deepEqual(d.prs.lines.map((l) => [board.itemLabel(l), l.kind, l.state, l.draft, l.repo]), [
+    ["tender#3020", "pr", "open", true, "example/tender"], ["tender#3015", "pr", "merged", false, "example/tender"],
+  ]);
+  assert.equal(d.prs.count, 2);
+  const missing = json("github-details-not-found.json");
+  assert.throws(() => board.parseGithubDetails(missing, detailsItem(), missing.errors), /^Error: GitHub: Could not resolve to an Issue with the number of 3004\.$/);
+  assert.throws(() => board.parseGithubDetails({ data: { repository: null } }, detailsItem()), /^Error: GitHub kennt example\/tender#3004 nicht$/);
+  const issue = { subIssuesSummary: { total: 1, completed: 0 }, subIssues: { totalCount: 1, nodes: [null] }, closedByPullRequestsReferences: { totalCount: 0, nodes: [] } };
+  const hidden = board.parseGithubDetails({ data: { repository: { issue } } }, detailsItem());
+  assert.deepEqual([hidden.subIssues.lines, hidden.subIssues.count], [[], 1], "a node without access is left out");
+});
+
+test("GitHub reads details for an issue with a number and a repo only", () => {
+  const { reads } = board.makeGithub(null).details;
+  const issue = detailsItem();
+  assert.deepEqual(
+    [reads(issue), reads({ ...issue, kind: "pr" }), reads({ ...issue, kind: "draft" }), reads({ ...issue, number: null }), reads({ ...issue, repo: "" })],
+    [true, false, false, false, false],
+  );
+});
+
+test("the details' lines: sub-issues first; a step from none goes to the first, up from the first to none, the last stays; an item is found on the board in its shown columns only", () => {
+  const d = board.parseGithubDetails(json("github-details.json"), detailsItem());
+  assert.deepEqual(board.detailLines(d).map((l) => l.number), [3001, 3010, 12, 3020, 3015]);
+  assert.deepEqual(board.detailLines(null), []);
+  assert.deepEqual(
+    [board.stepLine(null, 1, 3), board.stepLine(0, -1, 3), board.stepLine(2, 1, 3), board.stepLine(1, 1, 3), board.stepLine(1, -1, 3), board.stepLine(null, -1, 3), board.stepLine(null, 1, 0)],
+    [0, null, 2, 2, 0, null, null],
+  );
+  const columns = board.shownColumns(githubBoard(), "", false);
+  const col = columns.findIndex((c) => c.shown.some((i) => i.number === 3001));
+  assert.ok(col > 0);
+  assert.deepEqual(board.placeOf(columns, d.subIssues.lines[0]), { col, key: "PVTI_rec2" });
+  assert.equal(board.placeOf(columns, d.subIssues.lines[1]), null, "not on the board");
+  assert.equal(board.placeOf(columns, { ...d.subIssues.lines[0], repo: "example/other-tool" }), null, "the same number in another repo");
+  assert.equal(board.placeOf(columns, { ...d.subIssues.lines[0], kind: "pr" }), null, "a pull request of the same number");
+  assert.equal(board.placeOf(columns, { ...d.subIssues.lines[0], source: "azure" }), null, "another source");
+  assert.equal(board.placeOf(board.shownColumns(githubBoard(), "BUG input", false), d.subIssues.lines[0]), null, "one the filter hides");
+  const kept = new Map([["a", 1], ["b", 2]]);
+  assert.deepEqual([[...board.keptDetails(kept, "b")], [...board.keptDetails(kept, null)], [...board.keptDetails(kept, "c")]], [[["b", 2]], [], []]);
+  assert.equal(board.detailsKey(detailsItem()), "github\nexample/tender\n3004");
+});
+
+test("UI: an issue's details read its sub-issues and pull requests once when they open, saying „lädt …“ until they come", async () => {
+  const { b, cx, host } = await openBoard();
+  await cx.look();
+  assert.equal(host.open("gh").length, 0, "nothing before the details open");
+  // Enter as the board's root gets it.
+  cx.call((own) => b.render().with.on_key_down[0](key("enter"), own));
+  await settle();
+  const calls = host.open("gh");
+  assert.equal(calls.length, 1);
+  assert.ok(isDetailsCall(calls[0].args) && calls[0].args.includes("number=3004") && calls[0].args.includes("name=tender"));
+  assert.deepEqual(detailTexts(b), ["UNTERAUFGABEN", "lädt …"]);
+  await cx.look();
+  assert.equal(host.open("gh").length, 1, "one read while it loads");
+  await answerDetails(host, ok(fixture("github-details.json")));
+  assert.deepEqual(texts(detailPanel(b)).filter((s) => /^(UNTERAUFGABEN|VERKNÜPFTE)/.test(s)), ["UNTERAUFGABEN · 1/3", "VERKNÜPFTE PRS · 2"]);
+  assert.deepEqual(drawnLines(b), [
+    ["tender#3001", "fix(cache): keep the last entry when a refresh fails", "offen"],
+    ["tender#3010", "chore(ci): drop the old runner", "geschlossen"],
+    ["other-tool#12", "feat: read the sample list", "offen"],
+    ["tender#3020", "feat(api): page through long lists", "Entwurf", "offen"],
+    ["tender#3015", "refactor(api): split the list reader", "gemerged"],
+  ]);
+  const opacity = (i) => byId(detailPanel(b), `detail-line-${i}`).with.opacity[0];
+  assert.deepEqual([0, 1, 2, 3, 4].map(opacity), [1, 0.55, 1, 1, 0.55], "closed and merged ones dimmed");
+  assert.ok(pathTo(detailPanel(b), "SITZUNG"), "the rest of the details stays");
+  await press(b, cx, "escape");
+  await press(b, cx, "enter");
+  await cx.look();
+  assert.equal(host.open("gh").length, 0, "open again: kept, nothing read");
+  assert.equal(drawnLines(b).length, 5);
+});
+
+test("UI: details that come to show by a click, or a way that read nothing yet, are read; a hidden board reads none", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await clickCard(b, cx, "PVTI_rec4");
+  await clickCard(b, cx, "PVTI_rec4");
+  assert.equal(readsOf(host, 3004).length, 1, "a click that opens them");
+  st().detail = false;
+  b.choose(b.view(), { col: 0, key: "PVTI_rec5" });
+  st().detail = true;
+  host.panes = () => [];
+  await cx.look();
+  assert.equal(readsOf(host, 3005).length, 0, "not while the board is hidden");
+  host.panes = () => [{ pane: "p1", mod: "board", tab: "t1" }];
+  await cx.look();
+  assert.equal(readsOf(host, 3005).length, 1, "the next look of a shown board");
+});
+
+test("UI: a refresh keeps the open details and reads nothing for them; another item's details are read again after it; r reads the open ones again", async () => {
+  const { b, cx, host, st } = await openDetails();
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec5");
+  await answerDetails(host, ok(manySubIssues(1, 1)));
+  await press(b, cx, "k");
+  await press(b, cx, "j");
+  await press(b, cx, "k");
+  assert.equal(host.open("gh").length, 0, "both kept");
+  advance(3 * 60000);
+  await cx.tick();
+  assert.equal(host.open("gh").filter((c) => isBoardCall(c.args)).length, 1, "the timer refreshes the view");
+  assert.equal(readsOf(host).length, 0, "but reads no details");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  assert.equal(drawnLines(b).length, 5, "the open ones stay");
+  await press(b, cx, "j");
+  assert.equal(readsOf(host, 3005).length, 1, "the other one is read again");
+  await answerDetails(host, ok(manySubIssues(1, 1)));
+  await press(b, cx, "r");
+  assert.deepEqual(host.open("gh").map((c) => (isDetailsCall(c.args) ? "details" : isBoardCall(c.args) ? "board" : "?")).sort(), ["board", "details"], "r: the view and the open details");
+  assert.equal(detailTexts(b).at(-1), "lädt …");
+  await answerDetails(host, ok(manySubIssues(2, 2)));
+  assert.equal(drawnLines(b).length, 2);
+});
+
+test("UI: details that fail to read say gh's reason in one line, the rest stays; an older read that answers last changes nothing", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "enter");
+  await answerDetails(host, { code: 1, stdout: fixture("github-details-not-found.json"), stderr: "gh: Could not resolve to an Issue with the number of 3004.\n" });
+  assert.deepEqual(detailTexts(b), ["UNTERAUFGABEN", "GitHub: Could not resolve to an Issue with the number of 3004."]);
+  assert.ok(pathTo(detailPanel(b), "SITZUNG") && pathTo(detailPanel(b), "feat(api): page through long lists"), "the rest of the details");
+  await press(b, cx, "r");
+  await press(b, cx, "r");
+  const [older, newer] = readsOf(host);
+  assert.ok(older && newer, "each r reads them again");
+  newer.done = true;
+  newer.resolve(ok(manySubIssues(1, 1)));
+  await settle();
+  older.done = true;
+  older.resolve(ok(fixture("github-details.json")));
+  await settle();
+  assert.deepEqual(drawnLines(b).map((l) => l[0]), ["tender#4000"], "the newest read's answer");
+});
+
+test("UI: more than 50 sub-issues: the first 50 and how many there are; none: it says so; no linked pull requests: no such section", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "enter");
+  await answerDetails(host, ok(manySubIssues(50, 60)));
+  assert.equal(detailTexts(b)[0], "UNTERAUFGABEN · 0/60 · erste 50 von 60");
+  assert.equal(drawnLines(b).length, 50);
+  assert.ok(!detailTexts(b).some((s) => s.startsWith("VERKNÜPFTE")));
+  await press(b, cx, "r");
+  await answerDetails(host, ok(manySubIssues(0, 0)));
+  assert.deepEqual(detailTexts(b), ["UNTERAUFGABEN · 0/0", "keine"]);
+  const many = JSON.parse(fixture("github-details.json"));
+  many.data.repository.issue.closedByPullRequestsReferences.totalCount = 25;
+  await press(b, cx, "r");
+  await answerDetails(host, ok(JSON.stringify(many)));
+  assert.equal(detailTexts(b).find((s) => s.startsWith("VERKNÜPFTE")), "VERKNÜPFTE PRS · 25 · erste 2 von 25", "pull requests GitHub sent fewer of");
+});
+
+test("UI: a pull request's row, a pull request's card and a draft read no details and have no such section", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  await press(b, cx, "enter");
+  await cx.look();
+  assert.equal(b.views.prs.detail, true);
+  assert.equal(host.open("gh").length, 0);
+  assert.equal(byId(detailPanel(b), "details-lines"), null);
+  assert.ok(!hintKeys(b).includes("Tab"), "no hint for Tab");
+  await tab(b, cx);
+  assert.equal(b.panel, null, "Tab has no panel to go to");
+  await press(b, cx, "1");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board-cases.json")), isBoardCall);
+  for (const key of ["PVTI_case1", "PVTI_case2"]) {
+    const col = board.columnOf(b.navColumns(b.view()), key);
+    assert.ok(col >= 0, key);
+    b.choose(b.view(), { col, key });
+    b.views.mine.detail = true;
+    await press(b, cx, "z");
+    await cx.look();
+    assert.equal(host.open("gh").length, 0, key);
+    assert.equal(byId(detailPanel(b), "details-lines"), null, key);
+  }
+});
+
+test("UI: Tab moves the keyboard into the details panel and back; there j/k walk its lines, Esc gives it back, and a second Esc closes the details", async () => {
+  const { b, cx, st, host } = await openDetails();
+  host.theme = () => ({ accent: "#accent", border: "#border" });
+  assert.deepEqual([hintKeys(b).includes("Tab"), hintKeys(b).includes("j/k")], [true, false], "the hint names Tab");
+  assert.equal(detailPanel(b).with.border_color[0], "#border");
+  const stopped = cx.stopped;
+  await action(b, cx, "board_tab");
+  assert.ok(b.panelOf(b.view()), "the panel has the keyboard");
+  assert.ok(cx.stopped > stopped, "the action stops the key");
+  assert.equal(detailPanel(b).with.border_color[0], "#accent", "and shows it");
+  assert.ok(hintKeys(b).includes("j/k"));
+  const marked = () => [0, 1, 2, 3, 4].filter((i) => byId(detailPanel(b), `detail-line-${i}`).styles.includes("bg"));
+  assert.deepEqual(marked(), [], "no line yet");
+  await press(b, cx, "j");
+  await press(b, cx, "down");
+  assert.deepEqual([b.panel.line, marked(), st().sel.key], [1, [1], "PVTI_rec4"], "the lines move, the board's selection stays");
+  assert.equal(host.scrolled.filter((s) => s.handle === b.detailsUi.scroll).at(-1).row, 2, "scrolled to the second sub-issue's line");
+  for (let i = 0; i < 6; i++) await press(b, cx, "j");
+  assert.equal(b.panel.line, 4, "the last stays");
+  assert.deepEqual(host.scrolled.filter((s) => s.handle === b.detailsUi.scroll).at(-1).row, 6, "scrolled to the last pull request's line");
+  await press(b, cx, "k", { modifiers: { control: true } });
+  await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
+  assert.equal(b.panel.line, 4, "with Control or Shift a key is not the panel's");
+  for (let i = 0; i < 5; i++) await press(b, cx, i % 2 ? "up" : "k");
+  assert.equal(b.panel.line, null, "k above the first: no line");
+  await action(b, cx, "board_shift_tab");
+  assert.equal(b.panelOf(b.view()), null, "shift-Tab gives it back");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec5", "j is the board's again");
+  await press(b, cx, "k");
+  await tab(b, cx);
+  assert.ok(b.panelOf(b.view()), "Tab from on_key_down too");
+  await tab(b, cx, true);
+  assert.equal(b.panelOf(b.view()), null, "and shift-Tab");
+  await tab(b, cx);
+  await press(b, cx, "escape");
+  assert.deepEqual([b.panelOf(b.view()), st().detail], [null, true], "Esc gives the keyboard back");
+  await press(b, cx, "escape");
+  assert.equal(st().detail, false, "a second closes the details");
+  let before = cx.stopped;
+  await tab(b, cx);
+  assert.deepEqual([b.panelOf(b.view()), cx.stopped], [null, before], "without details Tab does nothing, and on_key_down lets it go on");
+  assert.equal(takesTab(b), false, "nor does the root take it: herdr's own Tab runs");
+  await press(b, cx, "enter");
+  before = cx.stopped;
+  await tab(b, cx);
+  assert.deepEqual([Boolean(b.panelOf(b.view())), cx.stopped], [true, before + 1], "a Tab the panel takes stops there");
+});
+
+test("UI: the details panel has the keyboard only for the item and view it took it in, with the details open", async () => {
+  const { b, cx, st, host } = await openDetails();
+  await tab(b, cx);
+  await press(b, cx, "l");
+  assert.deepEqual([st().sel.col, b.panelOf(b.view())], [1, null], "l moves the board; the panel is not the new card's");
+  const there = st().sel.key;
+  await press(b, cx, "j");
+  assert.deepEqual([b.panel, st().sel.key !== there], [null, true], "dropped: j is the board's");
+  await press(b, cx, "h");
+  await press(b, cx, "k");
+  await press(b, cx, "k");
+  assert.equal(st().sel.key, "PVTI_rec4");
+  assert.equal(b.panelOf(b.view()), null, "back on its item, the board keeps the keyboard");
+  await tab(b, cx);
+  assert.ok(b.panelOf(b.view()));
+  st().detail = false;
+  assert.equal(b.panelOf(b.view()), null, "details closed by the board");
+  st().detail = true;
+  await tab(b, cx);
+  // The view "other" shows the same project items under the same keys.
+  await press(b, cx, "3");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  const other = b.views.other;
+  assert.equal(other.sel.key, "PVTI_rec4");
+  other.detail = true;
+  assert.equal(b.panelOf(b.view()), null, "another view's details");
+});
+
+test("UI: in the details panel Enter on a line selects its item on the board, o opens it; one not on the board opens in the browser; with no line Enter and o do what they do on the board", async () => {
+  const { b, cx, st, host } = await openDetails();
+  await tab(b, cx);
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, [detailsItem().url], "o with no line opens the issue");
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  await press(b, cx, "o");
+  assert.equal(cx.opened.at(-1), "https://github.com/example/tender/issues/3010");
+  await press(b, cx, "enter");
+  assert.deepEqual([cx.opened.length, cx.opened.at(-1), st().sel.key], [3, "https://github.com/example/tender/issues/3010", "PVTI_rec4"], "not on the board: opened");
+  await press(b, cx, "k");
+  await press(b, cx, "enter");
+  assert.deepEqual([st().sel.key, st().detail, st().picked], ["PVTI_rec2", true, "PVTI_rec2"], "on the board: selected, its details shown");
+  assert.deepEqual([b.panelOf(b.view())?.line, b.panelOf(b.view())?.key], [null, "PVTI_rec2"], "the panel keeps the keyboard, no line");
+  assert.equal(readsOf(host, 3001).length, 1, "its details are read");
+  await answerDetails(host, ok(manySubIssues(0, 0)));
+  assert.equal(b.modal, null);
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "start", "Enter with no line: the item's session, as on the board");
+});
+
+test("UI: a click on a line moves the keyboard into the panel and does Enter on it", async () => {
+  const { b, cx, st, host } = await openDetails();
+  b.handle.held = false;
+  await click(b, cx, "detail-line-1");
+  assert.deepEqual([b.panelOf(b.view())?.line, cx.opened], [1, ["https://github.com/example/tender/issues/3010"]]);
+  assert.equal(b.handle.is_focused(), true, "the board takes the keyboard");
+  await click(b, cx, "detail-line-0");
+  assert.deepEqual([st().sel.key, b.panelOf(b.view())?.key, b.panelOf(b.view())?.line], ["PVTI_rec2", "PVTI_rec2", null]);
+  assert.equal(readsOf(host, 3001).length, 1, "its details are read");
+  b.modal = { kind: "status", view: b.view(), key: "PVTI_rec2", targets: [], at: 0 };
+  b.state(b.view().id).details.get(board.detailsKey(b.selected(b.view()))).data = board.parseGithubDetails(json("github-details.json"), detailsItem());
+  await click(b, cx, "detail-line-1");
+  assert.deepEqual([cx.opened.length, st().sel.key], [1, "PVTI_rec2"], "a click while a dialog is open does nothing");
+});
+
+test("UI: Enter and o on a line that r took away until the details come again do nothing", async () => {
+  const { b, cx, host } = await openDetails();
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "r");
+  await press(b, cx, "enter");
+  await press(b, cx, "o");
+  assert.deepEqual([b.modal, cx.opened, b.panelOf(b.view())?.line], [null, undefined, 0]);
+  await answerDetails(host, ok(fixture("github-details.json")));
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
 });

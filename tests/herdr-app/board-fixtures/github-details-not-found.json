@@ -1,0 +1,11 @@
+{
+  "data": { "repository": { "issue": null } },
+  "errors": [
+    {
+      "type": "NOT_FOUND",
+      "path": ["repository", "issue"],
+      "locations": [{ "line": 3, "column": 5 }],
+      "message": "Could not resolve to an Issue with the number of 3004."
+    }
+  ]
+}

@@ -30,8 +30,11 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh, an Azure team's
-// Sprint two az calls (the taskboard's column of each work item, and one
+// Calls: a GitHub view costs one gh call per refresh, and the details of
+// an issue in it one more when they open (its sub-issues and linked pull
+// requests), kept until the view's next refresh, which reads nothing for
+// them, and read again on `r` while they are open (readDetails). An Azure
+// team's Sprint two az calls (the taskboard's column of each work item, and one
 // WIQL query for their fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
 // their fields; one for an empty backlog); either one more while who az is
@@ -53,12 +56,15 @@
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
-// (a state's color), select.js (filter, "nur meine", selection), sources/
+// (a state's color), select.js (filter, "nur meine", selection),
+// details.js (an item's details read when they open: what is kept, their
+// lines), sources/
 // (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
 // index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
-// ui/helpers.js, ui/layer.js (the board layer), ui/shapes/ (how a view's
+// ui/helpers.js, ui/layer.js (the board layer), ui/details.js (the
+// details' lines as drawn), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
 // data logic is plain exported functions, tested with a few UI paths by
@@ -76,10 +82,12 @@ import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, v
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
+import { detailLines, detailsKey, keptDetails, placeOf, stepLine } from "./details.js";
 import { store, migrateShownView, boardShown, shownOf, button, detailSection } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
+import { detailsSections, detailsState, lineChild } from "./ui/details.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -89,6 +97,7 @@ export * from "./kinds/sprint.js";
 export * from "./kinds/backlog.js";
 export * from "./kinds/states.js";
 export * from "./select.js";
+export * from "./details.js";
 export * from "./sources/github.js";
 export * from "./sources/azure/common.js";
 export * from "./sources/azure/sprint.js";
@@ -103,6 +112,7 @@ export * from "./actions/create.js";
 export * from "./sources/index.js";
 export * from "./ui/helpers.js";
 export * from "./ui/layer.js";
+export * from "./ui/details.js";
 export * from "./ui/shapes/index.js";
 export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
@@ -126,20 +136,20 @@ export const WATCH_MS = 250;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
-
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
 // on_key_down, so Tab never reaches a dialog's key handler, not even while
 // the dialog's text field has the keyboard; while a dialog with fields is
-// open, the board takes it as an action of its own. Of the matching
+// open, or the details of an item whose source reads details (for the
+// details panel), the board takes it as an action of its own. Of the matching
 // bindings, the one in the deepest context wins, so a binding in the
 // context of the board's root comes first (the leader mod binds the same
 // way and says more:
 // mods/leader/main.js, KEY_CONTEXT). The root carries that context only
 // while the board takes Tab (takesTab), and a binding matches only in a
-// context on the path to what has the keyboard, so with nothing open herdr's
-// own Tab runs as before. That matters: herdr's AppWindow runs every
+// context on the path to what has the keyboard, so with neither open herdr's
+// own Tab runs as before, also while the filter is typed. That matters: herdr's AppWindow runs every
 // action the board does not stop as a command of its own, and says
 // "unknown command" for one it does not know (herdr's src/window.rs, its
 // ShellAction listener and run). Each action runs tabKey, the one place
@@ -183,6 +193,10 @@ export default class Board extends View {
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
+    // What the details' lines keep (ui/details.js), and the details panel's
+    // keyboard: { view, key, line } while it has it (panelOf).
+    this.detailsUi = detailsState();
+    this.panel = null;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -218,7 +232,11 @@ export default class Board extends View {
     });
     this.bindKeys(cx);
     cx.timer.every(TICK_MS, (cx) => this.guarded("Neuladen", () => this.tick(cx)));
-    cx.timer.every(WATCH_MS, (cx) => this.guarded("Anzeige", () => this.watchShown(cx)));
+    cx.timer.every(WATCH_MS, (cx) => {
+      this.guarded("Anzeige", () => this.watchShown(cx));
+      // Details that came to show by a way that did not read them yet.
+      this.guarded("Details", () => boardShown(this.isLayer()) && this.readDetails(cx));
+    });
     this.reload(cx);
   }
 
@@ -239,18 +257,25 @@ export default class Board extends View {
   }
 
   // Whether the board takes Tab and shift-Tab (BOARD_KEYS): while a dialog
-  // with fields is open (its tab, MODALS). Anything else leaves Tab to
-  // herdr: the root carries the board's key context only while this holds.
+  // with fields is open (its tab, MODALS), and, with no dialog and no filter
+  // being typed, while the shown view's details are of an item whose source
+  // reads details (readsDetails), to move the keyboard into the details
+  // panel and back. Anything else leaves Tab to herdr: the root carries the
+  // board's key context only while this holds.
   takesTab() {
-    return Boolean(this.modal && MODALS[this.modal.kind].tab);
+    if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
+    return !this.filtering && this.readsDetails(this.shownDetailsItem());
   }
 
   // Tab and shift-Tab (`back`), while the board takes them (takesTab): the
-  // open dialog's next or previous field.
+  // open dialog's next or previous field, else the keyboard into the details
+  // panel or back to the board (togglePanel).
   tabKey(back, cx) {
     if (!this.takesTab()) return;
     cx.stop_propagation();
-    MODALS[this.modal.kind].tab(this, back, cx);
+    if (this.modal) return MODALS[this.modal.kind].tab(this, back, cx);
+    this.togglePanel(this.view());
+    cx.notify();
   }
 
   // ---- data ----
@@ -263,11 +288,13 @@ export default class Board extends View {
   // toggles and the hidden set), sel ({ col, key }, null before the first
   // data), picked (the key of the item the person chose, see clickItem),
   // runs (how many refreshes have started), want (an item to choose once a
-  // refresh has it: chooseWanted) and detail.
+  // refresh has it: chooseWanted) and detail; details (what readDetails
+  // read, by detailsKey).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
+      details: new Map(),
     };
     return this.views[id];
   }
@@ -353,7 +380,10 @@ export default class Board extends View {
       const shown = this.view();
       if (!shown) return;
       this.sources[shown.source]?.forget?.(shown);
+      // The open details are read again too.
+      this.state(shown.id).details.clear();
       this.refresh(shown, cx);
+      this.readDetails(cx);
     });
   }
 
@@ -366,6 +396,8 @@ export default class Board extends View {
     st.loading = true;
     st.again = false;
     st.tried = Date.now();
+    const open = st.detail ? this.selected(view) : null;
+    st.details = keptDetails(st.details, open ? detailsKey(open) : null);
     const started = st.tried;
     const run = ++st.runs;
     cx.spawn(async (cx) => {
@@ -432,6 +464,124 @@ export default class Board extends View {
     const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
     if (shown && due(shown)) this.refresh(shown, cx);
+    cx.notify();
+  }
+
+  // ---- details ----
+
+  // Whether the item's source reads details for it (its details.reads).
+  readsDetails(item) {
+    return Boolean(item && this.sources[item.source]?.details?.reads(item));
+  }
+
+  // The item whose details show in the shown view, or null.
+  shownDetailsItem() {
+    const view = this.view();
+    return view && this.state(view.id).detail ? this.selected(view) : null;
+  }
+
+  // What is kept of the item's details in the view: { data, error } (both
+  // null while they load), or null before they are read.
+  detailsOf(view, item) {
+    return this.state(view.id).details.get(detailsKey(item)) ?? null;
+  }
+
+  // Reads the details of the item whose details show in the shown view,
+  // where its source reads some and none are kept: one call, kept until the
+  // view's next refresh (keptDetails) or `r` (reload).
+  readDetails(cx) {
+    const view = this.view();
+    const st = view ? this.state(view.id) : null;
+    const item = st?.detail ? this.selected(view) : null;
+    if (!this.readsDetails(item) || st.details.has(detailsKey(item))) return;
+    const entry = { data: null, error: null };
+    st.details.set(detailsKey(item), entry);
+    const source = this.sources[item.source].details;
+    cx.spawn(async (cx) => {
+      try {
+        entry.data = await source.load(item);
+      } catch (e) {
+        entry.error = report(e);
+      } finally {
+        cx.notify();
+      }
+    });
+    cx.notify();
+  }
+
+  // The details panel's keyboard ({ view, key, line }: the line selected,
+  // null for none) while it has it in `view`, for the item whose details
+  // show there; else null, when the board has it. Once it is not theirs
+  // (another view, item or the details closed) it is dropped, so that it
+  // does not come back with them.
+  panelOf(view) {
+    const p = this.panel;
+    const st = this.state(view.id);
+    if (p && p.view === view.id && st.detail && st.sel?.key === p.key) return p;
+    this.panel = null;
+    return null;
+  }
+
+  // Tab: the keyboard into the details panel, no line selected, where the
+  // details of an item with read details show; back to the board where the
+  // panel has it. False where it does neither.
+  togglePanel(view) {
+    const st = this.state(view.id);
+    const item = st.detail ? this.selected(view) : null;
+    if (!this.readsDetails(item)) return false;
+    this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null };
+    return true;
+  }
+
+  // The lines of the details that show in `view` (detailLines).
+  linesOf(view) {
+    const item = this.selected(view);
+    return detailLines(item ? this.detailsOf(view, item)?.data : null);
+  }
+
+  // A key while the details panel has the keyboard: j/k or the arrows walk
+  // its lines, Enter and o act on the selected one (with none, they do
+  // what they do on the board), Esc gives the keyboard back. True when the
+  // panel took the key.
+  panelKey(view, panel, k, cx) {
+    const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
+    const lines = this.linesOf(view);
+    if (dir) {
+      panel.line = stepLine(panel.line, dir, lines.length);
+      if (panel.line !== null) this.detailsUi.scroll.scroll_to_item(lineChild(this.detailsOf(view, this.selected(view)).data, panel.line));
+      return true;
+    }
+    if (k === "escape") return (this.panel = null), true;
+    if ((k !== "enter" && k !== "o") || panel.line === null) return false;
+    // A line selected before `r` read the details again is gone until they
+    // come: the key does nothing.
+    const line = lines[panel.line];
+    if (!line) return true;
+    if (k === "enter") this.enterLine(view, line, cx);
+    else this.open(line, cx);
+    return true;
+  }
+
+  // Enter on a line: its item selected on the board where a shown column
+  // holds it, its details shown, the panel keeping the keyboard with no
+  // line selected; else opened in the browser.
+  enterLine(view, line, cx) {
+    const place = placeOf(this.navColumns(view), line);
+    if (!place) return this.open(line, cx);
+    this.choose(view, place);
+    this.panel = { view: view.id, key: place.key, line: null };
+    this.readDetails(cx);
+  }
+
+  // A click on line `at` of the details: the keyboard into the panel on that
+  // line, and Enter on it.
+  pickLine(view, at, cx) {
+    const item = this.selected(view);
+    const line = this.linesOf(view)[at];
+    if (!item || !line) return;
+    this.panel = { view: view.id, key: item.key, line: at };
+    this.handle.focus();
+    this.enterLine(view, line, cx);
     cx.notify();
   }
 
@@ -585,6 +735,7 @@ export default class Board extends View {
     if (st.picked === sel.key) st.detail = true;
     else this.choose(view, sel);
     this.handle.focus();
+    this.readDetails(cx);
     cx.notify();
   }
 
@@ -723,6 +874,13 @@ export default class Board extends View {
 
   // ---- keys ----
 
+  // A key the board gets (on_key_down, or a bound key's action), then the
+  // details that came to show by it read (readDetails).
+  keyDown(e, cx) {
+    this.key(e, cx);
+    this.readDetails(cx);
+  }
+
   key(e, cx) {
     const k = e.key;
     const ch = e.key_char ?? "";
@@ -741,6 +899,10 @@ export default class Board extends View {
       cx.stop_propagation();
       cx.notify();
     };
+    // Where Tab comes here rather than as the board's action: its one home.
+    if (k === "tab") return this.tabKey(Boolean(mod.shift), cx);
+    const panel = view && !(mod.control || mod.alt || mod.platform || mod.shift) ? this.panelOf(view) : null;
+    if (panel && this.panelKey(view, panel, k, cx)) return done();
     // [ ] and / may come with Shift, or with Control+Alt; Control alone
     // stays herdr's. Alt alone is let through: a key herdr binds with Alt
     // never reaches a mod (logged), so this costs herdr nothing; how AltGr
@@ -824,7 +986,7 @@ export default class Board extends View {
       .bg(t.background)
       .text_color(t.foreground)
       .text_size(13)
-      .on_key_down((e, cx) => this.key(e, cx))
+      .on_key_down((e, cx) => this.keyDown(e, cx))
       .on_mouse_down_out((_e, cx) => this.pressOutside(cx))
       .on_mouse_down("left", () => {
         if (!this.filtering && !this.modal) this.handle.focus();
@@ -1052,12 +1214,15 @@ export default class Board extends View {
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
     const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
+    // Marked while it has the keyboard (Tab).
+    const panel = this.panelOf(view);
     return v_flex()
+      .id("detail")
       .w(360)
       .flex_none()
       .bg(t.chrome)
       .border_l(1)
-      .border_color(t.border)
+      .border_color(panel ? t.accent : t.border)
       .child(
         v_flex()
           .px(18)
@@ -1090,6 +1255,7 @@ export default class Board extends View {
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
       .children(parts.sections ?? [])
+      .when(this.readsDetails(item), (el) => el.child(detailsSections(this, t, mono, view, this.detailsOf(view, item), panel?.line ?? null)))
       .child(
         detailSection(
           t,
@@ -1132,6 +1298,15 @@ export default class Board extends View {
       );
   }
 
+  // The details panel's keys, where the details of an item with read
+  // details show: Tab into it, and in it its own.
+  panelHints(view) {
+    const st = this.state(view.id);
+    if (!st.detail || !this.readsDetails(this.selected(view))) return [];
+    if (!this.panelOf(view)) return [["Tab", "Unteraufgaben"]];
+    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+  }
+
   // The keys of what shows: the top bar's (a team's v), then those of the
   // shown view's shape.
   hints(t, view) {
@@ -1139,7 +1314,7 @@ export default class Board extends View {
     const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
     const switches = hasViewSwitch(context) ? [["v", viewSwitchHint(context)]] : [];
     const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", "schließen"]];
-    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...always];
+    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...(view ? this.panelHints(view) : []), ...always];
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

@@ -300,6 +300,80 @@ export function parseGithubList(json, view, errors = []) {
   return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
 }
 
+// How many sub-issues and linked pull requests an issue's details read.
+export const SUB_ISSUES = 50;
+export const LINKED_PRS = 20;
+
+// One GraphQL request for the details of an issue: its sub-issues (the
+// first SUB_ISSUES, the count of all and of the completed ones) and the pull
+// requests linked to it. closedByPullRequestsReferences is GitHub's field for
+// the pull requests that close the issue when merged: those linked by a
+// closing keyword in their text and those linked by hand in the issue's
+// Development sidebar ("List of open pull requests referenced from this
+// issue", docs.github.com/en/graphql/reference/issues; userLinkedOnly and
+// excludeUserLinked pick one of the two kinds). It lists open ones only
+// unless includeClosedPrs, which adds the merged and closed ones. A pull
+// request that only mentions the issue is not in it.
+export const DETAILS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      subIssuesSummary { total completed }
+      subIssues(first: ${SUB_ISSUES}) { totalCount nodes { number title state url repository { nameWithOwner } } }
+      closedByPullRequestsReferences(first: ${LINKED_PRS}, includeClosedPrs: true) {
+        totalCount nodes { number title state isDraft url repository { nameWithOwner } }
+      }
+    }
+  }
+}`;
+
+export function githubDetailsArgs(item) {
+  const [owner, name] = item.repo.split("/");
+  return ["api", "graphql", "-f", `query=${DETAILS_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
+}
+
+// A sub-issue or a linked pull request as a line of the details: kind
+// ("issue" or "pr"), its repo, number, title, url, state ("open", "closed"
+// or, for a pull request, "merged") and draft.
+function relatedLine(node, kind) {
+  const repo = node.repository?.nameWithOwner ?? "";
+  return {
+    kind,
+    source: "github",
+    repo,
+    repoShort: repo.split("/").pop(),
+    number: node.number,
+    title: node.title ?? "(kein Zugriff)",
+    url: node.url ?? null,
+    state: String(node.state ?? "").toLowerCase(),
+    draft: node.isDraft === true,
+  };
+}
+
+// gh's answer for githubDetailsArgs (and the GraphQL errors that came with
+// its data) → { subIssues: { total, completed, count, lines }, prs: { count,
+// lines } } (total and completed: subIssuesSummary's; count: how many GitHub
+// has; lines: those it sent). A missing issue is explained by the error at
+// its path.
+export function parseGithubDetails(json, item, errors = []) {
+  const issue = json?.data?.repository?.issue;
+  if (!issue) {
+    const e = errorAt(errors, ["repository"]);
+    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
+  }
+  const subs = issue.subIssues ?? {};
+  const prs = issue.closedByPullRequestsReferences ?? {};
+  const nodes = (c) => (c.nodes ?? []).filter((n) => Number.isInteger(n?.number));
+  return {
+    subIssues: {
+      total: issue.subIssuesSummary?.total ?? 0,
+      completed: issue.subIssuesSummary?.completed ?? 0,
+      count: subs.totalCount ?? 0,
+      lines: nodes(subs).map((n) => relatedLine(n, "issue")),
+    },
+    prs: { count: prs.totalCount ?? 0, lines: nodes(prs).map((n) => relatedLine(n, "pr")) },
+  };
+}
+
 // gh's network failures, as Go's net package and gh word them. NOT_SENT: the
 // request never reached GitHub (gh prints a failed DNS lookup as "error
 // connecting to <host>"; a failed dial, refused or timed out, never
@@ -363,12 +437,20 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // The GitHub source for the board: the name of the site `o` opens, why
 // "nur meine" cannot tell one's own items when GitHub did not name the
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
-// gives its hidden columns) and how a board writes a move. gh runs by the
-// path `paths` (toolPaths) finds.
+// gives its hidden columns) and how a board writes a move; and the details
+// of an item it reads when they open (`reads(item)`: whether it has any, an
+// issue's; `load(item)`). gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
+    details: {
+      reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
+      async load(item) {
+        const { json, errors } = await gh(paths, githubDetailsArgs(item));
+        return parseGithubDetails(json, item, errors);
+      },
+    },
     views: {
       board: {
         async load(view, hiddenFor) {
