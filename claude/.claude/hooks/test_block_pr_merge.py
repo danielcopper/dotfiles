@@ -542,6 +542,7 @@ PATHOLOGICAL = [
     ": {" + "a," * 40_000 + " ; gh pr {m..m}erge 3",
     "gh pr view " + '"$N" ' * 19_000,
     "a=b; " * 19_000 + "echo $?",
+    "echo\n" + "\n" * 99_000,
 ]
 
 

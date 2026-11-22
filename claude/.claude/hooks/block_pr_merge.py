@@ -23,7 +23,7 @@ FEEDER = re.compile(r"(?<![\w.-])(xargs|parallel)(?![\w.-])")
 EVAL = re.compile(r"(?<![\w.-])eval(?![\w.-])")
 SHELL_WORD = re.compile(r"(?<![\w.-])(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
 SHELL_C_CLUSTER = re.compile(r"(?<!\S)-[a-z]*c[a-z]*(?!\S)")
-SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])\s*(?:source|\.)(?=\s)")
+SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])[^\S\n]*(?:source|\.)(?=\s)")
 PIPE_INTO_SHELL = re.compile(r"\|\s*(?:\S*/)?(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
 # Where a request body can merge: gh api, curl, wget, and az rest, devops invoke and repos pr.
 BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
