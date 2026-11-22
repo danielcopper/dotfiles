@@ -60,13 +60,15 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     - holds such a construct in a simple command that runs `gh`, `az`, `curl` or `wget` (its command word, past
       `NAME=value` assignments, the keywords `do`, `then`, `else`, `elif`, `if`, `while`, `until`, `!` and `{`, and
       the wrappers `sudo`, `env`, `timeout`, `nice`, `nohup`, `command`, `exec`, `time`, `stdbuf`, `setsid`,
-      `ionice` and `doas` with their options), outside that command's output-redirection targets; or as the
-      command word of any simple command, or in a simple command with a redirection before its command word,
-      while the text names one of those tools. A simple command ends at an unquoted `;`, `|`, `&`, newline,
-      parenthesis or backtick, and a `$( )`, `<( )`, `>( )` or backtick substitution is one of its own. When the
-      text cannot be cut so (open quoting, an unclosed substitution), or names `gh`, `az`, `curl` or `wget` other
-      than as an unquoted command word — as an argument, an assignment value, in quotes — the rule reads the
-      whole text instead: any such construct counts. Both run-time rules leave out the parameters named below;
+      `ionice` and `doas` with the `NAME=value` assignments after them and timeout's duration), outside that
+      command's output-redirection targets; or as the command word of any simple command, or in a simple command
+      with a redirection before its command word, while the text names one of those tools. A simple command ends
+      at an unquoted `;`, `|`, `&`, newline, parenthesis or backtick, and a `$( )`, `<( )`, `>( )` or backtick
+      substitution is one of its own. When the text cannot be cut so (open quoting, an unclosed substitution),
+      names `gh`, `az`, `curl` or `wget` other than as an unquoted command word — as an argument, an assignment
+      value, in quotes — or holds a wrapper followed by an option (its argument may be the next word, and
+      `command -v` does not run the command), the rule reads the whole text instead: any such construct counts.
+      Both run-time rules leave out the parameters named below;
     - is nested too deep, too long or holds too many substitutions to check.
 
     The two run-time rules do not read the body of a heredoc with a quoted delimiter (`<<'D'`, `<<"D"`, `<<\D`,

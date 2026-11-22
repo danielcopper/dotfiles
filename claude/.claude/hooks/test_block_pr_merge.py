@@ -627,6 +627,19 @@ DENIED = [
     "gh api graphql -f query='#>'\"$Q\"",
     'gh api graphql -f query="#>$Q"',
     'gh pr "x >$X"',
+    # a wrapper's option may take the next word, or the wrapper may not run its argument: the
+    # whole text counts
+    "gh pr view 1; sudo -u me $G pr view 1",
+    "gh pr view 1; nice -n 5 $G api -X PUT x",
+    "gh pr view 1; timeout -k 1 5 $G api -X PUT x",
+    "gh pr view 1; timeout -s KILL 5 $G api -X PUT x",
+    "gh pr view 1; ionice -c 2 $G api -X PUT x",
+    "gh pr view 1; env -u X $G api -X PUT x",
+    "gh pr view 1; exec -a x $G api -X PUT x",
+    "G=$(command -v gh); watch $G api -X PUT x",
+    "G=$(command -V gh); coproc $G api -X PUT x",
+    "G=$(command -v gh); ssh host $G api -X PUT x",
+    "G=$(command -v gh); flock f $G api -X PUT x",
 ]
 
 REASONS = {

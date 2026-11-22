@@ -711,8 +711,10 @@ def without_output_targets(raw: str) -> str:
 
 def command_word_index(words: list[Token]) -> int | None:
     """Index of the word a simple command runs: past assignments, the keywords in KEYWORDS, and
-    the WRAPPERS with their options (and timeout's duration). The length of *words* when only
-    assignments stand there; None when a redirection comes first."""
+    the WRAPPERS with the assignments after them (and timeout's duration). The length of *words*
+    when only assignments stand there; None when a redirection comes first. ValueError when a
+    wrapper takes an option: its argument may be the next word, or the wrapper may not run the
+    command at all (`command -v`)."""
     i = 0
     while i < len(words):
         word = words[i]
@@ -725,12 +727,10 @@ def command_word_index(words: list[Token]) -> int | None:
         if name not in WRAPPERS:
             return i
         i += 1
-        while (
-            i < len(words)
-            and not words[i].op
-            and (words[i].text.startswith("-") or ASSIGNMENT.match(words[i].text))
-        ):
+        while i < len(words) and not words[i].op and ASSIGNMENT.match(words[i].text):
             i += 1
+        if i < len(words) and words[i].text.startswith("-"):
+            raise ValueError("a wrapper option")
         if name == "timeout" and i < len(words) and DURATION.fullmatch(words[i].text):
             i += 1
     return len(words)
@@ -752,11 +752,11 @@ def network_runtime_by_command(command: str) -> bool | None:
     for raw in parts:
         try:
             words, _ = shell_tokens(raw)
+            at = command_word_index(words)
         except ValueError:
             return None
         if not words:
             continue
-        at = command_word_index(words)
         runs = False
         for k, word in enumerate(words):
             if word.op or not NETWORK.search(stripped(word.text).lower()):
