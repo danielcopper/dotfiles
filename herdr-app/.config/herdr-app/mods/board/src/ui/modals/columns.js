@@ -5,7 +5,7 @@
 // are now, so a toggle shows at once.
 
 import { div } from "gpui-kit";
-import { menu, menuKey } from "../helpers.js";
+import { columnColor, menu, menuKey } from "../helpers.js";
 
 // The view's columns, all of them, in the board's order.
 const columnsOf = (b, m) => b.state(m.view.id).data?.columns ?? [];
@@ -31,7 +31,7 @@ export const columnsModal = {
       pick: (i, cx) => toggleAt(b, m, i, cx),
       rows: columnsOf(b, m).map((c) => [
         div().w(14).text_color(t.foreground).child(c.hidden ? "" : "✓"),
-        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().size(9).flex_none().rounded(5).bg(columnColor(t, c)),
         div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
         div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
         div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),

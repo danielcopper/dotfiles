@@ -64,9 +64,9 @@
 // index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
-// ui/helpers.js, ui/tones.js (the board's colors), ui/layer.js (the board
-// layer), ui/related.js (the related
-// items as drawn), ui/shapes/ (how a view's
+// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
+// background, the tints), ui/layer.js (the board layer), ui/related.js
+// (the related items as drawn), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
 // data logic is plain exported functions, tested with a few UI paths by
@@ -75,7 +75,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, layout, nextCommand, notify, props, readTextFile, run, settings, spaces, theme } from "herdr";
-import { MOD, CONFIG_NAME, errorText, firstLine, itemKey, itemLabel, parentLabel, report, updatedLabel } from "./shared.js";
+import { MOD, CONFIG_NAME, cardType, errorText, firstLine, itemKey, itemLabel, parentLabel, report, updatedLabel } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
@@ -1257,8 +1257,8 @@ export default class Board extends View {
               .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von ${parentLabel(item)}`)))
               .when(Boolean(item.sub), (el) => el.child(div().text_size(12).text_color(t.muted).child(`◔ ${item.sub?.done}/${item.sub?.total} erledigt`))),
           )
-          .when((item.labels ?? []).length > 0 || Boolean(item.type), (el) =>
-            el.child(div().text_size(12).text_color(t.muted).child([item.type, ...(item.labels ?? [])].filter(Boolean).join(" · "))),
+          .when((item.labels ?? []).length > 0 || Boolean(cardType(item)), (el) =>
+            el.child(div().text_size(12).text_color(t.muted).child([cardType(item), ...(item.labels ?? [])].filter(Boolean).join(" · "))),
           )
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )

@@ -6,8 +6,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, itemLabel } from "../../shared.js";
-import { checkColor, detailSection, shownOf } from "../helpers.js";
-import { selectedBg } from "../tones.js";
+import { checkColor, detailSection, selectedLook, shownOf } from "../helpers.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -61,8 +60,7 @@ function drawPrs(b, t, mono, view, st) {
       .py(8)
       .items_center()
       .border_l(2)
-      .border_color(selected ? t.accent : t.background)
-      .when(selected, (el) => el.bg(selectedBg(t)))
+      .map(selectedLook(t, selected, t.background))
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {

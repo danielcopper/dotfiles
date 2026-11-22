@@ -24,8 +24,7 @@ import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { cardEdge, chip, columnHead, sessionChip, shownOf, workItemDetail } from "../helpers.js";
-import { selectedBg } from "../tones.js";
+import { cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, workItemDetail } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -129,7 +128,7 @@ function drawSprint(b, t, mono, view, st) {
       div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
         .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
     )
-    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length)).flex_1().min_w(0)));
+    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
@@ -170,8 +169,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
     .p(6)
     .rounded(8)
     .border_1()
-    .border_color(selected ? t.accent : t.background)
-    .when(selected, (el) => el.bg(selectedBg(t)))
+    .map(selectedLook(t, selected, t.background))
     .opacity(shown ? (st.pending[story.key] ? 0.7 : 1) : 0.5)
     .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
@@ -201,8 +199,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     .gap(7)
     .rounded(8)
     .border_1()
-    .border_color(selected ? t.accent : t.border)
-    .bg(selected ? selectedBg(t) : t.background)
+    .map(selectedLook(t, selected, t.border, t.background))
     .opacity(st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_click((_e, cx) => {

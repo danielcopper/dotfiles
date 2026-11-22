@@ -21,8 +21,7 @@ import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/
 import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
 import { MODALS } from "../modals/index.js";
-import { chip, sessionChip, shownOf, workItemDetail } from "../helpers.js";
-import { selectedBg } from "../tones.js";
+import { chip, selectedLook, sessionChip, shownOf, workItemDetail } from "../helpers.js";
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -125,8 +124,7 @@ function drawBacklog(b, t, mono, view, st) {
       .py(7)
       .items_center()
       .border_l(2)
-      .border_color(selected ? t.accent : t.background)
-      .when(selected, (el) => el.bg(selectedBg(t)))
+      .map(selectedLook(t, selected, t.background))
       .opacity(st.pending[r.key] ? 0.7 : 1)
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))

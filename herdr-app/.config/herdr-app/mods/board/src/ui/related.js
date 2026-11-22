@@ -14,7 +14,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { itemLabel } from "../shared.js";
 import { descriptionLines, prsHead, relatedLines, subIssuesHead } from "../related.js";
-import { chip, sectionFrame, sectionTitle } from "./helpers.js";
+import { chip, sectionFrame, sectionTitle, selectedLook } from "./helpers.js";
 
 // What the related items keep per Board, made when it starts (why then:
 // ui/shapes/index.js): the lines' scroll handle.
@@ -81,10 +81,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .items_center()
       .rounded(6)
       .border_1()
-      .border_color(marked ? t.accent : t.chrome)
+      .map(selectedLook(t, marked, t.chrome))
       .cursor_pointer()
       .opacity(line.done ? 0.55 : 1)
-      .when(marked, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
         if (!b.modal) b.pickLine(view, n, cx);

@@ -66,9 +66,9 @@
 // index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
-// ui/helpers.js, ui/tones.js (the board's colors), ui/layer.js (the board
-// layer), ui/related.js (the related
-// items as drawn), ui/shapes/ (how a view's
+// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
+// background, the tints), ui/layer.js (the board layer), ui/related.js
+// (the related items as drawn), ui/shapes/ (how a view's
 // data is drawn and worked: board, prs, sprint, backlog, placeholder),
 // ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
 // data logic is plain exported functions, tested with a few UI paths by
@@ -81,7 +81,8 @@ import { appHome, checking, exec, focused, home, knownAgents, layout, machines, 
 // ==== src/shared.js ====
 
 // What the board's modules share: its names, its error and how one is
-// shown, small checks and text helpers, an item's key, and labels for times.
+// shown, small checks and text helpers, an item's key and type, and labels
+// for times.
 
 export const MOD = "board";
 // The config's base name; the extension is added where the path is built.
@@ -135,6 +136,19 @@ export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
+
+// An item that is an Epic by its title alone: "[Epic] …", the convention of
+// a project without issue types.
+const EPIC_TITLE = /^\[epic\]/i;
+
+// An item's type as the board names it: its own (an issue type, a work item
+// type), else "Epic" for an Epic by its title; null for none.
+export const cardType = (item) => item.type ?? (EPIC_TITLE.test(item.title ?? "") ? "Epic" : null);
+
+// The label whose color an Epic by its title alone takes for its type's
+// marker: its "epic" label, whatever its case; null for another item.
+export const epicLabel = (item) =>
+  (!item.type && cardType(item) ? (item.labels ?? []).find((l) => l.toLowerCase() === "epic") ?? null : null);
 
 export function updatedLabel(at, now) {
   if (!at) return "";
@@ -2570,37 +2584,68 @@ export const layers = { boardLayer, showTab, leaveLayer };
 
 // ==== src/ui/tones.js ====
 
-// The board's colors, their one home: which theme color (a tone: a theme
-// name such as "ansi4" or "muted") a label, an issue type and a status
-// take, and the tints the board draws with. Everything is a theme name or
-// a tint of one, so a theme with other colors, or with surfaces of its own,
-// changes the board with it.
+// The tone (a theme name such as "ansi4" or "muted") a label's chip takes,
+// by its GitHub color's hue, and an issue type's, by its named color, with
+// the color an Epic by its title takes (which items are one: cardType and
+// epicLabel in shared.js); the selected background and a column head's;
+// how strong the chip, head and selected tints are; and tint, which the
+// rest of the board tints with too. Which theme name a status or a state
+// has, its source says (GITHUB_COLORS, CATEGORY_COLORS); the selected look,
+// border and background, is selectedLook in helpers.js. Everything is a
+// theme name or a tint of one, so a theme with other colors, or with
+// surfaces of its own, changes the board with it.
 
 // How strong a tint is (the alpha byte after #rrggbb): a chip's background
 // (CHIP_ALPHA, under text in the chip's own tone), a column head's
 // (HEAD_ALPHA, under its name and its muted count) and a selected card's or
-// row's (SELECTED_ALPHA, under the card's chips). Measured against the
-// copper themes: that text stays at 4.5:1 or more, a chip's over a card and
-// over a selected one, a head's over the column, in copper-dark and
+// row's (SELECTED_ALPHA, under its text and chips). Measured against the
+// copper themes with the surfaces herdr derives for them: that text stays at
+// 4.5:1 or more on every ground the shapes draw it on, in copper-dark and
 // copper-light (board.test.mjs).
 export const CHIP_ALPHA = "1a";
 export const HEAD_ALPHA = "14";
 export const SELECTED_ALPHA = "14";
 
-const HEX = /^#[0-9a-f]{6}$/i;
+// A theme color: #rrggbb, or #rrggbbaa (herdr's translucent surfaces); OPAQUE
+// only the first.
+const HEX = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i;
+const OPAQUE = /^#[0-9a-f]{6}$/i;
+const channels = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
-// `hex` with `alpha`, where it is a #rrggbb color; anything else (a theme
-// color with alpha of its own, a missing one) gives `fallback`.
-export const tintOr = (hex, alpha, fallback) => (HEX.test(hex ?? "") ? `${hex}${alpha}` : fallback);
+// `hex` with `alpha`: its first six digits, so a color with alpha of its own
+// takes this one instead; anything else gives `fallback` (by default `hex`
+// as it is).
+export const tint = (hex, alpha, fallback = hex) => (HEX.test(hex ?? "") ? `${hex.slice(0, 7)}${alpha}` : fallback);
 
-// A selected card's or row's background, in every shape alike: a tint of
-// the accent, whose border marks it too. The theme's `selected` would equal
-// `raised` in some themes, and a chip on it would vanish.
-export const selectedBg = (t) => tintOr(t.accent, SELECTED_ALPHA, t.selected);
+// `top` (its first six digits) at `alpha` laid over the opaque `ground`, as
+// an opaque #rrggbb: the same color whatever lies under it. `fallback` where
+// `top` is no color or `ground` no opaque one.
+export function layered(top, alpha, ground, fallback) {
+  if (!HEX.test(top ?? "") || !OPAQUE.test(ground ?? "")) return fallback;
+  const a = parseInt(alpha, 16) / 255;
+  const under = channels(ground);
+  return `#${channels(top).map((c, i) => Math.round(c * a + under[i] * (1 - a)).toString(16).padStart(2, "0")).join("")}`;
+}
+
+// A selected card's or row's background, in every shape alike: the accent
+// tinted over the theme's background, opaque, so its chips read the same on
+// a column's chrome as on the board; the accent border marks it too
+// (selectedLook, helpers.js). Without an accent or a background to lay it
+// on, the theme's `selected`. That one would not do as the rule: it equals
+// `raised` in copper-dark, and a chip on it vanishes.
+export const selectedBg = (t) => layered(t.accent, SELECTED_ALPHA, t.background, t.selected);
+
+// A column head's background: its `color` tinted over the `ground` the
+// head stands on (a column's chrome, the Sprint's background), opaque, so a
+// column that changes its own ground (a drop target) leaves the head as it
+// is. Without an opaque ground, the translucent tint; without a color,
+// `raised`.
+export const headBg = (t, color, ground) => layered(color, HEAD_ALPHA, ground, tint(color, HEAD_ALPHA, t.raised));
 
 // The tones a label or type can take: the theme's red, green, yellow, blue,
-// violet and teal. Their bright variants (ansi9 to ansi14) read too weak as
-// text on a light theme's card.
+// violet and teal. Not their bright variants (ansi9 to ansi14): in
+// copper-light each reads below 4.5:1 as chip text on a selected card
+// (ansi14 2.97, ansi11 3.12).
 export const HUE_TONES = ["ansi1", "ansi2", "ansi3", "ansi4", "ansi5", "ansi6"];
 // Below this OKLCH chroma a color counts as grey: it takes "muted".
 export const GREY_CHROMA = 0.03;
@@ -2608,25 +2653,26 @@ export const GREY_CHROMA = 0.03;
 const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 const seen = new Map();
 
-// A #rrggbb color's OKLCH chroma and hue (degrees), or null for anything
-// else.
+// A color's OKLCH chroma and hue (degrees), from its first six digits; null
+// for no #rrggbb[aa].
 export function oklch(hex) {
   if (!HEX.test(hex ?? "")) return null;
-  if (seen.has(hex)) return seen.get(hex);
-  const [r, g, b] = [1, 3, 5].map((i) => linear(parseInt(hex.slice(i, i + 2), 16) / 255));
+  const key = hex.toLowerCase();
+  if (seen.has(key)) return seen.get(key);
+  const [r, g, b] = channels(hex).map((c) => linear(c / 255));
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
   const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
   const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
   const found = { c: Math.hypot(a, bb), h: ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360 };
-  seen.set(hex, found);
+  seen.set(key, found);
   return found;
 }
 
 // The tone of a color from outside the theme (a GitHub label's): the
 // HUE_TONES color of the theme `t` nearest to it by OKLCH hue; a grey one
-// (GREY_CHROMA), one that is no #rrggbb, or a theme without those colors
+// (GREY_CHROMA), one that is no color, or a theme without those colors
 // gives "muted".
 export function hueTone(t, hex) {
   const own = oklch(hex);
@@ -2642,31 +2688,23 @@ export function hueTone(t, hex) {
   return best;
 }
 
-// The tone text takes for a source's color name (a column's or a type's,
-// from GITHUB_COLORS or Azure's categories): a bright variant becomes its
-// HUE_TONES color (ansi11 → ansi3), the rest stays.
+// The tone of an issue type's chip for its named color, the theme name
+// GITHUB_COLORS gives it: a bright variant becomes its HUE_TONES color
+// (ORANGE's ansi11 → ansi3, PINK's ansi13 → ansi5), the rest stays.
 export function chipTone(name) {
   const n = /^ansi(9|1[0-4])$/.exec(name ?? "")?.[1];
   return n ? `ansi${Number(n) - 8}` : name;
 }
 
-// An item that is an Epic by its title alone: "[Epic] …", the convention of
-// a project without issue types.
-const EPIC_TITLE = /^\[epic\]/i;
-
-// An item's type as the board marks it: its own (an issue type, a work item
-// type), else "Epic" for an Epic by its title; null for none.
-export const cardType = (item) => item.type ?? (EPIC_TITLE.test(item.title ?? "") ? "Epic" : null);
-
 // The tone of an item's type marker in the theme `t`, or null for a type
 // without a color (it keeps the plain chip). An issue type's own color
 // (typeColor) wins; an Epic by its title alone takes its "epic" label's
-// color, the owner's pick on GitHub (hueTone), and "muted" without such a
-// label.
+// color (epicLabel), the owner's pick on GitHub, by hue (hueTone), and
+// "muted" without such a label.
 export function typeTone(t, item) {
   if (item.type) return item.typeColor ? chipTone(item.typeColor) : null;
   if (!cardType(item)) return null;
-  const label = (item.labels ?? []).find((l) => l.toLowerCase() === "epic");
+  const label = epicLabel(item);
   return label ? hueTone(t, item.labelColors?.[label]) : "muted";
 }
 
@@ -2675,9 +2713,10 @@ export function typeTone(t, item) {
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu and its keys, a detail
-// section, a check's color, a status pill, a column's head, a card's edge,
-// a card's chip in a tone, for a label, for its type and for a session).
-// Which colors they take: tones.js.
+// section, a check's color, a status pill, a column's color and head, a
+// card's edge, a selected card's or row's look, a card's chip in a tone, for
+// a label, for its type and for a session). Which tones and tints they take:
+// tones.js.
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -2712,7 +2751,6 @@ export function migrateShownView() {
   store.set("view", null);
 }
 
-export const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
 export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
@@ -2914,19 +2952,20 @@ export function statusPill(t, label, color, open) {
     .child(`${label} ▾`);
 }
 
-// A column's color: its theme color, "muted" where the theme has none.
+// A column's color (a column of a board or a Sprint, a status menu's
+// target): its theme color, "muted" where the theme has none.
 export const columnColor = (t, col) => t[col.color] ?? t.muted;
 
-// A column's head, on a tint of its color: its color as a dot, its name and
-// `count`.
-export const columnHead = (t, col, count) =>
+// A column's head, on a tint of its color laid over the `ground` it stands
+// on (headBg): its color as a dot, its name and `count`.
+export const columnHead = (t, col, count, ground) =>
   h_flex()
     .gap(6)
     .px(8)
     .py(4)
     .rounded(6)
     .items_center()
-    .bg(tintOr(columnColor(t, col), HEAD_ALPHA, t.raised))
+    .bg(headBg(t, columnColor(t, col), ground))
     .child(div().size(9).flex_none().rounded(5).bg(columnColor(t, col)))
     .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
     .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
@@ -2935,13 +2974,20 @@ export const columnHead = (t, col, count) =>
 // card's content beside it.
 export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
 
+// A card's or row's look as selected or not, in every shape alike, for an
+// element's map(): a selected one has the accent border and selectedBg; one
+// that is not has the border `rest` and the background `restBg` (none: it
+// keeps its own).
+export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
+  el.border_color(selected ? t.accent : rest).when(selected || Boolean(restBg), (e) => e.bg(selected ? selectedBg(t) : restBg));
+
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
 // A chip in a `tone` (a theme name): `text` in that color on a tint of it.
 // A tone the theme does not have gives the plain chip (chip's defaults); one
 // it cannot tint, its text on `raised`.
-export const toneChip = (t, text, tone) => chip(t, text, t[tone], tintOr(t[tone], CHIP_ALPHA, t.raised));
+export const toneChip = (t, text, tone) => chip(t, text, t[tone], tint(t[tone], CHIP_ALPHA, t.raised));
 
 // A card's chip for its label `name`, in the label's color brought onto the
 // theme (hueTone).
@@ -3355,7 +3401,7 @@ export const columnsModal = {
       pick: (i, cx) => toggleAt(b, m, i, cx),
       rows: columnsOf(b, m).map((c) => [
         div().w(14).text_color(t.foreground).child(c.hidden ? "" : "✓"),
-        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().size(9).flex_none().rounded(5).bg(columnColor(t, c)),
         div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
         div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
         div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
@@ -3764,7 +3810,7 @@ export const statusModal = {
       at: m.at,
       pick: (i, cx) => pickTarget(b, m, i, cx),
       rows: m.targets.map((c) => [
-        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().size(9).flex_none().rounded(5).bg(columnColor(t, c)),
         div().flex_1().child(c.name),
         ...(c.hidden ? [div().text_size(11).text_color(t.dim).child("ausgeblendet")] : []),
       ]),
@@ -3903,8 +3949,7 @@ function drawBacklog(b, t, mono, view, st) {
       .py(7)
       .items_center()
       .border_l(2)
-      .border_color(selected ? t.accent : t.background)
-      .when(selected, (el) => el.bg(selectedBg(t)))
+      .map(selectedLook(t, selected, t.background))
       .opacity(st.pending[r.key] ? 0.7 : 1)
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
@@ -4086,7 +4131,10 @@ function drawBoard(b, t, mono, view, st) {
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
-    const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length));
+    // The column's ground, which its head is laid over too; a drop target
+    // takes another.
+    const ground = t.chrome;
+    const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), ground);
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -4099,7 +4147,7 @@ function drawBoard(b, t, mono, view, st) {
       .rounded(10)
       .border_1()
       .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
-      .bg(target ? t.selected : t.chrome)
+      .bg(target ? t.selected : ground)
       .p(10)
       .on_hover((hovered, cx) => {
         if (!b.drag) return;
@@ -4176,13 +4224,16 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-// A card in its column `col`: its left edge in the column's color, its
-// key, title and chips (its type, labels, sub-issues, assignees, session).
+// A card in its column `col`: its left edge in the column's color, its key,
+// its title, and a line of its type and labels as chips (not the label an
+// Epic by its title takes its type's color from: epicLabel), its
+// sub-issues' count, its assignees and its session's chip.
 function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const session = linkedSession(card, allSpaces);
   const type = typeChip(t, card);
+  const labels = card.labels.filter((l) => l !== epicLabel(card));
   return h_flex()
     .id(`card-${card.key}`)
     .flex_none()
@@ -4193,8 +4244,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
     .gap(7)
     .rounded(8)
     .border_1()
-    .border_color(selected ? t.accent : t.border)
-    .bg(selected ? selectedBg(t) : t.background)
+    .map(selectedLook(t, selected, t.border, t.background))
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_mouse_down("left", (_e, cx) => {
@@ -4232,8 +4282,8 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
           .flex_wrap()
           .items_center()
           .when(Boolean(type), (el) => el.child(type))
-          .children(card.labels.slice(0, 3).map((l) => labelChip(t, card, l)))
-          .when(card.labels.length > 3, (el) => el.child(chip(t, `+${card.labels.length - 3}`)))
+          .children(labels.slice(0, 3).map((l) => labelChip(t, card, l)))
+          .when(labels.length > 3, (el) => el.child(chip(t, `+${labels.length - 3}`)))
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
           .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
           .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
@@ -4345,8 +4395,7 @@ function drawPrs(b, t, mono, view, st) {
       .py(8)
       .items_center()
       .border_l(2)
-      .border_color(selected ? t.accent : t.background)
-      .when(selected, (el) => el.bg(selectedBg(t)))
+      .map(selectedLook(t, selected, t.background))
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
@@ -4501,7 +4550,7 @@ function drawSprint(b, t, mono, view, st) {
       div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
         .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
     )
-    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length)).flex_1().min_w(0)));
+    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
@@ -4542,8 +4591,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
     .p(6)
     .rounded(8)
     .border_1()
-    .border_color(selected ? t.accent : t.background)
-    .when(selected, (el) => el.bg(selectedBg(t)))
+    .map(selectedLook(t, selected, t.background))
     .opacity(shown ? (st.pending[story.key] ? 0.7 : 1) : 0.5)
     .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
@@ -4573,8 +4621,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     .gap(7)
     .rounded(8)
     .border_1()
-    .border_color(selected ? t.accent : t.border)
-    .bg(selected ? selectedBg(t) : t.background)
+    .map(selectedLook(t, selected, t.border, t.background))
     .opacity(st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_click((_e, cx) => {
@@ -4706,10 +4753,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .items_center()
       .rounded(6)
       .border_1()
-      .border_color(marked ? t.accent : t.chrome)
+      .map(selectedLook(t, marked, t.chrome))
       .cursor_pointer()
       .opacity(line.done ? 0.55 : 1)
-      .when(marked, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
         if (!b.modal) b.pickLine(view, n, cx);
@@ -5858,8 +5904,8 @@ export default class Board extends View {
               .when(Boolean(item.parent), (el) => el.child(div().text_size(12).text_color(t.muted).child(`Teil von ${parentLabel(item)}`)))
               .when(Boolean(item.sub), (el) => el.child(div().text_size(12).text_color(t.muted).child(`◔ ${item.sub?.done}/${item.sub?.total} erledigt`))),
           )
-          .when((item.labels ?? []).length > 0 || Boolean(item.type), (el) =>
-            el.child(div().text_size(12).text_color(t.muted).child([item.type, ...(item.labels ?? [])].filter(Boolean).join(" · "))),
+          .when((item.labels ?? []).length > 0 || Boolean(cardType(item)), (el) =>
+            el.child(div().text_size(12).text_color(t.muted).child([cardType(item), ...(item.labels ?? [])].filter(Boolean).join(" · "))),
           )
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )

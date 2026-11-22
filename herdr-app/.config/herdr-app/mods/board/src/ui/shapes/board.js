@@ -11,13 +11,12 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { itemLabel } from "../../shared.js";
+import { epicLabel, itemLabel } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
-import { button, cardEdge, chip, columnHead, labelChip, sessionChip, shownOf, statusPill, store, typeChip } from "../helpers.js";
-import { selectedBg } from "../tones.js";
+import { button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip } from "../helpers.js";
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -92,7 +91,10 @@ function drawBoard(b, t, mono, view, st) {
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
-    const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length));
+    // The column's ground, which its head is laid over too; a drop target
+    // takes another.
+    const ground = t.chrome;
+    const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), ground);
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -105,7 +107,7 @@ function drawBoard(b, t, mono, view, st) {
       .rounded(10)
       .border_1()
       .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
-      .bg(target ? t.selected : t.chrome)
+      .bg(target ? t.selected : ground)
       .p(10)
       .on_hover((hovered, cx) => {
         if (!b.drag) return;
@@ -182,13 +184,16 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-// A card in its column `col`: its left edge in the column's color, its
-// key, title and chips (its type, labels, sub-issues, assignees, session).
+// A card in its column `col`: its left edge in the column's color, its key,
+// its title, and a line of its type and labels as chips (not the label an
+// Epic by its title takes its type's color from: epicLabel), its
+// sub-issues' count, its assignees and its session's chip.
 function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const session = linkedSession(card, allSpaces);
   const type = typeChip(t, card);
+  const labels = card.labels.filter((l) => l !== epicLabel(card));
   return h_flex()
     .id(`card-${card.key}`)
     .flex_none()
@@ -199,8 +204,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
     .gap(7)
     .rounded(8)
     .border_1()
-    .border_color(selected ? t.accent : t.border)
-    .bg(selected ? selectedBg(t) : t.background)
+    .map(selectedLook(t, selected, t.border, t.background))
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .on_mouse_down("left", (_e, cx) => {
@@ -238,8 +242,8 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
           .flex_wrap()
           .items_center()
           .when(Boolean(type), (el) => el.child(type))
-          .children(card.labels.slice(0, 3).map((l) => labelChip(t, card, l)))
-          .when(card.labels.length > 3, (el) => el.child(chip(t, `+${card.labels.length - 3}`)))
+          .children(labels.slice(0, 3).map((l) => labelChip(t, card, l)))
+          .when(labels.length > 3, (el) => el.child(chip(t, `+${labels.length - 3}`)))
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
           .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
           .when(Boolean(session), (el) => el.child(sessionChip(t, session))),

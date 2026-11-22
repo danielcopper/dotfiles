@@ -4,7 +4,7 @@
 // key, targets, at }.
 
 import { div } from "gpui-kit";
-import { menu, menuKey } from "../helpers.js";
+import { columnColor, menu, menuKey } from "../helpers.js";
 
 // Moves the card to the target at `i`, or does what the view's shape does
 // with a pick (pickStatus).
@@ -26,7 +26,7 @@ export const statusModal = {
       at: m.at,
       pick: (i, cx) => pickTarget(b, m, i, cx),
       rows: m.targets.map((c) => [
-        div().size(9).flex_none().rounded(5).bg(t[c.color] ?? t.muted),
+        div().size(9).flex_none().rounded(5).bg(columnColor(t, c)),
         div().flex_1().child(c.name),
         ...(c.hidden ? [div().text_size(11).text_color(t.dim).child("ausgeblendet")] : []),
       ]),

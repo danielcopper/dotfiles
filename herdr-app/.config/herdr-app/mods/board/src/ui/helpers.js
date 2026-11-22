@@ -1,18 +1,19 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu and its keys, a detail
-// section, a check's color, a status pill, a column's head, a card's edge,
-// a card's chip in a tone, for a label, for its type and for a session).
-// Which colors they take: tones.js.
+// section, a check's color, a status pill, a column's color and head, a
+// card's edge, a selected card's or row's look, a card's chip in a tone, for
+// a label, for its type and for a session). Which tones and tints they take:
+// tones.js.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { layout, panes, spaces } from "herdr";
-import { MOD } from "../shared.js";
+import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
-import { CHIP_ALPHA, HEAD_ALPHA, cardType, hueTone, tintOr, typeTone } from "./tones.js";
+import { CHIP_ALPHA, headBg, hueTone, selectedBg, tint, typeTone } from "./tones.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -47,7 +48,6 @@ export function migrateShownView() {
   store.set("view", null);
 }
 
-export const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
 export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
@@ -249,19 +249,20 @@ export function statusPill(t, label, color, open) {
     .child(`${label} ▾`);
 }
 
-// A column's color: its theme color, "muted" where the theme has none.
+// A column's color (a column of a board or a Sprint, a status menu's
+// target): its theme color, "muted" where the theme has none.
 export const columnColor = (t, col) => t[col.color] ?? t.muted;
 
-// A column's head, on a tint of its color: its color as a dot, its name and
-// `count`.
-export const columnHead = (t, col, count) =>
+// A column's head, on a tint of its color laid over the `ground` it stands
+// on (headBg): its color as a dot, its name and `count`.
+export const columnHead = (t, col, count, ground) =>
   h_flex()
     .gap(6)
     .px(8)
     .py(4)
     .rounded(6)
     .items_center()
-    .bg(tintOr(columnColor(t, col), HEAD_ALPHA, t.raised))
+    .bg(headBg(t, columnColor(t, col), ground))
     .child(div().size(9).flex_none().rounded(5).bg(columnColor(t, col)))
     .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
     .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
@@ -270,13 +271,20 @@ export const columnHead = (t, col, count) =>
 // card's content beside it.
 export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
 
+// A card's or row's look as selected or not, in every shape alike, for an
+// element's map(): a selected one has the accent border and selectedBg; one
+// that is not has the border `rest` and the background `restBg` (none: it
+// keeps its own).
+export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
+  el.border_color(selected ? t.accent : rest).when(selected || Boolean(restBg), (e) => e.bg(selected ? selectedBg(t) : restBg));
+
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
 // A chip in a `tone` (a theme name): `text` in that color on a tint of it.
 // A tone the theme does not have gives the plain chip (chip's defaults); one
 // it cannot tint, its text on `raised`.
-export const toneChip = (t, text, tone) => chip(t, text, t[tone], tintOr(t[tone], CHIP_ALPHA, t.raised));
+export const toneChip = (t, text, tone) => chip(t, text, t[tone], tint(t[tone], CHIP_ALPHA, t.raised));
 
 // A card's chip for its label `name`, in the label's color brought onto the
 // theme (hueTone).

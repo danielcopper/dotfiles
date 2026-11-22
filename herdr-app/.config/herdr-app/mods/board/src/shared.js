@@ -1,5 +1,6 @@
 // What the board's modules share: its names, its error and how one is
-// shown, small checks and text helpers, an item's key, and labels for times.
+// shown, small checks and text helpers, an item's key and type, and labels
+// for times.
 
 
 
@@ -55,6 +56,19 @@ export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
+
+// An item that is an Epic by its title alone: "[Epic] …", the convention of
+// a project without issue types.
+const EPIC_TITLE = /^\[epic\]/i;
+
+// An item's type as the board names it: its own (an issue type, a work item
+// type), else "Epic" for an Epic by its title; null for none.
+export const cardType = (item) => item.type ?? (EPIC_TITLE.test(item.title ?? "") ? "Epic" : null);
+
+// The label whose color an Epic by its title alone takes for its type's
+// marker: its "epic" label, whatever its case; null for another item.
+export const epicLabel = (item) =>
+  (!item.type && cardType(item) ? (item.labels ?? []).find((l) => l.toLowerCase() === "epic") ?? null : null);
 
 export function updatedLabel(at, now) {
   if (!at) return "";
