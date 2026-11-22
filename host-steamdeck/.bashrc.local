@@ -55,11 +55,8 @@ alias update='brew update && brew upgrade && flatpak update --user -y'
 # of its list (bash/.local/bin/agent-env); the shared .bashrc leaves a claude
 # function defined here alone.
 claude() {
-    if command -v agent-env >/dev/null; then
-        VITEST_MAX_WORKERS=4 PYTEST_XDIST_AUTO_NUM_WORKERS=4 \
-            agent-env claude systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
-    else
-        VITEST_MAX_WORKERS=4 PYTEST_XDIST_AUTO_NUM_WORKERS=4 \
-            systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
-    fi
+    local via=()
+    if command -v agent-env >/dev/null; then via=(agent-env claude); fi
+    VITEST_MAX_WORKERS=4 PYTEST_XDIST_AUTO_NUM_WORKERS=4 \
+        "${via[@]}" systemd-run --user --scope --quiet --slice=claude.slice -- claude "$@"
 }
