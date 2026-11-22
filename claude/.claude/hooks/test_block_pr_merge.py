@@ -125,7 +125,7 @@ PASSES = [
     "echo $(date) $(whoami) `hostname`",
     "echo " + "$(true) " * 64,
     "git commit -F - <<'EOF'\nfix: don't wait for the owner's review\nEOF",
-    # $?, $#, $$ in a simple command that names none of gh, az, curl or wget
+    # a run-time word in a simple command that runs none of gh, az, curl or wget
     'gh pr view 12 --json state; echo "rc=$?"',
     "gh pr checks 3; test $? -eq 0 && echo $# $$",
     "test $? -eq 0 && echo ok",
@@ -185,6 +185,7 @@ PASSES = [
     "B=$(git merge-base origin/main HEAD); git diff --stat $B",
     "cat >> $F <<'EOF'\n- PR 20 merged, archived\nEOF",
     "grep -n host_key_alias $W/setup.py",
+    "grep -n alias $F",
     "gh api repos/o/r --jq '{squash_merge_commit_title}'",
     "cd $D && gh api repos/github/docs/contents/content/x/configuring-branches-and-merges.md",
     # the body of a quoted heredoc fed to a command that only stores or reads it as data
@@ -593,7 +594,8 @@ DENIED = [
     "$X api graphql -f query='mutation { mergeBranch(input: {}) { clientMutationId } }'",
     "$X api -X POST repos/o/r/merge-upstream -f branch=main",
     "curl https://example.com/merge-queue",
-    'gh api repos/o/r/pulls/3 -f merge_method=squash -X PUT "$U"',
+    "$X repos pr update --id 4 -s completed",
+    "$X repos pr update --id 4 --autocomplete true",
     # the GraphQL merge queue
     (
         'gh api graphql -f query=\'mutation { enqueuePullRequest(input: {pullRequestId: "x"})'
@@ -620,12 +622,17 @@ DENIED = [
     "GH_TOKEN=$(cat t) gh api -X GET x",
     "gh pr view 1 <(true) $SUB",
     "gh pr view 1; >/dev/null $G api -X PUT x",
+    # merge_method on a pull request that is no merge endpoint: denied for the parameter beside gh
+    'gh api repos/o/r/pulls/3 -f merge_method=squash -X PUT "$U"',
     # commands that run a program from their arguments or data: the whole text counts
     "gh pr view 1; find . -name x -exec bash x.sh $? \\;",
     "gh pr view 1; find . -execdir x $? +",
     "gh pr view 1; echo x | xargs echo $?",
     "gh pr view 1; parallel echo $? ::: a",
+    "echo merge | xargs echo '$?'",
     # a heredoc whose body a shell or an unknown command reads stays shell text
+    "cat > s.sh <<'EOF'\ngh api \"$EP\"\nEOF\n. s.sh",
+    "git commit -c HEAD <<'EOF'\ngh api \"$EP\" -X PUT\nEOF",
     "bash <<'EOF'\nX=gh; $X pr view 1\nEOF",
     "ssh host <<'EOF'\ngh pr $(printf mer)ge 1\nEOF",
     "cat <<'EOF' | sh\ngh api \"$EP\" -X PUT\nEOF",
