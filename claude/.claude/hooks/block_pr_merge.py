@@ -32,6 +32,7 @@ SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])[^\S\n]*(?:source|\.)(?=\s)")
 # A shell name at the start of a word part right after a pipe or a slash.
 SHELL_AFTER_PIPE = re.compile(r"(?:^|(?<=[|/]))(?:bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
 NON_BLANK_RUN = re.compile(r"\S+")
+PIPE_PIECE_END = re.compile(r"[;&\n()`]")
 # Commands that run a program named in their arguments or their data.
 TRAP = re.compile(r"(?<![\w.-])trap(?![\w.-])")
 SORT = re.compile(r"(?<![\w.-])sort(?![\w.-])")
@@ -242,8 +243,12 @@ def quote_parts(command: str) -> tuple[str, str]:
 
 def pipes_into_shell(lower: str) -> bool:
     """Whether a pipe feeds a shell: a `|`, any blanks, then a word in which a shell name stands
-    at its start, after a later `|` or after a `/`, and ends there. Each run of non-blank
+    at its start, after a later `|` or after a `/`, and ends there; or a command after a `|` that
+    starts with one of the WRAPPERS and names a shell, as a word or a path's basename, anywhere
+    after it (`| env bash`, `| sudo -u x sh`, `| timeout 5 bash`). Each run of non-blank
     characters is read once, so the time stays linear."""
+    if pipes_into_wrapped_shell(lower):
+        return True
     after_pipe = False  # the run before ended in |
     for run in NON_BLANK_RUN.finditer(lower):
         text = run.group()
@@ -252,6 +257,17 @@ def pipes_into_shell(lower: str) -> bool:
         if start >= 0 and SHELL_AFTER_PIPE.search(text[start:]):
             return True
         after_pipe = text.endswith("|")
+    return False
+
+
+def pipes_into_wrapped_shell(lower: str) -> bool:
+    """Whether a command after a `|` starts with one of the WRAPPERS and names a shell later,
+    options and their arguments in between or not."""
+    for piece in PIPE_PIECE_END.split(lower):
+        for after_pipe in piece.split("|")[1:]:
+            words = [word.rsplit("/", 1)[-1] for word in after_pipe.split()]
+            if words and words[0] in WRAPPERS and any(SHELL_WORD.fullmatch(w) for w in words):
+                return True
     return False
 
 

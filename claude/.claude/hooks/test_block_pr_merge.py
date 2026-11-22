@@ -692,6 +692,16 @@ DENIED = [
     "echo x\\\n#'\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
     "{ echo }; cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\necho {\n} | env bash",
     "case x in (x) cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n;; esac | env bash",
+    # a pipe into a shell behind a wrapper re-reads the text: quotes hide nothing
+    "echo 'gh pr $(printf mer)ge 1' | env bash",
+    "echo 'gh pr $(printf mer)ge 1' | sudo sh",
+    "echo 'gh pr $(printf mer)ge 1' | sudo -u x bash",
+    "echo 'gh pr $(printf mer)ge 1' | command bash",
+    "echo 'gh pr $(printf mer)ge 1' | nice -n 5 sh",
+    "echo 'gh pr $(printf mer)ge 1' | timeout 5 bash",
+    "echo 'gh pr $(printf mer)ge 1' | exec bash",
+    "echo 'gh pr $(printf mer)ge 1' | /usr/bin/env X=1 /bin/bash",
+    "echo 'gh pr $(printf mer)ge 1' | xargs bash",
     # an escaped quote opens no quoting that would hide what follows
     "gh api -X PUT -f a=\\' repos/o/r/pulls/1/$(printf me)rge -f b=\\'",
     # auto-complete set through the REST API

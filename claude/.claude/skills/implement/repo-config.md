@@ -100,7 +100,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     plain word that is no option.
 
     When the command hands text to a shell that reads it again — a shell with a `-c` option, `eval`, `<<<`,
-    `source` or `.`, a pipe into a shell — or to a command that runs a program from its arguments or data —
+    `source` or `.`, a pipe into a shell, also behind one of the wrappers named above with or without options
+    (`| env bash`, `| sudo -u x sh`, `| timeout 5 bash`) — or to a command that runs a program from its
+    arguments or data —
     `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs`,
     `parallel` — quoting no longer separates anything: the file, write and run-time rules then read the whole
     de-quoted text, next to any `gh`, `az`, `curl` or `wget` (the write rule the words of the simple commands
