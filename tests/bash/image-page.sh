@@ -87,11 +87,13 @@
 #       before <out-dir>: exit 2, the reason and the usage on stderr, the
 #       out-dir not created, in each; --section=-x is the heading -x; after
 #       -- a --section is an image name like any other
-#   l3  the layout: each section's images in a grid whose column is its
-#       widest image's CSS width (--col) and that fits as many columns as the
-#       page allows, never wider than the screen, rows that wrap centered;
-#       the page centered, as wide as its widest section with every image in
-#       one row (--page), whichever section that is, and at least 40rem
+#   l3  the layout: each section's images in rows that wrap, each figure as
+#       wide as the section's widest image's CSS width (--col) and never
+#       wider than the screen, as many side by side as the page allows; every
+#       row centered, the short last one too, so no column grid (auto-fill)
+#       that would keep a short row in its first columns; the page centered,
+#       as wide as its widest section with every image in one row (--page),
+#       whichever section that is, and at least 40rem
 # The f cases run the script inside a python harness, $ROOT/faulty.py, that
 # loads it as a module and makes the os calls the scenario FAULT names fail,
 # the one way to reach a rename that fails between two that succeed:
@@ -900,8 +902,13 @@ l3_grid_layout() {
     grep -qxF '<main class="page" style="--page:576px">' "$OUTDIR/index.html"
   check "the header first inside the page" [ "$(page | grep -A1 '^<main' | tail -1)" = '<header>' ]
   # The 24px column gap is the one the page width above counts.
-  check "the grid fits columns of --col, never wider than the screen" \
-    grep -qF '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--col)),var(--col)));gap:32px 24px;justify-content:center}' "$OUTDIR/index.html"
+  check "each row wraps and centers itself" \
+    grep -qxF '.grid{display:flex;flex-wrap:wrap;justify-content:center;gap:32px 24px}' "$OUTDIR/index.html"
+  check "each figure --col wide, never wider than the screen" \
+    grep -qxF '.grid>figure{flex:0 0 var(--col);max-width:100%}' "$OUTDIR/index.html"
+  # A column grid centers its set of columns, not each row: a short last row
+  # would stay in the first columns.
+  check "no column grid for the images" lacks "grid-template-columns|auto-fill|auto-fit" "$OUTDIR/index.html"
   check "the page centered, at least 40rem" \
     grep -qF '.page{width:100%;max-width:max(40rem,var(--page));margin-inline:auto' "$OUTDIR/index.html"
   check "each image still at its real size: $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]

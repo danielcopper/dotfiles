@@ -25,10 +25,10 @@ may stand anywhere before --; a --title or --section value that starts with
 --section TITLE (or --section=TITLE) among the images starts a section: a
 heading, then the images after it up to the next --section. Images before
 the first --section form a section without a heading. Each section lays its
-images out in a grid of columns as wide as its widest image, as many side
-by side as the screen holds and one on a phone, rows that wrap centered
-under the left-aligned heading; the page is centered and as wide as its
-widest section with all its images in one row, at least 40rem. Every
+images out in rows of figures as wide as its widest image, as many side by
+side as the screen holds and one on a phone, each row centered under the
+left-aligned heading; the page is centered and as wide as its widest
+section with all its images in one row, at least 40rem. Every
 --section needs a title that is not blank and an image after it, and
 <out-dir> comes before the first one; after -- a --section is an image
 name.
@@ -93,9 +93,10 @@ usage: image-page [--density D] [--title T] [--replace] <out-dir> [--section TIT
 # The grid's gap between columns, in CSS px: the .grid rule in STYLE and the
 # page width in render() both take it from here.
 COLUMN_GAP = 24
-# A centered page of sections, each a grid of figures at their real size,
-# each caption above its image; the page's own colors are tokens, light
-# first, dark redefined.
+# A centered page of sections, each in centered rows of figures at their
+# real size that wrap (flex, so a short last row is centered too, which a
+# column grid would leave in its first columns), each caption above its
+# image; the page's own colors are tokens, light first, dark redefined.
 STYLE = """\
 :root{--bg:#f1f3f6;--fg:#1b1f27;--muted:#596173;--rule:#d8dce3;\
 --font-text:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;\
@@ -111,8 +112,8 @@ h1{margin:0;font-size:1.375rem;font-weight:600;line-height:1.25;text-wrap:balanc
 .meta{margin:0}
 section{display:grid;gap:12px;min-width:0}
 h2{margin:0;font-size:1.0625rem;font-weight:600;line-height:1.3;text-wrap:balance;overflow-wrap:anywhere}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--col)),var(--col)));\
-gap:32px COLUMN_GAPpx;justify-content:center}
+.grid{display:flex;flex-wrap:wrap;justify-content:center;gap:32px COLUMN_GAPpx}
+.grid>figure{flex:0 0 var(--col);max-width:100%}
 figure{margin:0;display:grid;gap:8px;align-content:start;justify-items:start;min-width:0}
 figcaption{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;font-size:0.9375rem;font-weight:500;overflow-wrap:anywhere}
 img{display:block;height:auto;max-width:100%}
