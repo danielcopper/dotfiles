@@ -978,6 +978,21 @@ def without_data_heredocs(command: str) -> str:
     return "".join(out)
 
 
+def network_words(command: str, plain: str) -> list[str]:
+    """The de-quoted words of the simple commands of *command* that name gh, az, curl or wget,
+    for the whole-text write rule; every word of *plain* when the command cannot be cut. Another
+    command's options, such as find's -execdir, are no curl options."""
+    parts = raw_commands(command)
+    if parts is None:
+        return plain.split()
+    return [
+        word
+        for part in parts
+        if NETWORK.search(stripped(part).lower())
+        for word in stripped(part).split()
+    ]
+
+
 def check(command: str) -> str | None:
     """What makes *command* a possible merge, or None."""
     if len(command) > MAX_LENGTH:
@@ -1015,7 +1030,7 @@ def check(command: str) -> str | None:
         near = network if reread else body_tool
         if near and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
             body = "reads a request from a file"
-        elif near and writes_with_curl(plain.split()):
+        elif near and writes_with_curl(network_words(command, plain)):
             body = "sends a writing request with curl or wget"
         else:
             body = None

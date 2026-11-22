@@ -703,6 +703,7 @@ REASONS = {
     "echo merge | $RUNNER": "builds a word at run time next to a merge mention",
     'gh api "$ENDPOINT"': "builds a word at run time next to gh, az, curl or wget",
     "echo " + "x" * 100_001: "is too long to check",
+    "gh pr view 1; find . -execdir x $? +": "builds a word at run time next to gh, az, curl or wget",
 }
 
 PATHOLOGICAL = [
