@@ -3,7 +3,8 @@
 // the view as makeAzure uses it (backlogView).
 
 import { BoardError, failure, isObject } from "../../shared.js";
-import { AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azAreasArgs, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, jsonOrNull, parseDefaultArea, parseWorkItems } from "./common.js";
+import { AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
+import { sprintUntil } from "./sprint.js";
 
 // The Backlog view's calls for a team context `c`: the team's backlog
 // levels, its backlog configuration (the order field, each type's states
@@ -30,9 +31,11 @@ export const azBacklogIdsArgs = (c, levelId) => ["rest", "--method", "get", "--u
 export const BACKLOG_NEEDS_LOGIN = "Der Backlog braucht az login (ein PAT reicht dafür nicht)";
 const AZ_REST_LOGIN = /az login|AADSTS\d+|Unauthorized|\b401\b/i;
 export function azRestFailure(r, on, options) {
-  const said = String(r.stderr ?? "").split("\n").filter((l) => !/^WARNING:/.test(l)).join("\n");
-  if (AZ_REST_LOGIN.test(said)) return new BoardError(BACKLOG_NEEDS_LOGIN, { unavailable: true });
-  return azFailure(r, on, options);
+  const lines = String(r.stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const said = lines.join("\n");
+  if (!AZ_REST_LOGIN.test(said)) return azFailure(r, on, options);
+  const line = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0]).replace(/^ERROR:\s*/, "").trim();
+  return new BoardError(`${BACKLOG_NEEDS_LOGIN}: ${line}`, { unavailable: true });
 }
 
 // A backlog level of Azure's answer → { id, name, type ("portfolio",
@@ -52,8 +55,9 @@ export function parseBacklogLevels(stdout) {
   return levels;
 }
 
-// The level the Backlog shows: the team's requirement level (Stories, by
-// the process: User Stories, Product Backlog Items, Requirements), and the
+// The level the Backlog shows: the team's requirement level (Stories; by
+// the process for example User Stories, Product Backlog Items,
+// Requirements or Issues in Basic), and the
 // level below it, whose types (Tasks) may be created under one of its
 // items: the team's task level, else the configuration's.
 export function backlogLevels(levels, config) {
@@ -84,13 +88,21 @@ export function parseBacklogConfig(stdout) {
   };
 }
 
-// The team's settings → { defaultIteration, backlogIteration }: the paths
-// of the iteration a new work item gets and of the backlog's own (the root
-// of the team's iterations), each null where Azure names none.
+// The team's settings → { defaultIteration, backlogIteration, follows }:
+// the paths of the iteration a new work item gets and of the backlog's own
+// (the root of the team's iterations), each null where Azure names none;
+// follows: the default iteration is a macro (defaultIterationMacro, such
+// as @CurrentIteration), so the path Azure names is good only until that
+// iteration ends (its finishDate, or null where it names none).
 export function parseTeamSettings(stdout) {
   const json = azJson(stdout, "die Einstellungen des Teams");
   const path = (it) => (typeof it?.path === "string" && it.path ? it.path : null);
-  return { defaultIteration: path(json?.defaultIteration), backlogIteration: path(json?.backlogIteration) };
+  const macro = typeof json?.defaultIterationMacro === "string" && json.defaultIterationMacro !== "";
+  return {
+    defaultIteration: path(json?.defaultIteration),
+    backlogIteration: path(json?.backlogIteration),
+    follows: macro ? { finish: json.defaultIteration?.attributes?.finishDate ?? null } : null,
+  };
 }
 
 // The ids of the level's work items, in the list's order, each once.
@@ -180,6 +192,20 @@ export function checkParentLink(stdout, parent) {
 // How long the Backlog keeps a team's settings (ms): they change rarely.
 export const BACKLOG_KEEP_MS = 4 * 3600000;
 
+// Until when the Backlog keeps a team's settings read at `now`:
+// BACKLOG_KEEP_MS, or sooner where the default iteration follows one that
+// ends before (settings.follows, sprintUntil).
+export function backlogUntil(settings, now) {
+  const keep = now + BACKLOG_KEEP_MS;
+  return settings.follows ? Math.min(keep, sprintUntil(settings.follows.finish, now)) : keep;
+}
+
+// One WIQL query for the work items titled `title` that the account az is
+// signed in as created today: one is the create whose answer was unclear,
+// none means it did not land, several cannot be told apart.
+export const createdWiql = (title) =>
+  `SELECT [System.Id] FROM WorkItems WHERE [System.Title] = ${wiqlText(title)} AND [System.CreatedBy] = @Me AND [System.CreatedDate] = @Today ORDER BY [System.Id]`;
+
 // The Backlog as makeAzure uses it, on the source's shared parts `s` (see
 // makeAzure): what it keeps per team (backlogSettingsOf), how it loads and
 // writes, and what `r` or a refused write drops (forget).
@@ -188,17 +214,22 @@ export function backlogView(s) {
   async function backlogSettingsOf(c) {
     const held = s.keptValue(key(c));
     if (held) return held.value;
-    const [levels, config, settings, area] = await Promise.all([
+    const [levels, config, settings, areas] = await Promise.all([
       s.az(azLevelsArgs(c)).then(parseBacklogLevels),
       s.az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
       s.az(azTeamSettingsArgs(c)).then(parseTeamSettings),
-      s.az(azAreasArgs(c)).then(parseDefaultArea),
+      s.areasOf(c),
     ]);
-    const value = { ...backlogLevels(levels, config), config, settings, area };
-    s.kept.set(key(c), { value, until: Date.now() + BACKLOG_KEEP_MS });
+    const value = { ...backlogLevels(levels, config), config, settings, area: areas.default };
+    const until = backlogUntil(settings, Date.now());
+    s.kept.set(key(c), { value, until });
+    s.keepAreasUntil(c, until);
     return value;
   }
-  const forget = (c) => s.kept.delete(key(c));
+  const forget = (c) => {
+    s.kept.delete(key(c));
+    s.forgetAreas(c);
+  };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
   return {
     forget,
@@ -223,6 +254,11 @@ export function backlogView(s) {
     // Makes the work item `id` a child of `parent`.
     async addParent(view, id, parent) {
       checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true }), parent);
+    },
+    // The ids of the work items titled `title` that I created today: what
+    // settles a create whose answer was unclear (createdWiql).
+    async findCreated(view, title) {
+      return parseWorkItems(await s.az(azQueryArgs(view.context, createdWiql(title))), view.context).map((i) => i.number);
     },
   };
 }

@@ -1631,6 +1631,8 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
       // other inputs, as herdr's does.
       const input = {
         on: (event, fn) => ((on[event] = fn), true), value: () => value, set_value: (v) => (value = v),
+        // Enter in the field, with the cx of the key's call.
+        submit: (cx) => on.submit?.({}, cx),
         focus: () => {
           for (const h of host.handles) h.held = false;
           for (const other of host.inputs) if (other !== input) other.blur();
@@ -1694,7 +1696,7 @@ const STALE_CX = "cx is no longer valid: it was captured during an earlier call 
 // look() run, and every use of a stale cx throws herdr's words. The cx this
 // returns stands for a call the test keeps open: it never goes stale.
 function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
-  const cx = { later: [], every: [], bound: [], stopped: 0 };
+  const cx = { later: [], every: [], bound: [], stopped: 0, propagated: 0 };
   // A cx for one call; `lasting`: cx.spawn's, which never goes stale.
   const scope = (lasting) => {
     let valid = true;
@@ -1734,6 +1736,9 @@ function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
       notify: live(() => {}),
       stop_propagation: live(() => {
         cx.stopped++;
+      }),
+      propagate: live(() => {
+        cx.propagated++;
       }),
       open_url: live((url) => {
         (cx.opened ??= []).push(url);
@@ -4155,9 +4160,10 @@ test("the Sprint's answers: the current sprint, the team's areas, the columns in
   assert.throws(() => board.parseIteration("not json"), /az lieferte für den Sprint kein lesbares JSON/);
   assert.deepEqual(board.parseAreas(fixture("azure-sprint-areas.json")), {
     field: "System.AreaPath", values: [{ value: "Example Project\\Core", includeChildren: true }, { value: "Example Project\\Shared", includeChildren: false }],
+    default: "Example Project\\Core",
   });
   assert.deepEqual(board.parseAreas('{"field": {"referenceName": "Custom.Team"}, "values": [{"value": "Core", "includeChildren": false}]}'),
-    { field: "Custom.Team", values: [{ value: "Core", includeChildren: false }] }, "the team's own field");
+    { field: "Custom.Team", values: [{ value: "Core", includeChildren: false }], default: null }, "the team's own field, no default area");
   assert.throws(() => board.parseAreas('{"values": []}'), /keine Bereiche/);
   const columns = board.parseColumns(fixture("azure-sprint-columns.json"));
   assert.deepEqual(columns.map((c) => c.name), ["To Do", "In Progress", "In PR/Work done", "Done"]);
@@ -4269,7 +4275,9 @@ test("UI: the Sprint reads its settings once, all at the same time, then the tas
   const end = Date.parse(JSON.parse(iterationAnswer())[0].attributes.finishDate) + DAY;
   advance(end - Date.now() - 60000);
   await refreshSprint(b, cx);
-  assert.equal(host.open("az").length, 2, "still the sprint's last day");
+  assert.deepEqual(openCounts(host, SETTINGS), [0, 1, 0, 0], "still the sprint's last day: only the team's areas, kept for both views as long as the Backlog keeps its settings");
+  await answerSettings(host);
+  assert.equal(host.open("az").length, 2);
   await answerRefresh(host, { me: false });
   advance(2 * 60000);
   await refreshSprint(b, cx);
@@ -4383,7 +4391,7 @@ test("UI: s on a story offers its type's states; a refusal sets the state back, 
   await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZ.state);
   assert.equal(board.findSprintItem(st().data, "AB#302").state, "To Do");
   assert.equal(b.notice.text, "AB#302 bleibt „To Do“: TF401320: Rule Error for field State.");
-  assert.equal(host.notes.at(-1).level, "error");
+  assert.deepEqual([host.notes.at(-1).level, host.notes.at(-1).title], ["error", "Status von AB#302 nicht geändert"]);
   assert.equal(host.open("az").length, 0, "nothing read again");
   await press(b, cx, "s");
   await press(b, cx, "3");
@@ -4694,7 +4702,8 @@ const AZB = {
   settings: (a) => a.includes("show-default-iteration"),
   areas: (a) => a[0] === "boards" && a[1] === "area",
   ids: (a) => a[0] === "rest",
-  query: (a) => a[0] === "boards" && a[1] === "query",
+  query: (a) => a[0] === "boards" && a[1] === "query" && !a.some((x) => x.includes("@Me")),
+  created: (a) => a[0] === "boards" && a[1] === "query" && a.some((x) => x.includes("@Me")),
   me: (a) => a[0] === "account",
   state: (a) => a[1] === "work-item" && a[2] === "update",
   create: (a) => a[1] === "work-item" && a[2] === "create",
@@ -4741,7 +4750,7 @@ function backlogData({ ids = fixture("azure-backlog-ids.json"), items = fixture(
   const config = board.parseBacklogConfig(fixture("azure-backlog-config.json"));
   return board.backlogList({
     ...board.backlogLevels(board.parseBacklogLevels(fixture("azure-backlog-levels.json")), config), config,
-    settings: board.parseTeamSettings(fixture("azure-backlog-settings.json")), area: board.parseDefaultArea(fixture("azure-sprint-areas.json")),
+    settings: board.parseTeamSettings(fixture("azure-backlog-settings.json")), area: board.parseAreas(fixture("azure-sprint-areas.json")).default,
     ids: board.parseBacklogIds(ids), items: board.parseWorkItems(items, sprintTeam(), config.orderField), viewer,
   });
 }
@@ -4792,9 +4801,17 @@ test("the Backlog's answers: its levels, the requirement level and the one below
   assert.deepEqual(config.typeStates.Bug, ["New", "Committed", "Done", "Removed"]);
   assert.deepEqual(config.states.map((s) => s.category), ["Proposed", "Proposed", "InProgress", "InProgress", "InProgress", "InProgress", "Resolved", "Completed", "Removed"]);
   assert.deepEqual(config.states.find((s) => s.name === "In UAT"), { id: "In UAT", name: "In UAT", category: "Resolved", color: "ansi5" });
-  assert.deepEqual(board.parseTeamSettings(fixture("azure-backlog-settings.json")), { defaultIteration: "Example Project\\Sprint 12", backlogIteration: "Example Project" });
-  assert.deepEqual(board.parseTeamSettings("{}"), { defaultIteration: null, backlogIteration: null });
-  assert.deepEqual([board.parseDefaultArea(fixture("azure-sprint-areas.json")), board.parseDefaultArea('{"values": []}')], ["Example Project\\Core", null]);
+  assert.deepEqual(board.parseTeamSettings(fixture("azure-backlog-settings.json")),
+    { defaultIteration: "Example Project\\Sprint 12", backlogIteration: "Example Project", follows: null });
+  assert.deepEqual(board.parseTeamSettings("{}"), { defaultIteration: null, backlogIteration: null, follows: null });
+  const following = json("azure-backlog-settings.json");
+  following.defaultIterationMacro = "@currentIteration";
+  following.defaultIteration.attributes = { finishDate: "2026-11-27T00:00:00Z" };
+  const follows = board.parseTeamSettings(JSON.stringify(following));
+  assert.deepEqual(follows.follows, { finish: "2026-11-27T00:00:00Z" }, "a default iteration that follows the current one");
+  const now = Date.parse("2026-11-27T22:00:00Z");
+  assert.deepEqual([board.backlogUntil(follows, now), board.backlogUntil(follows, now - DAY), board.backlogUntil(board.parseTeamSettings("{}"), now)],
+    [Date.parse("2026-11-28T00:00:00Z"), now - DAY + board.BACKLOG_KEEP_MS, now + board.BACKLOG_KEEP_MS], "kept until that iteration ends, where that is sooner");
   assert.deepEqual(board.parseBacklogIds(fixture("azure-backlog-ids.json")), [302, 401, 301, 402, 403]);
   assert.deepEqual(board.parseBacklogIds('{"workItems": [{"target": {"id": 7}}, {"source": {"id": 7}, "target": {"id": 8}}, {"target": {"id": 7}}, {"target": null}]}'), [7, 8], "each once");
   assert.throws(() => board.parseBacklogIds("{}"), /keine Work Items des Backlogs/);
@@ -4817,6 +4834,8 @@ test("the backlog: its rows sorted by the order field, not the ids' list; one wi
   assert.equal(cut.limited, true);
   assert.ok(board.backlogWarnings(cut).includes("Nur die ersten 1000 von 1005 Einträgen des Backlogs (so viele liest eine Abfrage)"));
   assert.deepEqual(board.backlogWarnings(data), []);
+  assert.deepEqual(board.backlogWarnings({ ...data, meta: { ...data.meta, orderField: null } }), ["Reihenfolge ungeprüft: Azure nannte kein Order-Feld"],
+    "without an order field the order is the list's, unchecked");
   assert.deepEqual(board.createTypes(data, null).map((t) => [t.name, t.child]), [["User Story", false], ["Bug", false]]);
   assert.deepEqual(board.createTypes(data, data.rows[0]).map((t) => [t.name, t.child]), [["User Story", false], ["Bug", false], ["Task", true]], "with an item, its children's types");
 });
@@ -4859,7 +4878,23 @@ test("UI: an empty backlog asks no query and says so; r reads the Backlog's sett
   await answerBacklogSettings(host);
   await answerBacklog(host, { me: false });
   await press(b, cx, "v");
-  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 1], "the Sprint reads its own");
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 0, 1, 1], "the Sprint reads its own; the team's areas are kept for both");
+});
+
+test("UI: r on the Backlog reads its own settings and the team's areas again, not the Sprint's sprint, columns or types", async () => {
+  const { b, cx, host } = await openSprint();
+  await press(b, cx, "v");
+  await answerBacklogSettings(host);
+  assert.deepEqual(openCounts(host, SETTINGS), [0, 0, 0, 0], "the areas the Sprint read serve the Backlog too");
+  await answerBacklog(host, { me: false });
+  await press(b, cx, "r");
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1]);
+  await answerBacklogSettings(host);
+  await answerBacklog(host, { me: false });
+  await press(b, cx, "v");
+  assert.deepEqual(openCounts(host, SETTINGS), [0, 0, 0, 0], "the Sprint is fresh: nothing read on the switch");
+  await refreshSprint(b, cx);
+  assert.deepEqual(openCounts(host, SETTINGS), [0, 0, 0, 0], "a Sprint refresh too: the areas the Backlog read again serve it");
 });
 
 test("UI: the Backlog shows one row per work item in backlog order: id, type, title, state, sprint („—“ for none) and assignee; the tab counts them", async () => {
@@ -4881,13 +4916,15 @@ test("UI: a failed az rest without az login says the Backlog needs it, as do an 
   const { b, cx, host } = await bootBoard({ stored: BACKLOG_STORED, which: found });
   await answerBacklogSettings(host);
   await host.answer("az", azRefused("Please run 'az login' to setup account."), AZB.ids);
-  assert.equal(b.state(b.view().id).error, "Der Backlog braucht az login (ein PAT reicht dafür nicht)");
-  assert.ok(texts(b.render()).includes("Der Backlog braucht az login (ein PAT reicht dafür nicht)"));
+  const said = "Der Backlog braucht az login (ein PAT reicht dafür nicht): Please run 'az login' to setup account.";
+  assert.equal(b.state(b.view().id).error, said);
+  assert.ok(texts(b.render()).includes(said));
   assert.equal(openAzb(host, "query").length, 0);
-  for (const said of ["AADSTS700082: The refresh token has expired due to inactivity.", "Unauthorized({\"$id\":\"1\"})"]) {
+  for (const said of ["AADSTS700082: The refresh token has expired due to inactivity.", "Unauthorized({\"$id\":\"1\"})", "Operation returned a 401 status code."]) {
     assert.deepEqual([board.azRestFailure({ code: 1, stderr: `WARNING: x\nERROR: ${said}\n` }).message, board.azRestFailure({ code: 1, stderr: `ERROR: ${said}\n` }).unavailable],
-      [board.BACKLOG_NEEDS_LOGIN, true], said);
+      [`${board.BACKLOG_NEEDS_LOGIN}: ${said}`, true], said);
   }
+  assert.equal(board.azRestFailure({ code: 1, stderr: "ERROR: Not Found(work item 4012)\n" }).message, "Not Found(work item 4012)", "401 as a word only, not inside 4012");
   assert.equal(board.azRestFailure({ code: 1, stderr: "ERROR: Not Found({\"message\": \"no backlog\"})\n" }).message, "Not Found({\"message\": \"no backlog\"})");
   assert.equal(board.azRestFailure({ code: 1, stderr: "WARNING: run az login --use-device-code on a headless machine\nERROR: Not Found(x)\n" }).message, "Not Found(x)",
     "az's WARNING lines do not count");
@@ -4936,8 +4973,10 @@ test("UI: a create writes the type, the title, the team's default area and itera
   await press(b, cx, "n");
   b.modal.input.set_value("Second");
   await click(b, cx, "create-go");
-  assert.equal(b.notice.text, "„Second“ wird noch gespeichert", "one create at a time");
+  assert.deepEqual([b.modal?.kind, b.modal?.error, b.modal?.input.value()], ["create", "Ein Work Item wird noch angelegt …", "Second"],
+    "one create at a time: the dialog stays with its title");
   assert.equal(openAzb(host, "create").length, 1);
+  await press(b, cx, "escape");
   await host.answer("az", ok(fixture("azure-backlog-created.json")), AZB.create);
   assert.equal(b.notice.text, "AB#450 „Sample new story“ angelegt");
   assert.equal(openAzb(host, "parent").length, 0, "a Story under a Story is no child");
@@ -4998,9 +5037,7 @@ test("UI: a create Azure refuses says why and drops the Backlog's settings; one 
   await host.answer("az", azRefused("TF401320: Rule Error for field Area Path."), AZB.create);
   assert.equal(b.notice.text, "User Story „Sample new story“ nicht angelegt: TF401320: Rule Error for field Area Path.");
   assert.deepEqual([host.notes.at(-1).level, host.notes.at(-1).title], ["error", "„Sample new story“ nicht angelegt"]);
-  assert.equal(openAzb(host, "ids").length, 0, "nothing read again");
-  await refreshSprint(b, cx);
-  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1], "the refusal dropped the settings");
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1], "read again at once, with the settings the refusal dropped");
   await answerBacklogSettings(host);
   await answerBacklog(host, { me: false });
   await press(b, cx, "n");
@@ -5008,22 +5045,95 @@ test("UI: a create Azure refuses says why and drops the Backlog's settings; one 
   await click(b, cx, "create-go");
   await host.answer("az", ok("{}"), AZB.create);
   assert.equal(b.notice.text, "User Story „Sample new story“ anlegen: Ergebnis unklar: Azure hat keine Nummer des neuen Work Items genannt; lädt neu");
+  // An item of the same title is in the backlog already: the rows decide nothing.
   await answerBacklog(host, { me: false, ids: idsWith(450), items: itemsWith([450, "Sample new story", "User Story", 1500]) });
-  assert.equal(b.notice.text, "„Sample new story“ steht nach dem Neuladen im Backlog (AB#450)");
+  const [check] = openAzb(host, "created");
+  assert.ok(check.args.includes(board.createdWiql("Sample new story")), "one query: that title, created by me, today");
+  assert.match(board.createdWiql("O'Neil"), /\[System\.Title\] = 'O''Neil' AND \[System\.CreatedBy\] = @Me AND \[System\.CreatedDate\] = @Today/);
+  await host.answer("az", ok(JSON.stringify([{ id: 450, fields: { "System.Id": 450 } }])), AZB.created);
+  assert.deepEqual([b.notice.text, b.notice.level], ["User Story „Sample new story“ ist angelegt (AB#450)", "info"]);
+  const unclearCreate = async (title, answer) => {
+    await press(b, cx, "n");
+    b.modal.input.set_value(title);
+    await click(b, cx, "create-go");
+    await host.answer("az", { code: 1, stdout: "", stderr: "ERROR: Operation returned a 503 status code.\n" }, AZB.create);
+    await answerBacklog(host, { me: false });
+    await host.answer("az", answer, AZB.created);
+  };
+  await unclearCreate("Gone", ok(""));
+  assert.deepEqual([b.notice.text, b.notice.level], ["User Story „Gone“ ist nicht angelegt: Azure kennt kein Work Item dieses Titels, das ich heute angelegt habe", "warning"]);
+  await unclearCreate("Twice", ok(JSON.stringify([{ id: 460, fields: {} }, { id: 461, fields: {} }])));
+  assert.equal(b.notice.text, "User Story „Twice“: Azure kennt 2 Work Items dieses Titels, die ich heute angelegt habe (AB#460, AB#461); welches es ist, sagt das Board nicht");
+  await unclearCreate("Unknown", azRefused("TF400898: An internal error occurred."));
+  assert.match(b.notice.text, /^User Story „Unknown“: ob es angelegt ist, ließ sich nicht prüfen \(.*TF400898.*\); vor einem neuen Versuch in Azure nachsehen$/);
+});
+
+test("UI: an unclear create of a Task under a Story says the Backlog cannot show it; the check names it and its missing parent link; each unclear create keeps its own outcome", async () => {
+  const { b, cx, host, st } = await openBacklog();
   await press(b, cx, "n");
-  b.modal.input.set_value("Gone");
+  b.modal.input.set_value("Sample new task");
+  b.modal.at = 2;
   await click(b, cx, "create-go");
-  await host.answer("az", { code: 1, stdout: "", stderr: "ERROR: Operation returned a 503 status code.\n" }, AZB.create);
+  await host.answer("az", ok(""), AZB.create);
+  assert.equal(b.notice.text, "Task „Sample new task“ unter AB#301 anlegen (der Backlog zeigt keine Tasks: vor einem neuen Versuch in Azure nachsehen; mit AB#301 ist es noch nicht verknüpft): " +
+    "Ergebnis unklar: Azure hat keine Nummer des neuen Work Items genannt; lädt neu");
+  assert.equal(host.notes.at(-1).title, "Anlegen von „Sample new task“");
+  assert.equal(openAzb(host, "parent").length, 0, "no link without an id");
+  await press(b, cx, "n");
+  b.modal.input.set_value("Second story");
+  await click(b, cx, "create-go");
+  await host.answer("az", ok(""), AZB.create);
+  assert.deepEqual(st().unclear.filter((u) => u.kind === "create").map((u) => [u.title, u.type, u.child, u.parent]),
+    [["Sample new task", "Task", true, 301], ["Second story", "User Story", false, null]], "two creates, two outcomes");
+  assert.equal(new Set(st().unclear.map((u) => u.key)).size, 2);
   await answerBacklog(host, { me: false });
-  assert.deepEqual([b.notice.text, b.notice.level], ["„Gone“ steht nach dem Neuladen nicht im Backlog", "warning"]);
+  assert.equal(openAzb(host, "created").length, 1, "the refresh after the first settles the first");
+  await host.answer("az", ok(JSON.stringify([{ id: 451, fields: {} }])), AZB.created);
+  assert.deepEqual([b.notice.text, b.notice.level], ["Task „Sample new task“ ist angelegt (AB#451), hängt aber nicht unter AB#301", "warning"]);
+  await answerBacklog(host, { me: false });
+  await host.answer("az", ok(""), AZB.created);
+  assert.equal(b.notice.text, "User Story „Second story“ ist nicht angelegt: Azure kennt kein Work Item dieses Titels, das ich heute angelegt habe");
+  assert.equal(st().unclear.length, 0);
+});
+
+test("UI: Enter in the create dialog's title creates", async () => {
+  const { b, cx, host } = await openBacklog();
+  await press(b, cx, "n");
+  b.modal.input.set_value("By Enter");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.equal(b.modal, null);
+  assert.ok(openAzb(host, "create")[0].args.includes("--title=By Enter"));
+});
+
+test("UI: an unclear parent link says so; the refresh cannot tell for a Task, and says that", async () => {
+  const { b, cx, host } = await openBacklog();
+  await press(b, cx, "n");
+  b.modal.input.set_value("Sample new task");
+  b.modal.at = 2;
+  await click(b, cx, "create-go");
+  await host.answer("az", ok(JSON.stringify({ ...json("azure-backlog-created.json"), id: 451 })), AZB.create);
+  await host.answer("az", ok('{"id": 451, "relations": null}'), AZB.parent);
+  assert.equal(b.notice.text, "AB#451 unter AB#301: Ergebnis unklar: Azure hat die Verknüpfung nicht bestätigt; lädt neu");
+  assert.equal(host.notes.at(-1).title, "AB#451 unter AB#301");
+  await answerBacklog(host, { me: false });
+  await answerBacklog(host, { me: false });
+  assert.deepEqual([b.notice.text, b.notice.level], ["Ob AB#451 unter AB#301 hängt, zeigt der Backlog nicht: AB#451 ist kein Eintrag von ihm", "warning"]);
 });
 
 test("UI: without the team's default area or iteration n says what is missing and opens no dialog", async () => {
   const settings = json("azure-backlog-settings.json");
   settings.defaultIteration = null;
-  const { b, cx } = await openBacklog({ settings: JSON.stringify(settings), areas: '{"values": [{"value": "Example Project", "includeChildren": true}]}' });
-  await press(b, cx, "n");
-  assert.deepEqual([b.modal, b.notice.text], [null, "Das Team hat keinen Standardbereich und Standard-Iteration: in Azure unter Team-Einstellungen setzen"]);
+  const noArea = '{"values": [{"value": "Example Project", "includeChildren": true}]}';
+  const missing = async (options) => {
+    const { b, cx } = await openBacklog(options);
+    await press(b, cx, "n");
+    return [b.modal, b.notice.text];
+  };
+  const text = (what) => `Das Team hat ${what}: in Azure unter Team-Einstellungen setzen`;
+  assert.deepEqual(await missing({ settings: JSON.stringify(settings), areas: noArea }), [null, text("keinen Standardbereich und keine Standard-Iteration")]);
+  assert.deepEqual(await missing({ areas: noArea }), [null, text("keinen Standardbereich")]);
+  assert.deepEqual(await missing({ settings: JSON.stringify(settings) }), [null, text("keine Standard-Iteration")]);
 });
 
 test("UI: s on the Backlog offers the type's states from the backlog configuration and sets one; a refusal sets it back; one that landed reads nothing again", async () => {
@@ -5117,13 +5227,15 @@ test("UI: a backlog longer than one query reads asks for the first ones and says
 
 // The board's root's handler for a bound action (BOARD_KEYS), as herdr
 // calls it: with a cx whose stop_propagation is counted.
+// Returns how often it stopped the key, and `propagate` (set on the
+// function) how often it handed it on.
 function boardAction(b, action) {
   const root = b.render();
   const handler = root.calls.find((c) => c[0] === "on_action" && c[1] === action)?.[2];
   assert.ok(handler, `no on_action ${action}`);
-  const cx = { ...fakeCx(), stopped: 0 };
-  cx.stop_propagation = () => cx.stopped++;
-  handler({}, cx);
+  const cx = fakeCx();
+  cx.call((own) => handler({}, own));
+  boardAction.propagated = cx.propagated;
   return cx.stopped;
 }
 
@@ -5134,10 +5246,10 @@ test("the board binds Tab and shift-Tab in its own key context, which its root c
   const root = b.render();
   assert.deepEqual(root.with.key_context, [board.BOARD_KEY_CONTEXT]);
   assert.deepEqual(root.calls.filter((c) => c[0] === "on_action").map((c) => c[1]), ["board_tab", "board_shift_tab"]);
-  assert.equal(boardAction(b, "board_tab"), 0, "without a dialog nothing takes Tab: it stays herdr's");
+  assert.deepEqual([boardAction(b, "board_tab"), boardAction.propagated], [0, 1], "without a dialog the board hands Tab on to herdr's own");
 });
 
-test("UI: Tab and shift-Tab move between the start dialog's fields, also while its message has the keyboard (owner check: Tab wechselt das Feld im Start-Dialog)", async () => {
+test("UI: Tab and shift-Tab move between the start dialog's fields, also while its message has the keyboard", async () => {
   const { b, cx } = await openBoard();
   await openStart(b, cx);
   const m = b.modal;
@@ -5164,7 +5276,7 @@ test("UI: Tab and shift-Tab move between the create dialog's title and type", as
   await press(b, cx, "escape");
   await press(b, cx, "s");
   assert.equal(b.modal.kind, "status");
-  assert.equal(boardAction(b, "board_tab"), 0, "a menu without fields leaves Tab alone");
+  assert.deepEqual([boardAction(b, "board_tab"), boardAction.propagated], [0, 1], "a menu without fields hands Tab on");
 });
 
 test("UI: a bind_keys that fails is said in a toast, and the board works on", async () => {
@@ -5215,4 +5327,19 @@ test("UI: a write whose follow-up throws after it landed says it landed and what
   cx.call((own) => board.writeAtOnce(b, view, w({ landedBut: (why) => `gespeichert, aber ${why}` }), own));
   await settle();
   assert.equal(b.notice.text, "gespeichert, aber Folgeschritt fehlgeschlagen");
+});
+
+test("UI: a team default iteration that follows the current one keeps the Backlog's settings only until that iteration ends", async () => {
+  const settings = json("azure-backlog-settings.json");
+  settings.defaultIterationMacro = "@currentIteration";
+  // Azure's finishDate is the last day's start: this one ends in an hour.
+  settings.defaultIteration.attributes = { finishDate: new Date(Date.now() - DAY + 3600000).toISOString() };
+  const { b, cx, host } = await openBacklog({ settings: JSON.stringify(settings) });
+  advance(30 * 60000);
+  await refreshSprint(b, cx);
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [0, 0, 0, 0], "before it ends: kept");
+  await answerBacklog(host, { me: false });
+  advance(60 * 60000);
+  await refreshSprint(b, cx);
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1], "it ended: read again, long before four hours");
 });

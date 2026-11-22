@@ -135,19 +135,17 @@ export function jsonOrNull(stdout) {
 export const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
 
 // The team's areas → { field (the team field, System.AreaPath by default),
-// values: [{ value, includeChildren }] }.
+// values: [{ value, includeChildren }], default (the area a new work item
+// gets, or null) }.
 export function parseAreas(stdout) {
   const json = azJson(stdout, "die Bereiche des Teams");
   const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
   if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
-  return { field: json.field?.referenceName ?? AREA_PATH, values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })) };
-}
-
-// The team's default area (the area a new work item gets) from its areas'
-// answer (azAreasArgs), or null.
-export function parseDefaultArea(stdout) {
-  const value = azJson(stdout, "die Bereiche des Teams")?.defaultValue;
-  return typeof value === "string" && value ? value : null;
+  return {
+    field: json.field?.referenceName ?? AREA_PATH,
+    values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })),
+    default: typeof json.defaultValue === "string" && json.defaultValue ? json.defaultValue : null,
+  };
 }
 
 // The address of a work item's page.

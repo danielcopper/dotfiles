@@ -5,7 +5,7 @@
 // b.modal.view, and a reload that finishes while it is open closes it when
 // views.json no longer has that view of that kind. A dialog with fields
 // also has tab(b, back, cx), which Tab and shift-Tab (`back`) call to move
-// between them (Board.dialogTab). A new dialog is a module here and its
+// between them (Board.tabKey). A new dialog is a module here and its
 // entry in MODALS.
 
 import { columnsModal } from "./columns.js";

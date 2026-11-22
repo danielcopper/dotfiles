@@ -12,7 +12,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { itemLabel } from "../../shared.js";
 import { createTypes } from "../../kinds/backlog.js";
-import { createItem } from "../../actions/create.js";
+import { CREATE_KEY, createItem } from "../../actions/create.js";
 import { backdrop, button, cycleField, fieldFrame, fieldLabel, wireTextField } from "../helpers.js";
 
 // The fields Tab walks, in order.
@@ -36,8 +36,8 @@ export const createModal = {
     const types = createTypes(data, parent);
     if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
     if (!data.meta.area || !data.meta.iteration) {
-      const missing = [!data.meta.area && "Standardbereich", !data.meta.iteration && "Standard-Iteration"].filter(Boolean).join(" und ");
-      return b.say(`Das Team hat keinen ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
+      const missing = [!data.meta.area && "keinen Standardbereich", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
+      return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
     const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
@@ -47,14 +47,15 @@ export const createModal = {
     cx.notify();
   },
 
-  // Creates the work item and closes the dialog; without a title it stays
-  // and says so.
+  // Creates the work item and closes the dialog; without a title, or while
+  // another create of the view is under way, it stays and says so.
   create(b, cx) {
     const m = b.modal;
     if (m?.kind !== "create") return;
     const title = m.input.value().trim();
-    if (!title) {
-      m.error = "Der Titel fehlt";
+    const busy = b.state(m.view.id).pending[CREATE_KEY];
+    if (!title || busy) {
+      m.error = busy ? "Ein Work Item wird noch angelegt …" : "Der Titel fehlt";
       return cx.notify();
     }
     b.closeModal(cx);

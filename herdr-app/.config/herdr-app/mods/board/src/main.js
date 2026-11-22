@@ -127,12 +127,13 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
-// on_key_down, so a dialog's key handler never saw Tab, not even while its
-// text field had the keyboard; of the matching bindings, the one in the
-// deepest context wins, so a binding in the context of the board's root,
-// around its dialogs and their fields, comes first. The leader mod binds
-// the same way and says more (mods/leader/main.js, KEY_CONTEXT). Each
-// action runs tabKey, the one place that says what Tab does on the board.
+// on_key_down, so a dialog's key handler sees no Tab unless the board binds
+// it, not even while the dialog's text field has the keyboard. Of the
+// matching bindings, the one in the deepest context wins, so a binding in
+// the context of the board's root, around its dialogs and their fields,
+// comes first. The leader mod binds the same way and says more
+// (mods/leader/main.js, KEY_CONTEXT). Each action runs tabKey, the one
+// place that says what Tab does on the board.
 export const BOARD_KEY_CONTEXT = "Board";
 export const BOARD_KEYS = [
   { keystroke: "tab", action: "board_tab", back: false },
@@ -229,10 +230,13 @@ export default class Board extends View {
 
   // Tab and shift-Tab (`back`), whatever has the keyboard in the board: in
   // an open dialog with fields, its next or previous field (its tab,
-  // MODALS). Anything else takes no Tab yet: the key goes on to herdr.
+  // MODALS). Anything else takes no Tab yet and hands it on to herdr's own
+  // Tab (cx.propagate): GPUI stops an action at its first listener unless
+  // that listener lets it go on (gpui's window.rs, dispatch_action_on_node,
+  // and dispatch_key_event, which then tries the next binding of the key).
   tabKey(back, cx) {
     const tab = this.modal ? MODALS[this.modal.kind].tab : null;
-    if (!tab) return;
+    if (!tab) return cx.propagate();
     cx.stop_propagation();
     tab(this, back, cx);
   }
@@ -405,7 +409,7 @@ export default class Board extends View {
     const due = st.unclear.filter(isDue(st, started));
     if (!due.length) return;
     st.unclear = st.unclear.filter((u) => !due.includes(u));
-    SHAPES[data?.shape]?.settle?.(this, due, data, cx);
+    SHAPES[data?.shape]?.settle?.(this, due, data, cx, view);
   }
 
   // Every TICK_MS while the board shows: the shown view once refreshMinutes

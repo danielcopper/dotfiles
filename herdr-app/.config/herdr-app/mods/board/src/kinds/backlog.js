@@ -23,11 +23,12 @@ export function createTypes(data, parent) {
   return [...own, ...children];
 }
 
-// The warnings of a backlog: ids its query did not find, and a backlog
-// longer than one query reads.
+// The warnings of a backlog: an order it cannot check (no order field),
+// ids its query did not find, and a backlog longer than one query reads.
 export function backlogWarnings(data) {
   const { missing } = data.meta;
   return [
+    ...(data.meta.orderField ? [] : ["Reihenfolge ungeprüft: Azure nannte kein Order-Feld"]),
     ...(missing > 0 ? [`${missing} ${missing === 1 ? "Eintrag" : "Einträge"} des Backlogs ohne Felder (nicht gefunden)`] : []),
     ...(data.limited ? [`Nur die ersten ${data.limit} von ${data.total} Einträgen des Backlogs (so viele liest eine Abfrage)`] : []),
   ];

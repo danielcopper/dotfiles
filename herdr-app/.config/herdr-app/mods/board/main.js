@@ -1102,19 +1102,17 @@ export function jsonOrNull(stdout) {
 export const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json?.value) ? json.value : null);
 
 // The team's areas → { field (the team field, System.AreaPath by default),
-// values: [{ value, includeChildren }] }.
+// values: [{ value, includeChildren }], default (the area a new work item
+// gets, or null) }.
 export function parseAreas(stdout) {
   const json = azJson(stdout, "die Bereiche des Teams");
   const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
   if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
-  return { field: json.field?.referenceName ?? AREA_PATH, values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })) };
-}
-
-// The team's default area (the area a new work item gets) from its areas'
-// answer (azAreasArgs), or null.
-export function parseDefaultArea(stdout) {
-  const value = azJson(stdout, "die Bereiche des Teams")?.defaultValue;
-  return typeof value === "string" && value ? value : null;
+  return {
+    field: json.field?.referenceName ?? AREA_PATH,
+    values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })),
+    default: typeof json.defaultValue === "string" && json.defaultValue ? json.defaultValue : null,
+  };
 }
 
 // The address of a work item's page.
@@ -1428,9 +1426,10 @@ export function checkTaskboardMove(stdout, card, column) {
 }
 
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
-// makeAzure): what it keeps per team and project (settingsOf), how it
-// loads and writes, and what `r` or a refused write drops (forget: the
-// team's sprint, areas and columns, not the project's types).
+// makeAzure): what it keeps per team and project (settingsOf; the team's
+// areas are the source's, s.areasOf), how it loads and writes, and what
+// `r` or a refused write drops (forget: the team's sprint, areas and
+// columns, not the project's types).
 export function sprintView(s) {
   async function settingsOf(c) {
     const team = s.teamKey(c);
@@ -1438,19 +1437,21 @@ export function sprintView(s) {
     const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(project)];
     const [it, areas, columns, ty] = await Promise.all([
       iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
-      board?.value.areas ?? s.az(azAreasArgs(c)).then(parseAreas),
+      s.areasOf(c),
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
       types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
     ]);
     const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
+    s.keepAreasUntil(c, until);
     if (!iteration) s.kept.set(`iteration\n${team}`, { value: it, until });
-    if (!board) s.kept.set(`board\n${team}`, { value: { areas, columns }, until });
+    if (!board) s.kept.set(`board\n${team}`, { value: { columns }, until });
     if (!types) s.kept.set(project, { value: ty, until });
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
     s.kept.delete(`iteration\n${s.teamKey(c)}`);
     s.kept.delete(`board\n${s.teamKey(c)}`);
+    s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
   return {
@@ -1505,9 +1506,11 @@ export const azBacklogIdsArgs = (c, levelId) => ["rest", "--method", "get", "--u
 export const BACKLOG_NEEDS_LOGIN = "Der Backlog braucht az login (ein PAT reicht dafür nicht)";
 const AZ_REST_LOGIN = /az login|AADSTS\d+|Unauthorized|\b401\b/i;
 export function azRestFailure(r, on, options) {
-  const said = String(r.stderr ?? "").split("\n").filter((l) => !/^WARNING:/.test(l)).join("\n");
-  if (AZ_REST_LOGIN.test(said)) return new BoardError(BACKLOG_NEEDS_LOGIN, { unavailable: true });
-  return azFailure(r, on, options);
+  const lines = String(r.stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const said = lines.join("\n");
+  if (!AZ_REST_LOGIN.test(said)) return azFailure(r, on, options);
+  const line = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0]).replace(/^ERROR:\s*/, "").trim();
+  return new BoardError(`${BACKLOG_NEEDS_LOGIN}: ${line}`, { unavailable: true });
 }
 
 // A backlog level of Azure's answer → { id, name, type ("portfolio",
@@ -1527,8 +1530,9 @@ export function parseBacklogLevels(stdout) {
   return levels;
 }
 
-// The level the Backlog shows: the team's requirement level (Stories, by
-// the process: User Stories, Product Backlog Items, Requirements), and the
+// The level the Backlog shows: the team's requirement level (Stories; by
+// the process for example User Stories, Product Backlog Items,
+// Requirements or Issues in Basic), and the
 // level below it, whose types (Tasks) may be created under one of its
 // items: the team's task level, else the configuration's.
 export function backlogLevels(levels, config) {
@@ -1559,13 +1563,21 @@ export function parseBacklogConfig(stdout) {
   };
 }
 
-// The team's settings → { defaultIteration, backlogIteration }: the paths
-// of the iteration a new work item gets and of the backlog's own (the root
-// of the team's iterations), each null where Azure names none.
+// The team's settings → { defaultIteration, backlogIteration, follows }:
+// the paths of the iteration a new work item gets and of the backlog's own
+// (the root of the team's iterations), each null where Azure names none;
+// follows: the default iteration is a macro (defaultIterationMacro, such
+// as @CurrentIteration), so the path Azure names is good only until that
+// iteration ends (its finishDate, or null where it names none).
 export function parseTeamSettings(stdout) {
   const json = azJson(stdout, "die Einstellungen des Teams");
   const path = (it) => (typeof it?.path === "string" && it.path ? it.path : null);
-  return { defaultIteration: path(json?.defaultIteration), backlogIteration: path(json?.backlogIteration) };
+  const macro = typeof json?.defaultIterationMacro === "string" && json.defaultIterationMacro !== "";
+  return {
+    defaultIteration: path(json?.defaultIteration),
+    backlogIteration: path(json?.backlogIteration),
+    follows: macro ? { finish: json.defaultIteration?.attributes?.finishDate ?? null } : null,
+  };
 }
 
 // The ids of the level's work items, in the list's order, each once.
@@ -1655,6 +1667,20 @@ export function checkParentLink(stdout, parent) {
 // How long the Backlog keeps a team's settings (ms): they change rarely.
 export const BACKLOG_KEEP_MS = 4 * 3600000;
 
+// Until when the Backlog keeps a team's settings read at `now`:
+// BACKLOG_KEEP_MS, or sooner where the default iteration follows one that
+// ends before (settings.follows, sprintUntil).
+export function backlogUntil(settings, now) {
+  const keep = now + BACKLOG_KEEP_MS;
+  return settings.follows ? Math.min(keep, sprintUntil(settings.follows.finish, now)) : keep;
+}
+
+// One WIQL query for the work items titled `title` that the account az is
+// signed in as created today: one is the create whose answer was unclear,
+// none means it did not land, several cannot be told apart.
+export const createdWiql = (title) =>
+  `SELECT [System.Id] FROM WorkItems WHERE [System.Title] = ${wiqlText(title)} AND [System.CreatedBy] = @Me AND [System.CreatedDate] = @Today ORDER BY [System.Id]`;
+
 // The Backlog as makeAzure uses it, on the source's shared parts `s` (see
 // makeAzure): what it keeps per team (backlogSettingsOf), how it loads and
 // writes, and what `r` or a refused write drops (forget).
@@ -1663,17 +1689,22 @@ export function backlogView(s) {
   async function backlogSettingsOf(c) {
     const held = s.keptValue(key(c));
     if (held) return held.value;
-    const [levels, config, settings, area] = await Promise.all([
+    const [levels, config, settings, areas] = await Promise.all([
       s.az(azLevelsArgs(c)).then(parseBacklogLevels),
       s.az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
       s.az(azTeamSettingsArgs(c)).then(parseTeamSettings),
-      s.az(azAreasArgs(c)).then(parseDefaultArea),
+      s.areasOf(c),
     ]);
-    const value = { ...backlogLevels(levels, config), config, settings, area };
-    s.kept.set(key(c), { value, until: Date.now() + BACKLOG_KEEP_MS });
+    const value = { ...backlogLevels(levels, config), config, settings, area: areas.default };
+    const until = backlogUntil(settings, Date.now());
+    s.kept.set(key(c), { value, until });
+    s.keepAreasUntil(c, until);
     return value;
   }
-  const forget = (c) => s.kept.delete(key(c));
+  const forget = (c) => {
+    s.kept.delete(key(c));
+    s.forgetAreas(c);
+  };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
   return {
     forget,
@@ -1699,6 +1730,11 @@ export function backlogView(s) {
     async addParent(view, id, parent) {
       checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true }), parent);
     },
+    // The ids of the work items titled `title` that I created today: what
+    // settles a create whose answer was unclear (createdWiql).
+    async findCreated(view, title) {
+      return parseWorkItems(await s.az(azQueryArgs(view.context, createdWiql(title))), view.context).map((i) => i.number);
+    },
   };
 }
 
@@ -1714,22 +1750,27 @@ export function backlogView(s) {
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
 // (sprintUntil; one that fails keeps nothing): per team, by organisation,
-// project and team, its current sprint, and its areas and taskboard
-// columns; per project the work item types, until the sprint of the team
-// that read them ends. What is not kept is read at the same time. A
-// refresh then reads the taskboard's columns of the work items and the
-// sprint's work items, also at the same time. The team's kept settings
-// (not the project's types) are dropped, so that they are read again, by
-// `r` on the Sprint (forget), by a task in a column the columns read do not
-// know, and by a move or state change Azure refuses.
+// project and team, its current sprint and taskboard columns; per project
+// the work item types, until the sprint of the team that read them ends.
+// What is not kept is read at the same time. A refresh then reads the
+// taskboard's columns of the work items and the sprint's work items, also
+// at the same time. The team's kept settings (not the project's types) are
+// dropped, so that they are read again, by `r` on the Sprint (forget), by
+// a task in a column the columns read do not know, and by a move or state
+// change Azure refuses.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
-// for BACKLOG_KEEP_MS (one that fails keeps nothing): the team's backlog
-// levels, its backlog configuration, its settings and its areas (for the
-// default area). A refresh then reads the level's ids (az rest) and, after
-// them, one query for their fields; a backlog without ids asks no query.
-// `r` on the Backlog and a state change or create Azure refuses drop what
-// it keeps.
+// for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the
+// iteration ends that the team's default iteration follows, where that is
+// sooner (backlogUntil): the team's backlog levels, its backlog
+// configuration and its settings. A refresh then reads the level's ids (az
+// rest) and, after them, one query for their fields; a backlog without
+// ids asks no query. `r` on the Backlog and a state change or create Azure
+// refuses drop what it keeps.
+//
+// Both views read the team's areas (the Backlog for its default area) and
+// keep them as one, for the shorter of their times (areasOf); `r` on
+// either, or a refusal there, drops them.
 //
 // Who az is signed in as is read beside all that, with its own short
 // timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
@@ -1762,11 +1803,29 @@ export function makeAzure(paths) {
         return null;
       });
   const noViewer = "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)";
+  const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
+  const areasKey = (c) => `areas\n${teamKey(c)}`;
   // What the views share: az, what is kept, who az is (and the data's words
   // for why it is not known), and a state change.
   const shared = {
-    az, kept, keptValue, whoAmI,
-    teamKey: (c) => `${c.org}\n${c.project}\n${c.team}`,
+    az, kept, keptValue, whoAmI, teamKey,
+    // The team's areas (parseAreas), one entry for both views: read where
+    // it is not kept, kept BACKLOG_KEEP_MS, and shorter where a view keeps
+    // its own settings for a shorter time (keepAreasUntil: the Sprint's
+    // until its sprint ends, the Backlog's until backlogUntil); either
+    // view's forget drops it.
+    async areasOf(c) {
+      const held = keptValue(areasKey(c));
+      if (held) return held.value;
+      const value = parseAreas(await az(azAreasArgs(c)));
+      kept.set(areasKey(c), { value, until: Date.now() + BACKLOG_KEEP_MS });
+      return value;
+    },
+    keepAreasUntil(c, until) {
+      const entry = kept.get(areasKey(c));
+      if (entry) entry.until = Math.min(entry.until, until);
+    },
+    forgetAreas: (c) => kept.delete(areasKey(c)),
     noViewerOf(data) {
       if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
     },
@@ -2532,11 +2591,12 @@ export function createTypes(data, parent) {
   return [...own, ...children];
 }
 
-// The warnings of a backlog: ids its query did not find, and a backlog
-// longer than one query reads.
+// The warnings of a backlog: an order it cannot check (no order field),
+// ids its query did not find, and a backlog longer than one query reads.
 export function backlogWarnings(data) {
   const { missing } = data.meta;
   return [
+    ...(data.meta.orderField ? [] : ["Reihenfolge ungeprüft: Azure nannte kein Order-Feld"]),
     ...(missing > 0 ? [`${missing} ${missing === 1 ? "Eintrag" : "Einträge"} des Backlogs ohne Felder (nicht gefunden)`] : []),
     ...(data.limited ? [`Nur die ersten ${data.limit} von ${data.total} Einträgen des Backlogs (so viele liest eine Abfrage)`] : []),
   ];
@@ -2583,7 +2643,8 @@ export function viewStands(b, view) {
 //   whose follow-up failed; toasts: the toasts' titles, { unclear (also a
 //   landed write whose follow-up failed), refused } ("Status von AB#3",
 //   "Status von AB#3 nicht geändert" by default);
-// - w.again: refresh after a write that landed too.
+// - w.again: refresh after a write that landed too; w.againOnRefusal:
+//   after one that was refused too (what it met may have been out of date).
 // A write that landed or was refused refreshes the view too while an open
 // outcome of the item, of either kind, remains: the refresh tells it, so
 // it does not wait for the timer. A refresh follows only while the view
@@ -2647,7 +2708,7 @@ export function writeAtOnce(b, view, w, cx) {
       const earlier = st.unclear.some(same);
       b.say(w.texts.refused(why, earlier), "error", cx);
       notify({ title: toasts.refused, body: why, level: "error" });
-      if (followed && current && openOf(st, key)) b.refresh(current, cx);
+      if (followed && current && (w.againOnRefusal || openOf(st, key))) b.refresh(current, cx);
     }
   }
 }
@@ -2746,21 +2807,30 @@ export function unclearStateLines(due, data, how) {
 // row before Azure names the new id; and after a refresh, how unclear
 // creates and parent links ended up. The backlog shape creates so.
 
-// The key a create is written under: one create at a time per view.
+// The key a create is written under: one create at a time per view (an
+// unclear one's outcome is kept under a key of its own, createOpenKey).
 export const CREATE_KEY = "create";
 
 // The key of the Azure work item `id` (itemKey).
 const workItemKey = (id) => itemKey({ source: "azure", kind: "workitem", number: id });
 
+// The key the open outcome of one create is kept under, each its own, so
+// that a later create replaces none.
+let creates = 0;
+const createOpenKey = () => `${CREATE_KEY}:${++creates}`;
+
 // Creates a work item of `type` with `title`; a child type (type.child)
 // goes under `parent`. Nothing shows before Azure names the id; then the
 // backlog is read again and the new item, where the level holds its type,
 // is chosen once that refresh has it (Board.chooseWanted). A child, which
-// is no item of the level, is linked to its parent next (linkParent).
+// is no item of the level, is linked to its parent next (linkParent). A
+// refusal reads the backlog again too, with settings read afresh (the
+// source drops them): what the create met may have been out of date.
 export function createItem(b, view, { type, title, parent }, cx) {
   const st = b.state(view.id);
   const label = `„${title}“`;
   const under = type.child && parent ? parent : null;
+  const where = under ? ` unter ${itemLabel(under)}` : "";
   let id = null;
   writeAtOnce(b, view, {
     key: CREATE_KEY,
@@ -2774,12 +2844,20 @@ export function createItem(b, view, { type, title, parent }, cx) {
       else linkParent(b, view, id, under, cx);
     },
     undo() {},
-    open: { kind: "create", title },
+    open: {
+      kind: "create", key: createOpenKey(), title, type: type.name, child: Boolean(under),
+      parent: under?.number ?? null, parentLabel: under ? itemLabel(under) : null,
+    },
     again: true,
+    againOnRefusal: true,
     texts: {
-      pending: () => `${type.name} ${label} wird angelegt …`,
+      pending: () => `${type.name} ${label}${where} wird angelegt …`,
       landed: () => (under ? `${workItemKey(id)} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `${workItemKey(id)} ${label} angelegt`),
-      unclear: `${type.name} ${label} anlegen`,
+      // A child is no item of the backlog, so no refresh shows it; the
+      // refresh's check (unclearCreateLines) says whether it is there.
+      unclear: under
+        ? `${type.name} ${label} unter ${itemLabel(under)} anlegen (der Backlog zeigt keine ${type.name}s: vor einem neuen Versuch in Azure nachsehen; mit ${itemLabel(under)} ist es noch nicht verknüpft)`
+        : `${type.name} ${label} anlegen`,
       refused: (why) => `${type.name} ${label} nicht angelegt: ${why}`,
       landedBut: (why) => `${workItemKey(id)} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
       toasts: { unclear: `Anlegen von ${label}`, refused: `${label} nicht angelegt` },
@@ -2810,16 +2888,31 @@ function linkParent(b, view, id, parent, cx) {
   }, cx);
 }
 
-// Where the work items of settled unclear creates (`due`, of kind
-// "create") are in the new data, one line each: an item of that title in
-// the backlog (info), else none (warning; a child type is no item of the
-// level, so it never shows there).
-export function unclearCreateLines(due, data) {
-  return due.map((u) => {
-    const found = data.rows.filter((r) => r.title === u.title);
-    if (found.length) return { text: `${u.label} steht nach dem Neuladen im Backlog (${found.map(itemLabel).join(", ")})`, warn: false };
-    return { text: `${u.label} steht nach dem Neuladen nicht im Backlog`, warn: true };
-  });
+// How the settled unclear creates `due` (of kind "create") ended up, one
+// line each, by asking Azure for the work items of each title that I
+// created today (the loader's findCreated): exactly one is the create
+// (info; a child's line adds that it hangs under nothing yet, a warning),
+// none means it did not land, several are said as they are, a failed
+// question says that it could not be checked (warnings). Nothing is
+// guessed from the rows: another item of the same title may be there.
+export async function unclearCreateLines(b, view, due) {
+  const loader = b.loader(view);
+  return Promise.all(due.map(async (u) => {
+    const head = `${u.type} ${u.label}`;
+    let ids;
+    try {
+      ids = await loader.findCreated(view, u.title);
+    } catch (e) {
+      return { text: `${head}: ob es angelegt ist, ließ sich nicht prüfen (${errorText(e)}); vor einem neuen Versuch in Azure nachsehen`, warn: true };
+    }
+    if (ids.length === 1) {
+      const key = workItemKey(ids[0]);
+      if (u.child) return { text: `${head} ist angelegt (${key}), hängt aber nicht unter ${u.parentLabel}`, warn: true };
+      return { text: `${head} ist angelegt (${key})`, warn: false };
+    }
+    if (!ids.length) return { text: `${head} ist nicht angelegt: Azure kennt kein Work Item dieses Titels, das ich heute angelegt habe`, warn: true };
+    return { text: `${head}: Azure kennt ${ids.length} Work Items dieses Titels, die ich heute angelegt habe (${ids.map(workItemKey).join(", ")}); welches es ist, sagt das Board nicht`, warn: true };
+  }));
 }
 
 // Whether the items of settled unclear parent links (`due`, of kind
@@ -2910,8 +3003,8 @@ export const createModal = {
     const types = createTypes(data, parent);
     if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
     if (!data.meta.area || !data.meta.iteration) {
-      const missing = [!data.meta.area && "Standardbereich", !data.meta.iteration && "Standard-Iteration"].filter(Boolean).join(" und ");
-      return b.say(`Das Team hat keinen ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
+      const missing = [!data.meta.area && "keinen Standardbereich", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
+      return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
     const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
@@ -2921,14 +3014,15 @@ export const createModal = {
     cx.notify();
   },
 
-  // Creates the work item and closes the dialog; without a title it stays
-  // and says so.
+  // Creates the work item and closes the dialog; without a title, or while
+  // another create of the view is under way, it stays and says so.
   create(b, cx) {
     const m = b.modal;
     if (m?.kind !== "create") return;
     const title = m.input.value().trim();
-    if (!title) {
-      m.error = "Der Titel fehlt";
+    const busy = b.state(m.view.id).pending[CREATE_KEY];
+    if (!title || busy) {
+      m.error = busy ? "Ein Work Item wird noch angelegt …" : "Der Titel fehlt";
       return cx.notify();
     }
     b.closeModal(cx);
@@ -3293,7 +3387,7 @@ export const statusModal = {
 // b.modal.view, and a reload that finishes while it is open closes it when
 // views.json no longer has that view of that kind. A dialog with fields
 // also has tab(b, back, cx), which Tab and shift-Tab (`back`) call to move
-// between them (Board.dialogTab). A new dialog is a module here and its
+// between them (Board.tabKey). A new dialog is a module here and its
 // entry in MODALS.
 
 export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal };
@@ -3348,13 +3442,24 @@ export const backlogShape = {
   received: (data) => data,
   warnings: (_view, data) => backlogWarnings(data),
   // The settled outcomes: a state change's which state its item has, a
-  // create's whether its title is in the backlog, a parent link's whether
-  // the item hangs under its parent.
-  settle: (b, due, data, cx) => tellOutcomes(b, [
-    ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
-    ...unclearCreateLines(due.filter((u) => u.kind === "create"), data),
-    ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
-  ], cx),
+  // parent link's whether the item hangs under its parent; then, once Azure
+  // has answered (one query each, unclearCreateLines), a create's whether
+  // it landed.
+  settle(b, due, data, cx, view) {
+    tellOutcomes(b, [
+      ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
+      ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
+    ], cx);
+    const creates = due.filter((u) => u.kind === "create");
+    if (!creates.length) return;
+    cx.spawn(async (cx) => {
+      try {
+        tellOutcomes(b, await unclearCreateLines(b, view, creates), cx);
+      } catch (e) {
+        b.say(report(e), "error", cx);
+      }
+    });
+  },
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, BACKLOG_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, BACKLOG_STATES, cx),
   // The detail panel's rows of a work item: its state as a pill (a click
@@ -4097,10 +4202,10 @@ const SPRINT_STATES = {
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
 // where it has them, detailParts (its rows in the detail panel), settle
-// (says how the unclear writes of its items ended up), moveTo,
-// toggleColumn, openStatusMenu, navigate (its own keyboard movement in
-// place of navigate's, select.js) and pickStatus (what a pick in the status
-// menu does in place of a move to that column). A shape keeps its own
+// (says how the unclear writes of its items ended up; it gets the view
+// last), moveTo, toggleColumn, openStatusMenu, navigate (its own keyboard
+// movement in place of navigate's, select.js) and pickStatus (what a pick
+// in the status menu does in place of a move to that column). A shape keeps its own
 // state per Board in b.shapeState[name], which its state() makes once, when
 // the Board starts: herdr refuses a ScrollHandle made while a view draws
 // ("cannot run during render"). A new way to draw is a module here and its
@@ -4125,12 +4230,13 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
-// on_key_down, so a dialog's key handler never saw Tab, not even while its
-// text field had the keyboard; of the matching bindings, the one in the
-// deepest context wins, so a binding in the context of the board's root,
-// around its dialogs and their fields, comes first. The leader mod binds
-// the same way and says more (mods/leader/main.js, KEY_CONTEXT). Each
-// action runs tabKey, the one place that says what Tab does on the board.
+// on_key_down, so a dialog's key handler sees no Tab unless the board binds
+// it, not even while the dialog's text field has the keyboard. Of the
+// matching bindings, the one in the deepest context wins, so a binding in
+// the context of the board's root, around its dialogs and their fields,
+// comes first. The leader mod binds the same way and says more
+// (mods/leader/main.js, KEY_CONTEXT). Each action runs tabKey, the one
+// place that says what Tab does on the board.
 export const BOARD_KEY_CONTEXT = "Board";
 export const BOARD_KEYS = [
   { keystroke: "tab", action: "board_tab", back: false },
@@ -4227,10 +4333,13 @@ export default class Board extends View {
 
   // Tab and shift-Tab (`back`), whatever has the keyboard in the board: in
   // an open dialog with fields, its next or previous field (its tab,
-  // MODALS). Anything else takes no Tab yet: the key goes on to herdr.
+  // MODALS). Anything else takes no Tab yet and hands it on to herdr's own
+  // Tab (cx.propagate): GPUI stops an action at its first listener unless
+  // that listener lets it go on (gpui's window.rs, dispatch_action_on_node,
+  // and dispatch_key_event, which then tries the next binding of the key).
   tabKey(back, cx) {
     const tab = this.modal ? MODALS[this.modal.kind].tab : null;
-    if (!tab) return;
+    if (!tab) return cx.propagate();
     cx.stop_propagation();
     tab(this, back, cx);
   }
@@ -4403,7 +4512,7 @@ export default class Board extends View {
     const due = st.unclear.filter(isDue(st, started));
     if (!due.length) return;
     st.unclear = st.unclear.filter((u) => !due.includes(u));
-    SHAPES[data?.shape]?.settle?.(this, due, data, cx);
+    SHAPES[data?.shape]?.settle?.(this, due, data, cx, view);
   }
 
   // Every TICK_MS while the board shows: the shown view once refreshMinutes

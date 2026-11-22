@@ -318,13 +318,14 @@ herdr-app`. Which files of the package git tracks is set in the root
   items of the types the taskboard's columns map. What it reads per refresh, the
   header of `mods/board/src/main.js` says, and makeAzure (in
   `mods/board/src/sources/azure/index.js`) what it keeps; `r` reads the team's
-  sprint, areas and columns again. A team's Backlog lists its requirement level (its
-  Stories, and Bugs where the team keeps them there) in backlog order, one row
-  each with id, type, title, state, sprint ("—" for none) and assignee. It
-  needs `az login`: the order comes through `az rest`, which takes no PAT, and
-  the Backlog says so when the login is missing. What it keeps and for how
-  long, makeAzure says; `r` reads that again. The pull request tabs read
-  nothing yet; each says which view it will hold.
+  sprint, areas and columns again. A team's Backlog lists its requirement
+  level (its Stories, and Bugs where the team keeps them there) in backlog
+  order, one row each with id, type, title, state, sprint ("—" for none) and
+  assignee. It needs `az login`: the level's work items come through
+  `az rest`, which takes no PAT, and the Backlog says so when the login is
+  missing. What it keeps and for how long, makeAzure says; `r` reads that
+  again. The pull request tabs read nothing yet; each says which view it
+  will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
   me, opened by me, or asking for my review; a list section of my own
   search, one whose query sets author, assignee or (user-)review-requested
@@ -351,12 +352,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   state, `Enter` shows the details (parent, state, assignee, area, iteration
   and sprint), `o` opens the item in the browser, and `n` creates a work item:
   a dialog asks for its type (the level's, Story first; with a Story selected
-  also Task, as its child) and its title (`Tab` switches the field, `h/l` the
-  type). It is created in the team's default area and iteration, assigned to
-  me, and shows, selected, once Azure has named its id and the Backlog is read
-  again; a Task is linked to the selected Story as its parent and, being no
-  Story, does not show in the list. Where a work item's session starts
-  is only `start.checkout` so far. On a GitHub view `h/l j/k` move over the
+  also Task, as its child) and its title (`h/l` switch the type). It is
+  created in the team's default area and iteration, assigned to me, and
+  shows, selected, once Azure has named its id and the Backlog is read again;
+  a Task is linked to the selected Story as its parent and, being no Story,
+  does not show in the list. Where a work item's session starts is only
+  `start.checkout` so far. On a GitHub view `h/l j/k` move over the
   columns shown, `H/L` move a card one column, hidden ones included (`s` picks
   from a menu, hidden ones too, or drag the card onto a column; the notice
   says when a card went to a hidden column), `x` hides a column (views.json
@@ -372,16 +373,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   details, a second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
-  pull request) and makes its own worktree. In that dialog and the create
-  dialog `Tab` and shift-`Tab` move between the fields, from the message or
-  title too: the board binds them in its own key context, as the leader does
-  (the comment above `BOARD_KEYS` in `mods/board/src/main.js`). The session
-  is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
-  item), which is how the board
-  finds it again. A status change shows at once and is written to GitHub or
-  Azure; a refusal moves the card back (or sets the state back) with the
-  error, and a write without a clear answer refreshes the board and then says
-  where the card is, or which state the work item has. A state set on Azure
+  pull request) and makes its own worktree. In the start dialog and the
+  create dialog `Tab` and shift-`Tab` move between the fields, from the
+  message or title too: the board binds them in its own key context, as the
+  leader does (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
+  The session is named after the item (`romm-tender#2845 …`, `AB#456 …`
+  for a work item), which is how the board finds it again. A status change
+  shows at once and is written to GitHub or Azure; a refusal moves the card
+  back (or sets the state back) with the error, and a write without a clear
+  answer refreshes the board and then says where the card is, or which state
+  the work item has. A state set on Azure
   refreshes the Sprint either way, since which column it puts a task in is
   Azure's to say. It runs gh and az by the path my shell gives, since herdr's
   own PATH lacks Homebrew and mise. `mise run

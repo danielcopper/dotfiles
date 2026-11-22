@@ -41,7 +41,8 @@ export function viewStands(b, view) {
 //   whose follow-up failed; toasts: the toasts' titles, { unclear (also a
 //   landed write whose follow-up failed), refused } ("Status von AB#3",
 //   "Status von AB#3 nicht geändert" by default);
-// - w.again: refresh after a write that landed too.
+// - w.again: refresh after a write that landed too; w.againOnRefusal:
+//   after one that was refused too (what it met may have been out of date).
 // A write that landed or was refused refreshes the view too while an open
 // outcome of the item, of either kind, remains: the refresh tells it, so
 // it does not wait for the timer. A refresh follows only while the view
@@ -105,7 +106,7 @@ export function writeAtOnce(b, view, w, cx) {
       const earlier = st.unclear.some(same);
       b.say(w.texts.refused(why, earlier), "error", cx);
       notify({ title: toasts.refused, body: why, level: "error" });
-      if (followed && current && openOf(st, key)) b.refresh(current, cx);
+      if (followed && current && (w.againOnRefusal || openOf(st, key))) b.refresh(current, cx);
     }
   }
 }

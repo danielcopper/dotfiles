@@ -5,7 +5,7 @@
 import { home, readTextFile, writeTextFile } from "herdr";
 import { BoardError, failure, firstLine } from "../../shared.js";
 import { NO_STORY } from "../../kinds/sprint.js";
-import { AREA_PATH, AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azAreasArgs, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, jsonOrNull, parseAreas, parseAzureTypes, parseWorkItems, wiqlText } from "./common.js";
+import { AREA_PATH, AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, jsonOrNull, parseAzureTypes, parseWorkItems, wiqlText } from "./common.js";
 
 // The Sprint view's calls for a team context `c` ({ org, project, team }):
 // its current iteration, its areas (azAreasArgs), its taskboard's columns,
@@ -159,9 +159,10 @@ export function checkTaskboardMove(stdout, card, column) {
 }
 
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
-// makeAzure): what it keeps per team and project (settingsOf), how it
-// loads and writes, and what `r` or a refused write drops (forget: the
-// team's sprint, areas and columns, not the project's types).
+// makeAzure): what it keeps per team and project (settingsOf; the team's
+// areas are the source's, s.areasOf), how it loads and writes, and what
+// `r` or a refused write drops (forget: the team's sprint, areas and
+// columns, not the project's types).
 export function sprintView(s) {
   async function settingsOf(c) {
     const team = s.teamKey(c);
@@ -169,19 +170,21 @@ export function sprintView(s) {
     const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(project)];
     const [it, areas, columns, ty] = await Promise.all([
       iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
-      board?.value.areas ?? s.az(azAreasArgs(c)).then(parseAreas),
+      s.areasOf(c),
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
       types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
     ]);
     const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
+    s.keepAreasUntil(c, until);
     if (!iteration) s.kept.set(`iteration\n${team}`, { value: it, until });
-    if (!board) s.kept.set(`board\n${team}`, { value: { areas, columns }, until });
+    if (!board) s.kept.set(`board\n${team}`, { value: { columns }, until });
     if (!types) s.kept.set(project, { value: ty, until });
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
     s.kept.delete(`iteration\n${s.teamKey(c)}`);
     s.kept.delete(`board\n${s.teamKey(c)}`);
+    s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
   return {

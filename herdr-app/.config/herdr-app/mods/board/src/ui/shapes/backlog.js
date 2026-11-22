@@ -20,6 +20,7 @@ import { tellOutcomes } from "../../actions/write.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
+import { report } from "../../shared.js";
 import { MODALS } from "../modals/index.js";
 import { chip, sessionChip, shownOf, workItemDetail } from "../helpers.js";
 
@@ -59,13 +60,24 @@ export const backlogShape = {
   received: (data) => data,
   warnings: (_view, data) => backlogWarnings(data),
   // The settled outcomes: a state change's which state its item has, a
-  // create's whether its title is in the backlog, a parent link's whether
-  // the item hangs under its parent.
-  settle: (b, due, data, cx) => tellOutcomes(b, [
-    ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
-    ...unclearCreateLines(due.filter((u) => u.kind === "create"), data),
-    ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
-  ], cx),
+  // parent link's whether the item hangs under its parent; then, once Azure
+  // has answered (one query each, unclearCreateLines), a create's whether
+  // it landed.
+  settle(b, due, data, cx, view) {
+    tellOutcomes(b, [
+      ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
+      ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
+    ], cx);
+    const creates = due.filter((u) => u.kind === "create");
+    if (!creates.length) return;
+    cx.spawn(async (cx) => {
+      try {
+        tellOutcomes(b, await unclearCreateLines(b, view, creates), cx);
+      } catch (e) {
+        b.say(report(e), "error", cx);
+      }
+    });
+  },
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, BACKLOG_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, BACKLOG_STATES, cx),
   // The detail panel's rows of a work item: its state as a pill (a click
