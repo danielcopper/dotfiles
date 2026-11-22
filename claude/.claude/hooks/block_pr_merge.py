@@ -113,7 +113,8 @@ PR_MERGE = re.compile(
 )
 ALIAS = re.compile(r"\balias\b")
 ALIAS_VERB = re.compile(r"\b(set|import)\b")
-AZ_COMPLETE = re.compile(r"\b(completed|auto-?complete)\b")
+# auto-complete also as the start of a name, such as autoCompleteSetBy
+AZ_COMPLETE = re.compile(r"\b(?:completed\b|auto-?complete)")
 DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
 FILE_FLAGS = re.compile(r"@|--input|--upload-file|--config|--post-file|--body-file|--in-file")
 FILE_LONG_FLAGS = re.compile(r"--input|--upload-file|--config|--post-file|--body-file|--in-file")

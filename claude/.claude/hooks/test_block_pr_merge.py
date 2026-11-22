@@ -685,6 +685,8 @@ DENIED = [
     "echo x\\\n#'\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
     "{ echo }; cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\necho {\n} | env bash",
     "case x in (x) cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n;; esac | env bash",
+    # auto-complete set through the REST API
+    'az rest --method patch --uri u --body \'{"autoCompleteSetBy": {"id": "x"}}\'',
 ]
 
 REASONS = {

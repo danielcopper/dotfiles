@@ -42,7 +42,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       with a word in the subcommand position, past the options, that is no known subcommand and holds `merge`
       anywhere (`automerge`, `pr_merge`);
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
-      (`az` with `completed` or `auto-complete`, or `devops invoke` on pull requests);
+      (`az` with `completed` or `auto-complete`, also as the start of a name such as `autoCompleteSetBy`, or
+      `devops invoke` on pull requests);
     - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
       string also read as a command — that runs `gh api`, `az rest`, `az devops invoke` or `az repos pr` (the
       subcommand right after the tool's options, with no quoted word or redirection before it) and reads a request
