@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+# Tests for bash/.local/bin/image-page, which copies images into a directory
+# and writes an index.html that shows them at their real size. Each case runs
+# the script in a clean environment (env -i) whose PATH holds python3 and a
+# stand-in preview-serve that logs its calls to $ROOT/served, so a case can
+# tell that the script starts no server. The images are written once, before
+# the cases, by the python at the top of this file: a PNG that decodes, and
+# headers of the other formats with the size where each format keeps it.
+#   m1  a 725 px PNG at --density 2.625: CSS width 276; 5 px at 2: 3 (half
+#       up); 1 px at 3: 1, never 0; the copy is the same bytes as the source
+#   m2  without --density: the pixel width, 725
+#   m3  a density that is no positive decimal number (0, 0.0, -1, abc, empty,
+#       nan, inf, 1e3, 1_0, " 2", a missing value), an unknown option, no
+#       image: exit 2, the usage on stderr, the out-dir not created; the
+#       usage names preview-serve <out-dir>
+#   m4  each format's width read from the file: PNG, baseline and progressive
+#       JPEG (a DHT segment and fill bytes before the frame header), GIF,
+#       WebP as VP8 (scale bits set), VP8L and VP8X (a width above 16384)
+#   m5  a size that cannot be read (a text file named .png, a cut PNG, a
+#       JPEG without a frame header, a WebP without a known chunk, a missing
+#       file, a directory): exit 1, the file named on stderr, the out-dir not
+#       created
+#   c1  without a caption: the basename without its extension, above the
+#       image
+#   c2  image::caption: that caption, above the image, the rest of the path
+#       read as the image; an empty caption falls back to the default
+#   c3  the images stand in the order given
+#   c4  caption, title and file name are HTML-escaped in the caption, alt,
+#       <title> and <h1>; the src is the file name URL-escaped
+#   c5  --title sets <title> and <h1>; without it <title> is the out-dir's
+#       name and there is no <h1>
+#   c6  the page loads nothing from outside: no URL in it, every src a file
+#       beside it
+#   o1  a missing out-dir is created, parents too; an out-dir that is a file:
+#       exit 1
+#   o2  a non-empty out-dir is refused without --replace, also one holding
+#       an earlier page: exit 1, nothing in it changed
+#   o3  --replace on a page image-page wrote: the earlier images are gone,
+#       the new ones and index.html in place; on a missing or empty out-dir
+#       it writes the page
+#   o4  --replace on an out-dir holding anything image-page did not write (a
+#       foreign file beside a page, a subdirectory, a symlink under the name
+#       of an image the page shows, a directory without image-page's list):
+#       exit 1, nothing in it changed
+#   o5  two images with the same basename, or an image named index.html:
+#       exit 1, both named, the out-dir not created
+#   o6  stdout is the path of index.html and nothing else; no server started
+#   o7  options may follow the positional arguments; after -- a name that
+#       starts with - is an image
+# usage: image-page.sh [image-page] [case ...]
+#        image-page.sh --list
+#   The script defaults to the repo's bash/.local/bin/image-page, the cases
+#   to all of them. The script argument needs a / in its path.
+# Prints "PASS <case>" or "FAIL <case>: <check>" per case; exits 1 when any
+# case failed. HOME points into a temporary directory for the whole run,
+# which is removed at the end. Needs python3.
+set -uo pipefail
+
+CASES=(m1_density_scales m2_default_density m3_bad_density m4_formats m5_unreadable_size
+  c1_caption_default c2_caption_given c3_order_kept c4_escaping c5_title c6_no_external_resources
+  o1_out_dir_created o2_nonempty_refused o3_replace o4_replace_refuses_foreign o5_duplicate_basenames
+  o6_prints_path_only o7_option_order)
+if [ "${1:-}" = --list ]; then
+  printf '%s\n' "${CASES[@]}"
+  exit 0
+fi
+
+HERE=$(dirname "$(readlink -f "$0")")
+REPO=$(readlink -f "$HERE/../..")
+SUT=$REPO/bash/.local/bin/image-page
+if [ $# -gt 0 ] && [[ $1 == */* ]] && [ -f "$1" ]; then
+  SUT=$(readlink -f "$1")
+  shift
+fi
+# Resolved, so the path the script prints for a relative out-dir compares equal.
+ROOT=$(readlink -f "$(mktemp -d "${TMPDIR:-/tmp}/image-page-test.XXXXXX")")
+trap 'rm -rf "$ROOT"' EXIT
+export HOME=$ROOT/home
+FX=$ROOT/fixtures
+mkdir -p "$HOME" "$ROOT/bin" "$FX"
+
+ln -s "$(type -P python3)" "$ROOT/bin/python3"
+cat >"$ROOT/bin/preview-serve" <<EOF
+#!/bin/sh
+echo "preview-serve \$*" >>"$ROOT/served"
+EOF
+chmod +x "$ROOT/bin/preview-serve"
+
+python3 -I - "$FX" <<'EOF' || { echo "FAIL: the fixtures could not be written"; exit 1; }
+import pathlib, struct, sys, zlib
+
+fx = pathlib.Path(sys.argv[1])
+
+
+def png(w, h):
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    rows = b"".join(b"\0" + b"\x80\x80\x80" * w for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def segment(marker, data):
+    return b"\xff" + bytes([marker]) + struct.pack(">H", len(data) + 2) + data
+
+
+def jpeg(w, h, sof):
+    jfif = segment(0xE0, b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0")
+    dht = segment(0xC4, b"\0" + b"\x01" + b"\0" * 15 + b"\0")
+    frame = segment(sof, struct.pack(">BHHB", 8, h, w, 1) + b"\x01\x11\0")
+    return b"\xff\xd8" + jfif + dht + b"\xff\xff" + frame + segment(0xDA, b"\x01\x01\0\0\x3f\0") + b"\0\xff\xd9"
+
+
+def gif(w, h):
+    return b"GIF89a" + struct.pack("<HHBBB", w, h, 0, 0, 0) + b";"
+
+
+def riff(kind, data):
+    chunk = kind + struct.pack("<I", len(data)) + data
+    return b"RIFF" + struct.pack("<I", len(chunk) + 4) + b"WEBP" + chunk
+
+
+def vp8(w, h):
+    # Key frame tag, start code, then 14 bits of size and 2 of scale each.
+    return riff(b"VP8 ", b"\x10\x02\0" + b"\x9d\x01\x2a" + struct.pack("<HH", w | 1 << 14, h | 2 << 14) + b"\0" * 10)
+
+
+def vp8l(w, h):
+    return riff(b"VP8L", b"\x2f" + struct.pack("<I", (w - 1) | (h - 1) << 14) + b"\0" * 5)
+
+
+def vp8x(w, h):
+    size = (w - 1).to_bytes(3, "little") + (h - 1).to_bytes(3, "little")
+    return riff(b"VP8X", b"\0\0\0\0" + size)
+
+
+files = {
+    "wide.png": png(725, 4),
+    "five.png": png(5, 2),
+    "one.png": png(1, 1),
+    "base.jpg": jpeg(641, 3, 0xC0),
+    "prog.jpg": jpeg(1081, 7, 0xC2),
+    "anim.gif": gif(333, 9),
+    "lossy.webp": vp8(517, 11),
+    "lossless.webp": vp8l(9999, 13),
+    "extended.webp": vp8x(20000, 17),
+    "notes.png": b"just some text\n",
+    "cut.png": b"\x89PNG\r\n\x1a\n\0\0\0\x0dIH",
+    "noframe.jpg": b"\xff\xd8" + segment(0xE0, b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0") + b"\xff\xd9",
+    "odd.webp": riff(b"ALPH", b"\0" * 10),
+}
+for name, data in files.items():
+    (fx / name).write_bytes(data)
+EOF
+
+failures=0
+fail() { echo "FAIL $CASE: $*"; FAILED=1; }
+check() { # check <description> <command...>
+  local what=$1
+  shift
+  "$@" || fail "$what"
+}
+page() { cat "$OUTDIR/index.html" 2>/dev/null; }
+# img_width <src>: the CSS width, in px, index.html gives the image <src>.
+img_width() {
+  page | sed -n "s|.*<img src=\"$1\"[^>]*style=\"width:\([0-9]*\)px\".*|\1|p"
+}
+# shown: the figcaption and img lines of index.html, in order, one per line.
+shown() { page | grep -E '<figcaption>|<img '; }
+# listing <dir>: the names in <dir>, dotfiles too, one per line, sorted.
+listing() { (cd "$1" && find . -mindepth 1 | sort); }
+no_server() { [ ! -e "$ROOT/served" ]; }
+# lacks <regex> <file>: no line of <file> matches <regex>, case ignored.
+lacks() { ! grep -qiE -- "$1" "$2"; }
+
+# run <arg>...: the script's stdout in $OUT, stderr in $ERR, exit code in $RC.
+run() {
+  RC=0
+  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" "$SUT" "$@" 2>"$ROOT/stderr") || RC=$?
+  ERR=$(cat "$ROOT/stderr")
+}
+written() { # written: exit 0 and an index.html in $OUTDIR
+  check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
+  check "index.html written" [ -f "$OUTDIR/index.html" ]
+}
+not_created() { # not_created <rc> <stderr text>: refused before $OUTDIR exists
+  check "exit $1, got $RC: $ERR" [ "$RC" = "$1" ]
+  check "stderr names '$2': $ERR" grep -qF -- "$2" <<<"$ERR"
+  check "out-dir not created" [ ! -e "$OUTDIR" ]
+  check "nothing on stdout: $OUT" [ -z "$OUT" ]
+}
+
+m1_density_scales() {
+  run --density 2.625 "$OUTDIR" "$FX/wide.png" "$FX/five.png" "$FX/one.png"
+  written
+  check "725 px at 2.625 is 276 px, got $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]
+  run --replace --density 2 "$OUTDIR" "$FX/five.png"
+  written
+  check "5 px at 2 is 3 px, got $(img_width five.png)" [ "$(img_width five.png)" = 3 ]
+  run --replace --density 3 "$OUTDIR" "$FX/one.png" "$FX/wide.png"
+  written
+  check "1 px at 3 is 1 px, got $(img_width one.png)" [ "$(img_width one.png)" = 1 ]
+  check "the copy holds the source's bytes" cmp -s "$FX/wide.png" "$OUTDIR/wide.png"
+  check "height auto and max-width 100%: $(page | grep -F 'img{')" \
+    grep -qF 'img{display:block;height:auto;max-width:100%}' <<<"$(page)"
+}
+
+m2_default_density() {
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  check "725 px without --density, got $(img_width wide.png)" [ "$(img_width wide.png)" = 725 ]
+}
+
+m3_bad_density() {
+  local value
+  for value in 0 0.0 -1 abc "" nan inf 1e3 1_0 " 2"; do
+    run --density "$value" "$OUTDIR" "$FX/wide.png"
+    not_created 2 "usage: image-page"
+    run "--density=$value" "$OUTDIR" "$FX/wide.png"
+    not_created 2 "usage: image-page"
+  done
+  run "$OUTDIR" "$FX/wide.png" --density
+  not_created 2 "usage: image-page"
+  run --size 3 "$OUTDIR" "$FX/wide.png"
+  not_created 2 "usage: image-page"
+  run "$OUTDIR"
+  not_created 2 "usage: image-page"
+  run
+  check "exit 2 without arguments, got $RC" [ "$RC" = 2 ]
+  check "the usage says what to run next: $ERR" grep -qF "preview-serve <out-dir>" <<<"$ERR"
+}
+
+m4_formats() {
+  run "$OUTDIR" "$FX/wide.png" "$FX/base.jpg" "$FX/prog.jpg" "$FX/anim.gif" \
+    "$FX/lossy.webp" "$FX/lossless.webp" "$FX/extended.webp"
+  written
+  local pair name want got
+  for pair in wide.png:725 base.jpg:641 prog.jpg:1081 anim.gif:333 lossy.webp:517 \
+    lossless.webp:9999 extended.webp:20000; do
+    name=${pair%:*} want=${pair#*:}
+    got=$(img_width "$name")
+    check "$name is $want px wide, got $got" [ "$got" = "$want" ]
+  done
+}
+
+m5_unreadable_size() {
+  local name
+  for name in notes.png cut.png noframe.jpg odd.webp missing.png; do
+    run "$OUTDIR" "$FX/wide.png" "$FX/$name"
+    not_created 1 "$FX/$name"
+  done
+  mkdir "$ROOT/folder.png"
+  run "$OUTDIR" "$ROOT/folder.png"
+  not_created 1 "$ROOT/folder.png"
+}
+
+c1_caption_default() {
+  run "$OUTDIR" "$FX/wide.png" "$FX/lossless.webp"
+  written
+  check "each caption above its image: $(shown)" [ "$(shown)" = "<figcaption>wide</figcaption>
+<img src=\"wide.png\" alt=\"wide\" style=\"width:725px\">
+<figcaption>lossless</figcaption>
+<img src=\"lossless.webp\" alt=\"lossless\" style=\"width:9999px\">" ]
+}
+
+c2_caption_given() {
+  run "$OUTDIR" "$FX/wide.png::Woche :: dark" "$FX/anim.gif::"
+  written
+  check "the given caption and the default: $(shown)" [ "$(shown)" = "<figcaption>Woche :: dark</figcaption>
+<img src=\"wide.png\" alt=\"Woche :: dark\" style=\"width:725px\">
+<figcaption>anim</figcaption>
+<img src=\"anim.gif\" alt=\"anim\" style=\"width:333px\">" ]
+}
+
+c3_order_kept() {
+  run "$OUTDIR" "$FX/prog.jpg" "$FX/wide.png" "$FX/anim.gif" "$FX/base.jpg"
+  written
+  local srcs
+  srcs=$(page | grep -o '<img src="[^"]*"' | tr '\n' ' ')
+  check "order kept: $srcs" [ "$srcs" = '<img src="prog.jpg" <img src="wide.png" <img src="anim.gif" <img src="base.jpg" ' ]
+}
+
+c4_escaping() {
+  cp "$FX/wide.png" "$ROOT/two words&more.png"
+  run --title "<i>Tom & \"Jerry's\"</i>" "$OUTDIR" "$FX/anim.gif::<b>&\"x'</b>" "$ROOT/two words&more.png"
+  written
+  check "caption escaped: $(shown)" [ "$(shown)" = "<figcaption>&lt;b&gt;&amp;&quot;x&#x27;&lt;/b&gt;</figcaption>
+<img src=\"anim.gif\" alt=\"&lt;b&gt;&amp;&quot;x&#x27;&lt;/b&gt;\" style=\"width:333px\">
+<figcaption>two words&amp;more</figcaption>
+<img src=\"two%20words%26more.png\" alt=\"two words&amp;more\" style=\"width:725px\">" ]
+  local esc='&lt;i&gt;Tom &amp; &quot;Jerry&#x27;s&quot;&lt;/i&gt;'
+  check "title escaped: $(page | grep '<title>')" grep -qxF "<title>$esc</title>" <<<"$(page)"
+  check "h1 escaped: $(page | grep '<h1>')" grep -qxF "<h1>$esc</h1>" <<<"$(page)"
+  check "no raw markup from the input" lacks "<(b|i)>" "$OUTDIR/index.html"
+  check "the file kept its name" [ -f "$OUTDIR/two words&more.png" ]
+}
+
+c5_title() {
+  run --title "Woche" "$OUTDIR" "$FX/wide.png"
+  written
+  check "title set: $(page | grep '<title>')" grep -qxF "<title>Woche</title>" <<<"$(page)"
+  check "h1 set: $(page | grep '<h1>')" grep -qxF "<h1>Woche</h1>" <<<"$(page)"
+  run --replace "$OUTDIR" "$FX/wide.png"
+  written
+  check "title is the out-dir's name: $(page | grep '<title>')" grep -qxF "<title>page</title>" <<<"$(page)"
+  check "no h1 without --title" lacks "<h1" "$OUTDIR/index.html"
+}
+
+c6_no_external_resources() {
+  run --title T "$OUTDIR" "$FX/wide.png" "$FX/anim.gif"
+  written
+  check "no URL in the page" lacks "(https?|ftp|data):|//|@import|url\(" "$OUTDIR/index.html"
+  local src
+  while read -r src; do
+    check "src $src lies beside the page" [ -f "$OUTDIR/$src" ]
+  done < <(page | sed -n 's/.*src="\([^"]*\)".*/\1/p')
+  check "the page names its images: $(page | grep -c 'src=')" [ "$(page | grep -c 'src=')" = 2 ]
+}
+
+o1_out_dir_created() {
+  OUTDIR=$ROOT/deep/er/page
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  OUTDIR=$ROOT/plain-file
+  echo x >"$OUTDIR"
+  run "$OUTDIR" "$FX/wide.png"
+  check "exit 1 for a file, got $RC" [ "$RC" = 1 ]
+  check "says it is no directory: $ERR" grep -qF "$OUTDIR is no directory" <<<"$ERR"
+  check "the file untouched" [ "$(cat "$OUTDIR")" = x ]
+}
+
+o2_nonempty_refused() {
+  mkdir -p "$OUTDIR"
+  echo keep >"$OUTDIR/keep.txt"
+  run "$OUTDIR" "$FX/wide.png"
+  check "exit 1, got $RC" [ "$RC" = 1 ]
+  check "says it is not empty: $ERR" grep -qF "$OUTDIR is not empty" <<<"$ERR"
+  check "only keep.txt in it: $(listing "$OUTDIR")" [ "$(listing "$OUTDIR")" = ./keep.txt ]
+  rm "$OUTDIR/keep.txt"
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  local before
+  before=$(listing "$OUTDIR")
+  run "$OUTDIR" "$FX/anim.gif"
+  check "exit 1 over an earlier page, got $RC" [ "$RC" = 1 ]
+  check "the earlier page unchanged: $(listing "$OUTDIR")" [ "$(listing "$OUTDIR")" = "$before" ]
+  check "its index.html unchanged" grep -qF 'src="wide.png"' "$OUTDIR/index.html"
+}
+
+o3_replace() {
+  run "$OUTDIR" "$FX/wide.png" "$FX/anim.gif"
+  written
+  run --replace "$OUTDIR" "$FX/base.jpg"
+  written
+  check "wide.png gone: $(listing "$OUTDIR")" [ ! -e "$OUTDIR/wide.png" ]
+  check "anim.gif gone: $(listing "$OUTDIR")" [ ! -e "$OUTDIR/anim.gif" ]
+  check "the new image in place" cmp -s "$FX/base.jpg" "$OUTDIR/base.jpg"
+  check "index.html shows only the new image: $(shown)" [ "$(page | grep -o 'src="[^"]*"')" = 'src="base.jpg"' ]
+  run --replace "$OUTDIR" "$FX/base.jpg" "$FX/wide.png"
+  written
+  check "the page rewritten again: $(page | grep -o 'src="[^"]*"' | tr '\n' ' ')" \
+    [ "$(page | grep -o 'src="[^"]*"' | tr '\n' ' ')" = 'src="base.jpg" src="wide.png" ' ]
+  OUTDIR=$ROOT/fresh
+  run --replace "$OUTDIR" "$FX/wide.png"
+  written
+  OUTDIR=$ROOT/empty
+  mkdir "$OUTDIR"
+  run --replace "$OUTDIR" "$FX/wide.png"
+  written
+}
+
+o4_replace_refuses_foreign() {
+  local foreign before
+  for foreign in file dir link; do
+    rm -rf "$OUTDIR"
+    run "$OUTDIR" "$FX/wide.png"
+    case $foreign in
+      file) echo mine >"$OUTDIR/notes.txt" ;;
+      dir) mkdir "$OUTDIR/sub" ;;
+      # In place of the image the page names, so only its being a link tells.
+      link) ln -sf "$FX/anim.gif" "$OUTDIR/wide.png" ;;
+    esac
+    before=$(listing "$OUTDIR")
+    run --replace "$OUTDIR" "$FX/base.jpg"
+    check "exit 1 with a foreign $foreign, got $RC" [ "$RC" = 1 ]
+    check "says what it did not write: $ERR" grep -qF "image-page did not write" <<<"$ERR"
+    check "nothing changed with a foreign $foreign: $(listing "$OUTDIR")" [ "$(listing "$OUTDIR")" = "$before" ]
+    check "the page still shows wide.png" grep -qF 'src="wide.png"' "$OUTDIR/index.html"
+  done
+  rm -rf "$OUTDIR"
+  mkdir "$OUTDIR"
+  cp "$FX/wide.png" "$OUTDIR/wide.png"
+  echo "<p>hand-made</p>" >"$OUTDIR/index.html"
+  run --replace "$OUTDIR" "$FX/base.jpg"
+  check "exit 1 without image-page's list, got $RC" [ "$RC" = 1 ]
+  check "the hand-made page kept" grep -qF hand-made "$OUTDIR/index.html"
+  check "its image kept" [ -f "$OUTDIR/wide.png" ]
+}
+
+o5_duplicate_basenames() {
+  mkdir -p "$ROOT/a" "$ROOT/b"
+  cp "$FX/wide.png" "$ROOT/a/shot.png"
+  cp "$FX/anim.gif" "$ROOT/b/shot.png"
+  run "$OUTDIR" "$ROOT/a/shot.png" "$ROOT/b/shot.png"
+  not_created 1 "$ROOT/a/shot.png"
+  check "names the second one too: $ERR" grep -qF "$ROOT/b/shot.png" <<<"$ERR"
+  cp "$FX/wide.png" "$ROOT/a/index.html"
+  run "$OUTDIR" "$ROOT/a/index.html"
+  not_created 1 "$ROOT/a/index.html"
+}
+
+o6_prints_path_only() {
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  check "stdout is the path of index.html: $OUT" [ "$OUT" = "$OUTDIR/index.html" ]
+  check "nothing on stderr: $ERR" [ -z "$ERR" ]
+  check "no server started: $(cat "$ROOT/served" 2>/dev/null)" no_server
+  OUTDIR=$ROOT/caller/rel
+  RC=0
+  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" "$SUT" rel "$FX/wide.png" 2>/dev/null) || RC=$?
+  check "a relative out-dir prints the absolute path: $OUT" [ "$OUT" = "$OUTDIR/index.html" ]
+}
+
+o7_option_order() {
+  run "$OUTDIR" "$FX/wide.png" --density 2.625 --title Late
+  written
+  check "density after the images: $(img_width wide.png)" [ "$(img_width wide.png)" = 276 ]
+  check "title after the images" grep -qxF "<title>Late</title>" "$OUTDIR/index.html"
+  cp "$FX/anim.gif" "$ROOT/caller/-dash.gif"
+  run --replace -- "$OUTDIR" -dash.gif
+  written
+  check "-dash.gif after -- is an image: $(shown)" grep -qF 'src="-dash.gif"' "$OUTDIR/index.html"
+}
+
+missing=0
+for CASE in "${CASES[@]}"; do
+  if ! declare -F "$CASE" >/dev/null; then
+    echo "FAIL $CASE: listed in CASES, but no such function"
+    missing=1
+  fi
+done
+[ "$missing" = 0 ] || exit 1
+
+in_cases() {
+  local name
+  for name in "${CASES[@]}"; do [ "$name" = "$1" ] && return 0; done
+  return 1
+}
+
+all=("${CASES[@]}")
+[ $# -gt 0 ] && all=("$@")
+for CASE in "${all[@]}"; do
+  FAILED=0
+  OUTDIR=$ROOT/page
+  rm -rf "$OUTDIR" "$ROOT/caller" "$ROOT/served" "$ROOT/a" "$ROOT/b" "$ROOT/deep" "$ROOT/plain-file" \
+    "$ROOT/fresh" "$ROOT/empty" "$ROOT/folder.png" "$ROOT/two words&more.png"
+  mkdir -p "$ROOT/caller"
+  if in_cases "$CASE"; then
+    "$CASE"
+  else
+    fail "no such case"
+  fi
+  if [ "$FAILED" = 0 ]; then echo "PASS $CASE"; else failures=$((failures + 1)); fi
+done
+[ "$failures" = 0 ]

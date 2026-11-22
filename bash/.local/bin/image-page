@@ -1,0 +1,280 @@
+#!/usr/bin/env -S python3 -I
+"""Write a page that shows images at their real size, stacked one below the other.
+
+usage: image-page [--density D] [--title T] [--replace] <out-dir> <image>[::caption] ...
+
+Copies each image into <out-dir>, under its own basename, and writes
+<out-dir>/index.html: the images in the order given, each with its caption
+above it, the basename without its extension unless <image>::caption gives
+one (an empty caption falls back to that default). Each image's CSS width is
+its pixel width divided by D, rounded half up and at least 1 px, its height
+follows, and max-width:100% keeps it inside a narrow screen. D is the
+density the image was drawn at, in pixels per CSS pixel, such as an Android
+render's 2.625; without --density it is 1, for photos and screenshots. The
+pixel width is read from the file itself: PNG, JPEG, GIF or WebP. --title
+sets the page's <title> and an <h1>; without it the <title> is the
+out-dir's name. Captions, title and file names are HTML-escaped, and the
+page loads nothing from elsewhere. Options may stand anywhere before --.
+
+It creates <out-dir>, parents too, when it is missing, prints the path of
+index.html and starts no server: run `preview-serve <out-dir>` to show it.
+It also writes .image-page.json there, the list of what it wrote, which
+--replace reads.
+
+It refuses, before it writes anything, and exits 1:
+- an image whose pixel size it cannot read, or that it cannot read at all;
+- two images with the same basename, or an image named index.html or
+  .image-page.json;
+- an <out-dir> that is no directory;
+- an <out-dir> that is not empty, unless --replace is given and the
+  directory holds only what an earlier image-page run wrote there (the
+  files its .image-page.json names, index.html and that list); --replace
+  then removes those first, so a page never mixes old files.
+
+Exit codes: 0 written, 1 refused, 2 usage (an unknown option, a --density
+that is no positive decimal number, no <out-dir> or no image).
+"""
+
+import html
+import json
+import os
+import re
+import struct
+import sys
+import urllib.parse
+from typing import NoReturn
+
+MANIFEST = ".image-page.json"
+INDEX = "index.html"
+USAGE = """\
+usage: image-page [--density D] [--title T] [--replace] <out-dir> <image>[::caption] ...
+  Writes <out-dir>/index.html with the images at their real size, each CSS
+  pixel D image pixels (default 1); show it with: preview-serve <out-dir>"""
+STYLE = (
+    "body{margin:0;padding:16px;background:#eee;color:#222;font-family:sans-serif}"
+    "h1{margin:0 0 16px;font-size:1.25rem}"
+    "figure{margin:0 0 24px}"
+    "figcaption{margin:0 0 4px;font-size:0.8rem;color:#555}"
+    "img{display:block;height:auto;max-width:100%}"
+)
+
+
+class Refused(Exception):
+    """A reason to stop with exit 1, before anything is written."""
+
+
+def usage(reason) -> NoReturn:
+    print(f"image-page: {reason}\n{USAGE}", file=sys.stderr)
+    sys.exit(2)
+
+
+def density(value):
+    # A plain decimal only: float() also takes nan, inf, 1e3 and 1_0.
+    if not re.fullmatch(r"[0-9]+(\.[0-9]*)?|\.[0-9]+", value) or float(value) <= 0:
+        usage(f"--density takes a positive decimal number, not {value!r}")
+    return float(value)
+
+
+def parse(argv):
+    opts = {"density": 1.0, "title": None, "replace": False}
+    positional = []
+    args = iter(argv)
+    for arg in args:
+        if arg == "--":
+            positional.extend(args)
+            break
+        name, eq, value = arg.partition("=")
+        if name in ("--density", "--title"):
+            if not eq:
+                value = next(args, None)
+                if value is None:
+                    usage(f"{name} needs a value")
+            opts[name[2:]] = density(value) if name == "--density" else value
+        elif arg == "--replace":
+            opts["replace"] = True
+        elif arg.startswith("-") and arg != "-":
+            usage(f"unknown option {arg}")
+        else:
+            positional.append(arg)
+    if len(positional) < 2:
+        usage("an <out-dir> and at least one image are needed")
+    return opts, positional[0], positional[1:]
+
+
+def png_size(data):
+    if data[12:16] != b"IHDR" or len(data) < 24:
+        return None
+    return struct.unpack(">II", data[16:24])
+
+
+def gif_size(data):
+    if len(data) < 10:
+        return None
+    return struct.unpack("<HH", data[6:10])
+
+
+def jpeg_size(data):
+    # Walks the segments up to the first frame header (SOF0-SOF15 but DHT,
+    # JPG and DAC, which share the range), which holds height then width.
+    pos = 2
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            return None
+        marker = data[pos + 1]
+        if marker == 0xFF:
+            pos += 1
+            continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            pos += 2
+            continue
+        if marker in (0xD9, 0xDA):
+            return None
+        (length,) = struct.unpack(">H", data[pos + 2 : pos + 4])
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            if pos + 9 > len(data):
+                return None
+            height, width = struct.unpack(">HH", data[pos + 5 : pos + 9])
+            return width, height
+        pos += 2 + length
+    return None
+
+
+def webp_size(data):
+    kind, body = data[12:16], data[20:]
+    if kind == b"VP8 " and len(body) >= 10 and body[3:6] == b"\x9d\x01\x2a":
+        width, height = struct.unpack("<HH", body[6:10])
+        return width & 0x3FFF, height & 0x3FFF
+    if kind == b"VP8L" and len(body) >= 5 and body[0] == 0x2F:
+        (bits,) = struct.unpack("<I", body[1:5])
+        return (bits & 0x3FFF) + 1, (bits >> 14 & 0x3FFF) + 1
+    if kind == b"VP8X" and len(body) >= 10:
+        return int.from_bytes(body[4:7], "little") + 1, int.from_bytes(body[7:10], "little") + 1
+    return None
+
+
+def pixel_size(data):
+    """(width, height) from the image's own header, or None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        size = png_size(data)
+    elif data.startswith(b"\xff\xd8"):
+        size = jpeg_size(data)
+    elif data[:6] in (b"GIF87a", b"GIF89a"):
+        size = gif_size(data)
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        size = webp_size(data)
+    else:
+        return None
+    return size if size and size[0] > 0 and size[1] > 0 else None
+
+
+def load(specs):
+    """Reads every image: [(source, name, caption, data, width)]."""
+    images, seen = [], {}
+    for spec in specs:
+        source, sep, caption = spec.partition("::")
+        name = os.path.basename(source)
+        try:
+            with open(source, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            raise Refused(f"cannot read {source}: {e.strerror}") from None
+        size = pixel_size(data)
+        if size is None:
+            raise Refused(f"cannot read the pixel size of {source}: no PNG, JPEG, GIF or WebP size in it")
+        if name in (INDEX, MANIFEST):
+            raise Refused(f"{source} would overwrite the page's own {name}")
+        if name in seen:
+            raise Refused(f"{seen[name]} and {source} have the same name, {name}")
+        seen[name] = source
+        if not (sep and caption):
+            caption = os.path.splitext(name)[0]
+        images.append((source, name, caption, data, size[0]))
+    return images
+
+
+def own_files(out):
+    """The names in <out> that an earlier run wrote, or Refused naming the first other entry."""
+    try:
+        with open(os.path.join(out, MANIFEST), encoding="utf-8") as f:
+            listed = json.load(f)
+    except (OSError, ValueError):
+        raise Refused(f"{out} holds no {MANIFEST} that names what image-page wrote there") from None
+    if not isinstance(listed, list) or not all(isinstance(n, str) for n in listed):
+        raise Refused(f"{out}/{MANIFEST} is no list of file names")
+    allowed = set(listed) | {INDEX, MANIFEST}
+    names = []
+    with os.scandir(out) as entries:
+        for entry in entries:
+            if entry.name not in allowed or not entry.is_file(follow_symlinks=False):
+                raise Refused(f"image-page did not write {entry.path}; it removes only its own files")
+            names.append(entry.name)
+    return names
+
+
+def prepare(out, replace):
+    """Checks <out> and returns the names to remove from it before writing."""
+    if not os.path.lexists(out):
+        return []
+    if not os.path.isdir(out):
+        raise Refused(f"{out} is no directory")
+    if not os.listdir(out):
+        return []
+    if not replace:
+        raise Refused(f"{out} is not empty; --replace rewrites a page image-page wrote there")
+    return own_files(out)
+
+
+def render(out, images, title, density_):
+    esc = html.escape
+    head_title = title if title is not None else os.path.basename(os.path.abspath(out))
+    lines = [
+        "<!doctype html>",
+        "<html>",
+        "<head>",
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{esc(head_title)}</title>",
+        f"<style>{STYLE}</style>",
+        "</head>",
+        "<body>",
+    ]
+    if title is not None:
+        lines.append(f"<h1>{esc(title)}</h1>")
+    for _, name, caption, _, width in images:
+        css = max(1, int(width / density_ + 0.5))
+        lines += [
+            "<figure>",
+            f"<figcaption>{esc(caption)}</figcaption>",
+            f'<img src="{esc(urllib.parse.quote(name))}" alt="{esc(caption)}" style="width:{css}px">',
+            "</figure>",
+        ]
+    lines += ["</body>", "</html>", ""]
+    return "\n".join(lines)
+
+
+def main(argv):
+    opts, out, specs = parse(argv)
+    try:
+        images = load(specs)
+        stale = prepare(out, opts["replace"])
+    except Refused as e:
+        print(f"image-page: {e}", file=sys.stderr)
+        return 1
+    os.makedirs(out, exist_ok=True)
+    for name in stale:
+        os.remove(os.path.join(out, name))
+    # The list first, so a run cut short still leaves --replace what to clear.
+    with open(os.path.join(out, MANIFEST), "w", encoding="utf-8") as f:
+        json.dump([name for _, name, _, _, _ in images], f)
+    for _, name, _, data, _ in images:
+        with open(os.path.join(out, name), "wb") as f:
+            f.write(data)
+    index = os.path.join(out, INDEX)
+    with open(index, "w", encoding="utf-8") as f:
+        f.write(render(out, images, opts["title"], opts["density"]))
+    print(os.path.abspath(index))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
