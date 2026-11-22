@@ -25,10 +25,28 @@ const PANEL_PX = 368;
 
 // Focuses the pane focus-history saw before the current one; pane.focus also
 // shows its space and tab, so focus changes once. Pressed again (ctrl-space
-// Tab), it jumps back. With no previous pane, or one that is gone, it shows
-// "No previous pane".
+// Tab), it jumps back. It trusts the history only in a layout with a
+// focus-history block, and with a pane focused only while the history's
+// current pane is that one; otherwise it says the focus history is not
+// recording here and focuses nothing, since shared values outlive a restart.
+// focus-history's header says where it runs and that it does not record a
+// focused layout terminal block. From such a block, whose pane is null
+// (AGENTS.md, focused()), it focuses the history's current pane, the one
+// just left, like tmux's last-pane. With no pane to go to, or one that is
+// gone, it shows "No previous pane".
 function focusPrevious() {
-  const pane = shared("focus.history")?.previous;
+  const title = "Focus history is not recording here";
+  if (!findNode(layout(), (n) => n.content?.mod === "focus-history")) {
+    notify({ title, body: "This layout has no focus-history block; the personal layout has one", level: "info" });
+    return;
+  }
+  const history = shared("focus.history");
+  const focusedPane = focused()?.pane;
+  if (focusedPane && history?.current !== focusedPane) {
+    notify({ title, body: "It has not recorded the focused pane yet", level: "info" });
+    return;
+  }
+  const pane = focusedPane ? history?.previous : history?.current;
   if (pane && panes().some((p) => p.pane === pane)) run("pane.focus", { pane });
   else notify({ title: "No previous pane", level: "info" });
 }

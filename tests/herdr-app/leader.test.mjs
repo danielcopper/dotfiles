@@ -81,13 +81,30 @@ const callsOf = (el, name) => el.calls.filter((c) => c[0] === name).map((c) => c
 const SOCKET = "/tmp/tmux-1000/default";
 const TTY = "/dev/pts/7";
 
+// A layout with the shown tab, a status bar mod and, unless `history` is
+// false, the empty block that keeps focus-history running, as
+// layouts/personal.json has them.
+function historyLayout(history = true) {
+  const children = [
+    { id: "tab", type: "block", content: { tab: "active" } },
+    { id: "status", type: "block", content: { mod: "workspace-status" }, size: { px: 28 } },
+  ];
+  if (history) children.push({ id: "focus-history", type: "block", content: { mod: "focus-history" }, size: { px: 0 } });
+  return { id: "root", type: "row", children };
+}
+const HISTORY_LAYOUT = historyLayout();
+const NOT_RECORDING = "Focus history is not recording here";
+
 // The fake herdr: two panes, p1 focused after p2; a tmux with prefix C-Space
-// on terminal t1, none of whose keys repeat. `leaderState` is what
+// on terminal t1, none of whose keys repeat. `history` is what
+// focus-history recorded, `focusedPane` the pane focused() names (null: a
+// layout terminal block has the focus), `layout` what layout() returns (by
+// default one with a focus-history block). `leaderState` is what
 // focus-history left in shared("leader.state") before the leader started;
 // host.command(name) hands the leader a key command (leader.<name>).
 // `failRun`: a command run throws for, as a broken app command would.
-function fakeHost({ previous = "p2", leaderState = null, failRun = null } = {}) {
-  const shared = new Map([["focus.history", { current: "p1", previous }], ["leader.state", leaderState]]);
+function fakeHost({ history = { current: "p1", previous: "p2" }, focusedPane = "p1", layout = HISTORY_LAYOUT, leaderState = null, failRun = null } = {}) {
+  const shared = new Map([["focus.history", history], ["leader.state", leaderState]]);
   const waiting = [];
   const host = {
     runs: [],
@@ -112,9 +129,9 @@ function fakeHost({ previous = "p2", leaderState = null, failRun = null } = {}) 
       await settle();
     },
     panes: () => [{ pane: "p1" }, { pane: "p2" }],
-    focused: () => ({ pane: "p1", terminal: "t1", shown: null }),
+    focused: () => ({ pane: focusedPane, terminal: "t1", shown: null }),
     theme: () => ({}),
-    layout: () => null,
+    layout: () => layout,
     hc: async () => ({ code: 0, stdout: JSON.stringify({ pid: 4242, foreground: { argv: ["bash"], pid: 4242 } }), stderr: "" }),
     exec: async (tool, args) => {
       if (tool === "sh") return { code: 0, stdout: `${SOCKET}\n${TTY}\nC-Space\n500\n0\n\n`, stderr: "" };
@@ -243,7 +260,54 @@ for (const [how, press] of [
   });
 
   test(`Tab ${how} with the previous pane gone says so and closes the leader`, async () => {
-    const { leader, cx, host } = await openLeader({ previous: "p9" });
+    const { leader, cx, host } = await openLeader({ history: { current: "p1", previous: "p9" } });
+    await press(leader, cx, "tab");
+    assert.deepEqual(host.runs, []);
+    assert.deepEqual(host.notes.map((n) => n.title), ["No previous pane"]);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
+
+  test(`Tab ${how} with no previous pane says so and closes the leader`, async () => {
+    const { leader, cx, host } = await openLeader({ history: { current: "p1", previous: null } });
+    await press(leader, cx, "tab");
+    assert.deepEqual(host.runs, []);
+    assert.deepEqual(host.notes.map((n) => n.title), ["No previous pane"]);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
+
+  for (const [what, history] of [
+    ["a history whose current pane is not the focused one", { current: "p2", previous: "p1" }],
+    ["no focus history at all", null],
+  ]) {
+    test(`Tab ${how} with ${what} says it has not recorded the focused pane and focuses nothing`, async () => {
+      const { leader, cx, host } = await openLeader({ history });
+      await press(leader, cx, "tab");
+      assert.deepEqual(host.runs, []);
+      assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[NOT_RECORDING, "It has not recorded the focused pane yet", "info"]]);
+      assert.deepEqual(host.closed, ["mod-leader"]);
+    });
+  }
+
+  for (const [what, focusedPane] of [["a pane", "p1"], ["a layout terminal block", null]]) {
+    test(`Tab ${how} with ${what} focused in a layout without a focus-history block says so and focuses nothing`, async () => {
+      const { leader, cx, host } = await openLeader({ layout: historyLayout(false), focusedPane });
+      await press(leader, cx, "tab");
+      assert.deepEqual(host.runs, []);
+      assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [[NOT_RECORDING, "This layout has no focus-history block; the personal layout has one", "info"]]);
+      assert.deepEqual(host.closed, ["mod-leader"]);
+    });
+  }
+
+  test(`Tab ${how} from a layout terminal block focuses the pane just left`, async () => {
+    const { leader, cx, host } = await openLeader({ focusedPane: null });
+    await press(leader, cx, "tab");
+    assert.deepEqual(host.runs, [["pane.focus", { pane: "p1" }]]);
+    assert.deepEqual(host.notes, []);
+    assert.deepEqual(host.closed, ["mod-leader"]);
+  });
+
+  test(`Tab ${how} from a layout terminal block with the pane just left gone says so`, async () => {
+    const { leader, cx, host } = await openLeader({ focusedPane: null, history: { current: "p9", previous: "p2" } });
     await press(leader, cx, "tab");
     assert.deepEqual(host.runs, []);
     assert.deepEqual(host.notes.map((n) => n.title), ["No previous pane"]);
