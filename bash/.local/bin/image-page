@@ -13,11 +13,12 @@ max-width:100% keeps it inside a narrow screen. D is the density the image
 was drawn at, in pixels per CSS pixel, such as an Android render's 2.625;
 a screenshot takes the scale of the screen it was taken on (a phone's
 density, a desktop's scale factor); photos take none, and without --density
-D is 1. The pixel size is read from the file itself: PNG, JPEG, GIF or WebP. A line at the top names
-the number of images and D. --title sets the page's <title> and an <h1>;
-without it the <title> is the out-dir's name. Captions, title and file names
-are HTML-escaped. The page follows the viewer's light or dark setting and
-loads nothing from elsewhere. Options may stand anywhere before --.
+D is 1. The pixel size is read from the file itself: PNG, JPEG, GIF or
+WebP. A line at the top names the number of images and D. --title sets the
+page's <title> and an <h1>; without it the <title> is the out-dir's name.
+Captions, title and file names are HTML-escaped. The page follows the
+viewer's light or dark setting and loads nothing from elsewhere. Options
+may stand anywhere before --.
 
 It creates <out-dir>, parents too, when it is missing, prints the path of
 index.html and starts no server: run `preview-serve <out-dir>` to show it.
@@ -26,8 +27,9 @@ It also writes .image-page.json there, the list of what it wrote, which
 
 It writes the page into a new directory beside <out-dir> and puts that in
 place of <out-dir> only once every file is written, so a page never mixes
-old files and a run that fails leaves the earlier page as it was. So the
-parent of <out-dir> must be writable, even when <out-dir> itself is. Into
+old files and a run that fails leaves the earlier page as it was, unless
+putting it back fails too (below). So the parent of <out-dir> must be
+writable, even when <out-dir> itself is. Into
 an empty <out-dir> it moves the files one by one, .image-page.json first and
 index.html last, so --replace can clear what a failed move left there. When
 putting the new page in place fails and putting the earlier one back fails
@@ -47,10 +49,11 @@ It refuses, before it writes anything, and exits 1:
   page: the swap would move it away from under the caller.
 
 Exit codes: 0 written, 1 refused, 2 usage (an unknown option, an option
-without its value, a --density that is no positive decimal number or too
-large for a float, no <out-dir> or no image), 3 the page could not be
-written in <out-dir> (a full disk, a directory it may not write); the
-earlier page, if any, stays.
+without its value, a --density that is no positive decimal number, too
+large for a float or too small to be told from 0, no <out-dir> or no
+image), 3 the page could not be written in <out-dir> (a full disk, a
+directory it may not write); the earlier page, if any, stays, or the
+message says where it went.
 """
 
 import html
@@ -97,7 +100,14 @@ class Refused(Exception):
 
 
 class PageLost(Exception):
-    """The new page could not be put in place, nor the earlier one back."""
+    """The new page could not be put in place, nor the earlier one back.
+
+    error is why the new page could not; old is where the earlier page is.
+    """
+
+    def __init__(self, error, old):
+        super().__init__(error, old)
+        self.error, self.old = error, old
 
 
 def usage(reason) -> NoReturn:
@@ -108,7 +118,7 @@ def usage(reason) -> NoReturn:
 def density(value):
     # A plain decimal only: float() also takes nan, inf, 1e3 and 1_0.
     if not re.fullmatch(r"[0-9]+(\.[0-9]*)?|\.[0-9]+", value) or not 0 < float(value) < math.inf:
-        usage(f"--density takes a positive decimal number not too large for a float, not {value!r}")
+        usage(f"--density {value!r} is no positive decimal number, too large for a float or too small to be told from 0")
     return float(value)
 
 
@@ -363,9 +373,7 @@ def swap(out, target, new, stale):
                 os.rename(old, target)
             except OSError:
                 keep_old = True
-                raise PageLost(
-                    f"cannot write the page in {out}: {e.strerror}; {out} is missing; the earlier page is at {old}"
-                ) from None
+                raise PageLost(e, old) from None
             raise
         try:
             for name in stale:
@@ -384,6 +392,14 @@ def swap(out, target, new, stale):
                 pass
 
 
+def write_error(out, e):
+    """The exit-3 message: why the page is not in <out>, and where an earlier page went."""
+    if isinstance(e, PageLost):
+        return f"cannot write the page in {out}: {e.error.strerror or e.error}; {out} is missing; the earlier page is at {e.old}"
+    detail = f" ({e.filename})" if e.filename else ""
+    return f"cannot write the page in {out}: {e.strerror or e}{detail}"
+
+
 def main(argv):
     opts, out, specs = parse(argv)
     try:
@@ -395,12 +411,8 @@ def main(argv):
         return 1
     try:
         warnings = write_page(out, state, stale, images, page)
-    except PageLost as e:
-        print(f"image-page: {e}", file=sys.stderr)
-        return 3
-    except OSError as e:
-        detail = f" ({e.filename})" if e.filename else ""
-        print(f"image-page: cannot write the page in {out}: {e.strerror or e}{detail}", file=sys.stderr)
+    except (PageLost, OSError) as e:
+        print(f"image-page: {write_error(out, e)}", file=sys.stderr)
         return 3
     for warning in warnings:
         print(f"image-page: {warning}", file=sys.stderr)

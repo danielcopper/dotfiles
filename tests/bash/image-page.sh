@@ -10,11 +10,13 @@
 #       up); 1 px at 3: 1, never 0; the copy is the same bytes as the source;
 #       the page's meta line says "3 images · density 2.625"
 #   m2  without --density: the pixel width, 725, and "1 image · density 1"
-#   m3  a density that is no positive decimal number or too large for a
-#       float (0, 0.0, -1, abc, empty, nan, inf, 1e3, 1_0, " 2", 400 digits
-#       that overflow to infinity, a missing value), --title without its value, an unknown option, no
-#       image: exit 2, the usage on stderr, the out-dir not created; the
-#       usage names preview-serve <out-dir>
+#   m3  a density that is no positive decimal number, too large for a float
+#       or too small to be told from 0 (0, 0.0, -1, abc, empty, nan, inf,
+#       1e3, 1_0, " 2", 400 digits that overflow to infinity, 0. and 400
+#       zeros and a 1, which is 0 to a float): exit 2, that reason and the
+#       usage on stderr; a missing value, --title without its value, an
+#       unknown option, no image: exit 2, the usage on stderr; the out-dir
+#       not created in each; the usage names preview-serve <out-dir>
 #   m4  each format's size read from the file, width and height, as the CSS
 #       width and the caption show them: PNG, baseline and progressive JPEG
 #       (a DHT segment and fill bytes before the frame header), GIF, WebP as
@@ -55,7 +57,7 @@
 #       foreign file beside a page, a subdirectory, a symlink under the name
 #       of an image the page shows, a directory without image-page's list,
 #       a list that is no JSON or no list of names, a list it cannot read):
-#       exit 1, says why, no traceback, nothing in it changed
+#       exit 1, says why, no traceback, nothing in it changed, in each
 #   o5  two images with the same basename, or an image named index.html:
 #       exit 1, both named, the out-dir not created
 #   o6  stdout is the path of index.html and nothing else; no server started
@@ -72,10 +74,10 @@
 #   o11 --replace on the current directory when it holds a page, which the
 #       swap would move: exit 1, says so, the page unchanged
 # The f cases run the script inside a python harness, $ROOT/faulty.py, that
-# loads it as a module and makes the os call FAULT names fail, the one way to
-# reach a rename that fails between two that succeed:
-#   f1  the swap's rename into place fails (aside of the earlier page, it
-#       worked): the earlier page put back, exit 3 naming <out-dir> and the
+# loads it as a module and makes the os calls the scenario FAULT names fail,
+# the one way to reach a rename that fails between two that succeed:
+#   f1  the swap's rename into place fails after the earlier page moved
+#       aside: the earlier page put back, exit 3 naming <out-dir> and the
 #       error, nothing left beside it
 #   f2  the swap fails and so does putting the earlier page back: exit 3,
 #       the swap's error, "<out-dir> is missing; the earlier page is at
@@ -83,7 +85,8 @@
 #   f3  moving the earlier page aside fails: exit 3, the page unchanged,
 #       nothing left beside it
 #   f4  removing the earlier page after the swap fails: exit 0, the new page
-#       in place, its path on stdout, a warning naming the leftover directory
+#       in place, its path on stdout, a warning naming the leftover directory,
+#       which exists
 #   f5  into an empty out-dir, every move after the first fails: the list
 #       moved first, so --replace clears what is there; the move of
 #       index.html alone fails: everything else moved, and --replace clears it
@@ -278,22 +281,24 @@ no_server() { [ ! -e "$ROOT/served" ]; }
 # lacks <regex> <file>: no line of <file> matches <regex>, case ignored.
 lacks() { ! grep -qiE -- "$1" "$2"; }
 
+# run_cmd <command>...: runs <command> from $ROOT/caller in a clean
+# environment (env -i: PATH, HOME, and FAULT when set), under a file-size
+# limit of $FSIZE KiB when set; its stdout in $OUT, stderr in $ERR, exit
+# code in $RC.
+run_cmd() {
+  RC=0
+  OUT=$(cd "$ROOT/caller" && { [ -z "${FSIZE:-}" ] || ulimit -f "$FSIZE"; } &&
+    env -i PATH="$ROOT/bin" HOME="$HOME" ${FAULT:+"FAULT=$FAULT"} "$@" 2>"$ROOT/stderr") || RC=$?
+  ERR=$(cat "$ROOT/stderr")
+}
+# run <arg>...: the script with <arg>..., as run_cmd runs it.
+run() { run_cmd "$SUT" "$@"; }
 # run_faulty <fault> <arg>...: as run, inside $ROOT/faulty.py with FAULT=<fault>;
 # -B, so loading the script as a module writes no __pycache__ beside it.
 run_faulty() {
-  local fault=$1
+  local FAULT=$1
   shift
-  RC=0
-  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" FAULT="$fault" \
-    python3 -I -B "$ROOT/faulty.py" "$SUT" "$@" 2>"$ROOT/stderr") || RC=$?
-  ERR=$(cat "$ROOT/stderr")
-}
-
-# run <arg>...: the script's stdout in $OUT, stderr in $ERR, exit code in $RC.
-run() {
-  RC=0
-  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" "$SUT" "$@" 2>"$ROOT/stderr") || RC=$?
-  ERR=$(cat "$ROOT/stderr")
+  run_cmd python3 -I -B "$ROOT/faulty.py" "$SUT" "$@"
 }
 written() { # written: exit 0 and an index.html in $OUTDIR
   check "exit 0, got $RC: $ERR" [ "$RC" = 0 ]
@@ -334,11 +339,15 @@ m2_default_density() {
 
 m3_bad_density() {
   local value
-  for value in 0 0.0 -1 abc "" nan inf 1e3 1_0 " 2" "1$(printf '0%.0s' {1..400})"; do
+  local reason="is no positive decimal number, too large for a float or too small to be told from 0"
+  for value in 0 0.0 -1 abc "" nan inf 1e3 1_0 " 2" "1$(printf '0%.0s' {1..400})" \
+    "0.$(printf '0%.0s' {1..400})1"; do
     run --density "$value" "$OUTDIR" "$FX/wide.png"
     not_created 2 "usage: image-page"
+    check "the reason for ${value:0:12}: $ERR" grep -qF "$reason" <<<"$ERR"
     run "--density=$value" "$OUTDIR" "$FX/wide.png"
     not_created 2 "usage: image-page"
+    check "the reason for =${value:0:12}: $ERR" grep -qF "$reason" <<<"$ERR"
   done
   run "$OUTDIR" "$FX/wide.png" --density
   not_created 2 "usage: image-page"
@@ -589,6 +598,7 @@ o4_replace_refuses_foreign() {
     run --replace "$OUTDIR" "$FX/base.jpg"
     check "exit 1 with a foreign $foreign, got $RC" [ "$RC" = 1 ]
     check "says what it did not write: $ERR" grep -qF "image-page did not write" <<<"$ERR"
+    check "no traceback with a foreign $foreign: $ERR" no_traceback
     check "nothing changed with a foreign $foreign: $(listing "$OUTDIR")" [ "$(listing "$OUTDIR")" = "$before" ]
     check "the page still shows wide.png" grep -qF 'src="wide.png"' "$OUTDIR/index.html"
   done
@@ -596,9 +606,12 @@ o4_replace_refuses_foreign() {
   mkdir "$OUTDIR"
   cp "$FX/wide.png" "$OUTDIR/wide.png"
   echo "<p>hand-made</p>" >"$OUTDIR/index.html"
+  before=$(listing "$OUTDIR")
   run --replace "$OUTDIR" "$FX/base.jpg"
   check "exit 1 without image-page's list, got $RC" [ "$RC" = 1 ]
   check "says the list is missing: $ERR" grep -qF "$OUTDIR holds no .image-page.json" <<<"$ERR"
+  check "no traceback without a list: $ERR" no_traceback
+  check "nothing changed without a list" [ "$(listing "$OUTDIR")" = "$before" ]
   check "the hand-made page kept" grep -qF hand-made "$OUTDIR/index.html"
   check "its image kept" [ -f "$OUTDIR/wide.png" ]
   local list
@@ -608,6 +621,7 @@ o4_replace_refuses_foreign() {
     run --replace "$OUTDIR" "$FX/base.jpg"
     check "exit 1 with the list $list, got $RC" [ "$RC" = 1 ]
     check "says the list is none: $ERR" grep -qF ".image-page.json is no list of file names" <<<"$ERR"
+    check "no traceback with the list $list: $ERR" no_traceback
     check "nothing changed with the list $list" [ "$(listing "$OUTDIR")" = "$before" ]
   done
   echo '["wide.png"]' >"$OUTDIR/.image-page.json"
@@ -640,8 +654,7 @@ o6_prints_path_only() {
   check "nothing on stderr: $ERR" [ -z "$ERR" ]
   check "no server started: $(cat "$ROOT/served" 2>/dev/null)" no_server
   OUTDIR=$ROOT/caller/rel
-  RC=0
-  OUT=$(cd "$ROOT/caller" && env -i PATH="$ROOT/bin" HOME="$HOME" "$SUT" rel "$FX/wide.png" 2>/dev/null) || RC=$?
+  run rel "$FX/wide.png"
   check "a relative out-dir prints the absolute path: $OUT" [ "$OUT" = "$OUTDIR/index.html" ]
 }
 
@@ -666,11 +679,8 @@ o8_write_fails_keeps_page() {
   written
   local before
   before=$(the_page)
-  RC=0
   # A 4 KiB file-size limit: big.png is three times that, so its copy fails.
-  OUT=$(cd "$ROOT/caller" && ulimit -f 4 && env -i PATH="$ROOT/bin" HOME="$HOME" "$SUT" --replace \
-    "$OUTDIR" "$FX/big.png" 2>"$ROOT/stderr") || RC=$?
-  ERR=$(cat "$ROOT/stderr")
+  FSIZE=4 run --replace "$OUTDIR" "$FX/big.png"
   check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
   check "says it cannot write the page: $ERR" grep -qxF "image-page: cannot write the page in $OUTDIR: File too large" <<<"$ERR"
   check "no traceback: $ERR" no_traceback
@@ -762,6 +772,9 @@ f4_cleanup_fails_warns() {
   check "the new page in place" grep -qF 'src="base.jpg"' "$OUTDIR/index.html"
   check "warns, naming the leftover: $ERR" grep -qF \
     "image-page: the page is written, but $(dirname "$OUTDIR")/.image-page-" <<<"$ERR"
+  local leftover
+  leftover=$(sed -n 's/^image-page: the page is written, but \(.*\) could not be removed: .*/\1/p' <<<"$ERR")
+  check "the warned directory exists: $leftover" [ -d "${leftover:-/no warned path}" ]
   check "no traceback: $ERR" no_traceback
 }
 
