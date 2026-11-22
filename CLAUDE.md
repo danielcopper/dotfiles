@@ -14,7 +14,7 @@ Personal dotfiles, managed with [GNU Stow](https://www.gnu.org/software/stow/).
 
 ## Secrets
 
-- Secrets (API keys, `SQLCMDPASSWORD`) live in untracked `~/.bashrc.secrets`, sourced at the end of shared `.bashrc` — **never commit them**.
+- Secrets (API keys, `SQLCMDPASSWORD`) live in untracked `~/.bashrc.secrets`, sourced by shared `.bashrc` before its prompt setup — **never commit them**.
 - Agent harnesses (`claude`, `opencode`, `pi`) start through `agent-env`, which reads the file afresh at each start and passes on only the names `bash/.config/agent-env/<harness>` lists; a harness that needs another secret gets the name added there (README, "Secrets").
 
 ## Claude config lives here

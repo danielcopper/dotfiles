@@ -75,7 +75,8 @@ mise run dotfiles-relink host-arch
 API keys and passwords (`SQLCMDPASSWORD`, the SonarQube CLI's token) live in
 `~/.bashrc.secrets`, which git ignores and which never goes into this repo.
 It is bash, `export NAME=value` lines, and a value may come from a `$(...)`.
-Every interactive shell sources it at the end of `.bashrc`.
+Every interactive shell sources it from `.bashrc`, before the prompt setup
+and the harness functions.
 
 An agent harness does not take its secrets from the shell it starts in, which
 holds the values the file had when that shell started.
@@ -93,7 +94,8 @@ every name a line assigns first (`NAME=…` / `export NAME=…`); one assignment
 per line. agent-env unsets each of them the list does not declare, also
 where the starting shell holds a value for it, but never `PATH`, `HOME`,
 `SHELL`, `USER`, `LOGNAME` or `TERM`. It prints no value, also under
-`bash -x`. A missing file is named on stderr and the harness starts
+`bash -x`; an error a command in the file raises reaches stderr as bash
+writes it. A missing file is named on stderr and the harness starts
 without its secrets; a missing list, or a file that cannot be read or does
 not parse, stops the start. The script's header has the details.
 
