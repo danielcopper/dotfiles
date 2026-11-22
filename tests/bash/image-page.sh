@@ -11,19 +11,24 @@
 #       the page's meta line says "3 images · density 2.625"
 #   m2  without --density: the pixel width, 725, and "1 image · density 1"
 #   m3  a density that is no positive decimal number (0, 0.0, -1, abc, empty,
-#       nan, inf, 1e3, 1_0, " 2", a missing value), an unknown option, no
+#       nan, inf, 1e3, 1_0, " 2", 400 digits that overflow to infinity, a
+#       missing value), --title without its value, an unknown option, no
 #       image: exit 2, the usage on stderr, the out-dir not created; the
 #       usage names preview-serve <out-dir>
-#   m4  each format's width read from the file: PNG, baseline and progressive
-#       JPEG (a DHT segment and fill bytes before the frame header), GIF,
-#       WebP as VP8 (scale bits set), VP8L and VP8X (a width above 16384)
-#   m5  a size that cannot be read (a text file named .png, a cut PNG, a
-#       JPEG without a frame header, a WebP without a known chunk, a missing
-#       file, a directory): exit 1, the file named on stderr, the out-dir not
-#       created
+#   m4  each format's size read from the file, width and height, as the CSS
+#       width and the caption show them: PNG, baseline and progressive JPEG
+#       (a DHT segment and fill bytes before the frame header), GIF, WebP as
+#       VP8 (scale bits set), VP8L and VP8X (a width above 16384)
+#   m5  a size that cannot be read (a text file named .png, a PNG cut before
+#       and one cut inside its IHDR, a PNG of width 0, a GIF cut after its
+#       signature, a JPEG without a frame header and one cut inside it, a WebP
+#       without a known chunk, VP8, VP8L and VP8X chunks too short for their
+#       size, a missing file, a directory): exit 1, the file named on stderr,
+#       no traceback, the out-dir not created
+#   m6  a density so small that an image's CSS width overflows: exit 1, the
+#       file named, no traceback, the out-dir not created
 #   c1  without a caption: the basename without its extension, with the
-#       image's pixel size beside it, above the
-#       image
+#       image's pixel size beside it, above the image
 #   c2  image::caption: that caption, above the image, the rest of the path
 #       read as the image; an empty caption falls back to the default
 #   c3  the images stand in the order given
@@ -36,7 +41,9 @@
 #   c7  light and dark: every color token of the bare :root block is
 #       redefined in a prefers-color-scheme: dark block that sets only tokens
 #       and color-scheme: dark, body takes its colors from the tokens, and
-#       no color literal stands outside the two token blocks
+#       no color literal stands outside the two token blocks: no hex color,
+#       no CSS named color and no rgb(), hsl(), hwb(), lab(), lch(), oklab(),
+#       oklch() or color()
 #   o1  a missing out-dir is created, parents too; an out-dir that is a file:
 #       exit 1
 #   o2  a non-empty out-dir is refused without --replace, also one holding
@@ -46,13 +53,22 @@
 #       it writes the page
 #   o4  --replace on an out-dir holding anything image-page did not write (a
 #       foreign file beside a page, a subdirectory, a symlink under the name
-#       of an image the page shows, a directory without image-page's list):
-#       exit 1, nothing in it changed
+#       of an image the page shows, a directory without image-page's list,
+#       a list that is no JSON or no list of names): exit 1, nothing in it
+#       changed
 #   o5  two images with the same basename, or an image named index.html:
 #       exit 1, both named, the out-dir not created
 #   o6  stdout is the path of index.html and nothing else; no server started
 #   o7  options may follow the positional arguments; after -- a name that
 #       starts with - is an image
+#   o8  --replace whose writing fails (a file-size limit below the new
+#       image's size): exit 3, "cannot write" on stderr, no traceback, the
+#       earlier page unchanged and no temporary directory left beside it
+#   o9  an out-dir that cannot be listed: exit 1, says so, no traceback
+#   o10 a parent directory that cannot be written: exit 3, "cannot write" on
+#       stderr, no traceback, nothing created
+#   o11 --replace on the current directory, which the swap would move: exit
+#       1, says so, the page unchanged
 # usage: image-page.sh [image-page] [case ...]
 #        image-page.sh --list
 #   The script defaults to the repo's bash/.local/bin/image-page, the cases
@@ -66,7 +82,8 @@ CASES=(m1_density_scales m2_default_density m3_bad_density m4_formats m5_unreada
   c1_caption_default c2_caption_given c3_order_kept c4_escaping c5_title c6_no_external_resources
   c7_dark_tokens
   o1_out_dir_created o2_nonempty_refused o3_replace o4_replace_refuses_foreign o5_duplicate_basenames
-  o6_prints_path_only o7_option_order)
+  o6_prints_path_only o7_option_order o8_write_fails_keeps_page o9_unlistable_out_dir
+  o10_parent_not_writable o11_replace_current_dir m6_width_overflows)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
   exit 0
@@ -94,17 +111,18 @@ EOF
 chmod +x "$ROOT/bin/preview-serve"
 
 python3 -I - "$FX" <<'EOF' || { echo "FAIL: the fixtures could not be written"; exit 1; }
-import pathlib, struct, sys, zlib
+import os, pathlib, struct, sys, zlib
 
 fx = pathlib.Path(sys.argv[1])
 
 
-def png(w, h):
+def png(w, h, noise=False):
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
 
-    rows = b"".join(b"\0" + b"\x80\x80\x80" * w for _ in range(h))
+    # Noise does not compress, so the file is as large as its pixels.
+    rows = b"".join(b"\0" + (os.urandom(3 * w) if noise else b"\x80\x80\x80" * w) for _ in range(h))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
@@ -157,6 +175,14 @@ files = {
     "cut.png": b"\x89PNG\r\n\x1a\n\0\0\0\x0dIH",
     "noframe.jpg": b"\xff\xd8" + segment(0xE0, b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0") + b"\xff\xd9",
     "odd.webp": riff(b"ALPH", b"\0" * 10),
+    "ihdr-cut.png": b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">I", 725),
+    "zero.png": png(0, 4),
+    "cut.gif": b"GIF89a",
+    "sof-cut.jpg": b"\xff\xd8" + segment(0xE0, b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0") + b"\xff\xc0\0\x11\x08\0\x03",
+    "short-vp8.webp": riff(b"VP8 ", b"\x10\x02\0\x9d\x01\x2a\0\0"),
+    "short-vp8l.webp": riff(b"VP8L", b"\x2f\0\0"),
+    "short-vp8x.webp": riff(b"VP8X", b"\0\0\0\0\x01\0"),
+    "big.png": png(64, 64, noise=True),
 }
 for name, data in files.items():
     (fx / name).write_bytes(data)
@@ -174,10 +200,11 @@ page() { cat "$OUTDIR/index.html" 2>/dev/null; }
 img_width() {
   page | sed -n "s|.*<img src=\"$1\"[^>]*style=\"width:\([0-9]*\)px\".*|\1|p"
 }
-# shown: the figcaption and img lines of index.html, in order, one per line.
 # caption <html> <w × h>: the figcaption line shown() expects for an image.
 caption() { printf '<figcaption><span class="name">%s</span> <span class="size">%s px</span></figcaption>' "$1" "$2"; }
+# shown: the figcaption and img lines of index.html, in order, one per line.
 shown() { page | grep -E '<figcaption>|<img '; }
+no_traceback() { ! grep -q Traceback <<<"$ERR"; }
 # listing <dir>: the names in <dir>, dotfiles too, one per line, sorted.
 listing() { (cd "$1" && find . -mindepth 1 | sort); }
 no_server() { [ ! -e "$ROOT/served" ]; }
@@ -199,6 +226,7 @@ not_created() { # not_created <rc> <stderr text>: refused before $OUTDIR exists
   check "stderr names '$2': $ERR" grep -qF -- "$2" <<<"$ERR"
   check "out-dir not created" [ ! -e "$OUTDIR" ]
   check "nothing on stdout: $OUT" [ -z "$OUT" ]
+  check "no traceback: $ERR" no_traceback
 }
 
 m1_density_scales() {
@@ -228,13 +256,15 @@ m2_default_density() {
 
 m3_bad_density() {
   local value
-  for value in 0 0.0 -1 abc "" nan inf 1e3 1_0 " 2"; do
+  for value in 0 0.0 -1 abc "" nan inf 1e3 1_0 " 2" "1$(printf '0%.0s' {1..400})"; do
     run --density "$value" "$OUTDIR" "$FX/wide.png"
     not_created 2 "usage: image-page"
     run "--density=$value" "$OUTDIR" "$FX/wide.png"
     not_created 2 "usage: image-page"
   done
   run "$OUTDIR" "$FX/wide.png" --density
+  not_created 2 "usage: image-page"
+  run "$OUTDIR" "$FX/wide.png" --title
   not_created 2 "usage: image-page"
   run --size 3 "$OUTDIR" "$FX/wide.png"
   not_created 2 "usage: image-page"
@@ -249,24 +279,32 @@ m4_formats() {
   run "$OUTDIR" "$FX/wide.png" "$FX/base.jpg" "$FX/prog.jpg" "$FX/anim.gif" \
     "$FX/lossy.webp" "$FX/lossless.webp" "$FX/extended.webp"
   written
-  local pair name want got
-  for pair in wide.png:725 base.jpg:641 prog.jpg:1081 anim.gif:333 lossy.webp:517 \
-    lossless.webp:9999 extended.webp:20000; do
-    name=${pair%:*} want=${pair#*:}
+  local entry name w h got size
+  for entry in wide.png:725:4 base.jpg:641:3 prog.jpg:1081:7 anim.gif:333:9 lossy.webp:517:11 \
+    lossless.webp:9999:13 extended.webp:20000:17; do
+    IFS=: read -r name w h <<<"$entry"
     got=$(img_width "$name")
-    check "$name is $want px wide, got $got" [ "$got" = "$want" ]
+    check "$name is $w px wide, got $got" [ "$got" = "$w" ]
+    size=$(page | grep -B1 -F "<img src=\"$name\"" | sed -n 's/.*<span class="size">\(.*\) px<.*/\1/p')
+    check "$name's caption says $w × $h, got $size" [ "$size" = "$w × $h" ]
   done
 }
 
 m5_unreadable_size() {
   local name
-  for name in notes.png cut.png noframe.jpg odd.webp missing.png; do
+  for name in notes.png cut.png ihdr-cut.png zero.png cut.gif noframe.jpg sof-cut.jpg odd.webp \
+    short-vp8.webp short-vp8l.webp short-vp8x.webp missing.png; do
     run "$OUTDIR" "$FX/wide.png" "$FX/$name"
     not_created 1 "$FX/$name"
   done
   mkdir "$ROOT/folder.png"
   run "$OUTDIR" "$ROOT/folder.png"
   not_created 1 "$ROOT/folder.png"
+}
+
+m6_width_overflows() {
+  run --density "0.$(printf '0%.0s' {1..310})1" "$OUTDIR" "$FX/wide.png"
+  not_created 1 "$FX/wide.png"
 }
 
 c1_caption_default() {
@@ -350,8 +388,38 @@ if not light or not dark:
 def decls(block):
     return dict(d.split(":", 1) for d in block.split(";") if d.strip())
 light_d, dark_d = decls(light.group(1)), decls(dark.group(1))
-color = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(rgb|hsl|oklch|lab)a?\(")
-colors = sorted(k for k, v in light_d.items() if k.startswith("--") and color.search(v))
+# The CSS named colors; a font name, a keyword or a token name is none of them.
+NAMED = set("""
+aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan
+darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred
+darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink
+deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold
+goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush
+lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey
+lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow
+lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen
+mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin
+navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise
+palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue
+saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow
+springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen
+""".split())
+FUNCS = r"\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\("
+
+
+def color_in(text):
+    """The first color literal in CSS text, or None."""
+    found = re.search(r"#[0-9a-fA-F]{3,8}\b|" + FUNCS, text, re.I)
+    if found:
+        return found.group(0)
+    # A named color counts in a declaration's value, outside quotes.
+    for value in re.findall(r":([^;{}]*)", re.sub(r'"[^"]*"', "", text)):
+        for word in re.findall(r"(?<![-\w])[a-zA-Z]+(?![-\w(])", value):
+            if word.lower() in NAMED:
+                return word
+    return None
+colors = sorted(k for k, v in light_d.items() if k.startswith("--") and color_in(":" + v))
 if len(colors) < 3:
     sys.exit(f"fewer than 3 color tokens on :root: {colors}")
 missing = [k for k in colors if k not in dark_d]
@@ -361,8 +429,8 @@ extra = [k for k in dark_d if not k.startswith("--") and k != "color-scheme"]
 if extra or dark_d.get("color-scheme") != "dark":
     sys.exit(f"the dark block sets {extra} or lacks color-scheme:dark")
 rest = css.replace(light.group(0), "").replace(dark.group(0), "")
-if color.search(rest):
-    sys.exit(f"a color literal outside the token blocks: {color.search(rest).group(0)}")
+if color_in(rest):
+    sys.exit(f"a color literal outside the token blocks: {color_in(rest)}")
 body = re.search(r"(?m)^body\{([^}]*)\}", rest)
 if not body or "background:var(--bg)" not in body.group(1) or "color:var(--fg)" not in body.group(1):
     sys.exit("body does not take background and color from the tokens")
@@ -450,6 +518,15 @@ o4_replace_refuses_foreign() {
   check "exit 1 without image-page's list, got $RC" [ "$RC" = 1 ]
   check "the hand-made page kept" grep -qF hand-made "$OUTDIR/index.html"
   check "its image kept" [ -f "$OUTDIR/wide.png" ]
+  local list
+  for list in 'not json' '{"wide.png": 1}' '["wide.png", 7]'; do
+    printf '%s' "$list" >"$OUTDIR/.image-page.json"
+    before=$(listing "$OUTDIR")
+    run --replace "$OUTDIR" "$FX/base.jpg"
+    check "exit 1 with the list $list, got $RC" [ "$RC" = 1 ]
+    check "says the list is none: $ERR" grep -qF ".image-page.json is no list of file names" <<<"$ERR"
+    check "nothing changed with the list $list" [ "$(listing "$OUTDIR")" = "$before" ]
+  done
 }
 
 o5_duplicate_basenames() {
@@ -487,6 +564,65 @@ o7_option_order() {
   check "-dash.gif after -- is an image: $(shown)" grep -qF 'src="-dash.gif"' "$OUTDIR/index.html"
 }
 
+# the_page: index.html and the listing of $OUTDIR, to compare before and after.
+the_page() { cat "$OUTDIR/index.html" 2>/dev/null; listing "$OUTDIR"; }
+# leftovers: entries image-page left beside $OUTDIR, one per line.
+leftovers() { (cd "$(dirname "$OUTDIR")" && find . -maxdepth 1 -name '.image-page-*'); }
+
+o8_write_fails_keeps_page() {
+  run "$OUTDIR" "$FX/wide.png"
+  written
+  local before
+  before=$(the_page)
+  RC=0
+  # A 4 KiB file-size limit: big.png is three times that, so its copy fails.
+  OUT=$(cd "$ROOT/caller" && ulimit -f 4 && env -i PATH="$ROOT/bin" HOME="$HOME" "$SUT" --replace \
+    "$OUTDIR" "$FX/big.png" 2>"$ROOT/stderr") || RC=$?
+  ERR=$(cat "$ROOT/stderr")
+  check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
+  check "says it cannot write: $ERR" grep -q "^image-page: cannot write .*: File too large$" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+  check "the earlier page unchanged: $(listing "$OUTDIR")" [ "$(the_page)" = "$before" ]
+  check "nothing left beside it: $(leftovers)" [ -z "$(leftovers)" ]
+}
+
+o9_unlistable_out_dir() {
+  mkdir "$OUTDIR"
+  echo x >"$OUTDIR/x"
+  chmod 000 "$OUTDIR"
+  run --replace "$OUTDIR" "$FX/wide.png"
+  chmod 755 "$OUTDIR"
+  check "exit 1, got $RC: $ERR" [ "$RC" = 1 ]
+  check "says it cannot read the out-dir: $ERR" grep -qF "image-page: cannot read $OUTDIR" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+  check "its file kept: $(listing "$OUTDIR")" [ "$(listing "$OUTDIR")" = ./x ]
+}
+
+o10_parent_not_writable() {
+  mkdir "$ROOT/locked"
+  chmod 555 "$ROOT/locked"
+  OUTDIR=$ROOT/locked/page
+  run "$OUTDIR" "$FX/wide.png"
+  chmod 755 "$ROOT/locked"
+  check "exit 3, got $RC: $ERR" [ "$RC" = 3 ]
+  check "says it cannot write: $ERR" grep -q "^image-page: cannot write .*: Permission denied$" <<<"$ERR"
+  check "no traceback: $ERR" no_traceback
+  check "nothing created: $(listing "$ROOT/locked")" [ -z "$(listing "$ROOT/locked")" ]
+  check "nothing on stdout: $OUT" [ -z "$OUT" ]
+}
+
+o11_replace_current_dir() {
+  OUTDIR=$ROOT/caller
+  run . "$FX/wide.png"
+  written
+  local before
+  before=$(the_page)
+  run --replace . "$FX/anim.gif"
+  check "exit 1, got $RC: $ERR" [ "$RC" = 1 ]
+  check "says why: $ERR" grep -qF "is the current directory or holds it" <<<"$ERR"
+  check "the page unchanged" [ "$(the_page)" = "$before" ]
+}
+
 missing=0
 for CASE in "${CASES[@]}"; do
   if ! declare -F "$CASE" >/dev/null; then
@@ -508,7 +644,7 @@ for CASE in "${all[@]}"; do
   FAILED=0
   OUTDIR=$ROOT/page
   rm -rf "$OUTDIR" "$ROOT/caller" "$ROOT/served" "$ROOT/a" "$ROOT/b" "$ROOT/deep" "$ROOT/plain-file" \
-    "$ROOT/fresh" "$ROOT/empty" "$ROOT/folder.png" "$ROOT/two words&more.png"
+    "$ROOT/fresh" "$ROOT/empty" "$ROOT/folder.png" "$ROOT/two words&more.png" "$ROOT/locked"
   mkdir -p "$ROOT/caller"
   if in_cases "$CASE"; then
     "$CASE"

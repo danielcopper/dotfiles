@@ -11,7 +11,8 @@ size beside the caption. Each image's CSS width is its pixel width divided
 by D, rounded half up and at least 1 px, its height follows, and
 max-width:100% keeps it inside a narrow screen. D is the density the image
 was drawn at, in pixels per CSS pixel, such as an Android render's 2.625;
-without --density it is 1, for photos and screenshots. The pixel size is
+without --density it is 1, for photos and desktop screenshots; a phone
+screenshot takes the phone's density. The pixel size is
 read from the file itself: PNG, JPEG, GIF or WebP. A line at the top names
 the number of images and D. --title sets the page's <title> and an <h1>;
 without it the <title> is the out-dir's name. Captions, title and file names
@@ -23,26 +24,37 @@ index.html and starts no server: run `preview-serve <out-dir>` to show it.
 It also writes .image-page.json there, the list of what it wrote, which
 --replace reads.
 
+It writes the page into a new directory beside <out-dir> and puts that in
+place of <out-dir> only once every file is written, so a page never mixes
+old files and a run that fails leaves the earlier page as it was.
+
 It refuses, before it writes anything, and exits 1:
 - an image whose pixel size it cannot read, or that it cannot read at all;
+- a --density so small that an image's CSS width overflows;
 - two images with the same basename, or an image named index.html or
   .image-page.json;
-- an <out-dir> that is no directory;
+- an <out-dir> that is no directory, or that it cannot list;
 - an <out-dir> that is not empty, unless --replace is given and the
   directory holds only what an earlier image-page run wrote there (the
-  files its .image-page.json names, index.html and that list); --replace
-  then removes those first, so a page never mixes old files.
+  files its .image-page.json names, index.html and that list);
+- --replace on the current directory or one that holds it, which the swap
+  would move away from under the caller.
 
-Exit codes: 0 written, 1 refused, 2 usage (an unknown option, a --density
-that is no positive decimal number, no <out-dir> or no image).
+Exit codes: 0 written, 1 refused, 2 usage (an unknown option, an option
+without its value, a --density that is no positive decimal number, no
+<out-dir> or no image), 3 the page could not be written (a full disk, a
+directory it may not write); the earlier page, if any, stays.
 """
 
 import html
 import json
+import math
 import os
 import re
+import shutil
 import struct
 import sys
+import tempfile
 import urllib.parse
 from typing import NoReturn
 
@@ -84,7 +96,7 @@ def usage(reason) -> NoReturn:
 
 def density(value):
     # A plain decimal only: float() also takes nan, inf, 1e3 and 1_0.
-    if not re.fullmatch(r"[0-9]+(\.[0-9]*)?|\.[0-9]+", value) or float(value) <= 0:
+    if not re.fullmatch(r"[0-9]+(\.[0-9]*)?|\.[0-9]+", value) or not 0 < float(value) < math.inf:
         usage(f"--density takes a positive decimal number, not {value!r}")
     return float(value)
 
@@ -208,13 +220,18 @@ def load(specs):
 
 def own_files(out):
     """The names in <out> that an earlier run wrote, or Refused naming the first other entry."""
+    manifest = os.path.join(out, MANIFEST)
     try:
-        with open(os.path.join(out, MANIFEST), encoding="utf-8") as f:
+        with open(manifest, encoding="utf-8") as f:
             listed = json.load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         raise Refused(f"{out} holds no {MANIFEST} that names what image-page wrote there") from None
+    except OSError as e:
+        raise Refused(f"cannot read {manifest}: {e.strerror}") from None
+    except ValueError:
+        listed = None
     if not isinstance(listed, list) or not all(isinstance(n, str) for n in listed):
-        raise Refused(f"{out}/{MANIFEST} is no list of file names")
+        raise Refused(f"{manifest} is no list of file names")
     allowed = set(listed) | {INDEX, MANIFEST}
     names = []
     with os.scandir(out) as entries:
@@ -226,16 +243,31 @@ def own_files(out):
 
 
 def prepare(out, replace):
-    """Checks <out> and returns the names to remove from it before writing."""
+    """Checks <out>: ("missing", []), ("empty", []) or ("page", the names an earlier run wrote)."""
     if not os.path.lexists(out):
-        return []
+        return "missing", []
     if not os.path.isdir(out):
         raise Refused(f"{out} is no directory")
-    if not os.listdir(out):
-        return []
-    if not replace:
-        raise Refused(f"{out} is not empty; --replace rewrites a page image-page wrote there")
-    return own_files(out)
+    try:
+        if not os.listdir(out):
+            return "empty", []
+        if not replace:
+            raise Refused(f"{out} is not empty; --replace rewrites a page image-page wrote there")
+        names = own_files(out)
+    except OSError as e:
+        raise Refused(f"cannot read {out}: {e.strerror}") from None
+    target, cwd = os.path.realpath(out), os.getcwd()
+    if cwd == target or cwd.startswith(target + os.sep):
+        raise Refused(f"{out} is the current directory or holds it; run image-page from outside it")
+    return "page", names
+
+
+def css_width(source, width, density_):
+    """The CSS width of an image <width> pixels wide: half up, at least 1."""
+    css = width / density_ + 0.5
+    if not math.isfinite(css):
+        raise Refused(f"--density {density_:g} makes {source} too wide to show")
+    return max(1, int(css))
 
 
 def render(out, images, title, density_):
@@ -257,8 +289,8 @@ def render(out, images, title, density_):
     if title is not None:
         lines.append(f"<h1>{esc(title)}</h1>")
     lines += [f'<p class="meta">{count} · density {density_:g}</p>', "</header>", "<main>"]
-    for _, name, caption, _, (width, height) in images:
-        css = max(1, int(width / density_ + 0.5))
+    for source, name, caption, _, (width, height) in images:
+        css = css_width(source, width, density_)
         lines += [
             "<figure>",
             f'<figcaption><span class="name">{esc(caption)}</span> <span class="size">{width} × {height} px</span></figcaption>',
@@ -269,27 +301,65 @@ def render(out, images, title, density_):
     return "\n".join(lines)
 
 
+def write_page(out, state, stale, images, page):
+    """Writes the page into a new directory beside <out>, then puts it in place.
+
+    Until the last step the earlier page stays as it was; a directory that
+    held one is swapped out whole and then emptied of the stale names.
+    """
+    target = os.path.realpath(out)
+    parent = os.path.dirname(target)
+    os.makedirs(parent, exist_ok=True)
+    temp = tempfile.mkdtemp(prefix=".image-page-", dir=parent)
+    try:
+        mask = os.umask(0)
+        os.umask(mask)
+        os.chmod(temp, 0o777 & ~mask if state == "missing" else os.stat(target).st_mode & 0o7777)
+        with open(os.path.join(temp, MANIFEST), "w", encoding="utf-8") as f:
+            json.dump([name for _, name, _, _, _ in images], f)
+        for _, name, _, data, _ in images:
+            with open(os.path.join(temp, name), "wb") as f:
+                f.write(data)
+        with open(os.path.join(temp, INDEX), "w", encoding="utf-8") as f:
+            f.write(page)
+        if state == "missing":
+            os.rename(temp, target)
+        elif state == "empty":
+            # File by file: the directory may be the caller's working directory.
+            for name in os.listdir(temp):
+                os.rename(os.path.join(temp, name), os.path.join(target, name))
+            os.rmdir(temp)
+        else:
+            old = tempfile.mkdtemp(prefix=".image-page-", dir=parent)
+            os.rename(target, old)
+            try:
+                os.rename(temp, target)
+            except OSError:
+                os.rename(old, target)
+                raise
+            for name in stale:
+                os.remove(os.path.join(old, name))
+            os.rmdir(old)
+    finally:
+        if os.path.isdir(temp):
+            shutil.rmtree(temp, ignore_errors=True)
+
+
 def main(argv):
     opts, out, specs = parse(argv)
     try:
         images = load(specs)
-        stale = prepare(out, opts["replace"])
+        state, stale = prepare(out, opts["replace"])
+        page = render(out, images, opts["title"], opts["density"])
     except Refused as e:
         print(f"image-page: {e}", file=sys.stderr)
         return 1
-    os.makedirs(out, exist_ok=True)
-    for name in stale:
-        os.remove(os.path.join(out, name))
-    # The list first, so a run cut short still leaves --replace what to clear.
-    with open(os.path.join(out, MANIFEST), "w", encoding="utf-8") as f:
-        json.dump([name for _, name, _, _, _ in images], f)
-    for _, name, _, data, _ in images:
-        with open(os.path.join(out, name), "wb") as f:
-            f.write(data)
-    index = os.path.join(out, INDEX)
-    with open(index, "w", encoding="utf-8") as f:
-        f.write(render(out, images, opts["title"], opts["density"]))
-    print(os.path.abspath(index))
+    try:
+        write_page(out, state, stale, images, page)
+    except OSError as e:
+        print(f"image-page: cannot write {e.filename or out}: {e.strerror}", file=sys.stderr)
+        return 3
+    print(os.path.abspath(os.path.join(out, INDEX)))
     return 0
 
 
