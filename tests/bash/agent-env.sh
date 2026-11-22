@@ -13,8 +13,9 @@
 # ~/.config/agent-env; the .bashrc cases put a link to the script at
 # ~/.local/bin/agent-env. No dummy value contains the word of another and
 # every one contains "dummy", which no other output does.
-#   l1  the shipped lists of claude, opencode and pi pass SONARQUBE_CLI_ORG
-#       and SONARQUBE_CLI_TOKEN, nothing else of the file, and no stderr
+#   l1  the shipped lists of claude, opencode and pi pass SONARQUBE_CLI_ORG,
+#       SONARQUBE_CLI_TOKEN and SQLCMDPASSWORD, nothing else of the file, and
+#       no stderr
 #   f1  an interactive shell on bash/.bashrc that sourced the file, which is
 #       then rewritten: `claude` in that shell gets the new value, the shell
 #       still holds the old one
@@ -129,6 +130,7 @@ export SONARQUBE_CLI_ORG=org-dummy-1
 export SONARQUBE_CLI_TOKEN=$(printf "%s-%s" tok dummy-1)
 export OTHER_TOKEN=other-dummy-1
   PLAIN_SECRET=plain-dummy-1
+export SQLCMDPASSWORD=sql-dummy-1
 END
 
 failures=0
@@ -208,6 +210,7 @@ l1_shipped_lists() {
     check "$h: exit 0 (got $RC)" eq "$RC" 0
     check "$h: org passed" has SONARQUBE_CLI_ORG org-dummy-1
     check "$h: token passed" has SONARQUBE_CLI_TOKEN tok-dummy-1
+    check "$h: SQL password passed" has SQLCMDPASSWORD sql-dummy-1
     check "$h: OTHER_TOKEN not passed" lacks OTHER_TOKEN
     check "$h: PLAIN_SECRET not passed" lacks PLAIN_SECRET
     check "$h: nothing on stderr (got: $(err))" eq "$(err)" ""
