@@ -1686,18 +1686,18 @@ const STALE_CX = "cx is no longer valid: it was captured during an earlier call 
 // bind_keys records the bindings in `bound` and gives what `bindKeys` (by
 // default: how many it got) gives or throws.
 //
-// As herdr's, a cx is valid only while the call it came with runs: herdr
-// gives each call a frame with a generation of its own, and a cx kept past
-// its call names a frame that is gone (scope.rs, with_context). The cx
-// cx.spawn hands its function is the exception: it names no frame and stays
-// valid across every await (engine/quickjs/scheduler.rs, "Which cx may be
-// held across an await", js_spawn). So call(fn) runs fn with a cx of its
-// own that goes stale when fn returns, as do the timers fire(), tick() and
-// look() run, and every use of a stale cx throws herdr's words. The cx this
-// returns stands for a call the test keeps open: it never goes stale.
+// herdr's rule for a cx (gpui-kit, crates/shell/src/typings.rs,
+// AsyncContext; scope.rs, with_context): a handler (a key, a click, an
+// action, an input's event) gets a cx for that one call, which is stale
+// once the call returns; init, cx.spawn's body and a cx.timer callback get
+// an AsyncContext, which names no call and stays valid. So call(fn) runs a
+// handler `fn` with a cx of its own that goes stale when it returns, and
+// every use of a stale cx throws herdr's words; the timers fire(), tick()
+// and look() run, and every spawn, get a lasting one, as does the cx this
+// returns, which init gets.
 function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
   const cx = { later: [], every: [], bound: [], stopped: 0 };
-  // A cx for one call; `lasting`: cx.spawn's, which never goes stale.
+  // A cx for one call; `lasting`: an AsyncContext, which never goes stale.
   const scope = (lasting) => {
     let valid = true;
     const live = (fn) => (...args) => {
@@ -1743,7 +1743,7 @@ function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
     };
   };
   Object.assign(cx, scope(true), {
-    // Runs fn with a cx of its own, stale once fn returns.
+    // Runs the handler fn with a cx of its own, stale once fn returns.
     call(fn) {
       const own = scope(false);
       try {
@@ -1753,17 +1753,17 @@ function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
       }
     },
     async fire() {
-      for (const fn of cx.later.splice(0)) cx.call(fn);
+      for (const fn of cx.later.splice(0)) fn(scope(true));
       await settle();
     },
     async tick() {
-      for (const fn of cx.every) cx.call(fn);
+      for (const fn of cx.every) fn(scope(true));
       await settle();
     },
     // One look of the copy's WATCH_MS timer, then what it queued.
     async look() {
-      for (const fn of cx.every.filter((f) => f.ms === board.WATCH_MS)) cx.call(fn);
-      for (const fn of cx.later.splice(0)) cx.call(fn);
+      for (const fn of cx.every.filter((f) => f.ms === board.WATCH_MS)) fn(scope(true));
+      for (const fn of cx.later.splice(0)) fn(scope(true));
       await settle();
     },
   });
@@ -1810,7 +1810,7 @@ async function bootBoard(options = {}) {
   globalThis.__boardHost = host;
   const b = new board.default();
   const cx = fakeCx(options);
-  cx.call((own) => b.init(options.props ?? {}, own));
+  b.init(options.props ?? {}, cx);
   await settle();
   return { b, cx, host, st: () => b.views.mine };
 }
@@ -5299,7 +5299,7 @@ test("UI: a bind_keys that fails is said in a toast, and the board works on", as
   assert.deepEqual(short.notes.at(-1), { title: "Board: Tab und shift-Tab nicht alle gebunden", body: "1 von 2 Bindungen angelegt", level: "error" });
 });
 
-test("the fake cx goes stale as herdr's does: one kept past its call throws herdr's words, cx.spawn's stays valid", async () => {
+test("the fake cx keeps herdr's rule: a handler's cx is stale once it returns; init's, a spawn's and a timer's stay valid", async () => {
   const cx = fakeCx();
   let kept = null;
   let spawned = null;
@@ -5314,9 +5314,11 @@ test("the fake cx goes stale as herdr's does: one kept past its call throws herd
   assert.throws(() => kept.notify(), (e) => e.message === STALE_CX);
   assert.throws(() => kept.spawn(async () => {}), (e) => e.message === STALE_CX);
   assert.doesNotThrow(() => spawned.notify(), "a spawn's cx after an await");
-  cx.timer.after(0, (own) => (kept = own));
+  let timed = null;
+  cx.timer.after(0, (own) => (timed = own));
   await cx.fire();
-  assert.throws(() => kept.stop_propagation(), (e) => e.message === STALE_CX, "a timer's cx after it ran");
+  assert.doesNotThrow(() => timed.stop_propagation(), "a timer's cx after it ran");
+  assert.doesNotThrow(() => cx.notify(), "init's");
 });
 
 test("UI: a write whose follow-up throws after it landed says it landed and what failed; nothing is undone, the lock is gone", async () => {
