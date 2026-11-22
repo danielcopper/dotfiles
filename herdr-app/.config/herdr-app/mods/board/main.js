@@ -2463,8 +2463,9 @@ export function backlogWarnings(data) {
 // write per item at a time; a refusal undoes it and says why, and a write
 // whose outcome is unclear keeps the change, refreshes the view and leaves
 // the outcome for the next refresh to settle (Board.settleUnclear, the
-// shape's settle, which says the outcomes with tellOutcomes). A card's move
-// and a work item's state change are written so.
+// shape's settle, which says the outcomes with tellOutcomes). A card's
+// move, a work item's state change, a create and a parent link are written
+// so.
 
 // Whether a write's view still stands, the one rule for following a write
 // up: views.json, as its last valid form says (an invalid one in between
@@ -2479,16 +2480,24 @@ export function viewStands(b, view) {
 //   the item under way);
 // - w.apply() shows the change; w.write() writes it (a BoardError marked
 //   unclear leaves the outcome open);
-// - w.landed() when it landed; w.failed() when it did not, either way;
-//   w.undo() when it was refused;
+// - w.landed(cx) when it landed, with the cx that may still be used then
+//   (the write's own: a cx a call handed over goes stale when that call
+//   returns, herdr's scope.rs); a throw there does not undo the write, it
+//   is said as w.texts.landedBut(why). w.failed() when it did not land,
+//   either way; w.undo() when it was refused;
 // - w.open: what an open outcome records beside key, label and time, for
 //   the shape's settle: its kind ("move" with the target `to`, "state"
-//   with the `state`). A write replaces or drops only the item's open
-//   outcome of its own kind, so a move's report waits through a state
-//   change and the other way round;
+//   with the `state`, "create" with the title and type, "parent" with the
+//   parent), and its key where that is not w.key (a create's, whose w.key
+//   only keeps one create at a time). A write replaces or drops only the
+//   item's open outcome of its own kind, so a move's report waits through
+//   a state change and the other way round;
 // - w.texts: pending() and landed() say how it goes, unclear leads the
 //   warning, refused(why, earlier) the error (earlier: an outcome of the
-//   item's write of this kind is still open);
+//   item's write of this kind is still open), landedBut(why) a landed write
+//   whose follow-up failed; toasts: the toasts' titles, { unclear (also a
+//   landed write whose follow-up failed), refused } ("Status von AB#3",
+//   "Status von AB#3 nicht geändert" by default);
 // - w.again: refresh after a write that landed too.
 // A write that landed or was refused refreshes the view too while an open
 // outcome of the item, of either kind, remains: the refresh tells it, so
@@ -2497,7 +2506,9 @@ export function viewStands(b, view) {
 export function writeAtOnce(b, view, w, cx) {
   const st = b.state(view.id);
   const { key, label } = w;
-  const same = (u) => u.key === key && u.kind === w.open.kind;
+  const openKey = w.open.key ?? key;
+  const same = (u) => u.key === openKey && u.kind === w.open.kind;
+  const toasts = w.texts.toasts ?? { unclear: `Status von ${label}`, refused: `Status von ${label} nicht geändert` };
   if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
   if (w.refuse) return b.say(w.refuse, "warning", cx);
   w.apply();
@@ -2505,35 +2516,55 @@ export function writeAtOnce(b, view, w, cx) {
   b.say(w.texts.pending(), "info", cx);
   cx.spawn(async (cx) => {
     try {
-      await w.write();
-      w.landed?.();
-      // A write that landed replaces the open outcome of an earlier one.
-      st.unclear = st.unclear.filter((u) => !same(u));
-      b.say(w.texts.landed(), "success", cx);
-      const { followed, current } = viewStands(b, view);
-      if ((w.again || openOf(st, key)) && followed && current) b.refresh(current, cx);
-    } catch (e) {
-      w.failed?.();
-      const why = report(e);
-      const { followed, current } = viewStands(b, view);
-      if (e instanceof BoardError && e.unclear) {
-        if (followed) st.unclear = [...st.unclear.filter((u) => !same(u)), { key, label, ...w.open, at: Date.now() }];
-        const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
-        b.say(`${w.texts.unclear}: ${why}${next}`, "warning", cx);
-        notify({ title: `Status von ${label}`, body: why, level: "warning" });
-        if (followed && current) b.refresh(current, cx);
-      } else {
-        w.undo();
-        const earlier = st.unclear.some(same);
-        b.say(w.texts.refused(why, earlier), "error", cx);
-        notify({ title: `Status von ${label} nicht geändert`, body: why, level: "error" });
-        if (followed && current && openOf(st, key)) b.refresh(current, cx);
+      let landed = false;
+      try {
+        await w.write();
+        landed = true;
+      } catch (e) {
+        failed(e, cx);
       }
+      if (landed) settled(cx);
     } finally {
       delete st.pending[key];
       cx.notify();
     }
   });
+
+  function settled(cx) {
+    // A write that landed replaces the open outcome of an earlier one.
+    st.unclear = st.unclear.filter((u) => !same(u));
+    let said = w.texts.landed();
+    let level = "success";
+    try {
+      w.landed?.(cx);
+    } catch (e) {
+      said = w.texts.landedBut?.(report(e)) ?? `${said}; danach: ${report(e)}`;
+      level = "warning";
+      notify({ title: toasts.unclear, body: said, level });
+    }
+    b.say(said, level, cx);
+    const { followed, current } = viewStands(b, view);
+    if ((w.again || openOf(st, key)) && followed && current) b.refresh(current, cx);
+  }
+
+  function failed(e, cx) {
+    w.failed?.();
+    const why = report(e);
+    const { followed, current } = viewStands(b, view);
+    if (e instanceof BoardError && e.unclear) {
+      if (followed) st.unclear = [...st.unclear.filter((u) => !same(u)), { label, ...w.open, key: openKey, at: Date.now() }];
+      const next = !followed ? "" : current ? "; lädt neu" : "; wird nach dem nächsten Neuladen gemeldet";
+      b.say(`${w.texts.unclear}: ${why}${next}`, "warning", cx);
+      notify({ title: toasts.unclear, body: why, level: "warning" });
+      if (followed && current) b.refresh(current, cx);
+    } else {
+      w.undo();
+      const earlier = st.unclear.some(same);
+      b.say(w.texts.refused(why, earlier), "error", cx);
+      notify({ title: toasts.refused, body: why, level: "error" });
+      if (followed && current && openOf(st, key)) b.refresh(current, cx);
+    }
+  }
 }
 
 // Whether an outcome of the item `key`, of either kind, is still open.
@@ -2644,7 +2675,9 @@ export function createItem(b, view, { type, title, parent }, cx) {
     label,
     apply() {},
     write: async () => (id = await b.loader(view).create(view, st.data, { type: type.name, title })),
-    landed() {
+    // The write's own cx (writeAtOnce): the one this was called with has
+    // gone stale by now.
+    landed(cx) {
       if (!under) st.want = { key: itemLabel({ source: "azure", kind: "workitem", number: id }), after: st.runs };
       else linkParent(b, view, id, under, cx);
     },
@@ -2656,6 +2689,8 @@ export function createItem(b, view, { type, title, parent }, cx) {
       landed: () => (under ? `AB#${id} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `AB#${id} ${label} angelegt`),
       unclear: `${type.name} ${label} anlegen`,
       refused: (why) => `${type.name} ${label} nicht angelegt: ${why}`,
+      landedBut: (why) => `AB#${id} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
+      toasts: { unclear: `Anlegen von ${label}`, refused: `${label} nicht angelegt` },
     },
   }, cx);
 }
@@ -2678,6 +2713,7 @@ function linkParent(b, view, id, parent, cx) {
       landed: () => `${label} hängt jetzt unter ${to}`,
       unclear: `${label} unter ${to}`,
       refused: (why) => `${label} ist angelegt, hängt aber nicht unter ${to}: ${why}`,
+      toasts: { unclear: `${label} unter ${to}`, refused: `${label} hängt nicht unter ${to}` },
     },
   }, cx);
 }

@@ -1676,62 +1676,95 @@ async function settle() {
   for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
 }
 
+// herdr's words for a cx used after the call it came with returned
+// (gpui-kit, crates/shell/src/scope.rs, StaleContext).
+const STALE_CX = "cx is no longer valid: it was captured during an earlier call and used later. Use cx.spawn or take cx from the callback arguments instead.";
+
 // A fake cx; its timers run when a test calls fire(), tick() or look().
 // bind_keys records the bindings in `bound` and gives what `bindKeys` (by
 // default: how many it got) gives or throws.
+//
+// As herdr's, a cx is valid only while the call it came with runs: herdr
+// gives each call a frame with a generation of its own, and a cx kept past
+// its call names a frame that is gone (scope.rs, with_context). The cx
+// cx.spawn hands its function is the exception: it names no frame and stays
+// valid across every await (engine/quickjs/scheduler.rs, "Which cx may be
+// held across an await", js_spawn). So call(fn) runs fn with a cx of its
+// own that goes stale when fn returns, as do the timers fire(), tick() and
+// look() run, and every use of a stale cx throws herdr's words. The cx this
+// returns stands for a call the test keeps open: it never goes stale.
 function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
-  const cx = {
-    later: [],
-    every: [],
-    bound: [],
-    bind_keys: (bindings) => (cx.bound.push(...bindings), bindKeys(bindings)),
-    // A handle that knows whether it has the keyboard: from its focus()
-    // until a test says otherwise (handle.held = false).
-    // The board's handle, one of the host's handles: its focus() takes the
-    // keyboard from the others and from every input.
-    focus_handle: () => {
-      const host = globalThis.__boardHost;
-      const handle = {
-        held: false,
-        focus: () => {
-          for (const h of host.handles) h.held = false;
-          handle.held = true;
-          host.focusCalls++;
-          for (const input of host.inputs ?? []) input.blur();
-        },
-        is_focused: () => handle.held,
-      };
-      host.handles.push(handle);
-      return handle;
-    },
-    spawn: (fn) => Promise.resolve().then(() => fn(cx)),
-    timer: {
-      after: (ms, fn) => cx.later.push(fn),
-      every: (ms, fn) => cx.every.push(Object.assign(fn, { ms })),
-    },
-    notify() {},
-    stopped: 0,
-    stop_propagation() {
-      cx.stopped++;
-    },
-    open_url(url) {
-      (cx.opened ??= []).push(url);
+  const cx = { later: [], every: [], bound: [], stopped: 0 };
+  // A cx for one call; `lasting`: cx.spawn's, which never goes stale.
+  const scope = (lasting) => {
+    let valid = true;
+    const live = (fn) => (...args) => {
+      if (!valid) throw new Error(STALE_CX);
+      return fn(...args);
+    };
+    return {
+      end: () => {
+        if (!lasting) valid = false;
+      },
+      bind_keys: live((bindings) => (cx.bound.push(...bindings), bindKeys(bindings))),
+      // A handle that knows whether it has the keyboard: from its focus()
+      // until a test says otherwise (handle.held = false).
+      // The board's handle, one of the host's handles: its focus() takes the
+      // keyboard from the others and from every input.
+      focus_handle: live(() => {
+        const host = globalThis.__boardHost;
+        const handle = {
+          held: false,
+          focus: () => {
+            for (const h of host.handles) h.held = false;
+            handle.held = true;
+            host.focusCalls++;
+            for (const input of host.inputs ?? []) input.blur();
+          },
+          is_focused: () => handle.held,
+        };
+        host.handles.push(handle);
+        return handle;
+      }),
+      spawn: live((fn) => Promise.resolve().then(() => fn(scope(true)))),
+      timer: {
+        after: live((ms, fn) => cx.later.push(fn)),
+        every: live((ms, fn) => cx.every.push(Object.assign(fn, { ms }))),
+      },
+      notify: live(() => {}),
+      stop_propagation: live(() => {
+        cx.stopped++;
+      }),
+      open_url: live((url) => {
+        (cx.opened ??= []).push(url);
+      }),
+    };
+  };
+  Object.assign(cx, scope(true), {
+    // Runs fn with a cx of its own, stale once fn returns.
+    call(fn) {
+      const own = scope(false);
+      try {
+        return fn(own);
+      } finally {
+        own.end();
+      }
     },
     async fire() {
-      for (const fn of cx.later.splice(0)) fn(cx);
+      for (const fn of cx.later.splice(0)) cx.call(fn);
       await settle();
     },
     async tick() {
-      for (const fn of cx.every) fn(cx);
+      for (const fn of cx.every) cx.call(fn);
       await settle();
     },
     // One look of the copy's WATCH_MS timer, then what it queued.
     async look() {
-      for (const fn of cx.every.filter((f) => f.ms === board.WATCH_MS)) fn(cx);
-      for (const fn of cx.later.splice(0)) fn(cx);
+      for (const fn of cx.every.filter((f) => f.ms === board.WATCH_MS)) cx.call(fn);
+      for (const fn of cx.later.splice(0)) cx.call(fn);
       await settle();
     },
-  };
+  });
   return cx;
 }
 
@@ -1775,7 +1808,7 @@ async function bootBoard(options = {}) {
   globalThis.__boardHost = host;
   const b = new board.default();
   const cx = fakeCx(options);
-  b.init(options.props ?? {}, cx);
+  cx.call((own) => b.init(options.props ?? {}, own));
   await settle();
   return { b, cx, host, st: () => b.views.mine };
 }
@@ -1791,7 +1824,7 @@ async function openBoard(options = {}) {
 
 const key = (k, extra = {}) => ({ key: k, key_char: extra.char ?? (k.length === 1 ? k : undefined), keystroke: k, modifiers: extra.modifiers ?? {} });
 async function press(b, cx, k, extra) {
-  b.key(key(k, extra), cx);
+  cx.call((own) => b.key(key(k, extra), own));
   await settle();
 }
 const shiftL = { char: "L", modifiers: { shift: true } };
@@ -3123,7 +3156,7 @@ const hintKeys = (b) => {
 async function click(b, cx, id) {
   const el = byId(b.render(), id);
   assert.ok(el, `no ${id}`);
-  el.with.on_click[0]({}, cx);
+  cx.call((own) => el.with.on_click[0]({}, own));
   await settle();
 }
 
@@ -4944,6 +4977,7 @@ test("UI: a child type under the selected item is created, then linked to it as 
   await answerBacklog(host, { me: false });
   await host.answer("az", ok(fixture("azure-backlog-related.json")), AZB.parent);
   assert.equal(b.notice.text, "AB#451 hängt jetzt unter AB#301");
+  assert.deepEqual([b.state(view.id).pending, openAzb(host, "create").length], [{}, 0], "nothing left under way, one create");
   assert.equal(b.state(view.id).sel.key, "AB#301", "a Task is no row of the Stories: the parent stays selected");
   await press(b, cx, "n");
   b.modal.input.set_value("Another task");
@@ -4953,6 +4987,7 @@ test("UI: a child type under the selected item is created, then linked to it as 
   await host.answer("az", ok(JSON.stringify({ ...json("azure-backlog-created.json"), id: 452 })), AZB.create);
   await host.answer("az", azRefused("TF401320: Rule Error for field Parent."), AZB.parent);
   assert.equal(b.notice.text, "AB#452 ist angelegt, hängt aber nicht unter AB#301: TF401320: Rule Error for field Parent.");
+  assert.equal(host.notes.at(-1).title, "AB#452 hängt nicht unter AB#301", "the toast names the link, not a status");
 });
 
 test("UI: a create Azure refuses says why and drops the Backlog's settings; one without a clear answer reads again and says what the refresh found", async () => {
@@ -4962,7 +4997,7 @@ test("UI: a create Azure refuses says why and drops the Backlog's settings; one 
   await click(b, cx, "create-go");
   await host.answer("az", azRefused("TF401320: Rule Error for field Area Path."), AZB.create);
   assert.equal(b.notice.text, "User Story „Sample new story“ nicht angelegt: TF401320: Rule Error for field Area Path.");
-  assert.equal(host.notes.at(-1).level, "error");
+  assert.deepEqual([host.notes.at(-1).level, host.notes.at(-1).title], ["error", "„Sample new story“ nicht angelegt"]);
   assert.equal(openAzb(host, "ids").length, 0, "nothing read again");
   await refreshSprint(b, cx);
   assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1], "the refusal dropped the settings");
@@ -5140,4 +5175,44 @@ test("UI: a bind_keys that fails is said in a toast, and the board works on", as
   assert.ok(b.render());
   const { host: short } = await bootBoard({ bindKeys: () => 1 });
   assert.deepEqual(short.notes.at(-1), { title: "Board: Tab und shift-Tab nicht alle gebunden", body: "1 von 2 Bindungen angelegt", level: "error" });
+});
+
+test("the fake cx goes stale as herdr's does: one kept past its call throws herdr's words, cx.spawn's stays valid", async () => {
+  const cx = fakeCx();
+  let kept = null;
+  let spawned = null;
+  cx.call((own) => {
+    kept = own;
+    own.spawn(async (later) => {
+      await null;
+      spawned = later;
+    });
+  });
+  await settle();
+  assert.throws(() => kept.notify(), (e) => e.message === STALE_CX);
+  assert.throws(() => kept.spawn(async () => {}), (e) => e.message === STALE_CX);
+  assert.doesNotThrow(() => spawned.notify(), "a spawn's cx after an await");
+  cx.timer.after(0, (own) => (kept = own));
+  await cx.fire();
+  assert.throws(() => kept.stop_propagation(), (e) => e.message === STALE_CX, "a timer's cx after it ran");
+});
+
+test("UI: a write whose follow-up throws after it landed says it landed and what failed; nothing is undone, the lock is gone", async () => {
+  const { b, cx, host, st, view } = await openBacklog();
+  let undone = false;
+  const w = (texts) => ({
+    key: "AB#301", label: "AB#301", apply() {}, write: async () => {}, undo: () => (undone = true), open: { kind: "state" },
+    landed(cx) {
+      cx.notify();
+      throw new board.BoardError("Folgeschritt fehlgeschlagen");
+    },
+    texts: { pending: () => "…", landed: () => "AB#301 gespeichert", unclear: "AB#301", refused: () => "abgelehnt", ...texts },
+  });
+  cx.call((own) => board.writeAtOnce(b, view, w({}), own));
+  await settle();
+  assert.deepEqual([b.notice.text, b.notice.level, undone, st().pending], ["AB#301 gespeichert; danach: Folgeschritt fehlgeschlagen", "warning", false, {}]);
+  assert.deepEqual(host.notes.at(-1), { title: "Status von AB#301", body: "AB#301 gespeichert; danach: Folgeschritt fehlgeschlagen", level: "warning" });
+  cx.call((own) => board.writeAtOnce(b, view, w({ landedBut: (why) => `gespeichert, aber ${why}` }), own));
+  await settle();
+  assert.equal(b.notice.text, "gespeichert, aber Folgeschritt fehlgeschlagen");
 });

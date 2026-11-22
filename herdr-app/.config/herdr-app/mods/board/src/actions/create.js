@@ -25,7 +25,9 @@ export function createItem(b, view, { type, title, parent }, cx) {
     label,
     apply() {},
     write: async () => (id = await b.loader(view).create(view, st.data, { type: type.name, title })),
-    landed() {
+    // The write's own cx (writeAtOnce): the one this was called with has
+    // gone stale by now.
+    landed(cx) {
       if (!under) st.want = { key: itemLabel({ source: "azure", kind: "workitem", number: id }), after: st.runs };
       else linkParent(b, view, id, under, cx);
     },
@@ -37,6 +39,8 @@ export function createItem(b, view, { type, title, parent }, cx) {
       landed: () => (under ? `AB#${id} ${label} angelegt; wird unter ${itemLabel(under)} gehängt …` : `AB#${id} ${label} angelegt`),
       unclear: `${type.name} ${label} anlegen`,
       refused: (why) => `${type.name} ${label} nicht angelegt: ${why}`,
+      landedBut: (why) => `AB#${id} ${label} angelegt, aber nicht unter ${itemLabel(under)} gehängt: ${why}`,
+      toasts: { unclear: `Anlegen von ${label}`, refused: `${label} nicht angelegt` },
     },
   }, cx);
 }
@@ -59,6 +63,7 @@ function linkParent(b, view, id, parent, cx) {
       landed: () => `${label} hängt jetzt unter ${to}`,
       unclear: `${label} unter ${to}`,
       refused: (why) => `${label} ist angelegt, hängt aber nicht unter ${to}: ${why}`,
+      toasts: { unclear: `${label} unter ${to}`, refused: `${label} hängt nicht unter ${to}` },
     },
   }, cx);
 }
