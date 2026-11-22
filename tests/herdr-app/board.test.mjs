@@ -5569,6 +5569,9 @@ test("UI: an issue's related items are read once when its details open, „lädt
   ]);
   const opacity = (i) => byId(detailPanel(b), `related-line-${i}`).with.opacity[0];
   assert.deepEqual([0, 1, 2, 3, 4].map(opacity), [1, 0.55, 1, 1, 0.55], "closed and merged ones dimmed");
+  host.theme = () => ({ ansi2: "#green", ansi5: "#purple", muted: "#grey" });
+  const chipColor = (i) => byId(detailPanel(b), `related-line-${i}`).kids.at(-1).with.bg[0];
+  assert.deepEqual([0, 1, 4].map(chipColor), ["#green", "#grey", "#purple"], "each state's chip in its color");
   assert.ok(pathTo(detailPanel(b), "SITZUNG"), "the rest of the details stays");
   await press(b, cx, "escape");
   await press(b, cx, "enter");
@@ -5690,6 +5693,12 @@ test("UI: a node GitHub sent as null is counted as without access; a section it 
   hidden.data.repository.issue.subIssues.nodes = [null];
   await answerRelated(host, ok(JSON.stringify(hidden)));
   assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "1 ohne Zugriff"], "not „keine“");
+  await press(b, cx, "r");
+  const unsent = JSON.parse(relatedAnswer());
+  unsent.data.repository.issue.subIssues = null;
+  unsent.errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "subIssues"], message: "Sub-issues are hidden" }];
+  await answerRelated(host, { code: 1, stdout: JSON.stringify(unsent), stderr: "gh: Sub-issues are hidden\n" });
+  assert.deepEqual(relatedTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Sub-issues are hidden"], "the error in their place, not „keine“");
 });
 
 test("UI: a pull request's row, a pull request's card and a draft read no related items and have no such section", async () => {

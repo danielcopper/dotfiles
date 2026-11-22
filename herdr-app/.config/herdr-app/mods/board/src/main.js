@@ -527,12 +527,11 @@ export default class Board extends View {
     return null;
   }
 
-  // Tab: the keyboard into the details panel, no line selected, where the
-  // details of an item with related items to read show; back to the board
-  // where the panel has it.
+  // Tab, where the board takes it for the panel (takesTab: the details of
+  // an item with related items to read show): the keyboard into the details
+  // panel, no line selected, or back to the board where the panel has it.
   togglePanel(view) {
     const item = this.shownDetailsItem();
-    if (!this.readsRelated(item)) return;
     this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null };
   }
 
