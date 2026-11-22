@@ -121,6 +121,52 @@ PASSES = [
     '  \t gh pr view "$N" | head -1',
     'gh pr view "$N" > out 2>> err;',
     'gh pr list "$X" --search a_b.c/d:e,f@g%h+i=j-k',
+    # a run-time word in a simple command that runs none of gh, az, curl or wget and re-reads
+    # nothing, or in an output-redirection target, cannot reach gh's words; a word built without
+    # spelling gh stays out of sight (merge_policy)
+    "gh pr view 1; env X=$? true",
+    "gh pr view 1; bash x.sh $?",
+    "X=1 env echo $?; gh pr view 1",
+    "gh pr view 1; /usr/bin/env X=$? true",
+    'echo $? #"x"; gh pr view 1',
+    "gh pr view 1; echo x>log $?",
+    "gh pr view 1; echo x$?y",
+    "gh pr view 1; /bin/bash x.sh $?",
+    "gh pr view 1; 2>log bash x.sh $?",
+    "X+=1 env echo $?; gh pr view 1",
+    "gh pr view 1; setsid bash x.sh $?",
+    "gh pr view 1; if true; then bash x.sh $?; fi",
+    "gh pr view 1; python3 x.py $?",
+    "gh api x; echo $?",
+    "/tmp/x/gh pr view 1; echo $?",
+    "S=/tmp/s; gh issue view 10 -R o/r --json body -q .body > $S/issue10.md",
+    "W=/tmp/w; git -C $W log --oneline -3; gh issue view 12 -R o/r",
+    (
+        "for i in $(seq 1 120); do s=$(gh pr view 20 --json state -q .state 2>/dev/null);"
+        ' [ "$s" != OPEN ] && break; sleep 30; done'
+    ),
+    'gh pr checks 2856 -R o/r --watch --interval 30 > $S/ci.log 2>&1; echo "checks exit $?"',
+    "mkdir -p $S/bom && cd $S/bom && curl -sfO https://dl.google.com/x.pom && grep -c x x.pom",
+    # merge, completed and alias as other words than the merge vocabulary
+    "grep -E 'FAILED|tests completed' $S/p1.log | head",
+    "B=$(git merge-base origin/main HEAD); git diff --stat $B",
+    "cat >> $F <<'EOF'\n- PR 20 merged, archived\nEOF",
+    "grep -n host_key_alias $W/setup.py",
+    "gh api repos/o/r --jq '{squash_merge_commit_title}'",
+    "cd $D && gh api repos/github/docs/contents/content/x/configuring-branches-and-merges.md",
+    # the body of a quoted heredoc fed to a command that only stores or reads it as data
+    "cat > $S/brief.md <<'EOF'\nshow it, then check it with curl -sI $URL\nEOF",
+    "python3 - <<'EOF'\nprint(\"$HOME\", 'use gh pr view')\nEOF",
+    "cat > $S/n.md <<'EOF'\nthe gh api call reads \"$EP\"\nEOF",
+    "git commit -F - <<'EOF'\nfix: read $HOME and gh pr view 3\nEOF",
+    "cat <<-'EOF' > /tmp/x.md\n\tsee gh api \"$EP\"\n\tEOF",
+    "tee $S/a.md <<\\EOF\n`gh api $EP`\nEOF",
+    'git tag -a v1 -F - <<"EOF"\nv1: gh api "$EP"\nEOF',
+    "# don't wait\ncat > /tmp/n.md <<'EOF'\nsee gh api \"$EP\"\nEOF",
+    "python3 - <<'EOF'\nprint(\"trap '$X' EXIT; bash -c x; gh pr view 1\")\nEOF",
+    # an @ inside a word, not at its start or after =
+    "gh api 'users/x/repos?per_page=100' -q '.[] | [.name] | @tsv'",
+    "gh api -X GET search/users -f q='\"agent for @\" in:bio' --jq .total_count",
 ]
 
 DENIED = [
@@ -386,10 +432,7 @@ DENIED = [
     # special parameters outside the commands where they cannot build a word
     "gh pr view 1; sudo g$!h pr me$!rge 1",
     "echo merge $!",
-    "gh pr view 1; env X=$? true",
-    "gh pr view 1; bash x.sh $?",
     "gh pr view 1; ./step$? go",
-    "X=1 env echo $?; gh pr view 1",
     'curl -s$?K cfg; echo "rc=$?"',
     # a parameter beside curl or wget
     'URL=https://example.com; curl -s "$URL" | head',
@@ -410,8 +453,6 @@ DENIED = [
     "echo merge $*",
     'gh pr view "$@"',
     'gh pr view "$*"',
-    "gh pr view 1; /usr/bin/env X=$? true",
-    'echo $? #"x"; gh pr view 1',
     "echo merge $? #x",
     "echo merge; * $?",
     "echo merge; ?? $?",
@@ -420,12 +461,10 @@ DENIED = [
     "echo merge; ! bash x.sh $?",
     "echo merge $? &",
     'echo "merge (x)" $?',
-    "gh pr view 1; echo x>log $?",
     '/*/gh pr view "$N"',
     "echo 'merge' $?",
     "echo mer\\ge $?",
     "echo merge\r $?",
-    "gh pr view 1; echo x$?y",
     "echo merge $? & true",
     "echo merge $? >&2",
     "echo merge $? >(bash)",
@@ -444,10 +483,7 @@ DENIED = [
     "echo merge | . f $?",
     'echo merge | "timeout" 5 echo $?',
     "echo merge; /usr/bin/env echo $?",
-    "gh pr view 1; /bin/bash x.sh $?",
-    "gh pr view 1; 2>log bash x.sh $?",
     "gh pr view 1; > log bash x.sh $?",
-    "X+=1 env echo $?; gh pr view 1",
     "gh pr view 1; gh pr list $?",
     'gh pr list $?; echo "rc=$?"',
     'xgh pr view "$N" merge',
@@ -470,12 +506,8 @@ DENIED = [
     "echo merge | X=1 . f $?",
     "echo merge|timeout 5 echo $?",
     "echo merge | timeout\t5 echo $?",
-    "gh pr view 1; setsid bash x.sh $?",
     "echo merge | builtin source f $?",
-    "gh pr view 1; if true; then bash x.sh $?; fi",
-    "gh pr view 1; python3 x.py $?",
     "echo merge | watch echo $?",
-    "gh api x; echo $?",
     "echo merge; /tmp/x/echo $?",
     'echo merge; "echo" $?',
     "X+=1; echo merge $?",
@@ -511,9 +543,22 @@ DENIED = [
     'echo merge; trap "bash x.sh $?" EXIT',
     "echo merge; ./a=b echo $?",
     "/tmp/x/gh pr view 1; echo merge $?",
-    "/tmp/x/gh pr view 1; echo $?",
     "echo az $?",
     "echo wget $?",
+    # the merge vocabulary still covers every spelling the rules name
+    "$X pr --squash merge 3",
+    "$X pr -R o/r merge 3",
+    "$X api -X PUT repos/o/r/pulls/3/merge",
+    "$X repos pr update --id 4 --status completed",
+    "$X repos pr update --id 4 --status=completed",
+    "$X repos pr update --id 4 --auto-complete true",
+    '$X rest --method patch --uri u --body \'{"status": "completed"}\'',
+    "$X alias import aliases.yml",
+    "$X alias --clobber set m x",
+    "$X api graphql -f query='mutation { mergeBranch(input: {}) { clientMutationId } }'",
+    "$X api -X POST repos/o/r/merge-upstream -f branch=main",
+    "curl https://example.com/merge-queue",
+    'gh api repos/o/r/pulls/3 -f merge_method=squash -X PUT "$U"',
     # the GraphQL merge queue
     (
         'gh api graphql -f query=\'mutation { enqueuePullRequest(input: {pullRequestId: "x"})'
@@ -524,6 +569,60 @@ DENIED = [
         "curl -s -H 'Authorization: bearer x' https://api.github.com/graphql"
         ' -d \'{"query": "mutation { enqueuePullRequest(input: {}) { clientMutationId } }"}\''
     ),
+    # a run-time word in the simple command that runs gh, az, curl or wget, or as its command word
+    'S=x; gh api "$EP" -X PUT',
+    "cd /tmp && gh pr view $N --json title",
+    "gh pr view `cat n`",
+    "gh pr view $(cat n) --json title",
+    "gh api x $(true) --method $M",
+    "G=gh; $G api graphql --input q.json",
+    "G=gh; timeout 9 $G api graphql --input q.json",
+    "G=gh; sudo -u me $G pr view 1",
+    "echo hi; $(gh) pr view 1",
+    'x=$(which gh); $x api -X PUT "$U"',
+    "for n in 1 2; do gh pr view $n; done",
+    'curl -s -X PUT "https://api.github.com/repos/o/r/pulls/$N/merge"',
+    "GH_TOKEN=$(cat t) gh api -X GET x",
+    "gh pr view 1 <(true) $SUB",
+    "gh pr view 1; >/dev/null $G api -X PUT x",
+    # commands that run a program from their arguments or data: the whole text counts
+    "gh pr view 1; find . -name x -exec bash x.sh $? \\;",
+    "gh pr view 1; find . -execdir x $? +",
+    "gh pr view 1; echo x | xargs echo $?",
+    "gh pr view 1; parallel echo $? ::: a",
+    # a heredoc whose body a shell or an unknown command reads stays shell text
+    "bash <<'EOF'\nX=gh; $X pr view 1\nEOF",
+    "ssh host <<'EOF'\ngh pr $(printf mer)ge 1\nEOF",
+    "cat <<'EOF' | sh\ngh api \"$EP\" -X PUT\nEOF",
+    'cat > f <<EOF\n$(gh api "$EP" -X PUT)\nEOF',
+    "git -c alias.x='!sh' x <<'EOF'\ngh api \"$EP\" -X PUT\nEOF",
+    "cat <<'EOF' | sh\ngh api \"$EP\"\nEOF",
+    "cat <<'EOF' | xargs -0 sh\ngh pr view \"$N\"\nEOF",
+    "tee s.sh <<'EOF' && bash s.sh\ngh api \"$EP\" -X PUT\nEOF",
+    "X=1 cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF",
+    "cat <<'EOF' > s.sh # x\ngh api \"$EP\" -X PUT\nEOF",
+    "cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOX",
+    "python3 bash <<'EOF'\ngh api \"$EP\" -X PUT\nEOF",
+    "cat > s.sh <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n. s.sh",
+    # a heredoc marker inside quotes (as the shell reads them), a group or a substitution, or
+    # after a construct the heredoc reading does not follow
+    "echo 'x\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n'",
+    "x=$'\\''\necho 'x\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
+    (
+        "echo \"$(echo \"it's\")\"\necho 'x\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '"
+        "\nEOF\n' \\'"
+    ),
+    "$(cat <<'EOF'\ngh\nEOF\n) api \"$EP\" -X PUT",
+    "`cat <<'EOF'\ngh\nEOF\n` api \"$EP\" -X PUT",
+    "{\ncat <<'EOF'\ngh\nEOF\n} | read G; $G api \"$EP\" -X PUT",
+    "exec > >(bash)\ncat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF",
+    "bash <(cat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n)",
+    'eval "$(cat <<\'EOF\'\ngh api "$EP" -X PUT\nEOF\n)"',
+    "(\ncat <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n) | sh",
+    "cat <<'EOF' >'s.sh\nEOF\n'; gh api \"$EP\" -X PUT",
+    # a file reference in a gh api or az rest word
+    "gh api graphql -F query=@q.graphql",
+    "az rest --method patch --uri u --body @b.json",
 ]
 
 REASONS = {
@@ -553,6 +652,10 @@ PATHOLOGICAL = [
     "gh pr view " + '"$N" ' * 19_000,
     "a=b; " * 19_000 + "echo $?",
     "echo\n" + "\n" * 99_000,
+    "cat <<'A' " * 9_000,
+    "cat <<'A'\n" * 9_000,
+    "cat <<'A'\nA\n" * 8_000,
+    "cat <<'A'\n" + "x\n" * 40_000 + "A",
 ]
 
 

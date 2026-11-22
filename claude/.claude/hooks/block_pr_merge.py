@@ -25,6 +25,12 @@ SHELL_WORD = re.compile(r"(?<![\w.-])(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
 SHELL_C_CLUSTER = re.compile(r"(?<!\S)-[a-z]*c[a-z]*(?!\S)")
 SOURCE_COMMAND = re.compile(r"(?:^|[;&|(\n])[^\S\n]*(?:source|\.)(?=\s)")
 PIPE_INTO_SHELL = re.compile(r"\|\s*(?:\S*/)?(bash|sh|zsh|dash|ksh|fish)(?![\w.-])")
+# Commands that run a program named in their arguments or their data.
+TRAP = re.compile(r"(?<![\w.-])trap(?![\w.-])")
+SORT = re.compile(r"(?<![\w.-])sort(?![\w.-])")
+SORT_PROGRAM = re.compile(r"(?<!\S)--co[\w-]*")  # --compress-program and its abbreviations
+FIND = re.compile(r"(?<![\w.-])find(?![\w.-])")
+FIND_EXEC = re.compile(r"(?<!\S)-(?:exec|execdir|ok|okdir)(?!\S)")
 # Where a request body can merge: gh api, curl, wget, and az rest, devops invoke and repos pr.
 BODY_TOOL = re.compile(r"(?<![\w.-])(curl|wget)(?![\w.-])")
 TOKEN_SPLIT = re.compile(r"[\s;&|()<>`]+")
@@ -104,8 +110,13 @@ ALIAS_VERB = re.compile(r"\b(set|import)\b")
 AZ_COMPLETE = re.compile(r"\b(completed|auto-?complete)\b")
 DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
 FILE_FLAGS = re.compile(r"@|--input|--upload-file|--config|--post-file|--body-file|--in-file")
+FILE_LONG_FLAGS = re.compile(r"--input|--upload-file|--config|--post-file|--body-file|--in-file")
+FILE_REFERENCE = re.compile(r"^@|=@")  # an @ at a word's start or after =
 FILE_SHORT_FLAGS = re.compile(r"(?<!\S)-[A-Za-z]*[TK]|(?<!\S)-i(?!\S)")  # case-sensitive
-MENTION = re.compile(r"merge|complet|alias")
+# The merge vocabulary as words: merge itself (not merged, merges, merger, merge-base or
+# merge-tree), mergeBranch and merge-upstream; a completion only as a status or auto-complete.
+MERGE_TERM = re.compile(r"(?<!\w)merge(?!\w)(?!-(?:base|tree)\b)|mergebranch|merge-upstream")
+COMPLETION = re.compile(r"auto-?complete|(?:status|-s)\W{1,4}completed\b")
 # The part before the first comma or `..` cannot hold one, so a long open brace is scanned once.
 BRACE_EXPANSION = re.compile(r"\{(?:[^{}\s,.]|\.(?!\.))*(?:,|\.\.)[^{}\s]*\}")
 GLOB_NEXT_TO_LETTER = re.compile(r"[A-Za-z][*?\[]|[*?\[][A-Za-z]")
@@ -140,7 +151,6 @@ PLAIN_COMMAND = re.compile(
 PLAIN_PIECE = re.compile(
     rf"(?P<redirect>{PLAIN_REDIRECT})|(?P<word>{PLAIN_WORD})|(?P<separator>{PLAIN_SEPARATOR})"
 )
-SPECIAL_PARAMETER = re.compile(SPECIAL)
 ASSIGNMENT = re.compile(rf"{NAME}=")
 ALLOWED_COMMANDS = frozenset(
     ["echo", "printf", "test", "true", "false", "exit", ":"]
@@ -151,6 +161,30 @@ GH_READ_ONLY = {
     "issue": frozenset(["view", "list"]),
     "run": frozenset(["view", "list", "watch"]),
 }
+
+# Where the run-time rule finds the command word of a simple command (merge_policy).
+SEGMENT_OPS = set(";|&\n()`")
+WRAPPERS = frozenset(
+    ["sudo", "env", "timeout", "nice", "nohup", "command", "exec", "time", "stdbuf", "setsid"]
+    + ["ionice", "doas"]
+)
+KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
+DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
+OUTPUT_REDIRECT = re.compile(
+    r"(?<![<\w])(?:\d*>>?\|?|&>>?)\s*(?:\"[^\"]*\"|'[^']*'|[^\s;&|()<>`]+)"
+)
+NETWORK_TOOLS = frozenset(["gh", "az", "curl", "wget"])
+
+# Heredocs whose body the run-time rules do not read (merge_policy).
+DELIMITER = r"[A-Za-z_][\w-]*"
+HEREDOC = re.compile(
+    rf"<<(-?)[ \t]*(?:'({DELIMITER})'|\"({DELIMITER})\"|\\({DELIMITER})|({DELIMITER}))"
+    r"(?=[\s;&|<>()]|$)"
+)
+DATA_READERS = frozenset(["cat", "tee", "python", "python3", "git"])
+GIT_DATA_SUBCOMMANDS = frozenset(["commit", "tag", "notes"])
+AFTER_MARKER = re.compile(r"[ \t]*(?:\d*>>?[ \t]*[^\s;&|<>()`$'\"\\#]+[ \t]*)?")
+STANDALONE = " \t\n;&|()<>"
 
 REASON = (
     "Merging a pull request is the owner's alone (merge_policy in "
@@ -187,17 +221,25 @@ def quote_parts(command: str) -> tuple[str, str]:
 
 
 def rereads(lower: str) -> bool:
-    """Whether the de-quoted, lowercased command hands text to a shell that reads it again: a
-    shell word followed later by a `-c` option cluster, `eval`, `<<<`, `source` or `.` as a
-    command, or a pipe into a shell word. Quoting means nothing to such text, so the caller
-    judges the whole text instead."""
+    """Whether the de-quoted, lowercased command hands text to a shell that reads it again, or
+    to a command that runs a program from its arguments or data: a shell word followed later by
+    a `-c` option cluster, `eval`, `<<<`, `source` or `.` as a command, a pipe into a shell word,
+    `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`,
+    `xargs` or `parallel`. Quoting means nothing to such text, so the caller judges the whole
+    text instead."""
     shell = SHELL_WORD.search(lower)
+    sort = SORT.search(lower)
+    find = FIND.search(lower)
     return bool(
         (shell and SHELL_C_CLUSTER.search(lower, shell.end()))
         or EVAL.search(lower)
         or "<<<" in lower
         or SOURCE_COMMAND.search(lower)
         or PIPE_INTO_SHELL.search(lower)
+        or TRAP.search(lower)
+        or (sort and SORT_PROGRAM.search(lower, sort.end()))
+        or (find and FIND_EXEC.search(lower, find.end()))
+        or FEEDER.search(lower)
     )
 
 
@@ -214,6 +256,26 @@ def runs_at_run_time(command: str, whole: bool = False) -> bool:
         or bool(BRACE_EXPANSION.search(outside))
         or bool(GLOB_NEXT_TO_LETTER.search(outside))
     )
+
+
+def built(word: str) -> bool:
+    """Whether a word, its quoting already removed, may be built at run time: a `$` or a
+    backtick anywhere, or a brace expansion or a glob next to a letter."""
+    return (
+        "$" in word
+        or "`" in word
+        or bool(BRACE_EXPANSION.search(word))
+        or bool(GLOB_NEXT_TO_LETTER.search(word))
+    )
+
+
+def mentions_merge(lower: str) -> bool:
+    """Whether the de-quoted, lowercased command mentions a merge for the run-time rule: a merge
+    word, a completion, or `alias` followed later by `set` or `import`."""
+    if MERGE_TERM.search(lower) or COMPLETION.search(lower):
+        return True
+    alias = ALIAS.search(lower)
+    return bool(alias and ALIAS_VERB.search(lower, alias.end()))
 
 
 @dataclass(frozen=True)
@@ -367,7 +429,11 @@ def reads_or_writes_body(command: str, depth: int = 0) -> str | None:
             return "sends a writing request with curl or wget"
         if gh_az_body_tokens(words):
             joined = " ".join(texts)
-            if FILE_FLAGS.search(joined.lower()) or FILE_SHORT_FLAGS.search(joined):
+            if (
+                FILE_LONG_FLAGS.search(joined.lower())
+                or any(FILE_REFERENCE.search(text) for text in texts)
+                or FILE_SHORT_FLAGS.search(joined)
+            ):
                 return "reads a request from a file"
     for part in quoted_parts:
         try:
@@ -503,22 +569,13 @@ def allowed(pieces: list[re.Match[str]]) -> bool:
     return texts[0] in ALLOWED_COMMANDS
 
 
-def spared_in(command: str, pieces: list[re.Match[str]]) -> list[tuple[int, int, str]]:
-    """Where a parameter of one allowed plain simple command does not count, and what stands for
-    it: `0` for `$?`, `$#` and `$$` when no piece names gh, az, curl or wget; `""` for a
-    whole-word `"$NAME"` in a command that starts with gh, after a plain word that is no
-    option."""
-    if not NETWORK.search(" ".join(piece.group() for piece in pieces).lower()):
-        return [
-            (found.start(), found.end(), "0")
-            for piece in pieces
-            if piece.lastgroup == "word"
-            for found in SPECIAL_PARAMETER.finditer(command, piece.start(), piece.end())
-        ]
+def spared_in(pieces: list[re.Match[str]]) -> list[tuple[int, int]]:
+    """Where a parameter of one allowed plain simple command does not count: a whole-word
+    `"$NAME"` in a command that starts with gh, after a plain word that is no option."""
     if pieces[0].group() != "gh":
         return []
     return [
-        (piece.start(), piece.end(), '""')
+        (piece.start(), piece.end())
         for previous, piece in itertools.pairwise(pieces[2:])
         if re.fullmatch(rf"{PLAIN}++", previous.group())
         and not previous.group().startswith("-")
@@ -527,16 +584,267 @@ def spared_in(command: str, pieces: list[re.Match[str]]) -> list[tuple[int, int,
 
 
 def without_spared_parameters(command: str) -> str:
-    """*command* with the parameters the run-time rule does not count replaced by plain text;
+    """*command* with the parameters the run-time rule does not count replaced by `""`;
     unchanged when the command is not in the plain language."""
-    spans = sorted(
-        span for pieces in plain_commands(command) for span in spared_in(command, pieces)
-    )
+    spans = sorted(span for pieces in plain_commands(command) for span in spared_in(pieces))
     out: list[str] = []
     position = 0
-    for start, end, replacement in spans:
+    for start, end in spans:
         out.append(command[position:start])
-        out.append(replacement)
+        out.append('""')
+        position = end
+    out.append(command[position:])
+    return "".join(out)
+
+
+def raw_commands(command: str) -> list[str] | None:
+    """The simple commands of *command* as raw text, cut at unquoted `;`, `|`, `&`, newline,
+    parentheses and backticks; `>&`, `<&` and `&>` stay inside. A substitution (`$( )`, `<( )`,
+    `>( )` or backticks) is a simple command of its own, and the command around it keeps a `$`
+    where it stood. None on open quoting or an unclosed substitution."""
+    parts: list[str] = []
+    current: list[str] = []
+    stack: list[tuple[list[str], str]] = []  # the buffer around a substitution, its closer
+    quote = ""
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            current.append(c)
+            if c == quote:
+                quote = ""
+            elif c == "\\" and quote == '"' and i + 1 < len(command):
+                current.append(command[i + 1])
+                i += 1
+        elif c == "\\":
+            current.append(command[i : i + 2])
+            i += 1
+        elif c in "'\"":
+            quote = c
+            current.append(c)
+        elif c == "(" and current and current[-1] in "$<>":
+            if current[-1] != "$":
+                current.append("$")
+            stack.append((current, ")"))
+            current = []
+        elif c == "`" and stack and stack[-1][1] == "`":
+            parts.append("".join(current))
+            current = stack.pop()[0]
+        elif c == "`":
+            current.append("$")
+            stack.append((current, "`"))
+            current = []
+        elif c == "(":
+            parts.append("".join(current))
+            current = []
+            stack.append(([], "("))
+        elif c == ")" and stack and stack[-1][1] in ")(":
+            parts.append("".join(current))
+            outer, closer = stack.pop()
+            current = outer if closer == ")" else []
+        elif c == "&" and ((i > 0 and command[i - 1] in "<>") or command[i + 1 : i + 2] == ">"):
+            current.append(c)
+        elif c in SEGMENT_OPS:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(c)
+        i += 1
+    if quote or stack:
+        return None
+    parts.append("".join(current))
+    return parts
+
+
+def command_word_index(words: list[Token]) -> int | None:
+    """Index of the word a simple command runs: past assignments, the keywords in KEYWORDS, and
+    the WRAPPERS with their options (and timeout's duration). The length of *words* when only
+    assignments stand there; None when a redirection comes first."""
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word.op:
+            return None
+        if not word.quoted and (ASSIGNMENT.match(word.text) or word.text in KEYWORDS):
+            i += 1
+            continue
+        name = word.text.lower().rsplit("/", 1)[-1]
+        if name not in WRAPPERS:
+            return i
+        i += 1
+        while (
+            i < len(words)
+            and not words[i].op
+            and (words[i].text.startswith("-") or ASSIGNMENT.match(words[i].text))
+        ):
+            i += 1
+        if name == "timeout" and i < len(words) and DURATION.fullmatch(words[i].text):
+            i += 1
+    return len(words)
+
+
+def network_runtime_by_command(command: str) -> bool | None:
+    """Whether the run-time rule denies *command* next to gh, az, curl or wget, judged per
+    simple command: a simple command that runs one of them holds a run-time construct outside
+    its output-redirection targets, a simple command's command word is built at run time, or a
+    redirection before the command word stands next to a word built at run time - the last two
+    while the text names one of them. None when the text cannot be cut (open quoting, an
+    unclosed substitution) or names gh, az, curl or wget other than as an unquoted command word;
+    the caller then judges the whole text."""
+    parts = raw_commands(command)
+    if parts is None:
+        return None
+    named = NETWORK.search(stripped(command).lower()) is not None
+    hit = False
+    for raw in parts:
+        try:
+            words, _ = shell_tokens(raw)
+        except ValueError:
+            return None
+        if not words:
+            continue
+        at = command_word_index(words)
+        runs = False
+        for k, word in enumerate(words):
+            if word.op or not NETWORK.search(stripped(word.text).lower()):
+                continue
+            if k != at or word.quoted or word.text.lower().rsplit("/", 1)[-1] not in NETWORK_TOOLS:
+                return None
+            runs = True
+        if at is not None and at < len(words) and built(words[at].text) and named:
+            hit = True
+        if at is None and named and any(built(word.text) for word in words if not word.op):
+            hit = True
+        if runs and runs_at_run_time(OUTPUT_REDIRECT.sub(" ", raw)):
+            hit = True
+    return hit
+
+
+def reads_data(text: str) -> bool:
+    """Whether the simple command *text*, up to a heredoc marker, runs a command that only stores
+    or reads the heredoc as data: cat, tee, python or python3, or git commit, tag or notes
+    without `-c`, with no shell word among its words."""
+    words = text.lower().split()
+    if not words or words[0].rsplit("/", 1)[-1] not in DATA_READERS:
+        return False
+    if any(SHELL_WORD.fullmatch(word.rsplit("/", 1)[-1]) for word in words):
+        return False
+    if words[0].rsplit("/", 1)[-1] == "git":
+        return len(words) > 1 and words[1] in GIT_DATA_SUBCOMMANDS and "-c" not in words
+    return True
+
+
+def terminator(command: str, position: int, delimiter: str, tabs: bool) -> tuple[int, int] | None:
+    """Where the line that ends a heredoc body starting at *position* begins, and where the text
+    after that line goes on; None when no line ends the body."""
+    while True:
+        newline = command.find("\n", position)
+        end = len(command) if newline < 0 else newline
+        line = command[position:end]
+        if (line.lstrip("\t") if tabs else line) == delimiter:
+            return position, min(end + 1, len(command))
+        if newline < 0:
+            return None
+        position = newline + 1
+
+
+def standalone(command: str, i: int) -> bool:
+    """Whether the character at *i* stands as a word of its own."""
+    before = i == 0 or command[i - 1] in STANDALONE
+    return before and (i + 1 == len(command) or command[i + 1] in STANDALONE)
+
+
+def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
+    """Spans of the heredoc bodies the run-time rules do not read: a quoted delimiter
+    (`<<'D'`, `<<"D"`, `<<\\D`, also with `<<-`), a marker outside quotes, comments, groups and
+    substitutions, fed to a command reads_data() accepts, with at most an output redirection to a
+    plain word after the marker on its line, and a line that ends the body. No span at all when
+    the text holds what this reading does not follow: a backtick, a `$'` string, a substitution
+    or `${` inside double quotes, a process substitution, `((`, or a `<<` that is no heredoc
+    marker it reads."""
+    spans: list[tuple[int, int]] = []
+    pending: list[tuple[str, bool, bool]] = []  # delimiter, tabs stripped, body spared
+    quote = ""
+    depth = 0  # parentheses and brace groups around the current position
+    start = 0  # where the current simple command starts
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            if quote == '"' and c == "\\":
+                i += 2
+                continue
+            if quote == '"' and (c == "`" or command.startswith(("$(", "${"), i)):
+                return []
+            if c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if c == "`" or command.startswith(("$'", "<(", ">(", "(("), i):
+            return []
+        if c in "'\"":
+            quote = c
+        elif c == "#" and (i == 0 or command[i - 1] in STANDALONE):
+            newline = command.find("\n", i)
+            i = len(command) if newline < 0 else newline
+            continue
+        elif c == "(" or (c == "{" and standalone(command, i)):
+            depth += 1
+            start = i + 1
+        elif c == ")" or (c == "}" and standalone(command, i)):
+            depth -= 1
+            start = i + 1
+            if depth < 0:
+                return []
+        elif c in ";&|":
+            start = i + 1
+        elif command.startswith("<<<", i):
+            i += 3
+            continue
+        elif command.startswith("<<", i):
+            marker = HEREDOC.match(command, i)
+            if marker is None:
+                return []
+            after = AFTER_MARKER.match(command, marker.end())
+            line_ends = after.end() == len(command) or command[after.end()] == "\n"
+            spared = (
+                marker.group(5) is None
+                and depth == 0
+                and line_ends
+                and reads_data(command[start:i])
+            )
+            delimiter = next(group for group in marker.groups()[1:] if group)
+            pending.append((delimiter, bool(marker.group(1)), spared))
+            i = marker.end()
+            continue
+        elif c == "\n":
+            start = i + 1
+            position = i + 1
+            for delimiter, tabs, spared in pending:
+                found = terminator(command, position, delimiter, tabs)
+                if found is None:
+                    return []
+                if spared:
+                    spans.append((position, found[0]))
+                position = found[1]
+            if pending:
+                pending = []
+                i = start = position
+                continue
+        i += 1
+    return [] if quote or pending else spans
+
+
+def without_data_heredocs(command: str) -> str:
+    """*command* with every heredoc body data_heredoc_bodies() finds reduced to its newlines."""
+    out: list[str] = []
+    position = 0
+    for begin, end in data_heredoc_bodies(command):
+        out.append(command[position:begin])
+        out.append("\n" * command.count("\n", begin, end))
         position = end
     out.append(command[position:])
     return "".join(out)
@@ -583,16 +891,27 @@ def check(command: str) -> str | None:
             body = None
     if body:
         return body
-    if body_tool and "merge" in lower:
+    if body_tool and MERGE_TERM.search(lower):
         return (
             "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"
         )
     if network and FEEDER.search(lower):
         return "feeds gh, az, curl or wget through xargs or parallel"
-    if runs_at_run_time(command if reread else without_spared_parameters(command), whole=reread):
-        if MENTION.search(lower):
-            return "builds a word at run time next to a merge mention"
-        if network:
+    # The two run-time rules do not read data heredoc bodies, unless the text around them is
+    # re-read: then the whole text counts. Otherwise the spared parameters do not count either,
+    # and the rule next to gh, az, curl or wget is judged per simple command where it can be.
+    data = without_data_heredocs(command)
+    data_lower = stripped(data).lower()
+    whole = rereads(data_lower) if data != command else reread
+    if whole:
+        data, data_lower = command, lower
+    else:
+        data = without_spared_parameters(data)
+    if runs_at_run_time(data, whole=whole) and mentions_merge(data_lower):
+        return "builds a word at run time next to a merge mention"
+    if NETWORK.search(data_lower):
+        by_command = None if whole else network_runtime_by_command(data)
+        if runs_at_run_time(data, whole=whole) if by_command is None else by_command:
             return "builds a word at run time next to gh, az, curl or wget"
     if len(EVAL.findall(lower)) > MAX_EVALS:
         return "is nested too deep to check"
