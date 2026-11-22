@@ -4205,7 +4205,7 @@ test("the sprint's taskboard: a row per story in the query's order after „Ohne
   assert.equal(odd.rows.some((r) => r.key === "AB#311"), false, "and is no story either");
   const many = Array.from({ length: board.AZ_QUERY_LIMIT }, (_, i) => ({ ...sprintParts().items[1], number: 5000 + i, key: `AB#${5000 + i}` }));
   assert.equal(board.sprintBoard({ ...sprintParts(), items: many }).limited, true, "as many as az boards query gives: maybe cut");
-  assert.deepEqual([board.sprintUntil("2026-11-27T00:00:00Z", 0), board.sprintUntil(null, 1000), board.sprintUntil("soon", 1000)],
+  assert.deepEqual([board.iterationUntil("2026-11-27T00:00:00Z", 0), board.iterationUntil(null, 1000), board.iterationUntil("soon", 1000)],
     [Date.parse("2026-11-28T00:00:00Z"), 1000 + DAY / 2, 1000 + DAY / 2], "the end of the last day, else half a day");
 });
 

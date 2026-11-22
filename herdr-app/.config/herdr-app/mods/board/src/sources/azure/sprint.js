@@ -5,7 +5,7 @@
 import { home, readTextFile, writeTextFile } from "herdr";
 import { BoardError, failure, firstLine } from "../../shared.js";
 import { NO_STORY } from "../../kinds/sprint.js";
-import { AREA_PATH, AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, jsonOrNull, parseAzureTypes, parseWorkItems, wiqlText } from "./common.js";
+import { AREA_PATH, AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
 
 // The Sprint view's calls for a team context `c` ({ org, project, team }):
 // its current iteration, its areas (azAreasArgs), its taskboard's columns,
@@ -16,6 +16,15 @@ export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ..
 export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
+// The work item types' answer → { states: [{ id, name, category, color }] in
+// category order, types: { [type]: [state names] } }.
+export function parseAzureTypes(stdout) {
+  const value = azJson(stdout, "die Work-Item-Typen")?.value;
+  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
+  const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
+}
+
 // One WIQL query for the work items of the sprint `iteration` in the team's
 // areas (parseAreas), as Azure's taskboard shows them: in the iteration's
 // path, and in one of the team's area paths, those below it too where the
@@ -106,15 +115,6 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
   };
 }
 
-// Until when a team's sprint stays cached (ms): the end of its last day
-// (Azure's finishDate is that day's start, in UTC), or half a day from
-// `now` where it names none.
-const DAY_MS = 86400000;
-export function sprintUntil(finish, now) {
-  const at = Date.parse(finish ?? "");
-  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
-}
-
 // az devops invoke takes a request's body only from a file (--in-file):
 // one per work item, written before each move and kept for the next.
 // herdr's writeTextFile makes the folders it needs (herdr-app 0.1.16,
@@ -174,16 +174,16 @@ export function sprintView(s) {
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
       types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
     ]);
-    const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
+    const until = iteration?.until ?? iterationUntil(it.finish, Date.now());
     s.keepAreasUntil(c, until);
-    if (!iteration) s.kept.set(`iteration\n${team}`, { value: it, until });
-    if (!board) s.kept.set(`board\n${team}`, { value: { columns }, until });
-    if (!types) s.kept.set(project, { value: ty, until });
+    if (!iteration) s.keep(`iteration\n${team}`, it, until);
+    if (!board) s.keep(`board\n${team}`, { columns }, until);
+    if (!types) s.keep(project, ty, until);
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
-    s.kept.delete(`iteration\n${s.teamKey(c)}`);
-    s.kept.delete(`board\n${s.teamKey(c)}`);
+    s.drop(`iteration\n${s.teamKey(c)}`);
+    s.drop(`board\n${s.teamKey(c)}`);
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);

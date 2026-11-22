@@ -989,15 +989,6 @@ export function categoryStates(pairs) {
   return [...states.values()].sort((a, b) => order(a) - order(b));
 }
 
-// The work item types' answer → { states: [{ id, name, category, color }] in
-// category order, types: { [type]: [state names] } }.
-export function parseAzureTypes(stdout) {
-  const value = azJson(stdout, "die Work-Item-Typen")?.value;
-  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
-  const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
-  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
-}
-
 // az's words for a request that may have reached Azure but got no clear
 // answer: msrest's "Error occurred in request., <requests exception>: …"
 // and the requests messages it wraps (ConnectionError, ReadTimeout, …).
@@ -1019,9 +1010,7 @@ const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following argument
 // without a clear answer, a server error, az's own crash or interrupt, a
 // failure without an ERROR: line) leaves open whether the change landed.
 export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
-  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const errorLine = lines.find((l) => /^ERROR:/.test(l));
-  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const { lines, errorLine, said } = azSaid(stderr);
   const az = on ? `az auf ${on}` : "az";
   // A crash's traceback may hold any words; az's own line says what failed.
   const subject = errorLine ? said : lines.join("\n");
@@ -1035,6 +1024,15 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   }
   if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
+}
+
+// What az printed on stderr: its lines but the WARNING: ones, its ERROR:
+// line (or undefined), and what it said, that line's words or else the
+// first line's.
+export function azSaid(stderr) {
+  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const errorLine = lines.find((l) => /^ERROR:/.test(l));
+  return { lines, errorLine, said: (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim() };
 }
 
 // The organisation for az boards and az devops, and no guessing it from a
@@ -1146,6 +1144,19 @@ export function azWorkItem(wi, c, orderField = null) {
   };
   return { key: itemKey(item), ...item };
 }
+
+// Until when what an iteration's dates bound stays kept (ms): the end of
+// its last day (Azure's finishDate is that day's start, in UTC), or half a
+// day from `now` where it names none.
+const DAY_MS = 86400000;
+export function iterationUntil(finish, now) {
+  const at = Date.parse(finish ?? "");
+  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
+}
+
+// How long a team's settings that change rarely stay kept (ms): its areas,
+// and the Backlog's settings (BACKLOG_KEEP_MS).
+export const TEAM_KEEP_MS = 4 * 3600000;
 
 // The most work items az boards query gives.
 export const AZ_QUERY_LIMIT = 1000;
@@ -1284,6 +1295,15 @@ export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ..
 export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
+// The work item types' answer → { states: [{ id, name, category, color }] in
+// category order, types: { [type]: [state names] } }.
+export function parseAzureTypes(stdout) {
+  const value = azJson(stdout, "die Work-Item-Typen")?.value;
+  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
+  const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
+}
+
 // One WIQL query for the work items of the sprint `iteration` in the team's
 // areas (parseAreas), as Azure's taskboard shows them: in the iteration's
 // path, and in one of the team's area paths, those below it too where the
@@ -1374,15 +1394,6 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
   };
 }
 
-// Until when a team's sprint stays cached (ms): the end of its last day
-// (Azure's finishDate is that day's start, in UTC), or half a day from
-// `now` where it names none.
-const DAY_MS = 86400000;
-export function sprintUntil(finish, now) {
-  const at = Date.parse(finish ?? "");
-  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
-}
-
 // az devops invoke takes a request's body only from a file (--in-file):
 // one per work item, written before each move and kept for the next.
 // herdr's writeTextFile makes the folders it needs (herdr-app 0.1.16,
@@ -1442,16 +1453,16 @@ export function sprintView(s) {
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
       types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
     ]);
-    const until = iteration?.until ?? sprintUntil(it.finish, Date.now());
+    const until = iteration?.until ?? iterationUntil(it.finish, Date.now());
     s.keepAreasUntil(c, until);
-    if (!iteration) s.kept.set(`iteration\n${team}`, { value: it, until });
-    if (!board) s.kept.set(`board\n${team}`, { value: { columns }, until });
-    if (!types) s.kept.set(project, { value: ty, until });
+    if (!iteration) s.keep(`iteration\n${team}`, it, until);
+    if (!board) s.keep(`board\n${team}`, { columns }, until);
+    if (!types) s.keep(project, ty, until);
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
-    s.kept.delete(`iteration\n${s.teamKey(c)}`);
-    s.kept.delete(`board\n${s.teamKey(c)}`);
+    s.drop(`iteration\n${s.teamKey(c)}`);
+    s.drop(`board\n${s.teamKey(c)}`);
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
@@ -1507,11 +1518,9 @@ export const azBacklogIdsArgs = (c, levelId) => ["rest", "--method", "get", "--u
 export const BACKLOG_NEEDS_LOGIN = "Der Backlog braucht az login (ein PAT reicht dafür nicht)";
 const AZ_REST_LOGIN = /az login|AADSTS\d+|Unauthorized|\b401\b/i;
 export function azRestFailure(r, on, options) {
-  const lines = String(r.stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const said = lines.join("\n");
-  if (!AZ_REST_LOGIN.test(said)) return azFailure(r, on, options);
-  const line = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0]).replace(/^ERROR:\s*/, "").trim();
-  return new BoardError(`${BACKLOG_NEEDS_LOGIN}: ${line}`, { unavailable: true });
+  const { lines, said } = azSaid(r.stderr);
+  if (!AZ_REST_LOGIN.test(lines.join("\n"))) return azFailure(r, on, options);
+  return new BoardError(`${BACKLOG_NEEDS_LOGIN}: ${said}`, { unavailable: true });
 }
 
 // A backlog level of Azure's answer → { id, name, type ("portfolio",
@@ -1666,14 +1675,14 @@ export function checkParentLink(stdout, parent) {
 }
 
 // How long the Backlog keeps a team's settings (ms): they change rarely.
-export const BACKLOG_KEEP_MS = 4 * 3600000;
+export const BACKLOG_KEEP_MS = TEAM_KEEP_MS;
 
 // Until when the Backlog keeps a team's settings read at `now`:
 // BACKLOG_KEEP_MS, or sooner where the default iteration follows one that
-// ends before (settings.follows, sprintUntil).
+// ends before (settings.follows, iterationUntil).
 export function backlogUntil(settings, now) {
   const keep = now + BACKLOG_KEEP_MS;
-  return settings.follows ? Math.min(keep, sprintUntil(settings.follows.finish, now)) : keep;
+  return settings.follows ? Math.min(keep, iterationUntil(settings.follows.finish, now)) : keep;
 }
 
 // One WIQL query for the work items titled `title` that the account az is
@@ -1698,12 +1707,12 @@ export function backlogView(s) {
     ]);
     const value = { ...backlogLevels(levels, config), config, settings, area: areas.default };
     const until = backlogUntil(settings, Date.now());
-    s.kept.set(key(c), { value, until });
+    s.keep(key(c), value, until);
     s.keepAreasUntil(c, until);
     return value;
   }
   const forget = (c) => {
-    s.kept.delete(key(c));
+    s.drop(key(c));
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
@@ -1750,7 +1759,7 @@ export function backlogView(s) {
 // it loads and writes. az runs by the path `paths` (toolPaths) finds.
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
-// (sprintUntil; one that fails keeps nothing): per team, by organisation,
+// (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns; per project
 // the work item types, until the sprint of the team that read them ends.
 // What is not kept is read at the same time. A refresh then reads the
@@ -1785,7 +1794,9 @@ export function makeAzure(paths) {
     if (r.code !== 0) throw (options.failure ?? azFailure)(r, null, options);
     return r.stdout;
   };
+  // What the views keep: by key, a value until a time (ms).
   const kept = new Map();
+  const keep = (key, value, until) => kept.set(key, { value, until });
   const keptValue = (key) => {
     const entry = kept.get(key);
     return entry && Date.now() < entry.until ? entry : null;
@@ -1809,9 +1820,9 @@ export function makeAzure(paths) {
   // What the views share: az, what is kept, who az is (and the data's words
   // for why it is not known), and a state change.
   const shared = {
-    az, kept, keptValue, whoAmI, teamKey,
+    az, keptValue, whoAmI, teamKey,
     // The team's areas (parseAreas), one entry for both views: read where
-    // it is not kept, kept BACKLOG_KEEP_MS, and shorter where a view keeps
+    // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
     // until its sprint ends, the Backlog's until backlogUntil); either
     // view's forget drops it.
@@ -1819,7 +1830,7 @@ export function makeAzure(paths) {
       const held = keptValue(areasKey(c));
       if (held) return held.value;
       const value = parseAreas(await az(azAreasArgs(c)));
-      kept.set(areasKey(c), { value, until: Date.now() + BACKLOG_KEEP_MS });
+      keep(areasKey(c), value, Date.now() + TEAM_KEEP_MS);
       return value;
     },
     keepAreasUntil(c, until) {
@@ -1827,6 +1838,8 @@ export function makeAzure(paths) {
       if (entry) entry.until = Math.min(entry.until, until);
     },
     forgetAreas: (c) => kept.delete(areasKey(c)),
+    keep,
+    drop: (key) => kept.delete(key),
     noViewerOf(data) {
       if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
     },
@@ -3446,7 +3459,7 @@ export const backlogShape = {
   // parent link's whether the item hangs under its parent; then, once Azure
   // has answered (one query each, unclearCreateLines), a create's whether
   // it landed.
-  settle(b, due, data, cx, view) {
+  settle(b, view, due, data, cx) {
     tellOutcomes(b, [
       ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
       ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
@@ -3662,7 +3675,7 @@ export const boardShape = {
   },
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
-  settle: (b, due, data, cx) => tellOutcomes(b, unclearMoveLines(due, data), cx),
+  settle: (b, view, due, data, cx) => tellOutcomes(b, unclearMoveLines(due, data), cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
@@ -4048,7 +4061,7 @@ export const sprintShape = {
   warnings: (view, data) => sprintWarnings(data),
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has.
-  settle: (b, due, data, cx) =>
+  settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data, SPRINT_STATES)], cx),
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
@@ -4203,8 +4216,8 @@ const SPRINT_STATES = {
 // draws without data), keys (handles the shape's own keys; true when it
 // took one), received (the data as kept after a refresh) and warnings; and
 // where it has them, detailParts (its rows in the detail panel), settle
-// (says how the unclear writes of its items ended up; it gets the view
-// last), moveTo, toggleColumn, openStatusMenu, navigate (its own keyboard
+// (b, view, due, data, cx: says how the unclear writes of its items ended
+// up), moveTo, toggleColumn, openStatusMenu, navigate (its own keyboard
 // movement in place of navigate's, select.js) and pickStatus (what a pick
 // in the status menu does in place of a move to that column). A shape keeps its own
 // state per Board in b.shapeState[name], which its state() makes once, when
@@ -4521,7 +4534,7 @@ export default class Board extends View {
     const due = st.unclear.filter(isDue(st, started));
     if (!due.length) return;
     st.unclear = st.unclear.filter((u) => !due.includes(u));
-    SHAPES[data?.shape]?.settle?.(this, due, data, cx, view);
+    SHAPES[data?.shape]?.settle?.(this, view, due, data, cx);
   }
 
   // Every TICK_MS while the board shows: the shown view once refreshMinutes

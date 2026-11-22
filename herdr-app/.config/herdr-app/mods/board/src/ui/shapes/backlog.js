@@ -13,14 +13,13 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { itemLabel } from "../../shared.js";
+import { itemLabel, report } from "../../shared.js";
 import { backlogNav, backlogWarnings, findBacklogItem, withBacklogState } from "../../kinds/backlog.js";
 import { linkedSession } from "../../actions/start.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
-import { report } from "../../shared.js";
 import { MODALS } from "../modals/index.js";
 import { chip, sessionChip, shownOf, workItemDetail } from "../helpers.js";
 
@@ -63,7 +62,7 @@ export const backlogShape = {
   // parent link's whether the item hangs under its parent; then, once Azure
   // has answered (one query each, unclearCreateLines), a create's whether
   // it landed.
-  settle(b, due, data, cx, view) {
+  settle(b, view, due, data, cx) {
     tellOutcomes(b, [
       ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
       ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),

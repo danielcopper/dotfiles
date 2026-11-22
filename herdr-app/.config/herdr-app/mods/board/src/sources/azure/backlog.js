@@ -3,8 +3,7 @@
 // the view as makeAzure uses it (backlogView).
 
 import { BoardError, failure, isObject } from "../../shared.js";
-import { AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
-import { sprintUntil } from "./sprint.js";
+import { AZ_QUERY_LIMIT, TEAM_KEEP_MS, WORK_ITEM_FIELDS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
 
 // The Backlog view's calls for a team context `c`: the team's backlog
 // levels, its backlog configuration (the order field, each type's states
@@ -31,11 +30,9 @@ export const azBacklogIdsArgs = (c, levelId) => ["rest", "--method", "get", "--u
 export const BACKLOG_NEEDS_LOGIN = "Der Backlog braucht az login (ein PAT reicht dafür nicht)";
 const AZ_REST_LOGIN = /az login|AADSTS\d+|Unauthorized|\b401\b/i;
 export function azRestFailure(r, on, options) {
-  const lines = String(r.stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const said = lines.join("\n");
-  if (!AZ_REST_LOGIN.test(said)) return azFailure(r, on, options);
-  const line = (lines.find((l) => /^ERROR:/.test(l)) ?? lines[0]).replace(/^ERROR:\s*/, "").trim();
-  return new BoardError(`${BACKLOG_NEEDS_LOGIN}: ${line}`, { unavailable: true });
+  const { lines, said } = azSaid(r.stderr);
+  if (!AZ_REST_LOGIN.test(lines.join("\n"))) return azFailure(r, on, options);
+  return new BoardError(`${BACKLOG_NEEDS_LOGIN}: ${said}`, { unavailable: true });
 }
 
 // A backlog level of Azure's answer → { id, name, type ("portfolio",
@@ -190,14 +187,14 @@ export function checkParentLink(stdout, parent) {
 }
 
 // How long the Backlog keeps a team's settings (ms): they change rarely.
-export const BACKLOG_KEEP_MS = 4 * 3600000;
+export const BACKLOG_KEEP_MS = TEAM_KEEP_MS;
 
 // Until when the Backlog keeps a team's settings read at `now`:
 // BACKLOG_KEEP_MS, or sooner where the default iteration follows one that
-// ends before (settings.follows, sprintUntil).
+// ends before (settings.follows, iterationUntil).
 export function backlogUntil(settings, now) {
   const keep = now + BACKLOG_KEEP_MS;
-  return settings.follows ? Math.min(keep, sprintUntil(settings.follows.finish, now)) : keep;
+  return settings.follows ? Math.min(keep, iterationUntil(settings.follows.finish, now)) : keep;
 }
 
 // One WIQL query for the work items titled `title` that the account az is
@@ -222,12 +219,12 @@ export function backlogView(s) {
     ]);
     const value = { ...backlogLevels(levels, config), config, settings, area: areas.default };
     const until = backlogUntil(settings, Date.now());
-    s.kept.set(key(c), { value, until });
+    s.keep(key(c), value, until);
     s.keepAreasUntil(c, until);
     return value;
   }
   const forget = (c) => {
-    s.kept.delete(key(c));
+    s.drop(key(c));
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);

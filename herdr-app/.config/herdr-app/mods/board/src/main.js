@@ -418,7 +418,7 @@ export default class Board extends View {
     const due = st.unclear.filter(isDue(st, started));
     if (!due.length) return;
     st.unclear = st.unclear.filter((u) => !due.includes(u));
-    SHAPES[data?.shape]?.settle?.(this, due, data, cx, view);
+    SHAPES[data?.shape]?.settle?.(this, view, due, data, cx);
   }
 
   // Every TICK_MS while the board shows: the shown view once refreshMinutes

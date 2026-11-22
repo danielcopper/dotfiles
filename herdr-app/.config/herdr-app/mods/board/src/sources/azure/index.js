@@ -4,16 +4,16 @@
 
 import { BoardError, errorText } from "../../shared.js";
 import { AZ_TIMEOUT, call } from "../../tools.js";
-import { AZ_ME_ARGS, AZ_ME_TIMEOUT, azAreasArgs, azFailure, azStateArgs, checkStateResult, parseAreas, parseViewer } from "./common.js";
+import { AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azFailure, azStateArgs, checkStateResult, parseAreas, parseViewer } from "./common.js";
 import { sprintView } from "./sprint.js";
-import { BACKLOG_KEEP_MS, backlogView } from "./backlog.js";
+import { backlogView } from "./backlog.js";
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, and per layout of an Azure view how
 // it loads and writes. az runs by the path `paths` (toolPaths) finds.
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
-// (sprintUntil; one that fails keeps nothing): per team, by organisation,
+// (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns; per project
 // the work item types, until the sprint of the team that read them ends.
 // What is not kept is read at the same time. A refresh then reads the
@@ -48,7 +48,9 @@ export function makeAzure(paths) {
     if (r.code !== 0) throw (options.failure ?? azFailure)(r, null, options);
     return r.stdout;
   };
+  // What the views keep: by key, a value until a time (ms).
   const kept = new Map();
+  const keep = (key, value, until) => kept.set(key, { value, until });
   const keptValue = (key) => {
     const entry = kept.get(key);
     return entry && Date.now() < entry.until ? entry : null;
@@ -72,9 +74,9 @@ export function makeAzure(paths) {
   // What the views share: az, what is kept, who az is (and the data's words
   // for why it is not known), and a state change.
   const shared = {
-    az, kept, keptValue, whoAmI, teamKey,
+    az, keptValue, whoAmI, teamKey,
     // The team's areas (parseAreas), one entry for both views: read where
-    // it is not kept, kept BACKLOG_KEEP_MS, and shorter where a view keeps
+    // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
     // until its sprint ends, the Backlog's until backlogUntil); either
     // view's forget drops it.
@@ -82,7 +84,7 @@ export function makeAzure(paths) {
       const held = keptValue(areasKey(c));
       if (held) return held.value;
       const value = parseAreas(await az(azAreasArgs(c)));
-      kept.set(areasKey(c), { value, until: Date.now() + BACKLOG_KEEP_MS });
+      keep(areasKey(c), value, Date.now() + TEAM_KEEP_MS);
       return value;
     },
     keepAreasUntil(c, until) {
@@ -90,6 +92,8 @@ export function makeAzure(paths) {
       if (entry) entry.until = Math.min(entry.until, until);
     },
     forgetAreas: (c) => kept.delete(areasKey(c)),
+    keep,
+    drop: (key) => kept.delete(key),
     noViewerOf(data) {
       if (!data.viewer) data.noViewer = `${noViewer}: ${viewerError}`;
     },

@@ -21,15 +21,6 @@ export function categoryStates(pairs) {
   return [...states.values()].sort((a, b) => order(a) - order(b));
 }
 
-// The work item types' answer → { states: [{ id, name, category, color }] in
-// category order, types: { [type]: [state names] } }.
-export function parseAzureTypes(stdout) {
-  const value = azJson(stdout, "die Work-Item-Typen")?.value;
-  if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
-  const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
-  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
-}
-
 // az's words for a request that may have reached Azure but got no clear
 // answer: msrest's "Error occurred in request., <requests exception>: …"
 // and the requests messages it wraps (ConnectionError, ReadTimeout, …).
@@ -51,9 +42,7 @@ const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following argument
 // without a clear answer, a server error, az's own crash or interrupt, a
 // failure without an ERROR: line) leaves open whether the change landed.
 export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
-  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
-  const errorLine = lines.find((l) => /^ERROR:/.test(l));
-  const said = (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim();
+  const { lines, errorLine, said } = azSaid(stderr);
   const az = on ? `az auf ${on}` : "az";
   // A crash's traceback may hold any words; az's own line says what failed.
   const subject = errorLine ? said : lines.join("\n");
@@ -67,6 +56,15 @@ export function azFailure({ code, stderr }, on = null, { write = false } = {}) {
   }
   if (/^TF200016:/.test(said)) return new BoardError(`Azure-Projekt unbekannt: ${said}`);
   return failure(on ? `${az}: ${said || `endete mit ${code}`}` : said || `az endete mit ${code}`, { write, unclear: !errorLine || !AZ_REFUSED.test(said) });
+}
+
+// What az printed on stderr: its lines but the WARNING: ones, its ERROR:
+// line (or undefined), and what it said, that line's words or else the
+// first line's.
+export function azSaid(stderr) {
+  const lines = String(stderr ?? "").split("\n").filter((l) => l.trim() && !/^WARNING:/.test(l));
+  const errorLine = lines.find((l) => /^ERROR:/.test(l));
+  return { lines, errorLine, said: (errorLine ?? lines[0] ?? "").replace(/^ERROR:\s*/, "").trim() };
 }
 
 // The organisation for az boards and az devops, and no guessing it from a
@@ -178,6 +176,19 @@ export function azWorkItem(wi, c, orderField = null) {
   };
   return { key: itemKey(item), ...item };
 }
+
+// Until when what an iteration's dates bound stays kept (ms): the end of
+// its last day (Azure's finishDate is that day's start, in UTC), or half a
+// day from `now` where it names none.
+const DAY_MS = 86400000;
+export function iterationUntil(finish, now) {
+  const at = Date.parse(finish ?? "");
+  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
+}
+
+// How long a team's settings that change rarely stay kept (ms): its areas,
+// and the Backlog's settings (BACKLOG_KEEP_MS).
+export const TEAM_KEEP_MS = 4 * 3600000;
 
 // The most work items az boards query gives.
 export const AZ_QUERY_LIMIT = 1000;
