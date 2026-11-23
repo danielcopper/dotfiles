@@ -8980,6 +8980,40 @@ test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its windo
   assert.equal(b.panel.line, null, "the lines stay as they were");
 });
 
+test("UI: a page or end key in the details panel glides the block and its thumb (herdr's transition of top, 120 ms ease-out); j/k, the mouse wheel and another item's details move them at once", async () => {
+  const { b, cx, st } = await openRelated();
+  layOut(b, cx, 100);
+  const glides = () => {
+    const [content, thumb] = ["related-lines", "related-thumb"].map((id) => byId(detailPanel(b), id));
+    return [content.with.transition ?? null, thumb?.with.transition ?? null];
+  };
+  const GLIDING = [["top", { duration: 120, easing: "ease-out" }], ["top", { duration: 120, easing: "ease-out" }]];
+  const ctrl = (k) => press(b, cx, k, { modifiers: { control: true } });
+  const wheel = (y) => cx.call((own) => byId(detailPanel(b), "related-window").with.on_scroll_wheel[0]({ delta: { x: 0, y } }, own));
+  assert.deepEqual(glides(), [null, null], "nothing moved yet");
+  await tab(b, cx);
+  await ctrl("d");
+  assert.deepEqual([offsetOf(b), glides()], [50, GLIDING], "ctrl-d");
+  await press(b, cx, "k");
+  assert.deepEqual([offsetOf(b), glides()], [32, [null, null]], "k: a line up, at once");
+  await ctrl("u");
+  assert.deepEqual([offsetOf(b), glides()], [0, GLIDING], "ctrl-u");
+  wheel(-40);
+  assert.deepEqual([offsetOf(b), glides()], [40, [null, null]], "the wheel");
+  await press(b, cx, "end");
+  assert.deepEqual([offsetOf(b), glides()], [134, GLIDING], "End");
+  await press(b, cx, "j");
+  assert.deepEqual(glides(), [null, null], "j: a line's move, whether it scrolls or not");
+  await press(b, cx, "home");
+  assert.deepEqual([offsetOf(b), glides()], [0, GLIDING], "Home");
+  await press(b, cx, ...SHIFT_G);
+  assert.deepEqual([offsetOf(b), glides()], [134, GLIDING], "G, as End");
+  await press(b, cx, "escape");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec5");
+  assert.deepEqual([offsetOf(b), glides()[0], b.relatedUi.glide], [0, null, false], "another item's details: at the top, at once");
+});
+
 test("UI: the mouse wheel scrolls the block, in the script's pixels at herdr's zoom; a thumb at the right shows where it is, none where all fits", async () => {
   const { b, cx, host } = await openRelated();
   host.theme = () => ({ muted: "#muted", border: "#border" });

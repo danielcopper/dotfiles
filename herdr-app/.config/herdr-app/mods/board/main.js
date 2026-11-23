@@ -4836,10 +4836,16 @@ export const columnsModal = {
 // ui/related.js, relatedState) with the heights of the window and the
 // content as measured (`viewport`, `content`), shifts the content up by it,
 // and draws the position as a thumb. All lengths are the script's pixels
-// (measured ones divided by herdr's zoom: ui/related.js).
+// (measured ones divided by herdr's zoom: ui/related.js). A move by a page
+// or end key glides (`glide` in the state, GLIDE): herdr animates the
+// content's and the thumb's top natively; every other move, and another
+// item's details, jump.
 
 // One line of the details, the step of j/k.
 export const LINE_PX = 18;
+
+// How a page or end key's move glides: herdr's transition of `top`.
+export const GLIDE = { duration: 120, easing: "ease-out" };
 
 // The offset `offset` kept within the content: from 0 to where its end
 // meets the window's; 0 where the content fits.
@@ -4887,19 +4893,30 @@ export function offsetOf(ui, key) {
   if (ui.at !== key) {
     ui.at = key;
     ui.offset = 0;
+    ui.glide = false;
   }
   ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
   return ui.offset;
 }
 
-// The block moved by `by` pixels: ctrl-d/ctrl-u by halfWindow, j/k by
-// LINE_PX, the wheel by its move.
-export const scrollBy = (ui, by) => (ui.offset = offsetBy(ui, by));
+// The block moved by `by` pixels: j/k by LINE_PX, the wheel by its move,
+// at once; ctrl-d/ctrl-u by halfWindow (scrollPage), gliding.
+export function scrollBy(ui, by, glide = false) {
+  ui.glide = glide;
+  ui.offset = offsetBy(ui, by);
+}
 export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
-// The block at its top or bottom (gg/G, Home/End).
-export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
-// The block moved so that `span` ({ top, height }) shows.
-export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));
+export const scrollPage = (ui, dir) => scrollBy(ui, dir * halfWindow(ui), true);
+// The block at its top or bottom (gg/G, Home/End), gliding.
+export function scrollToEnd(ui, end) {
+  ui.glide = true;
+  ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport);
+}
+// The block moved so that `span` ({ top, height }) shows, at once.
+export function revealSpan(ui, span) {
+  ui.glide = false;
+  ui.offset = revealOffset(ui, span.top, span.height);
+}
 
 // ==== src/ui/related.js ====
 
@@ -4943,9 +4960,10 @@ export const FOLDED_H = 12 * LINE_PX;
 // when it starts and every draw reads: the measured height of each
 // description by its item's key, the key of the item whose description is
 // unfolded (null: none; another item's shows folded), and the block's
-// scroll (scroll.js): its offset, the item it is of (`at`), the heights of
-// its window and its content, and of each row by its id.
-export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, at: null, viewport: 0, content: 0, sizes: new Map() });
+// scroll (scroll.js): its offset, whether its last move glides, the item it
+// is of (`at`), the heights of its window and its content, and of each row
+// by its id.
+export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glide: false, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
 export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
@@ -5110,6 +5128,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .gap(FRAME.gap)
     .relative()
     .top(offset ? -offset : 0)
+    .when(ui.glide, (el) => el.transition("top", GLIDE))
     .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
   const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
     .min_h(0)
@@ -5128,7 +5147,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .border_color(t.border)
     .child(windowEl)
     .when(Boolean(thumb), (el) => el.child(
-      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
+      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).when(ui.glide, (el) => el.transition("top", GLIDE))
+        .w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
     ));
 }
 
@@ -8079,6 +8099,8 @@ export default class Board extends View {
       const item = this.levelItem(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
+      // A line's move is no page's: what it scrolls, it scrolls at once.
+      ui.glide = false;
       if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
       else {
         panel.line = stepLine(panel.line, dir, lines.length);
@@ -8129,7 +8151,7 @@ export default class Board extends View {
     const ui = this.relatedUi;
     // Its heights as they were measured, until it is laid out again: the
     // window's too, which takes its height from the content.
-    Object.assign(ui, { at: item.key, offset: back.offset, viewport: back.viewport, content: back.content, sizes: back.sizes, unfolded: back.unfolded });
+    Object.assign(ui, { at: item.key, offset: back.offset, glide: false, viewport: back.viewport, content: back.content, sizes: back.sizes, unfolded: back.unfolded });
     if (entry?.data) {
       const at = relatedLines(entry.data).findIndex((l) => sameItem(l, from));
       panel.line = at < 0 ? null : at;
@@ -8175,7 +8197,7 @@ export default class Board extends View {
   // ctrl-d and ctrl-u while the details panel has the keyboard: its block
   // half its window down or up.
   panelPage(dir) {
-    scrollBy(this.relatedUi, dir * halfWindow(this.relatedUi));
+    scrollPage(this.relatedUi, dir);
   }
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,

@@ -114,7 +114,7 @@ import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
 import { descriptionFolds, levelParts, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
 import { actionFor, actionName, aimOf, groupAimOf, hintsOf, keyName, keyShown } from "./commands.js";
-import { LINE_PX, halfWindow, scrollBy, scrollToEnd } from "./scroll.js";
+import { LINE_PX, scrollBy, scrollPage, scrollToEnd } from "./scroll.js";
 import { shownDescription, webUrl } from "./description.js";
 export * from "./shared.js";
 export * from "./config.js";
@@ -702,6 +702,8 @@ export default class Board extends View {
       const item = this.levelItem(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
+      // A line's move is no page's: what it scrolls, it scrolls at once.
+      ui.glide = false;
       if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
       else {
         panel.line = stepLine(panel.line, dir, lines.length);
@@ -752,7 +754,7 @@ export default class Board extends View {
     const ui = this.relatedUi;
     // Its heights as they were measured, until it is laid out again: the
     // window's too, which takes its height from the content.
-    Object.assign(ui, { at: item.key, offset: back.offset, viewport: back.viewport, content: back.content, sizes: back.sizes, unfolded: back.unfolded });
+    Object.assign(ui, { at: item.key, offset: back.offset, glide: false, viewport: back.viewport, content: back.content, sizes: back.sizes, unfolded: back.unfolded });
     if (entry?.data) {
       const at = relatedLines(entry.data).findIndex((l) => sameItem(l, from));
       panel.line = at < 0 ? null : at;
@@ -798,7 +800,7 @@ export default class Board extends View {
   // ctrl-d and ctrl-u while the details panel has the keyboard: its block
   // half its window down or up.
   panelPage(dir) {
-    scrollBy(this.relatedUi, dir * halfWindow(this.relatedUi));
+    scrollPage(this.relatedUi, dir);
   }
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
