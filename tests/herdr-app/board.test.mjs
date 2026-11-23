@@ -8015,15 +8015,19 @@ test("UI: Esc back up marks the line it came from where a re-read moved it, and 
 test("UI: the hint line on a level: with no line marked Enter and o are the level's item's, with one the line's; a pull request's level names no lines", async () => {
   const { b, cx, host } = await onLevel();
   const hint = (key) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === key).map((t) => t[1]);
+  const once = (where) => assert.deepEqual(hintKeys(b), [...new Set(hintKeys(b))], `each key once: ${where}`);
   assert.deepEqual([hint("Enter"), hint("o"), hint("j/k")], [["Agent"], ["öffnen"], []]);
+  once("a level, no line");
   await press(b, cx, "j");
   assert.deepEqual([hint("Enter"), hint("o")], [["Zeile zeigen"], ["Zeile öffnen"]]);
+  once("a level's line");
   await press(b, cx, "escape");
   for (let i = 0; i < 2; i++) await press(b, cx, "j");
   await press(b, cx, "enter");
   assert.deepEqual(levelsNow(b)[0], [3020]);
   await host.answer("gh", ok(pullRequestAnswer()), isPullRequestCall);
   assert.deepEqual([hint("Enter"), hint("o"), hint("j/k")], [["Review"], ["öffnen"], []]);
+  once("a pull request's level");
 });
 
 test("UI: the command menu runs a line's action only on the line it opened on: where a re-read moved the lines it says so and opens nothing", async () => {

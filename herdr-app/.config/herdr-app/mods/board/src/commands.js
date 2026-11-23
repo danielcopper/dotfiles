@@ -21,14 +21,11 @@
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
-//   the hint line names (its key by default); part: "panel" for a hint of
-//   the details panel's keys that a hint of the board's names too, which
-//   wins that key while the panel has the keyboard (hintsOf; on a level the
-//   board's item's hints are held anyway).
+//   the hint line names (its key by default). The hint line names each key
+//   once (hintsOf), and neither the moves nor a key that its place on the
+//   board already names; README, "herdr app", lists those it leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
-// (Tab, Esc). The hint line names no key whose place already says it: not
-// the moves (h/j/k/l, ctrl-d/u, gg/G, Home/End), not z (the description's
-// "… mehr (z)"), not / (the filter field's).
+// (Tab, Esc).
 // `c` is what the Board says of the moment (Board.actionContext): { b,
 // view, st, shape, item (the selected one), details (the item whose details
 // show: where the panel went down into a related item, that one), related
@@ -137,14 +134,14 @@ export const aimOf = (a, c) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.
 export const groupAimOf = (a, c) => JSON.stringify(GROUPS[a.group].aim(c));
 
 // The hint line's entries now: [key, text], in the table's order, each key
-// once: the part that has the keyboard (the details panel or the board)
-// names its keys, and the other part's hints stay for the keys it does not
-// name.
+// once: the part that has the keyboard (the details panel, whose actions
+// are the group "details", or the board) names its keys, and the other
+// part's hints stay for the keys it does not name.
 export function hintsOf(c) {
   const shown = ACTIONS.filter((a) => a.hint && !held(a, c))
     .map((a) => ({ a, key: a.hintKey ?? keyLabel(a.key), text: a.hint(c) }))
     .filter((h) => h.text);
-  const leads = (h) => (h.a.part === "panel") === Boolean(c.panel);
+  const leads = (h) => (h.a.group === "details") === Boolean(c.panel);
   const named = new Set(shown.filter(leads).map((h) => h.key));
   return shown.filter((h) => leads(h) || !named.has(h.key)).map((h) => [h.key, h.text]);
 }
@@ -308,7 +305,7 @@ export const ACTIONS = [
     id: "line-details", group: "details", name: "Zeile im Detailfenster zeigen", key: "enter", menu: 10,
     when: onLine, takes: (c) => c.line !== null, aim: lineAim, gone: lineGone,
     run: (b, c, cx) => c.lines[c.line] && b.drillLine(c.view, c.lines[c.line], cx),
-    hint: (c) => (lineHints(c) ? "Zeile zeigen" : null), part: "panel",
+    hint: (c) => (lineHints(c) ? "Zeile zeigen" : null),
   },
   {
     id: "line-board", group: "details", name: "Zeile auf dem Board", key: null, menu: 11,
@@ -319,7 +316,7 @@ export const ACTIONS = [
     id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 12,
     when: onLine, takes: (c) => c.line !== null, aim: lineAim, gone: lineGone,
     run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
-    hint: (c) => (lineHints(c) ? "Zeile öffnen" : null), part: "panel",
+    hint: (c) => (lineHints(c) ? "Zeile öffnen" : null),
   },
   // The item the panel went down to: Enter and o act on it where no line
   // is selected (the line's actions come first in the table and take them
