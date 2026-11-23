@@ -36,7 +36,10 @@
 // related items (its description, sub-issues and linked pull requests) one
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
-// keeps of them keptRelated says). An Azure work item's related items (its
+// keeps of them keptRelated says); an item the details panel went down to
+// (Enter on a line, related.js) costs the same when it shows, and on `r`
+// each level's again, so that a level whose item is no longer among the
+// lines of the one above can go. An Azure work item's related items (its
 // description, children and linked pull requests) cost the same, one az
 // call (az boards work-item show --expand relations), and one WIQL query
 // more for its children's titles and states where it has children
@@ -156,6 +159,10 @@ export const cardLabel = (item) => (item.source === "azure" && item.kind === "wo
 // there is one, else by login; null for neither. Logins are kept apart
 // (assigneeLogins: select.js isMine).
 export const personName = ({ name, login }) => name || login || null;
+
+// Whether `a` and `b` are the same issue, pull request or work item: the
+// same source, kind, repo and number (on Azure no repo, the same on both).
+export const sameItem = (a, b) => a.source === b.source && a.kind === b.kind && a.repo === b.repo && a.number === b.number;
 
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
@@ -632,7 +639,7 @@ export const columnOf = (columns, key) => columns.findIndex((c) => c.shown.some(
 // a selection { col, key }; null where none of them is that item.
 export function placeOf(columns, item) {
   for (const [col, c] of columns.entries()) {
-    const card = c.shown.find((i) => i.source === item.source && i.kind === item.kind && i.repo === item.repo && i.number === item.number);
+    const card = c.shown.find((i) => sameItem(i, item));
     if (card) return { col, key: card.key };
   }
   return null;
@@ -2977,6 +2984,13 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // description.js's.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
+// Enter on a line shows its item's details in the panel, a level down
+// (the Board's drillLine; Esc goes back up): the Board keeps the levels on
+// the panel's keyboard (panel.levels, each the line's item under its
+// lineKey and what the level above showed when it went down), reads each
+// level's related items as it reads the selected item's, and names the way
+// down at the panel's top (pathLabel).
+//
 // A source that has related items gives `related: { reads(item), load(item,
 // view) }`: reads tells whether the item has any to read (no call); load
 // reads them (view: the view the item shows in) into { description,
@@ -2995,13 +3009,31 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // failed that is to be read again after the next refresh.
 
 // What a view keeps of its related items after a refresh starts: only
-// those of the item whose details show (`openKey`, null when none), read
+// those of the item whose details show (`openKey`, null when none) and of
+// the levels the panel went down to from it (`deeper`, their keys), read
 // or still being read, so that a refresh reads nothing for them; a failed
 // read, or one with a part to read again (retry), is dropped, so that it
 // is tried again; `r` reads them again too (the Board's reload).
-export function keptRelated(related, openKey) {
-  const entry = openKey === null ? undefined : related.get(openKey);
-  return new Map(entry && !entry.error && !entry.data?.retry ? [[openKey, entry]] : []);
+export function keptRelated(related, openKey, deeper = []) {
+  const keys = openKey === null ? [] : [openKey, ...deeper];
+  return new Map(keys.flatMap((key) => {
+    const entry = related.get(key);
+    return entry && !entry.error && !entry.data?.retry ? [[key, entry]] : [];
+  }));
+}
+
+// The key a line's item has as a level of the details panel: its source,
+// kind, repo and number, which name it wherever it is.
+export const lineKey = (line) => `${line.source}:${line.kind}:${line.repo ?? ""}#${line.number}`;
+
+// The way the panel went down from `root` (the board's selected item) to
+// the items `levels`, as its top shows it: "tender#914 › #2217". A GitHub
+// item in the root's repo is named by its number ("#2217"), one in
+// another by its label; an Azure work item by its number alone, as a card
+// names it (cardLabel).
+export function pathLabel(root, levels) {
+  const label = (i) => (i.source === "github" && i.repo === root.repo ? `#${i.number}` : cardLabel(i));
+  return [cardLabel(root), ...levels.map(label)].join(" › ");
 }
 
 // The lines of read related items (`data`, or null while none are read),
@@ -4633,6 +4665,16 @@ function description(b, t, item, r) {
     ));
 }
 
+// The detail panel's rows of an item the panel went down to (a line's
+// item: it has no card, so no shape lends it rows): its state as a chip,
+// in its own color where its source names one (GitHub), else its state's
+// in the view's data (Azure), as its line has it.
+export function levelParts(b, t, view, item) {
+  const data = b.state(view.id).data;
+  const color = item.color ?? (data ? stateColor(data, item.state) : "muted");
+  return { chips: [chip(t, item.state ?? "ohne Status", t.background, toneColor(t, color))] };
+}
+
 // The block of the related items of `item` (relatedRows) in `view`, the
 // line `at` marked (null: none). A line's state's color, and whether it is
 // done, are its own where its source names them (GitHub), else its state's
@@ -4727,9 +4769,15 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // (moving, gg/G, Tab, the details panel's keys, Esc).
 // `c` is what the Board says of the moment (Board.actionContext): { b,
 // view, st, shape, item (the selected one), details (the item whose details
-// show), related (whether those read related items), panel (the details
-// panel's keyboard, or null), line (its selected line's index, or null),
-// lines (the related items' lines) }.
+// show: where the panel went down into a related item, that one), related
+// (whether those read related items), panel (the details panel's keyboard,
+// or null), line (its selected line's index, or null), lines (the related
+// items' lines), drilled (whether the panel shows a related item rather
+// than the board's selected one), trail (the keys of the items on the
+// panel's way down, the board's selected one first) }.
+// While the panel is drilled, the selected item's keys (s, a, H/L, Enter,
+// o) are not taken: they would act on the board's item while another one
+// shows; the menu still offers them, under that item's heading.
 
 // What a key event names (an action's key), or null for one no action has:
 // [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
@@ -4774,6 +4822,8 @@ const KIND_NAMES = { issue: "Issue", pr: "PR" };
 // action opened for (its view and item, its view and details, its view;
 // the board has none); and `gone`, what the menu says where an action
 // would run on another (Board.runAction).
+// The details' aim is the way the panel went down to them (trail), so that
+// an action opened on one level does not run on another.
 const GROUPS = {
   item: {
     title: (c) => `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`,
@@ -4782,7 +4832,7 @@ const GROUPS = {
   },
   details: {
     title: (c) => `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`,
-    aim: (c) => [c.view?.id, c.details?.key],
+    aim: (c) => [c.view?.id, ...(c.trail ?? [c.details?.key])],
     gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
   },
   view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ wird nicht mehr gezeigt` },
@@ -4832,8 +4882,11 @@ const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context(
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
-// takes Enter and o while one is.
-const onItem = (c) => Boolean(c.item) && c.line === null;
+// takes Enter and o while one is, and the panel shows that item's details
+// (not drilled).
+const onItem = (c) => Boolean(c.item) && c.line === null && !c.drilled;
+// Whether the panel shows a related item it went down to.
+const onLevel = (c) => Boolean(c.details) && Boolean(c.drilled);
 // Whether a line of the details panel is selected and still there.
 const onLine = (c) => Boolean(c.details) && c.line !== null && Boolean(c.lines[c.line]);
 // Whether a view shows, its data is read, and its shape has `what`.
@@ -4875,9 +4928,9 @@ const moveAction = (id, key, by, name) => ({
   key,
   menu: by < 0 ? 5 : 6,
   when: (c) => has(c, "move") && Boolean(c.item) && c.shape.canMove(c.st, c.item, by),
-  takes: (c) => has(c, "move"),
+  takes: (c) => has(c, "move") && !c.drilled,
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
-  ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
+  ...(by < 0 ? { hint: (c) => (c.shape?.move && !c.drilled ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
 });
 
 export const ACTIONS = [
@@ -4916,15 +4969,15 @@ export const ACTIONS = [
   },
   {
     id: "status", group: "item", name: "Status ändern…", key: "s", menu: 3,
-    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu"),
+    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu") && !c.drilled,
     run: (b, c, cx) => b.openStatusMenu(c.view, cx),
-    hint: (c) => (c.shape?.openStatusMenu ? "Status" : null),
+    hint: (c) => (c.shape?.openStatusMenu && !c.drilled ? "Status" : null),
   },
   {
     id: "assign", group: "item", name: "Zuweisen…", key: "a", menu: 4,
-    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data),
+    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data) && !c.drilled,
     run: (b, c, cx) => b.openAssign(c.view, cx),
-    hint: (c) => (c.shape?.assign ? "zuweisen" : null),
+    hint: (c) => (c.shape?.assign && !c.drilled ? "zuweisen" : null),
   },
   // z folds what is where the keyboard is: on a Sprint the selected
   // story's tasks while the board has it, the description while the details
@@ -4942,7 +4995,7 @@ export const ACTIONS = [
     id: "details", group: "item", name: "Details zeigen", key: "enter", menu: 1,
     when: (c) => Boolean(c.item) && !c.st.detail,
     run: (b, c, cx) => b.enter(c.view, cx),
-    hint: (c) => (walks(c) ? c.shape.enterHint ?? "Detail · Agent" : null),
+    hint: (c) => (walks(c) && !c.drilled ? c.shape.enterHint ?? "Detail · Agent" : null),
   },
   {
     id: "start", group: "item", name: (c) => startName(c.item), key: "enter", menu: 2,
@@ -4953,7 +5006,7 @@ export const ACTIONS = [
     id: "open", group: "item", name: "Im Browser öffnen", key: "o", menu: 7,
     when: (c) => Boolean(c.item), takes: onItem,
     run: (b, c, cx) => b.open(c.item, cx),
-    hint: (c) => (walks(c) ? "öffnen" : null),
+    hint: (c) => (walks(c) && !c.drilled ? "öffnen" : null),
   },
   { id: "tab-hint", hint: (c) => (c.related ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
   { id: "lines-hint", hint: (c) => (c.panel ? "Zeilen" : null), hintKey: "j/k" },
@@ -4968,17 +5021,38 @@ export const ACTIONS = [
   },
   // The details panel's selected line (a line selected before `r` read the
   // related items again is gone until they come: its key does nothing).
+  // Enter shows its item's details in the panel, a level down (Esc goes
+  // back up); "Zeile auf dem Board" selects it on the board, from the menu
+  // and the panel's button.
   {
-    id: "line-board", group: "details", name: "Zeile auf dem Board", key: "enter", menu: 10,
+    id: "line-details", group: "details", name: "Zeile im Detailfenster zeigen", key: "enter", menu: 10,
     when: onLine, takes: (c) => c.line !== null,
-    run: (b, c, cx) => c.lines[c.line] && b.enterLine(c.view, c.lines[c.line], cx),
-    hint: (c) => (c.panel ? "Zeile auf dem Board" : null),
+    run: (b, c, cx) => c.lines[c.line] && b.drillLine(c.view, c.lines[c.line], cx),
+    hint: (c) => (c.panel ? "Zeile zeigen" : null),
   },
   {
-    id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 11,
+    id: "line-board", group: "details", name: "Zeile auf dem Board", key: null, menu: 11,
+    when: onLine,
+    run: (b, c, cx) => b.enterLine(c.view, c.lines[c.line], cx),
+  },
+  {
+    id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 12,
     when: onLine, takes: (c) => c.line !== null,
     run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
     hint: (c) => (c.panel ? "Zeile öffnen" : null),
+  },
+  // The item the panel went down to: Enter and o act on it, as they do on
+  // the board's item at the top, where no line is selected (the line's
+  // actions come first in the table and take them while one is).
+  {
+    id: "level-start", group: "details", name: (c) => startName(c.details), key: "enter", menu: 13,
+    when: onLevel,
+    run: (b, c, cx) => b.startSession(c.view, c.details, cx),
+  },
+  {
+    id: "level-open", group: "details", name: "Im Browser öffnen", key: "o", menu: 14,
+    when: onLevel,
+    run: (b, c, cx) => b.open(c.details, cx),
   },
   {
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,
@@ -7005,7 +7079,8 @@ export default class Board extends View {
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
     // What the related items' lines keep (ui/related.js), and the details
-    // panel's keyboard: { view, key, line } while it has it (panelOf).
+    // panel's keyboard: { view, key, line, levels } while it has it
+    // (panelOf; levels: drillLine).
     this.relatedUi = relatedState();
     this.panel = null;
     // Whether the last key was a `g`, the first of gg (edgeKey).
@@ -7213,7 +7288,7 @@ export default class Board extends View {
     st.again = false;
     st.tried = Date.now();
     const open = st.detail ? this.selected(view) : null;
-    st.related = keptRelated(st.related, open ? open.key : null);
+    st.related = keptRelated(st.related, open ? open.key : null, this.levelsOf(view).map((l) => l.item.key));
     const started = st.tried;
     const run = ++st.runs;
     cx.spawn(async (cx) => {
@@ -7298,7 +7373,24 @@ export default class Board extends View {
   // The item whose details show in the shown view, or null.
   shownDetailsItem() {
     const view = this.view();
-    return view && this.state(view.id).detail ? this.selected(view) : null;
+    return view ? this.shownDetailsItemIn(view) : null;
+  }
+
+  // The item whose details show in `view`, or null.
+  shownDetailsItemIn(view) {
+    return this.state(view.id).detail ? this.selected(view) : null;
+  }
+
+  // The levels the details panel went down to in `view` (drillLine), the
+  // deepest last; none while it is at the top or does not have the keyboard.
+  levelsOf(view) {
+    return this.panelOf(view)?.levels ?? [];
+  }
+
+  // The item the details panel shows in `view`: the deepest level it went
+  // down to, else the item whose details show; null for none.
+  levelItem(view) {
+    return this.levelsOf(view).at(-1)?.item ?? this.shownDetailsItemIn(view);
   }
 
   // What the view keeps of the item's related items, the entry relatedRows
@@ -7308,15 +7400,24 @@ export default class Board extends View {
   }
 
   // Reads the related items of the item whose details show in the shown
-  // view, where its source has some to read and the view keeps none
-  // (keptRelated says what a refresh keeps): one call, two for an Azure
-  // work item with children (Calls, above). While a refresh of the view
-  // runs it waits: the refresh reads them once it ended (refresh).
+  // view, and of each level the details panel went down to from it, where
+  // its source has some to read and the view keeps none (keptRelated says
+  // what a refresh keeps): one call each, two for an Azure work item with
+  // children (Calls, above). While a refresh of the view runs it waits:
+  // the refresh reads them once it ended (refresh).
   readRelated(cx) {
     const view = this.view();
     const item = this.shownDetailsItem();
-    const st = view ? this.state(view.id) : null;
-    if (!this.readsRelated(item) || st.loading || st.related.has(item.key)) return;
+    if (!item || this.state(view.id).loading) return;
+    for (const one of [item, ...this.levelsOf(view).map((l) => l.item)]) this.readRelatedOf(view, one, cx);
+  }
+
+  // Reads the related items of `item` in `view` (readRelated), where its
+  // source has some to read and the view keeps none; once they came, the
+  // levels below it are checked (checkLevels).
+  readRelatedOf(view, item, cx) {
+    const st = this.state(view.id);
+    if (!this.readsRelated(item) || st.related.has(item.key)) return;
     const entry = { data: null, error: null, shown: null };
     st.related.set(item.key, entry);
     const source = this.sources[item.source].related;
@@ -7329,17 +7430,35 @@ export default class Board extends View {
       } catch (e) {
         entry.error = report(e);
       } finally {
+        if (entry.data) this.checkLevels(view, item.key, cx);
         cx.notify();
       }
     });
     cx.notify();
   }
 
-  // The details panel's keyboard ({ view, key, line }: the line selected,
-  // null for none) while it has it in `view`, for the item whose details
-  // show there; else null, when the board has it. Once it is not theirs
-  // (another view or item, one without related items, or the details
-  // closed) it is dropped, so that it does not come back with them.
+  // After the related items of the item `key` came: where the panel went
+  // down from that item to one that is no longer among its lines (`r` read
+  // them again), the panel goes back up to that item, and says so.
+  checkLevels(view, key, cx) {
+    const panel = this.panelOf(view);
+    if (!panel) return;
+    const levels = panel.levels;
+    const way = [this.shownDetailsItemIn(view), ...levels.map((l) => l.item)];
+    const at = way.findIndex((i) => i?.key === key);
+    if (at < 0 || at >= levels.length) return;
+    const next = way[at + 1];
+    if (relatedLines(this.relatedOf(view, way[at])?.data).some((l) => sameItem(l, next))) return;
+    while (levels.length > at) this.levelUp(view, panel);
+    this.say(`${itemLabel(next)} steht nicht mehr bei ${itemLabel(way[at])}: zurück zu ${itemLabel(way[at])}`, "info", cx);
+  }
+
+  // The details panel's keyboard ({ view, key, line, levels }: the line
+  // selected, null for none; the levels it went down to, drillLine) while
+  // it has it in `view`, for the item whose details show there; else null,
+  // when the board has it. Once it is not theirs (another view or item, one
+  // without related items, or the details closed) it is dropped, so that
+  // it does not come back with them, nor do its levels.
   panelOf(view) {
     const p = this.panel;
     const st = this.state(view.id);
@@ -7350,29 +7469,33 @@ export default class Board extends View {
 
   // Tab, where the board takes it for the panel (takesTab: the details of
   // an item with related items to read show): the keyboard into the details
-  // panel, no line selected, or back to the board where the panel has it.
+  // panel, no line selected, or back to the board where the panel has it,
+  // which closes the levels it went down to: the board's keys act on its
+  // selected item, whose details then show again.
   togglePanel(view) {
     const item = this.shownDetailsItem();
-    this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null };
+    this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null, levels: [] };
   }
 
-  // The lines of the related items that show in `view` (relatedLines).
+  // The lines of the related items that show in `view` (relatedLines), of
+  // the level the panel shows.
   linesOf(view) {
-    const item = this.selected(view);
+    const item = this.levelItem(view);
     return relatedLines(item ? this.relatedOf(view, item)?.data : null);
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
   // its lines, each scrolled into view; with no line selected they scroll
   // the block a line (LINE_PX), j until the first line shows whole, which
-  // it then selects, k from the first line to none and then up. Esc gives
-  // the keyboard back. True when the panel took the key. Enter and o on
-  // the selected line are actions (commands.js: line-board, line-open).
+  // it then selects, k from the first line to none and then up. Esc goes
+  // a level up where the panel went down (levelUp), else gives the keyboard
+  // back. True when the panel took the key. Enter and o on the selected
+  // line are actions (commands.js: line-details, line-open).
   panelKey(view, panel, k) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
     const lines = this.linesOf(view);
     if (dir) {
-      const item = this.selected(view);
+      const item = this.levelItem(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
       if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
@@ -7382,31 +7505,77 @@ export default class Board extends View {
       }
       return true;
     }
-    if (k === "escape") return (this.panel = null), true;
+    if (k === "escape") {
+      if (panel.levels.length) this.levelUp(view, panel);
+      else this.panel = null;
+      return true;
+    }
     return false;
   }
 
-  // Enter on a line: where a shown column holds the line's item, that item
-  // is selected and its details show; the panel keeps the keyboard (with no
-  // line selected) where that item has related items to read, else the
-  // board takes it back. Where no shown column holds it, the line opens in
+  // Enter on a line (commands.js, line-details): its item's details in the
+  // panel, a level down, where its source reads related items for it
+  // (readsRelated; read as the selected item's are: readRelated); the
+  // board's selection stays. The level keeps what the level above showed
+  // (its selected line, its scroll with the heights it was measured at,
+  // and its unfolded description), for Esc to bring back (levelUp). A line whose item has none to read opens in
   // the browser.
+  drillLine(view, line, cx) {
+    const panel = this.panelOf(view);
+    if (!panel) return;
+    const item = { ...line, key: lineKey(line) };
+    if (!this.readsRelated(item)) return this.open(line, cx);
+    const ui = this.relatedUi;
+    const back = { line: panel.line, offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes, unfolded: ui.unfolded };
+    panel.levels.push({ item, back });
+    panel.line = null;
+    ui.sizes = new Map();
+    this.readRelated(cx);
+    cx.notify();
+  }
+
+  // Esc on a level the panel went down to: the level above again, as it
+  // showed (drillLine kept it), its line the one it went down from, found
+  // again among its lines where they are read (none where it is no longer
+  // there), else the line as it was, and scrolled into view.
+  levelUp(view, panel) {
+    const { item: from, back } = panel.levels.pop();
+    const item = this.levelItem(view);
+    const entry = this.relatedOf(view, item);
+    const ui = this.relatedUi;
+    // Its heights as they were measured, until it is laid out again: the
+    // window's too, which takes its height from the content.
+    Object.assign(ui, { at: item.key, offset: back.offset, viewport: back.viewport, content: back.content, sizes: back.sizes, unfolded: back.unfolded });
+    if (entry?.data) {
+      const at = relatedLines(entry.data).findIndex((l) => sameItem(l, from));
+      panel.line = at < 0 ? null : at;
+    } else panel.line = back.line;
+    if (panel.line !== null) revealLine(ui, item, entry, panel.line);
+  }
+
+  // "Zeile auf dem Board" (commands.js, line-board; the panel's button):
+  // where a shown column holds the line's item, that item is selected and
+  // its details show; the panel keeps the keyboard (with no line selected
+  // and none of the levels it went down to) where that item has related
+  // items to read, else the board takes it back. Where no shown column
+  // holds it, it says so.
   enterLine(view, line, cx) {
     const place = placeOf(this.navColumns(view), line);
-    if (!place) return this.open(line, cx);
+    if (!place) return this.say(`${itemLabel(line)} ist nicht auf dem Board`, "info", cx);
     this.choose(view, place, cx);
-    this.panel = this.readsRelated(this.selected(view)) ? { view: view.id, key: place.key, line: null } : null;
+    this.panel = this.readsRelated(this.selected(view)) ? { view: view.id, key: place.key, line: null, levels: [] } : null;
   }
 
   // A click on line `at` of the related items: the keyboard into the panel
-  // on that line, and Enter on it.
+  // on that line (at the level it shows), and Enter on it.
   pickLine(view, at, cx) {
-    const item = this.selected(view);
+    const item = this.shownDetailsItemIn(view);
     const line = this.linesOf(view)[at];
     if (!item || !line) return;
-    this.panel = { view: view.id, key: item.key, line: at };
+    this.panel = this.panelOf(view) ?? { view: view.id, key: item.key, line: null, levels: [] };
+    this.panel.line = at;
     this.handle.focus();
-    this.enterLine(view, line, cx);
+    this.drillLine(view, line, cx);
     cx.notify();
   }
 
@@ -7442,7 +7611,8 @@ export default class Board extends View {
   // switch: the shown details' description unfolded, or folded again,
   // where it is taller than its fold (ui/related.js); true when it is.
   toggleFold(cx) {
-    const item = this.shownDetailsItem();
+    const view = this.view();
+    const item = view ? this.levelItem(view) : null;
     const ui = this.relatedUi;
     if (!this.readsRelated(item) || !descriptionFolds(ui, item)) return false;
     ui.unfolded = ui.unfolded === item.key ? null : item.key;
@@ -7631,6 +7801,12 @@ export default class Board extends View {
       this.readRelated(cx);
       return cx.notify();
     }
+    this.startSession(view, item, cx);
+  }
+
+  // The session of `item` (the selected one, or the one the details panel
+  // went down to): go to it, or start one.
+  startSession(view, item, cx) {
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
     const session = linkedSession(item, spaces());
     if (!session) return MODALS.start.open(this, view, item, cx);
@@ -7755,11 +7931,13 @@ export default class Board extends View {
   actionContext() {
     const view = this.view();
     const st = view ? this.state(view.id) : null;
-    const details = this.shownDetailsItem();
     const panel = view ? this.panelOf(view) : null;
+    const details = view ? this.levelItem(view) : null;
+    const levels = panel?.levels ?? [];
     return {
       b: this, view, st, shape: view ? this.shape(view) : null, item: view ? this.selected(view) : null, details,
       related: this.readsRelated(details), panel, line: panel?.line ?? null, lines: panel ? this.linesOf(view) : [],
+      drilled: levels.length > 0, trail: details ? [this.shownDetailsItemIn(view).key, ...levels.map((l) => l.item.key)] : null,
     };
   }
 
@@ -8142,16 +8320,25 @@ export default class Board extends View {
     return [`„nur meine“ zeigt ${what}: ${st.data.noViewer ?? this.sources[view.source].noViewer ?? NO_VIEWER}`];
   }
 
-  detail(t, mono, view, item) {
+  // The details of `root`, the selected item, or of the item the panel went
+  // down to from it (drillLine): then its way down at the top (pathLabel),
+  // its rows from its line (levelParts) in place of the shape's, and its
+  // session and page in the buttons.
+  detail(t, mono, view, root) {
     const st = this.state(view.id);
+    // Marked while it has the keyboard (Tab).
+    const panel = this.panelOf(view);
+    const levels = panel?.levels ?? [];
+    const item = levels.at(-1)?.item ?? root;
     const session = linkedSession(item, spaces());
     // The shape's own rows: chips beside the author, sections, buttons.
-    const parts = this.shape(view).detailParts?.(this, t, view, item) ?? {};
+    const parts = (levels.length ? levelParts(this, t, view, item) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
     const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
-    // Marked while it has the keyboard (Tab).
-    const panel = this.panelOf(view);
+    // The panel's selected line, where it has one.
+    const line = panel && panel.line !== null ? this.linesOf(view)[panel.line] ?? null : null;
+    const top = levels.length ? pathLabel(root, levels.map((l) => l.item)) : `${itemLabel(item)}${item.branch ? ` · ${item.branch}` : ""}`;
     return v_flex()
       .id("detail")
       .w(detailWidth(this.shape(view).columnCount?.(this, st) ?? 0))
@@ -8173,8 +8360,8 @@ export default class Board extends View {
               .font_family(mono)
               .text_size(11.5)
               .text_color(t.muted)
-              .child(div().flex_1().min_w(0).truncate().child(`${itemLabel(item)}${item.branch ? ` · ${item.branch}` : ""}`))
-              .child(div().text_size(11).child("Esc schließt")),
+              .child(div().id("detail-top").flex_1().min_w(0).truncate().child(top))
+              .child(div().text_size(11).child(levels.length ? "Esc zurück" : "Esc schließt")),
           )
           .child(div().text_size(15).font_semibold().line_height("20px").child(item.title))
           .child(
@@ -8226,10 +8413,14 @@ export default class Board extends View {
           .border_color(t.border)
           .child(button(t, "act-start", startLabel, true, (cx) => {
             if (this.modal) return;
+            if (levels.length) return this.startSession(view, item, cx);
             st.detail = true;
             this.enter(view, cx);
           }))
           .children(parts.buttons ?? [])
+          .when(Boolean(line), (el) => el.child(button(t, "act-line-board", "Zeile auf dem Board", false, (cx) => {
+            if (!this.modal) this.enterLine(view, line, cx);
+          })))
           .child(button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
             if (!this.modal) this.open(item, cx);
           })),

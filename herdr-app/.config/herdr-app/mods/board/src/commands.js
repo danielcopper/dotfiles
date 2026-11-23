@@ -26,9 +26,15 @@
 // (moving, gg/G, Tab, the details panel's keys, Esc).
 // `c` is what the Board says of the moment (Board.actionContext): { b,
 // view, st, shape, item (the selected one), details (the item whose details
-// show), related (whether those read related items), panel (the details
-// panel's keyboard, or null), line (its selected line's index, or null),
-// lines (the related items' lines) }.
+// show: where the panel went down into a related item, that one), related
+// (whether those read related items), panel (the details panel's keyboard,
+// or null), line (its selected line's index, or null), lines (the related
+// items' lines), drilled (whether the panel shows a related item rather
+// than the board's selected one), trail (the keys of the items on the
+// panel's way down, the board's selected one first) }.
+// While the panel is drilled, the selected item's keys (s, a, H/L, Enter,
+// o) are not taken: they would act on the board's item while another one
+// shows; the menu still offers them, under that item's heading.
 
 import { spaces } from "herdr";
 import { cardType, itemLabel } from "./shared.js";
@@ -80,6 +86,8 @@ const KIND_NAMES = { issue: "Issue", pr: "PR" };
 // action opened for (its view and item, its view and details, its view;
 // the board has none); and `gone`, what the menu says where an action
 // would run on another (Board.runAction).
+// The details' aim is the way the panel went down to them (trail), so that
+// an action opened on one level does not run on another.
 const GROUPS = {
   item: {
     title: (c) => `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`,
@@ -88,7 +96,7 @@ const GROUPS = {
   },
   details: {
     title: (c) => `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`,
-    aim: (c) => [c.view?.id, c.details?.key],
+    aim: (c) => [c.view?.id, ...(c.trail ?? [c.details?.key])],
     gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
   },
   view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ wird nicht mehr gezeigt` },
@@ -138,8 +146,11 @@ const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context(
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
-// takes Enter and o while one is.
-const onItem = (c) => Boolean(c.item) && c.line === null;
+// takes Enter and o while one is, and the panel shows that item's details
+// (not drilled).
+const onItem = (c) => Boolean(c.item) && c.line === null && !c.drilled;
+// Whether the panel shows a related item it went down to.
+const onLevel = (c) => Boolean(c.details) && Boolean(c.drilled);
 // Whether a line of the details panel is selected and still there.
 const onLine = (c) => Boolean(c.details) && c.line !== null && Boolean(c.lines[c.line]);
 // Whether a view shows, its data is read, and its shape has `what`.
@@ -181,9 +192,9 @@ const moveAction = (id, key, by, name) => ({
   key,
   menu: by < 0 ? 5 : 6,
   when: (c) => has(c, "move") && Boolean(c.item) && c.shape.canMove(c.st, c.item, by),
-  takes: (c) => has(c, "move"),
+  takes: (c) => has(c, "move") && !c.drilled,
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
-  ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
+  ...(by < 0 ? { hint: (c) => (c.shape?.move && !c.drilled ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
 });
 
 export const ACTIONS = [
@@ -222,15 +233,15 @@ export const ACTIONS = [
   },
   {
     id: "status", group: "item", name: "Status ändern…", key: "s", menu: 3,
-    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu"),
+    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu") && !c.drilled,
     run: (b, c, cx) => b.openStatusMenu(c.view, cx),
-    hint: (c) => (c.shape?.openStatusMenu ? "Status" : null),
+    hint: (c) => (c.shape?.openStatusMenu && !c.drilled ? "Status" : null),
   },
   {
     id: "assign", group: "item", name: "Zuweisen…", key: "a", menu: 4,
-    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data),
+    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data) && !c.drilled,
     run: (b, c, cx) => b.openAssign(c.view, cx),
-    hint: (c) => (c.shape?.assign ? "zuweisen" : null),
+    hint: (c) => (c.shape?.assign && !c.drilled ? "zuweisen" : null),
   },
   // z folds what is where the keyboard is: on a Sprint the selected
   // story's tasks while the board has it, the description while the details
@@ -248,7 +259,7 @@ export const ACTIONS = [
     id: "details", group: "item", name: "Details zeigen", key: "enter", menu: 1,
     when: (c) => Boolean(c.item) && !c.st.detail,
     run: (b, c, cx) => b.enter(c.view, cx),
-    hint: (c) => (walks(c) ? c.shape.enterHint ?? "Detail · Agent" : null),
+    hint: (c) => (walks(c) && !c.drilled ? c.shape.enterHint ?? "Detail · Agent" : null),
   },
   {
     id: "start", group: "item", name: (c) => startName(c.item), key: "enter", menu: 2,
@@ -259,7 +270,7 @@ export const ACTIONS = [
     id: "open", group: "item", name: "Im Browser öffnen", key: "o", menu: 7,
     when: (c) => Boolean(c.item), takes: onItem,
     run: (b, c, cx) => b.open(c.item, cx),
-    hint: (c) => (walks(c) ? "öffnen" : null),
+    hint: (c) => (walks(c) && !c.drilled ? "öffnen" : null),
   },
   { id: "tab-hint", hint: (c) => (c.related ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
   { id: "lines-hint", hint: (c) => (c.panel ? "Zeilen" : null), hintKey: "j/k" },
@@ -274,17 +285,38 @@ export const ACTIONS = [
   },
   // The details panel's selected line (a line selected before `r` read the
   // related items again is gone until they come: its key does nothing).
+  // Enter shows its item's details in the panel, a level down (Esc goes
+  // back up); "Zeile auf dem Board" selects it on the board, from the menu
+  // and the panel's button.
   {
-    id: "line-board", group: "details", name: "Zeile auf dem Board", key: "enter", menu: 10,
+    id: "line-details", group: "details", name: "Zeile im Detailfenster zeigen", key: "enter", menu: 10,
     when: onLine, takes: (c) => c.line !== null,
-    run: (b, c, cx) => c.lines[c.line] && b.enterLine(c.view, c.lines[c.line], cx),
-    hint: (c) => (c.panel ? "Zeile auf dem Board" : null),
+    run: (b, c, cx) => c.lines[c.line] && b.drillLine(c.view, c.lines[c.line], cx),
+    hint: (c) => (c.panel ? "Zeile zeigen" : null),
   },
   {
-    id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 11,
+    id: "line-board", group: "details", name: "Zeile auf dem Board", key: null, menu: 11,
+    when: onLine,
+    run: (b, c, cx) => b.enterLine(c.view, c.lines[c.line], cx),
+  },
+  {
+    id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 12,
     when: onLine, takes: (c) => c.line !== null,
     run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
     hint: (c) => (c.panel ? "Zeile öffnen" : null),
+  },
+  // The item the panel went down to: Enter and o act on it, as they do on
+  // the board's item at the top, where no line is selected (the line's
+  // actions come first in the table and take them while one is).
+  {
+    id: "level-start", group: "details", name: (c) => startName(c.details), key: "enter", menu: 13,
+    when: onLevel,
+    run: (b, c, cx) => b.startSession(c.view, c.details, cx),
+  },
+  {
+    id: "level-open", group: "details", name: "Im Browser öffnen", key: "o", menu: 14,
+    when: onLevel,
+    run: (b, c, cx) => b.open(c.details, cx),
   },
   {
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,

@@ -151,6 +151,16 @@ function description(b, t, item, r) {
     ));
 }
 
+// The detail panel's rows of an item the panel went down to (a line's
+// item: it has no card, so no shape lends it rows): its state as a chip,
+// in its own color where its source names one (GitHub), else its state's
+// in the view's data (Azure), as its line has it.
+export function levelParts(b, t, view, item) {
+  const data = b.state(view.id).data;
+  const color = item.color ?? (data ? stateColor(data, item.state) : "muted");
+  return { chips: [chip(t, item.state ?? "ohne Status", t.background, toneColor(t, color))] };
+}
+
 // The block of the related items of `item` (relatedRows) in `view`, the
 // line `at` marked (null: none). A line's state's color, and whether it is
 // done, are its own where its source names them (GitHub), else its state's

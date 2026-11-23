@@ -6650,7 +6650,7 @@ test("UI: the details panel has the keyboard only for the item and view it took 
   assert.equal(b.panelOf(b.view()), null, "another view's details");
 });
 
-test("UI: in the details panel Enter on a line selects its item on the board, o opens it; one not on the board opens in the browser; with no line Enter and o do what they do on the board", async () => {
+test("UI: in the details panel o opens a line; „Zeile auf dem Board“ selects its item on the board, and says so where the board does not show it; with no line Enter and o do what they do on the board", async () => {
   const { b, cx, st, host } = await openRelated();
   await tab(b, cx);
   await press(b, cx, "o");
@@ -6659,10 +6659,10 @@ test("UI: in the details panel Enter on a line selects its item on the board, o 
   await press(b, cx, "j");
   await press(b, cx, "o");
   assert.equal(cx.opened.at(-1), "https://github.com/example/tender/issues/3010");
-  await press(b, cx, "enter");
-  assert.deepEqual([cx.opened.length, cx.opened.at(-1), st().sel.key], [3, "https://github.com/example/tender/issues/3010", "PVTI_rec4"], "not on the board: opened");
+  await runCommand(b, cx, "Zeile auf dem Board");
+  assert.deepEqual([cx.opened.length, st().sel.key, b.notice?.text], [2, "PVTI_rec4", "tender#3010 ist nicht auf dem Board"], "not on the board: said, nothing opened");
   await press(b, cx, "k");
-  await press(b, cx, "enter");
+  await runCommand(b, cx, "Zeile auf dem Board");
   assert.deepEqual([st().sel.key, st().detail, st().picked], ["PVTI_rec2", true, "PVTI_rec2"], "on the board: selected, its details shown");
   assert.deepEqual([b.panelOf(b.view())?.line, b.panelOf(b.view())?.key], [null, "PVTI_rec2"], "the panel keeps the keyboard, no line");
   assert.equal(readsOf(host, 3001).length, 1, "its related items are read");
@@ -6672,7 +6672,7 @@ test("UI: in the details panel Enter on a line selects its item on the board, o 
   assert.equal(b.modal?.kind, "start", "Enter with no line: the item's session, as on the board");
 });
 
-test("UI: Enter on a pull request's line whose card is on the board selects it and gives the keyboard back: a pull request has no related items", async () => {
+test("UI: „Zeile auf dem Board“ on a pull request's line whose card is on the board selects it and gives the keyboard back: a pull request has no related items", async () => {
   const { b, cx, st, host } = await openBoard({ answer: fixture("github-board-cases.json") });
   const issue = "PVTI_case4";
   cx.call((own) => b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), issue), key: issue }, own));
@@ -6681,26 +6681,29 @@ test("UI: Enter on a pull request's line whose card is on the board selects it a
   await answerRelated(host, ok(relatedAnswer({ prs: [{ ...prNode(3050), repository: { nameWithOwner: "example/tender" } }] })));
   await tab(b, cx);
   await press(b, cx, "j");
-  await press(b, cx, "enter");
+  await runCommand(b, cx, "Zeile auf dem Board");
   assert.deepEqual([st().sel.key, st().detail], ["PVTI_case1", true], "the pull request's card, its details shown");
   assert.deepEqual([b.panel, takesTab(b)], [null, false], "the board has the keyboard, Tab is herdr's");
   b.panel = { view: b.view().id, key: "PVTI_case1", line: null };
   assert.equal(b.panelOf(b.view()), null, "a panel on an item without related items is dropped");
 });
 
-test("UI: a click on a line moves the keyboard into the panel and does Enter on it", async () => {
+test("UI: a click on a line moves the keyboard into the panel and does Enter on it: its item's details a level down", async () => {
   const { b, cx, st, host } = await openRelated();
   b.handle.held = false;
   await click(b, cx, "related-line-1");
-  assert.deepEqual([b.panelOf(b.view())?.line, cx.opened], [1, ["https://github.com/example/tender/issues/3010"]]);
+  const panel = () => b.panelOf(b.view());
+  assert.deepEqual([panel()?.levels.map((l) => l.item.number), panel()?.line, cx.opened], [[3010], null, undefined]);
   assert.equal(b.handle.is_focused(), true, "the board takes the keyboard");
-  await click(b, cx, "related-line-0");
-  assert.deepEqual([st().sel.key, b.panelOf(b.view())?.key, b.panelOf(b.view())?.line], ["PVTI_rec2", "PVTI_rec2", null]);
-  assert.equal(readsOf(host, 3001).length, 1, "its related items are read");
-  await answerRelated(host, ok(fixture("github-related.json")));
-  b.modal = { kind: "status", view: b.view(), key: "PVTI_rec2", targets: [], at: 0 };
+  assert.equal(readsOf(host, 3010).length, 1, "its related items are read");
+  await answerRelated(host, ok(relatedAnswer({ n: 2 })));
   await click(b, cx, "related-line-1");
-  assert.deepEqual([cx.opened.length, st().sel.key], [1, "PVTI_rec2"], "a click while a dialog is open does nothing");
+  assert.deepEqual([st().sel.key, panel()?.key, panel()?.levels.map((l) => l.item.number), panel()?.line], ["PVTI_rec4", "PVTI_rec4", [3010, 4001], null],
+    "a line of that level: one more down, the board's selection where it was");
+  await answerRelated(host, ok(relatedAnswer({ n: 1 })));
+  b.modal = { kind: "status", view: b.view(), key: "PVTI_rec4", targets: [], at: 0 };
+  await click(b, cx, "related-line-0");
+  assert.deepEqual([panel()?.levels.length, host.open("gh").length], [2, 0], "a click while a dialog is open does nothing");
 });
 
 test("UI: Enter and o on a line that r took away until the related items come again do nothing", async () => {
@@ -6714,6 +6717,228 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   await answerRelated(host, ok(fixture("github-related.json")));
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
+});
+
+// ---- Going down into a related item in the details panel ----
+
+// The details panel's levels: each level's item number, and its line.
+const levelsNow = (b) => [b.panelOf(b.view())?.levels.map((l) => l.item.number) ?? null, b.panelOf(b.view())?.line ?? null];
+const topText = (b) => texts(byId(detailPanel(b), "detail-top"))[0];
+const readRelatedOf = (number) => (a) => isRelatedCall(a) && a.includes(`number=${number}`);
+
+test("the details panel's levels: a line's item is named by its source, kind, repo and number; the path names the board's item, then each level, by number in its repo and on Azure", () => {
+  const root = issueItem();
+  const sub = { source: "github", kind: "issue", repo: "example/tender", repoShort: "tender", number: 2217 };
+  const other = { ...sub, repo: "example/other-tool", repoShort: "other-tool", number: 12 };
+  const pr = { ...sub, kind: "pr", number: 3020 };
+  const samePr = { ...sub, kind: "pr" };
+  assert.deepEqual([board.lineKey(sub), board.lineKey(pr), board.lineKey({ source: "azure", kind: "workitem", number: 311 })],
+    ["github:issue:example/tender#2217", "github:pr:example/tender#3020", "azure:workitem:#311"]);
+  assert.equal(board.pathLabel(root, []), "tender#3004");
+  assert.equal(board.pathLabel(root, [sub, other, pr]), "tender#3004 › #2217 › other-tool#12 › #3020");
+  const story = { source: "azure", kind: "workitem", number: 301 };
+  assert.equal(board.pathLabel(story, [{ ...story, number: 311 }, { source: "azure", kind: "pr", number: 57 }]), "301 › 311 › !57", "Azure: work items by their numbers");
+  assert.deepEqual([board.sameItem(sub, { ...sub }), board.sameItem(sub, samePr), board.sameItem(sub, other), board.sameItem(sub, { ...sub, number: 3 }), board.sameItem(sub, { ...sub, source: "azure" })],
+    [true, false, false, false, false]);
+});
+
+test("a refresh keeps the related items of the details' item and of each level the panel went down to, unless their read failed", () => {
+  const kept = new Map([["a", { data: 1, error: null }], ["b", { data: 2, error: null }], ["c", { data: null, error: "x" }], ["d", { data: { retry: true }, error: null }], ["e", { data: 5, error: null }]]);
+  assert.deepEqual([...board.keptRelated(kept, "a", ["b", "c", "d"]).keys()], ["a", "b"]);
+  assert.deepEqual([...board.keptRelated(kept, null, ["b"]).keys()], [], "no details open: nothing");
+});
+
+test("UI: Enter on a sub-issue's line shows its details in the panel, a level down: its path, title and state, its own related items read once; the board's selection stays", async () => {
+  const { b, cx, st, host } = await openRelated();
+  host.theme = () => ({ muted: "#grey" });
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.deepEqual(levelsNow(b), [[], 1]);
+  await press(b, cx, "enter");
+  assert.deepEqual(levelsNow(b), [[3010], null], "a level down, no line there yet");
+  assert.deepEqual([st().sel.key, st().detail, cx.opened], ["PVTI_rec4", true, undefined], "the board's selection stays, nothing opened");
+  assert.equal(readsOf(host, 3010).length, 1, "its related items: one read, by repo and number");
+  assert.ok(readsOf(host, 3010)[0].args.includes("owner=example") && readsOf(host, 3010)[0].args.includes("name=tender"));
+  assert.deepEqual([topText(b), texts(detailPanel(b)).includes("Esc zurück")], ["tender#3004 › #3010", true], "the path at the top; Esc goes back");
+  assert.ok(texts(detailPanel(b)).includes("chore(ci): drop the old runner"), "its title");
+  const state = chipOf(detailPanel(b), "geschlossen");
+  assert.ok(state, "its state as a chip");
+  assert.equal(state.with.bg[0], "#grey", "in its line's color");
+  assert.equal(texts(detailPanel(b)).includes("Status s"), false, "no status button: the board's item's");
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "lädt …"]);
+  const answer = JSON.parse(relatedAnswer({ n: 2 }));
+  answer.data.repository.issue.body = "Drop the **old** runner.";
+  await answerRelated(host, ok(JSON.stringify(answer)));
+  assert.deepEqual(drawnLines(b).map((l) => l[0]), ["tender#4000", "tender#4001"], "its own sub-issues");
+  assert.equal(textViewOf(b).source, "Drop the **old** runner.", "its description");
+  assert.equal(textViewOf(b).viewId, "description-github:issue:example/tender#3010");
+  await press(b, cx, "j");
+  assert.deepEqual(levelsNow(b), [[3010], 0], "j walks its lines");
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  assert.deepEqual([host.open("gh").length, levelsNow(b)], [0, [[3010], 0]], "a refresh keeps its read and the level");
+  const level = "github:issue:example/tender#3010";
+  cx.call((own) => byId(detailPanel(b), `description-size-${level}`).with.on_size_change[0]({ width: 400, height: 500 }, own));
+  await press(b, cx, "z");
+  assert.equal(b.relatedUi.unfolded, level, "z unfolds the level's description");
+  await press(b, cx, "escape");
+  assert.equal(b.relatedUi.unfolded, null, "back up: the description above as it was, folded");
+});
+
+test("UI: two levels down and back with Esc: each level its line again, marked and scrolled as it was; at the top Esc gives the keyboard back, a second closes the details", async () => {
+  const { b, cx, st, host } = await openRelated();
+  await tab(b, cx);
+  layOut(b, cx, 120);
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.equal(offsetOf(b), 6);
+  const ctrl = { modifiers: { control: true } };
+  await press(b, cx, "d", ctrl);
+  const rootOffset = offsetOf(b);
+  assert.equal(rootOffset, 66, "scrolled on, its line still in view");
+  await press(b, cx, "enter");
+  assert.equal(offsetOf(b), 0, "a level down starts at its top");
+  await answerRelated(host, ok(relatedAnswer({ n: 6 })));
+  layOut(b, cx, 120);
+  for (let i = 0; i < 5; i++) await press(b, cx, "j");
+  assert.deepEqual([levelsNow(b), offsetOf(b)], [[[3010], 4], 78]);
+  await press(b, cx, "u", ctrl);
+  assert.equal(offsetOf(b), 18, "scrolled back, its line out of view");
+  await press(b, cx, "enter");
+  assert.equal(topText(b), "tender#3004 › #3010 › #4004");
+  await answerRelated(host, ok(relatedAnswer({ n: 1 })));
+  layOut(b, cx, 400, { rowH: 40 });
+  await press(b, cx, "escape");
+  assert.deepEqual([levelsNow(b), offsetOf(b), topText(b)], [[[3010], 4], 78, "tender#3004 › #3010"], "one up: its line, scrolled into view by the heights measured there");
+  const marked = () => [0, 1, 2, 3, 4, 5].filter((i) => byId(detailPanel(b), `related-line-${i}`)?.styles.includes("bg"));
+  assert.deepEqual(marked(), [4], "marked again");
+  await press(b, cx, "escape");
+  assert.deepEqual([levelsNow(b), offsetOf(b), topText(b), marked()], [[[], 1], rootOffset, "tender#3004", [1]], "the top: the line it went down from, its scroll as it was");
+  assert.equal(host.open("gh").length, 0, "nothing read again: each level's read is kept");
+  await press(b, cx, "escape");
+  assert.deepEqual([b.panelOf(b.view()), st().detail], [null, true], "at the top Esc gives the keyboard back");
+  await press(b, cx, "escape");
+  assert.equal(st().detail, false, "a second closes the details");
+});
+
+test("UI: on a level o opens the marked line, and with none the level's item; Enter with none starts that item's session, not the board's; s, a and H/L are not taken there; Tab back to the board closes the levels", async () => {
+  const { b, cx, st, host } = await onLevel();
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3010"], "no line: the level's item");
+  await press(b, cx, "j");
+  await press(b, cx, "o");
+  assert.equal(cx.opened.at(-1), "https://github.com/example/tender/issues/4000", "the marked line");
+  await press(b, cx, "k");
+  const before = cx.stopped;
+  for (const k of ["s", "a"]) await press(b, cx, k);
+  await press(b, cx, "l", shiftL);
+  assert.deepEqual([b.modal, cx.stopped, board.findCard(st().data, "PVTI_rec4").column.name], [null, before, "Ready"], "the board's item's keys do nothing here");
+  assert.deepEqual(hintKeys(b).filter((k) => ["s", "a", "H/L"].includes(k)), [], "nor does the hint line name them");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, board.itemLabel(b.modal.item), b.modal.item.title], ["start", "tender#3010", "chore(ci): drop the old runner"], "the level's item's session");
+  await press(b, cx, "escape");
+  await click(b, cx, "act-start");
+  assert.deepEqual([b.modal?.kind, board.itemLabel(b.modal.item)], ["start", "tender#3010"], "and so does the panel's button");
+  await press(b, cx, "escape");
+  await tab(b, cx);
+  assert.deepEqual([b.panelOf(b.view()), topText(b)], [null, "tender#3004"], "Tab: the board's keyboard, the board item's details again");
+  await tab(b, cx);
+  assert.deepEqual(levelsNow(b), [[], null], "and back in the panel at the top");
+  assert.equal(host.open("gh").length, 0);
+});
+
+test("UI: on a level „Zeile auf dem Board“ selects the line's item from the menu and from the panel's button, and closes the levels; one the board does not show is said", async () => {
+  const { b, cx, st, host } = await onLevel();
+  await press(b, cx, "j");
+  assert.equal(byId(detailPanel(b), "act-line-board") !== null, true, "a button while a line is marked");
+  await runCommand(b, cx, "Zeile auf dem Board");
+  assert.deepEqual([b.notice?.text, st().sel.key, levelsNow(b)], ["tender#4000 ist nicht auf dem Board", "PVTI_rec4", [[3010], 0]]);
+  const sub = JSON.parse(relatedAnswer({ n: 1 }));
+  sub.data.repository.issue.subIssues.nodes[0].number = 3001;
+  // The level's read again, its first line now tender#3001, on the board.
+  st().related.delete(b.panelOf(b.view()).levels[0].item.key);
+  cx.call((own) => b.readRelated(own));
+  await settle();
+  await answerRelated(host, ok(JSON.stringify(sub)));
+  await click(b, cx, "act-line-board");
+  assert.deepEqual([st().sel.key, st().detail, levelsNow(b)], ["PVTI_rec2", true, [[], null]], "selected on the board, its details at the top");
+  await press(b, cx, "k");
+  assert.equal(byId(detailPanel(b), "act-line-board"), null, "no line: no button");
+});
+
+test("UI: an Azure child's details a level down: its path by numbers, its state in the view's color, its own children read; Esc back to its line", async () => {
+  const { b, cx, host, st } = await openSprint();
+  host.theme = () => ({ muted: "#grey", ansi2: "#green" });
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual([st().sel.key, levelsNow(b), topText(b)], ["AB#301", [[312], null], "301 › 312"]);
+  assert.equal(chipOf(detailPanel(b), "Done").with.bg[0], "#green", "its state in the view's color for it");
+  assert.deepEqual(azureRelatedOf(host).map((c) => c.args[c.args.indexOf("--id") + 1]), ["312"], "its related items: read by its id");
+  const child = { rel: "System.LinkTypes.Hierarchy-Forward", url: "https://dev.azure.com/example-org/p/_apis/wit/workItems/311" };
+  await host.answer("az", ok(JSON.stringify({ id: 312, fields: { "System.Description": "<p>kept</p>" }, relations: [child] })), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  assert.deepEqual(drawnLines(b), [["AB#311", "Parse the sample file", "To Do"]]);
+  await press(b, cx, "escape");
+  assert.deepEqual([levelsNow(b), topText(b)], [[[], 0], "AB#301"], "back: its line marked");
+});
+
+test("UI: r reads each level's related items again; a level whose item is no longer among the lines above it goes, with a notice, the panel on the deepest level still there", async () => {
+  const { b, cx, st, host } = await onLevel();
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  await answerRelated(host, ok(relatedAnswer()));
+  assert.deepEqual(levelsNow(b)[0], [3010, 4000]);
+  await press(b, cx, "r");
+  assert.equal(readsOf(host).length, 0, "nothing while the board is read");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  assert.deepEqual([readsOf(host, 3004).length, readsOf(host, 3010).length, readsOf(host, 4000).length], [1, 1, 1], "each level read again");
+  await host.answer("gh", ok(fixture("github-related.json")), readRelatedOf(3004));
+  assert.deepEqual([levelsNow(b)[0], b.notice], [[3010, 4000], null], "still there: kept");
+  await host.answer("gh", ok(relatedAnswer()), readRelatedOf(3010));
+  assert.deepEqual(levelsNow(b), [[3010], null], "tender#4000 went: the level above, no line");
+  assert.equal(b.notice?.text, "tender#4000 steht nicht mehr bei tender#3010: zurück zu tender#3010");
+  assert.equal(topText(b), "tender#3004 › #3010");
+  await host.answer("gh", ok(relatedAnswer()), readRelatedOf(4000));
+  await reloadBoard(b, cx, host);
+  const without = json("github-related.json");
+  without.data.repository.issue.subIssues.nodes = without.data.repository.issue.subIssues.nodes.filter((n) => n.number !== 3010);
+  await host.answer("gh", ok(JSON.stringify(without)), readRelatedOf(3004));
+  assert.deepEqual([levelsNow(b), st().sel.key, b.notice?.text], [[[], null], "PVTI_rec4", "tender#3010 steht nicht mehr bei tender#3004: zurück zu tender#3004"]);
+  const failed = await onLevel();
+  await reloadBoard(failed.b, failed.cx, failed.host);
+  await failed.host.answer("gh", new Error("offline"), readRelatedOf(3004));
+  assert.deepEqual(levelsNow(failed.b)[0], [3010], "a read that failed takes no level away");
+});
+
+test("UI: the command menu runs a level's action only on that level: after a refresh took the level away it says so and opens nothing", async () => {
+  const { b, cx, host } = await onLevel();
+  await press(b, cx, "j");
+  await openMenu(b, cx);
+  assert.ok(menuHeads(b).includes("Detailfenster · tender#3010 chore(ci): drop the old runner"), "the level's item is the details' heading");
+  b.modal.input.type("Zeile im Browser");
+  b.reload(cx);
+  await settle();
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  const without = json("github-related.json");
+  without.data.repository.issue.subIssues.nodes = without.data.repository.issue.subIssues.nodes.filter((n) => n.number !== 3010);
+  await host.answer("gh", ok(JSON.stringify(without)), readRelatedOf(3004));
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal, b.notice?.text, cx.opened], [null, "Die Details von tender#3010 sind nicht mehr offen", undefined]);
+});
+
+test("UI: Enter on a pull request's line opens it in the browser: the panel goes down into issues and work items only", async () => {
+  const { b, cx, host } = await openRelated();
+  await tab(b, cx);
+  for (let i = 0; i < 4; i++) await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual([levelsNow(b), cx.opened, host.open("gh").length], [[[], 3], ["https://github.com/example/tender/pull/3020"], 0]);
 });
 
 // Every tag name a shown HTML description holds, and the `<` in a shown
@@ -7038,15 +7263,13 @@ test("UI: a Sprint story's details read its related items: its description as HT
   await press(b, cx, "j");
   await press(b, cx, "j");
   await press(b, cx, "enter");
-  assert.deepEqual([st().sel.key, st().detail], ["AB#311", true], "a child on the board: selected, its details shown");
+  assert.deepEqual([st().sel.key, st().detail, b.panelOf(b.view())?.levels.map((l) => l.item.number)], ["AB#301", true, [311]],
+    "a child: its details a level down, the board's selection where it was");
   assert.equal(azureRelatedOf(host).length, 1, "its related items are read");
   await host.answer("az", ok(JSON.stringify({ id: 311, fields: {}, relations: null })), (a) => a.includes("relations"));
   assert.deepEqual([host.open("az").length, descriptionTexts(b), sectionTexts(b)], [0, ["BESCHREIBUNG", "keine Beschreibung"], ["UNTERAUFGABEN", "keine"]], "no children: no query");
   await press(b, cx, "escape");
-  cx.call((own) => b.choose(b.view(), { col: 0, key: "AB#301" }, own));
-  await settle();
-  assert.deepEqual([st().detail, host.open("az").length], [true, 0], "back on the story: kept, nothing read again");
-  await tab(b, cx);
+  assert.deepEqual([b.panelOf(b.view())?.levels.length, b.panelOf(b.view())?.line, host.open("az").length], [0, 1, 0], "back on the story: its line again, nothing read again");
   await press(b, cx, ...SHIFT_G);
   await press(b, cx, "o");
   assert.equal(cx.opened.at(-1), `${ORG}/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_git/6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c/pullrequest/57`, "the pull request's page");
@@ -8027,10 +8250,10 @@ test("UI: the command menu in the details and in their panel: the second Enter's
   await press(b, cx, "j");
   assert.equal(b.panel.line, 0);
   const entries = await openMenu(b, cx);
-  assert.deepEqual(entries.slice(0, 9), [
+  assert.deepEqual(entries.slice(0, 10), [
     ["Agent starten…", null], ["Status ändern…", "s"], ["Zuweisen…", "a"], ["Nach links verschieben", "H"], ["Nach rechts verschieben", "L"], ["Im Browser öffnen", null],
-    ["Beschreibung mehr", "z"], ["Zeile auf dem Board", "Enter"], ["Zeile im Browser öffnen", "o"],
-  ], "Enter and o are the line's: the card's own run from the menu, without a key");
+    ["Beschreibung mehr", "z"], ["Zeile im Detailfenster zeigen", "Enter"], ["Zeile auf dem Board", null], ["Zeile im Browser öffnen", "o"],
+  ], "Enter and o are the line's: the card's own run from the menu, without a key; the line's place on the board from the menu alone");
 });
 
 test("UI: the command menu on a Sprint: on a story its fold and no move, on a task its moves; the view's switch; on the Backlog the create; on the PR list and the PR view to come only what they have", async () => {
@@ -8221,6 +8444,16 @@ async function onFirstLine() {
   await press(opened.b, opened.cx, "j");
   return opened;
 }
+// The details panel a level down: Enter on its second line (tender#3010,
+// not on the board), its related items read (two sub-issues), no line
+// selected there.
+async function onLevel() {
+  const opened = await onFirstLine();
+  await press(opened.b, opened.cx, "j");
+  await press(opened.b, opened.cx, "enter");
+  await answerRelated(opened.host, ok(relatedAnswer({ n: 2 })));
+  return opened;
+}
 // Each action the menu lists that has a key: where it can run, and its
 // key as pressed.
 const KEYED = {
@@ -8252,8 +8485,10 @@ const KEYED = {
     },
     key: ["z"],
   },
-  "line-board": { open: onFirstLine, key: ["enter"] },
+  "line-details": { open: onFirstLine, key: ["enter"] },
   "line-open": { open: onFirstLine, key: ["o"] },
+  "level-start": { open: onLevel, key: ["enter"] },
+  "level-open": { open: onLevel, key: ["o"] },
   mine: { open: openBoard, key: ["m"] },
   filter: { open: openBoard, key: ["/"] },
   reload: { open: openBoard, key: ["r"] },
@@ -8452,7 +8687,7 @@ test("UI: the hint line while the details panel has the keyboard: each key and w
   assert.deepEqual(pairs, [
     ["1 2 3 [ ]", "Tab"], ["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"],
     ["Enter", "Detail · Agent"], ["o", "öffnen"], ["Tab", "Board"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"],
-    ["z", "mehr"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"], ["m", "nur meine"], ["/", "Filter"], ["r", "neu laden"], [":", "Befehle"],
+    ["z", "mehr"], ["Enter", "Zeile zeigen"], ["o", "Zeile öffnen"], ["m", "nur meine"], ["/", "Filter"], ["r", "neu laden"], [":", "Befehle"],
     ["Esc", "zurück"],
   ]);
 });

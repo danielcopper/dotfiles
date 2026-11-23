@@ -1,7 +1,7 @@
 // What shows and what is selected, whatever a view's shape: the text filter,
 // "nur meine", and keyboard movement over columns (a list is one column).
 
-import { itemKey } from "./shared.js";
+import { itemKey, sameItem } from "./shared.js";
 
 // Whether `texts` (falsy ones left out) hold every word of `filter`
 // between them, case-insensitive; an empty filter matches anything.
@@ -123,7 +123,7 @@ export const columnOf = (columns, key) => columns.findIndex((c) => c.shown.some(
 // a selection { col, key }; null where none of them is that item.
 export function placeOf(columns, item) {
   for (const [col, c] of columns.entries()) {
-    const card = c.shown.find((i) => i.source === item.source && i.kind === item.kind && i.repo === item.repo && i.number === item.number);
+    const card = c.shown.find((i) => sameItem(i, item));
     if (card) return { col, key: card.key };
   }
   return null;

@@ -537,10 +537,25 @@ herdr-app`. Which files of the package git tracks is set in the root
   its bottom on its last line. The board scrolls the details itself (herdr
   gives a mod no scroll position to set), so they have no scrollbar to drag:
   the mouse wheel scrolls them, and a thin mark at the right shows where they
-  are. `Enter` selects a line's item on the board and shows its details, or
-  opens it in the browser where the board does not show it, `o` opens it,
-  and with no line selected `Enter` and `o` do what they do on the board; a
-  click on a line does what `Enter` on it does. `Enter` opens the details, a
+  are. `Enter` shows a line's item in the panel, a level down: a
+  sub-issue's, a child's, its description, its own related items and its
+  state (a pull request's line opens in the browser). The panel's top names
+  the way down (`tender#914 › #2217`, on Azure the numbers alone); there
+  `j/k` walk that item's lines, `Enter` goes further down, to any depth, and
+  `Esc` goes back up a level, to the line it came from, marked and scrolled
+  into view. The board's selection stays where it was. `o` opens the marked
+  line in the browser; with no line selected `Enter` and `o` act on the
+  item the panel shows: at the top what they do on the board, on a level
+  that item's session and page. On a level `s`, `a`, `H/L` and a story's
+  `z` do nothing, since they act on the board's item (the command menu
+  still offers them under its heading), and `Tab` back to the board closes
+  the levels. The command menu's "Zeile auf dem Board", and the panel's
+  button of that name while a line is marked, select the line's item where
+  a shown column holds it, its details shown at the top, and otherwise say
+  that it is not on the board. A click on a line does what `Enter` on it
+  does. `r` reads each level's related items again; a level whose item is
+  no longer among the lines of the level above goes, and the board says
+  so. `Enter` opens the details, a
   second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a

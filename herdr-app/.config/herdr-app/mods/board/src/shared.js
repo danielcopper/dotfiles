@@ -64,6 +64,10 @@ export const cardLabel = (item) => (item.source === "azure" && item.kind === "wo
 // (assigneeLogins: select.js isMine).
 export const personName = ({ name, login }) => name || login || null;
 
+// Whether `a` and `b` are the same issue, pull request or work item: the
+// same source, kind, repo and number (on Azure no repo, the same on both).
+export const sameItem = (a, b) => a.source === b.source && a.kind === b.kind && a.repo === b.repo && a.number === b.number;
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });

@@ -7,6 +7,13 @@
 // description.js's.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
+// Enter on a line shows its item's details in the panel, a level down
+// (the Board's drillLine; Esc goes back up): the Board keeps the levels on
+// the panel's keyboard (panel.levels, each the line's item under its
+// lineKey and what the level above showed when it went down), reads each
+// level's related items as it reads the selected item's, and names the way
+// down at the panel's top (pathLabel).
+//
 // A source that has related items gives `related: { reads(item), load(item,
 // view) }`: reads tells whether the item has any to read (no call); load
 // reads them (view: the view the item shows in) into { description,
@@ -24,14 +31,34 @@
 // warnings: what the source said besides, one line each. retry: a part
 // failed that is to be read again after the next refresh.
 
+import { cardLabel } from "./shared.js";
+
 // What a view keeps of its related items after a refresh starts: only
-// those of the item whose details show (`openKey`, null when none), read
+// those of the item whose details show (`openKey`, null when none) and of
+// the levels the panel went down to from it (`deeper`, their keys), read
 // or still being read, so that a refresh reads nothing for them; a failed
 // read, or one with a part to read again (retry), is dropped, so that it
 // is tried again; `r` reads them again too (the Board's reload).
-export function keptRelated(related, openKey) {
-  const entry = openKey === null ? undefined : related.get(openKey);
-  return new Map(entry && !entry.error && !entry.data?.retry ? [[openKey, entry]] : []);
+export function keptRelated(related, openKey, deeper = []) {
+  const keys = openKey === null ? [] : [openKey, ...deeper];
+  return new Map(keys.flatMap((key) => {
+    const entry = related.get(key);
+    return entry && !entry.error && !entry.data?.retry ? [[key, entry]] : [];
+  }));
+}
+
+// The key a line's item has as a level of the details panel: its source,
+// kind, repo and number, which name it wherever it is.
+export const lineKey = (line) => `${line.source}:${line.kind}:${line.repo ?? ""}#${line.number}`;
+
+// The way the panel went down from `root` (the board's selected item) to
+// the items `levels`, as its top shows it: "tender#914 › #2217". A GitHub
+// item in the root's repo is named by its number ("#2217"), one in
+// another by its label; an Azure work item by its number alone, as a card
+// names it (cardLabel).
+export function pathLabel(root, levels) {
+  const label = (i) => (i.source === "github" && i.repo === root.repo ? `#${i.number}` : cardLabel(i));
+  return [cardLabel(root), ...levels.map(label)].join(" › ");
 }
 
 // The lines of read related items (`data`, or null while none are read),
