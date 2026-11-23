@@ -1,14 +1,14 @@
-// The tone (a theme name such as "ansi4", "copper-orange" or "muted") a
-// label's chip takes, by its GitHub color's hue, and an issue type's, by its
-// named color, with the color an Epic by its title takes (which items are
-// one: cardType and epicLabel in shared.js); the board's colors in a theme,
-// its palette (paletteOf); how strong the tints are on a theme without
-// copper's colors; and tint, which the rest of the board tints with too.
+// The tone (a theme name such as "ansi4" or "muted") a label's chip takes,
+// by its GitHub color's hue, and an issue type's, by its named color, with
+// the color an Epic by its title takes (which items are one: cardType and
+// epicLabel in shared.js); the board's colors in a theme, its palette
+// (paletteOf); how strong the tints are on a theme without copper's colors;
+// and tint, which the rest of the board tints with too.
 // Which theme name a status or a state has, its source says (GITHUB_COLORS,
 // CATEGORY_COLORS); the selected look, border and background, is
 // selectedLook in helpers.js.
 //
-// Two paths, chosen once per theme (copperSteps), never per color: a theme
+// Two paths, chosen once per theme (copperColors), never per color: a theme
 // that carries copper's colors for mods (themes/copper-*.json, from
 // copper-design) draws in copper's text colors and tinted steps, with orange
 // as a hue of its own; any other theme draws in its own colors and tints of
@@ -54,33 +54,34 @@ export function layered(top, alpha, ground, fallback) {
 }
 
 // copper's colors for mods that the board takes (copper-design's herdr port
-// carries them as copper-<color>-<step> since v0.4.0): of each base color,
+// carries them as copper-<color>-<key> since v0.4.0): of each base color,
 // its tinted backgrounds, step 3 at rest and step 4 beside it, and its text
 // color (copper-<color>-text), which reads at 4.5:1 or more on both and on
 // the theme's background.
-const COPPER_HUES = ["red", "orange", "yellow", "green", "teal", "blue", "violet"];
-const COPPER_COLORS = [...COPPER_HUES, "neutral"];
-const COPPER_STEPS = [3, 4, "text"];
-const copperStep = (color, step) => `copper-${color}-${step}`;
-
-// A tone's copper color. A label's tone in a copper theme is a hue's own
-// name, copper-<hue> (hueTone). A theme name a source gives (GITHUB_COLORS,
-// CATEGORY_COLORS) takes its ANSI slot's color: copper's port lays ansi1 to
+//
+// A tone's copper color is its ANSI slot's: copper's port lays ansi1 to
 // ansi6 out as red, green, yellow, blue, violet and teal, and a bright
-// variant counts as its plain one (chipTone), but for ansi11, which only
-// GitHub's ORANGE takes: orange. Any other tone (muted, dim) is the neutral.
+// variant counts as its plain one (chipTone), but for ansi11, which stands
+// for orange: only GitHub's ORANGE takes it (GITHUB_COLORS), and a label
+// takes it for copper's orange (hueTone). Any other tone (muted, dim) is the
+// neutral.
 const ANSI_COPPER = { ansi1: "red", ansi2: "green", ansi3: "yellow", ansi4: "blue", ansi5: "violet", ansi6: "teal", ansi11: "orange" };
-function copperColor(tone) {
-  const own = /^copper-([a-z]+)$/.exec(tone ?? "")?.[1];
-  if (COPPER_HUES.includes(own)) return own;
-  return ANSI_COPPER[tone] ?? ANSI_COPPER[chipTone(tone)] ?? "neutral";
-}
+const COPPER_COLORS = [...Object.values(ANSI_COPPER), "neutral"];
+const COPPER_KEYS = [3, 4, "text"];
+const copperKey = (color, key) => `copper-${color}-${key}`;
+const copperColor = (tone) => ANSI_COPPER[tone] ?? ANSI_COPPER[chipTone(tone)] ?? "neutral";
 
 // Whether the theme `t` carries every copper color the board takes, each an
 // opaque #rrggbb. One answer for the whole theme: a theme that misses one (a
 // copper theme before v0.4.0, without text colors) draws in its own colors
 // and their tints throughout.
-export const copperSteps = (t) => COPPER_COLORS.every((color) => COPPER_STEPS.every((step) => OPAQUE.test(t[copperStep(color, step)] ?? "")));
+export const copperColors = (t) => COPPER_COLORS.every((color) => COPPER_KEYS.every((key) => OPAQUE.test(t[copperKey(color, key)] ?? "")));
+
+// Where a label's color turns from copper's red to its orange, as an OKLCH
+// hue in degrees: further toward orange than halfway between their text
+// colors (about 4 and 50), so GitHub's dark reds (b60205 at 29, d93f0b at
+// 36) stay red.
+const RED_ORANGE = 40;
 
 // How far apart a tint has to stand from the ground beside it, as OKLab
 // distance times 100: the board's own bar for every pair, adopted from
@@ -97,13 +98,15 @@ const TINT_APART = 3;
 // neutral step 3).
 function copperTint(t, tone, grounds) {
   const color = copperColor(tone);
-  const rest = t[copperStep(color, 3)];
-  return grounds.every((g) => !OPAQUE.test(g ?? "") || apart(rest, g) >= TINT_APART) ? rest : t[copperStep(color, 4)];
+  const rest = t[copperKey(color, 3)];
+  return grounds.every((g) => !OPAQUE.test(g ?? "") || apart(rest, g) >= TINT_APART) ? rest : t[copperKey(color, 4)];
 }
 
-// The board's colors in the theme `t`, its palette, on the path copperSteps
-// chooses for it, worked out once per theme object: `hues`, the tones a
-// label can take, each with the theme name hueTone measures its hue by;
+// The board's colors in the theme `t`, its palette, on the path
+// copperColors chooses for it, worked out once per theme object: `hues`, the
+// tones a label can take, each with the theme name hueTone measures its hue
+// by; `borders`, where between two of them a label's hue turns from the one
+// to the other where that is not halfway ([low, high, hue]);
 // `named(name)`, the tone of a named color a source gives (an issue type's);
 // `text(tone)`, the color of text, lines and state fills in a tone;
 // `selected`, a selected card's or row's background; `chip(tone)` and
@@ -112,26 +115,27 @@ function copperTint(t, tone, grounds) {
 // own.
 const palettes = new WeakMap();
 function paletteOf(t) {
-  if (!palettes.has(t)) palettes.set(t, copperSteps(t) ? copperPalette(t) : tintedPalette(t));
+  if (!palettes.has(t)) palettes.set(t, copperColors(t) ? copperPalette(t) : tintedPalette(t));
   return palettes.get(t);
 }
 
-// A copper theme's palette. A label takes one of copper's seven hues
-// (copper-<hue>, measured by its text color); a named color stays as its
-// source names it. Text, lines and state fills in a tone take its copper
-// color's text color (copperColor). A selected card or row stands on the
-// theme's `selected`, copper's own blue step for a selected row. A chip
-// stands on its tone's copper tint for what a chip stands on, a card (the
-// theme's background) and a selected one; a column head on its tone's
-// copper tint for both grounds a head stands on (copperTint), a column's
-// chrome and the Sprint's background, so a head looks the same on either. A
-// drop target keeps its ground and the accent border marks it: its
-// `selected` would match a selected card.
+// A copper theme's palette. A label takes one of copper's seven hues, as
+// the tone ANSI_COPPER gives it, measured by its text color, red below
+// RED_ORANGE; a named color stays as its source names it. Text, lines and
+// state fills in a tone take its copper color's text color (copperColor). A
+// selected card or row stands on the theme's `selected`, copper's own blue
+// step for a selected row. A chip stands on its tone's copper tint for what
+// a chip stands on, a card (the theme's background) and a selected one; a
+// column head on its tone's copper tint for both grounds a head stands on
+// (copperTint), a column's chrome and the Sprint's background, so a head
+// looks the same on either. A drop target keeps its ground and the accent
+// border marks it: its `selected` would match a selected card.
 function copperPalette(t) {
   return {
-    hues: COPPER_HUES.map((hue) => [`copper-${hue}`, copperStep(hue, "text")]),
+    hues: Object.entries(ANSI_COPPER).map(([tone, color]) => [tone, copperKey(color, "text")]),
+    borders: [["ansi1", "ansi11", RED_ORANGE]],
     named: (name) => name,
-    text: (tone) => t[copperStep(copperColor(tone), "text")],
+    text: (tone) => t[copperKey(copperColor(tone), "text")],
     selected: t.selected,
     chip: (tone) => copperTint(t, tone, [t.background, t.selected]),
     head: (tone) => copperTint(t, tone, [t.chrome, t.background]),
@@ -159,6 +163,7 @@ function tintedPalette(t) {
   const text = (tone) => t[tone] ?? t.muted;
   return {
     hues: HUE_TONES.map((name) => [name, name]),
+    borders: [],
     named: chipTone,
     text,
     selected: layered(t.accent, SELECTED_ALPHA, t.background, t.selected),
@@ -177,9 +182,8 @@ export const chipBg = (t, tone) => paletteOf(t).chip(tone);
 export const headBg = (t, tone, ground) => paletteOf(t).head(tone, ground);
 export const dropBg = (t, ground) => paletteOf(t).drop(ground);
 
-// The tone of a note's level, which toneColor draws it in: an error, a
-// warning, a success, information (a banner line, a check's state, a
-// related item's note, a dialog's error).
+// The tone of a note's level, which toneColor draws every note the board
+// shows in: an error, a warning, a success, information.
 export const NOTE_TONES = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
 
 // The tones a label can take on a theme without copper's colors: the
@@ -230,14 +234,24 @@ function apart(one, other) {
 
 // The tone of a color from outside the theme (a GitHub label's): of the
 // hues the theme `t`'s palette offers (paletteOf), the one whose color is
-// nearest to it by OKLCH hue; a grey one (GREY_CHROMA), one that is no
-// color, or a theme without those colors gives "muted".
+// nearest to it by OKLCH hue, but between two hues with a border of their
+// own the one on its side of that border; a grey one (GREY_CHROMA), one
+// that is no color, or a theme without those colors gives "muted".
 export function hueTone(t, hex) {
   const own = oklch(hex);
   if (!own || own.c < GREY_CHROMA) return "muted";
+  const { hues, borders } = paletteOf(t);
+  const hueOf = (tone) => oklch(t[hues.find(([name]) => name === tone)?.[1]])?.h;
+  // How far round from `from` a hue lies, going up.
+  const round = (h, from) => (h - from + 360) % 360;
+  for (const [low, high, at] of borders) {
+    const [from, to] = [hueOf(low), hueOf(high)];
+    if (from === undefined || to === undefined || round(own.h, from) > round(to, from)) continue;
+    return round(own.h, from) < round(at, from) ? low : high;
+  }
   let best = "muted";
   let distance = Infinity;
-  for (const [tone, name] of paletteOf(t).hues) {
+  for (const [tone, name] of hues) {
     const theirs = oklch(t[name]);
     if (!theirs) continue;
     const d = Math.min(Math.abs(own.h - theirs.h), 360 - Math.abs(own.h - theirs.h));
@@ -246,10 +260,11 @@ export function hueTone(t, hex) {
   return best;
 }
 
-// The tone of an issue type's chip for its named color on a theme without
-// copper's colors, the theme name GITHUB_COLORS gives it: a bright variant
-// becomes its HUE_TONES color (ORANGE's ansi11 → ansi3, PINK's ansi13 →
-// ansi5), the rest stays. A copper theme keeps the name (copperPalette).
+// A theme name's plain variant: a bright one (ansi9 to ansi14) becomes its
+// HUE_TONES color (ORANGE's ansi11 → ansi3, PINK's ansi13 → ansi5), the rest
+// stays. On a theme without copper's colors it is an issue type's chip tone
+// for the theme name GITHUB_COLORS gives it (tintedPalette); on a copper
+// theme it takes a bright tone to its copper color (copperColor).
 export function chipTone(name) {
   const n = /^ansi(9|1[0-4])$/.exec(name ?? "")?.[1];
   return n ? `ansi${Number(n) - 8}` : name;

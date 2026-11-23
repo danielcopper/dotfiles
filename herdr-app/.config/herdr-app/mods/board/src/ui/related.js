@@ -93,26 +93,26 @@ export function lineShows(ui, item, entry, n) {
 // (the Board's kept read: { data, error, shown }, data and error null
 // while it loads, shown the description as drawn (shownDescription, made
 // once per read); null before a read starts): { kind: "head" | "note" |
-// "text" | "line", text, tone ("muted", "error", "warning") or, for a
-// line, `line` and its index `n` among relatedLines (the one order of the
-// lines); a "text" is the description, one row: its `text` as drawn and
-// its `format`.
+// "text" | "line", text, a note's level ("info", "error", "warning";
+// NOTE_TONES) or, for a line, `line` and its index `n` among relatedLines
+// (the one order of the lines); a "text" is the description, one row: its
+// `text` as drawn and its `format`.
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
   if (!data) {
-    const why = entry?.error ? { kind: "note", text: entry.error, tone: "error" } : { kind: "note", text: "lädt …", tone: "muted" };
+    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: "lädt …", level: "info" };
     return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
   const lines = relatedLines(data);
   const rows = [description];
   if (typeof entry.shown === "string") rows.push({ kind: "text", text: entry.shown, format: data.format === "html" ? "html" : "markdown" });
-  else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
+  else rows.push({ kind: "note", text: "keine Beschreibung", level: "info" });
   const body = (section, none) => {
-    if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
+    if (section.error) rows.push({ kind: "note", text: section.error, level: "error" });
     for (const line of section.lines) rows.push({ kind: "line", line, n: lines.indexOf(line) });
-    if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", tone: "muted" });
-    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, tone: "muted" });
+    if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", level: "info" });
+    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, level: "info" });
   };
   rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
   body(data.subIssues, true);
@@ -121,7 +121,7 @@ export function relatedRows(item, entry) {
     rows.push({ kind: "head", text: prsHead(prs) });
     body(prs, false);
   }
-  for (const text of data.warnings ?? []) rows.push({ kind: "note", text, tone: "warning" });
+  for (const text of data.warnings ?? []) rows.push({ kind: "note", text, level: "warning" });
   return rows;
 }
 
@@ -163,7 +163,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
   const data = b.state(view.id).data;
   const rowOf = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
-    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, NOTE_TONES[r.tone] ?? "muted")).child(r.text);
+    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, NOTE_TONES[r.level])).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const color = line.color ?? stateColor(data, line.state);
