@@ -1,7 +1,7 @@
 // views.json: reading it, what is wrong with it, and the start settings for
 // an item.
 
-import { CONFIG_NAME, isObject, isText, textList } from "./shared.js";
+import { CONFIG_NAME, PAGE, isObject, isText, textList } from "./shared.js";
 import { viewDefaults, viewKind } from "./kinds/index.js";
 
 export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
@@ -35,15 +35,20 @@ const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] 
 // "source" may stay from views.json's first form, as "github".
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
+// The most items a board reads, and so its default limit: ten pages of
+// GitHub's (PAGE), one gh call each.
+const BOARD_LIMIT = 10 * PAGE;
+
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
 // kinds/index.js, says how it shows): its own keys, what is wrong with them,
 // its fields with their defaults filled in, and the largest `limit` it takes:
-// a board's is the most items it reads, in pages of GitHub's 100 (one gh
-// call each); a list's is each search's `first`, one page.
+// a board's is the most items it reads, in pages of up to PAGE, one gh call
+// each, at most as many calls as full pages would take; a list's is each
+// search's `first`, one page.
 const VIEW_KINDS = {
   "github board": {
     keys: ["project", "filter"],
-    maxLimit: 1000,
+    maxLimit: BOARD_LIMIT,
     problems(v) {
       const p = v.project;
       const out = [];
@@ -55,12 +60,12 @@ const VIEW_KINDS = {
     defaults: (v) => ({
       project: { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" },
       filter: v.filter ?? "",
-      limit: v.limit ?? 1000,
+      limit: v.limit ?? BOARD_LIMIT,
     }),
   },
   "github list": {
     keys: ["sections"],
-    maxLimit: 100,
+    maxLimit: PAGE,
     problems: (v) =>
       Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query))
         ? []

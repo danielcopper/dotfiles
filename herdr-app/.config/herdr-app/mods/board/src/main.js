@@ -33,8 +33,8 @@
 // with.
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
-// up to 100 items it reads (GitHub's most), at most ten for the 1000 items
-// of its limit; a list view one. An issue's related items (its
+// up to 100 items it reads (GitHub's most), at most as many as full pages
+// of its limit take: ten for the 1000 by default; a list view one. An issue's related items (its
 // description, parent, sub-issues and linked pull requests) cost one more
 // when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh

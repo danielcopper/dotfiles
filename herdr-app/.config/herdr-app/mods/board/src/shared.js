@@ -29,6 +29,10 @@ export function failure(text, { write = false, unclear = false } = {}) {
 export const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 export const isText = (v) => typeof v === "string" && v.trim() !== "";
 export const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+// How many items GitHub sends in one page of a connection at most (its
+// `first`).
+export const PAGE = 100;
+
 export const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
 export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 

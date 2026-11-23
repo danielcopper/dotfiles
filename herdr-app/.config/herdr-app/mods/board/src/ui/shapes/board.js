@@ -4,10 +4,9 @@
 // the columns names the hidden ones and a click on a name shows it again;
 // the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
-// count, target, cards }], total, limited, viewer, limit }
-// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
-// columns hidden by default) and, where the data does not name its own,
-// limit.
+// count, target, cards }], total, limited, viewer, read }
+// (parseGithubBoard). View fields it reads: id, source, layout and hide (the
+// columns hidden by default).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -142,7 +141,7 @@ function drawBoard(b, t, mono, view, st) {
     .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
-        .child(`Nur die ersten ${st.data.limit ?? view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+        .child(`Nur die ersten ${st.data.read} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );
 }
 
