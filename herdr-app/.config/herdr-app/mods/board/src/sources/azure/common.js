@@ -99,7 +99,7 @@ export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 // stand alone in quotes are built from SYSTEM: the command check
 // (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
 // for a herdr command.
-const SYSTEM = "System.";
+export const SYSTEM = "System.";
 export const AREA_PATH = `${SYSTEM}AreaPath`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 

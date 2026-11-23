@@ -63,7 +63,15 @@
 //   azure-backlog-items.json (az boards query, with the order field; one
 //   item without it), azure-backlog-created.json (az boards work-item
 //   create) and azure-backlog-related.json (az boards work-item relation
-//   add); the team's areas are azure-sprint-areas.json.
+//   add); the team's areas are azure-sprint-areas.json;
+// - written the same way for a work item's related items (the REST
+//   reference's Work Items - Get Work Item with $expand=relations, and the
+//   pull request link az repos pr work-item add writes), with made-up
+//   names, not recorded: azure-related-item.json (az boards work-item show
+//   --expand relations: a description in HTML with an image, children, a
+//   parent, a pull request, a branch and a related link) and
+//   azure-related-children.json (az boards query for the children, one of
+//   them not found).
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -1567,6 +1575,16 @@ function element(kind) {
   return proxy;
 }
 
+// herdr's TextView as the fake gpui draws it (TextView.markdown and
+// TextView.html): an element of kind "textview" with its `format`, `viewId`
+// and text (`source`), which it also holds as its one child.
+function textView(format, id, text) {
+  const el = element("textview");
+  Object.assign(el, { format, viewId: id, source: text });
+  el.kids.push(text);
+  return el;
+}
+
 // The fake herdr: exec calls wait until the test answers them, except the
 // questions for gh's and az's paths: those are answered at once from
 // which(tool, on) (a path, "" for not found, an Error, or exec's result;
@@ -1666,6 +1684,9 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
     h_flex: () => element("h_flex"),
     v_flex: () => element("v_flex"),
     "Input.new": () => element("input"),
+    // A TextView: its format, id and text, the text as its one child.
+    "TextView.markdown": (id, text) => textView("markdown", id, text),
+    "TextView.html": (id, text) => textView("html", id, text),
     svg: (path) => element("svg").path(path),
   };
   // A call of a tool: by its name, or by the path which gave for it.
@@ -5449,6 +5470,8 @@ const sectionTexts = (b) => {
   const all = relatedTexts(b);
   return all.slice(all.findIndex((t) => t.startsWith("UNTERAUFGABEN")));
 };
+// The description's TextView as the board draws it now, or null.
+const textViewOf = (b) => chainTo(byId(detailPanel(b), "related-lines"), (el) => el.kind === "textview")?.at(-1) ?? null;
 const descriptionTexts = (b) => {
   const all = relatedTexts(b);
   return all.slice(0, all.findIndex((t) => t.startsWith("UNTERAUFGABEN")));
@@ -5946,33 +5969,190 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
 });
 
-test("a description as the details show it: line breaks kept, trailing blanks cut, a run of empty lines as one, none at either end, Markdown as written", () => {
-  assert.deepEqual(board.descriptionLines("\r\n\nRolls it out.  \r\n\r\n\r\n## Steps\r- one\n\n\n- **two**\n\n"), ["Rolls it out.", "", "## Steps", "- one", "", "- **two**"]);
-  assert.deepEqual([board.descriptionLines(""), board.descriptionLines("  \n \n"), board.descriptionLines(null)], [[], [], []]);
-  assert.deepEqual(board.descriptionLines("- a\n  - b\n\t- c"), ["- a", "  - b", "\t- c"], "leading indentation kept");
-  const d = board.parseGithubRelated(json("github-related.json"), issueItem());
-  assert.equal(d.description, json("github-related.json").data.repository.issue.body, "the issue's body, as GitHub sends it");
-  assert.equal(board.parseGithubRelated(JSON.parse(relatedAnswer()), issueItem()).description, "", "none");
-  assert.match(board.githubRelatedArgs(issueItem())[3].replace(/\s+/g, " "), /issue\(number: \$number\) \{ body subIssues\(/, "read in the same query");
+test("a description is drawn as written, its images made links: Markdown's, inline and by reference, and every <img> or <image> in HTML and in Markdown, whatever its case and quoting", () => {
+  const md = (text) => board.shownDescription(text, "markdown");
+  const html = (text) => board.shownDescription(text, "html");
+  assert.equal(md("Rolls it out.\r\n\r\n## Steps\n- one\n- **two**"), "Rolls it out.\r\n\r\n## Steps\n- one\n- **two**", "the rest as written");
+  assert.equal(md("see ![the shot](https://example.com/a.png \"title\") here"), "see [Bild: the shot](https://example.com/a.png \"title\") here");
+  assert.equal(md("![](https://example.com/a.png)"), "[Bild](https://example.com/a.png)", "no alt");
+  assert.equal(md("![logo][l]\n\n[l]: https://example.com/l.png"), "[Bild: logo][l]\n\n[l]: https://example.com/l.png", "by reference");
+  assert.equal(md("a <img src=\"https://example.com/b.png\" alt=\"chart\"> b"), "a <a href=\"https://example.com/b.png\">Bild: chart</a> b", "raw HTML in Markdown");
+  assert.equal(html("<p><IMG SRC='https://example.com/c.png' ALT=cat></p>"), "<p><a href=\"https://example.com/c.png\">Bild: cat</a></p>", "upper case, single quotes, no quotes");
+  assert.equal(html("<img/src=https://example.com/d.png alt=\"a > b\"/>"), "<a href=\"https://example.com/d.png\">Bild: a &gt; b</a>", "a slash for a space, a > in a quoted value");
+  assert.equal(html("<image src=\"https://example.com/e.png\">"), "<a href=\"https://example.com/e.png\">Bild</a>", "<image>, which HTML reads as <img>");
+  assert.equal(html("<img\n  data-src=\"https://example.com/x.png\"\n  src = \"https://example.com/f.png\" alt='say \"hi\"'>"),
+    "<a href=\"https://example.com/f.png\">Bild: say &quot;hi&quot;</a>", "attributes on lines of their own; data-src is not src");
+  assert.equal(html("<img alt=\"no source\">"), "Bild: no source", "no src: its text");
+  assert.equal(html("<imgx src=\"a\"><p>![x](y)</p>"), "<imgx src=\"a\"><p>![x](y)</p>", "another tag, and Markdown in HTML, stay");
+  assert.equal(md("<img src=\"a&amp;b\" alt=\"x&y\">"), "<a href=\"a&amp;b\">Bild: x&amp;y</a>", "entities kept, a bare & escaped");
+  assert.deepEqual([md(""), md("  \n "), md(null), html("\n")], [null, null, null, null], "blank: none");
+  const sample = [
+    "![a](u) ![b][r] ![](v) \\![c](w)", "<img src=a>", "<IMG\tSRC=\"b\">", "<Image src='c' />", "<img/src=d>", "<p><img src=\"e\" alt=\">\"></p>",
+    "`![code](x)` and\n\n```\n<img src=\"y\">\n```",
+  ].join("\n");
+  for (const out of [md(sample), html(sample)]) assert.doesNotMatch(out, /<\s*im(?:g|age)(?=[\s/>])/i, "no image tag reaches TextView");
+  assert.doesNotMatch(md(sample), /!\[/, "no Markdown image reaches TextView, in code neither");
 });
 
-test("UI: the details show the issue's description above its sub-issues, as written, „lädt …“ until it comes, the reason after a failure, „keine Beschreibung“ for none", async () => {
+test("UI: the details draw the description with TextView, Markdown for an issue's body as GitHub sends it, its images as links; „lädt …“ until it comes, the reason after a failure, „keine Beschreibung“ for none", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "enter");
   assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "lädt …"]);
-  await answerRelated(host, ok(fixture("github-related.json")));
+  const body = "Rolls it out.\n\n![plan](https://example.com/plan.png)\n<img src=\"https://example.com/b.png\">";
+  const answer = JSON.parse(fixture("github-related.json"));
+  answer.data.repository.issue.body = body;
+  await answerRelated(host, ok(JSON.stringify(answer)));
   assert.equal(readsOf(host).length, 0, "one call for all of it");
-  assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "Rolls the sample tool out to the list readers.", "", "## Steps", "- read the list", "- page through it"]);
+  assert.equal(board.parseGithubRelated(answer, issueItem()).description, body, "the issue's body, as GitHub sends it");
+  const view = textViewOf(b);
+  assert.deepEqual([view.format, view.viewId, view.source], ["markdown", "description-PVTI_rec4", board.shownDescription(body, "markdown")]);
+  assert.doesNotMatch(view.source, /!\[|<img/i, "no image");
   assert.ok(relatedTexts(b).indexOf("BESCHREIBUNG") < relatedTexts(b).findIndex((t) => t.startsWith("UNTERAUFGABEN")), "above the sub-issues, in the same scrolled block");
-  const block = byId(detailPanel(b), "related-lines").kids[1];
-  assert.deepEqual([block.kind, block.kids.length, block.styles.includes("gap")], ["v_flex", 5, false], "one row, its lines with no gap between them");
-  assert.deepEqual(block.kids.map((l) => l.with.min_h[0]), [18, 18, 18, 18, 18], "an empty line keeps its height");
+  assert.equal(byId(detailPanel(b), "related-lines").kids.findIndex((k) => Boolean(chainTo(k, (el) => el.kind === "textview"))), 1, "one row, after the head");
   await press(b, cx, "r");
   await answerRelated(host, ok(relatedAnswer()));
-  assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "keine Beschreibung"]);
+  assert.deepEqual([descriptionTexts(b), textViewOf(b)], [["BESCHREIBUNG", "keine Beschreibung"], null]);
   await press(b, cx, "r");
   await answerRelated(host, { code: 1, stdout: "", stderr: "gh: GraphQL: Something broke\n" });
   assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "GraphQL: Something broke"]);
+});
+
+test("UI: a link in the description opens through the board, http and https only; anything else is said, not opened", async () => {
+  const { b, cx } = await openRelated();
+  const handler = textViewOf(b).with.on_link_click[0];
+  cx.call((own) => handler("https://example.com/spec", own));
+  cx.call((own) => handler("http://example.com/x", own));
+  assert.deepEqual(cx.opened, ["https://example.com/spec", "http://example.com/x"]);
+  for (const url of ["javascript:alert(1)", "file:///etc/passwd", "mailto:a@example.com", "https://", "not a url"]) {
+    cx.call((own) => handler(url, own));
+    assert.equal(b.notice?.text, `Link nicht geöffnet (nur http und https): ${url}`, url);
+  }
+  assert.equal(cx.opened.length, 2);
+});
+
+// The description's measured block, and its height reported as `height`.
+const sizeDescription = (b, cx, height) => {
+  const block = byId(detailPanel(b), `description-size-${b.selected(b.view()).key}`);
+  cx.call((own) => block.with.on_size_change[0]({ width: 400, height }, own));
+};
+const foldBox = (b) => byId(detailPanel(b), "description");
+
+test("UI: a description taller than 12 lines shows folded to their height with „… mehr (e)“; e or a click unfolds and folds it, on the board and in the panel; a short one has no fold and leaves e alone", async () => {
+  const { b, cx, host, st } = await openRelated();
+  assert.equal(board.FOLDED_H, 216);
+  sizeDescription(b, cx, 120);
+  assert.deepEqual([foldBox(b).styles.includes("max_h"), byId(detailPanel(b), "description-fold"), hintKeys(b).includes("e")], [false, null, false], "short: no fold");
+  const stopped = cx.stopped;
+  await press(b, cx, "e");
+  assert.equal(cx.stopped, stopped, "e is not taken");
+  sizeDescription(b, cx, 500);
+  assert.deepEqual([foldBox(b).with.max_h[0], foldBox(b).styles.includes("overflow_hidden"), texts(byId(detailPanel(b), "description-fold"))], [216, true, ["… mehr (e)"]]);
+  const hintOf = (name) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === name).map((t) => t[1]);
+  assert.deepEqual(hintOf("e"), ["mehr"]);
+  await press(b, cx, "e");
+  assert.deepEqual([foldBox(b).styles.includes("max_h"), texts(byId(detailPanel(b), "description-fold")), hintOf("e")], [false, ["weniger (e)"], ["weniger"]], "unfolded");
+  await tab(b, cx);
+  assert.deepEqual(hintOf("e"), ["weniger"], "the panel's hint");
+  await press(b, cx, "e");
+  assert.equal(foldBox(b).with.max_h[0], 216, "folded again, from the panel");
+  await click(b, cx, "description-fold");
+  assert.equal(foldBox(b).styles.includes("max_h"), false, "a click unfolds");
+  await press(b, cx, "e", { modifiers: { control: true } });
+  assert.equal(foldBox(b).styles.includes("max_h"), false, "with Control e is not the fold's");
+  await press(b, cx, "escape");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec5");
+  await answerRelated(host, ok(fixture("github-related.json")));
+  sizeDescription(b, cx, 500);
+  assert.equal(foldBox(b).with.max_h[0], 216, "another item's shows folded");
+});
+
+// ---- An Azure work item's related items ----
+
+const azureRelatedOf = (host) => host.open("az").filter((c) => c.args.includes("show") && c.args.includes("relations"));
+const childrenQuery = (host) => host.open("az").filter((c) => AZ.query(c.args) && c.args.some((a) => String(a).includes("IN (")));
+
+test("an Azure work item's related items: one az call for the item with its links, one WIQL query by id for its children; what the answers hold", () => {
+  const c = sprintTeam();
+  assert.deepEqual(board.azRelatedArgs(c, 301), ["boards", "work-item", "show", "--org", ORG, "--detect", "false", "--id", "301", "--expand", "relations", "-o", "json"]);
+  assert.equal(board.childrenWiql([312, 311]), "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State] FROM WorkItems WHERE [System.Id] IN (312, 311) ORDER BY [System.Id]");
+  const read = board.parseRelatedItem(fixture("azure-related-item.json"));
+  assert.match(read.description, /^<div><h2>Goal<\/h2>/);
+  assert.deepEqual(read.children, [312, 311, 399], "the children, in the links' order; parent, related and branch links left out");
+  assert.deepEqual(read.prs, [{ project: "0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88", repo: "6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c", number: 57 }]);
+  const bare = board.parseRelatedItem(JSON.stringify({ id: 5, fields: {}, relations: null }));
+  assert.deepEqual(bare, { description: "", children: [], prs: [] }, "no description, no links");
+  const twice = JSON.parse(fixture("azure-related-item.json"));
+  twice.relations.push(twice.relations[0], twice.relations[3], { rel: "System.LinkTypes.Hierarchy-Forward", url: "https://dev.azure.com/x/_apis/wit/workItems/abc" });
+  assert.deepEqual([board.parseRelatedItem(JSON.stringify(twice)).children, board.parseRelatedItem(JSON.stringify(twice)).prs.length], [[312, 311, 399], 1], "each once; a link without an id left out");
+  assert.throws(() => board.parseRelatedItem("[]"), /^Error: Azure lieferte keinen Work Item$/);
+  assert.throws(() => board.parseRelatedItem("not json"), /kein lesbares JSON/);
+  assert.deepEqual([board.pullRequestOf("vstfs:///Git/PullRequestId/p%2Fr%2F9"), board.pullRequestOf("vstfs:///Git/Ref/p%2Fr%2FGBmain")], [{ project: "p", repo: "r", number: 9 }, null]);
+  const states = sprintData().meta.states;
+  const lines = board.parseChildren(fixture("azure-related-children.json"), [312, 311, 399], c, states);
+  assert.deepEqual(lines.map((l) => [board.itemLabel(l), l.title, l.type, l.state, l.color, l.done, l.url]), [
+    ["AB#312", "Keep the last good copy", "Task", "Done", "ansi2", true, `${ORG}/Example%20Project/_workitems/edit/312`],
+    ["AB#311", "Parse the sample file", "Task", "To Do", "muted", false, `${ORG}/Example%20Project/_workitems/edit/311`],
+  ], "in the links' order, a Completed one done; one the query does not find left out");
+  assert.deepEqual(board.parseChildren("", [1], c, states), [], "no output: none");
+  assert.equal(board.parseChildren(JSON.stringify([{ id: 1, fields: { "System.State": "Odd" } }]), [1], c, states)[0].color, "muted", "a state the view does not know");
+  const reads = board.makeAzure(null).related.reads;
+  assert.deepEqual([reads({ source: "azure", kind: "workitem", number: 3 }), reads({ source: "azure", kind: "pr", number: 3 }), reads({ source: "azure", kind: "workitem", number: null }), reads({ source: "github", kind: "issue", number: 3 })],
+    [true, false, false, false]);
+});
+
+test("UI: a Sprint story's details read its related items: its description as HTML without images, its children with their states, a linked pull request by its id; Tab walks them", async () => {
+  const { b, cx, host, st } = await openSprint();
+  assert.equal(st().sel.key, "AB#301");
+  await press(b, cx, "enter");
+  assert.equal(azureRelatedOf(host).length, 1, "one az call when the details open");
+  assert.ok(azureRelatedOf(host)[0].args.includes("301"));
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "lädt …"]);
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  assert.equal(childrenQuery(host).length, 1, "then one query for the children");
+  assert.ok(childrenQuery(host)[0].args.includes(board.childrenWiql([312, 311, 399])));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  assert.equal(host.open("az").length, 0);
+  const view = textViewOf(b);
+  assert.deepEqual([view.format, view.viewId], ["html", "description-AB#301"]);
+  assert.equal(view.source, board.shownDescription(json("azure-related-item.json").fields["System.Description"], "html"));
+  assert.match(view.source, /<a href="https:\/\/dev\.azure\.com\/[^"]+fileName=shot\.png">Bild: shot<\/a>/);
+  assert.doesNotMatch(view.source, /<img/i);
+  assert.deepEqual(sectionTexts(b), [
+    "UNTERAUFGABEN", "AB#312", "Keep the last good copy", "Done", "AB#311", "Parse the sample file", "To Do", "1 ohne Zugriff",
+    "VERKNÜPFTE PRS · 1", "!57", "Pull Request", "verknüpft",
+  ]);
+  assert.equal(byId(detailPanel(b), "related-line-0").with.opacity[0], 0.55, "a done child dimmed");
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual([st().sel.key, st().detail], ["AB#311", true], "a child on the board: selected, its details shown");
+  assert.equal(azureRelatedOf(host).length, 1, "its related items are read");
+  await host.answer("az", ok(JSON.stringify({ id: 311, fields: {}, relations: null })), (a) => a.includes("relations"));
+  assert.deepEqual([host.open("az").length, descriptionTexts(b), sectionTexts(b)], [0, ["BESCHREIBUNG", "keine Beschreibung"], ["UNTERAUFGABEN", "keine"]], "no children: no query");
+  await press(b, cx, "escape");
+  cx.call((own) => b.choose(b.view(), { col: 0, key: "AB#301" }, own));
+  await settle();
+  assert.deepEqual([st().detail, host.open("az").length], [true, 0], "back on the story: kept, nothing read again");
+  await tab(b, cx);
+  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, "o");
+  assert.equal(cx.opened.at(-1), `${ORG}/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_git/6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c/pullrequest/57`, "the pull request's page");
+});
+
+test("UI: an Azure related read that fails says why; a children query that fails says why in their place, the rest stays; r reads them again", async () => {
+  const { b, cx, host } = await openSprint();
+  await press(b, cx, "enter");
+  await host.answer("az", azRefused("TF401232: Work item 301 does not exist, or you do not have permissions to read it."), (a) => a.includes("relations"));
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "TF401232: Work item 301 does not exist, or you do not have permissions to read it."]);
+  await press(b, cx, "r");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false });
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", azRefused("Operation returned a 400 status code."), AZ.query);
+  assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "Operation returned a 400 status code.", "VERKNÜPFTE PRS · 1", "!57", "Pull Request", "verknüpft"]);
+  assert.equal(textViewOf(b).format, "html", "the description stays");
 });
 
 test("UI: the detail panel takes a third of the board area as a share, no narrower than one of the columns beside it, the 420 and 720 pixel bounds last", async () => {

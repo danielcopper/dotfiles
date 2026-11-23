@@ -1,0 +1,54 @@
+{
+  "fields": {
+    "System.Id": 301,
+    "System.AreaPath": "Example Project\\Core",
+    "System.TeamProject": "Example Project",
+    "System.IterationPath": "Example Project\\Sprint 12",
+    "System.WorkItemType": "User Story",
+    "System.State": "In Progress",
+    "System.Reason": "Implementation started",
+    "System.Title": "Import the sample catalogue",
+    "System.Description": "<div><h2>Goal</h2><p>Read the <b>sample</b> catalogue into the store.</p><ul><li>parse the file</li><li>keep the last good copy</li></ul><p><img src=\"https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/attachments/5d2e?fileName=shot.png\" alt=\"shot\"></p><p>See <a href=\"https://example.com/spec\">the spec</a>.</p></div>",
+    "Microsoft.VSTS.Common.Priority": 2
+  },
+  "id": 301,
+  "relations": [
+    {
+      "attributes": { "isLocked": false, "name": "Child" },
+      "rel": "System.LinkTypes.Hierarchy-Forward",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/312"
+    },
+    {
+      "attributes": { "isLocked": false, "name": "Child" },
+      "rel": "System.LinkTypes.Hierarchy-Forward",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/311"
+    },
+    {
+      "attributes": { "isLocked": false, "name": "Parent" },
+      "rel": "System.LinkTypes.Hierarchy-Reverse",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/290"
+    },
+    {
+      "attributes": { "authorizedDate": "2026-11-18T09:12:40.11Z", "id": 4211, "name": "Pull Request", "resourceCreatedDate": "2026-11-18T09:12:40.11Z", "resourceModifiedDate": "2026-11-18T09:12:40.11Z", "revisedDate": "9999-01-01T00:00:00Z" },
+      "rel": "ArtifactLink",
+      "url": "vstfs:///Git/PullRequestId/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88%2F6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c%2F57"
+    },
+    {
+      "attributes": { "authorizedDate": "2026-11-17T15:02:11.4Z", "id": 4198, "name": "Branch", "resourceCreatedDate": "2026-11-17T15:02:11.4Z", "resourceModifiedDate": "2026-11-17T15:02:11.4Z", "revisedDate": "9999-01-01T00:00:00Z" },
+      "rel": "ArtifactLink",
+      "url": "vstfs:///Git/Ref/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88%2F6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c%2FGBfeature%2Fsample-import"
+    },
+    {
+      "attributes": { "isLocked": false, "name": "Child" },
+      "rel": "System.LinkTypes.Hierarchy-Forward",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/399"
+    },
+    {
+      "attributes": { "isLocked": false, "name": "Related" },
+      "rel": "System.LinkTypes.Related",
+      "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/302"
+    }
+  ],
+  "rev": 7,
+  "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/301"
+}

@@ -1,6 +1,8 @@
 // The detail panel's sections of an item's related items (related.js): its
-// description ("BESCHREIBUNG", its lines as written, "keine Beschreibung"
-// where it has none), its sub-issues, then, where it has any or the source
+// description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
+// Markdown or HTML as its source writes it, its images as links:
+// shownDescription; "keine Beschreibung" where it has none), its
+// sub-issues (an Azure work item's children), then, where it has any or the source
 // could not send them, the pull requests linked to it; one line each with
 // its key, title and state (a done one dimmed, a draft marked), and below
 // a section how many it sent that cannot be read. While they load the
@@ -8,24 +10,40 @@
 // failure the reason; a section the source could not send says why in its
 // place; what the source said besides follows at the end. The line the
 // panel has selected while it has the keyboard is marked; a click on a
-// line is Enter on it (the Board's pickLine).
+// line is Enter on it (the Board's pickLine). A link in the description
+// opens through the Board's openLink (http and https only).
+//
+// A description taller than about 12 lines shows folded to that height,
+// with "… mehr (e)" below; `e` or a click on it unfolds it ("weniger (e)"
+// folds it again). TextView tells no count of its lines, so the fold goes
+// by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
+// description is, its block measures (on_size_change), and it folds only
+// once that is known to be more.
 
 import { div } from "gpui-kit";
-import { h_flex, v_flex, ScrollHandle } from "gpui-base";
+import { h_flex, v_flex, ScrollHandle, TextView } from "gpui-base";
 import { itemLabel } from "../shared.js";
-import { descriptionLines, prsHead, relatedLines, subIssuesHead } from "../related.js";
+import { prsHead, relatedLines, shownDescription, subIssuesHead } from "../related.js";
 import { chip, sectionFrame, sectionTitle, selectedLook } from "./helpers.js";
 
+export const FOLDED_H = 12 * 18;
+
 // What the related items keep per Board, made when it starts (why then:
-// ui/shapes/index.js): the lines' scroll handle.
-export const relatedState = () => ({ scroll: ScrollHandle.new() });
+// ui/shapes/index.js): the lines' scroll handle, the measured height of
+// each description by its item's key, and the key of the item whose
+// description is unfolded (null: none; another item's shows folded).
+export const relatedState = () => ({ scroll: ScrollHandle.new(), heights: new Map(), unfolded: null });
+
+// Whether the description of `item` is taller than FOLDED_H, as measured.
+export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
 // (the Board's kept read: { data, error }, both null while it loads; null
 // before a read starts): { kind: "head" | "note" | "text" | "line", text,
 // tone ("muted", "error", "warning") or, for a line, `line` and its index
 // `n` among relatedLines (the one order of the lines); a "text" is the
-// description, one row, its `lines` ("" an empty one).
+// description, one row: `text` as drawn (shownDescription) and its
+// `format`.
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
@@ -35,8 +53,9 @@ export function relatedRows(item, entry) {
   }
   const lines = relatedLines(data);
   const rows = [description];
-  const text = descriptionLines(data.description);
-  if (text.length) rows.push({ kind: "text", lines: text });
+  const format = data.format === "html" ? "html" : "markdown";
+  const text = shownDescription(data.description, format);
+  if (text !== null) rows.push({ kind: "text", text, format });
   else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
@@ -58,6 +77,43 @@ export function relatedRows(item, entry) {
 // The child of the scrolled block that holds line `n`.
 export const lineChild = (item, entry, n) => relatedRows(item, entry).findIndex((r) => r.kind === "line" && r.n === n);
 
+// The description row `r` of `item`: the TextView in a block that measures
+// it, folded to FOLDED_H where it is taller and not unfolded, and below it
+// the fold's switch.
+function description(b, t, item, r) {
+  const ui = b.relatedUi;
+  const folds = descriptionFolds(ui, item);
+  const open = ui.unfolded === item.key;
+  const id = `description-${item.key}`;
+  const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
+    .text_size(12)
+    .on_link_click((url, cx) => b.openLink(url, cx));
+  const measured = div()
+    .id(`description-size-${item.key}`)
+    .flex_none()
+    .on_size_change((size, cx) => {
+      if (ui.heights.get(item.key) === size.height) return;
+      ui.heights.set(item.key, size.height);
+      cx.notify();
+    })
+    .child(view);
+  const box = div().id("description").overflow_hidden().when(folds && !open, (el) => el.max_h(FOLDED_H)).child(measured);
+  return v_flex()
+    .gap(4)
+    .child(box)
+    .when(folds, (el) => el.child(
+      div()
+        .id("description-fold")
+        .text_size(12)
+        .text_color(t.accent)
+        .cursor_pointer()
+        .on_click((_e, cx) => {
+          if (!b.modal) b.toggleFold(cx);
+        })
+        .child(open ? "weniger (e)" : "… mehr (e)"),
+    ));
+}
+
 // The block of the related items of `item` (relatedRows), the line `at`
 // marked (null: none).
 export function relatedSections(b, t, mono, view, item, entry, at) {
@@ -65,11 +121,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
   const row = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
-    // The description as one block, its lines with no gap between them: each
-    // wraps, an empty one keeps its height.
-    if (r.kind === "text") {
-      return v_flex().children(r.lines.map((l) => div().text_size(12).line_height("18px").min_h(18).child(l)));
-    }
+    if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const marked = n === at;
     return h_flex()

@@ -36,7 +36,11 @@
 // related items (its description, sub-issues and linked pull requests) one
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
-// keeps of them keptRelated says). An Azure team's Sprint two az calls (the
+// keeps of them keptRelated says). An Azure work item's related items (its
+// description, children and linked pull requests) cost the same, one az
+// call (az boards work-item show --expand relations), and one WIQL query
+// more for its children's titles and states where it has children
+// (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
@@ -63,7 +67,7 @@
 // related.js (the items related to an item, read when its details open:
 // what is kept, their lines), sources/
 // (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
-// index.js), tools.js (running gh and az), actions/ (starting a session,
+// related.js, index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
 // ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
@@ -75,7 +79,7 @@
 // tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
-import { Input, InputState, ScrollHandle, h_flex, v_flex } from "gpui-base";
+import { Input, InputState, ScrollHandle, TextView, h_flex, v_flex } from "gpui-base";
 import { appHome, checking, exec, focused, home, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, theme, writeTextFile } from "herdr";
 
 // ==== src/shared.js ====
@@ -1110,7 +1114,7 @@ export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 // stand alone in quotes are built from SYSTEM: the command check
 // (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
 // for a herdr command.
-const SYSTEM = "System.";
+export const SYSTEM = "System.";
 export const AREA_PATH = `${SYSTEM}AreaPath`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
@@ -1806,6 +1810,129 @@ export function backlogView(s) {
   };
 }
 
+// ==== src/sources/azure/related.js ====
+
+// An Azure work item's related items (related.js says what they hold): its
+// description, its children and the pull requests linked to it, read when
+// its details open (azureRelated, which makeAzure gives as its `related`).
+//
+// `az boards work-item show --id <n> --expand relations` (the extension's
+// show_work_item, dev/boards/work_item.py: client.get_work_item, REST's
+// Work Items - Get Work Item with $expand=relations) answers the work item
+// with all its fields, System.Description among them where it has one
+// (HTML, as Azure keeps it), and its links as REST names them: a child
+// "System.LinkTypes.Hierarchy-Forward" with the child's URL, a pull request
+// an "ArtifactLink" named "Pull Request" whose URL is
+// vstfs:///Git/PullRequestId/<project id>%2F<repo id>%2F<pull request id>
+// (how az repos pr work-item add writes one, dev/repos/pull_request.py).
+// (`az boards work-item relation show` would name the links in words, at
+// the cost of one more call for the link types.) A child's link carries no
+// title or state, so where the item has children one WIQL query by their
+// ids reads those (az boards query takes flat queries only, no link
+// query); a pull request's link carries none either, and reading them would
+// cost a call per pull request (az repos pr show), so a pull request's line
+// names its id only, with its page.
+
+// The calls: the work item with its links, and its children's fields.
+export const azRelatedArgs = (c, id) => ["boards", "work-item", "show", ...azOrg(c.org), "--id", String(id), "--expand", "relations", "-o", "json"];
+export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
+export const childrenWiql = (ids) =>
+  `SELECT [${SYSTEM}Id], [${SYSTEM}Title], [${SYSTEM}WorkItemType], [${SYSTEM}State] FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
+
+// The work item's id at the end of a link's URL (…/workItems/<id>), or null.
+const linkedId = (url) => {
+  const id = Number(String(url ?? "").match(/\/workItems\/(\d+)$/i)?.[1]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
+
+// A pull request link's URL → { project, repo, number }, or null.
+export function pullRequestOf(url) {
+  const m = String(url ?? "").match(/^vstfs:\/\/\/Git\/PullRequestId\/([^/%]+)(?:%2F|\/)([^/%]+)(?:%2F|\/)(\d+)$/i);
+  return m ? { project: m[1], repo: m[2], number: Number(m[3]) } : null;
+}
+
+// az's answer for azRelatedArgs → { description (HTML, "" for none),
+// children: [ids], prs: [{ project, repo, number }] }, each once, in the
+// order of the links.
+export function parseRelatedItem(stdout) {
+  const json = azJson(stdout, "den Work Item");
+  if (!isObject(json) || !Number.isInteger(json.id)) throw new BoardError("Azure lieferte keinen Work Item");
+  const description = json.fields?.[`${SYSTEM}Description`];
+  const relations = Array.isArray(json.relations) ? json.relations : [];
+  const children = [];
+  const prs = [];
+  for (const r of relations) {
+    if (r?.rel === CHILD_LINK) {
+      const id = linkedId(r.url);
+      if (id && !children.includes(id)) children.push(id);
+    } else if (r?.rel === "ArtifactLink" && r.attributes?.name === "Pull Request") {
+      const pr = pullRequestOf(r.url);
+      if (pr && !prs.some((p) => p.number === pr.number)) prs.push(pr);
+    }
+  }
+  return { description: typeof description === "string" ? description : "", children, prs };
+}
+
+// A child, of az boards query's answer, as a line (related.js); its state's
+// color and whether it is done (Completed or Removed) from `states` (the
+// view's data.meta.states, [] for none).
+function childLine(wi, c, states) {
+  const f = (name) => wi.fields?.[SYSTEM + name] ?? null;
+  const state = f("State");
+  const known = states.find((s) => s.name === state);
+  return {
+    kind: "workitem", source: "azure", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"), url: workItemUrl(c, wi.id),
+    state: state ?? "ohne Status", color: known?.color ?? "muted", done: known?.category === "Completed" || known?.category === "Removed", draft: false,
+  };
+}
+
+// The children's query answer → their lines, in the order of `ids`.
+export function parseChildren(stdout, ids, c, states = []) {
+  const list = azList(azJson(stdout, "die untergeordneten Work Items", []));
+  if (!list) throw new BoardError("Azure lieferte keine untergeordneten Work Items");
+  const byId = new Map(list.filter((wi) => Number.isInteger(wi?.id)).map((wi) => [wi.id, wi]));
+  return ids.filter((id) => byId.has(id)).map((id) => childLine(byId.get(id), c, states));
+}
+
+// A pull request's line: its id and its page, no title or state (see the
+// header).
+export const pullRequestLine = (c, pr) => ({
+  kind: "pr", source: "azure", number: pr.number, title: "Pull Request", type: null, draft: false, done: false, state: "verknüpft", color: "muted",
+  url: `${c.org}/${encodeURIComponent(pr.project)}/_git/${encodeURIComponent(pr.repo)}/pullrequest/${pr.number}`,
+});
+
+const section = (count, lines, error = null) => ({ count, sent: lines.length, cut: false, hidden: error ? 0 : count - lines.length, error, lines });
+
+// The related items of the work item `item` in the team context `c`
+// (related.js): one az call, and one query more where it has children (a
+// failed query shows its reason in the children's place). `states`: the
+// view's states, for the children's colors. `az(args)` runs az.
+export async function loadAzureRelated(az, c, item, states = []) {
+  const read = parseRelatedItem(await az(azRelatedArgs(c, item.number)));
+  let children = section(read.children.length, []);
+  if (read.children.length) {
+    try {
+      children = section(read.children.length, parseChildren(await az(azQueryArgs(c, childrenWiql(read.children))), read.children, c, states));
+    } catch (e) {
+      children = section(read.children.length, [], report(e));
+    }
+  }
+  return {
+    description: read.description,
+    format: "html",
+    subIssues: children,
+    prs: section(read.prs.length, read.prs.map((pr) => pullRequestLine(c, pr))),
+    warnings: [],
+  };
+}
+
+// The Azure source's `related` (related.js): a work item with an id has
+// some to read.
+export const azureRelated = (az) => ({
+  reads: (item) => item?.source === "azure" && item.kind === "workitem" && Number.isInteger(item.number),
+  load: (item, view, data) => loadAzureRelated(az, view.context, item, data?.meta?.states ?? []),
+});
+
 // ==== src/sources/azure/index.js ====
 
 // The Azure source as the board uses it (makeAzure); its team views'
@@ -1914,6 +2041,9 @@ export function makeAzure(paths) {
   return {
     site: "Azure",
     noViewer,
+    // A work item's description, children and linked pull requests
+    // (related.js).
+    related: azureRelated(az),
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
       if (view.context?.kind === "team") views[view.layout]?.forget(view.context);
@@ -2250,9 +2380,9 @@ export const LINKED_PRS = 20;
 // unless includeClosedPrs, which adds the merged and closed ones. A pull
 // request that only mentions the issue is not in it. The same request reads
 // the issue's description: `body` ("Identifies the body of the issue"), the
-// text as it was written, its line breaks as typed and its Markdown not
-// rendered; `bodyText` is the body "rendered to text", and how that keeps
-// line breaks the reference does not say.
+// text as it was written, in Markdown, which the details draw formatted;
+// `bodyText` is the body "rendered to text", and how that keeps line breaks
+// the reference does not say.
 export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
@@ -2334,6 +2464,7 @@ export function parseGithubRelated(json, item, errors = []) {
   const shown = [subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
+    format: "markdown",
     subIssues: subIssues.section,
     prs: prs.section,
     warnings: errors.filter((e) => !shown.includes(e)).map((e) => firstLine(e.message)).filter(Boolean),
@@ -2449,18 +2580,22 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // ==== src/related.js ====
 
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's sub-issues and the pull requests linked to it;
-// the same read brings the issue's description beside them), what of them
-// a view keeps (keptRelated), the lines the details panel walks when it has
-// the keyboard, the lines of the description, and the heads of their
-// sections.
+// open (on GitHub an issue's sub-issues and the pull requests linked to it,
+// on Azure a work item's children and linked pull requests; the same read
+// brings the item's description beside them), what of them a view keeps
+// (keptRelated), the lines the details panel walks when it has the
+// keyboard, the description as drawn (shownDescription), and the heads of
+// their sections.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
-// A source that has related items gives `related: { reads(item), load(item)
-// }`: reads tells whether the item has any to read (no call); load reads
-// them, one call, into { description, subIssues, prs, warnings }.
-// description is the item's own text as the source has it ("" for none;
-// shown as written: descriptionLines). Each of subIssues and prs is a
+// A source that has related items gives `related: { reads(item), load(item,
+// view, data) }`: reads tells whether the item has any to read (no call);
+// load reads them (view: the view the item shows in; data: that view's
+// data, null before any) into { description, format, subIssues, prs,
+// warnings }. description is the item's own text as the source has it (""
+// for none), format how it is written: "markdown" (the default) or "html";
+// it is drawn formatted, without its images (shownDescription). Each of
+// subIssues and prs is a
 // section { count (how many the source has; null when it did not send the
 // section), sent
 // (how many it sent), cut (it has more than it sent), hidden (how many it
@@ -2494,16 +2629,41 @@ export function stepLine(line, dir, count) {
   return next < 0 ? null : Math.min(next, count - 1);
 }
 
-// A description as the details show it, one entry per line: line breaks
-// kept (any of \r\n, \r, \n), trailing blanks cut, a run of empty lines
-// as one "", none at the start or end; [] for an empty one. Markdown stays
-// as written.
-export function descriptionLines(text) {
-  const lines = String(text ?? "").split(/\r\n|\r|\n/).map((l) => l.trimEnd());
-  const out = [];
-  for (const line of lines) if (line || (out.length && out.at(-1))) out.push(line);
-  while (out.length && !out.at(-1)) out.pop();
-  return out;
+// An image of a description as a link to it, "Bild: <alt>" ("Bild" without
+// one), so that nothing loads it: herdr's TextView loads every http(s) image
+// a text names with the mod's network grant, which herdr gives every mod in
+// full (herdr's src/mods.rs, capabilities; gpui-kit's
+// crates/shell/src/materialize/text_view.rs), and a description is text
+// anyone with access may write. What TextView draws as an image (gpui-kit's
+// crates/base/src/text/format): Markdown's image, and an HTML <img> with a
+// src, in HTML and as raw HTML in Markdown; HTML's parser reads <image> as
+// <img>. So every <img> and <image> tag becomes a link (its src and alt read
+// whatever their case and quoting; without a src, its text alone), and in
+// Markdown every `![` becomes `[Bild: ` (`![]` `[Bild]`), which turns an
+// image, inline or by reference, into a link. Text in code blocks is changed
+// the same way.
+const IMAGE_TAG = /<(?:img|image)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
+const htmlText = (text) => text.replace(/&(?![a-z]+;|#\d+;|#x[0-9a-f]+;)/gi, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function imageLink(tag) {
+  const attrs = {};
+  const body = tag.replace(/^<[a-z]+/i, "").replace(/\/?>$/, "");
+  for (const m of body.matchAll(ATTRIBUTE)) {
+    const name = m[1].toLowerCase();
+    if (!(name in attrs)) attrs[name] = m[2] ?? m[3] ?? m[4] ?? "";
+  }
+  const label = htmlText(attrs.alt ? `Bild: ${attrs.alt}` : "Bild");
+  return attrs.src ? `<a href="${htmlText(attrs.src.trim())}">${label}</a>` : label;
+}
+
+// A description as the details draw it (format: "markdown" or "html"): its
+// images as links (above); null where it has no text.
+export function shownDescription(text, format) {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+  const tags = raw.replace(IMAGE_TAG, imageLink);
+  return format === "html" ? tags : tags.replace(/!\[\]/g, "[Bild]").replace(/!\[/g, "[Bild: ");
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.
@@ -4687,8 +4847,10 @@ export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, b
 // ==== src/ui/related.js ====
 
 // The detail panel's sections of an item's related items (related.js): its
-// description ("BESCHREIBUNG", its lines as written, "keine Beschreibung"
-// where it has none), its sub-issues, then, where it has any or the source
+// description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
+// Markdown or HTML as its source writes it, its images as links:
+// shownDescription; "keine Beschreibung" where it has none), its
+// sub-issues (an Azure work item's children), then, where it has any or the source
 // could not send them, the pull requests linked to it; one line each with
 // its key, title and state (a done one dimmed, a draft marked), and below
 // a section how many it sent that cannot be read. While they load the
@@ -4696,18 +4858,34 @@ export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, b
 // failure the reason; a section the source could not send says why in its
 // place; what the source said besides follows at the end. The line the
 // panel has selected while it has the keyboard is marked; a click on a
-// line is Enter on it (the Board's pickLine).
+// line is Enter on it (the Board's pickLine). A link in the description
+// opens through the Board's openLink (http and https only).
+//
+// A description taller than about 12 lines shows folded to that height,
+// with "… mehr (e)" below; `e` or a click on it unfolds it ("weniger (e)"
+// folds it again). TextView tells no count of its lines, so the fold goes
+// by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
+// description is, its block measures (on_size_change), and it folds only
+// once that is known to be more.
+
+export const FOLDED_H = 12 * 18;
 
 // What the related items keep per Board, made when it starts (why then:
-// ui/shapes/index.js): the lines' scroll handle.
-export const relatedState = () => ({ scroll: ScrollHandle.new() });
+// ui/shapes/index.js): the lines' scroll handle, the measured height of
+// each description by its item's key, and the key of the item whose
+// description is unfolded (null: none; another item's shows folded).
+export const relatedState = () => ({ scroll: ScrollHandle.new(), heights: new Map(), unfolded: null });
+
+// Whether the description of `item` is taller than FOLDED_H, as measured.
+export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
 // (the Board's kept read: { data, error }, both null while it loads; null
 // before a read starts): { kind: "head" | "note" | "text" | "line", text,
 // tone ("muted", "error", "warning") or, for a line, `line` and its index
 // `n` among relatedLines (the one order of the lines); a "text" is the
-// description, one row, its `lines` ("" an empty one).
+// description, one row: `text` as drawn (shownDescription) and its
+// `format`.
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
@@ -4717,8 +4895,9 @@ export function relatedRows(item, entry) {
   }
   const lines = relatedLines(data);
   const rows = [description];
-  const text = descriptionLines(data.description);
-  if (text.length) rows.push({ kind: "text", lines: text });
+  const format = data.format === "html" ? "html" : "markdown";
+  const text = shownDescription(data.description, format);
+  if (text !== null) rows.push({ kind: "text", text, format });
   else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
@@ -4740,6 +4919,43 @@ export function relatedRows(item, entry) {
 // The child of the scrolled block that holds line `n`.
 export const lineChild = (item, entry, n) => relatedRows(item, entry).findIndex((r) => r.kind === "line" && r.n === n);
 
+// The description row `r` of `item`: the TextView in a block that measures
+// it, folded to FOLDED_H where it is taller and not unfolded, and below it
+// the fold's switch.
+function description(b, t, item, r) {
+  const ui = b.relatedUi;
+  const folds = descriptionFolds(ui, item);
+  const open = ui.unfolded === item.key;
+  const id = `description-${item.key}`;
+  const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
+    .text_size(12)
+    .on_link_click((url, cx) => b.openLink(url, cx));
+  const measured = div()
+    .id(`description-size-${item.key}`)
+    .flex_none()
+    .on_size_change((size, cx) => {
+      if (ui.heights.get(item.key) === size.height) return;
+      ui.heights.set(item.key, size.height);
+      cx.notify();
+    })
+    .child(view);
+  const box = div().id("description").overflow_hidden().when(folds && !open, (el) => el.max_h(FOLDED_H)).child(measured);
+  return v_flex()
+    .gap(4)
+    .child(box)
+    .when(folds, (el) => el.child(
+      div()
+        .id("description-fold")
+        .text_size(12)
+        .text_color(t.accent)
+        .cursor_pointer()
+        .on_click((_e, cx) => {
+          if (!b.modal) b.toggleFold(cx);
+        })
+        .child(open ? "weniger (e)" : "… mehr (e)"),
+    ));
+}
+
 // The block of the related items of `item` (relatedRows), the line `at`
 // marked (null: none).
 export function relatedSections(b, t, mono, view, item, entry, at) {
@@ -4747,11 +4963,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
   const row = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
-    // The description as one block, its lines with no gap between them: each
-    // wraps, an empty one keeps its height.
-    if (r.kind === "text") {
-      return v_flex().children(r.lines.map((l) => div().text_size(12).line_height("18px").min_h(18).child(l)));
-    }
+    if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const marked = n === at;
     return h_flex()
@@ -5178,7 +5390,7 @@ export default class Board extends View {
     const source = this.sources[item.source].related;
     cx.spawn(async (cx) => {
       try {
-        entry.data = await source.load(item);
+        entry.data = await source.load(item, view, st.data);
       } catch (e) {
         entry.error = report(e);
       } finally {
@@ -5287,6 +5499,32 @@ export default class Board extends View {
     this.keepSelection(view);
     const sel = edgeOf(this.navColumns(view), st.sel, end);
     if (sel) this.choose(view, sel, cx);
+  }
+
+  // e, or a click on the description's switch: the shown details'
+  // description unfolded, or folded again, where it is taller than its fold
+  // (ui/related.js); true when it is.
+  toggleFold(cx) {
+    const item = this.shownDetailsItem();
+    const ui = this.relatedUi;
+    if (!this.readsRelated(item) || !descriptionFolds(ui, item)) return false;
+    ui.unfolded = ui.unfolded === item.key ? null : item.key;
+    cx.notify();
+    return true;
+  }
+
+  // A link in a description: opened where it is http or https with a host,
+  // else said.
+  openLink(url, cx) {
+    let ok = false;
+    try {
+      const u = new URL(String(url));
+      ok = (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.hostname);
+    } catch {
+      // Not a URL.
+    }
+    if (ok) cx.open_url(String(url));
+    else this.say(`Link nicht geöffnet (nur http und https): ${url}`, "warning", cx);
   }
 
   // ---- moves ----
@@ -5609,6 +5847,7 @@ export default class Board extends View {
     if (end) return this.toEdge(view, end, cx), done();
     const panel = view && !(mod.control || mod.alt || mod.platform || mod.shift) ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k, cx)) return done();
+    if (k === "e" && !(mod.control || mod.alt || mod.platform || mod.shift) && this.toggleFold(cx)) return done();
     // [ ] and / may come with Shift, or with Control+Alt; Control alone
     // stays herdr's. Alt alone is let through: a key herdr binds with Alt
     // never reaches a mod (logged), so this costs herdr nothing; how AltGr
@@ -6009,9 +6248,12 @@ export default class Board extends View {
   // The details panel's keys, where the details of an item with related
   // items to read show (readsRelated): Tab into it, and in it its own.
   panelHints(view) {
-    if (!view || !this.readsRelated(this.shownDetailsItem())) return [];
-    if (!this.panelOf(view)) return [["Tab", "Zeilen"]];
-    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+    const item = view ? this.shownDetailsItem() : null;
+    if (!this.readsRelated(item)) return [];
+    const ui = this.relatedUi;
+    const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
+    if (!this.panelOf(view)) return [["Tab", "Zeilen"], ...fold];
+    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
   // The keys of what shows: the top bar's (a team's v), those of the shown

@@ -34,7 +34,11 @@
 // related items (its description, sub-issues and linked pull requests) one
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
-// keeps of them keptRelated says). An Azure team's Sprint two az calls (the
+// keeps of them keptRelated says). An Azure work item's related items (its
+// description, children and linked pull requests) cost the same, one az
+// call (az boards work-item show --expand relations), and one WIQL query
+// more for its children's titles and states where it has children
+// (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
@@ -61,7 +65,7 @@
 // related.js (the items related to an item, read when its details open:
 // what is kept, their lines), sources/
 // (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
-// index.js), tools.js (running gh and az), actions/ (starting a session,
+// related.js, index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
 // work item),
 // ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
@@ -89,7 +93,7 @@ import { store, migrateShownView, boardShown, shownOf, button, detailSection, de
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
-import { lineChild, relatedRows, relatedSections, relatedState } from "./ui/related.js";
+import { descriptionFolds, lineChild, relatedRows, relatedSections, relatedState } from "./ui/related.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -104,6 +108,7 @@ export * from "./sources/github.js";
 export * from "./sources/azure/common.js";
 export * from "./sources/azure/sprint.js";
 export * from "./sources/azure/backlog.js";
+export * from "./sources/azure/related.js";
 export * from "./sources/azure/index.js";
 export * from "./tools.js";
 export * from "./actions/start.js";
@@ -521,7 +526,7 @@ export default class Board extends View {
     const source = this.sources[item.source].related;
     cx.spawn(async (cx) => {
       try {
-        entry.data = await source.load(item);
+        entry.data = await source.load(item, view, st.data);
       } catch (e) {
         entry.error = report(e);
       } finally {
@@ -630,6 +635,32 @@ export default class Board extends View {
     this.keepSelection(view);
     const sel = edgeOf(this.navColumns(view), st.sel, end);
     if (sel) this.choose(view, sel, cx);
+  }
+
+  // e, or a click on the description's switch: the shown details'
+  // description unfolded, or folded again, where it is taller than its fold
+  // (ui/related.js); true when it is.
+  toggleFold(cx) {
+    const item = this.shownDetailsItem();
+    const ui = this.relatedUi;
+    if (!this.readsRelated(item) || !descriptionFolds(ui, item)) return false;
+    ui.unfolded = ui.unfolded === item.key ? null : item.key;
+    cx.notify();
+    return true;
+  }
+
+  // A link in a description: opened where it is http or https with a host,
+  // else said.
+  openLink(url, cx) {
+    let ok = false;
+    try {
+      const u = new URL(String(url));
+      ok = (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.hostname);
+    } catch {
+      // Not a URL.
+    }
+    if (ok) cx.open_url(String(url));
+    else this.say(`Link nicht geöffnet (nur http und https): ${url}`, "warning", cx);
   }
 
   // ---- moves ----
@@ -952,6 +983,7 @@ export default class Board extends View {
     if (end) return this.toEdge(view, end, cx), done();
     const panel = view && !(mod.control || mod.alt || mod.platform || mod.shift) ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k, cx)) return done();
+    if (k === "e" && !(mod.control || mod.alt || mod.platform || mod.shift) && this.toggleFold(cx)) return done();
     // [ ] and / may come with Shift, or with Control+Alt; Control alone
     // stays herdr's. Alt alone is let through: a key herdr binds with Alt
     // never reaches a mod (logged), so this costs herdr nothing; how AltGr
@@ -1352,9 +1384,12 @@ export default class Board extends View {
   // The details panel's keys, where the details of an item with related
   // items to read show (readsRelated): Tab into it, and in it its own.
   panelHints(view) {
-    if (!view || !this.readsRelated(this.shownDetailsItem())) return [];
-    if (!this.panelOf(view)) return [["Tab", "Zeilen"]];
-    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+    const item = view ? this.shownDetailsItem() : null;
+    if (!this.readsRelated(item)) return [];
+    const ui = this.relatedUi;
+    const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
+    if (!this.panelOf(view)) return [["Tab", "Zeilen"], ...fold];
+    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
   // The keys of what shows: the top bar's (a team's v), those of the shown

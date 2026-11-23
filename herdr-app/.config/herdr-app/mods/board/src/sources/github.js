@@ -327,9 +327,9 @@ export const LINKED_PRS = 20;
 // unless includeClosedPrs, which adds the merged and closed ones. A pull
 // request that only mentions the issue is not in it. The same request reads
 // the issue's description: `body` ("Identifies the body of the issue"), the
-// text as it was written, its line breaks as typed and its Markdown not
-// rendered; `bodyText` is the body "rendered to text", and how that keeps
-// line breaks the reference does not say.
+// text as it was written, in Markdown, which the details draw formatted;
+// `bodyText` is the body "rendered to text", and how that keeps line breaks
+// the reference does not say.
 export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
@@ -411,6 +411,7 @@ export function parseGithubRelated(json, item, errors = []) {
   const shown = [subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
+    format: "markdown",
     subIssues: subIssues.section,
     prs: prs.section,
     warnings: errors.filter((e) => !shown.includes(e)).map((e) => firstLine(e.message)).filter(Boolean),

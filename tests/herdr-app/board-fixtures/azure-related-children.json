@@ -1,0 +1,26 @@
+[
+  {
+    "fields": {
+      "System.Id": 311,
+      "System.Title": "Parse the sample file",
+      "System.WorkItemType": "Task",
+      "System.State": "To Do"
+    },
+    "id": 311,
+    "relations": null,
+    "rev": 2,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/311"
+  },
+  {
+    "fields": {
+      "System.Id": 312,
+      "System.Title": "Keep the last good copy",
+      "System.WorkItemType": "Task",
+      "System.State": "Done"
+    },
+    "id": 312,
+    "relations": null,
+    "rev": 4,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/312"
+  }
+]

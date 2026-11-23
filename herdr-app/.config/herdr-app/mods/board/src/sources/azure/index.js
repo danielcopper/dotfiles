@@ -7,6 +7,7 @@ import { AZ_TIMEOUT, call } from "../../tools.js";
 import { AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azFailure, azStateArgs, checkStateResult, parseAreas, parseViewer } from "./common.js";
 import { sprintView } from "./sprint.js";
 import { backlogView } from "./backlog.js";
+import { azureRelated } from "./related.js";
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, and per layout of an Azure view how
@@ -110,6 +111,9 @@ export function makeAzure(paths) {
   return {
     site: "Azure",
     noViewer,
+    // A work item's description, children and linked pull requests
+    // (related.js).
+    related: azureRelated(az),
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
       if (view.context?.kind === "team") views[view.layout]?.forget(view.context);

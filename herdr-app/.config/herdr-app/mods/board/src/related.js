@@ -1,16 +1,20 @@
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's sub-issues and the pull requests linked to it;
-// the same read brings the issue's description beside them), what of them
-// a view keeps (keptRelated), the lines the details panel walks when it has
-// the keyboard, the lines of the description, and the heads of their
-// sections.
+// open (on GitHub an issue's sub-issues and the pull requests linked to it,
+// on Azure a work item's children and linked pull requests; the same read
+// brings the item's description beside them), what of them a view keeps
+// (keptRelated), the lines the details panel walks when it has the
+// keyboard, the description as drawn (shownDescription), and the heads of
+// their sections.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
-// A source that has related items gives `related: { reads(item), load(item)
-// }`: reads tells whether the item has any to read (no call); load reads
-// them, one call, into { description, subIssues, prs, warnings }.
-// description is the item's own text as the source has it ("" for none;
-// shown as written: descriptionLines). Each of subIssues and prs is a
+// A source that has related items gives `related: { reads(item), load(item,
+// view, data) }`: reads tells whether the item has any to read (no call);
+// load reads them (view: the view the item shows in; data: that view's
+// data, null before any) into { description, format, subIssues, prs,
+// warnings }. description is the item's own text as the source has it (""
+// for none), format how it is written: "markdown" (the default) or "html";
+// it is drawn formatted, without its images (shownDescription). Each of
+// subIssues and prs is a
 // section { count (how many the source has; null when it did not send the
 // section), sent
 // (how many it sent), cut (it has more than it sent), hidden (how many it
@@ -44,16 +48,41 @@ export function stepLine(line, dir, count) {
   return next < 0 ? null : Math.min(next, count - 1);
 }
 
-// A description as the details show it, one entry per line: line breaks
-// kept (any of \r\n, \r, \n), trailing blanks cut, a run of empty lines
-// as one "", none at the start or end; [] for an empty one. Markdown stays
-// as written.
-export function descriptionLines(text) {
-  const lines = String(text ?? "").split(/\r\n|\r|\n/).map((l) => l.trimEnd());
-  const out = [];
-  for (const line of lines) if (line || (out.length && out.at(-1))) out.push(line);
-  while (out.length && !out.at(-1)) out.pop();
-  return out;
+// An image of a description as a link to it, "Bild: <alt>" ("Bild" without
+// one), so that nothing loads it: herdr's TextView loads every http(s) image
+// a text names with the mod's network grant, which herdr gives every mod in
+// full (herdr's src/mods.rs, capabilities; gpui-kit's
+// crates/shell/src/materialize/text_view.rs), and a description is text
+// anyone with access may write. What TextView draws as an image (gpui-kit's
+// crates/base/src/text/format): Markdown's image, and an HTML <img> with a
+// src, in HTML and as raw HTML in Markdown; HTML's parser reads <image> as
+// <img>. So every <img> and <image> tag becomes a link (its src and alt read
+// whatever their case and quoting; without a src, its text alone), and in
+// Markdown every `![` becomes `[Bild: ` (`![]` `[Bild]`), which turns an
+// image, inline or by reference, into a link. Text in code blocks is changed
+// the same way.
+const IMAGE_TAG = /<(?:img|image)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
+const htmlText = (text) => text.replace(/&(?![a-z]+;|#\d+;|#x[0-9a-f]+;)/gi, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function imageLink(tag) {
+  const attrs = {};
+  const body = tag.replace(/^<[a-z]+/i, "").replace(/\/?>$/, "");
+  for (const m of body.matchAll(ATTRIBUTE)) {
+    const name = m[1].toLowerCase();
+    if (!(name in attrs)) attrs[name] = m[2] ?? m[3] ?? m[4] ?? "";
+  }
+  const label = htmlText(attrs.alt ? `Bild: ${attrs.alt}` : "Bild");
+  return attrs.src ? `<a href="${htmlText(attrs.src.trim())}">${label}</a>` : label;
+}
+
+// A description as the details draw it (format: "markdown" or "html"): its
+// images as links (above); null where it has no text.
+export function shownDescription(text, format) {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+  const tags = raw.replace(IMAGE_TAG, imageLink);
+  return format === "html" ? tags : tags.replace(/!\[\]/g, "[Bild]").replace(/!\[/g, "[Bild: ");
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.
