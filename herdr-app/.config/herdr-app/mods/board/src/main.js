@@ -15,8 +15,9 @@
 //     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
 //     board has project { owner, number, field? ("Status") } and filter? (a
 //     Projects filter such as "assignee:@me"); its columns are the options
-//     of that single-select field. A list has sections [{ name, query }], one GitHub
-//     search for pull requests each. A view may still say source: "github".
+//     of that single-select field. A list has sections [{ name, query }],
+//     one GitHub search for pull requests each. A view may still say
+//     source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
 //   in; ~ is that machine's home), message (the first message for issues and

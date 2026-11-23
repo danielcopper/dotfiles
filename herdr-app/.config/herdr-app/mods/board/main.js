@@ -17,8 +17,9 @@
 //     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
 //     board has project { owner, number, field? ("Status") } and filter? (a
 //     Projects filter such as "assignee:@me"); its columns are the options
-//     of that single-select field. A list has sections [{ name, query }], one GitHub
-//     search for pull requests each. A view may still say source: "github".
+//     of that single-select field. A list has sections [{ name, query }],
+//     one GitHub search for pull requests each. A view may still say
+//     source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
 //   in; ~ is that machine's home), message (the first message for issues and
@@ -2693,16 +2694,27 @@ export function githubBoardPageArgs(view, hidden, after, read) {
   ];
 }
 
+// Where a board's items stand in its answers.
+const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
+
+// The error that explains a page without its items: the deepest one on the
+// way to them (the owner's, the project's, the items' own), else the
+// page's first; null for none.
+function pageError(errors) {
+  const onTheWay = errors.filter((e) => Array.isArray(e.path) && e.path.length <= ITEMS_PATH.length && e.path.every((p, i) => p === ITEMS_PATH[i]));
+  return onTheWay.sort((a, b) => b.path.length - a.path.length)[0] ?? errors[0] ?? null;
+}
+
 // The board answer `json` (githubBoardArgs) with the items of the next
 // page's answer `page` (githubBoardPageArgs, and its GraphQL errors)
 // added, each item once (one that moved between two reads may come
 // twice), and that page's pageInfo, which says whether more follow. A page
-// without its items is explained by the error at their path.
+// without its items is explained by GitHub's error (pageError).
 export function addBoardPage(json, page, errors = []) {
   const items = json.data.repositoryOwner.projectV2.items;
   const next = page?.data?.repositoryOwner?.projectV2?.items;
   if (!Array.isArray(next?.nodes)) {
-    const e = errorAt(errors, ["repositoryOwner", "projectV2", "items"]) ?? errorAt(errors, ["repositoryOwner"]);
+    const e = pageError(errors);
     const title = json.data.repositoryOwner.projectV2.title;
     throw new BoardError(e ? `Projekt „${title}“: ${firstLine(e.message)}` : `Projekt „${title}“ lieferte die Einträge nach den ersten ${items.nodes.length} nicht`);
   }

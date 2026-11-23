@@ -751,6 +751,12 @@ test("a board's pages add up: each item once, the last page's pageInfo; the next
   assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), missing, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items"], message: "no access" }]),
     { message: "Projekt „Sample“: no access" });
   assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), missing), { message: "Projekt „Sample“ lieferte die Einträge nach den ersten 3 nicht" });
+  const gone = { data: { repositoryOwner: { projectV2: null } } };
+  const at = (path, message) => ({ type: "NOT_FOUND", path, message });
+  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner"], "owner"), at(["repositoryOwner", "projectV2"], "project gone")]),
+    { message: "Projekt „Sample“: project gone" }, "the deepest error on the way to the items");
+  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["viewer"], "elsewhere")]),
+    { message: "Projekt „Sample“: an item" }, "none on the way: the page's first");
 });
 
 test("validateConfig: a board's limit is the most items it reads, 1000 by default and at most; a list's at most 100, 50 by default", () => {
