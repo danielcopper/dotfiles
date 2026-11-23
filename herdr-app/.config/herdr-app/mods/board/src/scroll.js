@@ -81,8 +81,6 @@ export function scrollToEnd(ui, end) {
   ui.glide = true;
   ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport);
 }
-// The block moved so that `span` ({ top, height }) shows, at once.
-export function revealSpan(ui, span) {
-  ui.glide = false;
-  ui.offset = revealOffset(ui, span.top, span.height);
-}
+// The block moved so that `span` ({ top, height }) shows (a line's move,
+// which clears the glide itself: Board.panelKey, Board.levelUp).
+export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));

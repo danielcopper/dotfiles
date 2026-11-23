@@ -22,8 +22,9 @@
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
 //   the hint line names (its key by default); part: "panel" for a hint of
-//   the details panel's keys, which wins its key while the panel has the
-//   keyboard (hintsOf).
+//   the details panel's keys that a hint of the board's names too, which
+//   wins that key while the panel has the keyboard (hintsOf; on a level the
+//   board's item's hints are held anyway).
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc). The hint line names no key whose place already says it: not
 // the moves (h/j/k/l, ctrl-d/u, gg/G, Home/End), not z (the description's
@@ -327,13 +328,13 @@ export const ACTIONS = [
     id: "level-start", group: "details", name: (c) => startName(c.details), key: "enter", menu: 13,
     when: onLevel,
     run: (b, c, cx) => b.startSession(c.view, c.details, cx),
-    hint: (c) => (onLevelItem(c) ? (c.details.kind === "pr" ? "Review" : "Agent") : null), part: "panel",
+    hint: (c) => (onLevelItem(c) ? (c.details.kind === "pr" ? "Review" : "Agent") : null),
   },
   {
     id: "level-open", group: "details", name: "Im Browser öffnen", key: "o", menu: 14,
     when: onLevel,
     run: (b, c, cx) => b.open(c.details, cx),
-    hint: (c) => (onLevelItem(c) ? "öffnen" : null), part: "panel",
+    hint: (c) => (onLevelItem(c) ? "öffnen" : null),
   },
   {
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,

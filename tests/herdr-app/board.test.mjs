@@ -784,6 +784,15 @@ test("UI: a GitHub board reads every page, one gh call each, and shows all their
   assert.ok(texts(capped.b.render()).some((s) => s.startsWith("Nur die ersten 5 von 9 Einträgen")), "and the board says it is cut");
 });
 
+test("UI: what GitHub says beside a later page's items shows as a warning, as the first page's does", async () => {
+  const { b, host, st } = await bootBoard();
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  const page = { ...boardPage(3, 6, null, { first: false }), errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration", path: ["repositoryOwner", "projectV2", "items", "nodes", 0, "content"] }] };
+  await host.answer("gh", { code: 1, stdout: JSON.stringify(page), stderr: "gh: Resource not accessible by integration" }, isBoardCall);
+  assert.deepEqual([st().error, st().warnings], [null, ["Resource not accessible by integration"]]);
+  assert.ok(texts(b.render()).includes("Resource not accessible by integration"), "the board says so");
+});
+
 test("UI: a board whose next page fails shows the error, as a failed first page does", async () => {
   const { b, host, st } = await bootBoard();
   await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
