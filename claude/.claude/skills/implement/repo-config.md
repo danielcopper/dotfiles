@@ -56,13 +56,12 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     - mentions `merge` as a word anywhere next to `curl`, `wget`, `gh api`, `az rest`, `az devops invoke` or
       `az repos pr` — not `merged`, `merges`, `merger`, `merge_…`, `merge-base` or `merge-tree`; `mergeBranch` and
       `merge-upstream` count. This rule reads the merge word only, no completion or alias;
-    - runs `gh`, `az`, `curl` or `wget` through `xargs` or `parallel`;
     - holds a construct the shell expands at run time (a `$` or a backtick outside single quotes, a `{a,b}` or
       `{a..b}` brace or a `*`, `?` or `[` next to a letter outside any quotes) next to a merge mention — `merge` as
       a word as in the rule above, a completion (`status` or `-s` followed by `completed`, or `auto-complete`), or
       `alias` followed later by `set` or `import` — anywhere in the text, except the parameters named below. A
-      run-time construct next to `gh`, `az`, `curl` or `wget` alone does not count: the merge must be spelled to
-      be caught;
+      run-time construct next to `gh`, `az`, `curl` or `wget` alone does not count, nor do words that `xargs` or
+      `parallel` supplies to one of them: the merge must be spelled to be caught;
     - is nested too deep, too long or holds too many substitutions to check.
 
     The hook fails closed on itself too. Input that is no JSON object, has no `tool_input` object or no

@@ -420,6 +420,14 @@ PASSES = [
     "gh api -X PUT -f a=\\' repos/o/r/pulls/1/$(printf me)rge -f b=\\'",
     "echo x\\ #'\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
     "echo $[1<<x ]\necho '\nx\ncat <<'EOF'\n'; gh api \"$EP\" -X PUT; echo '\nEOF\n' \\'",
+    "echo 3 | xargs gh pr view",
+    "parallel gh pr view ::: 1 2",
+    'parallel "gh pr view {}" ::: 3',
+    "gh pr view 1; echo x | xargs echo $?",
+    "gh pr view 1; parallel echo $? ::: a",
+    "echo 'gh pr $(printf mer)ge 1' | xargs bash",
+    "cat <<'EOF' | xargs -0 sh\ngh pr view \"$N\"\nEOF",
+    "seq 1 3 | xargs -I{} az boards work-item show --id {} -o json",
 ]
 
 DENIED = [
@@ -465,9 +473,6 @@ DENIED = [
     'curl -X PUT "$URL"',
     'wget "https://api.github.com/repos/o/r/pulls/$N/merge"',
     "curl --url=$URL -X PUT",
-    # words supplied by xargs or parallel
-    "echo 3 | xargs gh pr view",
-    "parallel gh pr view ::: 1 2",
     # shells and their -c forms
     "bash -ec 'gh pr merge 3'",
     "bash -c -- 'gh pr merge 3'",
@@ -502,7 +507,6 @@ DENIED = [
     "gh api graphql -iF query=@q.graphql",
     "gh api graphql -F=query=@q.graphql",
     "parallel 'gh pr merge {}' ::: 3",
-    'parallel "gh pr view {}" ::: 3',
     "gh -R $X merge 3",
     "gh --repo {o/r,pr} merge 3",
     "curl -d @body.json https://api.github.com/repos/o/r/pulls/12",
@@ -699,6 +703,7 @@ DENIED = [
     "$X repos pr update --id 4 -s completed",
     "$X repos pr update --id 4 --autocomplete true",
     # a merge spelled next to variables still counts
+    "seq 1 3 | xargs -I{} gh pr merge {}",
     'curl -X PUT -u ":$PAT" "$B/pullRequests/5/merge"',
     "az repos pr update --id $ID --status completed",
     "gh pr merge $N",
@@ -717,13 +722,9 @@ DENIED = [
     'curl -s -X PUT "https://api.github.com/repos/o/r/pulls/$N/merge"',
     # commands that run a program from their arguments or data: the whole text counts
     "gh pr view 1; find . -execdir x $? +",
-    "gh pr view 1; echo x | xargs echo $?",
-    "gh pr view 1; parallel echo $? ::: a",
-    "echo 'gh pr $(printf mer)ge 1' | xargs bash",
     "echo merge | xargs echo '$?'",
     # a heredoc whose body a shell or an unknown command reads stays shell text
     "cat <<'EOF' | sh\ngh api \"$EP\" -X PUT\nEOF",
-    "cat <<'EOF' | xargs -0 sh\ngh pr view \"$N\"\nEOF",
     "tee s.sh <<'EOF' && bash s.sh\ngh api \"$EP\" -X PUT\nEOF",
     "cat > s.sh <<'EOF'\ngh api \"$EP\" -X PUT\nEOF\n. s.sh",
     # a heredoc marker inside quotes (as the shell reads them), a group or a substitution, or

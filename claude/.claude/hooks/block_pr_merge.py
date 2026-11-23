@@ -955,8 +955,6 @@ def check(command: str) -> str | None:
         return (
             "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"
         )
-    if network and FEEDER.search(lower):
-        return "feeds gh, az, curl or wget through xargs or parallel"
     # The run-time rule next to a merge mention does not read data heredoc bodies, unless the
     # text around them is re-read: then the whole text counts. Otherwise the spared parameters
     # do not count either.
