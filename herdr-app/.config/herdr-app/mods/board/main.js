@@ -4942,16 +4942,44 @@ export const columnsModal = {
 // ui/related.js, relatedState) with the heights of the window and the
 // content as measured (`viewport`, `content`), shifts the content up by it,
 // and draws the position as a thumb. All lengths are the script's pixels
-// (measured ones divided by herdr's zoom: ui/related.js). A move by a page
-// or end key glides (`glide` in the state, GLIDE): herdr animates the
-// content's and the thumb's top natively; every other move, and another
-// item's details, jump.
+// (measured ones divided by herdr's zoom: ui/related.js).
+//
+// A move by a page or end key glides: the content and the thumb carry
+// herdr's transition of `top` at every draw (motionOf), GLIDE while the
+// block stands where such a key put it (`glideTo`: the offset and the
+// heights then), else a zero duration. gpui-kit keeps a transition's
+// value per element and property, adopting the first one it sees, and
+// eases toward a changed target with the duration given in that draw; a
+// zero duration takes the target at once (gpui-kit's base/src/motion.rs,
+// transition_with_status). So a transition set only once the target has
+// changed would not ease that change, and j/k, the wheel, a line scrolled
+// into view, another item or level and a change of the heights (a fold, a
+// read, a resize) move the block at once.
 
 // One line of the details, the step of j/k.
 export const LINE_PX = 18;
 
 // How a page or end key's move glides: herdr's transition of `top`.
 export const GLIDE = { duration: 120, easing: "ease-out" };
+
+// The transition the block draws its top with now: GLIDE while it stands
+// where a page or end key put it, else 0, which moves it at once.
+export function motionOf(ui) {
+  const to = ui.glideTo;
+  return to && to.offset === ui.offset && to.content === ui.content && to.viewport === ui.viewport ? GLIDE : 0;
+}
+
+// The block at `offset`, put there by a page or end key.
+function glideTo(ui, offset) {
+  ui.offset = offset;
+  ui.glideTo = { offset, content: ui.content, viewport: ui.viewport };
+}
+
+// The block at `offset`, at once.
+function jumpTo(ui, offset) {
+  ui.offset = offset;
+  ui.glideTo = null;
+}
 
 // The offset `offset` kept within the content: from 0 to where its end
 // meets the window's; 0 where the content fits.
@@ -4993,34 +5021,37 @@ export function rowSpan(heights, i, gap, pad) {
 }
 
 // The block's offset when it draws the details of the item `key`: 0 for
-// another item than the last (ui.at), kept within the content, which a
-// resize or a refresh may have changed.
+// another item than the last (ui.at), at once, kept within the content,
+// which a resize or a refresh may have changed.
 export function offsetOf(ui, key) {
   if (ui.at !== key) {
     ui.at = key;
-    ui.offset = 0;
-    ui.glide = false;
+    jumpTo(ui, 0);
   }
   ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
   return ui.offset;
 }
 
-// The block moved by `by` pixels: j/k by LINE_PX, the wheel by its move,
-// at once; ctrl-d/ctrl-u by halfWindow (scrollPage), gliding.
-export function scrollBy(ui, by, glide = false) {
-  ui.glide = glide;
-  ui.offset = offsetBy(ui, by);
-}
+// The block moved by `by` pixels at once: j/k by LINE_PX, the wheel by its
+// move.
+export const scrollBy = (ui, by) => jumpTo(ui, offsetBy(ui, by));
 export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
-export const scrollPage = (ui, dir) => scrollBy(ui, dir * halfWindow(ui), true);
+// ctrl-d/ctrl-u: the block half its window down (`dir` 1) or up (-1),
+// gliding.
+export const scrollPage = (ui, dir) => glideTo(ui, offsetBy(ui, dir * halfWindow(ui)));
 // The block at its top or bottom (gg/G, Home/End), gliding.
-export function scrollToEnd(ui, end) {
-  ui.glide = true;
-  ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport);
+export const scrollToEnd = (ui, end) => glideTo(ui, end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+// The block moved at once so that `span` ({ top, height }) shows.
+export const revealSpan = (ui, span) => jumpTo(ui, revealOffset(ui, span.top, span.height));
+// The block's scroll as it stands, for restoreScroll: its offset, the
+// heights of its window and its content, and its rows' sizes.
+export const keptScroll = (ui) => ({ offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes });
+// The block's scroll as keptScroll kept it (`back`), for the details of
+// the item `key`, at once: a level's way back up (Board.levelUp).
+export function restoreScroll(ui, key, back) {
+  Object.assign(ui, { at: key, viewport: back.viewport, content: back.content, sizes: back.sizes });
+  jumpTo(ui, back.offset);
 }
-// The block moved so that `span` ({ top, height }) shows (a line's move,
-// which clears the glide itself: Board.panelKey, Board.levelUp).
-export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));
 
 // ==== src/ui/related.js ====
 
@@ -5064,10 +5095,10 @@ export const FOLDED_H = 12 * LINE_PX;
 // when it starts and every draw reads: the measured height of each
 // description by its item's key, the key of the item whose description is
 // unfolded (null: none; another item's shows folded), and the block's
-// scroll (scroll.js): its offset, whether its last move glides, the item it
-// is of (`at`), the heights of its window and its content, and of each row
-// by its id.
-export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glide: false, at: null, viewport: 0, content: 0, sizes: new Map() });
+// scroll (scroll.js): its offset, where a page or end key put it (null:
+// nowhere), the item it is of (`at`), the heights of its window and its
+// content, and of each row by its id.
+export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glideTo: null, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
 export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
@@ -5225,6 +5256,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(stateChip(t, data, line.state, line.color));
   };
   const offset = offsetOf(ui, item.key);
+  const motion = motionOf(ui);
   const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))
     .flex_none()
     .px(FRAME.px)
@@ -5232,7 +5264,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .gap(FRAME.gap)
     .relative()
     .top(offset ? -offset : 0)
-    .when(ui.glide, (el) => el.transition("top", GLIDE))
+    .transition("top", motion)
     .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
   const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
     .min_h(0)
@@ -5251,7 +5283,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .border_color(t.border)
     .child(windowEl)
     .when(Boolean(thumb), (el) => el.child(
-      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).when(ui.glide, (el) => el.transition("top", GLIDE))
+      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).transition("top", motion)
         .w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
     ));
 }
@@ -8203,8 +8235,6 @@ export default class Board extends View {
       const item = this.levelItem(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
-      // A line's move is no page's: what it scrolls, it scrolls at once.
-      ui.glide = false;
       if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
       else {
         panel.line = stepLine(panel.line, dir, lines.length);
@@ -8235,7 +8265,7 @@ export default class Board extends View {
     const item = { ...line, key: lineKey(line) };
     if (!this.readsRelated(item) && !this.readsPullRequest(item)) return this.say(`${itemLabel(line)} lässt sich hier nicht zeigen`, "info", cx);
     const ui = this.relatedUi;
-    const back = { line: panel.line, offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes, unfolded: ui.unfolded };
+    const back = { line: panel.line, ...keptScroll(ui), unfolded: ui.unfolded };
     const section = sectionOf(this.relatedOf(view, this.levelItem(view))?.data, line);
     panel.levels.push({ item, back, section });
     panel.line = null;
@@ -8255,7 +8285,8 @@ export default class Board extends View {
     const ui = this.relatedUi;
     // Its heights as they were measured, until it is laid out again: the
     // window's too, which takes its height from the content.
-    Object.assign(ui, { at: item.key, offset: back.offset, glide: false, viewport: back.viewport, content: back.content, sizes: back.sizes, unfolded: back.unfolded });
+    restoreScroll(ui, item.key, back);
+    ui.unfolded = back.unfolded;
     if (entry?.data) {
       const at = relatedLines(entry.data).findIndex((l) => sameItem(l, from));
       panel.line = at < 0 ? null : at;

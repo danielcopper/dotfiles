@@ -560,10 +560,11 @@ herdr-app`. Which files of the package git tracks is set in the root
   scroll the details a line, `j` until the first line shows whole, which it
   then selects. `ctrl-d` and `ctrl-u` scroll half the details' height, `gg`
   and `Home` go to the panel's top with no line selected, `G` and `End` to
-  its bottom on its last line; these glide there in about a tenth of a
-  second, while `j/k` and the mouse wheel move at once. The board scrolls
-  the details itself (herdr
-  gives a mod no scroll position to set), so they have no scrollbar to drag:
+  its bottom on its last line; these glide there in 120 ms with an ease-out,
+  herdr's native transition of the details' top, the first press after any
+  other move too, while `j/k`, the mouse wheel and a change of the details'
+  heights move them at once. The board scrolls the details itself (herdr gives
+  a mod no scroll position to set), so they have no scrollbar to drag:
   the mouse wheel scrolls them, and a thin mark at the right shows where they
   are. `Enter` shows a line's item in the panel, a level down: a parent's, a
   sub-issue's or a child's description, its own related items and its state; a

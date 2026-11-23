@@ -37,7 +37,7 @@ import { h_flex, v_flex, TextView } from "gpui-base";
 import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateDone } from "../kinds/states.js";
-import { GLIDE, LINE_PX, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
+import { LINE_PX, motionOf, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
 import { FRAME, checksSection, chip, sectionTitle, selectedLook, stateChip, unzoomed } from "./helpers.js";
 import { NOTE_TONES, toneColor } from "./tones.js";
 
@@ -47,10 +47,10 @@ export const FOLDED_H = 12 * LINE_PX;
 // when it starts and every draw reads: the measured height of each
 // description by its item's key, the key of the item whose description is
 // unfolded (null: none; another item's shows folded), and the block's
-// scroll (scroll.js): its offset, whether its last move glides, the item it
-// is of (`at`), the heights of its window and its content, and of each row
-// by its id.
-export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glide: false, at: null, viewport: 0, content: 0, sizes: new Map() });
+// scroll (scroll.js): its offset, where a page or end key put it (null:
+// nowhere), the item it is of (`at`), the heights of its window and its
+// content, and of each row by its id.
+export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glideTo: null, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
 export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
@@ -208,6 +208,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(stateChip(t, data, line.state, line.color));
   };
   const offset = offsetOf(ui, item.key);
+  const motion = motionOf(ui);
   const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))
     .flex_none()
     .px(FRAME.px)
@@ -215,7 +216,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .gap(FRAME.gap)
     .relative()
     .top(offset ? -offset : 0)
-    .when(ui.glide, (el) => el.transition("top", GLIDE))
+    .transition("top", motion)
     .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
   const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
     .min_h(0)
@@ -234,7 +235,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .border_color(t.border)
     .child(windowEl)
     .when(Boolean(thumb), (el) => el.child(
-      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).when(ui.glide, (el) => el.transition("top", GLIDE))
+      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).transition("top", motion)
         .w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
     ));
 }

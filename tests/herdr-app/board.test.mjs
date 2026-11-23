@@ -9124,30 +9124,32 @@ test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its windo
   assert.equal(b.panel.line, null, "the lines stay as they were");
 });
 
-test("UI: a page or end key in the details panel glides the block and its thumb (herdr's transition of top, 120 ms ease-out); j/k, the mouse wheel and another item's details move them at once", async () => {
+// The transitions of top the details block's content and thumb draw with
+// now (the thumb's null where there is none).
+const glidesOf = (b) => ["related-lines", "related-thumb"].map((id) => byId(detailPanel(b), id)?.with.transition ?? null);
+const GLIDING = [["top", { duration: 120, easing: "ease-out" }], ["top", { duration: 120, easing: "ease-out" }]];
+const STILL = [["top", 0], ["top", 0]];
+
+test("UI: a page or end key in the details panel glides the block and its thumb, the first after any other move too (herdr's transition of top, 120 ms ease-out, at every draw); j/k, the mouse wheel and another item's details move them at once", async () => {
   const { b, cx, st } = await openRelated();
   layOut(b, cx, 100);
-  const glides = () => {
-    const [content, thumb] = ["related-lines", "related-thumb"].map((id) => byId(detailPanel(b), id));
-    return [content.with.transition ?? null, thumb?.with.transition ?? null];
-  };
-  const GLIDING = [["top", { duration: 120, easing: "ease-out" }], ["top", { duration: 120, easing: "ease-out" }]];
+  const glides = () => glidesOf(b);
   const ctrl = (k) => press(b, cx, k, { modifiers: { control: true } });
   const wheel = (y) => cx.call((own) => byId(detailPanel(b), "related-window").with.on_scroll_wheel[0]({ delta: { x: 0, y } }, own));
-  assert.deepEqual(glides(), [null, null], "nothing moved yet");
+  assert.deepEqual(glides(), STILL, "nothing moved yet: drawn with a transition that moves at once");
   await tab(b, cx);
   await ctrl("d");
   assert.deepEqual([offsetOf(b), glides()], [50, GLIDING], "ctrl-d");
   await press(b, cx, "k");
-  assert.deepEqual([offsetOf(b), glides()], [32, [null, null]], "k: a line up, at once");
+  assert.deepEqual([offsetOf(b), glides()], [32, STILL], "k: a line up, at once");
   await ctrl("u");
   assert.deepEqual([offsetOf(b), glides()], [0, GLIDING], "ctrl-u");
   wheel(-40);
-  assert.deepEqual([offsetOf(b), glides()], [40, [null, null]], "the wheel");
+  assert.deepEqual([offsetOf(b), glides()], [40, STILL], "the wheel");
   await press(b, cx, "end");
   assert.deepEqual([offsetOf(b), glides()], [134, GLIDING], "End");
   await press(b, cx, "j");
-  assert.deepEqual(glides(), [null, null], "j: a line's move, whether it scrolls or not");
+  assert.deepEqual(glides(), STILL, "j: a line's move, whether it scrolls or not");
   await press(b, cx, "home");
   assert.deepEqual([offsetOf(b), glides()], [0, GLIDING], "Home");
   await press(b, cx, ...SHIFT_G);
@@ -9155,7 +9157,50 @@ test("UI: a page or end key in the details panel glides the block and its thumb 
   await press(b, cx, "escape");
   await press(b, cx, "j");
   assert.equal(st().sel.key, "PVTI_rec5");
-  assert.deepEqual([offsetOf(b), glides()[0], b.relatedUi.glide], [0, null, false], "another item's details: at the top, at once");
+  assert.deepEqual([offsetOf(b), glides()[0]], [0, ["top", 0]], "another item's details: at the top, at once");
+});
+
+test("UI: where a page or end key put the details block, a change of its heights moves it at once: a resize that cuts its offset, a taller content", async () => {
+  const { b, cx } = await openRelated();
+  layOut(b, cx, 100);
+  await tab(b, cx);
+  await press(b, cx, "end");
+  assert.deepEqual([offsetOf(b), glidesOf(b)], [134, GLIDING]);
+  layOut(b, cx, 200);
+  assert.deepEqual([offsetOf(b), glidesOf(b)], [34, STILL], "a taller window: its end at the content's, at once");
+  await press(b, cx, "end");
+  assert.deepEqual(glidesOf(b), GLIDING, "End again");
+  layOut(b, cx, 200, { rowH: 30 });
+  assert.deepEqual([offsetOf(b), glidesOf(b)], [34, STILL], "taller content, the offset kept: its thumb moves at once");
+});
+
+test("UI: Esc from a level back up brings the scroll of the level above back at once, also where a page or end key put it", async () => {
+  const { b, cx, host } = await openRelated();
+  layOut(b, cx, 100);
+  await tab(b, cx);
+  await press(b, cx, "end");
+  assert.deepEqual([b.panel.line, offsetOf(b), glidesOf(b)], [4, 134, GLIDING]);
+  b.panel.line = 3;
+  await press(b, cx, "enter");
+  await host.answer("gh", ok(pullRequestAnswer()), isPullRequestCall);
+  assert.deepEqual([b.panel.levels.length, byId(detailPanel(b), "related-lines")], [1, null], "a pull request's level, which draws no block");
+  await press(b, cx, "escape");
+  assert.deepEqual([b.panel.levels.length, b.panel.line, offsetOf(b), glidesOf(b)], [0, 3, 134, STILL], "the scroll it had, without a glide");
+});
+
+test("the details block's glide belongs to the move a page or end key made: another item's offset, a restored one and any other move drop it (motionOf)", () => {
+  const ui = { offset: 0, glideTo: null, at: "a", viewport: 100, content: 300, sizes: new Map() };
+  board.scrollToEnd(ui, "top");
+  assert.equal(board.motionOf(ui), board.GLIDE, "Home");
+  board.offsetOf(ui, "b");
+  assert.deepEqual([ui.offset, board.motionOf(ui)], [0, 0], "another item: at its top, as Home left the last, yet at once");
+  board.scrollToEnd(ui, "top");
+  const back = board.keptScroll(ui);
+  board.restoreScroll(ui, "b", back);
+  assert.deepEqual([ui.offset, board.motionOf(ui)], [0, 0], "restored where the key put it: at once");
+  board.scrollPage(ui, 1);
+  board.revealSpan(ui, { top: 50, height: 10 });
+  assert.deepEqual([ui.offset, board.motionOf(ui)], [50, 0], "a line shown where it already shows: at once");
 });
 
 test("UI: the mouse wheel scrolls the block, in the script's pixels at herdr's zoom; a thumb at the right shows where it is, none where all fits", async () => {
