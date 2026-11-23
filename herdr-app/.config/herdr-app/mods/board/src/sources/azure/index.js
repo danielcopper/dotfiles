@@ -148,7 +148,7 @@ export function makeAzure(paths) {
   return {
     site: "Azure",
     noViewer,
-    // A work item's description, children and linked pull requests
+    // A work item's description, parent, children and linked pull requests
     // (related.js).
     related: azureRelated(az),
     pullRequest: azurePullRequest(az),

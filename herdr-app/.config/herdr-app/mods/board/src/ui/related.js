@@ -3,17 +3,16 @@
 // Markdown or HTML as its source writes it, without anything it could load:
 // description.js; "keine Beschreibung" where it has none), its parent
 // ("ÜBERGEORDNET", where it has one or the source could not send it), its
-// sub-issues (an Azure work item's children), then, where it has any or
-// the source
-// could not send them, the pull requests linked to it; one line each with
-// its key, title and state (a done one dimmed, a draft marked), and below
-// a section how many it has that cannot be read. While they load the
-// description's and the sub-issues' sections say "lädt …", after a
-// failure the reason; a section the source could not send says why in its
-// place; what the source said besides follows at the end. The line the
-// panel has selected while it has the keyboard is marked; a click on a
-// line is Enter on it (the Board's pickLine). A link in the description
-// opens through the Board's openLink.
+// sub-issues (an Azure work item's children), then, where it has any or the
+// source could not send them, the pull requests linked to it; one line each
+// with its key, title and state (a done one dimmed, a draft marked), and
+// below a section how many it has that cannot be read. While they load the
+// description's and the sub-issues' sections say "lädt …", after a failure
+// the reason; a section the source could not send says why in its place;
+// what the source said besides follows at the end. The line the panel has
+// selected while it has the keyboard is marked; a click on a line is Enter
+// on it (the Board's pickLine). A link in the description opens through the
+// Board's openLink.
 //
 // A description taller than about 12 lines shows folded to that height,
 // with "… mehr" below, and the key that unfolds it where one does now
@@ -39,7 +38,7 @@ import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateColor, stateDone } from "../kinds/states.js";
 import { LINE_PX, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
-import { FRAME, checkColor, chip, detailSection, sectionTitle, selectedLook, unzoomed } from "./helpers.js";
+import { FRAME, checksSection, chip, sectionTitle, selectedLook, unzoomed } from "./helpers.js";
 import { NOTE_TONES, toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
@@ -166,14 +165,20 @@ function description(b, t, item, r) {
 // details show beside the header: its checks where its source reads them
 // (GitHub), and while they load or after a failure, a note.
 export function levelParts(b, t, view, item, entry) {
-  const data = b.state(view.id).data;
-  const color = item.color ?? (data ? stateColor(data, item.state) : "muted");
-  const chips = [chip(t, item.state ?? "ohne Status", t.background, toneColor(t, color))];
+  const chips = [lineStateChip(t, b.state(view.id).data, item)];
   if (item.kind !== "pr") return { chips };
   const note = (text, level) => div().id("level-note").px(18).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES[level])).child(text);
   if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note("lädt …", "info")] };
-  const checks = entry.data.pr.checks;
-  return { chips, sections: checks ? [detailSection(t, "CHECKS", div().text_color(checkColor(t, checks.state)).child(checks.text))] : [] };
+  const { checks, warnings } = entry.data.pr;
+  return { chips, sections: [...(checks ? [checksSection(t, checks)] : []), ...(warnings ?? []).map((w) => note(w, "warning"))] };
+}
+
+// The chip of a line's or a level's state: in its own color where its
+// source names one (GitHub), else its state's in the view's `data`
+// (Azure); muted before the view is read.
+function lineStateChip(t, data, line) {
+  const color = line.color ?? (data ? stateColor(data, line.state) : "muted");
+  return chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color));
 }
 
 // The block of the related items of `item` (relatedRows) in `view`, the
@@ -188,7 +193,6 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, NOTE_TONES[r.level])).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
-    const color = line.color ?? stateColor(data, line.state);
     const done = line.done ?? stateDone(data, line.state);
     return h_flex()
       .flex_none()
@@ -208,7 +212,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color)));
+      .child(lineStateChip(t, data, line));
   };
   const offset = offsetOf(ui, item.key);
   const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))

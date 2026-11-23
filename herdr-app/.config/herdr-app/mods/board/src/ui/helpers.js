@@ -307,6 +307,10 @@ export const sectionFrame = (t) => v_flex().px(FRAME.px).py(FRAME.py).gap(FRAME.
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
 export const detailSection = (t, title, ...kids) => sectionFrame(t).child(sectionTitle(t, title)).children(kids);
 
+// The detail panel's section of a pull request's checks (checksSummary),
+// in their state's color.
+export const checksSection = (t, checks) => detailSection(t, "CHECKS", div().text_color(checkColor(t, checks.state)).child(checks.text));
+
 // The detail panel's parts of a work item (the sprint and the backlog
 // shape): its `state` as a pill on its theme `color`, a click opening the
 // status menu; a section `title` with `rows` ([label, value]) where there

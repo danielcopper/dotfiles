@@ -1,35 +1,34 @@
 // An Azure work item's related items (related.js says what they hold): its
-// description, its parent, its children and the pull requests linked to
-// it, read when
-// its details open (azureRelated, which makeAzure gives as its `related`).
+// description, its parent, its children and the pull requests linked to it,
+// read when its details open (azureRelated, which makeAzure gives as its
+// `related`).
 //
 // `az boards work-item show --id <n> --expand relations` (the extension's
-// show_work_item, dev/boards/work_item.py: client.get_work_item, REST's
-// Work Items - Get Work Item with $expand=relations) answers the work item
-// with all its fields, System.Description among them where it has one
-// (HTML, as Azure keeps it), and its links as REST names them: a child
+// show_work_item, dev/boards/work_item.py: client.get_work_item, REST's Work
+// Items - Get Work Item with $expand=relations) answers the work item with
+// all its fields, System.Description among them where it has one (HTML, as
+// Azure keeps it), and its links as REST names them: a child
 // "System.LinkTypes.Hierarchy-Forward" with the child's URL, its parent
-// "System.LinkTypes.Hierarchy-Reverse" with the parent's, a pull request
-// an "ArtifactLink" named "Pull Request" whose URL (which alone tells it
-// from another artifact, a branch or a commit) is
+// "System.LinkTypes.Hierarchy-Reverse" with the parent's, a pull request an
+// "ArtifactLink" named "Pull Request" whose URL (which alone tells it from
+// another artifact, a branch or a commit) is
 // vstfs:///Git/PullRequestId/<project id>%2F<repo id>%2F<pull request id>
 // (how az repos pr work-item add writes one, dev/repos/pull_request.py).
-// (`az boards work-item relation show` would name the links in words, at
-// the cost of one more call for the link types.) A child's or the parent's
-// link carries no title or state, so where the item has children or a
-// parent one WIQL query by their ids reads them (idsWiql, as the Backlog
-// reads its items; az boards query takes flat queries only, no link
-// query); a pull request's link carries
-// none either, and reading them would cost a call per pull request (az
-// repos pr show), so a pull request's line names its id only, with its
-// page. The details panel reads a pull request it goes down to with that
-// call (azurePullRequest): `az repos pr show --id <n>` (the extension's
-// show_pull_request, dev/repos/pull_request.py: GitClient.get_pull_request,
-// REST's GitPullRequest) answers its title, status, isDraft, createdBy,
-// sourceRefName and reviewers, each with a vote; no checks (Azure's
-// policies would cost another call).
+// (`az boards work-item relation show` would name the links in words, at the
+// cost of one more call for the link types.) A child's or the parent's link
+// carries no title or state, so where the item has children or a parent one
+// WIQL query by their ids reads them (idsWiql, as the Backlog reads its
+// items; az boards query takes flat queries only, no link query); a pull
+// request's link carries none either, and reading them would cost a call per
+// pull request (az repos pr show), so a pull request's line names its id
+// only, with its page. The details panel reads a pull request it goes down
+// to with that call (azurePullRequest): `az repos pr show --id <n>` (the
+// extension's show_pull_request, dev/repos/pull_request.py:
+// GitClient.get_pull_request, REST's GitPullRequest) answers its title,
+// status, isDraft, createdBy, sourceRefName and reviewers, each with a vote;
+// no checks (Azure's policies would cost another call).
 
-import { BoardError, isObject, report } from "../../shared.js";
+import { BoardError, DRAFT_REVIEW, STATE_LOOKS, isObject, otherLook, report } from "../../shared.js";
 import { CHILD_LINK, DESCRIPTION, PARENT_LINK, azJson, azOrg, azQueryArgs, idsWiql, parseWorkItems } from "./common.js";
 
 // The work item with its links.
@@ -131,20 +130,15 @@ export async function loadAzureRelated(az, c, item) {
 // A pull request by its id.
 export const azPullRequestArgs = (c, id) => ["repos", "pr", "show", ...azOrg(c.org), "--id", String(id), "-o", "json"];
 
-// A pull request's status as a line shows it (as GitHub's states are):
-// its label, its chip's theme color, and whether it is done.
-const PULL_REQUEST_STATES = {
-  active: { state: "offen", color: "ansi2", done: false },
-  completed: { state: "gemerged", color: "ansi5", done: true },
-  abandoned: { state: "geschlossen", color: "muted", done: true },
-};
+// A pull request's status as a line shows it (STATE_LOOKS).
+const PULL_REQUEST_LOOKS = { active: STATE_LOOKS.open, completed: STATE_LOOKS.merged, abandoned: STATE_LOOKS.closed };
 
 // The reviewers' votes as a review label, as GitHub's review decision is
-// one (reviewLabel): a draft "Entwurf"; else Azure's own votes, the
+// one (reviewLabel): a draft DRAFT_REVIEW; else Azure's own votes, the
 // strongest first: -10 "abgelehnt", -5 "wartet auf Autor", 10 or 5
 // "freigegeben"; none (no vote yet, or no reviewer) says nothing.
 export function azureReview(reviewers, draft) {
-  if (draft) return "Entwurf";
+  if (draft) return DRAFT_REVIEW;
   const votes = (Array.isArray(reviewers) ? reviewers : []).map((r) => r?.vote);
   if (votes.includes(-10)) return "abgelehnt";
   if (votes.includes(-5)) return "wartet auf Autor";
@@ -157,7 +151,7 @@ export function azureReview(reviewers, draft) {
 export function parseAzurePullRequest(stdout) {
   const json = azJson(stdout, "den Pull Request");
   if (!isObject(json) || !Number.isInteger(json.pullRequestId)) throw new BoardError("Azure lieferte keinen Pull Request");
-  const state = PULL_REQUEST_STATES[json.status] ?? { state: String(json.status ?? "?"), color: "muted", done: false };
+  const state = PULL_REQUEST_LOOKS[json.status] ?? otherLook(json.status);
   return {
     ...(typeof json.title === "string" ? { title: json.title } : {}),
     ...state,

@@ -64,9 +64,28 @@ export const cardLabel = (item) => (item.source === "azure" && item.kind === "wo
 // (assigneeLogins: select.js isMine).
 export const personName = ({ name, login }) => name || login || null;
 
-// Whether `a` and `b` are the same issue, pull request or work item: the
-// same source, kind, repo and number (on Azure no repo, the same on both).
-export const sameItem = (a, b) => a.source === b.source && a.kind === b.kind && a.repo === b.repo && a.number === b.number;
+// What names an issue, pull request or work item wherever it shows (on
+// the board, as a line of the details, as a level the details panel went
+// down to): its source, kind, repo (none on Azure) and number.
+export const lineKey = (item) => `${item.source}:${item.kind}:${item.repo ?? ""}#${item.number}`;
+
+// Whether `a` and `b` are the same issue, pull request or work item.
+export const sameItem = (a, b) => lineKey(a) === lineKey(b);
+
+// How an issue's or pull request's state shows on a line and a level of
+// the details (GitHub's states and Azure's pull request statuses map onto
+// them): its label, its chip's theme color, and whether it is done
+// (dimmed); otherLook for a state none is known for.
+export const STATE_LOOKS = {
+  open: { state: "offen", color: "ansi2", done: false },
+  closed: { state: "geschlossen", color: "muted", done: true },
+  merged: { state: "gemerged", color: "ansi5", done: true },
+};
+export const otherLook = (state) => ({ state: String(state ?? "?").toLowerCase(), color: "muted", done: false });
+
+// A draft pull request's review, on either source: a draft asks for none
+// yet.
+export const DRAFT_REVIEW = "Entwurf";
 
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".

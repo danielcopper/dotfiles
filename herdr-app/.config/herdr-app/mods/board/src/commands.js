@@ -32,12 +32,9 @@
 // items' lines), drilled (whether the panel shows a related item rather
 // than the board's selected one), trail (the keys of the items on the
 // panel's way down, the board's selected one first) }.
-// While the panel is drilled, the selected item's keys (s, a, H/L, Enter,
-// o) are not taken: they would act on the board's item while another one
-// shows; the menu still offers them, under that item's heading.
 
 import { spaces } from "herdr";
-import { cardType, itemLabel } from "./shared.js";
+import { cardType, itemLabel, lineKey } from "./shared.js";
 import { hasViewSwitch, shownIndex, sourceAfter, sourcesOf, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
 import { linkedSession } from "./actions/start.js";
 import { fuzzyRank } from "./select.js";
@@ -62,9 +59,16 @@ export function keyName(k, ch, mod) {
 // How the hint line and the menu write a key.
 const keyLabel = (key) => (key === "enter" ? "Enter" : key);
 
+// Whether the action `a` is held now: while the details panel shows a
+// level it went down to, the actions on the selected item (its group
+// "item") take no key and give no hint, since they would act on the
+// board's item while another one shows; the menu still offers them, under
+// that item's heading.
+const held = (a, c) => a.group === "item" && Boolean(c.drilled);
+
 // The action the key `name` runs now: the first in the table that has it
-// and takes it; null for none.
-export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && (a.takes ?? a.when)(c)) ?? null;
+// and takes it, and is not held; null for none.
+export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && !held(a, c) && (a.takes ?? a.when)(c)) ?? null;
 
 const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
 
@@ -104,11 +108,12 @@ const GROUPS = {
 };
 
 // The command menu's entries now: { action, name, key, group, head, aim,
-// gone } for each action the menu lists that can run, in the menu's order,
-// with its key where that key runs it now (actionFor), else none; its
-// group's heading; and what it aims at and what is said where that has
-// gone (GROUPS; an action may aim closer, as "Spalte ausblenden" at its
-// column).
+// gone, groupAim, groupGone } for each action the menu lists that can run,
+// in the menu's order, with its key where that key runs it now
+// (actionFor), else none; its group's heading; and what it aims at and
+// what is said where that has gone (GROUPS; an action may aim closer, as
+// "Spalte ausblenden" at its column, and what its group aims at, and says,
+// apart: where that has gone, the menu says so first).
 export function menuActions(c) {
   return ACTIONS.filter((a) => a.menu != null && a.when(c))
     .sort((x, y) => x.menu - y.menu)
@@ -116,13 +121,15 @@ export function menuActions(c) {
       const group = GROUPS[a.group];
       return {
         action: a, name: nameOf(a, c), key: keyShown(a.id, c), group: a.group, head: group.title(c),
-        aim: aimOf(a, c), gone: a.gone?.(c) ?? group.gone(c),
+        aim: aimOf(a, c), gone: a.gone?.(c) ?? group.gone(c), groupAim: groupAimOf(a, c), groupGone: group.gone(c),
       };
     });
 }
 
-// What the action `a` acts on now, as a text to compare (menuActions).
+// What the action `a` acts on now, as a text to compare (menuActions), and
+// what its group does.
 export const aimOf = (a, c) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.aim?.(c) ?? [])]);
+export const groupAimOf = (a, c) => JSON.stringify(GROUPS[a.group].aim(c));
 
 // The menu's entries its filter leaves, best first (fuzzyRank), each with
 // `at`, where the filter's letters stand in its name.
@@ -130,7 +137,7 @@ export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) =
 
 // The hint line's entries now: [key, text], in the table's order.
 export function hintsOf(c) {
-  return ACTIONS.filter((a) => a.hint)
+  return ACTIONS.filter((a) => a.hint && !held(a, c))
     .map((a) => [a.hintKey ?? keyLabel(a.key), a.hint(c)])
     .filter(([, text]) => text);
 }
@@ -147,10 +154,20 @@ const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context(
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
 // takes Enter and o while one is, and the panel shows that item's details
-// (not drilled).
-const onItem = (c) => Boolean(c.item) && c.line === null && !c.drilled;
-// Whether the panel shows a related item it went down to.
+// (held while drilled).
+const onItem = (c) => Boolean(c.item) && c.line === null;
+// Whether the panel shows a related item it went down to, and whether no
+// line of it is selected, when Enter and o act on that item.
 const onLevel = (c) => Boolean(c.details) && Boolean(c.drilled);
+const onLevelItem = (c) => onLevel(c) && c.line === null;
+// Whether the line hints name the line's keys: the panel has the keyboard
+// and, on a level, a line is selected (else Enter and o are the level's
+// item's; a pull request's level has none).
+const lineHints = (c) => Boolean(c.panel) && (!c.drilled || c.line !== null);
+// What the marked line's actions aim at: that line's item, so that a read
+// that shifts the lines while the menu is open runs none on another.
+const lineAim = (c) => [c.lines[c.line] ? lineKey(c.lines[c.line]) : null];
+const lineGone = (c) => `${itemLabel(c.lines[c.line])} ist nicht mehr markiert`;
 // Whether a line of the details panel is selected and still there.
 const onLine = (c) => Boolean(c.details) && c.line !== null && Boolean(c.lines[c.line]);
 // Whether a view shows, its data is read, and its shape has `what`.
@@ -192,9 +209,9 @@ const moveAction = (id, key, by, name) => ({
   key,
   menu: by < 0 ? 5 : 6,
   when: (c) => has(c, "move") && Boolean(c.item) && c.shape.canMove(c.st, c.item, by),
-  takes: (c) => has(c, "move") && !c.drilled,
+  takes: (c) => has(c, "move"),
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
-  ...(by < 0 ? { hint: (c) => (c.shape?.move && !c.drilled ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
+  ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
 });
 
 export const ACTIONS = [
@@ -233,15 +250,15 @@ export const ACTIONS = [
   },
   {
     id: "status", group: "item", name: "Status ändern…", key: "s", menu: 3,
-    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu") && !c.drilled,
+    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu"),
     run: (b, c, cx) => b.openStatusMenu(c.view, cx),
-    hint: (c) => (c.shape?.openStatusMenu && !c.drilled ? "Status" : null),
+    hint: (c) => (c.shape?.openStatusMenu ? "Status" : null),
   },
   {
     id: "assign", group: "item", name: "Zuweisen…", key: "a", menu: 4,
-    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data) && !c.drilled,
+    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data),
     run: (b, c, cx) => b.openAssign(c.view, cx),
-    hint: (c) => (c.shape?.assign && !c.drilled ? "zuweisen" : null),
+    hint: (c) => (c.shape?.assign ? "zuweisen" : null),
   },
   // z folds what is where the keyboard is: on a Sprint the selected
   // story's tasks while the board has it, the description while the details
@@ -259,7 +276,7 @@ export const ACTIONS = [
     id: "details", group: "item", name: "Details zeigen", key: "enter", menu: 1,
     when: (c) => Boolean(c.item) && !c.st.detail,
     run: (b, c, cx) => b.enter(c.view, cx),
-    hint: (c) => (walks(c) && !c.drilled ? c.shape.enterHint ?? "Detail · Agent" : null),
+    hint: (c) => (walks(c) ? c.shape.enterHint ?? "Detail · Agent" : null),
   },
   {
     id: "start", group: "item", name: (c) => startName(c.item), key: "enter", menu: 2,
@@ -270,12 +287,12 @@ export const ACTIONS = [
     id: "open", group: "item", name: "Im Browser öffnen", key: "o", menu: 7,
     when: (c) => Boolean(c.item), takes: onItem,
     run: (b, c, cx) => b.open(c.item, cx),
-    hint: (c) => (walks(c) && !c.drilled ? "öffnen" : null),
+    hint: (c) => (walks(c) ? "öffnen" : null),
   },
   // On a pull request's level, which reads no related items, the panel
   // still has the keyboard.
   { id: "tab-hint", hint: (c) => (c.related || c.panel ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
-  { id: "lines-hint", hint: (c) => (c.panel ? "Zeilen" : null), hintKey: "j/k" },
+  { id: "lines-hint", hint: (c) => (c.panel && c.related ? "Zeilen" : null), hintKey: "j/k" },
   { id: "page-hint", hint: (c) => (c.panel ? "halbe Seite" : null), hintKey: "ctrl-d/u" },
   { id: "panel-edge-hint", hint: (c) => (c.panel ? "oben/unten" : null), hintKey: "gg/G" },
   {
@@ -287,38 +304,37 @@ export const ACTIONS = [
   },
   // The details panel's selected line (a line selected before `r` read the
   // related items again is gone until they come: its key does nothing).
-  // Enter shows its item's details in the panel, a level down (Esc goes
-  // back up); "Zeile auf dem Board" selects it on the board, from the menu
-  // and the panel's button.
   {
     id: "line-details", group: "details", name: "Zeile im Detailfenster zeigen", key: "enter", menu: 10,
-    when: onLine, takes: (c) => c.line !== null,
+    when: onLine, takes: (c) => c.line !== null, aim: lineAim, gone: lineGone,
     run: (b, c, cx) => c.lines[c.line] && b.drillLine(c.view, c.lines[c.line], cx),
-    hint: (c) => (c.panel ? "Zeile zeigen" : null),
+    hint: (c) => (lineHints(c) ? "Zeile zeigen" : null),
   },
   {
     id: "line-board", group: "details", name: "Zeile auf dem Board", key: null, menu: 11,
-    when: onLine,
+    when: onLine, aim: lineAim, gone: lineGone,
     run: (b, c, cx) => b.enterLine(c.view, c.lines[c.line], cx),
   },
   {
     id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 12,
-    when: onLine, takes: (c) => c.line !== null,
+    when: onLine, takes: (c) => c.line !== null, aim: lineAim, gone: lineGone,
     run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
-    hint: (c) => (c.panel ? "Zeile öffnen" : null),
+    hint: (c) => (lineHints(c) ? "Zeile öffnen" : null),
   },
-  // The item the panel went down to: Enter and o act on it, as they do on
-  // the board's item at the top, where no line is selected (the line's
-  // actions come first in the table and take them while one is).
+  // The item the panel went down to: Enter and o act on it where no line
+  // is selected (the line's actions come first in the table and take them
+  // while one is).
   {
     id: "level-start", group: "details", name: (c) => startName(c.details), key: "enter", menu: 13,
     when: onLevel,
     run: (b, c, cx) => b.startSession(c.view, c.details, cx),
+    hint: (c) => (onLevelItem(c) ? (c.details.kind === "pr" ? "Review" : "Agent") : null),
   },
   {
     id: "level-open", group: "details", name: "Im Browser öffnen", key: "o", menu: 14,
     when: onLevel,
     run: (b, c, cx) => b.open(c.details, cx),
+    hint: (c) => (onLevelItem(c) ? "öffnen" : null),
   },
   {
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,

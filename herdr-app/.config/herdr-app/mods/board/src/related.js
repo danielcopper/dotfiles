@@ -1,44 +1,43 @@
-// The items related to an item, which the board reads when its details
-// open (on GitHub an issue's parent, its sub-issues and the pull requests
-// linked to it, on Azure a work item's parent, its children and linked
-// pull requests; the same read
-// brings the item's description beside them), what of them a view keeps
-// (keptRelated), the lines the details panel walks when it has the
-// keyboard, and the heads of their sections. The description as drawn is
-// description.js's.
-// The Board reads them (readRelated) and draws them (ui/related.js).
+// The items related to an item, which the board reads when its details open
+// (on GitHub an issue's parent, its sub-issues and the pull requests linked
+// to it, on Azure a work item's parent, its children and linked pull
+// requests; the same read brings the item's description beside them), what
+// of them a view keeps (keptRelated), the lines the details panel walks when
+// it has the keyboard, and the heads of their sections. The description as
+// drawn is description.js's. The Board reads them (readRelated) and draws
+// them (ui/related.js).
 //
-// Enter on a line shows its item's details in the panel, a level down
-// (the Board's drillLine; Esc goes back up): the Board keeps the levels on
-// the panel's keyboard (panel.levels, each the line's item under its
-// lineKey and what the level above showed when it went down), reads each
-// level's related items as it reads the selected item's, and names the way
-// down at the panel's top (pathLabel).
+// Enter on a line shows its item's details in the panel, a level down (the
+// Board's drillLine; Esc goes back up): the Board keeps the levels on the
+// panel's keyboard (panelOf), reads each level's related items as it reads
+// the selected item's, and names the way down at the panel's top
+// (pathLabel).
 //
 // A source that has related items gives `related: { reads(item), load(item,
 // view) }`: reads tells whether the item has any to read (no call); load
-// reads them (view: the view the item shows in) into { description,
-// format, parents, subIssues, prs, warnings, retry }. description is the item's own
+// reads them (view: the view the item shows in) into { description, format,
+// parents, subIssues, prs, warnings, retry }. description is the item's own
 // text as the source has it ("" for none), format how it is written:
 // "markdown" (the default) or "html". Each of parents (the item's parent,
-// one line at most), subIssues and prs is a
-// section { count (how many the source has; null when it did not send the
-// section), sent (how many it sent), cut (it has more than it sent), hidden
-// (how many it has that cannot be read), hiddenAs (what the details say of
-// those: "ohne Zugriff" where it is missing), error (why it sent none;
-// null), lines (those that can be read) }; a line { source, kind, number,
-// title, url, state (its label), draft, and on GitHub repo, repoShort,
-// color (its chip's theme color) and done (dimmed); on Azure type, its
-// color and whether it is done coming from the view's states when drawn }.
-// warnings: what the source said besides, one line each. retry: a part
-// failed that is to be read again after the next refresh.
+// one line at most), subIssues and prs is a section { count (how many the
+// source has; null when it did not send the section), sent (how many it
+// sent), cut (it has more than it sent), hidden (how many it has that cannot
+// be read), hiddenAs (what the details say of those: "ohne Zugriff" where it
+// is missing), error (why it sent none; null), lines (those that can be
+// read) }; a line { source, kind, number, title, url, state (its label),
+// draft, and on GitHub repo, repoShort, color (its chip's theme color) and
+// done (dimmed); on Azure type, its color and whether it is done coming from
+// the view's states when drawn }. warnings: what the source said besides,
+// one line each. retry: a part failed that is to be read again after the
+// next refresh.
 //
 // A source whose pull requests the details panel can go down to gives
 // `pullRequest: { reads(item), load(item, view) }` the same way: load
 // reads the pull request's details as the PR list has a row's (title,
 // state, color, done, draft, author, review, branch; on GitHub its checks
-// and assignees too), which the panel shows as the PR list's details do;
-// the Board keeps them as { pr } beside the related items.
+// and assignees too, and warnings: what GitHub said besides), which the
+// panel shows as the PR list's details do; the Board keeps them as { pr }
+// beside the related items.
 
 import { cardLabel } from "./shared.js";
 
@@ -55,10 +54,6 @@ export function keptRelated(related, openKey, deeper = []) {
     return entry && !entry.error && !entry.data?.retry ? [[key, entry]] : [];
   }));
 }
-
-// The key a line's item has as a level of the details panel: its source,
-// kind, repo and number, which name it wherever it is.
-export const lineKey = (line) => `${line.source}:${line.kind}:${line.repo ?? ""}#${line.number}`;
 
 // The way the panel went down from `root` (the board's selected item) to
 // the items `levels`, as its top shows it: "tender#914 › #2217". A GitHub

@@ -6741,7 +6741,8 @@ test("an issue's parent is a section of one line before its sub-issues; none for
   answer.data.repository.issue.parent = null;
   const errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "parent"], message: "Resource not accessible\nmore" }];
   const hidden = board.parseGithubRelated(answer, issueItem(), errors);
-  assert.deepEqual([hidden.parents.lines, hidden.parents.error, hidden.warnings], [[], "GitHub: Resource not accessible", []]);
+  assert.deepEqual([hidden.parents.lines, hidden.parents.error, hidden.parents.count, hidden.warnings], [[], "GitHub: Resource not accessible", null, []],
+    "no count: GitHub did not send it");
 });
 
 test("an Azure work item's parent is read in the children's query, or in one of its own where it has no children; a failed query shows in both sections and is read again", async () => {
@@ -6772,6 +6773,10 @@ test("an Azure work item's parent is read in the children's query, or in one of 
   assert.deepEqual([d.parents.error, d.subIssues.error, d.retry], ["offline", "offline", true]);
   d = await board.loadAzureRelated(az([JSON.stringify(only), new board.BoardError("offline")]), c, { number: 301 });
   assert.deepEqual([d.parents.error, d.subIssues.error], ["offline", null], "no children: no error in their place");
+  const orphan = JSON.parse(fixture("azure-related-item.json"));
+  orphan.relations = orphan.relations.filter((r) => !/Reverse$/.test(r.rel));
+  d = await board.loadAzureRelated(az([JSON.stringify(orphan), new board.BoardError("offline")]), c, { number: 301 });
+  assert.deepEqual([d.parents.error, d.parents.count, d.subIssues.error], [null, 0, "offline"], "no parent: no error in its place");
   const bare = JSON.parse(fixture("azure-related-item.json"));
   bare.relations = [];
   calls.length = 0;
@@ -6797,7 +6802,7 @@ test("UI: the details show an issue's parent under „ÜBERGEORDNET“ before it
   assert.equal(relatedTexts(none.b).includes("ÜBERGEORDNET"), false, "none without a parent");
 });
 
-test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read with its children; one the query does not find is counted", async () => {
+test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read with its children and its parent; one the query does not find is counted; none without a parent, also where the query fails", async () => {
   const { b, cx, host } = await openSprint();
   await press(b, cx, "enter");
   await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
@@ -6813,6 +6818,14 @@ test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read with
   await press(again.b, again.cx, "j");
   await press(again.b, again.cx, "enter");
   assert.deepEqual([levelsNow(again.b), topText(again.b)], [[[290], null], "301 › 290"]);
+  const orphan = await openSprint();
+  await press(orphan.b, orphan.cx, "enter");
+  const item = json("azure-related-item.json");
+  item.relations = item.relations.filter((r) => !/Reverse$/.test(r.rel));
+  await orphan.host.answer("az", ok(JSON.stringify(item)), (a) => a.includes("relations"));
+  await orphan.host.answer("az", azRefused("Operation returned a 400 status code."), AZ.query);
+  const texts2 = relatedTexts(orphan.b);
+  assert.deepEqual([texts2.includes("ÜBERGEORDNET"), texts2.includes("Operation returned a 400 status code.")], [false, true], "the error in the children's place only");
 });
 
 // ---- Going down into a related item in the details panel ----
@@ -6945,7 +6958,17 @@ test("UI: on a level o opens the marked line, and with none the level's item; En
   assert.equal(host.open("gh").length, 0);
 });
 
-test("UI: on a level „Zeile auf dem Board“ selects the line's item from the menu and from the panel's button, and closes the levels; one the board does not show is said", async () => {
+test("UI: on a level „Zeile auf dem Board“ selects the line's item from the menu and from the panel's button, and closes the levels; one the board does not show is said; the button does nothing while a dialog is open", async () => {
+  const byMenu = await onLevel();
+  const level = JSON.parse(relatedAnswer({ n: 1 }));
+  level.data.repository.issue.subIssues.nodes[0].number = 3001;
+  byMenu.st().related.delete(byMenu.b.panelOf(byMenu.b.view()).levels[0].item.key);
+  byMenu.cx.call((own) => byMenu.b.readRelated(own));
+  await settle();
+  await answerRelated(byMenu.host, ok(JSON.stringify(level)));
+  await press(byMenu.b, byMenu.cx, "j");
+  await runCommand(byMenu.b, byMenu.cx, "Zeile auf dem Board");
+  assert.deepEqual([byMenu.st().sel.key, levelsNow(byMenu.b)], ["PVTI_rec2", [[], null]], "from the menu");
   const { b, cx, st, host } = await onLevel();
   await press(b, cx, "j");
   assert.equal(byId(detailPanel(b), "act-line-board") !== null, true, "a button while a line is marked");
@@ -6958,6 +6981,10 @@ test("UI: on a level „Zeile auf dem Board“ selects the line's item from the 
   cx.call((own) => b.readRelated(own));
   await settle();
   await answerRelated(host, ok(JSON.stringify(sub)));
+  b.modal = { kind: "status", view: b.view(), key: "PVTI_rec4", targets: [], at: 0 };
+  await click(b, cx, "act-line-board");
+  assert.deepEqual([st().sel.key, levelsNow(b)], ["PVTI_rec4", [[3010], 0]], "a dialog is open: nothing");
+  b.modal = null;
   await click(b, cx, "act-line-board");
   assert.deepEqual([st().sel.key, st().detail, levelsNow(b)], ["PVTI_rec2", true, [[], null]], "selected on the board, its details at the top");
   await press(b, cx, "k");
@@ -7034,7 +7061,7 @@ test("UI: the command menu runs a level's action only on that level: after a ref
 function pullRequestAnswer({ state = "OPEN", draft = true, decision = null } = {}) {
   const pullRequest = {
     id: "PR_sample3020", number: 3020, title: "feat(api): page through long lists", url: "https://github.com/example/tender/pull/3020", state, isDraft: draft,
-    headRefName: "feat/3004-pages", reviewDecision: decision, author: { login: "alex-sample" }, assignees: { nodes: [{ login: "robin-example", name: "Robin Example" }] },
+    createdAt: "2026-11-18T09:00:00Z", updatedAt: "2026-11-19T09:00:00Z", repository: { nameWithOwner: "example/tender" }, headRefName: "feat/3004-pages", reviewDecision: decision, author: { login: "alex-sample" }, assignees: { nodes: [{ login: "robin-example", name: "Robin Example" }] },
     reviewRequests: { nodes: [{ requestedReviewer: { login: "robin-example" } }] },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS", contexts: { checkRunCountsByState: [{ state: "SUCCESS", count: 2 }], statusContextCountsByState: [] } } } }] },
   };
@@ -7047,12 +7074,18 @@ test("a pull request the panel goes down to is one GraphQL query by repo and num
   const args = board.githubPullRequestArgs(pr);
   assert.deepEqual(args.slice(4), ["-f", "owner=example", "-f", "name=tender", "-F", "number=3020"]);
   const query = args[3].replace(/\s+/g, " ");
-  assert.match(query, /repository\(owner: \$owner, name: \$name\) \{ pullRequest\(number: \$number\) \{ id number title url state isDraft headRefName reviewDecision author \{ login \}/);
-  assert.match(query, /statusCheckRollup/);
+  assert.match(query, /repository\(owner: \$owner, name: \$name\) \{ pullRequest\(number: \$number\) \{ state id number title url isDraft createdAt updatedAt headRefName reviewDecision repository \{ nameWithOwner \} author \{ login \}/);
+  const list = board.githubListArgs({ sections: [{ query: "is:pr" }], limit: 5 })[3].replace(/\s+/g, " ");
+  assert.ok(list.includes(query.slice(query.indexOf("id number title"), query.lastIndexOf("} } } } } }") + 11)), "the fields of a PR list's row");
   const d = board.parseGithubPullRequest(JSON.parse(pullRequestAnswer()), pr);
-  assert.deepEqual([d.title, d.state, d.color, d.done, d.draft, d.author, d.review, d.branch, d.checks.text, d.assignees, d.assigneeLogins, d.reviewers, d.contentId], [
-    "feat(api): page through long lists", "offen", "ansi2", false, true, "alex-sample", "Entwurf", "feat/3004-pages", "2 bestanden", ["Robin Example"], ["robin-example"], ["robin-example"], "PR_sample3020",
+  assert.deepEqual([d.title, d.state, d.color, d.done, d.draft, d.author, d.review, d.branch, d.checks.text, d.assignees, d.assigneeLogins, d.reviewers, d.warnings], [
+    "feat(api): page through long lists", "offen", "ansi2", false, true, "alex-sample", "Entwurf", "feat/3004-pages", "2 bestanden", ["Robin Example"], ["robin-example"], ["robin-example"], [],
   ]);
+  const row = board.parseGithubList({ data: { s0: { issueCount: 1, nodes: [JSON.parse(pullRequestAnswer()).data.repository.pullRequest] } } }, { sections: [{ name: "S", query: "is:pr" }] }).sections[0].rows[0];
+  assert.deepEqual(Object.fromEntries(Object.keys(row).filter((k) => !["key", "source", "kind", "ownByQuery"].includes(k)).map((k) => [k, d[k]])),
+    Object.fromEntries(Object.entries(row).filter(([k]) => !["key", "source", "kind", "ownByQuery"].includes(k))), "what a PR list's row holds of it");
+  const partial = board.parseGithubPullRequest(JSON.parse(pullRequestAnswer()), pr, [{ path: ["repository", "pullRequest", "commits"], message: "Checks are hidden\nmore" }]);
+  assert.deepEqual(partial.warnings, ["Checks are hidden"], "a part GitHub did not send: a warning");
   const merged = board.parseGithubPullRequest(JSON.parse(pullRequestAnswer({ state: "MERGED", draft: false, decision: "APPROVED" })), pr);
   assert.deepEqual([merged.state, merged.done, merged.review], ["gemerged", true, "freigegeben"]);
   assert.throws(() => board.parseGithubPullRequest({ data: { repository: { pullRequest: null } } }, pr), /^Error: GitHub kennt example\/tender#3020 nicht$/);
@@ -7073,6 +7106,7 @@ test("UI: Enter on a pull request's line shows it a level down as the PR list's 
   assert.ok(calls[0].args.includes("number=3020"));
   assert.deepEqual(texts(byId(detailPanel(b), "level-note")), ["lädt …"]);
   await host.answer("gh", ok(pullRequestAnswer()), isPullRequestCall);
+  assert.equal(topText(b), "tender#3004 › #3020 · feat/3004-pages", "its branch beside the way down, as the PR list's details name it");
   const all = texts(detailPanel(b));
   for (const text of ["von alex-sample · Entwurf", "zugewiesen: Robin Example", "CHECKS", "2 bestanden", "offen"]) assert.ok(all.includes(text), text);
   assert.equal(byId(detailPanel(b), "related-lines"), null, "no description and no related items, as in the PR list");
@@ -7135,12 +7169,202 @@ test("UI: Enter on an Azure work item's pull request line shows it a level down:
   const shows = host.open("az").filter((c) => c.args[0] === "repos");
   assert.deepEqual(shows.map((c) => c.args), [board.azPullRequestArgs(b.view().context, 57)]);
   await host.answer("az", ok(fixture("azure-pr-show.json")), (a) => a[0] === "repos");
+  assert.equal(topText(b), "301 › !57 · feature/sample-import", "its branch");
   const all = texts(detailPanel(b));
   for (const text of ["Import the sample catalogue", "von Alex Sample · freigegeben", "offen"]) assert.ok(all.includes(text), text);
   assert.equal(all.includes("CHECKS"), false, "no checks on Azure");
   assert.deepEqual([b.actionContext().details.branch, b.actionContext().details.kind], ["feature/sample-import", "pr"], "the item its keys act on: its details laid over its line");
 });
 
+
+// ---- The levels' fixes: partial reads, discarded reads, other views ----
+
+// The related items' answer of tender#3004 with `patch` applied to its
+// issue; `errors` beside them.
+function rootAnswer(patch, errors) {
+  const answer = json("github-related.json");
+  patch(answer.data.repository.issue);
+  return ok(JSON.stringify(errors ? { ...answer, errors } : answer));
+}
+const without3010 = (issue) => (issue.subIssues.nodes = issue.subIssues.nodes.filter((n) => n.number !== 3010));
+
+test("UI: r takes a level away only where the section its line came from came whole: sub-issues GitHub did not send, sent cut short or with one hidden keep it; another section's failure decides nothing for it", async () => {
+  const { b, cx, host } = await onLevel();
+  const again = async (answer) => {
+    await reloadBoard(b, cx, host);
+    await host.answer("gh", answer, readRelatedOf(3004));
+    await host.answer("gh", ok(relatedAnswer({ n: 2 })), readRelatedOf(3010));
+  };
+  await again(rootAnswer((i) => (i.subIssues = null), [{ type: "FORBIDDEN", path: ["repository", "issue", "subIssues"], message: "Sub-issues are hidden" }]));
+  assert.deepEqual([levelsNow(b)[0], b.notice], [[3010], null], "not sent: kept, nothing said");
+  await again(rootAnswer((i) => {
+    without3010(i);
+    i.subIssues.pageInfo.hasNextPage = true;
+  }));
+  assert.deepEqual([levelsNow(b)[0], b.notice], [[3010], null], "cut short: it may stand further on");
+  await again(rootAnswer((i) => {
+    without3010(i);
+    i.subIssues.nodes.push(null);
+  }));
+  assert.deepEqual([levelsNow(b)[0], b.notice], [[3010], null], "one without access: it may be that one");
+  await again(rootAnswer((i) => {
+    without3010(i);
+    i.closedByPullRequestsReferences = null;
+  }));
+  assert.deepEqual([levelsNow(b)[0], b.notice?.text], [[], "tender#3010 steht nicht mehr bei tender#3004: zurück zu tender#3004"],
+    "the pull requests not sent: the sub-issues still decide");
+  await tab(b, cx);
+  await tab(b, cx);
+  await reloadBoard(b, cx, host);
+  await host.answer("gh", rootAnswer((i) => (i.parent = parentNode(2900))), readRelatedOf(3004));
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual(levelsNow(b), [[2900], null]);
+  await reloadBoard(b, cx, host);
+  await host.answer("gh", rootAnswer((i) => (i.subIssues = null)), readRelatedOf(3004));
+  assert.deepEqual([levelsNow(b)[0], b.notice?.text], [[], "tender#2900 steht nicht mehr bei tender#3004: zurück zu tender#3004"],
+    "the parent's level by the parent's section: it has none now, whatever the sub-issues");
+});
+
+test("UI: on Azure a level stays where the children's query failed after the work item came, and goes where it ran", async () => {
+  const { b, cx, host } = await openSprint();
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  await host.answer("az", ok(JSON.stringify({ id: 312, fields: {}, relations: null })), (a) => a.includes("relations"));
+  assert.deepEqual(levelsNow(b), [[312], null]);
+  const reload = async (item, children) => {
+    await press(b, cx, "r");
+    await answerSettings(host);
+    await answerRefresh(host, { me: false });
+    await host.answer("az", ok(JSON.stringify(item)), (a) => a.includes("relations") && a.includes("301"));
+    await host.answer("az", children, (a) => AZ.query(a) && a.some((x) => String(x).includes(" IN (")));
+    await host.answer("az", ok(JSON.stringify({ id: 312, fields: {}, relations: null })), (a) => a.includes("relations") && a.includes("312"));
+  };
+  await reload(json("azure-related-item.json"), azRefused("Operation returned a 400 status code."));
+  assert.deepEqual([levelsNow(b)[0], b.notice], [[312], null], "the query failed: kept, nothing said");
+  // 312 unlinked; every child left and the parent found.
+  const unlinked = json("azure-related-item.json");
+  unlinked.relations = unlinked.relations.filter((r) => !/workItems\/312$/.test(r.url));
+  const found = [...json("azure-related-children.json"), { id: 399, fields: { "System.Title": "Third" } }, { id: 290, fields: { "System.Title": "Epic" } }];
+  await reload(unlinked, ok(JSON.stringify(found)));
+  assert.deepEqual([levelsNow(b)[0], b.notice?.text], [[], "AB#312 steht nicht mehr bei AB#301: zurück zu AB#301"], "it ran without it: gone");
+});
+
+test("UI: a read that r dropped decides nothing when it comes: r twice keeps the level", async () => {
+  const { b, cx, host } = await onLevel();
+  await reloadBoard(b, cx, host);
+  await press(b, cx, "r");
+  await host.answer("gh", rootAnswer(without3010), readRelatedOf(3004));
+  assert.deepEqual([levelsNow(b)[0], b.notice], [[3010], null]);
+});
+
+test("UI: a level's read that ends after another view's panel opened leaves that panel and its levels alone, and so does a refresh of the first view", async () => {
+  const { b, cx, host } = await onFirstLine();
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual(levelsNow(b), [[3010], null]);
+  await press(b, cx, "3");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  await press(b, cx, "enter");
+  await host.answer("gh", ok(fixture("github-related.json")), readRelatedOf(3004));
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  const other = () => [b.panel?.view, b.panel?.levels.map((l) => l.item.number)];
+  assert.deepEqual(other(), ["other", [3001]]);
+  await host.answer("gh", ok(relatedAnswer({ n: 1 })), (a) => isRelatedCall(a) && a.includes("number=3010"));
+  assert.deepEqual(other(), ["other", [3001]], "the first view's late read");
+  b.refresh(b.viewById("mine"), cx);
+  await settle();
+  assert.deepEqual(other(), ["other", [3001]], "the first view's refresh");
+});
+
+test("UI: r shows a level as its line above says now: a sub-issue that opened again shows open", async () => {
+  const { b, cx, host } = await onLevel();
+  assert.ok(chipOf(detailPanel(b), "geschlossen"));
+  await reloadBoard(b, cx, host);
+  await host.answer("gh", rootAnswer((i) => (i.subIssues.nodes.find((n) => n.number === 3010).state = "OPEN")), readRelatedOf(3004));
+  assert.deepEqual([levelsNow(b)[0], Boolean(chipOf(detailPanel(b), "offen")), chipOf(detailPanel(b), "geschlossen")], [[3010], true, null]);
+});
+
+test("UI: Enter on a line whose item the panel cannot read says so and opens nothing; o opens it", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "enter");
+  await answerRelated(host, rootAnswer((i) => {
+    i.subIssues.nodes = [{ number: 5000, title: "elsewhere", state: "OPEN", url: "https://github.com/example/gone/issues/5000", repository: null }];
+  }));
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual([levelsNow(b), cx.opened, b.notice?.text, host.open("gh").length], [[[], 0], undefined, "#5000 lässt sich hier nicht zeigen", 0]);
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, ["https://github.com/example/gone/issues/5000"]);
+});
+
+test("UI: Esc back up marks the line it came from where a re-read moved it, and the remembered line while the level above is still being read", async () => {
+  const { b, cx, host } = await onLevel();
+  await reloadBoard(b, cx, host);
+  await host.answer("gh", rootAnswer((i) => i.subIssues.nodes.unshift({ number: 2999, title: "new", state: "OPEN", url: "u", repository: { nameWithOwner: "example/tender" } })),
+    readRelatedOf(3004));
+  await press(b, cx, "escape");
+  assert.deepEqual(levelsNow(b), [[], 2], "tender#3010 now the third line");
+  const loading = await onLevel();
+  await reloadBoard(loading.b, loading.cx, loading.host);
+  await press(loading.b, loading.cx, "escape");
+  assert.deepEqual(levelsNow(loading.b), [[], 1], "still being read: the line it was on");
+});
+
+test("UI: the hint line on a level: with no line marked Enter and o are the level's item's, with one the line's; a pull request's level names no lines", async () => {
+  const { b, cx, host } = await onLevel();
+  const hint = (key) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === key).map((t) => t[1]);
+  assert.deepEqual([hint("Enter"), hint("o"), hint("j/k")], [["Agent"], ["öffnen"], ["Zeilen"]]);
+  await press(b, cx, "j");
+  assert.deepEqual([hint("Enter"), hint("o")], [["Zeile zeigen"], ["Zeile öffnen"]]);
+  await press(b, cx, "escape");
+  for (let i = 0; i < 2; i++) await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual(levelsNow(b)[0], [3020]);
+  await host.answer("gh", ok(pullRequestAnswer()), isPullRequestCall);
+  assert.deepEqual([hint("Enter"), hint("o"), hint("j/k")], [["Review"], ["öffnen"], []]);
+});
+
+test("UI: the command menu runs a line's action only on the line it opened on: where a re-read moved the lines it says so and opens nothing", async () => {
+  const { b, cx, host } = await onFirstLine();
+  await openMenu(b, cx);
+  b.modal.input.type("Zeile im Browser");
+  b.reload(cx);
+  await settle();
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  await host.answer("gh", rootAnswer((i) => (i.parent = parentNode(2900))), readRelatedOf(3004));
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal, b.notice?.text, cx.opened], [null, "tender#3001 ist nicht mehr markiert", undefined]);
+});
+
+test("UI: on a level the command menu still lists the board item's actions under its heading, without their keys", async () => {
+  const { b, cx } = await onLevel();
+  await openMenu(b, cx);
+  const entries = board.shownCommands(b.modal.entries, "");
+  const items = entries.filter((e) => e.group === "item").map((e) => [e.name, e.key]);
+  assert.deepEqual(items.filter(([name]) => /Status|Zuweisen|verschieben/.test(name)),
+    [["Status ändern…", null], ["Zuweisen…", null], ["Nach links verschieben", null], ["Nach rechts verschieben", null]]);
+  assert.equal(entries.find((e) => e.group === "item").head, "Issue tender#3004 · feat(api): page through long lists");
+});
+
+test("UI: a pull request's level says what GitHub did not send of it", async () => {
+  const { b, cx, host } = await openRelated();
+  await tab(b, cx);
+  for (let i = 0; i < 4; i++) await press(b, cx, "j");
+  await press(b, cx, "enter");
+  const answer = JSON.parse(pullRequestAnswer());
+  answer.errors = [{ type: "FORBIDDEN", path: ["repository", "pullRequest", "commits"], message: "Checks are hidden" }];
+  await host.answer("gh", ok(JSON.stringify(answer)), isPullRequestCall);
+  assert.deepEqual(texts(byId(detailPanel(b), "level-note")), ["Checks are hidden"]);
+});
 
 // Every tag name a shown HTML description holds, and the `<` in a shown
 // Markdown one that could start HTML (none but its links' destinations).
@@ -7403,7 +7627,7 @@ test("UI: a description taller than 12 lines shows folded to their height with �
 const azureRelatedOf = (host) => host.open("az").filter((c) => c.args.includes("show") && c.args.includes("relations"));
 const childrenQuery = (host) => host.open("az").filter((c) => AZ.query(c.args) && c.args.some((a) => String(a).includes("IN (")));
 
-test("an Azure work item's related items: one az call for the item with its links, one WIQL query by id for its children; what the answers hold", () => {
+test("an Azure work item's related items: one az call for the item with its links, one WIQL query by id for its children and its parent; what the answers hold", () => {
   const c = sprintTeam();
   assert.deepEqual(board.azRelatedArgs(c, 301), ["boards", "work-item", "show", "--org", ORG, "--detect", "false", "--id", "301", "--expand", "relations", "-o", "json"]);
   assert.equal(board.idsWiql([312, 311]), `SELECT ${board.WORK_ITEM_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.Id] IN (312, 311) ORDER BY [System.Id]`,

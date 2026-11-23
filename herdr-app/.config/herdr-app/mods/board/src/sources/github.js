@@ -2,7 +2,7 @@
 // parsing, the status mutation, what gh's answers and failures mean, and the
 // source as the board uses it (makeGithub).
 
-import { CONFIG_NAME, BoardError, failure, firstLine, personName, readMemo } from "../shared.js";
+import { CONFIG_NAME, BoardError, DRAFT_REVIEW, STATE_LOOKS, failure, firstLine, otherLook, personName, readMemo } from "../shared.js";
 import { GH_TIMEOUT, call } from "../tools.js";
 
 // Theme colors for GitHub's named colors: a Projects v2 option's and an
@@ -210,18 +210,44 @@ export function checkMoveResult(json, card) {
   }
 }
 
-const PR_FIELDS = `
-  issueCount
-  nodes {
-    ... on PullRequest {
+// A pull request's fields as a row of a PR list shows it (prRow), which
+// the details panel shows of a pull request it goes down to too.
+const PR_ROW_FIELDS = `
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
       assignees(first: 10) { nodes { login name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
-        checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
+        checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }`;
+
+const PR_FIELDS = `
+  issueCount
+  nodes {
+    ... on PullRequest {${PR_ROW_FIELDS}
     }
   }`;
+
+// A pull request as PR_ROW_FIELDS reads it → the fields of its row.
+function prRow(pr) {
+  const repo = pr.repository.nameWithOwner;
+  return {
+    number: pr.number,
+    repo,
+    repoShort: repo.split("/").pop(),
+    title: pr.title,
+    url: pr.url,
+    author: pr.author?.login ?? "?",
+    draft: pr.isDraft,
+    review: reviewLabel(pr.reviewDecision, pr.isDraft),
+    checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null),
+    updatedAt: pr.updatedAt,
+    createdAt: pr.createdAt,
+    branch: pr.headRefName,
+    labels: [],
+    ...assigneesOf(pr.assignees?.nodes),
+    reviewers: reviewerLogins(pr.reviewRequests),
+  };
+}
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
 // …), and the login gh runs as.
@@ -260,7 +286,7 @@ export function checksSummary(rollup) {
 // GitHub's review decision as a label. No decision is also what a repo
 // without required reviews reports, so it shows nothing.
 const REVIEW = { APPROVED: "freigegeben", CHANGES_REQUESTED: "Änderungen gewünscht", REVIEW_REQUIRED: "noch kein Review" };
-export const reviewLabel = (decision, draft) => (draft ? "Entwurf" : REVIEW[decision] ?? "");
+export const reviewLabel = (decision, draft) => (draft ? DRAFT_REVIEW : REVIEW[decision] ?? "");
 
 // Whether a search holds only one's own pull requests, as "nur meine" counts
 // them: it has author, assignee, review-requested or user-review-requested
@@ -295,28 +321,7 @@ export function parseGithubList(json, view, errors = []) {
       }
       if (seen.has(pr.id)) continue;
       seen.add(pr.id);
-      const repo = pr.repository.nameWithOwner;
-      rows.push({
-        key: pr.id,
-        source: "github",
-        kind: "pr",
-        number: pr.number,
-        repo,
-        repoShort: repo.split("/").pop(),
-        title: pr.title,
-        url: pr.url,
-        author: pr.author?.login ?? "?",
-        draft: pr.isDraft,
-        review: reviewLabel(pr.reviewDecision, pr.isDraft),
-        checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null),
-        updatedAt: pr.updatedAt,
-        createdAt: pr.createdAt,
-        branch: pr.headRefName,
-        labels: [],
-        ...assigneesOf(pr.assignees?.nodes),
-        reviewers: reviewerLogins(pr.reviewRequests),
-        ownByQuery: own,
-      });
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...prRow(pr), ownByQuery: own });
     }
     // count: how many GitHub found; fetched: how many it sent; rows: those
     // held, each pull request once (in its first section), no other result.
@@ -367,18 +372,22 @@ export function githubRelatedArgs(item) {
   return ["api", "graphql", "-f", `query=${RELATED_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
 }
 
-// GitHub's states of an issue and a pull request as a line shows them: the
-// label, the theme color of its chip, and whether the item is done (dimmed).
-const RELATED_STATES = {
-  OPEN: { state: "offen", color: "ansi2", done: false },
-  CLOSED: { state: "geschlossen", color: "muted", done: true },
-  MERGED: { state: "gemerged", color: "ansi5", done: true },
-};
+// GitHub's state of an issue or a pull request as a line shows it
+// (STATE_LOOKS).
+const GITHUB_LOOKS = { OPEN: STATE_LOOKS.open, CLOSED: STATE_LOOKS.closed, MERGED: STATE_LOOKS.merged };
+const lookOf = (state) => GITHUB_LOOKS[state] ?? otherLook(state);
+
+// The error for an issue or pull request `item` that GitHub's answer does
+// not hold: the error at its path, where GitHub sent one.
+function notFound(errors, item) {
+  const e = errorAt(errors, ["repository"]);
+  return new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
+}
 
 // A sub-issue or a linked pull request as a line (related.js).
 function relatedLine(node, kind) {
   const repo = node.repository?.nameWithOwner ?? "";
-  const state = RELATED_STATES[node.state] ?? { state: String(node.state ?? "?").toLowerCase(), color: "muted", done: false };
+  const state = lookOf(node.state);
   return {
     kind,
     source: "github",
@@ -416,27 +425,24 @@ function relatedSection(conn, kind, path, errors) {
 
 // The issue's parent as a section of one line, or of none where it has
 // none; where GitHub sent none for an error at its path, that error, which
-// it shows (`shown`).
+// it shows (`shown`), and no count.
 function parentSection(issue, errors) {
   const node = issue.parent;
   if (Number.isInteger(node?.number)) return { section: { count: 1, sent: 1, cut: false, hidden: 0, error: null, lines: [relatedLine(node, "issue")] }, shown: null };
   const shown = errorAt(errors, RELATED_PATHS.parent);
   const error = shown ? `GitHub: ${firstLine(shown.message)}` : null;
-  return { section: { count: shown ? 1 : 0, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
+  return { section: { count: shown ? null : 0, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
 }
 
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { description, parents, subIssues, prs, warnings } (related.js). A
-// missing issue is explained by the error at its path. An error is a
-// section's own only where the section shows it, in place of what GitHub
-// did not send; all others are warnings (a node GitHub sent as null counts
-// as hidden, and its error is one of them).
+// its data) → { description, parents, subIssues, prs, warnings }
+// (related.js). A missing issue is explained by the error at its path. An
+// error is a section's own only where the section shows it, in place of what
+// GitHub did not send; all others are warnings (a node GitHub sent as null
+// counts as hidden, and its error is one of them).
 export function parseGithubRelated(json, item, errors = []) {
   const issue = json?.data?.repository?.issue;
-  if (!issue) {
-    const e = errorAt(errors, ["repository"]);
-    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
-  }
+  if (!issue) throw notFound(errors, item);
   const parents = parentSection(issue, errors);
   const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors);
   const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors);
@@ -452,18 +458,13 @@ export function parseGithubRelated(json, item, errors = []) {
 }
 
 // One GraphQL request for a pull request the details panel goes down to
-// (related.js, pullRequest): by its repo and number, the fields the PR
-// list reads for a row (PR_FIELDS), and its state, which the list, of open
-// pull requests only, does not need.
+// (related.js, pullRequest): by its repo and number, the fields a PR
+// list's row reads (PR_ROW_FIELDS), and its state, which a row does not
+// show.
 export const PULL_REQUEST_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      id number title url state isDraft headRefName reviewDecision
-      author { login }
-      assignees(first: 10) { nodes { login name } }
-      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
-        checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
+      state${PR_ROW_FIELDS}
     }
   }
 }`;
@@ -474,29 +475,14 @@ export function githubPullRequestArgs(item) {
 }
 
 // gh's answer for githubPullRequestArgs (and the GraphQL errors that came
-// with its data) → the pull request's details (related.js, pullRequest),
-// as parseGithubList makes a row's, with its state as a line has it. A
+// with its data) → the pull request's details (related.js, pullRequest):
+// its row (prRow), its state as a line has it, and the errors that came
+// with it as warnings (a part GitHub did not send, such as its checks). A
 // missing pull request is explained by the error at its path.
 export function parseGithubPullRequest(json, item, errors = []) {
   const pr = json?.data?.repository?.pullRequest;
-  if (!pr) {
-    const e = errorAt(errors, ["repository"]);
-    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
-  }
-  const state = RELATED_STATES[pr.state] ?? { state: String(pr.state ?? "?").toLowerCase(), color: "muted", done: false };
-  return {
-    title: pr.title ?? item.title,
-    url: pr.url ?? item.url,
-    ...state,
-    draft: pr.isDraft === true,
-    author: pr.author?.login ?? "?",
-    review: reviewLabel(pr.reviewDecision, pr.isDraft),
-    checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null),
-    branch: pr.headRefName ?? null,
-    ...assigneesOf(pr.assignees?.nodes),
-    reviewers: reviewerLogins(pr.reviewRequests),
-    contentId: pr.id ?? null,
-  };
+  if (!pr) throw notFound(errors, item);
+  return { ...prRow(pr), ...lookOf(pr.state), warnings: errors.map((e) => firstLine(e.message)).filter(Boolean) };
 }
 
 // The people an issue's or pull request's repo can assign (GitHub's
@@ -625,16 +611,16 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
 
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
-// The GitHub source for the board: the name of the site `o` opens, why
-// "nur meine" cannot tell one's own items when GitHub did not name the
-// login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
-// gives its hidden columns) and how a board writes a move; and the items
-// related to an issue, its sub-issues and linked pull requests, read with
-// its description (related.js says what `related` holds), and a pull
-// request's details (pullRequest, the same); and an item's
-// assignment (assign: actions/assign.js says what it holds), whose people
-// are read once per repo and kept while the board runs (one that fails is
-// not kept). gh runs by the path `paths` (toolPaths) finds.
+// The GitHub source for the board: the name of the site `o` opens, why "nur
+// meine" cannot tell one's own items when GitHub did not name the login, and
+// per layout of a GitHub view how it loads (`hiddenFor(view)` gives its
+// hidden columns) and how a board writes a move; and the items related to an
+// issue, its parent, sub-issues and linked pull requests, read with its
+// description (related.js says what `related` holds), and a pull request's
+// details (pullRequest, the same); and an item's assignment (assign:
+// actions/assign.js says what it holds), whose people are read once per repo
+// and kept while the board runs (one that fails is not kept). gh runs by the
+// path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   const people = readMemo();
   return {

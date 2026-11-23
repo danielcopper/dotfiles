@@ -6,7 +6,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, cardLabel } from "../../shared.js";
-import { checkColor, detailSection, selectedLook, shownOf } from "../helpers.js";
+import { checkColor, checksSection, selectedLook, shownOf } from "../helpers.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -33,8 +33,7 @@ export const prsShape = {
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
   // The detail panel's rows of a pull request: its checks, where it has them.
-  detailParts: (b, t, view, item) =>
-    item.checks ? { sections: [detailSection(t, "CHECKS", div().text_color(checkColor(t, item.checks.state)).child(item.checks.text))] } : {},
+  detailParts: (b, t, view, item) => (item.checks ? { sections: [checksSection(t, item.checks)] } : {}),
 };
 
 // A section's count: the rows it holds (each pull request once, in its first
