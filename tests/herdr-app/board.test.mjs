@@ -6120,11 +6120,20 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
     "an http(s) URL in <…> stays, an autolink or a destination, its \\ as %5C; anything else in <…> is text");
   assert.equal(md(`<https://example.com/${"a".repeat(3000)}>`), `<https://example.com/${"a".repeat(3000)}>`, "however long");
   assert.equal(md("<!x --> y"), "<\u200b!x --> y", "no other <! is a comment");
+  assert.equal(md("<https://a/![b](c)> <https://a/ ![b](https://e/x.png)>"), "<https://a/![b](c)> <https://a/ !\u200b[b](https://e/x.png)>",
+    "one without a space as written, an autolink or a destination; one with a space is Markdown outside a link: its ![ goes");
+  assert.equal(md("![a](https://e/x?a\\\\)"), "[Bild: a](<https://e/x?a%5C>)", "an image's URL with a \\ in its <…>: %5C");
   assert.equal(md("<mailto:a@example.com> <https://example.com/<b>"), "<\u200bmailto:a@example.com> <\u200bhttps://example.com/<\u200bb>", "another scheme, or a < inside: text");
   assert.equal(md("a <!-- hidden <img src=x> --> b <!--> c <!-- open"), "a  b  c <\u200b!-- open", "comments go; one not closed is text");
+  assert.equal(md("<!-- Describe the change -->\n## Summary\n\nText"), "\n## Summary\n\nText", "a template's comment goes");
+  assert.equal(md("`x`<!-- c -->y"), "`x`y", "one right after a code span goes too");
+  assert.equal(md("Use `<!--` to start a comment.\n\nAnd so on --> prod"), "Use `<\u200b!--` to start a comment.\n\nAnd so on --> prod", "not one that starts in a code span");
+  assert.equal(md("```html\n<!-- in a fence\n```\nafter --> prod"), "```html\n<\u200b!-- in a fence\n```\nafter --> prod", "nor in a fenced block");
+  assert.equal(md("    <!-- indented\n\nlater --> x"), "    <\u200b!-- indented\n\nlater --> x", "nor in an indented one");
+  assert.equal(md("a <!-- one\n\ntwo --> b"), "a <\u200b!-- one\n\ntwo --> b", "nor one across a blank line");
   assert.equal(md('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<\u200bpre>&lt;img src="https://attacker.example/x.png"&gt;<\u200b/pre>');
-  assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no link");
-  assert.equal(md(`![x](https://example.com/i.png "${"t".repeat(1100)}")`), `[Bild: x](https://example.com/i.png "${"t".repeat(1100)}")`, "its title past MAX_IMAGE: no link");
+  assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no image, a link as written");
+  assert.equal(md(`![x](https://example.com/i.png "${"t".repeat(1100)}")`), `[Bild: x](https://example.com/i.png "${"t".repeat(1100)}")`, "its title past MAX_IMAGE: no image, a link as written");
   assert.equal(md("</img> <img>"), "<\u200b/img> Bild", "an <img> closed: text; one without src: its label");
   const link = "[Bild: a](<https://example.com/i.png>)";
   assert.deepEqual(
@@ -6138,6 +6147,17 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
   const out = md(HOSTILE);
   assert.deepEqual(htmlStarts(out).map((m) => out.slice(m.index, m.index + 8)), [], "no < that starts HTML");
   assert.doesNotMatch(out, /!\[/, "no `![` left");
+});
+
+test("Markdown's code, as the comment step reads it: fenced and indented blocks, code spans of matching runs within a paragraph", () => {
+  const spans = (text) => board.codeRanges(text).map(([a, b]) => text.slice(a, b));
+  assert.deepEqual(spans("a `b` c ``d` e`` f \\`g` h `i"), ["`b`", "``d` e``", "` h `"], "a run after a backslash opens nothing (the next one does); one left open is no span");
+  assert.deepEqual([spans("a `b\n\nc` d"), spans("a `b\n \t\nc` d"), spans("a `b\r\n\r\nc` d")], [[], [], []], "not across a blank line, one of spaces or a CR too");
+  assert.deepEqual(spans("```js\nx `\n````\n~~~\ny\n~~\n"), ["```js\nx `\n````", "~~~\ny\n~~\n"], "a fence to one as long or longer of its kind, else to the end");
+  assert.deepEqual(spans("``` a`b\ncode?\n"), [], "a backtick fence with a backtick in its info is none");
+  assert.deepEqual([spans("```\nx\n~~~\ny\n```\nz"), spans("````\nx\n```\ny\n````\nz")], [["```\nx\n~~~\ny\n```"], ["````\nx\n```\ny\n````"]],
+    "not closed by the other kind, nor by a shorter fence");
+  assert.deepEqual(spans("    one\n\n    two\npara\n    goes on\n"), ["    one", "    two"], "an indented line, but not where a paragraph goes on");
 });
 
 test("a hostile description's cost grows with its length, not faster: 64 KB takes at most about six times what 16 KB takes, in either format", () => {

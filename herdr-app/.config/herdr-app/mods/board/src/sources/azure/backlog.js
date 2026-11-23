@@ -70,8 +70,8 @@ const fieldName = (name) => (typeof name === "string" && /^[A-Za-z][\w.]*$/.test
 // The team's backlog configuration → { orderField (the field the backlog
 // is ordered by: Microsoft.VSTS.Common.StackRank or …BacklogPriority, by
 // the process; null where it names none), typeStates: { [type]: [state
-// names] in Azure's order }, states: [{ id, name, category, color }] in
-// category order (as parseAzureTypes), taskLevel }.
+// names] in Azure's order }, states (categoryStates, common.js),
+// taskLevel }.
 export function parseBacklogConfig(stdout) {
   const json = azJson(stdout, "die Backlog-Einstellungen");
   if (!isObject(json)) throw new BoardError("Azure lieferte keine Backlog-Einstellungen");

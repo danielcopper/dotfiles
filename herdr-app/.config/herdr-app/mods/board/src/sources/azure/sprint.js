@@ -16,8 +16,8 @@ export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ..
 export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
-// The work item types' answer → { states: [{ id, name, category, color }] in
-// category order, types: { [type]: [state names] } }.
+// The work item types' answer → { states (categoryStates, common.js),
+// types: { [type]: [state names] } }.
 export function parseAzureTypes(stdout) {
   const value = azJson(stdout, "die Work-Item-Typen")?.value;
   if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
