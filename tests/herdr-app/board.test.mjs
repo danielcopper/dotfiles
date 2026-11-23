@@ -5973,9 +5973,9 @@ test("a description is drawn as written, its images made links: Markdown's, inli
   const md = (text) => board.shownDescription(text, "markdown");
   const html = (text) => board.shownDescription(text, "html");
   assert.equal(md("Rolls it out.\r\n\r\n## Steps\n- one\n- **two**"), "Rolls it out.\r\n\r\n## Steps\n- one\n- **two**", "the rest as written");
-  assert.equal(md("see ![the shot](https://example.com/a.png \"title\") here"), "see [Bild: the shot](https://example.com/a.png \"title\") here");
-  assert.equal(md("![](https://example.com/a.png)"), "[Bild](https://example.com/a.png)", "no alt");
-  assert.equal(md("![logo][l]\n\n[l]: https://example.com/l.png"), "[Bild: logo][l]\n\n[l]: https://example.com/l.png", "by reference");
+  assert.equal(md("see ![the shot](https://example.com/a.png \"title\") here"), "see \u200b[Bild: the shot](https://example.com/a.png \"title\") here");
+  assert.equal(md("![](https://example.com/a.png)"), "\u200b[Bild](https://example.com/a.png)", "no alt");
+  assert.equal(md("![logo][l]\n\n[l]: https://example.com/l.png"), "\u200b[Bild: logo][l]\n\n[l]: https://example.com/l.png", "by reference");
   assert.equal(md("a <img src=\"https://example.com/b.png\" alt=\"chart\"> b"), "a <a href=\"https://example.com/b.png\">Bild: chart</a> b", "raw HTML in Markdown");
   assert.equal(html("<p><IMG SRC='https://example.com/c.png' ALT=cat></p>"), "<p><a href=\"https://example.com/c.png\">Bild: cat</a></p>", "upper case, single quotes, no quotes");
   assert.equal(html("<img/src=https://example.com/d.png alt=\"a > b\"/>"), "<a href=\"https://example.com/d.png\">Bild: a &gt; b</a>", "a slash for a space, a > in a quoted value");
@@ -5984,7 +5984,7 @@ test("a description is drawn as written, its images made links: Markdown's, inli
     "<a href=\"https://example.com/f.png\">Bild: say &quot;hi&quot;</a>", "attributes on lines of their own; data-src is not src");
   assert.equal(html("<img alt=\"no source\">"), "Bild: no source", "no src: its text");
   assert.equal(html("<img src=\"https://example.com/1.png\" SRC=\"https://example.com/2.png\" alt=a alt=b>"), "<a href=\"https://example.com/1.png\">Bild: a</a>", "the first of an attribute counts, as in HTML");
-  assert.equal(html("<imgx src=\"a\"><p>![x](y)</p>"), "<imgx src=\"a\"><p>![x](y)</p>", "another tag, and Markdown in HTML, stay");
+  assert.equal(html("<imgx src=\"a\"><p>![x](y)</p>"), "&lt;imgx src=\"a\"><p>![x](y)</p>", "another tag that starts so is text; Markdown in HTML stays");
   assert.equal(md("<img src=\"a&amp;b\" alt=\"x&y\">"), "<a href=\"a&amp;b\">Bild: x&amp;y</a>", "entities kept, a bare & escaped");
   assert.deepEqual([md(""), md("  \n "), md(null), html("\n")], [null, null, null, null], "blank: none");
   const sample = [
@@ -5993,6 +5993,25 @@ test("a description is drawn as written, its images made links: Markdown's, inli
   ].join("\n");
   for (const out of [md(sample), html(sample)]) assert.doesNotMatch(out, /<\s*im(?:g|age)(?=[\s/>])/i, "no image tag reaches TextView");
   assert.doesNotMatch(md(sample), /!\[/, "no Markdown image reaches TextView, in code neither");
+});
+
+test("a tag the image step cannot read is written as text, so that nothing left can become an image; no Markdown image of any form survives", () => {
+  const md = (text) => board.shownDescription(text, "markdown");
+  const html = (text) => board.shownDescription(text, "html");
+  assert.equal(html('<img src="https://example.com/a.png alt=x>after'), '&lt;img src="https://example.com/a.png alt=x>after', "unbalanced quotes");
+  assert.equal(html("<img\nsrc=https://example.com/b.png>"), '<a href="https://example.com/b.png">Bild</a>', "a newline after the name");
+  assert.equal(html("<img\u0001src=https://example.com/c.png>"), "&lt;img\u0001src=https://example.com/c.png>", "an odd character after the name");
+  assert.equal(html("<IMG/SRC=https://example.com/d.png/>"), '<a href="https://example.com/d.png">Bild</a>', "upper case, self-closing without a space");
+  assert.equal(html("<imagefoo src=x><Img"), "&lt;imagefoo src=x>&lt;Img", "any tag name that starts so, and one cut off");
+  assert.equal(md("[![badge](https://example.com/b.svg)](https://example.com)"), "[\u200b[Bild: badge](https://example.com/b.svg)](https://example.com)", "an image inside a link's text");
+  assert.equal(md("![alt][ref] ![alt][] ![ref]\n\n[ref]: https://example.com/r.png"), "\u200b[Bild: alt][ref] \u200b[Bild: alt][] \u200b[Bild: ref]\n\n[ref]: https://example.com/r.png", "by reference: full, collapsed, shortcut");
+  assert.equal(md("!![f](x) \\\\![g](y)"), "!\u200b[Bild: f](x) \\\\\u200b[Bild: g](y)", "a `!` or an escaped backslash before one makes no new image");
+  const tricky = [
+    '<img src="a', "<img\nsrc=b>", "<IMG/SRC=c/>", "<img\tsrc='d'>", "<iMaGe src=e>", "<img\u0001src=f>", "<img\u000bsrc=f>", "<img src=g alt='x>", "<<img src=h>>",
+    "![a](u)", "![b][r]", "![c][]", "![d]", "[![e](v)](w)", "!![f](x)", "`![g](y)`", "<p>![h](z)</p>", "\\![i](q)", "\\\\![j](r)", "!![![k](s)](t)",
+  ].join("\n");
+  for (const out of [md(tricky), html(tricky)]) assert.doesNotMatch(out, /<im(?:g|age)/i, "no <img or <image left");
+  assert.doesNotMatch(md(tricky), /!\[/, "no `![` left in Markdown");
 });
 
 test("UI: the details draw the description with TextView, Markdown for an issue's body as GitHub sends it, its images as links; „lädt …“ until it comes, the reason after a failure, „keine Beschreibung“ for none", async () => {

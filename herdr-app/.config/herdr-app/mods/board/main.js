@@ -2637,14 +2637,24 @@ export function stepLine(line, dir, count) {
 // full (herdr's src/mods.rs, capabilities; gpui-kit's
 // crates/shell/src/materialize/text_view.rs), and a description is text
 // anyone with access may write. What TextView draws as an image (gpui-kit's
-// crates/base/src/text/format): Markdown's image, and an HTML <img> with a
-// src, in HTML and as raw HTML in Markdown; HTML's parser reads <image> as
-// <img>. So every <img> and <image> tag becomes a link (its src and alt read
+// crates/base/src/text/format): an HTML <img> with a src (html.rs), in HTML
+// and as raw HTML in Markdown (markdown.rs, Node::Html), which HTML's parser
+// also reads <image> as; and Markdown's inline image `![alt](url)`
+// (markdown.rs, Node::Image). Markdown's images by reference (`![alt][ref]`,
+// `![alt][]`, `![ref]`, Node::ImageReference) it draws as nothing at all
+// today. So every <img> and <image> tag becomes a link (its src and alt read
 // whatever their case and quoting; without a src, its text alone), and in
 // Markdown every `![` becomes `[Bild: ` (`![]` `[Bild]`), which turns an
-// image, inline or by reference, into a link. Text in code blocks is changed
-// the same way.
+// image of either kind into a link, also inside a link's text; a zero-width
+// space before it keeps a `!` before it (`!![`, `\![`) from making a new
+// `![`, so none is left. Then, so
+// that a tag the first step does not read (unbalanced quotes, an odd
+// character after the name) cannot become one either, every `<` left before
+// "img" or "image", in any case, is written `&lt;`: shown as text. Text in
+// code is changed the same way.
 const IMAGE_TAG = /<(?:img|image)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const LEFT_IMAGE_TAG = /<(?=im(?:g|age))/gi;
+const ZWSP = "\u200b";
 const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
 const htmlText = (text) => text.replace(/&(?![a-z]+;|#\d+;|#x[0-9a-f]+;)/gi, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -2664,8 +2674,8 @@ function imageLink(tag) {
 export function shownDescription(text, format) {
   const raw = String(text ?? "");
   if (!raw.trim()) return null;
-  const tags = raw.replace(IMAGE_TAG, imageLink);
-  return format === "html" ? tags : tags.replace(/!\[\]/g, "[Bild]").replace(/!\[/g, "[Bild: ");
+  const tags = raw.replace(IMAGE_TAG, imageLink).replace(LEFT_IMAGE_TAG, "&lt;");
+  return format === "html" ? tags : tags.replace(/!\[(\]?)/g, (_m, empty) => (empty ? `${ZWSP}[Bild]` : `${ZWSP}[Bild: `));
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.
