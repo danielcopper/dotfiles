@@ -79,7 +79,7 @@ import { MOD, CONFIG_NAME, cardType, errorText, firstLine, itemKey, itemLabel, p
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { kindOf, viewKind } from "./kinds/index.js";
-import { matches, shows, navigate, columnOf, placeOf, selectionAfter } from "./select.js";
+import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
@@ -89,7 +89,7 @@ import { store, migrateShownView, boardShown, shownOf, button, detailSection, de
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
-import { lineChild, relatedSections, relatedState } from "./ui/related.js";
+import { lineChild, relatedRows, relatedSections, relatedState } from "./ui/related.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -164,6 +164,17 @@ export const BOARD_KEYS = [
   { keystroke: "shift-tab", action: "board_shift_tab", back: true },
 ];
 
+// Which end gg, G, Home and End go to ("top", "bottom"), "pending" for a
+// first `g` (`g`: one came just before), null for any other key. No key of
+// the board or of keys.json is a bare g, G, Home or End.
+export function edgeKey(k, ch, mod, g) {
+  if (mod.control || mod.alt || mod.platform) return null;
+  if (k === "home") return "top";
+  if (k === "end" || ch === "G" || (k === "g" && mod.shift)) return "bottom";
+  if (k !== "g") return null;
+  return g ? "top" : "pending";
+}
+
 export default class Board extends View {
   init(initProps, cx) {
     this.initProps = initProps;
@@ -201,6 +212,8 @@ export default class Board extends View {
     // panel's keyboard: { view, key, line } while it has it (panelOf).
     this.relatedUi = relatedState();
     this.panel = null;
+    // A `g` waiting for the second of gg (edgeKey).
+    this.pendingG = false;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -595,6 +608,30 @@ export default class Board extends View {
     cx.notify();
   }
 
+  // gg/G and Home/End (edgeKey) while the details panel has the keyboard:
+  // its top, with no line selected, or its bottom, on its last line where it
+  // has lines.
+  panelEdge(view, panel, end) {
+    const item = this.selected(view);
+    const rows = relatedRows(item, this.relatedOf(view, item));
+    const count = this.linesOf(view).length;
+    panel.line = end === "bottom" && count ? count - 1 : null;
+    this.relatedUi.scroll.scroll_to_item(end === "top" ? 0 : rows.length - 1);
+  }
+
+  // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
+  // else the first or last item of the selected column (a list's first or
+  // last row) in a view whose shape moves up and down (edgeOf).
+  toEdge(view, end, cx) {
+    const panel = this.panelOf(view);
+    if (panel) return this.panelEdge(view, panel, end);
+    const st = this.state(view.id);
+    if (!st.data || !this.shape(view).dirs.includes("down")) return;
+    this.keepSelection(view);
+    const sel = edgeOf(this.navColumns(view), st.sel, end);
+    if (sel) this.choose(view, sel, cx);
+  }
+
   // ---- moves ----
 
   // Moves a card to a column, where the view's shape has columns.
@@ -891,6 +928,9 @@ export default class Board extends View {
     const k = e.key;
     const ch = e.key_char ?? "";
     const mod = e.modifiers ?? {};
+    // A `g` waits for the next key only: any other key drops it.
+    const g = this.pendingG;
+    this.pendingG = false;
     if (this.modal) return this.modalKey(e, cx);
     if (this.filtering) {
       if (k === "escape") {
@@ -907,6 +947,9 @@ export default class Board extends View {
     };
     // Where Tab comes here rather than as the board's action: its one home.
     if (k === "tab") return this.tabKey(Boolean(mod.shift), cx);
+    const end = view ? edgeKey(k, ch, mod, g) : null;
+    if (end === "pending") return (this.pendingG = true), done();
+    if (end) return this.toEdge(view, end, cx), done();
     const panel = view && !(mod.control || mod.alt || mod.platform || mod.shift) ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k, cx)) return done();
     // [ ] and / may come with Shift, or with Control+Alt; Control alone
@@ -1311,7 +1354,7 @@ export default class Board extends View {
   panelHints(view) {
     if (!view || !this.readsRelated(this.shownDetailsItem())) return [];
     if (!this.panelOf(view)) return [["Tab", "Zeilen"]];
-    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
   // The keys of what shows: the top bar's (a team's v), those of the shown

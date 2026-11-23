@@ -27,7 +27,7 @@ export const prsShape = {
     return { shown: rows.filter((r) => b.visible(r, data)).length, total: rows.length };
   },
   render: (b, t, mono, view, st) => drawPrs(b, t, mono, view, st),
-  hints: [["j/k", "bewegen"], ["Enter", "Detail · Review"], ["o", "öffnen"]],
+  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["Enter", "Detail · Review"], ["o", "öffnen"]],
   dirs: ["up", "down"],
   loads: true,
   keys: () => false,

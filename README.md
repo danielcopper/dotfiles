@@ -396,15 +396,17 @@ herdr-app`. Which files of the package git tracks is set in the root
   Keys: `q` switches the source, `1 2 3` or `[ ]` the tab, `v` a team's Sprint
   and Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
   switch and "nur meine" take clicks too), `/` filters, `r` refreshes (the shown
-  view also refreshes every few minutes while the board shows), `Esc` closes. On
-  a Sprint `j/k` move within a column (the stories' or a taskboard column) and
-  `h/l` stay in the row: they go to the row's item in the next column that has
-  one, past empty cells, and move nothing where no column further on has one;
-  `H/L` move a task to the next column its type has (through the taskboard's
-  own column, not the state, since two columns may map to one state; az takes
-  the request from a file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state from its
-  type's states, a click selects, and `Enter` shows the details (parent, state,
-  assignee, column, area and iteration). On a Backlog `j/k` move, `s` sets the
+  view also refreshes every few minutes while the board shows), `Esc` closes,
+  `gg` and `Home` go to the first card of the selected column (in a list, the
+  first row), `G` and `End` to its last. On a Sprint `j/k` move within a
+  column (the stories' or a taskboard column) and `h/l` stay in the row: they
+  go to the row's item in the next column that has one, past empty cells, and
+  move nothing where no column further on has one; `H/L` move a task to the
+  next column its type has (through the taskboard's own column, not the
+  state, since two columns may map to one state; az takes the request from a
+  file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state
+  from its type's states, a click selects, and `Enter` shows the details
+  (parent, state, assignee, column, area and iteration). On a Backlog `j/k` move, `s` sets the
   state, `Enter` shows the details (parent, state, assignee, area, iteration
   and sprint), `o` opens the item in the browser, and `n` creates a work item:
   a dialog asks for its type (the level's, Story first; with a Story selected
@@ -460,8 +462,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   While they show, `Tab` moves the keyboard into the details panel and back
   (`Esc` gives it back too; elsewhere, and while the filter is typed, `Tab`
   stays herdr's): there
-  `j/k` walk those lines, `Enter` selects a line's item on the board and shows
-  its details, or opens it in the browser where the board does not show it,
+  `j/k` walk those lines, `gg` and `Home` go to the panel's top with no line
+  selected, `G` and `End` to its bottom on its last line, `Enter` selects a
+  line's item on the board and shows its details, or opens it in the browser where the board does not show it,
   `o` opens it, and with no line selected `Enter` and `o` do what they do on
   the board; a click on a line does what `Enter` on it does. `Enter` opens the
   details, a second `Enter` goes to the item's session or starts one: a new

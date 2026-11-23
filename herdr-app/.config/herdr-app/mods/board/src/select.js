@@ -45,6 +45,14 @@ export function navigate(columns, sel, dir) {
   return { col: ci, key: list.length ? list[Math.min(row, list.length - 1)].key : null };
 }
 
+// gg/G (Home/End): the first (`end` "top") or last ("bottom") card of the
+// selected column; null where that column shows none.
+export function edgeOf(columns, sel, end) {
+  const cards = columns[sel?.col]?.shown ?? [];
+  if (!cards.length) return null;
+  return { col: sel.col, key: (end === "top" ? cards[0] : cards.at(-1)).key };
+}
+
 // The index of the column whose shown cards hold `key`; -1 for none.
 export const columnOf = (columns, key) => columns.findIndex((c) => c.shown.some((card) => card.key === key));
 

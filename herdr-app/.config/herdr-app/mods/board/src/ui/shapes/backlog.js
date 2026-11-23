@@ -47,7 +47,7 @@ export const backlogShape = {
   items: (data) => data.rows,
   count: (b, data) => ({ shown: data.rows.filter((r) => b.visible(r, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawBacklog(b, t, mono, view, st),
-  hints: [["j/k", "bewegen"], ["n", "neu"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["n", "neu"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down"],
   loads: true,
   keys(b, view, st, { k }, cx) {

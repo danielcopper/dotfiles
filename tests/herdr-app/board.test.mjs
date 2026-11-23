@@ -3264,10 +3264,10 @@ test("UI: an Azure team tab shows its Sprint or its Backlog, and v switches them
   const shown = () => texts(b.render());
   const layout = () => b.view().layout;
   assert.ok(shown().includes("az ist nicht installiert"), "the Sprint reads with az, which is not found here");
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "H/L", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "gg/G", "H/L", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
   await press(b, cx, "v");
   assert.deepEqual([layout(), shown().includes("az ist nicht installiert")], ["backlog", true], "the Backlog reads with az too");
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "j/k", "n", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Backlog's keys");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "j/k", "gg/G", "n", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Backlog's keys");
   await press(b, cx, "v");
   assert.equal(layout(), "sprint");
   await click(b, cx, "team-view-backlog");
@@ -3290,7 +3290,7 @@ test("UI: a team with one view shows it without a switch; a config with one sour
   const { b, cx } = await bootBoard({ config: JSON.stringify(config), stored: {} });
   assert.equal(b.view().layout, "backlog");
   assert.equal(byId(b.render(), "team-view"), null);
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "j/k", "n", "s", "Enter", "o", "m", "/", "r", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "j/k", "gg/G", "n", "s", "Enter", "o", "m", "/", "r", "Esc"]);
   await press(b, cx, "q");
   await press(b, cx, "v");
   assert.deepEqual([b.source().id, b.teamViewOf(b.context())], ["azure", "backlog"]);
@@ -3394,10 +3394,10 @@ test("UI: the shown GitHub view refreshes every refreshMinutes while the board s
 
 test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
   const { b, cx, host } = await openBoard();
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "H/L", "s", "x", "X", "Enter", "o", "m", "/", "r", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "gg/G", "H/L", "s", "x", "X", "Enter", "o", "m", "/", "r", "Esc"]);
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "j/k", "Enter", "o", "m", "/", "r", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "j/k", "gg/G", "Enter", "o", "m", "/", "r", "Esc"]);
 });
 
 // Fires the left button's `event` ("on_mouse_down" or "on_mouse_up") on the
@@ -6311,4 +6311,104 @@ test("UI: a selected row of the Backlog and of a PR list, and a marked line of t
   await press(related.b, related.cx, "j");
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-0")), [board.selectedBg(t), t.accent]);
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-1")), ["none", t.chrome]);
+});
+
+// ---- gg, G, Home and End ----
+
+test("gg, G, Home and End name an end; a first g waits for a second; with Control, Alt or the platform key they are no ends", () => {
+  const none = {};
+  assert.deepEqual(
+    [board.edgeKey("home", "", none, false), board.edgeKey("end", "", none, false), board.edgeKey("g", "G", { shift: true }, false), board.edgeKey("G", "G", none, false)],
+    ["top", "bottom", "bottom", "bottom"],
+  );
+  assert.deepEqual([board.edgeKey("g", "g", none, false), board.edgeKey("g", "g", none, true)], ["pending", "top"], "g, then gg");
+  assert.deepEqual([board.edgeKey("g", "g", { shift: true }, true), board.edgeKey("j", "j", none, true)], ["bottom", null], "G after a g is G; another key is none");
+  for (const mod of [{ control: true }, { alt: true }, { platform: true }]) {
+    assert.deepEqual(["home", "end", "g"].map((k) => board.edgeKey(k, k, mod, true)), [null, null, null], JSON.stringify(mod));
+  }
+  const cols = board.shownColumns(githubBoard(), "");
+  assert.deepEqual(board.edgeOf(cols, { col: 1, key: "PVTI_rec2" }, "top"), { col: 1, key: "PVTI_rec1" });
+  assert.deepEqual(board.edgeOf(cols, { col: 1, key: "PVTI_rec2" }, "bottom"), { col: 1, key: "PVTI_rec3" });
+  assert.deepEqual([board.edgeOf(cols, { col: 2, key: null }, "top"), board.edgeOf(cols, null, "bottom"), board.edgeOf([], { col: 0, key: null }, "top")], [null, null, null],
+    "an empty column, no selection, no columns: none");
+});
+
+test("UI: on a board gg and Home go to the first card of the selected column, G and End to its last; a g before another key does nothing", async () => {
+  const { b, cx, st } = await openBoard();
+  await press(b, cx, "l");
+  assert.equal(st().sel.key, "PVTI_rec1");
+  await press(b, cx, "g", { char: "G", modifiers: { shift: true } });
+  assert.deepEqual(st().sel, { col: 1, key: "PVTI_rec3" }, "G");
+  await press(b, cx, "g");
+  assert.equal(st().sel.key, "PVTI_rec3", "one g moves nothing");
+  await press(b, cx, "g");
+  assert.deepEqual([st().sel, st().picked], [{ col: 1, key: "PVTI_rec1" }, "PVTI_rec1"], "gg, chosen as the keys choose");
+  await press(b, cx, "end");
+  assert.equal(st().sel.key, "PVTI_rec3", "End");
+  await press(b, cx, "home");
+  assert.equal(st().sel.key, "PVTI_rec1", "Home");
+  await press(b, cx, "g");
+  await press(b, cx, "j");
+  await press(b, cx, "g");
+  assert.equal(st().sel.key, "PVTI_rec2", "g, j, g: j moved, no gg");
+  await press(b, cx, "x", { modifiers: { control: true } });
+  await press(b, cx, "g");
+  assert.equal(st().sel.key, "PVTI_rec2", "a key between the two g drops the first");
+  await press(b, cx, "end", { modifiers: { control: true } });
+  assert.equal(st().sel.key, "PVTI_rec2", "with Control End is not the board's");
+  await press(b, cx, "l");
+  await press(b, cx, "G", { char: "G" });
+  assert.deepEqual(st().sel, { col: 2, key: null }, "an empty column stays selected as such");
+});
+
+test("UI: in the Backlog and a PR list gg and G go to the first and last row; on a Sprint to the first and last item of the column", async () => {
+  const backlog = await openBacklog();
+  const rows = backlog.b.navColumns(backlog.view)[0].shown.map((r) => r.key);
+  await press(backlog.b, backlog.cx, "end");
+  assert.equal(backlog.st().sel.key, rows.at(-1));
+  await press(backlog.b, backlog.cx, "g");
+  await press(backlog.b, backlog.cx, "g");
+  assert.equal(backlog.st().sel.key, rows[0]);
+  const prs = await openBoard();
+  await press(prs.b, prs.cx, "2");
+  await prs.host.answer("gh", ok(fixture("github-list.json")));
+  const prRows = prs.b.navColumns(prs.b.view())[0].shown.map((r) => r.key);
+  assert.ok(prRows.length > 2);
+  await press(prs.b, prs.cx, "G", { char: "G" });
+  assert.equal(prs.b.views.prs.sel.key, prRows.at(-1));
+  await press(prs.b, prs.cx, "home");
+  assert.equal(prs.b.views.prs.sel.key, prRows[0]);
+  const sprint = await openSprint();
+  await press(sprint.b, sprint.cx, "end");
+  assert.deepEqual(sprint.st().sel, { col: 0, key: "AB#302" }, "the last story");
+  await press(sprint.b, sprint.cx, "l");
+  await press(sprint.b, sprint.cx, "g");
+  await press(sprint.b, sprint.cx, "g");
+  assert.deepEqual(sprint.st().sel, { col: 4, key: "AB#321" }, "Done holds one");
+  await press(sprint.b, sprint.cx, "h");
+  await press(sprint.b, sprint.cx, "k");
+  await press(sprint.b, sprint.cx, "l");
+  await press(sprint.b, sprint.cx, "end");
+  assert.deepEqual(sprint.st().sel, { col: 1, key: "AB#311" }, "the last task of To Do");
+  await press(sprint.b, sprint.cx, "home");
+  assert.deepEqual(sprint.st().sel, { col: 1, key: "AB#331" });
+});
+
+test("UI: while the details panel has the keyboard gg and Home go to its top with no line selected, G and End to its bottom on its last line; the hint names them", async () => {
+  const { b, cx, st, host } = await openRelated();
+  await tab(b, cx);
+  assert.ok(hintKeys(b).includes("gg/G"), "the panel's hint");
+  await press(b, cx, "G", { char: "G" });
+  const rows = byId(detailPanel(b), "related-lines").kids.length;
+  assert.deepEqual([b.panel.line, scrolledTo(b, host), st().sel.key], [4, rows - 1, "PVTI_rec4"], "the last line, the block's last child; the board's selection stays");
+  await press(b, cx, "g");
+  await press(b, cx, "g");
+  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [null, 0]);
+  await press(b, cx, "end");
+  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [4, rows - 1]);
+  await press(b, cx, "home");
+  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [null, 0]);
+  await press(b, cx, "r");
+  await press(b, cx, "end");
+  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [null, 3], "while the related items load: no line, the block's last child");
 });
