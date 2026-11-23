@@ -379,8 +379,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   assignee. It needs `az login`: the level's work items come through
   `az rest`, which takes no PAT, and the Backlog says so when the login is
   missing. What it keeps and for how long, makeAzure says; `r` reads that
-  again. The pull request tabs read nothing yet; each says which view it
-  will hold.
+  again. On the Sprint's cards and stories and the Backlog's rows a work
+  item's id stands without its "AB#"; its details, the notices and the
+  toasts keep it. The pull request tabs read nothing yet; each says which
+  view it will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
   me, opened by me, or asking for my review; a list section of my own
   search, one whose query sets author, assignee or (user-)review-requested

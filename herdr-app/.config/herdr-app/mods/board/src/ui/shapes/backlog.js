@@ -13,7 +13,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { itemLabel, report } from "../../shared.js";
+import { cardLabel, report } from "../../shared.js";
 import { backlogNav, backlogWarnings, findBacklogItem, withBacklogState } from "../../kinds/backlog.js";
 import { linkedSession } from "../../actions/start.js";
 import { tellOutcomes } from "../../actions/write.js";
@@ -132,7 +132,7 @@ function drawBacklog(b, t, mono, view, st) {
         // A click on a row (clickItem).
         if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
-      .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
+      .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(cell(WIDTH.type, r.type ?? ""))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()
         .child(div().min_w(0).truncate().child(r.title))

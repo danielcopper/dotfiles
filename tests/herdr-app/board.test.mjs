@@ -1413,6 +1413,13 @@ test("an item's key names it on every source; a draft has none", () => {
   assert.equal(board.itemLabel(azureItem()), "AB#101");
 });
 
+test("a card or row names an Azure work item by its number alone, anything else as itemLabel does", () => {
+  assert.equal(board.cardLabel(azureItem()), "101");
+  assert.equal(board.cardLabel({ ...azureItem(), kind: "pr" }), "!101", "an Azure pull request keeps its mark");
+  assert.equal(board.cardLabel(board.findCard(githubBoard(), "PVTI_rec1").card), "tender#3000");
+  assert.equal(board.cardLabel(board.findCard(casesBoard(), "PVTI_case2").card), "Entwurf");
+});
+
 test("a session is named after its item, the title cut to fit", () => {
   const card = board.findCard(githubBoard(), "PVTI_rec6").card;
   assert.equal(board.sessionName(card), "tender#3007 fix(input): pass the key map to the viewer");
@@ -4353,12 +4360,13 @@ test("UI: the Sprint shows a row per story, its tasks as cards with state, assig
   assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301", "row-AB#302"]);
   assert.ok(texts(byId(root, "row-none")).includes("Ohne Story"));
   const story = texts(byId(root, "story-AB#301"));
-  for (const s of ["AB#301", "User Story", "Import the sample catalogue", "In Progress"]) assert.ok(story.includes(s), s);
+  for (const s of ["301", "User Story", "Import the sample catalogue", "In Progress"]) assert.ok(story.includes(s), s);
   assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], ["card-AB#312"], ["card-AB#313"], []]);
   assert.deepEqual(rowCells(root, "none"), [["card-AB#331"], ["card-AB#332"], [], []]);
   assert.deepEqual(rowCells(root, "AB#302"), [[], [], [], ["card-AB#321"]]);
   const card = texts(byId(root, "card-AB#311"));
-  for (const s of ["AB#311", "Parse the sample file", "To Do", "Alex Sample"]) assert.ok(card.includes(s), s);
+  for (const s of ["311", "Parse the sample file", "To Do", "Alex Sample"]) assert.ok(card.includes(s), s);
+  assert.equal([...story, ...card].some((s) => s.includes("AB#")), false, "a story and a task show their number alone");
   assert.ok(texts(byId(root, "card-AB#332")).includes("Committed"), "a card shows its own state");
   assert.equal(texts(root).some((s) => s.includes("undefined")), false);
   assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "8", "the tab counts stories and tasks");
@@ -4461,6 +4469,24 @@ test("UI: s on a story offers its type's states; a refusal sets the state back, 
   st().data.meta.typeStates = {};
   await press(b, cx, "s");
   assert.deepEqual([b.modal, b.notice.text], [null, "Für User Story kennt das Board keine Status"]);
+});
+
+test("UI: a Sprint's cards and stories and a Backlog's rows show a work item's number without AB#; its details, notices and toasts keep AB#, a GitHub card its repo", async () => {
+  const { b, cx, host } = await openSprint();
+  assert.equal(texts(byId(b.render(), "card-AB#311"))[0], "311");
+  assert.equal(texts(byId(b.render(), "story-AB#301"))[0], "301");
+  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#311");
+  assert.ok(texts(byId(b.render(), "detail")).includes("AB#311"), "the details' head");
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  assert.equal(b.notice.text, "AB#311 → Done …");
+  await host.answer("az", azRefused("TF401320: Rule Error for field State."), (a) => AZ.state(a) && a[2] === "update");
+  assert.deepEqual([b.notice.text, host.notes.at(-1).title], ["AB#311 bleibt „To Do“: TF401320: Rule Error for field State.", "Status von AB#311 nicht geändert"]);
+  const { b: backlog } = await openBacklog();
+  assert.equal(texts(byId(backlog.render(), "row-AB#401"))[0], "401");
+  const { b: github } = await openBoard();
+  assert.equal(texts(byId(github.render(), "card-PVTI_rec4"))[0], "tender#3004");
 });
 
 test("UI: Enter shows a work item's parent, state, assignee, column, area and iteration; o opens its page; Enter again names what is missing to start", async () => {
@@ -4959,8 +4985,8 @@ test("UI: the Backlog shows one row per work item in backlog order: id, type, ti
     tabs: [{ id: "t9", name: "AB#302 Export the weekly report", status: "working" }] }];
   const root = b.render();
   assert.deepEqual(backlogRows(root), ["row-AB#301", "row-AB#302", "row-AB#401", "row-AB#403", "row-AB#402"]);
-  assert.deepEqual(texts(byId(root, "row-AB#401")), ["AB#401", "User Story", "Show the sample prices in euros", "To Do", "—", "Robin Example"]);
-  assert.deepEqual(texts(byId(root, "row-AB#402")), ["AB#402", "Bug", "Sample totals are off by one", "New", "—", ""]);
+  assert.deepEqual(texts(byId(root, "row-AB#401")), ["401", "User Story", "Show the sample prices in euros", "To Do", "—", "Robin Example"]);
+  assert.deepEqual(texts(byId(root, "row-AB#402")), ["402", "Bug", "Sample totals are off by one", "New", "—", ""]);
   assert.ok(texts(byId(root, "row-AB#302")).includes("arbeitet"), "a row's session");
   const head = texts(byId(root, "backlog-head"));
   assert.deepEqual(head, ["Stories · 5", "ID", "Typ", "Titel", "Status", "Sprint", "Zugewiesen"]);

@@ -53,6 +53,12 @@ export function itemKey(item) {
 
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 
+// An item's label on a card or a list's row: an Azure work item's number
+// alone (the views that show it hold only work items, so the AB# says
+// nothing there), else itemLabel. Its details, notices and toasts keep
+// itemLabel.
+export const cardLabel = (item) => (item.source === "azure" && item.kind === "workitem" ? String(item.number) : itemLabel(item));
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });

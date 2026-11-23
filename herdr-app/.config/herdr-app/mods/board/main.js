@@ -138,6 +138,12 @@ export function itemKey(item) {
 
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 
+// An item's label on a card or a list's row: an Azure work item's number
+// alone (the views that show it hold only work items, so the AB# says
+// nothing there), else itemLabel. Its details, notices and toasts keep
+// itemLabel.
+export const cardLabel = (item) => (item.source === "azure" && item.kind === "workitem" ? String(item.number) : itemLabel(item));
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
@@ -4100,7 +4106,7 @@ function drawBacklog(b, t, mono, view, st) {
         // A click on a row (clickItem).
         if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
-      .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
+      .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(cell(WIDTH.type, r.type ?? ""))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()
         .child(div().min_w(0).truncate().child(r.title))
@@ -4740,7 +4746,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
     .child(h_flex().gap(6).items_center()
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(story)))
+      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
@@ -4773,7 +4779,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(5)
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
         .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
       .child(h_flex().gap(5).flex_wrap().items_center()

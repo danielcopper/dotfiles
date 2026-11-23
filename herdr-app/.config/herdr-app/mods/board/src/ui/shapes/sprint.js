@@ -16,7 +16,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { itemLabel } from "../../shared.js";
+import { cardLabel, itemLabel } from "../../shared.js";
 import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
 import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, sprintWarnings, withItemState } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
@@ -175,7 +175,7 @@ function storyCell(b, t, mono, view, st, r, nav) {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
     .child(h_flex().gap(6).items_center()
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(story)))
+      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
@@ -208,7 +208,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(5)
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
         .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
       .child(h_flex().gap(5).flex_wrap().items_center()
