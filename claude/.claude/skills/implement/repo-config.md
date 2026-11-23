@@ -45,7 +45,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       anywhere (`automerge`, `pr_merge`), or runs `gh extension exec` with an extension so named;
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, also as the start of a name such as `autoCompleteSetBy`, or
-      `devops invoke` on pull requests);
+      `devops invoke` writing to a pull-request resource: an `--http-method` other than GET, or `--in-file`;
+      without a method it reads and passes);
     - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
       string also read as a command — that runs `gh api`, `az rest`, `az devops invoke` or `az repos pr` (the
       subcommand right after the tool's options, with no quoted word or redirection before it) and reads a request

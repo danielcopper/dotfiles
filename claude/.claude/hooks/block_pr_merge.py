@@ -124,6 +124,8 @@ ALIAS_VERB = re.compile(r"\b(set|import)\b")
 # as autoCompleteSetBy. COMPLETION below is the run-time rule's narrower reading.
 AZ_COMPLETE = re.compile(r"\b(?:completed\b|auto-?complete)")
 DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
+# az devops invoke's method; without one it reads (GET)
+HTTP_METHOD = re.compile(r"--http-method(?:=|\s+)(\S+)")
 FILE_LONG_FLAGS = re.compile(r"--input|--upload-file|--config|--post-file|--body-file|--in-file")
 FILE_FLAGS = re.compile("@|" + FILE_LONG_FLAGS.pattern)  # re-read or open-quoted: any @
 FILE_REFERENCE = re.compile(r"^@|=@")  # an @ at a word's start or after =
@@ -902,6 +904,12 @@ def network_words(command: str, plain: str) -> list[str]:
     ]
 
 
+def invoke_writes(lower: str) -> bool:
+    """Whether the de-quoted, lowercased text sends `az devops invoke` a writing request: an
+    `--http-method` other than GET, or an `--in-file` body."""
+    return "--in-file" in lower or any(method != "get" for method in HTTP_METHOD.findall(lower))
+
+
 def check(command: str) -> str | None:
     """What makes *command* a possible merge, or None."""
     if len(command) > MAX_LENGTH:
@@ -926,7 +934,8 @@ def check(command: str) -> str | None:
     if ALIAS.search(lower) and ALIAS_VERB.search(lower) and gh:
         return "defines a gh alias"
     if az and (
-        AZ_COMPLETE.search(lower) or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower)
+        AZ_COMPLETE.search(lower)
+        or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower and invoke_writes(lower))
     ):
         return "completes an Azure DevOps pull request"
     write_words = False  # re-read text holds curl's writing options outside a tool's command

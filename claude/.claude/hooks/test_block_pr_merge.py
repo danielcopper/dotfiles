@@ -202,6 +202,10 @@ PASSES = [
     "echo sh; gh pr view 1 --jq '$x'",
     "cat bash.md; gh pr view 1 --jq '$x'",
     "which bash; gh pr view 1 --jq '$x'",
+    # az devops invoke reading a pull request's resources
+    "az devops invoke --area git --resource pullRequestThreads --route-parameters project=VC repositoryId=r pullRequestId=88308 --api-version 7.1 -o json > $S/threads.json",
+    "az devops invoke --area git --resource pullRequestThreads --route-parameters project=VC repositoryId=r pullRequestId=88308 --api-version 7.1 --http-method GET -o json > $S/threads.json",
+    "az devops invoke --area git --resource pullRequestThreads --route-parameters project=VC repositoryId=r pullRequestId=88308 --api-version 7.1 --http-method=get -o json",
     # an @ inside a word, not at its start or after =
     "gh api 'users/x/repos?per_page=100' -q '.[] | [.name] | @tsv'",
     "gh api -X GET search/users -f q='\"agent for @\" in:bio' --jq .total_count",
@@ -714,6 +718,19 @@ DENIED = [
     "az repos pr update --id $ID --status completed",
     "gh pr merge $N",
     "X=merge; gh pr $X 5",
+    # az devops invoke writing to a pull request
+    (
+        "az devops invoke --area git --resource pullRequests --route-parameters project=VC"
+        " repositoryId=r pullRequestId=5 --http-method PATCH --in-file b.json --api-version 7.1"
+    ),
+    (
+        "az devops invoke --area git --resource pullRequests --route-parameters project=VC"
+        " repositoryId=r pullRequestId=5 --http-method=Put --api-version 7.1"
+    ),
+    (
+        "az devops invoke --area git --resource pullRequests --route-parameters project=VC"
+        " repositoryId=r pullRequestId=5 --http-method patch --api-version 7.1 # status completed"
+    ),
     # the GraphQL merge queue
     (
         'gh api graphql -f query=\'mutation { enqueuePullRequest(input: {pullRequestId: "x"})'
