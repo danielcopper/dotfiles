@@ -38,7 +38,7 @@ import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateColor, stateDone } from "../kinds/states.js";
 import { LINE_PX, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
 import { FRAME, chip, sectionTitle, selectedLook } from "./helpers.js";
-import { toneColor } from "./tones.js";
+import { NOTE_TONES, toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
 
@@ -161,10 +161,9 @@ function description(b, t, item, r) {
 export function relatedSections(b, t, mono, view, item, entry, at) {
   const ui = b.relatedUi;
   const data = b.state(view.id).data;
-  const tones = { muted: "muted", error: "ansi1", warning: "ansi3" };
   const rowOf = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
-    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, tones[r.tone])).child(r.text);
+    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, NOTE_TONES[r.tone] ?? "muted")).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const color = line.color ?? stateColor(data, line.state);

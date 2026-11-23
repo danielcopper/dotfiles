@@ -13,7 +13,7 @@ import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
-import { chipBg, headBg, hueTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
+import { NOTE_TONES, chipBg, headBg, hueTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -242,9 +242,10 @@ export function workItemDetail(b, t, view, { state, color, title, rows }) {
   };
 }
 
-// The color of a check state: its tone's (toneColor), dim for another.
-const CHECK_TONES = { failed: "ansi1", pending: "ansi3", passed: "ansi2" };
-export const checkColor = (t, state) => (CHECK_TONES[state] ? toneColor(t, CHECK_TONES[state]) : t.dim);
+// The color of a check state: its note level's tone (NOTE_TONES), dim for
+// another.
+const CHECK_TONES = { failed: NOTE_TONES.error, pending: NOTE_TONES.warning, passed: NOTE_TONES.success };
+export const checkColor = (t, state) => toneColor(t, CHECK_TONES[state] ?? "dim");
 
 // The detail panel's status pill: `label` on its tone `color`'s color
 // (toneColor); a click opens the status menu (`open(cx)`).

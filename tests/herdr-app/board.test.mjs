@@ -7205,21 +7205,34 @@ test("a card carries its labels' colors and its issue type's color, which the bo
     ["#d73a4a", "#abcdef", null, null, null, null, null]);
 });
 
-test("a label's color takes the theme's red, green, yellow, blue, violet or teal nearest by hue, a grey one or no color muted, a color with alpha by its first six digits, in copper-dark and copper-light alike", () => {
-  const cases = [
+test("a label's color takes, by hue, one of copper's seven hues in a copper theme and the theme's red, green, yellow, blue, violet or teal in any other; a grey one or no color muted, a color with alpha by its first six digits, in copper-dark and copper-light with and without copper's colors", () => {
+  const greys = [["cfd3d7", "muted"], ["ffffff", "muted"], ["000000", "muted"], ["8b949e", "muted"], ["bfdadc", "muted"]];
+  const tinted = [
     ["d73a4a", "ansi1"], ["b60205", "ansi1"], ["e99695", "ansi1"], ["d93f0b", "ansi1"], ["e4007c", "ansi1"],
     ["0e8a16", "ansi2"], ["c2e0c6", "ansi2"], ["e4e669", "ansi2"],
     ["fbca04", "ansi3"], ["fef2c0", "ansi3"],
     ["0075ca", "ansi4"], ["1d76db", "ansi4"], ["c5def5", "ansi4"],
     ["7057ff", "ansi5"], ["5319e7", "ansi5"], ["d876e3", "ansi5"],
     ["008672", "ansi6"], ["a2eeef", "ansi6"],
-    ["cfd3d7", "muted"], ["ffffff", "muted"], ["000000", "muted"], ["8b949e", "muted"], ["bfdadc", "muted"],
+    ...greys,
   ];
-  for (const mode of COPPER) {
-    const t = copperTheme(mode);
-    assert.deepEqual(cases.map(([hex]) => [hex, board.hueTone(t, `#${hex}`)]), cases, mode);
-    assert.deepEqual([null, undefined, "#fff", "red", "#d73a4a8"].map((c) => board.hueTone(t, c)), ["muted", "muted", "muted", "muted", "muted"], `${mode}: no color`);
-    assert.deepEqual(["#d73a4a80", "#0075CA17"].map((c) => board.hueTone(t, c)), ["ansi1", "ansi4"], `${mode}: with alpha`);
+  const copper = [
+    ["d73a4a", "copper-red"], ["e99695", "copper-red"], ["e4007c", "copper-red"],
+    ["b60205", "copper-orange"], ["d93f0b", "copper-orange"], ["f9d0c4", "copper-orange"],
+    ["fbca04", "copper-yellow"], ["fef2c0", "copper-yellow"],
+    ["0e8a16", "copper-green"], ["c2e0c6", "copper-green"], ["e4e669", "copper-green"],
+    ["008672", "copper-teal"], ["a2eeef", "copper-teal"],
+    ["0075ca", "copper-blue"], ["1d76db", "copper-blue"], ["c5def5", "copper-blue"],
+    ["7057ff", "copper-violet"], ["5319e7", "copper-violet"], ["d876e3", "copper-violet"],
+    ...greys,
+  ];
+  for (const [name, t, cases, alpha] of [
+    ...COPPER.map((mode) => [`copper-${mode}`, copperTheme(mode), copper, ["copper-red", "copper-blue"]]),
+    ...COPPER.map((mode) => [`copper-${mode} without copper's colors`, tintedCopper(mode), tinted, ["ansi1", "ansi4"]]),
+  ]) {
+    assert.deepEqual(cases.map(([hex]) => [hex, board.hueTone(t, `#${hex}`)]), cases, name);
+    assert.deepEqual([null, undefined, "#fff", "red", "#d73a4a8"].map((c) => board.hueTone(t, c)), ["muted", "muted", "muted", "muted", "muted"], `${name}: no color`);
+    assert.deepEqual(["#d73a4a80", "#0075CA17"].map((c) => board.hueTone(t, c)), alpha, `${name}: with alpha`);
   }
   assert.deepEqual(board.oklch("#d73a4a80"), board.oklch("#d73a4a"));
   assert.equal(board.hueTone({ muted: "#808080" }, "#d73a4a"), "muted", "a theme without those colors");
@@ -7256,6 +7269,9 @@ test("a theme takes copper's steps for its chips, heads and selection only where
     [[missing.ansi6, `${missing.ansi6}${board.CHIP_ALPHA}`], [missing.ansi1, `${missing.ansi1}${board.CHIP_ALPHA}`]], "every tone tinted, not only teal");
   assert.equal(board.selectedBg(missing), over(`${missing.accent}${board.SELECTED_ALPHA}`, missing.background));
   assert.equal(board.copperSteps({ ...copperTheme("light"), "copper-neutral-3": "#f2e9e180" }), false, "a step with alpha");
+  const v030 = Object.fromEntries(Object.entries(copperTheme("light")).filter(([name]) => !name.endsWith("-text")));
+  assert.equal(board.copperSteps(v030), false, "a copper theme before v0.4.0, without text colors");
+  assert.deepEqual([chipLook(board.toneChip(v030, "x", "ansi3")), board.hueTone(v030, "#d93f0b")], [[v030.ansi3, `${v030.ansi3}${board.CHIP_ALPHA}`], "ansi1"], "its own colors and their tints, six hues");
 });
 
 test("without copper's steps, a selected card's or row's background is the accent laid opaque over the theme's background, the same on every ground; a chip's text on its tint reads at 4.5:1 or more on a card and on it, and so does the card's own text (foreground, muted, dim) on it, in copper-dark and copper-light without their steps and in catppuccin-mocha, but for a muted chip and dim text on a selected card in catppuccin-mocha, where herdr derives its muted and dim", () => {
@@ -7303,18 +7319,24 @@ test("without copper's steps, a column head's background is its color laid opaqu
 // mode and tone: 3 where it stands 3 or more apart from both grounds, else
 // 4 (tones.js, copperTint).
 const CHIP_STEPS = {
-  dark: { ansi1: 3, ansi2: 3, ansi3: 3, ansi4: 3, ansi5: 4, ansi6: 3, muted: 4 },
-  light: { ansi1: 3, ansi2: 3, ansi3: 3, ansi4: 4, ansi5: 3, ansi6: 4, muted: 3 },
+  dark: { red: 3, orange: 3, yellow: 3, green: 3, teal: 3, blue: 3, violet: 4, neutral: 4 },
+  light: { red: 3, orange: 3, yellow: 3, green: 3, teal: 4, blue: 4, violet: 3, neutral: 3 },
 };
 const HEAD_STEPS = {
   dark: { muted: 4, dim: 4, ansi1: 3, ansi2: 3, ansi3: 3, ansi4: 3, ansi5: 4, ansi11: 3, ansi13: 4 },
   light: { muted: 4, dim: 4, ansi1: 4, ansi2: 4, ansi3: 4, ansi4: 3, ansi5: 3, ansi11: 4, ansi13: 3 },
 };
-// A tone's copper color: its ANSI slot's in copper's port, the neutral for
-// muted and dim.
-const COPPER_OF = { ansi1: "red", ansi2: "green", ansi3: "yellow", ansi4: "blue", ansi5: "violet", ansi6: "teal", ansi11: "yellow", ansi13: "violet", muted: "neutral", dim: "neutral" };
+// A tone's copper color: a label's copper-<hue> its hue; a source's theme
+// name its ANSI slot's in copper's port (a bright one its plain one's), but
+// GitHub's ORANGE (ansi11) orange; muted and dim the neutral.
+const COPPER_HUES = ["red", "orange", "yellow", "green", "teal", "blue", "violet"];
+const COPPER_OF = {
+  ansi1: "red", ansi2: "green", ansi3: "yellow", ansi4: "blue", ansi5: "violet", ansi6: "teal",
+  ansi9: "red", ansi10: "green", ansi11: "orange", ansi12: "blue", ansi13: "violet", ansi14: "teal", muted: "neutral", dim: "neutral",
+  ...Object.fromEntries(COPPER_HUES.map((hue) => [`copper-${hue}`, hue])),
+};
 
-test("in a copper theme a selected card's or row's background is the theme's selected; a chip stands on its tone's copper step 3, or 4 where 3 stands less than 3 apart from a card or a selected one, its text in the tone at 4.5:1 or more, and the card's own text (foreground, muted, dim) reads at 4.5:1 or more on a selected card, in copper-dark and copper-light", () => {
+test("in a copper theme a selected card's or row's background is the theme's selected; a chip stands on its copper color's step 3, or 4 where 3 stands less than 3 apart from a card or a selected one, its text in its copper color's text color at 4.5:1 or more there and on a card and a selected one, a source's theme name in its ANSI slot's copper color (GitHub's ORANGE in orange), and the card's own text (foreground, muted, dim) reads at 4.5:1 or more on a selected card, in copper-dark and copper-light", () => {
   globalThis.__boardHost = fakeHost();
   const ratios = {};
   const close = {};
@@ -7323,16 +7345,19 @@ test("in a copper theme a selected card's or row's background is the theme's sel
     const selected = board.selectedBg(t);
     assert.equal(selected, t.selected, mode);
     assert.match(selected, OPAQUE, mode);
-    for (const tone of [...board.HUE_TONES, "muted"]) {
+    for (const color of [...COPPER_HUES, "neutral"]) {
+      const tone = color === "neutral" ? "muted" : `copper-${color}`;
       const [fg, bg] = chipLook(board.toneChip(t, "x", tone));
-      assert.deepEqual([fg, bg], [t[tone], t[`copper-${COPPER_OF[tone]}-${CHIP_STEPS[mode][tone]}`]], `${mode} ${tone}`);
-      ratios[`${mode} chip ${tone}`] = [contrast(fg, bg)];
-      close[`${mode} chip ${tone}`] = [distance(bg, t.background), distance(bg, selected)];
-      const rest = t[`copper-${COPPER_OF[tone]}-3`];
-      if (CHIP_STEPS[mode][tone] === 4) assert.ok(Math.min(distance(rest, t.background), distance(rest, selected)) < 3, `${mode} ${tone}: step 3 stands too close`);
+      assert.deepEqual([fg, bg], [t[`copper-${color}-text`], t[`copper-${color}-${CHIP_STEPS[mode][color]}`]], `${mode} ${tone}`);
+      ratios[`${mode} chip ${color}`] = [contrast(fg, bg), contrast(fg, t.background), contrast(fg, selected)];
+      close[`${mode} chip ${color}`] = [distance(bg, t.background), distance(bg, selected)];
+      const rest = t[`copper-${color}-3`];
+      if (CHIP_STEPS[mode][color] === 4) assert.ok(Math.min(distance(rest, t.background), distance(rest, selected)) < 3, `${mode} ${color}: step 3 stands too close`);
     }
-    assert.equal(chipLook(board.toneChip(t, "x", "ansi13"))[1], chipLook(board.toneChip(t, "x", "ansi5"))[1], `${mode}: a bright tone on its plain one's step`);
-    assert.equal(chipLook(board.toneChip(t, "x", "dim"))[1], chipLook(board.toneChip(t, "x", "muted"))[1], `${mode}: dim on the neutral`);
+    for (const [tone, color] of Object.entries(COPPER_OF)) {
+      const own = color === "neutral" ? "muted" : `copper-${color}`;
+      assert.deepEqual(chipLook(board.toneChip(t, "x", tone)), chipLook(board.toneChip(t, "x", own)), `${mode} ${tone}: as ${own}`);
+    }
     ratios[`${mode} text`] = [t.foreground, t.muted, t.dim].map((fg) => contrast(fg, selected));
   }
   assert.deepEqual(below(ratios, 4.5), [], shownRatios(ratios));
@@ -7381,14 +7406,15 @@ test("a drop target column keeps its ground in a copper theme, which stands 3 or
   for (const [name, t] of Object.entries(TINTED())) assert.equal(board.dropBg(t, t.chrome), t.selected, name);
 });
 
-test("a tone's color, as a column's dot, a card's edge and a type's line, stands at 3:1 or more from what it is drawn on (a card, a selected one, a column head on a column's chrome and on the Sprint's background), for every tone, in copper-dark and copper-light with and without their steps and in catppuccin-mocha, but for catppuccin's dim on a selected card", () => {
+test("a tone's color, as a column's dot, a card's edge and a type's line, is its copper color's text color in a copper theme and the theme's color of that name in any other, and stands at 3:1 or more from what it is drawn on (a card, a selected one, a column head on a column's chrome and on the Sprint's background), for every tone, in copper-dark and copper-light with and without copper's colors and in catppuccin-mocha, but for catppuccin's dim on a selected card", () => {
   globalThis.__boardHost = fakeHost();
   const ratios = {};
-  const themes = { ...Object.fromEntries(COPPER.map((mode) => [`copper-${mode} steps`, copperTheme(mode)])), ...TINTED() };
+  const themes = { ...Object.fromEntries(COPPER.map((mode) => [`copper-${mode} with its colors`, copperTheme(mode)])), ...TINTED() };
   for (const [name, t] of Object.entries(themes)) {
-    for (const tone of new Set([...board.HUE_TONES, ...STATUS_TONES])) {
+    const copper = board.copperSteps(t);
+    for (const tone of new Set([...(copper ? COPPER_HUES.map((hue) => `copper-${hue}`) : board.HUE_TONES), ...STATUS_TONES])) {
       const fg = board.columnColor(t, { color: tone });
-      assert.equal(fg, t[tone], `${name} ${tone}`);
+      assert.equal(fg, copper ? t[`copper-${COPPER_OF[tone]}-text`] : t[tone], `${name} ${tone}`);
       const grounds = [t.background, board.selectedBg(t), board.headBg(t, tone, t.chrome), board.headBg(t, tone, t.background)];
       ratios[`${name} ${tone}`] = grounds.map((g) => contrast(fg, g));
     }
@@ -7406,7 +7432,8 @@ test("a tone or ground the theme has no color for falls back: text to muted, a c
   assert.deepEqual([board.toneColor(t, "ansi4"), board.toneColor(t, "ansi1"), board.checkColor(t, "failed"), board.checkColor({ ...t, dim: "#dim" }, "other")],
     ["#0000ff", "#muted", "#muted", "#dim"], "text: muted for a tone the theme has no color for; a check of another state dim");
   const copper = copperTheme("dark");
-  assert.deepEqual(["failed", "pending", "passed"].map((state) => board.checkColor(copper, state)), [copper.ansi1, copper.ansi3, copper.ansi2], "a check's state in its tone");
+  assert.deepEqual(["failed", "pending", "passed", "other"].map((state) => board.checkColor(copper, state)),
+    ["red", "yellow", "green", "neutral"].map((color) => copper[`copper-${color}-text`]), "a check's state in its note level's tone");
   assert.deepEqual(chipLook(board.toneChip(t, "x", "muted")), ["#muted", "#raised"], "no color to tint");
   assert.deepEqual(chipLook(board.toneChip(t, "x", "ansi4")), ["#0000ff", `#0000ff${board.CHIP_ALPHA}`]);
   assert.equal(board.headBg(t, "ansi4", "#ffffff17"), `#0000ff${board.HEAD_ALPHA}`, "a translucent ground: the translucent tint");
@@ -7422,14 +7449,16 @@ test("a tone or ground the theme has no color for falls back: text to muted, a c
     ["#ffffff26", "#71B8F426", "#nope", "#x"]);
 });
 
-test("a type's marker: an issue type in its color (a bright one as its plain color), an Epic by its title in its epic label's color or muted without one, a type without color plain", () => {
+test("a type's marker: an issue type in its color (in a copper theme as its source names it, elsewhere a bright one as its plain color), an Epic by its title in its epic label's color or muted without one, a type without color plain", () => {
   const t = copperTheme("dark");
   const b = colorsBoard();
   const card = (key) => board.findCard(b, key).card;
   const keys = ["PVTI_col1", "PVTI_col2", "PVTI_col3", "PVTI_col4", "PVTI_col5"];
   assert.deepEqual(keys.map((k) => [board.cardType(card(k)), board.typeTone(t, card(k))]),
-    [["Bug", "ansi1"], ["Task", "ansi3"], ["Epic", "ansi5"], ["Epic", "muted"], ["Epic", "ansi2"]],
-    "RED; ORANGE (ansi11) as ansi3; the Epic label's violet; no epic label; the issue type's GREEN wins over the red epic label");
+    [["Bug", "ansi1"], ["Task", "ansi11"], ["Epic", "copper-violet"], ["Epic", "muted"], ["Epic", "ansi2"]],
+    "RED; ORANGE (ansi11, copper's orange); the Epic label's violet; no epic label; the issue type's GREEN wins over the red epic label");
+  assert.deepEqual(keys.map((k) => board.typeTone(tintedCopper("dark"), card(k))), ["ansi1", "ansi3", "ansi5", "muted", "ansi2"],
+    "without copper's colors: ORANGE (ansi11) as ansi3");
   assert.deepEqual(keys.map((k) => board.epicLabel(card(k))), [null, null, "Epic", null, null], "only an Epic by its title alone takes a label's color");
   const azure = { type: "User Story", title: "[Epic] not by its title", labels: ["epic"] };
   assert.deepEqual([board.cardType(azure), board.typeTone(t, azure), board.epicLabel(azure)], ["User Story", null, null], "a type of its own, without a color");
@@ -7442,20 +7471,20 @@ test("UI: the board draws labels and types as chips in their tones (an Epic by i
   const { b, cx, host } = await openBoard({ answer: fixture("github-board-colors.json") });
   const t = copperTheme("dark");
   host.theme = () => t;
-  const onTone = (name) => board.chipBg(t, name);
+  // A chip's look in a tone, and in a copper color by its own keys.
+  const look = (tone) => [board.toneColor(t, tone), board.chipBg(t, tone)];
   let root = b.render();
   const col1 = byId(root, "card-PVTI_col1");
-  assert.deepEqual(["Bug", "bug", "docs", "chore"].map((n) => chipLook(chipOf(col1, n))),
-    [[t.ansi1, onTone("ansi1")], [t.ansi1, onTone("ansi1")], [t.ansi4, onTone("ansi4")], [t.muted, onTone("muted")]]);
+  assert.deepEqual(["Bug", "bug", "docs", "chore"].map((n) => chipLook(chipOf(col1, n))), [look("ansi1"), look("copper-red"), look("copper-blue"), look("muted")]);
   const col2 = byId(root, "card-PVTI_col2");
-  assert.deepEqual(["Task", "help wanted", "question", "unread"].map((n) => chipLook(chipOf(col2, n))),
-    [[t.ansi3, onTone("ansi3")], [t.ansi6, onTone("ansi6")], [t.ansi5, onTone("ansi5")], [t.muted, onTone("muted")]]);
+  assert.deepEqual(["Task", "help wanted", "question", "unread"].map((n) => chipLook(chipOf(col2, n))), [look("ansi11"), look("copper-teal"), look("copper-violet"), look("muted")]);
+  assert.deepEqual(chipLook(chipOf(col2, "Task")), [t["copper-orange-text"], t["copper-orange-3"]], "ORANGE in copper's orange");
   const epic = byId(root, "card-PVTI_col3");
-  assert.deepEqual(chipsOf(epic, "Epic").map(chipLook), [[t.ansi5, onTone("ansi5")]], "an Epic by its title: one chip, in its epic label's color");
-  assert.deepEqual(chipLook(chipOf(epic, "area:ui")), [t.ansi3, onTone("ansi3")], "its other labels stay");
-  assert.deepEqual(chipsOf(byId(root, "card-PVTI_col4"), "Epic").map(chipLook), [[t.muted, onTone("muted")]]);
+  assert.deepEqual(chipsOf(epic, "Epic").map(chipLook), [look("copper-violet")], "an Epic by its title: one chip, in its epic label's color");
+  assert.deepEqual(chipLook(chipOf(epic, "area:ui")), look("copper-yellow"), "its other labels stay");
+  assert.deepEqual(chipsOf(byId(root, "card-PVTI_col4"), "Epic").map(chipLook), [look("muted")]);
   const typed = byId(root, "card-PVTI_col5");
-  assert.deepEqual([chipsOf(typed, "Epic").map(chipLook), chipsOf(typed, "epic").map(chipLook)], [[[t.ansi2, onTone("ansi2")]], [[t.ansi1, onTone("ansi1")]]],
+  assert.deepEqual([chipsOf(typed, "Epic").map(chipLook), chipsOf(typed, "epic").map(chipLook)], [[look("ansi2")], [look("copper-red")]],
     "an issue type Epic keeps its epic label's chip");
   const cols = b.navColumns(b.view());
   assert.deepEqual(cols.map((c) => [c.name, c.color]), [["Parked", "muted"], ["Ready", "ansi4"], ["In progress", "ansi3"]]);
@@ -7463,10 +7492,10 @@ test("UI: the board draws labels and types as chips in their tones (an Epic by i
   cols.forEach((col, ci) => {
     const head = byId(root, `col-${ci}`).kids[0];
     assert.equal(head.with.bg[0], board.headBg(t, col.color, t.chrome), `${col.name}: its head`);
-    assert.equal(head.kids[0].with.bg[0], t[col.color], `${col.name}: its dot`);
+    assert.equal(head.kids[0].with.bg[0], t[`copper-${COPPER_OF[col.color]}-text`], `${col.name}: its dot`);
     for (const card of col.shown) {
       const edge = byId(root, `card-${card.key}`).kids[0];
-      assert.deepEqual([edge.with.w[0], edge.with.bg[0]], [3, t[col.color]], `${card.key}: its edge`);
+      assert.deepEqual([edge.with.w[0], edge.with.bg[0]], [3, t[`copper-${COPPER_OF[col.color]}-text`]], `${card.key}: its edge`);
     }
   });
   const before = heads();
@@ -7481,8 +7510,38 @@ test("UI: the board draws labels and types as chips in their tones (an Epic by i
   const selected = byId(root, "card-PVTI_col1");
   assert.deepEqual([selected.with.bg[0], selected.with.border_color[0]], [board.selectedBg(t), t.accent]);
   assert.equal(selected.with.bg[0], t.selected, "copper's own selected");
-  assert.deepEqual(chipLook(chipOf(selected, "bug")), [t.ansi1, onTone("ansi1")], "its chips as before");
+  assert.deepEqual(chipLook(chipOf(selected, "bug")), look("copper-red"), "its chips as before");
   assert.deepEqual([byId(root, "card-PVTI_col2").with.bg[0], byId(root, "card-PVTI_col2").with.border_color[0]], [t.background, t.border], "the others plain");
+});
+
+test("UI: on a theme without copper's colors a column a card is dragged over takes the theme's selected, and its head stays", async () => {
+  const { b, cx, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const t = catppuccinTheme();
+  host.theme = () => t;
+  const heads = () => [0, 1, 2].map((ci) => byId(b.render(), `col-${ci}`).kids[0].with.bg[0]);
+  const before = heads();
+  await mouse(b, cx, "card-PVTI_col1", "on_mouse_down");
+  byId(b.render(), "col-2").with.on_hover[0](true, cx);
+  const target = byId(b.render(), "col-2");
+  assert.deepEqual([target.with.bg[0], target.with.border_color[0]], [t.selected, t.accent], "a drop target");
+  assert.notEqual(target.with.bg[0], t.chrome);
+  assert.deepEqual(heads(), before, "the heads as they were");
+  b.endDrag(cx);
+});
+
+test("UI: the banner draws a notice in its level's tone and an error of the views' file as an error, in copper's text colors in a copper theme", async () => {
+  const { b } = await openBoard();
+  const t = copperTheme("light");
+  const colorOf = (text) => chipOf(b.banner(t), text)?.with.text_color[0];
+  const shown = ["error", "warning", "success", "info", "other"].map((level) => {
+    b.notice = { text: `a ${level}`, level };
+    return colorOf(`a ${level}`);
+  });
+  assert.deepEqual(shown, ["red", "yellow", "green", "neutral", "neutral"].map((color) => t[`copper-${color}-text`]));
+  b.notice = null;
+  b.configErrors = ["broken"];
+  assert.equal(colorOf("broken"), t["copper-red-text"]);
+  b.configErrors = [];
 });
 
 test("UI: a card counts the labels it draws no chip for after the third, and draws no count for three or fewer; an Epic by its title leaves its epic label out of both", async () => {
@@ -7524,7 +7583,7 @@ test("UI: the Sprint draws its taskboard columns' heads opaque on its background
   const heads = byId(root, "sprint-head").kids.slice(1);
   assert.deepEqual(heads.map((h) => h.with.bg[0]), cols.map((c) => board.headBg(t, c.color, t.background)));
   for (const col of cols) {
-    for (const card of col.shown) assert.equal(byId(root, `card-${card.key}`).kids[0].with.bg[0], t[col.color], `${card.key} in ${col.name}`);
+    for (const card of col.shown) assert.equal(byId(root, `card-${card.key}`).kids[0].with.bg[0], t[`copper-${COPPER_OF[col.color]}-text`], `${card.key} in ${col.name}`);
   }
   assert.ok(cols.some((c) => c.shown.length), "cards to look at");
   await click(b, cx, "card-AB#311");
@@ -7574,15 +7633,17 @@ const lineLook = (root, id) => {
     line?.with.left?.[0], line?.with.right?.[0]];
 };
 
-test("a type line's tone: an Azure type's color by hue, a GitHub issue type's by its named color (a bright one as its plain color); none for a type without a color or an item without an issue type", () => {
+test("a type line's tone: an Azure type's color by hue, a GitHub issue type's by its named color (in a copper theme as its source names it, elsewhere a bright one as its plain color); none for a type without a color or an item without an issue type", () => {
   const cards = colorsBoard().columns.flatMap((c) => c.cards);
   const card = (key) => cards.find((c) => c.key === key);
-  for (const mode of COPPER) {
-    const t = copperTheme(mode);
-    assert.deepEqual(["#cc293d", "#f2cb1d", "#009ccc", "#b2b2b2"].map((hex) => board.typeLineTone(t, azureItem(), hex)), ["ansi1", "ansi3", "ansi4", "muted"], mode);
+  for (const [name, t, hues, named] of [
+    ...COPPER.map((mode) => [`copper-${mode}`, copperTheme(mode), ["copper-red", "copper-yellow", "copper-blue", "muted"], ["ansi1", "ansi11", "ansi2"]]),
+    ...COPPER.map((mode) => [`copper-${mode} without copper's colors`, tintedCopper(mode), ["ansi1", "ansi3", "ansi4", "muted"], ["ansi1", "ansi3", "ansi2"]]),
+  ]) {
+    assert.deepEqual(["#cc293d", "#f2cb1d", "#009ccc", "#b2b2b2"].map((hex) => board.typeLineTone(t, azureItem(), hex)), hues, name);
     assert.equal(board.typeLineTone(t, azureItem(), "#773b93"), board.hueTone(t, "#773b93"));
     assert.equal(board.typeLineTone(t, azureItem(), undefined), null, "an Azure type without a color");
-    assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col5"].map((k) => board.typeLineTone(t, card(k))), ["ansi1", "ansi3", "ansi2"], "Bug RED, Task ORANGE, Epic GREEN");
+    assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col5"].map((k) => board.typeLineTone(t, card(k))), named, `${name}: Bug RED, Task ORANGE, Epic GREEN`);
     assert.deepEqual(["PVTI_col3", "PVTI_col4"].map((k) => board.typeLineTone(t, card(k))), [null, null], "an Epic by its title has no issue type");
     assert.equal(board.typeLineTone(t, { ...card("PVTI_col1"), typeColor: null }), null, "an issue type without a color");
   }
@@ -7593,10 +7654,10 @@ test("UI: the Sprint draws a thin line across the top of each story and task in 
   const t = copperTheme("dark");
   host.theme = () => t;
   let root = b.render();
-  for (const [id, tone] of [["story-AB#301", "ansi4"], ["story-AB#302", "ansi4"], ["card-AB#311", "ansi3"], ["card-AB#332", "ansi1"]]) {
-    assert.deepEqual(lineLook(root, id), [t[tone], true, 0, 2, 6, 6], id);
+  for (const [id, color] of [["story-AB#301", "blue"], ["story-AB#302", "blue"], ["card-AB#311", "yellow"], ["card-AB#332", "red"]]) {
+    assert.deepEqual(lineLook(root, id), [t[`copper-${color}-text`], true, 0, 2, 6, 6], id);
   }
-  assert.equal(byId(root, "card-AB#311").kids[0].with.bg[0], t.muted, "the card's edge stays first, in its column's color");
+  assert.equal(byId(root, "card-AB#311").kids[0].with.bg[0], t["copper-neutral-text"], "the card's edge stays first, in its column's color");
   st().data.meta.typeColors = { Task: "#f2cb1d" };
   root = b.render();
   assert.deepEqual([typeLine(root, "card-AB#332"), typeLine(root, "story-AB#301")], [null, null]);
@@ -7608,11 +7669,11 @@ test("UI: the Backlog reads the project's work item types beside its first refre
   const t = copperTheme("light");
   host.theme = () => t;
   const root = b.render();
-  assert.deepEqual([lineLook(root, "row-AB#401"), lineLook(root, "row-AB#402")], [[t.ansi4, true, 0, 2, 0, 0], [t.ansi1, true, 0, 2, 0, 0]]);
+  assert.deepEqual([lineLook(root, "row-AB#401"), lineLook(root, "row-AB#402")], [[t["copper-blue-text"], true, 0, 2, 0, 0], [t["copper-red-text"], true, 0, 2, 0, 0]]);
   await refreshSprint(b, cx);
   assert.deepEqual(backlogCounts(host, ["ids", "types"]), [1, 0], "a refresh reads the types no more");
   await answerBacklog(host, { me: false });
-  assert.equal(lineLook(b.render(), "row-AB#402")[0], t.ansi1, "it draws them from what it keeps");
+  assert.equal(lineLook(b.render(), "row-AB#402")[0], t["copper-red-text"], "it draws them from what it keeps");
   await press(b, cx, "v");
   assert.deepEqual(openCounts(host, ["iteration", "columns", "types"]), [1, 1, 0], "the Sprint of the same project reads them no more");
 });
@@ -7636,7 +7697,7 @@ test("UI: a GitHub card with an issue type has a line across its top in the type
   host.theme = () => t;
   const root = b.render();
   assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col5"].map((k) => lineLook(root, `card-${k}`)),
-    [[t.ansi1, true, 0, 2, 6, 6], [t.ansi3, true, 0, 2, 6, 6], [t.ansi2, true, 0, 2, 6, 6]]);
+    [[t["copper-red-text"], true, 0, 2, 6, 6], [t["copper-orange-text"], true, 0, 2, 6, 6], [t["copper-green-text"], true, 0, 2, 6, 6]]);
   assert.deepEqual(["PVTI_col3", "PVTI_col4"].map((k) => typeLine(root, `card-${k}`)), [null, null]);
 });
 

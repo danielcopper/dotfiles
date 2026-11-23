@@ -18,7 +18,7 @@ import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js"
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { assigneeText, button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
-import { dropBg, toneColor } from "../tones.js";
+import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
@@ -153,7 +153,7 @@ function drawBoard(b, t, mono, view, st) {
         : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder"),
     )
     .when(Boolean(st.data.limited), (el) =>
-      el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, "ansi3"))
+      el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
         .child(`Nur die ersten ${st.data.limit ?? view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );
 }

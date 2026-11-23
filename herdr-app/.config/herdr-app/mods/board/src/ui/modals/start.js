@@ -14,7 +14,7 @@ import { startSettings } from "../../config.js";
 import { call } from "../../tools.js";
 import { checkoutArgs, renderTemplate, sessionName, spaceForTab, startCommand, templateVars } from "../../actions/start.js";
 import { backdrop, button, cycleField, fieldFrame, fieldLabel, machineName, onMachine, wireTextField } from "../helpers.js";
-import { toneColor } from "../tones.js";
+import { NOTE_TONES, toneColor } from "../tones.js";
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
@@ -180,8 +180,8 @@ export const startModal = {
                 .child(label("Erste Nachricht"))
                 .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
             )
-            .children(m.notes.map((n) => div().text_size(12).text_color(toneColor(t, "ansi3")).child(n)))
-            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, "ansi1")).child(m.error ?? ""))),
+            .children(m.notes.map((n) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(n)))
+            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
         )
         .child(
           h_flex()

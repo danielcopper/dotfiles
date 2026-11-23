@@ -449,30 +449,32 @@ herdr-app`. Which files of the package git tracks is set in the root
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,
   its source says. Labels are chips in their GitHub color, brought onto the
-  theme's red, green, yellow, blue, violet or teal by hue, grey ones muted;
-  issue types are chips in their named GitHub color, orange as yellow and
-  pink as violet. An Epic by its "[Epic]" title alone gets an "Epic" chip in
-  its "epic" label's color, in place of that label's own chip, and the
-  details name it an Epic. A thin line across the top of a card or row is in
-  its type's color: on Azure, of every work item, the color the project's
-  work item types define (kept as makeAzure says), brought onto the theme by
-  hue as a label's is; on GitHub, of an issue with an issue type, that
-  type's named color as its chip has it. A type without a color, and an
-  item without a type (an Epic by its title too), has no line; where the
-  Backlog could not read the types, or where they name their colors in a
-  form the board does not read, the view says so and draws none. Text and
-  lines take the theme's colors; the tints under chips, heads and a selected
-  card or row depend on the theme. The copper themes carry copper's palette
-  steps for mods, and there a chip or a head stands on its color's tinted
-  step (`copper-<color>-3`, or `-4` where step 3 stands too close to the card
-  or column it is drawn on), a selected card or row on the theme's
-  `selected`, copper's blue step for it, and a column a card is dragged over
-  keeps its ground, marked by the accent border. A theme without those
-  steps (catppuccin-mocha) gets its colors at a low alpha, a selected card or
-  row a tint of the accent, so its chips stay readable, and a column a card
-  is dragged over the theme's `selected`.
+  theme's hues by hue, grey ones muted; issue types are chips in their named
+  GitHub color, pink as violet. An Epic by its "[Epic]" title alone gets an
+  "Epic" chip in its "epic" label's color, in place of that label's own
+  chip, and the details name it an Epic. A thin line across the top of a
+  card or row is in its type's color: on Azure, of every work item, the
+  color the project's work item types define (kept as makeAzure says),
+  brought onto the theme by hue as a label's is; on GitHub, of an issue with
+  an issue type, that type's named color as its chip has it. A type without
+  a color, and an item without a type (an Epic by its title too), has no
+  line; where the Backlog could not read the types, or where they name their
+  colors in a form the board does not read, the view says so and draws none.
+  The copper themes carry copper's colors for mods, and there the board
+  draws in them: its seven hues (red, orange, yellow, green, teal, blue,
+  violet) and its neutral, text and lines in their text color
+  (`copper-<color>-text`), a chip or a head on their tinted step
+  (`copper-<color>-3`, or `-4` where step 3 stands too close to the card or
+  column it is drawn on), a selected card or row on the theme's `selected`,
+  copper's blue step for it, and a column a card is dragged over keeps its
+  ground, marked by the accent border. A theme without those colors
+  (catppuccin-mocha) draws in its red, green, yellow, blue, violet and teal,
+  an issue type's orange as yellow, with its colors at a low alpha under
+  chips and heads, a selected card or row on a tint of the accent, so its
+  chips stay readable, and a column a card is dragged over on the theme's
+  `selected`.
   `mods/board/src/ui/tones.js` holds the label and type colors, which theme
-  takes which tints, the selected background and how strong the tints are.
+  takes which colors, the selected background and how strong the tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
   tables; its HTML shows as text, its comments not at all, but for one not
