@@ -34,13 +34,13 @@ const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 
 // How the backlog finds an item, and where one no longer is: what its
 // states and its assignments share.
-const BACKLOG_ITEMS = { find: findBacklogItem, where: "im Backlog" };
+const BACKLOG_LOOKUP = { find: findBacklogItem, where: "im Backlog" };
 // How the backlog finds, changes and shows its items' states
 // (actions/state.js). A state that landed is the item's own: nothing is
 // read again for it.
-const BACKLOG_STATES = { ...BACKLOG_ITEMS, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
+const BACKLOG_STATES = { ...BACKLOG_LOOKUP, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
 // How the backlog finds and changes its items' assignees (actions/assign.js).
-const BACKLOG_ASSIGN = { ...BACKLOG_ITEMS, withItem: withBacklogItem };
+const BACKLOG_ASSIGN = { ...BACKLOG_LOOKUP, withItem: withBacklogItem };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };

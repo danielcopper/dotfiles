@@ -22,9 +22,9 @@ import { azureRelated } from "./related.js";
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns. The
 // project's work item types, one entry for both views (typesOf), are kept
-// TEAM_KEEP_MS from their read, even where another read of the Sprint's
-// settings fails, and until the sprint ends where a Sprint's whole
-// settings read brought them.
+// TEAM_KEEP_MS from their read (even where another read of the Sprint's
+// settings fails), or, where a Sprint's whole settings read brought them,
+// until its sprint ends.
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -96,10 +96,10 @@ export function makeAzure(paths) {
   const shared = {
     az, keptValue, whoAmI, teamKey,
     // The project's work item types (parseAzureTypes), one entry for both
-    // views: read where it is not kept and kept TEAM_KEEP_MS from the read,
-    // even where another read beside it fails, and until the sprint ends
-    // where a Sprint's whole settings read brought them (keepTypesUntil);
-    // no forget drops it.
+    // views: read where it is not kept and kept TEAM_KEEP_MS from their read
+    // (even where another read of the Sprint's settings fails), or, where a
+    // Sprint's whole settings read brought them, until its sprint ends
+    // (keepTypesUntil); no forget drops it.
     async typesOf(c) {
       const held = keptValue(typesKey(c));
       if (held) return { types: held.value, fresh: false };

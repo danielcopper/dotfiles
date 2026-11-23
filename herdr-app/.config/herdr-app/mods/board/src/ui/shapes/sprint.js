@@ -52,13 +52,13 @@ const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, 
 
 // How the sprint finds an item, and where one no longer is: what its states
 // and its assignments share.
-const SPRINT_ITEMS = { find: findSprintItem, where: "im Sprint" };
+const SPRINT_LOOKUP = { find: findSprintItem, where: "im Sprint" };
 // How the sprint finds, changes and shows its items' states (actions/state.js).
 // A write that landed refreshes the view too: which column a task's new
 // state puts it in is Azure's to say.
-const SPRINT_STATES = { ...SPRINT_ITEMS, withState: withItemState, stateOf: stateNow, again: true };
+const SPRINT_STATES = { ...SPRINT_LOOKUP, withState: withItemState, stateOf: stateNow, again: true };
 // How the sprint finds and changes its items' assignees (actions/assign.js).
-const SPRINT_ASSIGN = { ...SPRINT_ITEMS, withItem: withSprintItem };
+const SPRINT_ASSIGN = { ...SPRINT_LOOKUP, withItem: withSprintItem };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -300,5 +300,3 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
         .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
     .when(Boolean(line), (el) => el.child(line));
 }
-
-

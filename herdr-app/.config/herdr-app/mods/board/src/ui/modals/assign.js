@@ -1,21 +1,19 @@
-// The assignee picker: whom the selected item is assigned to, one person or
-// no one, as a menu (helpers.js menu, without digits: typing goes to the
-// filter). Its rows are "Ich", "niemand", then the people its source
-// offers (the repo's assignable people on GitHub, the team's members on
-// Azure), narrowed by a filter that has the keyboard; up/down (or
-// ctrl-j/k, ctrl-n/p) mark a row, Enter or a click assigns it
-// (actions/assign.js). Which row is marked when the rows come and after
-// each change of the filter: where the people were read and "Ich" is among
-// them, the first row the filter leaves that is no "niemand", and
-// "niemand" only where it is all that is left; else (the people could not
-// be read, or GitHub named no viewer) none, so that Enter assigns nothing
-// until a row is chosen. Board.openAssign opens
-// it as b.modal = { kind: "assign", view, key, label, input (the filter's
-// InputState, made for this dialog), field and textField ("filter"),
-// inputFocused, filter, at (the marked row, -1 for none), top (the first
-// row drawn), list ({ me, people, note }, null while it loads), error }.
-// Where the people cannot be read, it says so in the dialog and as a
-// toast, and offers what its source can write without them.
+// The assignee picker: whom the selected item is assigned to, one person or no
+// one, as a menu (helpers.js menu, without digits: typing goes to the filter).
+// Its rows are "Ich", "niemand", then the people its source offers (the repo's
+// assignable people on GitHub, the team's members on Azure), narrowed by a
+// filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
+// Enter or a click assigns it (actions/assign.js). Which row is marked when the
+// rows come and after each change of the filter: where the people were read and
+// "Ich" is among them, the first row the filter leaves that is no "niemand",
+// and "niemand" only where it is all that is left; else (the people could not
+// be read, or GitHub named no viewer) none, so that Enter assigns nothing until
+// a row is chosen. Board.openAssign opens it as b.modal = { kind: "assign",
+// view, key, label, input (the filter's InputState, made for this dialog),
+// field and textField ("filter"), inputFocused, filter, at (the marked row, -1
+// for none), top (the first row drawn), list ({ me, people, note }, null while
+// it loads), error }. Where the people cannot be read, it says so in the dialog
+// and as a toast, and offers what its source can write without them.
 
 import { div } from "gpui-kit";
 import { Input, InputState } from "gpui-base";

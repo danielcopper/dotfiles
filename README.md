@@ -416,10 +416,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   keys pass over them, and the board remembers the folded stories per sprint,
   after a restart too (a new sprint starts unfolded). On a Backlog `j/k` move,
   `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
-  iteration and sprint), `o` opens the item in the browser,
-  and `n` creates a work item: a dialog asks for its type (the level's, Story
-  first; with a Story selected also Task, as its child) and its title (`h/l`
-  switch the type). It is
+  iteration and sprint), `o` opens the item in the browser, and `n` creates a
+  work item: a dialog asks for its type (the level's, Story first; with a Story
+  selected also Task, as its child) and its title (`h/l` switch the type). It is
   created in the team's default area and iteration, assigned to me, and
   shows, selected, once Azure has named its id and the Backlog is read again;
   a Task is linked to the selected Story as its parent and, being no Story,

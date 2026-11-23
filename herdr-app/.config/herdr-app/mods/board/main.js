@@ -1450,7 +1450,6 @@ export function membersFor({ all, note }, viewer) {
   return { me, people, note };
 }
 
-
 // Assigning the work item `id` to `person`: its login, "me" for az's own
 // account (me: true; az resolves it), "" for no one, which az writes as an
 // empty Assigned To.
@@ -2115,9 +2114,9 @@ export const azureRelated = (az) => ({
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns. The
 // project's work item types, one entry for both views (typesOf), are kept
-// TEAM_KEEP_MS from their read, even where another read of the Sprint's
-// settings fails, and until the sprint ends where a Sprint's whole
-// settings read brought them.
+// TEAM_KEEP_MS from their read (even where another read of the Sprint's
+// settings fails), or, where a Sprint's whole settings read brought them,
+// until its sprint ends.
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -2189,10 +2188,10 @@ export function makeAzure(paths) {
   const shared = {
     az, keptValue, whoAmI, teamKey,
     // The project's work item types (parseAzureTypes), one entry for both
-    // views: read where it is not kept and kept TEAM_KEEP_MS from the read,
-    // even where another read beside it fails, and until the sprint ends
-    // where a Sprint's whole settings read brought them (keepTypesUntil);
-    // no forget drops it.
+    // views: read where it is not kept and kept TEAM_KEEP_MS from their read
+    // (even where another read of the Sprint's settings fails), or, where a
+    // Sprint's whole settings read brought them, until its sprint ends
+    // (keepTypesUntil); no forget drops it.
     async typesOf(c) {
       const held = keptValue(typesKey(c));
       if (held) return { types: held.value, fresh: false };
@@ -3932,24 +3931,22 @@ export function unclearParentLines(due, data) {
 
 // ==== src/ui/modals/assign.js ====
 
-// The assignee picker: whom the selected item is assigned to, one person or
-// no one, as a menu (helpers.js menu, without digits: typing goes to the
-// filter). Its rows are "Ich", "niemand", then the people its source
-// offers (the repo's assignable people on GitHub, the team's members on
-// Azure), narrowed by a filter that has the keyboard; up/down (or
-// ctrl-j/k, ctrl-n/p) mark a row, Enter or a click assigns it
-// (actions/assign.js). Which row is marked when the rows come and after
-// each change of the filter: where the people were read and "Ich" is among
-// them, the first row the filter leaves that is no "niemand", and
-// "niemand" only where it is all that is left; else (the people could not
-// be read, or GitHub named no viewer) none, so that Enter assigns nothing
-// until a row is chosen. Board.openAssign opens
-// it as b.modal = { kind: "assign", view, key, label, input (the filter's
-// InputState, made for this dialog), field and textField ("filter"),
-// inputFocused, filter, at (the marked row, -1 for none), top (the first
-// row drawn), list ({ me, people, note }, null while it loads), error }.
-// Where the people cannot be read, it says so in the dialog and as a
-// toast, and offers what its source can write without them.
+// The assignee picker: whom the selected item is assigned to, one person or no
+// one, as a menu (helpers.js menu, without digits: typing goes to the filter).
+// Its rows are "Ich", "niemand", then the people its source offers (the repo's
+// assignable people on GitHub, the team's members on Azure), narrowed by a
+// filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
+// Enter or a click assigns it (actions/assign.js). Which row is marked when the
+// rows come and after each change of the filter: where the people were read and
+// "Ich" is among them, the first row the filter leaves that is no "niemand",
+// and "niemand" only where it is all that is left; else (the people could not
+// be read, or GitHub named no viewer) none, so that Enter assigns nothing until
+// a row is chosen. Board.openAssign opens it as b.modal = { kind: "assign",
+// view, key, label, input (the filter's InputState, made for this dialog),
+// field and textField ("filter"), inputFocused, filter, at (the marked row, -1
+// for none), top (the first row drawn), list ({ me, people, note }, null while
+// it loads), error }. Where the people cannot be read, it says so in the dialog
+// and as a toast, and offers what its source can write without them.
 
 // How many rows show at once.
 const VISIBLE = 10;
@@ -4552,13 +4549,13 @@ const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 
 // How the backlog finds an item, and where one no longer is: what its
 // states and its assignments share.
-const BACKLOG_ITEMS = { find: findBacklogItem, where: "im Backlog" };
+const BACKLOG_LOOKUP = { find: findBacklogItem, where: "im Backlog" };
 // How the backlog finds, changes and shows its items' states
 // (actions/state.js). A state that landed is the item's own: nothing is
 // read again for it.
-const BACKLOG_STATES = { ...BACKLOG_ITEMS, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
+const BACKLOG_STATES = { ...BACKLOG_LOOKUP, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
 // How the backlog finds and changes its items' assignees (actions/assign.js).
-const BACKLOG_ASSIGN = { ...BACKLOG_ITEMS, withItem: withBacklogItem };
+const BACKLOG_ASSIGN = { ...BACKLOG_LOOKUP, withItem: withBacklogItem };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
@@ -5183,13 +5180,13 @@ const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, 
 
 // How the sprint finds an item, and where one no longer is: what its states
 // and its assignments share.
-const SPRINT_ITEMS = { find: findSprintItem, where: "im Sprint" };
+const SPRINT_LOOKUP = { find: findSprintItem, where: "im Sprint" };
 // How the sprint finds, changes and shows its items' states (actions/state.js).
 // A write that landed refreshes the view too: which column a task's new
 // state puts it in is Azure's to say.
-const SPRINT_STATES = { ...SPRINT_ITEMS, withState: withItemState, stateOf: stateNow, again: true };
+const SPRINT_STATES = { ...SPRINT_LOOKUP, withState: withItemState, stateOf: stateNow, again: true };
 // How the sprint finds and changes its items' assignees (actions/assign.js).
-const SPRINT_ASSIGN = { ...SPRINT_ITEMS, withItem: withSprintItem };
+const SPRINT_ASSIGN = { ...SPRINT_LOOKUP, withItem: withSprintItem };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
