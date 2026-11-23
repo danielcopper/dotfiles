@@ -51,30 +51,36 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     tool: in a `$( )` within its pipeline or assigned to a variable it uses (also after `export`, `local`,
     `readonly` or `declare`), through a pipe into it, or as its stdin. A heredoc whose receiving command or a
     pipeline stage after it runs a request tool is a body too, and so is a `<<<` here-string. A heredoc that
-    `cat >`, `cat >>` or `tee` writes to a file stands in for that file, found by the word that names it (`$S/b.json`
-    and `"$tmp"` too): sent, it is a body; run — as the command word, by `source` or `.`, or by a shell or an
-    interpreter — it is read as commands. The command word is found past `VAR=` assignments and the wrappers
-    `env`, `sudo`, `nohup`, `exec`, `command`, `time`, `timeout`, `nice`, `ionice`, `stdbuf`, `setsid`, `xargs`
-    and `uv run`, with their options and option values (env's `-S` string is read as the command); a heredoc fed
-    to a wrapper whose command the hook cannot find is read as commands. Any other file is read from disk as a
-    regular file up to 1 MB, with `~` and `$HOME` expanded and a relative path taken from the session's working
-    directory only, not from a `cd` earlier in the command; a path the hook cannot resolve or read adds nothing.
-    A `<<` marker opens a heredoc only outside quotes and comments, and only when its delimiter line comes.
+    `cat >` or `tee` writes to a file stands in for that file (`cat >>` and `tee -a` add to it), found by the word
+    that names it, quotes deleted (`$S/b.json`, `"$tmp"`, `"$D"/b.json`, `$HOME/x` as `~/x`): sent, it is a body;
+    run, it is read as commands, and the files it writes in turn count as bodies, beside what the command wrote to
+    them before. A written file counts as run when it is the command word, the
+    file `source` or `.` reads, any argument of a wrapper, or the first argument after a shell or interpreter word.
+    The command word is found past `VAR=` assignments and the reserved words `!`, `{`, `if`, `then`, `elif`,
+    `else`, `do`, `while` and `until`. The wrappers are known by name, without their options: `env`, `sudo`,
+    `nohup`, `exec`, `command`, `time`, `timeout`, `nice`, `ionice`, `stdbuf`, `setsid`, `xargs`, `flock`,
+    `watch`, `uv run`, `poetry run`, `mise exec`, `mise x`, `docker exec` and `kubectl exec`; a heredoc fed to any
+    of them is read as commands. So is a `cat` heredoc in the `$( )` that is a shell's `-c` string. Any
+    other file is read from disk as a regular file up to 1 MB, with `~` and `$HOME` expanded and a relative path
+    taken from the session's working directory only, not from a `cd` earlier in the command; a path the hook cannot
+    resolve or read adds nothing. A `<<` marker opens a heredoc only outside quotes and before a comment (a `#` at
+    the start of a word or after `;`, `&`, `|` or `(`), and only when its delimiter line comes.
 
     It lets through `git merge`, `merge-base` and `merge-tree`, paths and names with "merge", "completed" outside
     an Azure DevOps completion, `gh pr view`, `list`, `checks`, `create`, `edit` and `update-branch`, comments and
     reviews, and a heredoc body fed to a command that only reads it (`cat`, `tee`, `git commit -F -`). A heredoc
     whose receiving command, or a pipeline stage after it, has a shell or an interpreter (`bash`, `sh`, `python`,
-    `node`, `ruby`, `perl`, `ssh`) as its command word is read as commands; one a request tool receives is checked
-    only as a body, so a PR body from `--body-file -` that names `gh pr merge` passes, while one that names a
-    GraphQL merge mutation is refused. A command form spelled as text — a `grep` pattern, a string in a Python
-    heredoc, a commit message with `-m` — is refused like a call; a GraphQL mutation name or a completion body
-    counts only where a request tool stands as a word in the command. Each refusal names the form it found.
+    `node`, `ruby`, `perl`, `ssh`) as its command word is read as commands — only the command word decides, so a
+    PR title with "node" in it does not; one a request tool receives is checked only as a body, so a PR body from
+    `--body-file -` that names `gh pr merge` passes, while one that names a GraphQL merge mutation is refused. A
+    command form spelled as text — a `grep` pattern, a string in a Python heredoc, a commit message with `-m` — is
+    refused like a call; a GraphQL mutation name or a completion body counts only where a request tool stands as a
+    word in the command. Each refusal names the form it found.
 
     An error inside the hook, and a command over 1,000,000 characters, refuse the call only when the command holds
-    `merge`, `complet` or `enqueue`, naming the error; otherwise the call goes through, and the hook says so in a
-    `systemMessage` and on stderr. That is by design: the hook guards against a session's accident, not against an
-    attacker who provokes an error.
+    `merge`, `complet` or `enqueue`, naming the error (for input that is no UTF-8, its type and the byte where
+    decoding stopped); otherwise the call goes through, and the hook says so in a `systemMessage` and on stderr.
+    That is by design: the hook guards against a session's accident, not against an attacker who provokes an error.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
     `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions
     one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of
@@ -86,7 +92,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
   HTTP clients, a gh alias defined before or elsewhere, gh extensions, and a remote workflow that merges when
   started (`gh workflow run …`). Spellings only a deliberate trick would choose are out of scope too: a
   percent-encoded endpoint (`pulls/5/%6Derge`), a backslash for the slash in an Azure DevOps URL, a second request
-  after curl's `--next`, and a literal URL in a header next to a target from a variable. A bypass that a command
+  after curl's `--next`, a literal URL in a header next to a target from a variable, a `#` right after a
+  subshell's `)` (`(true)#<<A`), a `cat` heredoc in the `$( )` that is an interpreter's `-c` or `-e` string
+  (`python -c "$(cat <<X …)"`), and a script that a written-and-run script runs in turn. A bypass that a command
   written without intent to evade could hit is a finding against the hook; one that only a command built to get
   past it reaches is an accepted gap. `claude/.claude/hooks/merge_corpus.py` in the dotfiles repo (not stowed) is
   the local acceptance run over the transcripts; its docstring says what it counts.
