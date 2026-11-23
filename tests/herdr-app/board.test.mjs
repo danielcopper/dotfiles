@@ -6145,7 +6145,12 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
     const kept = board.keptUrl(url);
     assert.ok(kept, url);
     assert.equal(new URL(kept).host, new URL(board.webUrl(url)).host, url);
-    assert.doesNotMatch(kept.slice(kept.indexOf(new URL(kept).host) + new URL(kept).host.length), /[![\]()`\\]/, `${url}: nothing to encode left outside the host`);
+    const { protocol, host } = new URL(kept);
+    const authority = kept.slice(protocol.length + 2).split("/")[0];
+    const hostAt = authority.lastIndexOf("@") + 1;
+    assert.equal(authority.slice(hostAt), host, `${url}: the host stands between the user part and the path`);
+    const outside = authority.slice(0, hostAt) + kept.slice(protocol.length + 2 + authority.length);
+    assert.doesNotMatch(outside, /[![\]()`\\]/, `${url}: nothing to encode left outside the host`);
   }
   assert.equal(md("\\<https://a/![b](https://e/x.png)>"), "\\<https://a/%21%5Bb%5D%28https://e/x.png%29>", "after a backslash, where it is no autolink");
   assert.equal(md("a `<https://a/` ![b](https://e/x.png)>"), "a `<https://a/%60%20%21%5Bb%5D%28https://e/x.png%29>", "across a code span, its backtick too");
