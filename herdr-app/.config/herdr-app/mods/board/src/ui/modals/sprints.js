@@ -20,7 +20,7 @@ import { div } from "gpui-kit";
 import { report } from "../../shared.js";
 import { rankByName } from "../../select.js";
 import { sprintDates, startRow } from "../../kinds/sprint.js";
-import { filterMenuKey, markedName, menu, menuNote, menuWindow, openReadMenu, filterMenuHead, toneChip } from "../helpers.js";
+import { filterMenuHead, filterMenuKey, markedName, menu, menuNote, menuWindow, openReadMenu, toneChip } from "../helpers.js";
 import { NOTE_TONES } from "../tones.js";
 
 const sprintRowsOf = (m) => rankByName(m.list ?? [], m.filter);

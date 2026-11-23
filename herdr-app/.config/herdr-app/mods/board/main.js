@@ -253,7 +253,7 @@ export function ageLabel(iso, now) {
   const then = new Date(iso), today = new Date(now);
   if (Number.isNaN(then.getTime())) return "";
   const day = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  const days = Math.round((day(today) - day(then)) / 86400000);
+  const days = Math.round((day(today) - day(then)) / DAY_MS);
   if (days <= 0) return "heute";
   if (days === 1) return "gestern";
   if (days < 7) return `vor ${days} Tagen`;
@@ -4027,35 +4027,39 @@ export function menuKey(e, cx, m, count, pick) {
 // filter, an InputState with `placeholder` made for it (m.input; field and
 // textField "filter", inputFocused, filter; at, the marked row; top and
 // wheel, its window). Enter in the filter picks the marked row (pick(i,
-// cx)). When it opens and at each change of the filter the row startAt(m)
-// gives is marked, and the window, from the top, follows it into view
-// (followMark over count(m) rows).
+// cx)). When it opens and at each change of the filter, mark() marks the
+// row startAt(m) gives and brings the window, from the top, to it
+// (followMark over count(m) rows); it returns mark, for a menu whose rows
+// come later.
 export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
-  const input = InputState.new({ placeholder });
-  Object.assign(m, { input, field: "filter", filter: "", top: 0, wheel: 0 });
-  m.at = startAt(m);
-  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
-  input.on("change", (_e, cx) => {
-    m.filter = input.value();
+  const mark = () => {
     m.at = startAt(m);
     m.top = 0;
     followMark(m, count(m));
+  };
+  const input = InputState.new({ placeholder });
+  Object.assign(m, { input, field: "filter", filter: "", wheel: 0 });
+  mark();
+  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
+  input.on("change", (_e, cx) => {
+    m.filter = input.value();
+    mark();
     cx.notify();
   });
   b.modal = m;
   input.focus();
   cx.notify();
+  return mark;
 }
 
 // Such a menu whose rows come from a read (the assignee picker, the
 // sprint picker): openFilterMenu, then read(), whose rows land in m.list
-// (null until then); when they come the row startAt(m) gives is marked and
-// followed. A read that fails sets m.error and m.list as failed(e) gives
-// them ({ error, list }) and says so as a toast titled `title`.
+// (null until then), marked when they come (its mark). A read that fails
+// sets m.error and m.list as failed(e) gives them ({ error, list }) and
+// says so as a toast titled `title`.
 export function openReadMenu(b, m, { read, failed, title, ...menu }, cx) {
-  const { startAt, count } = menu;
   Object.assign(m, { list: null, error: null });
-  openFilterMenu(b, m, menu, cx);
+  const mark = openFilterMenu(b, m, menu, cx);
   cx.spawn(async (cx) => {
     try {
       m.list = await read();
@@ -4063,8 +4067,7 @@ export function openReadMenu(b, m, { read, failed, title, ...menu }, cx) {
       ({ error: m.error, list: m.list } = failed(e));
       notify({ title, body: m.error, level: "error" });
     } finally {
-      m.at = startAt(m);
-      followMark(m, count(m));
+      mark();
       cx.notify();
     }
   });
@@ -6705,8 +6708,9 @@ function scrollToRow(b, view, key) {
 // it; pickSprint, showSprint), and says so in the head ("nicht aktuell");
 // with no sprint running and none chosen the head says that, and no taskboard
 // shows (sprintIs tells the three apart). The data: { shape: "sprint", meta:
-// { iterationId, iteration, finish (null with none running), currentId (the
-// team's current sprint's, null with none running), gone ({ id, name } of a
+// { iterationId, iteration, finish (all three null where no sprint runs and
+// none is chosen), currentId (the team's current sprint's, null with none
+// running), gone ({ id, name } of a
 // chosen sprint the team no longer has, or null), typeStates, states,
 // typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
 // hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
@@ -6823,13 +6827,15 @@ function sprintEnd(finish) {
 }
 
 // Shows the sprint `sprint` ({ id, name }; null: the current one) in the
-// Sprint view `view` while the board runs, and reads it; where the sprint
-// with the id `id` (the current one's where the picker names it, else as
-// the data last read it) shows already, read without an error and no read
+// Sprint view `view` while the board runs, and reads it. `id` is that
+// sprint's id: by default `sprint`'s, or for the current one
+// meta.currentId as last read; the picker names its row's. Where that
+// sprint shows already, as what was asked for (the current one as current,
+// a chosen one as chosen: sprintIs), read without an error and no read
 // under way, it reads nothing.
 function showSprint(b, view, sprint, cx, id = sprint?.id ?? b.state(view.id).data?.meta.currentId ?? null) {
   const st = b.state(view.id);
-  const shows = id !== null && st.data?.meta.iterationId === id;
+  const shows = id !== null && st.data?.meta.iterationId === id && (sprintIs(st.data) === "current") === (sprint === null);
   st.sprint = sprint;
   if (shows && !st.error && !st.loading) return;
   b.refresh(view, cx);

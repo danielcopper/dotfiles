@@ -5157,6 +5157,38 @@ test("UI: at a sprint's end, picking the team's new current sprint while the end
   assert.deepEqual([st().data.meta.iterationId, board.sprintIs(st().data)], [SPRINT_13, "current"]);
 });
 
+test("UI: at a sprint's end, a chosen sprint that became current, picked as the current row, is read as current", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await pickSprint(b, cx, host, "Sprint 13");
+  assert.equal(board.sprintIs(st().data), "chosen");
+  advance(5 * DAY);
+  await runCommand(b, cx, "Sprint wählen…");
+  await host.answer("az", ok(sprint13Current()), AZ.iteration);
+  assert.deepEqual([chipped(b), b.modal.at], [["Sprint 13"], 3]);
+  await submitSprint(b, cx);
+  assert.equal(st().sprint, null);
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 1], "read, though Sprint 13 shows: it showed as a choice");
+  await answerSettings(host, sprint13Current());
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([st().data.meta.iterationId, board.sprintIs(st().data), sprintHead(b).includes("nicht aktuell")], [SPRINT_13, "current", false]);
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false);
+});
+
+test("UI: at a sprint's end, the ended sprint picked while it still shows as current is read as a choice", async () => {
+  const { b, cx, host, st } = await openSprint();
+  advance(5 * DAY);
+  await runCommand(b, cx, "Sprint wählen…");
+  await host.answer("az", iterationsAnswer(), isIterationsCall);
+  await host.answer("az", ok(sprint13Current()), AZ.iteration);
+  b.modal.input.type("Sprint 12");
+  await submitSprint(b, cx);
+  assert.deepEqual(st().sprint, { id: ITERATION_ID, name: "Sprint 12" });
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 1], "read, though Sprint 12 shows: it showed as current");
+  await answerSettings(host, sprint13Current());
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([st().data.meta.iterationId, board.sprintIs(st().data), sprintHead(b).includes("nicht aktuell")], [ITERATION_ID, "chosen", true]);
+});
+
 test("UI: a refresh keeps the chosen sprint; r reads the team's iterations again and keeps it where the team still has it, else shows the current one and says so; a refused write keeps them", async () => {
   const { b, cx, host, st } = await openSprint();
   await pickSprint(b, cx, host, "Sprint 11");

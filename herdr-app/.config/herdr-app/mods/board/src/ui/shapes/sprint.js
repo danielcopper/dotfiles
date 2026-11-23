@@ -15,8 +15,9 @@
 // it; pickSprint, showSprint), and says so in the head ("nicht aktuell");
 // with no sprint running and none chosen the head says that, and no taskboard
 // shows (sprintIs tells the three apart). The data: { shape: "sprint", meta:
-// { iterationId, iteration, finish (null with none running), currentId (the
-// team's current sprint's, null with none running), gone ({ id, name } of a
+// { iterationId, iteration, finish (all three null where no sprint runs and
+// none is chosen), currentId (the team's current sprint's, null with none
+// running), gone ({ id, name } of a
 // chosen sprint the team no longer has, or null), typeStates, states,
 // typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
 // hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
@@ -152,13 +153,15 @@ function sprintEnd(finish) {
 }
 
 // Shows the sprint `sprint` ({ id, name }; null: the current one) in the
-// Sprint view `view` while the board runs, and reads it; where the sprint
-// with the id `id` (the current one's where the picker names it, else as
-// the data last read it) shows already, read without an error and no read
+// Sprint view `view` while the board runs, and reads it. `id` is that
+// sprint's id: by default `sprint`'s, or for the current one
+// meta.currentId as last read; the picker names its row's. Where that
+// sprint shows already, as what was asked for (the current one as current,
+// a chosen one as chosen: sprintIs), read without an error and no read
 // under way, it reads nothing.
 function showSprint(b, view, sprint, cx, id = sprint?.id ?? b.state(view.id).data?.meta.currentId ?? null) {
   const st = b.state(view.id);
-  const shows = id !== null && st.data?.meta.iterationId === id;
+  const shows = id !== null && st.data?.meta.iterationId === id && (sprintIs(st.data) === "current") === (sprint === null);
   st.sprint = sprint;
   if (shows && !st.error && !st.loading) return;
   b.refresh(view, cx);

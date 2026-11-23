@@ -152,7 +152,7 @@ export function ageLabel(iso, now) {
   const then = new Date(iso), today = new Date(now);
   if (Number.isNaN(then.getTime())) return "";
   const day = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  const days = Math.round((day(today) - day(then)) / 86400000);
+  const days = Math.round((day(today) - day(then)) / DAY_MS);
   if (days <= 0) return "heute";
   if (days === 1) return "gestern";
   if (days < 7) return `vor ${days} Tagen`;

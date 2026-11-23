@@ -280,35 +280,39 @@ export function menuKey(e, cx, m, count, pick) {
 // filter, an InputState with `placeholder` made for it (m.input; field and
 // textField "filter", inputFocused, filter; at, the marked row; top and
 // wheel, its window). Enter in the filter picks the marked row (pick(i,
-// cx)). When it opens and at each change of the filter the row startAt(m)
-// gives is marked, and the window, from the top, follows it into view
-// (followMark over count(m) rows).
+// cx)). When it opens and at each change of the filter, mark() marks the
+// row startAt(m) gives and brings the window, from the top, to it
+// (followMark over count(m) rows); it returns mark, for a menu whose rows
+// come later.
 export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
-  const input = InputState.new({ placeholder });
-  Object.assign(m, { input, field: "filter", filter: "", top: 0, wheel: 0 });
-  m.at = startAt(m);
-  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
-  input.on("change", (_e, cx) => {
-    m.filter = input.value();
+  const mark = () => {
     m.at = startAt(m);
     m.top = 0;
     followMark(m, count(m));
+  };
+  const input = InputState.new({ placeholder });
+  Object.assign(m, { input, field: "filter", filter: "", wheel: 0 });
+  mark();
+  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
+  input.on("change", (_e, cx) => {
+    m.filter = input.value();
+    mark();
     cx.notify();
   });
   b.modal = m;
   input.focus();
   cx.notify();
+  return mark;
 }
 
 // Such a menu whose rows come from a read (the assignee picker, the
 // sprint picker): openFilterMenu, then read(), whose rows land in m.list
-// (null until then); when they come the row startAt(m) gives is marked and
-// followed. A read that fails sets m.error and m.list as failed(e) gives
-// them ({ error, list }) and says so as a toast titled `title`.
+// (null until then), marked when they come (its mark). A read that fails
+// sets m.error and m.list as failed(e) gives them ({ error, list }) and
+// says so as a toast titled `title`.
 export function openReadMenu(b, m, { read, failed, title, ...menu }, cx) {
-  const { startAt, count } = menu;
   Object.assign(m, { list: null, error: null });
-  openFilterMenu(b, m, menu, cx);
+  const mark = openFilterMenu(b, m, menu, cx);
   cx.spawn(async (cx) => {
     try {
       m.list = await read();
@@ -316,8 +320,7 @@ export function openReadMenu(b, m, { read, failed, title, ...menu }, cx) {
       ({ error: m.error, list: m.list } = failed(e));
       notify({ title, body: m.error, level: "error" });
     } finally {
-      m.at = startAt(m);
-      followMark(m, count(m));
+      mark();
       cx.notify();
     }
   });
