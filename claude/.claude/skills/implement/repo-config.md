@@ -62,7 +62,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       target built at run time (`$`, a backtick, for curl also `{` or `[`) or written percent-encoded, a path
       with a `.` or `..` segment, `//` after the host or a `;` (it may resolve to the pull request), or no
       literal target at all (curl and wget without a `://` URL, `-K`/`--config`, wget's `-i`; `gh api` with no
-      endpoint word; `az rest` without a URL or path; `az repos pr`). A write to a literal sub-resource — a
+      endpoint past its options and their values; `az rest` without a URL or path; `az repos pr`). For `gh api`
+      only the endpoint counts, not option values such as `--input "$S/review.json"`. A write to a literal
+      sub-resource — a
       pull request's threads, comments, reviews, reviewers, labels or statuses, or a GitHub pull request
       itself — passes, also with its body from a file. In re-read or open-quoted text the file rule reads the
       whole text and keeps no such exception;

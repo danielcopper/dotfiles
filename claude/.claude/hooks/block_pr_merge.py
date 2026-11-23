@@ -130,6 +130,12 @@ DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
 MERGE_SURFACE = re.compile(
     r"pullrequests/\d+/?(?:$|[?#])|/pulls/[^/\s?#]+/merge|/merges(?![\w-])|graphql"
 )
+# gh api's options that take a value, as a separate word or attached (`-Fk=v`, `--jq=.`).
+GH_API_VALUE_OPTIONS = frozenset(
+    ["--method", "--header", "--raw-field", "--field", "--input", "--jq", "--template"]
+    + ["--hostname", "--preview", "--cache"]
+)
+GH_API_VALUE_LETTERS = set("XHfFqtp")
 INVOKE_RESOURCE = re.compile(r"--resource(?:=|\s+)(\S+)")
 # az devops invoke's method; without one it reads (GET)
 HTTP_METHOD = re.compile(r"--http-method(?:=|\s+)(\S+)")
@@ -958,11 +964,28 @@ def may_write_to_merge(words: list[str]) -> bool:
     )
 
 
+def gh_api_endpoint(words: list[str]) -> str | None:
+    """The endpoint among the words after `gh api`: the first word that is no option and no
+    value of one of GH_API_VALUE_OPTIONS (`--flag=value` and attached short values included).
+    None when there is none."""
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word.startswith("--"):
+            i += 2 if word in GH_API_VALUE_OPTIONS else 1
+        elif word.startswith("-") and len(word) > 1:
+            taking = next((k for k, c in enumerate(word[1:]) if c in GH_API_VALUE_LETTERS), None)
+            # a value-taking letter last in the cluster takes the next word as its value
+            i += 2 if taking is not None and taking == len(word) - 2 else 1
+        else:
+            return word
+    return None
+
+
 def body_target_may_merge(texts: list[str]) -> bool:
     """For the words of a gh or az command that reads its request body from a file: whether the
-    target may be a merge surface. gh api: a word after `api` built at run time (`$`, a backtick,
-    a brace expansion), one on MERGE_SURFACE, or none that looks like an endpoint (a `/`
-    or graphql). az rest: no `--uri`/`--url`/`-u` holding a URL or a path, or one built at run
+    target may be a merge surface. gh api: no endpoint (gh_api_endpoint), or one built at run
+    time (`$`, a backtick, a brace expansion) or on_merge_surface(). az rest: no `--uri`/`--url`/`-u` holding a URL or a path, or one built at run
     time or on the surface.
     az devops invoke: invoke_reaches_pr(). az repos pr, or anything else: the pull request
     itself or unknown, so yes."""
@@ -970,15 +993,13 @@ def body_target_may_merge(texts: list[str]) -> bool:
     names = [text.rsplit("/", 1)[-1] for text in lower]
     joined = " ".join(lower)
     if "gh" in names and "api" in lower:
-        after = [text for text in texts[lower.index("api") + 1 :] if not text.startswith("-")]
-        if not any("/" in text or "graphql" in text.lower() for text in after):
-            return True
-        return any(
-            "$" in text
-            or "`" in text
-            or BRACE_EXPANSION.search(text) is not None
-            or on_merge_surface(text)
-            for text in after
+        endpoint = gh_api_endpoint(texts[lower.index("api") + 1 :])
+        return (
+            endpoint is None
+            or "$" in endpoint
+            or "`" in endpoint
+            or BRACE_EXPANSION.search(endpoint) is not None
+            or on_merge_surface(endpoint)
         )
     if "az" in names and "rest" in lower:
         uris = []

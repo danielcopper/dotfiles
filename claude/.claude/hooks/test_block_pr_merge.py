@@ -450,6 +450,12 @@ PASSES = [
     ),
     "gh api repos/o/r/pulls/2820/reviews --method POST --input review.json",
     "gh api repos/o/r/issues/5/comments -F body=@c.md",
+    'gh api repos/o/r/pulls/2820/reviews --method POST --input "$S/review.json"',
+    "gh api repos/o/r/pulls/2820/reviews --method POST --input ./review.json",
+    "gh api repos/o/r/issues/5/comments -F body=@$S/c.md",
+    "gh api repos/o/r/pulls/2820/reviews --method POST --input review.json -f note='a; b'",
+    "gh api repos/o/r/pulls/2820/reviews --method POST --input review.json --jq .",
+    'for f in $S/r*.json; do gh api repos/o/r/pulls/2820/reviews --method POST --input "$f"; done',
     (
         "az rest --method post --uri https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308/threads?api-version=7.1"
         " --body @thread.json"
