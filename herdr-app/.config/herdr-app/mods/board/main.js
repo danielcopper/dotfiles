@@ -65,18 +65,19 @@
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection),
 // related.js (the items related to an item, read when its details open:
-// what is kept, their lines), scroll.js (how the details scroll), sources/
-// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
-// related.js, index.js), tools.js (running gh and az), actions/ (starting a session,
-// writing a change at once, moving a card, changing a state, creating a
-// work item),
-// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
-// background, the tints), ui/layer.js (the board layer), ui/related.js
-// (the related items as drawn), ui/shapes/ (how a view's
-// data is drawn and worked: board, prs, sprint, backlog, placeholder),
-// ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
-// data logic is plain exported functions, tested with a few UI paths by
-// tests/herdr-app/board.test.mjs with node.
+// what is kept, their lines), description.js (a description as drawn,
+// without anything it could load), scroll.js (how the details scroll),
+// sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
+// backlog.js, related.js, index.js), tools.js (running gh and az),
+// actions/ (starting a session, writing a change at once, moving a card,
+// changing a state, creating a work item), ui/helpers.js, ui/tones.js (the
+// tones of labels and types, the selected background, the tints),
+// ui/layer.js (the board layer), ui/related.js (the related items as
+// drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
+// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
+// columns, create) and this one, the Board, which looks the shape up.
+// Their data logic is plain exported functions, tested with a few UI paths
+// by tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
 import { Input, InputState, ScrollHandle, TextView, h_flex, v_flex } from "gpui-base";
@@ -1015,11 +1016,12 @@ export function startCommand({ open, on, folder, argv, task, name, space }) {
 
 // ==== src/sources/azure/common.js ====
 
-// Azure DevOps, what its two team views share: states and their
-// categories, what az's failures mean, how az is called, the work items'
-// fields and how az's answers are read, who az is, and a state change.
-// The Sprint's own calls are in sprint.js, the Backlog's in backlog.js, the
-// source as the board uses it in index.js (makeAzure).
+// Azure DevOps, what its two team views and a work item's related items
+// share: states and their categories, what az's failures mean, how az is
+// called, the work items' fields and how az's answers are read, who az is,
+// and a state change. The Sprint's own calls are in sprint.js, the
+// Backlog's in backlog.js, the related items' in related.js, the source as
+// the board uses it in index.js (makeAzure).
 
 // Theme colors and column order for Azure's state categories.
 export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
@@ -1114,12 +1116,22 @@ export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 // stand alone in quotes are built from SYSTEM: the command check
 // (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
 // for a herdr command.
-export const SYSTEM = "System.";
+const SYSTEM = "System.";
 export const AREA_PATH = `${SYSTEM}AreaPath`;
+// A work item's description (HTML), and the link to a child.
+export const DESCRIPTION = `${SYSTEM}Description`;
+export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
 // The fields read of each work item.
 export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+
+// One WIQL query for the fields of the work items `ids` (WORK_ITEM_FIELDS
+// and `extraFields`), in the order of their ids.
+export function idsWiql(ids, extraFields = []) {
+  const fields = [...WORK_ITEM_FIELDS, ...extraFields].map((f) => `[${f}]`).join(", ");
+  return `SELECT ${fields} FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
+}
 
 // az's JSON answer for `what`; `empty` stands for no output at all (az
 // boards query prints nothing when nothing matches).
@@ -1646,13 +1658,6 @@ export function parseBacklogIds(stdout) {
   return [...new Set(list.map((l) => l?.target?.id).filter(Number.isInteger))];
 }
 
-// One WIQL query for the fields of the work items `ids`, the order field
-// among them where there is one.
-export function backlogWiql(ids, orderField) {
-  const fields = [...WORK_ITEM_FIELDS, ...(orderField ? [orderField] : [])].map((f) => `[${f}]`).join(", ");
-  return `SELECT ${fields} FROM WorkItems WHERE [System.Id] IN (${ids.join(", ")}) ORDER BY [System.Id]`;
-}
-
 // The sprint a work item is in, as the Backlog shows it: the last part of
 // its iteration's path, or null for none, which is the backlog's own
 // iteration (the root of the team's iterations) or the project's root (a
@@ -1777,7 +1782,7 @@ export function backlogView(s) {
       const kept = await backlogSettingsOf(c);
       const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
       const read = ids.slice(0, AZ_QUERY_LIMIT);
-      const out = read.length ? await s.az(azQueryArgs(c, backlogWiql(read, kept.config.orderField))) : "";
+      const out = read.length ? await s.az(azQueryArgs(c, idsWiql(read, kept.config.orderField ? [kept.config.orderField] : []))) : "";
       const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me });
       s.noViewerOf(data);
       return { data, warnings: [] };
@@ -1829,16 +1834,14 @@ export function backlogView(s) {
 // (`az boards work-item relation show` would name the links in words, at
 // the cost of one more call for the link types.) A child's link carries no
 // title or state, so where the item has children one WIQL query by their
-// ids reads those (az boards query takes flat queries only, no link
-// query); a pull request's link carries none either, and reading them would
-// cost a call per pull request (az repos pr show), so a pull request's line
-// names its id only, with its page.
+// ids reads them (idsWiql, as the Backlog reads its items; az boards query
+// takes flat queries only, no link query); a pull request's link carries
+// none either, and reading them would cost a call per pull request (az
+// repos pr show), so a pull request's line names its id only, with its
+// page.
 
-// The calls: the work item with its links, and its children's fields.
+// The work item with its links.
 export const azRelatedArgs = (c, id) => ["boards", "work-item", "show", ...azOrg(c.org), "--id", String(id), "--expand", "relations", "-o", "json"];
-export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
-export const childrenWiql = (ids) =>
-  `SELECT [${SYSTEM}Id], [${SYSTEM}Title], [${SYSTEM}WorkItemType], [${SYSTEM}State] FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
 
 // The work item's id at the end of a link's URL (…/workItems/<id>); NaN
 // for none.
@@ -1854,9 +1857,9 @@ export function pullRequestOf(url) {
 // children: [ids], prs: [{ project, repo, number }] }, each once, in the
 // order of the links.
 export function parseRelatedItem(stdout) {
-  const json = azJson(stdout, "den Work Item");
-  if (!isObject(json) || !Number.isInteger(json.id)) throw new BoardError("Azure lieferte keinen Work Item");
-  const description = json.fields?.[`${SYSTEM}Description`];
+  const json = azJson(stdout, "das Work Item");
+  if (!isObject(json) || !Number.isInteger(json.id)) throw new BoardError("Azure lieferte kein Work Item");
+  const description = json.fields?.[DESCRIPTION];
   const relations = Array.isArray(json.relations) ? json.relations : [];
   const children = [];
   const prs = [];
@@ -1873,48 +1876,41 @@ export function parseRelatedItem(stdout) {
   return { description: typeof description === "string" ? description : "", children, prs };
 }
 
-// A child, of az boards query's answer, as a line (related.js); its state's
-// color and whether it is done (Completed or Removed) from `states` (the
-// view's data.meta.states, [] for none).
-function childLine(wi, c, states) {
-  const f = (name) => wi.fields?.[SYSTEM + name] ?? null;
-  const state = f("State");
-  const known = states.find((s) => s.name === state);
-  return {
-    kind: "workitem", source: "azure", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"), url: workItemUrl(c, wi.id),
-    state: state ?? "ohne Status", color: known?.color ?? "muted", done: known?.category === "Completed" || known?.category === "Removed", draft: false,
-  };
-}
-
-// The children's query answer → their lines, in the order of `ids`.
-export function parseChildren(stdout, ids, c, states = []) {
-  const list = azList(azJson(stdout, "die untergeordneten Work Items", []));
-  if (!list) throw new BoardError("Azure lieferte keine untergeordneten Work Items");
-  const byId = new Map(list.filter((wi) => Number.isInteger(wi?.id)).map((wi) => [wi.id, wi]));
-  return ids.filter((id) => byId.has(id)).map((id) => childLine(byId.get(id), c, states));
+// The children's query answer → their lines (related.js; a work item as
+// azWorkItem makes it), in the order of `ids`; one the query does not find
+// is left out.
+export function parseChildren(stdout, ids, c) {
+  const byId = new Map(parseWorkItems(stdout, c).map((wi) => [wi.number, wi]));
+  return ids.filter((id) => byId.has(id)).map((id) => ({ ...byId.get(id), draft: false }));
 }
 
 // A pull request's line: its id and its page, no title or state (see the
 // header).
 export const pullRequestLine = (c, pr) => ({
-  kind: "pr", source: "azure", number: pr.number, title: "Pull Request", type: null, draft: false, done: false, state: "verknüpft", color: "muted",
+  kind: "pr", source: "azure", number: pr.number, title: "Pull Request", type: null, draft: false, state: "verknüpft",
   url: `${c.org}/${encodeURIComponent(pr.project)}/_git/${encodeURIComponent(pr.repo)}/pullrequest/${pr.number}`,
 });
 
-const section = (count, lines, error = null) => ({ count, sent: lines.length, cut: false, hidden: error ? 0 : count - lines.length, error, lines });
+// A section of `count` items, of which `lines` can be read (related.js);
+// those that cannot are ones the query did not find.
+const section = (count, lines, error = null) => ({
+  count, sent: lines.length, cut: false, hidden: error ? 0 : count - lines.length, hiddenAs: "nicht gefunden", error, lines,
+});
 
 // The related items of the work item `item` in the team context `c`
-// (related.js): one az call, and one query more where it has children (a
-// failed query shows its reason in the children's place). `states`: the
-// view's states, for the children's colors. `az(args)` runs az.
-export async function loadAzureRelated(az, c, item, states = []) {
+// (related.js): one az call, and one query more where it has children. A
+// failed query shows its reason in the children's place and marks the
+// read to be repeated after the next refresh (retry). `az(args)` runs az.
+export async function loadAzureRelated(az, c, item) {
   const read = parseRelatedItem(await az(azRelatedArgs(c, item.number)));
   let children = section(read.children.length, []);
+  let retry = false;
   if (read.children.length) {
     try {
-      children = section(read.children.length, parseChildren(await az(azQueryArgs(c, childrenWiql(read.children))), read.children, c, states));
+      children = section(read.children.length, parseChildren(await az(azQueryArgs(c, idsWiql(read.children))), read.children, c));
     } catch (e) {
       children = section(read.children.length, [], report(e));
+      retry = true;
     }
   }
   return {
@@ -1923,21 +1919,22 @@ export async function loadAzureRelated(az, c, item, states = []) {
     subIssues: children,
     prs: section(read.prs.length, read.prs.map((pr) => pullRequestLine(c, pr))),
     warnings: [],
+    retry,
   };
 }
 
 // The Azure source's `related` (related.js): a work item with an id has
 // some to read.
 export const azureRelated = (az) => ({
-  reads: (item) => item?.source === "azure" && item.kind === "workitem" && Number.isInteger(item.number),
-  load: (item, view, data) => loadAzureRelated(az, view.context, item, data?.meta?.states ?? []),
+  reads: (item) => item.kind === "workitem" && Number.isInteger(item.number),
+  load: (item, view) => loadAzureRelated(az, view.context, item),
 });
 
 // ==== src/sources/azure/index.js ====
 
 // The Azure source as the board uses it (makeAzure); its team views'
-// calls and data are in sprint.js and backlog.js, what both use in
-// common.js.
+// calls and data are in sprint.js and backlog.js, a work item's related
+// items' in related.js, what they share in common.js.
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, and per layout of an Azure view how
@@ -2584,35 +2581,35 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // on Azure a work item's children and linked pull requests; the same read
 // brings the item's description beside them), what of them a view keeps
 // (keptRelated), the lines the details panel walks when it has the
-// keyboard, the description as drawn (shownDescription), and the heads of
-// their sections.
+// keyboard, and the heads of their sections. The description as drawn is
+// description.js's.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
 // A source that has related items gives `related: { reads(item), load(item,
-// view, data) }`: reads tells whether the item has any to read (no call);
-// load reads them (view: the view the item shows in; data: that view's
-// data, null before any) into { description, format, subIssues, prs,
-// warnings }. description is the item's own text as the source has it (""
-// for none), format how it is written: "markdown" (the default) or "html";
-// it is drawn formatted, without its images (shownDescription). Each of
-// subIssues and prs is a
+// view) }`: reads tells whether the item has any to read (no call); load
+// reads them (view: the view the item shows in) into { description,
+// format, subIssues, prs, warnings, retry }. description is the item's own
+// text as the source has it ("" for none), format how it is written:
+// "markdown" (the default) or "html". Each of subIssues and prs is a
 // section { count (how many the source has; null when it did not send the
-// section), sent
-// (how many it sent), cut (it has more than it sent), hidden (how many it
-// sent that cannot be read), error (why it sent none; null), lines (those
-// it sent that can be read) }; a line { source, kind, repo, repoShort,
-// number, title, url, state (its label), color (its chip's theme color),
-// done (dimmed), draft }. warnings: what the source said besides, one line
-// each.
+// section), sent (how many it sent), cut (it has more than it sent), hidden
+// (how many it has that cannot be read), hiddenAs (what the details say of
+// those: "ohne Zugriff" where it is missing), error (why it sent none;
+// null), lines (those that can be read) }; a line { source, kind, number,
+// title, url, state (its label), draft, and on GitHub repo, repoShort,
+// color (its chip's theme color) and done (dimmed); on Azure type, its
+// color and whether it is done coming from the view's states when drawn }.
+// warnings: what the source said besides, one line each. retry: a part
+// failed that is to be read again after the next refresh.
 
 // What a view keeps of its related items after a refresh starts: only
 // those of the item whose details show (`openKey`, null when none), read
 // or still being read, so that a refresh reads nothing for them; a failed
-// read is dropped, so that it is tried again; `r` reads them again too
-// (the Board's reload).
+// read, or one with a part to read again (retry), is dropped, so that it
+// is tried again; `r` reads them again too (the Board's reload).
 export function keptRelated(related, openKey) {
   const entry = openKey === null ? undefined : related.get(openKey);
-  return new Map(entry && !entry.error ? [[openKey, entry]] : []);
+  return new Map(entry && !entry.error && !entry.data?.retry ? [[openKey, entry]] : []);
 }
 
 // The lines of read related items (`data`, or null while none are read),
@@ -2627,53 +2624,6 @@ export function stepLine(line, dir, count) {
   if (line === null) return dir > 0 ? 0 : null;
   const next = line + dir;
   return next < 0 ? null : Math.min(next, count - 1);
-}
-
-// An image of a description as a link to it, "Bild: <alt>" ("Bild" without
-// one), so that nothing loads it: herdr's TextView loads every http(s) image
-// a text names with the mod's network grant, which herdr gives every mod in
-// full (herdr's src/mods.rs, capabilities; gpui-kit's
-// crates/shell/src/materialize/text_view.rs), and a description is text
-// anyone with access may write. What TextView draws as an image (gpui-kit's
-// crates/base/src/text/format): an HTML <img> with a src (html.rs), in HTML
-// and as raw HTML in Markdown (markdown.rs, Node::Html), which HTML's parser
-// also reads <image> as; and Markdown's inline image `![alt](url)`
-// (markdown.rs, Node::Image). Markdown's images by reference (`![alt][ref]`,
-// `![alt][]`, `![ref]`, Node::ImageReference) it draws as nothing at all
-// today. So every <img> and <image> tag becomes a link (its src and alt read
-// whatever their case and quoting; without a src, its text alone), and in
-// Markdown every `![` becomes `[Bild: ` (`![]` `[Bild]`), which turns an
-// image of either kind into a link, also inside a link's text; a zero-width
-// space before it keeps a `!` before it (`!![`, `\![`) from making a new
-// `![`, so none is left. Then, so
-// that a tag the first step does not read (unbalanced quotes, an odd
-// character after the name) cannot become one either, every `<` left before
-// "img" or "image", in any case, is written `&lt;`: shown as text. Text in
-// code is changed the same way.
-const IMAGE_TAG = /<(?:img|image)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
-const LEFT_IMAGE_TAG = /<(?=im(?:g|age))/gi;
-const ZWSP = "\u200b";
-const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
-const htmlText = (text) => text.replace(/&(?![a-z]+;|#\d+;|#x[0-9a-f]+;)/gi, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-function imageLink(tag) {
-  const attrs = {};
-  const body = tag.replace(/^<[a-z]+/i, "").replace(/\/?>$/, "");
-  for (const m of body.matchAll(ATTRIBUTE)) {
-    const name = m[1].toLowerCase();
-    if (!(name in attrs)) attrs[name] = m[2] ?? m[3] ?? m[4] ?? "";
-  }
-  const label = htmlText(attrs.alt ? `Bild: ${attrs.alt}` : "Bild");
-  return attrs.src ? `<a href="${htmlText(attrs.src.trim())}">${label}</a>` : label;
-}
-
-// A description as the details draw it (format: "markdown" or "html"): its
-// images as links (above); null where it has no text.
-export function shownDescription(text, format) {
-  const raw = String(text ?? "");
-  if (!raw.trim()) return null;
-  const tags = raw.replace(IMAGE_TAG, imageLink).replace(LEFT_IMAGE_TAG, "&lt;");
-  return format === "html" ? tags : tags.replace(/!\[(\]?)/g, (_m, empty) => (empty ? `${ZWSP}[Bild]` : `${ZWSP}[Bild: `));
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.
@@ -3092,7 +3042,10 @@ export const detailWidth = (columns) => `${(100 * (columns > 0 ? Math.max(1 / 3,
 
 // A section of the detail panel: its frame (sectionFrame), a title
 // (sectionTitle) over its rows.
-export const sectionFrame = (t) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border);
+// A detail section's padding and the gap between its rows; the related
+// items' block (ui/related.js) lays its rows out by them too.
+export const FRAME = { px: 18, py: 12, gap: 6 };
+export const sectionFrame = (t) => v_flex().px(FRAME.px).py(FRAME.py).gap(FRAME.gap).border_b(1).border_color(t.border);
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
 export const detailSection = (t, title, ...kids) => sectionFrame(t).child(sectionTitle(t, title)).children(kids);
 
@@ -3352,6 +3305,10 @@ export function tellOutcomes(b, lines, cx) {
 // The theme color of a state, by its category (data.meta.states:
 // parseAzureTypes, parseBacklogConfig).
 export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
+
+// Whether a state counts as done (its category Completed or Removed), as a
+// done related item is dimmed.
+export const stateDone = (data, name) => ["Completed", "Removed"].includes(data.meta.states.find((s) => s.name === name)?.category);
 
 // ==== src/actions/state.js ====
 
@@ -4859,10 +4816,14 @@ export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, b
 // How the details block scrolls: the one home of its offset. herdr gives a
 // script no scroll offset of a scroll area (a ScrollHandle only reveals a
 // child, with the smallest scroll needed), so the board scrolls the block
-// itself: it keeps the offset, in `s` = { offset, content, viewport } (the
-// content's and the visible window's heights, as measured), shifts the
-// content up by it, and draws the position as a thumb. All lengths are the
-// script's pixels (measured ones divided by herdr's zoom: ui/related.js).
+// itself: it keeps the offset in the related items' state (`ui`:
+// ui/related.js, relatedState) with the heights of the window and the
+// content as measured (`viewport`, `content`), shifts the content up by it,
+// and draws the position as a thumb. All lengths are the script's pixels
+// (measured ones divided by herdr's zoom: ui/related.js).
+
+// One line of the details, the step of j/k.
+export const LINE_PX = 18;
 
 // The offset `offset` kept within the content: from 0 to where its end
 // meets the window's; 0 where the content fits.
@@ -4885,7 +4846,8 @@ export function revealOffset(s, top, height) {
 export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
 
 // The thumb that shows the position: { top, height } within the window, at
-// least `min` high; null where the content fits.
+// least `min` high; null where the content fits or the window is not
+// measured.
 export function thumbOf(s, min = 16) {
   if (!(s.content > s.viewport) || s.viewport <= 0) return null;
   const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
@@ -4902,22 +4864,43 @@ export function rowSpan(heights, i, gap, pad) {
   return { top, height: heights[i] ?? 0 };
 }
 
+// The block's offset when it draws the details of the item `key`: 0 for
+// another item than the last (ui.at), kept within the content, which a
+// resize or a refresh may have changed.
+export function offsetOf(ui, key) {
+  if (ui.at !== key) {
+    ui.at = key;
+    ui.offset = 0;
+  }
+  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
+  return ui.offset;
+}
+
+// The block moved by `by` pixels: ctrl-d/ctrl-u by halfWindow, j/k by
+// LINE_PX, the wheel by its move.
+export const scrollBy = (ui, by) => (ui.offset = offsetBy(ui, by));
+export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
+// The block at its top or bottom (gg/G, Home/End).
+export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+// The block moved so that `span` ({ top, height }) shows.
+export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));
+
 // ==== src/ui/related.js ====
 
 // The detail panel's sections of an item's related items (related.js): its
 // description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
-// Markdown or HTML as its source writes it, its images as links:
-// shownDescription; "keine Beschreibung" where it has none), its
-// sub-issues (an Azure work item's children), then, where it has any or the source
+// Markdown or HTML as its source writes it, without anything it could load:
+// description.js; "keine Beschreibung" where it has none), its sub-issues
+// (an Azure work item's children), then, where it has any or the source
 // could not send them, the pull requests linked to it; one line each with
 // its key, title and state (a done one dimmed, a draft marked), and below
-// a section how many it sent that cannot be read. While they load the
+// a section how many it has that cannot be read. While they load the
 // description's and the sub-issues' sections say "lädt …", after a
 // failure the reason; a section the source could not send says why in its
 // place; what the source said besides follows at the end. The line the
 // panel has selected while it has the keyboard is marked; a click on a
 // line is Enter on it (the Board's pickLine). A link in the description
-// opens through the Board's openLink (http and https only).
+// opens through the Board's openLink.
 //
 // A description taller than about 12 lines shows folded to that height,
 // with "… mehr (e)" below; `e` or a click on it unfolds it ("weniger (e)"
@@ -4926,26 +4909,20 @@ export function rowSpan(heights, i, gap, pad) {
 // description is, its block measures (on_size_change), and it folds only
 // once that is known to be more.
 //
-// The block scrolls by an offset the board keeps (scroll.js says why):
-// its window measures its height, the content its own and each row its
-// own (on_size_change), the content stands shifted up by the offset, the
-// mouse wheel moves it, and a thin thumb at the right shows where it is
-// (no scrollbar to drag). A resize or a refresh that changes a height
-// keeps the offset within the content; another item's details start at
-// the top.
+// The block scrolls by an offset the board keeps (scroll.js, its one home,
+// says why): its window measures its height, the content its own and each
+// row its own (on_size_change), the content stands shifted up by the
+// offset, the mouse wheel moves it, and a thin thumb at the right shows
+// where it is (no scrollbar to drag).
 
-export const LINE_PX = 18;
 export const FOLDED_H = 12 * LINE_PX;
-// The content's padding above its first row and the gap between rows.
-const PAD_Y = 12;
-const GAP = 6;
 
-// What the related items keep per Board, made when it starts (why then:
-// ui/shapes/index.js): the measured height of each description by its
-// item's key, the key of the item whose description is unfolded (null:
-// none; another item's shows folded), and the block's scroll: its offset,
-// the item it is of (`at`), the heights of its window and its content, and
-// of each row by its id.
+// What the related items keep per Board, plain values the Board makes once
+// when it starts and every draw reads: the measured height of each
+// description by its item's key, the key of the item whose description is
+// unfolded (null: none; another item's shows folded), and the block's
+// scroll (scroll.js): its offset, the item it is of (`at`), the heights of
+// its window and its content, and of each row by its id.
 export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
@@ -4956,62 +4933,45 @@ export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > 
 // its zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
 const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
-// The block's offset for `item`: 0 for another item than the last, kept
-// within the content.
-function offsetFor(ui, item) {
-  if (ui.at !== item.key) {
-    ui.at = item.key;
-    ui.offset = 0;
-  }
-  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
-  return ui.offset;
-}
-
-// The block's scroll as scroll.js takes it.
-const scrollOf = (ui) => ({ offset: ui.offset, content: ui.content, viewport: ui.viewport });
-
-// Moves the block by `by` pixels; ctrl-d/ctrl-u by half its window
-// (halfWindow), j/k by LINE_PX, the wheel by its move.
-export const scrollBlock = (ui, by) => (ui.offset = offsetBy(scrollOf(ui), by));
-export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
-// The block's top or bottom (gg/G, Home/End).
-export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+// `el` measuring its height into `keep(height)` after each layout that
+// changes it, under the id `id` (on_size_change needs a lasting one).
+const measured = (el, id, keep) => el.id(id).on_size_change((size, cx) => {
+  keep(unzoomed(size.height));
+  cx.notify();
+});
 
 // The id each row of relatedRows draws with.
 const rowId = (r, i) => (r.kind === "line" ? `related-line-${r.n}` : `related-row-${i}`);
 
-// Where row `i` of the rows of `item` stands in the content, from the
-// measured heights (LINE_PX for one not measured yet).
-function spanOf(ui, rows, i) {
-  return rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, GAP, PAD_Y);
+// Where line `n` of the related items stands in the block's content, from
+// the measured heights (LINE_PX for a row not measured yet); null where no
+// such line shows.
+function lineSpan(ui, item, entry, n) {
+  const rows = relatedRows(item, entry);
+  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
+  return i < 0 ? null : rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, FRAME.gap, FRAME.py);
 }
 
-// Scrolls line `n` of the related items into view.
+// Scrolls line `n` into view.
 export function revealLine(ui, item, entry, n) {
-  const rows = relatedRows(item, entry);
-  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
-  if (i < 0) return;
-  const { top, height } = spanOf(ui, rows, i);
-  ui.offset = revealOffset(scrollOf(ui), top, height);
+  const span = lineSpan(ui, item, entry, n);
+  if (span) revealSpan(ui, span);
 }
 
-// Whether line `n` shows whole in the block (true while it is not
-// measured yet).
+// Whether line `n` shows whole (true while the block is not measured yet).
 export function lineShows(ui, item, entry, n) {
-  const rows = relatedRows(item, entry);
-  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
-  if (i < 0) return false;
-  const { top, height } = spanOf(ui, rows, i);
-  return spanShows(scrollOf(ui), top, height);
+  const span = lineSpan(ui, item, entry, n);
+  return Boolean(span) && spanShows(ui, span.top, span.height);
 }
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
-// (the Board's kept read: { data, error }, both null while it loads; null
-// before a read starts): { kind: "head" | "note" | "text" | "line", text,
-// tone ("muted", "error", "warning") or, for a line, `line` and its index
-// `n` among relatedLines (the one order of the lines); a "text" is the
-// description, one row: `text` as drawn (shownDescription) and its
-// `format`.
+// (the Board's kept read: { data, error, shown }, data and error null
+// while it loads, shown the description as drawn (shownDescription, made
+// once per read); null before a read starts): { kind: "head" | "note" |
+// "text" | "line", text, tone ("muted", "error", "warning") or, for a
+// line, `line` and its index `n` among relatedLines (the one order of the
+// lines); a "text" is the description, one row: its `text` as drawn and
+// its `format`.
 export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
@@ -5021,15 +4981,13 @@ export function relatedRows(item, entry) {
   }
   const lines = relatedLines(data);
   const rows = [description];
-  const format = data.format === "html" ? "html" : "markdown";
-  const text = shownDescription(data.description, format);
-  if (text !== null) rows.push({ kind: "text", text, format });
+  if (typeof entry.shown === "string") rows.push({ kind: "text", text: entry.shown, format: data.format === "html" ? "html" : "markdown" });
   else rows.push({ kind: "note", text: "keine Beschreibung", tone: "muted" });
   const body = (section, none) => {
     if (section.error) rows.push({ kind: "note", text: section.error, tone: "error" });
     for (const line of section.lines) rows.push({ kind: "line", line, n: lines.indexOf(line) });
     if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", tone: "muted" });
-    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ohne Zugriff`, tone: "muted" });
+    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, tone: "muted" });
   };
   rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
   body(data.subIssues, true);
@@ -5053,15 +5011,8 @@ function description(b, t, item, r) {
   const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
     .text_size(12)
     .on_link_click((url, cx) => b.openLink(url, cx));
-  const measured = div()
-    .id(`description-size-${item.key}`)
-    .flex_none()
-    .on_size_change((size, cx) => {
-      ui.heights.set(item.key, unzoomed(size.height));
-      cx.notify();
-    })
-    .child(view);
-  const box = div().id("description").overflow_hidden().when(folds && !open, (el) => el.max_h(FOLDED_H)).child(measured);
+  const size = measured(div().flex_none(), `description-size-${item.key}`, (h) => ui.heights.set(item.key, h)).child(view);
+  const box = div().id("description").overflow_hidden().when(folds && !open, (el) => el.max_h(FOLDED_H)).child(size);
   return v_flex()
     .gap(4)
     .child(box)
@@ -5078,23 +5029,21 @@ function description(b, t, item, r) {
     ));
 }
 
-// The block of the related items of `item` (relatedRows), the line `at`
-// marked (null: none).
+// The block of the related items of `item` (relatedRows) in `view`, the
+// line `at` marked (null: none). A line's state's color, and whether it is
+// done, are its own where its source names them (GitHub), else its state's
+// in the view's data (Azure).
 export function relatedSections(b, t, mono, view, item, entry, at) {
   const ui = b.relatedUi;
+  const data = b.state(view.id).data;
   const tones = { muted: t.muted, error: t.ansi1, warning: t.ansi3 };
-  // Each row measures its height, under its id.
-  const measure = (el, id) => el.id(id).on_size_change((size, cx) => {
-    ui.sizes.set(id, unzoomed(size.height));
-    cx.notify();
-  });
-  const row = (r, i) => measure(rowOf(r), rowId(r, i));
   const rowOf = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
-    const marked = n === at;
+    const color = line.color ?? stateColor(data, line.state);
+    const done = line.done ?? stateDone(data, line.state);
     return h_flex()
       .flex_none()
       .gap(8)
@@ -5103,9 +5052,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .items_center()
       .rounded(6)
       .border_1()
-      .map(selectedLook(t, marked, t.chrome))
+      .map(selectedLook(t, n === at, t.chrome))
       .cursor_pointer()
-      .opacity(line.done ? 0.55 : 1)
+      .opacity(done ? 0.55 : 1)
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
         if (!b.modal) b.pickLine(view, n, cx);
@@ -5113,35 +5062,25 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(chip(t, line.state, t.background, t[line.color] ?? t.muted));
+      .child(chip(t, line.state, t.background, t[color] ?? t.muted));
   };
-  const offset = offsetFor(ui, item);
-  const content = v_flex()
-    .id("related-lines")
+  const offset = offsetOf(ui, item.key);
+  const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))
     .flex_none()
-    .px(18)
-    .py(PAD_Y)
-    .gap(GAP)
+    .px(FRAME.px)
+    .py(FRAME.py)
+    .gap(FRAME.gap)
     .mt(offset ? -offset : 0)
-    .on_size_change((size, cx) => {
-      ui.content = unzoomed(size.height);
-      cx.notify();
-    })
-    .children(relatedRows(item, entry).map(row));
-  const windowEl = v_flex()
-    .id("related-window")
+    .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
+  const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
     .min_h(0)
     .overflow_hidden()
-    .on_size_change((size, cx) => {
-      ui.viewport = unzoomed(size.height);
-      cx.notify();
-    })
     .on_scroll_wheel((e, cx) => {
-      scrollBlock(ui, -unzoomed(e.delta?.y ?? 0));
+      scrollBy(ui, -unzoomed(e.delta?.y ?? 0));
       cx.notify();
     })
     .child(content);
-  const thumb = thumbOf(scrollOf(ui));
+  const thumb = thumbOf(ui);
   return v_flex()
     .id("related-scroll")
     .relative()
@@ -5152,6 +5091,271 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .when(Boolean(thumb), (el) => el.child(
       div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
     ));
+}
+
+// ==== src/description.js ====
+
+// An item's description as the details hand it to herdr's TextView
+// (shownDescription): Markdown or HTML that can load nothing.
+//
+// Why: TextView loads every http(s) image of its text with the mod's network
+// grant, which herdr gives every mod in full (herdr's src/mods.rs,
+// capabilities; gpui-kit's crates/shell/src/materialize/text_view.rs), and
+// a description is text anyone with access to the item may write. What
+// TextView draws as an image (gpui-kit's crates/base/src/text/format): an
+// HTML <img> with a src (html.rs), which HTML's parser also reads <image>
+// as, in HTML and as raw HTML in Markdown (markdown.rs, Node::Html); and
+// Markdown's inline image `![alt](url)` (markdown.rs, Node::Image).
+// Markdown's images by reference (`![alt][ref]`, `![alt][]`, `![ref]`,
+// Node::ImageReference) it draws as nothing today. Before parsing HTML it
+// writes the text through html5minify (html.rs, cleanup_html), which
+// writes the text of <pre> and <textarea> and the content of <script> and
+// <style> decoded, as it stands (html5minify/mod.rs, preserve_whitespace
+// and contains_code): an entity-spelt `&lt;img …&gt;` in them comes out as
+// a tag, which the second parse builds into an image. So a list of what may
+// stay, not of what must go:
+//
+// - HTML keeps only the tags of KEPT, each written anew without attributes
+//   but an `a`'s http(s) href; none of them is one whose text html5minify
+//   writes as it stands, nor one HTML's parser reads as raw text. A <pre>
+//   becomes <p><code> (its text then wraps as any other). An <img> or
+//   <image> becomes a link "Bild: <alt>" to its http(s) src, or that text
+//   alone. Any other `<` (another tag, a comment, a tag left open or longer
+//   than MAX_TAG) is written `&lt;`, shown as text.
+// - Markdown keeps no HTML at all: every `<` gets a zero-width space after
+//   it, which no HTML tag, comment or autolink starts with, so Markdown
+//   reads it as text, and in code it looks unchanged. An inline image
+//   becomes a Markdown link "Bild: <alt>" to its http(s) URL (its text
+//   alone for another URL), and an <img> or <image> tag the same; a `![`
+//   that starts no inline image the scanner reads (an image by reference,
+//   or one longer than MAX_IMAGE) becomes `[Bild: `, so that
+//   `![alt][ref]` is a link where `ref` is defined, and `![alt][]` and
+//   `![ref]` plain text. Each link and each `[Bild: ` comes after a
+//   zero-width space, so that a `!` before it (`!![x](u)`) does not make
+//   it an image again; no `![` is left. Text in code changes the same way.
+//
+// Each step looks at the text once, and a tag or an image at most
+// MAX_TAG or MAX_IMAGE characters ahead, so a long hostile text costs
+// little; the board makes it once per read (the Board's readRelated).
+
+const KEPT = new Set([
+  "p", "br", "b", "strong", "i", "em", "u", "s", "del", "strike", "mark", "code", "a", "ul", "ol", "li",
+  "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table", "thead", "tbody", "tr", "th", "td", "hr", "div", "span", "sub", "sup",
+]);
+const IMAGES = new Set(["img", "image"]);
+export const MAX_TAG = 2048;
+export const MAX_IMAGE = 1024;
+// How deep the brackets of an image's alt and the parentheses of its
+// destination may nest (cmark's limit for the latter).
+const MAX_PARENS = 32;
+const ZWSP = "\u200b";
+const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
+const TAG_START = /<(\/?)([A-Za-z][A-Za-z0-9]*)/y;
+const NAMED = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
+
+// A text with its entities read (&amp; &lt; &gt; &quot; &apos;, &#n;,
+// &#xn;); any other stays as written.
+function decoded(text) {
+  return text.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|amp|lt|gt|quot|apos);/gi, (m, e) => {
+    if (e[0] !== "#") return NAMED[e.toLowerCase()];
+    const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  });
+}
+
+// A text as HTML writes it, as text or in a quoted attribute whose value
+// has no `"` (an http(s) URL as webUrl writes it).
+const htmlText = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// An http(s) URL as the WHATWG URL parser writes it (which percent-encodes
+// spaces, `<`, `>` and `"`), or null for anything else.
+export function webUrl(text) {
+  try {
+    const url = new URL(String(text).trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// The tag starting at `at` (its `<`): { close, name (in lower case), body
+// (what stands between the name and the `>`), end (after the `>`) }, or
+// null where none starts there or it does not end within MAX_TAG. `nextGt`
+// gives the next `>` from a position (tagReader).
+function readTag(text, at, nextGt) {
+  TAG_START.lastIndex = at;
+  const m = TAG_START.exec(text);
+  if (!m) return null;
+  const from = at + m[0].length;
+  if (from < text.length && !/[\s/>]/.test(text[from])) return null;
+  const end = nextGt(from);
+  if (end < 0 || end - at > MAX_TAG) return null;
+  return { close: m[1] === "/", name: m[2].toLowerCase(), body: text.slice(from, end), end: end + 1 };
+}
+
+// The next `>` at or after a position, for positions that only grow: each
+// search starts where the last one ended, so all of them read the text once.
+function tagReader(text) {
+  let gt = -2;
+  const nextGt = (p) => {
+    if (gt === -1) return -1;
+    if (gt < p) gt = text.indexOf(">", p);
+    return gt;
+  };
+  return (at) => readTag(text, at, nextGt);
+}
+
+// A tag's attributes by name, in lower case, each its first value, read.
+function attributesOf(body) {
+  const attrs = {};
+  for (const m of body.matchAll(ATTRIBUTE)) {
+    const name = m[1].toLowerCase();
+    if (!(name in attrs)) attrs[name] = decoded(m[2] ?? m[3] ?? m[4] ?? "");
+  }
+  return attrs;
+}
+
+// An image's label: "Bild: <alt>", "Bild" without one.
+const imageLabel = (alt) => {
+  const text = String(alt ?? "").replace(/\s+/g, " ").trim();
+  return text ? `Bild: ${text}` : "Bild";
+};
+
+// The tag `tag` as the HTML keeps it (see the header).
+function htmlTag(tag) {
+  if (tag.name === "pre") return tag.close ? "</code></p>" : "<p><code>";
+  if (IMAGES.has(tag.name)) {
+    if (tag.close) return "";
+    const attrs = attributesOf(tag.body);
+    const url = webUrl(attrs.src ?? "");
+    const label = htmlText(imageLabel(attrs.alt));
+    return url ? `<a href="${htmlText(url)}">${label}</a>` : label;
+  }
+  if (tag.close) return `</${tag.name}>`;
+  if (tag.name !== "a") return `<${tag.name}>`;
+  const url = webUrl(attributesOf(tag.body).href ?? "");
+  return url ? `<a href="${htmlText(url)}">` : "<a>";
+}
+
+// HTML as the details hand it on (see the header).
+function keptHtml(text) {
+  const tagAt = tagReader(text);
+  const out = [];
+  let from = 0;
+  for (let at = text.indexOf("<"); at >= 0; at = text.indexOf("<", from)) {
+    out.push(text.slice(from, at));
+    const tag = tagAt(at);
+    if (tag && (KEPT.has(tag.name) || IMAGES.has(tag.name) || tag.name === "pre")) {
+      out.push(htmlTag(tag));
+      from = tag.end;
+    } else {
+      out.push("&lt;");
+      from = at + 1;
+    }
+  }
+  out.push(text.slice(from));
+  return out.join("");
+}
+
+// A text as Markdown shows it in a link's label: its `\`, `[` and `]`
+// escaped, each `<` followed by a zero-width space.
+const markdownLabel = (text) => text.replace(/[\\[\]]/g, "\\$&").replace(/</g, `<${ZWSP}`);
+
+// An image as a Markdown link (see the header), after a zero-width space,
+// so that a `!` before it does not make it an image again.
+function markdownImage(alt, src) {
+  const url = webUrl(src);
+  const label = markdownLabel(imageLabel(alt));
+  return url ? `${ZWSP}[${label}](<${url}>)` : label;
+}
+
+// The inline image `![alt](destination "title")` starting at `at`, read as
+// CommonMark does, within MAX_IMAGE characters, without a blank line and
+// nested at most MAX_PARENS deep: { alt, src, end } or null.
+function inlineImage(text, at) {
+  const limit = Math.min(text.length, at + MAX_IMAGE);
+  let i = at + 2;
+  let depth = 0;
+  for (; i < limit; i++) {
+    const c = text[i];
+    if (c === "\\") i++;
+    else if (c === "[" && ++depth > MAX_PARENS) return null;
+    else if (c === "]" && depth-- === 0) break;
+    else if (c === "\n" && text[i + 1] === "\n") return null;
+  }
+  if (i >= limit || text[i + 1] !== "(") return null;
+  const alt = text.slice(at + 2, i);
+  i += 2;
+  const skip = () => {
+    while (i < limit && (text[i] === " " || text[i] === "\t" || text[i] === "\n")) i++;
+  };
+  skip();
+  let src = "";
+  if (text[i] === "<") {
+    const start = ++i;
+    while (i < limit && text[i] !== ">" && text[i] !== "\n") i += text[i] === "\\" ? 2 : 1;
+    if (text[i] !== ">") return null;
+    src = text.slice(start, i++);
+  } else {
+    // Up to a space or control character, its parentheses balanced.
+    const start = i;
+    let parens = 0;
+    for (; i < limit && text.charCodeAt(i) > 32; i++) {
+      if (text[i] === "\\") i++;
+      else if (text[i] === "(" && ++parens > MAX_PARENS) return null;
+      else if (text[i] === ")" && parens-- === 0) break;
+    }
+    src = text.slice(start, i);
+  }
+  skip();
+  const close = { "\"": "\"", "'": "'", "(": ")" }[text[i]];
+  if (close) {
+    for (i++; i < limit && text[i] !== close; i++) if (text[i] === "\\") i++;
+    if (i >= limit) return null;
+    i++;
+    skip();
+  }
+  if (i >= limit || text[i] !== ")") return null;
+  return { alt: decoded(alt.replace(/\\(.)/g, "$1")), src: decoded(src.replace(/\\(.)/g, "$1")), end: i + 1 };
+}
+
+// Markdown as the details hand it on (see the header).
+function keptMarkdown(text) {
+  const tagAt = tagReader(text);
+  const marks = /<|!\[/g;
+  const out = [];
+  let from = 0;
+  for (let m = marks.exec(text); m; m = marks.exec(text)) {
+    const at = m.index;
+    out.push(text.slice(from, at));
+    from = at + m[0].length;
+    if (m[0] === "<") {
+      const tag = tagAt(at);
+      if (tag && !tag.close && IMAGES.has(tag.name)) {
+        const attrs = attributesOf(tag.body);
+        out.push(markdownImage(attrs.alt, attrs.src ?? ""));
+        from = tag.end;
+      } else out.push(`<${ZWSP}`);
+    } else {
+      const image = inlineImage(text, at);
+      if (image) {
+        out.push(markdownImage(image.alt, image.src));
+        from = image.end;
+      } else if (text[from] === "]") out.push(`${ZWSP}[Bild`);
+      else out.push(`${ZWSP}[Bild: `);
+    }
+    marks.lastIndex = from;
+  }
+  out.push(text.slice(from));
+  return out.join("");
+}
+
+// A description as the details hand it to TextView (format: "markdown" or
+// "html"), see the header; null where it has no text.
+export function shownDescription(text, format) {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+  return format === "html" ? keptHtml(raw) : keptMarkdown(raw);
 }
 
 // ==== src/main.js ====
@@ -5240,8 +5444,8 @@ export default class Board extends View {
     // panel's keyboard: { view, key, line } while it has it (panelOf).
     this.relatedUi = relatedState();
     this.panel = null;
-    // A `g` waiting for the second of gg (edgeKey).
-    this.pendingG = false;
+    // Whether the last key was a `g`, the first of gg (edgeKey).
+    this.afterG = false;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -5317,6 +5521,7 @@ export default class Board extends View {
   // open dialog's next or previous field, else the keyboard into the details
   // panel or back to the board (togglePanel).
   tabKey(back, cx) {
+    this.afterG = false;
     if (!this.takesTab()) return;
     cx.stop_propagation();
     if (this.modal) return MODALS[this.modal.kind].tab(this, back, cx);
@@ -5544,12 +5749,15 @@ export default class Board extends View {
     const item = this.shownDetailsItem();
     const st = view ? this.state(view.id) : null;
     if (!this.readsRelated(item) || st.related.has(item.key)) return;
-    const entry = { data: null, error: null };
+    const entry = { data: null, error: null, shown: null };
     st.related.set(item.key, entry);
     const source = this.sources[item.source].related;
     cx.spawn(async (cx) => {
       try {
-        entry.data = await source.load(item, view, st.data);
+        const data = await source.load(item, view);
+        // The description as drawn, once per read (description.js).
+        entry.shown = shownDescription(data.description, data.format);
+        entry.data = data;
       } catch (e) {
         entry.error = report(e);
       } finally {
@@ -5599,7 +5807,7 @@ export default class Board extends View {
       const item = this.selected(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
-      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBlock(ui, dir * LINE_PX);
+      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
       else {
         panel.line = stepLine(panel.line, dir, lines.length);
         if (panel.line !== null) revealLine(ui, item, entry, panel.line);
@@ -5653,7 +5861,7 @@ export default class Board extends View {
   // ctrl-d and ctrl-u while the details panel has the keyboard: its block
   // half its window down or up.
   panelPage(dir) {
-    scrollBlock(this.relatedUi, dir * halfWindow(this.relatedUi));
+    scrollBy(this.relatedUi, dir * halfWindow(this.relatedUi));
   }
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
@@ -5681,16 +5889,12 @@ export default class Board extends View {
     return true;
   }
 
-  // A link in a description: opened where it is an http or https URL (which
-  // has a host, or is no URL), else said.
+  // A link in a description, as TextView reports its click: opened as an
+  // item's page is (open) where it is an http or https URL (webUrl), else
+  // said and not opened.
   openLink(url, cx) {
-    let ok = false;
-    try {
-      ok = ["http:", "https:"].includes(new URL(String(url)).protocol);
-    } catch {
-      // Not a URL.
-    }
-    if (ok) cx.open_url(String(url));
+    const page = webUrl(url);
+    if (page) this.open({ url: page }, cx);
     else this.say(`Link nicht geöffnet (nur http und https): ${url}`, "warning", cx);
   }
 
@@ -5990,9 +6194,10 @@ export default class Board extends View {
     const k = e.key;
     const ch = e.key_char ?? "";
     const mod = e.modifiers ?? {};
-    // A `g` waits for the next key only: any other key drops it.
-    const g = this.pendingG;
-    this.pendingG = false;
+    // A `g` waits for the next key only: any other key drops it (a Tab
+    // action too: tabKey).
+    const g = this.afterG;
+    this.afterG = false;
     if (this.modal) return this.modalKey(e, cx);
     if (this.filtering) {
       if (k === "escape") {
@@ -6009,15 +6214,19 @@ export default class Board extends View {
     };
     // Where Tab comes here rather than as the board's action: its one home.
     if (k === "tab") return this.tabKey(Boolean(mod.shift), cx);
-    if (view && mod.control && !(mod.alt || mod.platform || mod.shift) && (k === "d" || k === "u") && this.panelOf(view)) {
+    // A key without Shift, Alt or the platform key: bare without Control
+    // too, else with Control alone.
+    const plain = !(mod.alt || mod.platform || mod.shift);
+    const bare = plain && !mod.control;
+    if (view && plain && mod.control && (k === "d" || k === "u") && this.panelOf(view)) {
       return this.panelPage(k === "d" ? 1 : -1), done();
     }
     const end = view ? edgeKey(k, ch, mod, g) : null;
-    if (end === "pending") return (this.pendingG = true), done();
+    if (end === "pending") return (this.afterG = true), done();
     if (end) return this.toEdge(view, end, cx), done();
-    const panel = view && !(mod.control || mod.alt || mod.platform || mod.shift) ? this.panelOf(view) : null;
+    const panel = view && bare ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k, cx)) return done();
-    if (k === "e" && !(mod.control || mod.alt || mod.platform || mod.shift) && this.toggleFold(cx)) return done();
+    if (k === "e" && bare && this.toggleFold(cx)) return done();
     // [ ] and / may come with Shift, or with Control+Alt; Control alone
     // stays herdr's. Alt alone is let through: a key herdr binds with Alt
     // never reaches a mod (logged), so this costs herdr nothing; how AltGr

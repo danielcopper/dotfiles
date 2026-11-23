@@ -1,8 +1,9 @@
-// Azure DevOps, what its two team views share: states and their
-// categories, what az's failures mean, how az is called, the work items'
-// fields and how az's answers are read, who az is, and a state change.
-// The Sprint's own calls are in sprint.js, the Backlog's in backlog.js, the
-// source as the board uses it in index.js (makeAzure).
+// Azure DevOps, what its two team views and a work item's related items
+// share: states and their categories, what az's failures mean, how az is
+// called, the work items' fields and how az's answers are read, who az is,
+// and a state change. The Sprint's own calls are in sprint.js, the
+// Backlog's in backlog.js, the related items' in related.js, the source as
+// the board uses it in index.js (makeAzure).
 
 import { BoardError, failure, isObject, itemKey } from "../../shared.js";
 
@@ -99,12 +100,22 @@ export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 // stand alone in quotes are built from SYSTEM: the command check
 // (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
 // for a herdr command.
-export const SYSTEM = "System.";
+const SYSTEM = "System.";
 export const AREA_PATH = `${SYSTEM}AreaPath`;
+// A work item's description (HTML), and the link to a child.
+export const DESCRIPTION = `${SYSTEM}Description`;
+export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
 // The fields read of each work item.
 export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+
+// One WIQL query for the fields of the work items `ids` (WORK_ITEM_FIELDS
+// and `extraFields`), in the order of their ids.
+export function idsWiql(ids, extraFields = []) {
+  const fields = [...WORK_ITEM_FIELDS, ...extraFields].map((f) => `[${f}]`).join(", ");
+  return `SELECT ${fields} FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
+}
 
 // az's JSON answer for `what`; `empty` stands for no output at all (az
 // boards query prints nothing when nothing matches).

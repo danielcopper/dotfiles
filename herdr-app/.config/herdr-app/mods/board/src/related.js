@@ -3,35 +3,35 @@
 // on Azure a work item's children and linked pull requests; the same read
 // brings the item's description beside them), what of them a view keeps
 // (keptRelated), the lines the details panel walks when it has the
-// keyboard, the description as drawn (shownDescription), and the heads of
-// their sections.
+// keyboard, and the heads of their sections. The description as drawn is
+// description.js's.
 // The Board reads them (readRelated) and draws them (ui/related.js).
 //
 // A source that has related items gives `related: { reads(item), load(item,
-// view, data) }`: reads tells whether the item has any to read (no call);
-// load reads them (view: the view the item shows in; data: that view's
-// data, null before any) into { description, format, subIssues, prs,
-// warnings }. description is the item's own text as the source has it (""
-// for none), format how it is written: "markdown" (the default) or "html";
-// it is drawn formatted, without its images (shownDescription). Each of
-// subIssues and prs is a
+// view) }`: reads tells whether the item has any to read (no call); load
+// reads them (view: the view the item shows in) into { description,
+// format, subIssues, prs, warnings, retry }. description is the item's own
+// text as the source has it ("" for none), format how it is written:
+// "markdown" (the default) or "html". Each of subIssues and prs is a
 // section { count (how many the source has; null when it did not send the
-// section), sent
-// (how many it sent), cut (it has more than it sent), hidden (how many it
-// sent that cannot be read), error (why it sent none; null), lines (those
-// it sent that can be read) }; a line { source, kind, repo, repoShort,
-// number, title, url, state (its label), color (its chip's theme color),
-// done (dimmed), draft }. warnings: what the source said besides, one line
-// each.
+// section), sent (how many it sent), cut (it has more than it sent), hidden
+// (how many it has that cannot be read), hiddenAs (what the details say of
+// those: "ohne Zugriff" where it is missing), error (why it sent none;
+// null), lines (those that can be read) }; a line { source, kind, number,
+// title, url, state (its label), draft, and on GitHub repo, repoShort,
+// color (its chip's theme color) and done (dimmed); on Azure type, its
+// color and whether it is done coming from the view's states when drawn }.
+// warnings: what the source said besides, one line each. retry: a part
+// failed that is to be read again after the next refresh.
 
 // What a view keeps of its related items after a refresh starts: only
 // those of the item whose details show (`openKey`, null when none), read
 // or still being read, so that a refresh reads nothing for them; a failed
-// read is dropped, so that it is tried again; `r` reads them again too
-// (the Board's reload).
+// read, or one with a part to read again (retry), is dropped, so that it
+// is tried again; `r` reads them again too (the Board's reload).
 export function keptRelated(related, openKey) {
   const entry = openKey === null ? undefined : related.get(openKey);
-  return new Map(entry && !entry.error ? [[openKey, entry]] : []);
+  return new Map(entry && !entry.error && !entry.data?.retry ? [[openKey, entry]] : []);
 }
 
 // The lines of read related items (`data`, or null while none are read),
@@ -46,53 +46,6 @@ export function stepLine(line, dir, count) {
   if (line === null) return dir > 0 ? 0 : null;
   const next = line + dir;
   return next < 0 ? null : Math.min(next, count - 1);
-}
-
-// An image of a description as a link to it, "Bild: <alt>" ("Bild" without
-// one), so that nothing loads it: herdr's TextView loads every http(s) image
-// a text names with the mod's network grant, which herdr gives every mod in
-// full (herdr's src/mods.rs, capabilities; gpui-kit's
-// crates/shell/src/materialize/text_view.rs), and a description is text
-// anyone with access may write. What TextView draws as an image (gpui-kit's
-// crates/base/src/text/format): an HTML <img> with a src (html.rs), in HTML
-// and as raw HTML in Markdown (markdown.rs, Node::Html), which HTML's parser
-// also reads <image> as; and Markdown's inline image `![alt](url)`
-// (markdown.rs, Node::Image). Markdown's images by reference (`![alt][ref]`,
-// `![alt][]`, `![ref]`, Node::ImageReference) it draws as nothing at all
-// today. So every <img> and <image> tag becomes a link (its src and alt read
-// whatever their case and quoting; without a src, its text alone), and in
-// Markdown every `![` becomes `[Bild: ` (`![]` `[Bild]`), which turns an
-// image of either kind into a link, also inside a link's text; a zero-width
-// space before it keeps a `!` before it (`!![`, `\![`) from making a new
-// `![`, so none is left. Then, so
-// that a tag the first step does not read (unbalanced quotes, an odd
-// character after the name) cannot become one either, every `<` left before
-// "img" or "image", in any case, is written `&lt;`: shown as text. Text in
-// code is changed the same way.
-const IMAGE_TAG = /<(?:img|image)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
-const LEFT_IMAGE_TAG = /<(?=im(?:g|age))/gi;
-const ZWSP = "\u200b";
-const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
-const htmlText = (text) => text.replace(/&(?![a-z]+;|#\d+;|#x[0-9a-f]+;)/gi, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-function imageLink(tag) {
-  const attrs = {};
-  const body = tag.replace(/^<[a-z]+/i, "").replace(/\/?>$/, "");
-  for (const m of body.matchAll(ATTRIBUTE)) {
-    const name = m[1].toLowerCase();
-    if (!(name in attrs)) attrs[name] = m[2] ?? m[3] ?? m[4] ?? "";
-  }
-  const label = htmlText(attrs.alt ? `Bild: ${attrs.alt}` : "Bild");
-  return attrs.src ? `<a href="${htmlText(attrs.src.trim())}">${label}</a>` : label;
-}
-
-// A description as the details draw it (format: "markdown" or "html"): its
-// images as links (above); null where it has no text.
-export function shownDescription(text, format) {
-  const raw = String(text ?? "");
-  if (!raw.trim()) return null;
-  const tags = raw.replace(IMAGE_TAG, imageLink).replace(LEFT_IMAGE_TAG, "&lt;");
-  return format === "html" ? tags : tags.replace(/!\[(\]?)/g, (_m, empty) => (empty ? `${ZWSP}[Bild]` : `${ZWSP}[Bild: `));
 }
 
 // " · erste <sent> von <count>" for a section with more than it sent.

@@ -3,7 +3,7 @@
 // the view as makeAzure uses it (backlogView).
 
 import { BoardError, failure, isObject } from "../../shared.js";
-import { AZ_QUERY_LIMIT, TEAM_KEEP_MS, WORK_ITEM_FIELDS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
+import { AZ_QUERY_LIMIT, TEAM_KEEP_MS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, idsWiql, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
 
 // The Backlog view's calls for a team context `c`: the team's backlog
 // levels, its backlog configuration (the order field, each type's states
@@ -107,13 +107,6 @@ export function parseBacklogIds(stdout) {
   const list = azJson(stdout, "die Work Items des Backlogs")?.workItems;
   if (!Array.isArray(list)) throw new BoardError("Azure lieferte keine Work Items des Backlogs");
   return [...new Set(list.map((l) => l?.target?.id).filter(Number.isInteger))];
-}
-
-// One WIQL query for the fields of the work items `ids`, the order field
-// among them where there is one.
-export function backlogWiql(ids, orderField) {
-  const fields = [...WORK_ITEM_FIELDS, ...(orderField ? [orderField] : [])].map((f) => `[${f}]`).join(", ");
-  return `SELECT ${fields} FROM WorkItems WHERE [System.Id] IN (${ids.join(", ")}) ORDER BY [System.Id]`;
 }
 
 // The sprint a work item is in, as the Backlog shows it: the last part of
@@ -240,7 +233,7 @@ export function backlogView(s) {
       const kept = await backlogSettingsOf(c);
       const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
       const read = ids.slice(0, AZ_QUERY_LIMIT);
-      const out = read.length ? await s.az(azQueryArgs(c, backlogWiql(read, kept.config.orderField))) : "";
+      const out = read.length ? await s.az(azQueryArgs(c, idsWiql(read, kept.config.orderField ? [kept.config.orderField] : []))) : "";
       const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me });
       s.noViewerOf(data);
       return { data, warnings: [] };

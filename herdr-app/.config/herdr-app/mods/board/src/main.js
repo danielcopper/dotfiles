@@ -63,18 +63,19 @@
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection),
 // related.js (the items related to an item, read when its details open:
-// what is kept, their lines), scroll.js (how the details scroll), sources/
-// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
-// related.js, index.js), tools.js (running gh and az), actions/ (starting a session,
-// writing a change at once, moving a card, changing a state, creating a
-// work item),
-// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
-// background, the tints), ui/layer.js (the board layer), ui/related.js
-// (the related items as drawn), ui/shapes/ (how a view's
-// data is drawn and worked: board, prs, sprint, backlog, placeholder),
-// ui/modals/ (the dialogs: start, status, columns, create) and this one, the Board, which looks the shape up. Their
-// data logic is plain exported functions, tested with a few UI paths by
-// tests/herdr-app/board.test.mjs with node.
+// what is kept, their lines), description.js (a description as drawn,
+// without anything it could load), scroll.js (how the details scroll),
+// sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
+// backlog.js, related.js, index.js), tools.js (running gh and az),
+// actions/ (starting a session, writing a change at once, moving a card,
+// changing a state, creating a work item), ui/helpers.js, ui/tones.js (the
+// tones of labels and types, the selected background, the tints),
+// ui/layer.js (the board layer), ui/related.js (the related items as
+// drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
+// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
+// columns, create) and this one, the Board, which looks the shape up.
+// Their data logic is plain exported functions, tested with a few UI paths
+// by tests/herdr-app/board.test.mjs with node.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -93,7 +94,9 @@ import { store, migrateShownView, boardShown, shownOf, button, detailSection, de
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
-import { LINE_PX, descriptionFolds, halfWindow, lineShows, relatedSections, relatedState, revealLine, scrollBlock, scrollToEnd } from "./ui/related.js";
+import { descriptionFolds, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
+import { LINE_PX, halfWindow, scrollBy, scrollToEnd } from "./scroll.js";
+import { shownDescription, webUrl } from "./description.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -104,6 +107,7 @@ export * from "./kinds/backlog.js";
 export * from "./kinds/states.js";
 export * from "./select.js";
 export * from "./related.js";
+export * from "./description.js";
 export * from "./scroll.js";
 export * from "./sources/github.js";
 export * from "./sources/azure/common.js";
@@ -218,8 +222,8 @@ export default class Board extends View {
     // panel's keyboard: { view, key, line } while it has it (panelOf).
     this.relatedUi = relatedState();
     this.panel = null;
-    // A `g` waiting for the second of gg (edgeKey).
-    this.pendingG = false;
+    // Whether the last key was a `g`, the first of gg (edgeKey).
+    this.afterG = false;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -295,6 +299,7 @@ export default class Board extends View {
   // open dialog's next or previous field, else the keyboard into the details
   // panel or back to the board (togglePanel).
   tabKey(back, cx) {
+    this.afterG = false;
     if (!this.takesTab()) return;
     cx.stop_propagation();
     if (this.modal) return MODALS[this.modal.kind].tab(this, back, cx);
@@ -522,12 +527,15 @@ export default class Board extends View {
     const item = this.shownDetailsItem();
     const st = view ? this.state(view.id) : null;
     if (!this.readsRelated(item) || st.related.has(item.key)) return;
-    const entry = { data: null, error: null };
+    const entry = { data: null, error: null, shown: null };
     st.related.set(item.key, entry);
     const source = this.sources[item.source].related;
     cx.spawn(async (cx) => {
       try {
-        entry.data = await source.load(item, view, st.data);
+        const data = await source.load(item, view);
+        // The description as drawn, once per read (description.js).
+        entry.shown = shownDescription(data.description, data.format);
+        entry.data = data;
       } catch (e) {
         entry.error = report(e);
       } finally {
@@ -577,7 +585,7 @@ export default class Board extends View {
       const item = this.selected(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
-      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBlock(ui, dir * LINE_PX);
+      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
       else {
         panel.line = stepLine(panel.line, dir, lines.length);
         if (panel.line !== null) revealLine(ui, item, entry, panel.line);
@@ -631,7 +639,7 @@ export default class Board extends View {
   // ctrl-d and ctrl-u while the details panel has the keyboard: its block
   // half its window down or up.
   panelPage(dir) {
-    scrollBlock(this.relatedUi, dir * halfWindow(this.relatedUi));
+    scrollBy(this.relatedUi, dir * halfWindow(this.relatedUi));
   }
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
@@ -659,16 +667,12 @@ export default class Board extends View {
     return true;
   }
 
-  // A link in a description: opened where it is an http or https URL (which
-  // has a host, or is no URL), else said.
+  // A link in a description, as TextView reports its click: opened as an
+  // item's page is (open) where it is an http or https URL (webUrl), else
+  // said and not opened.
   openLink(url, cx) {
-    let ok = false;
-    try {
-      ok = ["http:", "https:"].includes(new URL(String(url)).protocol);
-    } catch {
-      // Not a URL.
-    }
-    if (ok) cx.open_url(String(url));
+    const page = webUrl(url);
+    if (page) this.open({ url: page }, cx);
     else this.say(`Link nicht geöffnet (nur http und https): ${url}`, "warning", cx);
   }
 
@@ -968,9 +972,10 @@ export default class Board extends View {
     const k = e.key;
     const ch = e.key_char ?? "";
     const mod = e.modifiers ?? {};
-    // A `g` waits for the next key only: any other key drops it.
-    const g = this.pendingG;
-    this.pendingG = false;
+    // A `g` waits for the next key only: any other key drops it (a Tab
+    // action too: tabKey).
+    const g = this.afterG;
+    this.afterG = false;
     if (this.modal) return this.modalKey(e, cx);
     if (this.filtering) {
       if (k === "escape") {
@@ -987,15 +992,19 @@ export default class Board extends View {
     };
     // Where Tab comes here rather than as the board's action: its one home.
     if (k === "tab") return this.tabKey(Boolean(mod.shift), cx);
-    if (view && mod.control && !(mod.alt || mod.platform || mod.shift) && (k === "d" || k === "u") && this.panelOf(view)) {
+    // A key without Shift, Alt or the platform key: bare without Control
+    // too, else with Control alone.
+    const plain = !(mod.alt || mod.platform || mod.shift);
+    const bare = plain && !mod.control;
+    if (view && plain && mod.control && (k === "d" || k === "u") && this.panelOf(view)) {
       return this.panelPage(k === "d" ? 1 : -1), done();
     }
     const end = view ? edgeKey(k, ch, mod, g) : null;
-    if (end === "pending") return (this.pendingG = true), done();
+    if (end === "pending") return (this.afterG = true), done();
     if (end) return this.toEdge(view, end, cx), done();
-    const panel = view && !(mod.control || mod.alt || mod.platform || mod.shift) ? this.panelOf(view) : null;
+    const panel = view && bare ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k, cx)) return done();
-    if (k === "e" && !(mod.control || mod.alt || mod.platform || mod.shift) && this.toggleFold(cx)) return done();
+    if (k === "e" && bare && this.toggleFold(cx)) return done();
     // [ ] and / may come with Shift, or with Control+Alt; Control alone
     // stays herdr's. Alt alone is let through: a key herdr binds with Alt
     // never reaches a mod (logged), so this costs herdr nothing; how AltGr

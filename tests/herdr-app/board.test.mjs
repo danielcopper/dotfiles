@@ -4827,10 +4827,10 @@ test("the Backlog's az calls: levels and configuration by az devops invoke at 7.
     "--area", "Example Project\\Core", "--iteration", "Example Project\\Sprint 12", "--assigned-to", "me", "-o", "json",
   ], "a title that starts with a dash is no option");
   assert.deepEqual(board.azParentArgs(c, 451, 301), ["boards", "work-item", "relation", "add", ...org, "--id", "451", "--relation-type", "parent", "--target-id", "301", "-o", "json"]);
-  assert.equal(board.backlogWiql([302, 401], "Microsoft.VSTS.Common.StackRank"),
+  assert.equal(board.idsWiql([302, 401], ["Microsoft.VSTS.Common.StackRank"]),
     "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.AssignedTo], [System.Parent], [System.AreaPath], [System.IterationPath], " +
     "[Microsoft.VSTS.Common.StackRank] FROM WorkItems WHERE [System.Id] IN (302, 401) ORDER BY [System.Id]");
-  assert.doesNotMatch(board.backlogWiql([1], null), /StackRank|\[null\]/, "no order field, none asked for");
+  assert.doesNotMatch(board.idsWiql([1]), /StackRank|\[null\]/, "no order field, none asked for");
 });
 
 test("the Backlog's answers: its levels, the requirement level and the one below, the order field, each type's states, the team's defaults, the ids in their order", () => {
@@ -4905,7 +4905,7 @@ test("UI: the Backlog reads its settings once, all at the same time, then per re
   assert.ok(openAzb(host, "ids")[0].args.includes(board.backlogIdsUrl(b.view().context, "Microsoft.RequirementCategory")));
   await host.answer("az", ok(fixture("azure-backlog-ids.json")), AZB.ids);
   const [query] = openAzb(host, "query");
-  assert.ok(query.args.includes(board.backlogWiql([302, 401, 301, 402, 403], "Microsoft.VSTS.Common.StackRank")), "their fields, after them");
+  assert.ok(query.args.includes(board.idsWiql([302, 401, 301, 402, 403], ["Microsoft.VSTS.Common.StackRank"])), "their fields, after them");
   await host.answer("az", ok(fixture("azure-backlog-items.json")), AZB.query);
   await host.answer("az", ok(fixture("azure-sprint-account.json")), AZB.me);
   assert.equal(b.state(b.view().id).data.shape, "backlog");
@@ -5545,6 +5545,7 @@ test("an issue's related items are one GraphQL query: its first 50 sub-issues an
   assert.match(query, /subIssues\(first: 50\) \{ totalCount pageInfo \{ hasNextPage \} nodes \{ number title state url repository \{ nameWithOwner \} \} \}/);
   assert.match(query, /closedByPullRequestsReferences\(first: 20, includeClosedPrs: true\) \{ totalCount pageInfo \{ hasNextPage \} nodes \{ number title state isDraft url repository \{ nameWithOwner \} \} \}/);
   assert.doesNotMatch(query, /subIssuesSummary/, "how many are done is the item's own (its sub)");
+  assert.match(query, /issue\(number: \$number\) \{ body subIssues\(/, "the description read in the same query");
 });
 
 test("an issue's related items: lines with key, state label, color, done and draft; counts, the cut by GitHub's page, nodes without access", () => {
@@ -6013,49 +6014,90 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
 });
 
-test("a description is drawn as written, its images made links: Markdown's, inline and by reference, and every <img> or <image> in HTML and in Markdown, whatever its case and quoting", () => {
-  const md = (text) => board.shownDescription(text, "markdown");
+// Every tag name a shown HTML description holds, and the `<` in a shown
+// Markdown one that could start HTML (none but its links' destinations).
+const tagNames = (html) => [...html.matchAll(/<\/?([A-Za-z][A-Za-z0-9]*)/g)].map((m) => m[1].toLowerCase());
+const KEPT_TAGS = new Set(["p", "br", "b", "strong", "i", "em", "u", "s", "del", "strike", "mark", "code", "a", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+  "blockquote", "table", "thead", "tbody", "tr", "th", "td", "hr", "div", "span", "sub", "sup"]);
+const htmlStarts = (md) => [...md.matchAll(/<[A-Za-z/!?]/g)].filter((m) => !md.startsWith("](<http", m.index - 2));
+// Inputs that tried to get an image or raw HTML past the description's
+// step, in both formats.
+const HOSTILE = [
+  '<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>',
+  '<textarea>&lt;img src="https://attacker.example/x.png"&gt;</textarea>',
+  '<script>&lt;img src="https://attacker.example/x.png"&gt;</script>',
+  '<style>&lt;img src="https://attacker.example/x.png"&gt;</style>',
+  '<svg><image href="https://attacker.example/x.png"/></svg>',
+  '<pre>&#60;img src="https://attacker.example/x.png"&#62;</pre>', '<pre>&#x3c;img src=x&#x3E;</pre>', '<xmp><img src=x></xmp>',
+  '<img src="https://attacker.example/a.png alt=x>after', "<img\nsrc=https://attacker.example/b.png>", "<img\u0001src=c>", "<IMG/SRC=https://attacker.example/d.png/>",
+  "<iMaGe src=e>", "<<img src=h>>", "<math><mi><img src=x></mi></math>", "<!-- <img src=x> -->", "<iframe src=x></iframe>",
+  "![a](https://attacker.example/u.png)", "![b][r]", "![c][]", "![d]", "[![e](https://attacker.example/v.png)](w)", "!![f](x)", "!![f2](https://attacker.example/f.png)", "`![g](y)`", "\\![i](q)", "\\\\![j](r)",
+].join("\n");
+
+test("an HTML description keeps only its allowed tags, written anew without attributes but an a's http(s) href; images become links; every other < is text", () => {
   const html = (text) => board.shownDescription(text, "html");
-  assert.equal(md("Rolls it out.\r\n\r\n## Steps\n- one\n- **two**"), "Rolls it out.\r\n\r\n## Steps\n- one\n- **two**", "the rest as written");
-  assert.equal(md("see ![the shot](https://example.com/a.png \"title\") here"), "see \u200b[Bild: the shot](https://example.com/a.png \"title\") here");
-  assert.equal(md("![](https://example.com/a.png)"), "\u200b[Bild](https://example.com/a.png)", "no alt");
-  assert.equal(md("![logo][l]\n\n[l]: https://example.com/l.png"), "\u200b[Bild: logo][l]\n\n[l]: https://example.com/l.png", "by reference");
-  assert.equal(md("a <img src=\"https://example.com/b.png\" alt=\"chart\"> b"), "a <a href=\"https://example.com/b.png\">Bild: chart</a> b", "raw HTML in Markdown");
-  assert.equal(html("<p><IMG SRC='https://example.com/c.png' ALT=cat></p>"), "<p><a href=\"https://example.com/c.png\">Bild: cat</a></p>", "upper case, single quotes, no quotes");
-  assert.equal(html("<img/src=https://example.com/d.png alt=\"a > b\"/>"), "<a href=\"https://example.com/d.png\">Bild: a &gt; b</a>", "a slash for a space, a > in a quoted value");
-  assert.equal(html("<image src=\"https://example.com/e.png\">"), "<a href=\"https://example.com/e.png\">Bild</a>", "<image>, which HTML reads as <img>");
-  assert.equal(html("<img\n  data-src=\"https://example.com/x.png\"\n  src = \"https://example.com/f.png\" alt='say \"hi\"'>"),
-    "<a href=\"https://example.com/f.png\">Bild: say &quot;hi&quot;</a>", "attributes on lines of their own; data-src is not src");
-  assert.equal(html("<img alt=\"no source\">"), "Bild: no source", "no src: its text");
-  assert.equal(html("<img src=\"https://example.com/1.png\" SRC=\"https://example.com/2.png\" alt=a alt=b>"), "<a href=\"https://example.com/1.png\">Bild: a</a>", "the first of an attribute counts, as in HTML");
-  assert.equal(html("<imgx src=\"a\"><p>![x](y)</p>"), "&lt;imgx src=\"a\"><p>![x](y)</p>", "another tag that starts so is text; Markdown in HTML stays");
-  assert.equal(md("<img src=\"a&amp;b\" alt=\"x&y\">"), "<a href=\"a&amp;b\">Bild: x&amp;y</a>", "entities kept, a bare & escaped");
-  assert.deepEqual([md(""), md("  \n "), md(null), html("\n")], [null, null, null, null], "blank: none");
-  const sample = [
-    "![a](u) ![b][r] ![](v) \\![c](w)", "<img src=a>", "<IMG\tSRC=\"b\">", "<Image src='c' />", "<img/src=d>", "<p><img src=\"e\" alt=\">\"></p>",
-    "`![code](x)` and\n\n```\n<img src=\"y\">\n```",
-  ].join("\n");
-  for (const out of [md(sample), html(sample)]) assert.doesNotMatch(out, /<\s*im(?:g|age)(?=[\s/>])/i, "no image tag reaches TextView");
-  assert.doesNotMatch(md(sample), /!\[/, "no Markdown image reaches TextView, in code neither");
+  assert.equal(html("<div><h2>Goal</h2><p>Read the <b>sample</b> file.</p><ul><li>one</li></ul></div>"), "<div><h2>Goal</h2><p>Read the <b>sample</b> file.</p><ul><li>one</li></ul></div>");
+  assert.equal(html('<p class="x" style="color: red" onclick="y()">t</p><BR/>'), "<p>t</p><br>", "attributes dropped, names in lower case");
+  assert.equal(html('<a href="https://example.com/spec" target="_blank">spec</a> <a href="javascript:alert(1)">x</a>'), '<a href="https://example.com/spec">spec</a> <a>x</a>');
+  assert.equal(html(`<a href='https://example.com/a?b="c"&d=<e'>x</a>`), '<a href="https://example.com/a?b=%22c%22&amp;d=%3Ce">x</a>', "a `\"`, `<` and `&` written safely into the href");
+  assert.equal(html("<p><IMG SRC='https://example.com/c.png' ALT=cat></p>"), '<p><a href="https://example.com/c.png">Bild: cat</a></p>', "an image: a link to it");
+  assert.equal(html('<img src="data:image/png;base64,AAAA" alt="dot"><img alt="no source"><image src="https://example.com/e.png">'), 'Bild: dotBild: no source<a href="https://example.com/e.png">Bild</a>',
+    "no http(s) src: its text");
+  assert.equal(html('<img src="https://example.com/1.png" SRC="https://example.com/2.png" alt="a &amp; b" alt=c>'), '<a href="https://example.com/1.png">Bild: a &amp; b</a>', "the first of an attribute, entities read");
+  assert.equal(html('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<p><code>&lt;img src="https://attacker.example/x.png"&gt;</code></p>', "a pre as code, its text as written");
+  assert.equal(html('<textarea>&lt;img src=x&gt;</textarea><script>a</script>'), "&lt;textarea>&lt;img src=x&gt;&lt;/textarea>&lt;script>a&lt;/script>");
+  assert.equal(html('<svg><image href="https://attacker.example/x.png"/></svg>'), "&lt;svg>Bild&lt;/svg>");
+  assert.equal(html('<b title="x>y">bold</b><!-- c --><unknown>u</unknown>'), '<b>y">bold</b>&lt;!-- c -->&lt;unknown>u&lt;/unknown>', "a tag ends at its first >; a comment and an unknown tag are text");
+  assert.equal(html(`<b ${"x".repeat(3000)}>t`), `&lt;b ${"x".repeat(3000)}>t`, "a tag longer than MAX_TAG is text");
+  assert.equal(html("<b"), "&lt;b", "a tag left open");
+  assert.equal(html("<p-x>t</p-x><img\u0001src=c>"), "&lt;p-x>t&lt;/p-x>&lt;img\u0001src=c>", "a name that goes on past an allowed one is another tag");
+  assert.equal(html('<img alt="&#65;&#x42; &lt;C&gt; &#0;" src="https://example.com/a.png">'), '<a href="https://example.com/a.png">Bild: AB &lt;C&gt; &amp;#0;</a>', "the alt's entities read, then written as text");
+  assert.deepEqual([html(""), html("  \n "), html(null)], [null, null, null], "blank: none");
+  const out = html(HOSTILE);
+  assert.deepEqual([...new Set(tagNames(out))].filter((n) => !KEPT_TAGS.has(n)), [], "no other tag survives");
+  assert.doesNotMatch(out, /<(?:img|image|pre|textarea|script|style|svg|math|xmp|iframe)\b/i);
 });
 
-test("a tag the image step cannot read is written as text, so that nothing left can become an image; no Markdown image of any form survives", () => {
+test("a Markdown description keeps no HTML; its images, inline and as <img>, become Markdown links to their http(s) URL; one by reference plain or a link; no image form survives", () => {
   const md = (text) => board.shownDescription(text, "markdown");
-  const html = (text) => board.shownDescription(text, "html");
-  assert.equal(html('<img src="https://example.com/a.png alt=x>after'), '&lt;img src="https://example.com/a.png alt=x>after', "unbalanced quotes");
-  assert.equal(html("<img\nsrc=https://example.com/b.png>"), '<a href="https://example.com/b.png">Bild</a>', "a newline after the name");
-  assert.equal(html("<img\u0001src=https://example.com/c.png>"), "&lt;img\u0001src=https://example.com/c.png>", "an odd character after the name");
-  assert.equal(html("<IMG/SRC=https://example.com/d.png/>"), '<a href="https://example.com/d.png">Bild</a>', "upper case, self-closing without a space");
-  assert.equal(html("<imagefoo src=x><Img"), "&lt;imagefoo src=x>&lt;Img", "any tag name that starts so, and one cut off");
-  assert.equal(md("[![badge](https://example.com/b.svg)](https://example.com)"), "[\u200b[Bild: badge](https://example.com/b.svg)](https://example.com)", "an image inside a link's text");
-  assert.equal(md("![alt][ref] ![alt][] ![ref]\n\n[ref]: https://example.com/r.png"), "\u200b[Bild: alt][ref] \u200b[Bild: alt][] \u200b[Bild: ref]\n\n[ref]: https://example.com/r.png", "by reference: full, collapsed, shortcut");
-  assert.equal(md("!![f](x) \\\\![g](y)"), "!\u200b[Bild: f](x) \\\\\u200b[Bild: g](y)", "a `!` or an escaped backslash before one makes no new image");
-  const tricky = [
-    '<img src="a', "<img\nsrc=b>", "<IMG/SRC=c/>", "<img\tsrc='d'>", "<iMaGe src=e>", "<img\u0001src=f>", "<img\u000bsrc=f>", "<img src=g alt='x>", "<<img src=h>>",
-    "![a](u)", "![b][r]", "![c][]", "![d]", "[![e](v)](w)", "!![f](x)", "`![g](y)`", "<p>![h](z)</p>", "\\![i](q)", "\\\\![j](r)", "!![![k](s)](t)",
-  ].join("\n");
-  for (const out of [md(tricky), html(tricky)]) assert.doesNotMatch(out, /<im(?:g|age)/i, "no <img or <image left");
-  assert.doesNotMatch(md(tricky), /!\[/, "no `![` left in Markdown");
+  assert.equal(md("Rolls it out.\r\n\r\n## Steps\n- one\n- **two** `code`"), "Rolls it out.\r\n\r\n## Steps\n- one\n- **two** `code`", "the rest as written");
+  assert.equal(md('see ![the shot](https://example.com/a.png "title") here'), "see \u200b[Bild: the shot](<https://example.com/a.png>) here");
+  assert.equal(md("![](<https://example.com/a b.png>)"), "\u200b[Bild](<https://example.com/a%20b.png>)", "no alt; a destination in <>");
+  assert.equal(md("![x](javascript:alert(1)) ![y](data:image/png;base64,AA)"), "Bild: x Bild: y", "no http(s) URL: its text");
+  assert.equal(md("![a [b] \\\\ <i>](https://example.com/x.png)"), "\u200b[Bild: a \\[b\\] \\\\ <\u200bi>](<https://example.com/x.png>)", "the label's [ ] \\ escaped, its < no HTML");
+  assert.equal(md("![logo][l] ![alt][] ![ref] ![][r]\n\n[l]: https://example.com/l.png"),
+    "\u200b[Bild: logo][l] \u200b[Bild: alt][] \u200b[Bild: ref] \u200b[Bild][r]\n\n[l]: https://example.com/l.png", "by reference: a link where the reference is defined, else text");
+  assert.equal(md("[![badge](https://example.com/b.svg)](https://example.com)"), "[\u200b[Bild: badge](<https://example.com/b.svg>)](https://example.com)", "inside a link's text");
+  assert.equal(md("!![f](x) \\\\![g](y) !![h](https://example.com/h.png)"), "!Bild: f \\\\Bild: g !\u200b[Bild: h](<https://example.com/h.png>)", "a ! or a backslash before one makes no new image");
+  assert.equal(md('a <img width="300" alt="chart" src="https://example.com/b.png"> b'), "a \u200b[Bild: chart](<https://example.com/b.png>) b", "an <img>, as GitHub writes a pasted one");
+  assert.equal(md("<b>x</b> <details> a<br>b <https://example.com>"), "<\u200bb>x<\u200b/b> <\u200bdetails> a<\u200bbr>b <\u200bhttps://example.com>", "other HTML and autolinks: text");
+  assert.equal(md('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<\u200bpre>&lt;img src="https://attacker.example/x.png"&gt;<\u200b/pre>');
+  assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "\u200b[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no link");
+  assert.equal(md("</img> <img>"), "<\u200b/img> Bild", "an <img> closed: text; one without src: its label");
+  const link = "\u200b[Bild: a](<https://example.com/i.png>)";
+  assert.deepEqual(
+    ["![a](https://example.com/i.png)", "![a]x https://example.com/i.png)", "![a](<https://example.com/i.png\n)", '![a](https://example.com/i.png "t"x',
+      "![a\n\nb](https://example.com/i.png)", `![${"[".repeat(33)}a${"]".repeat(33)}](https://example.com/i.png)`, `![a](https://example.com/${"(".repeat(33)}i${")".repeat(33)})`]
+      .map((t) => md(t).includes("](<https://example.com/")),
+    [true, false, false, false, false, false, false],
+    "an inline image only as CommonMark reads one: ( right after ], a < destination closed, ) after the title, no blank line, brackets and parentheses nested at most 32 deep",
+  );
+  assert.equal(board.shownDescription("![a](https://example.com/i.png)", undefined), link, "Markdown by default");
+  const out = md(HOSTILE);
+  assert.deepEqual(htmlStarts(out).map((m) => out.slice(m.index, m.index + 8)), [], "no < that starts HTML");
+  assert.doesNotMatch(out, /!\[/, "no `![` left");
+});
+
+test("a 64 KB hostile description takes little time in either format", () => {
+  const bodies = ["![".repeat(32768), "<a".repeat(32768), `${"<b ".repeat(21000)}>`, "![a](".repeat(13107), "<img src=".repeat(7281), "<b title='".repeat(6553), `${"[".repeat(32000)}](x)`, "<".repeat(65536)];
+  for (const body of bodies) {
+    for (const format of ["markdown", "html"]) {
+      const start = performance.now();
+      board.shownDescription(body, format);
+      const took = performance.now() - start;
+      assert.ok(took < 250, `${body.slice(0, 12)}… as ${format}: ${Math.round(took)} ms`);
+    }
+  }
 });
 
 test("UI: the details draw the description with TextView, Markdown for an issue's body as GitHub sends it, its images as links; „lädt …“ until it comes, the reason after a failure, „keine Beschreibung“ for none", async () => {
@@ -6139,7 +6181,8 @@ const childrenQuery = (host) => host.open("az").filter((c) => AZ.query(c.args) &
 test("an Azure work item's related items: one az call for the item with its links, one WIQL query by id for its children; what the answers hold", () => {
   const c = sprintTeam();
   assert.deepEqual(board.azRelatedArgs(c, 301), ["boards", "work-item", "show", "--org", ORG, "--detect", "false", "--id", "301", "--expand", "relations", "-o", "json"]);
-  assert.equal(board.childrenWiql([312, 311]), "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State] FROM WorkItems WHERE [System.Id] IN (312, 311) ORDER BY [System.Id]");
+  assert.equal(board.idsWiql([312, 311]), `SELECT ${board.WORK_ITEM_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.Id] IN (312, 311) ORDER BY [System.Id]`,
+    "the Backlog's query for the fields of work items by id");
   const read = board.parseRelatedItem(fixture("azure-related-item.json"));
   assert.match(read.description, /^<div><h2>Goal<\/h2>/);
   assert.deepEqual(read.children, [312, 311, 399], "the children, in the links' order; parent, related and branch links left out");
@@ -6150,22 +6193,21 @@ test("an Azure work item's related items: one az call for the item with its link
   const twice = JSON.parse(fixture("azure-related-item.json"));
   twice.relations.push(twice.relations[0], twice.relations[3], { rel: "System.LinkTypes.Hierarchy-Forward", url: "https://dev.azure.com/x/_apis/wit/workItems/abc" });
   assert.deepEqual([board.parseRelatedItem(JSON.stringify(twice)).children, board.parseRelatedItem(JSON.stringify(twice)).prs.length], [[312, 311, 399], 1], "each once; a link without an id left out");
-  assert.throws(() => board.parseRelatedItem("[]"), /^Error: Azure lieferte keinen Work Item$/);
+  assert.throws(() => board.parseRelatedItem("[]"), /^Error: Azure lieferte kein Work Item$/);
   assert.throws(() => board.parseRelatedItem("not json"), /kein lesbares JSON/);
   assert.deepEqual([board.pullRequestOf("vstfs:///Git/PullRequestId/p%2Fr%2F9"), board.pullRequestOf("vstfs:///Git/Ref/p%2Fr%2FGBmain")], [{ project: "p", repo: "r", number: 9 }, null]);
-  const states = sprintData().meta.states;
-  const lines = board.parseChildren(fixture("azure-related-children.json"), [312, 311, 399], c, states);
-  assert.deepEqual(lines.map((l) => [board.itemLabel(l), l.title, l.type, l.state, l.color, l.done, l.url]), [
-    ["AB#312", "Keep the last good copy", "Task", "Done", "ansi2", true, `${ORG}/Example%20Project/_workitems/edit/312`],
-    ["AB#311", "Parse the sample file", "Task", "To Do", "muted", false, `${ORG}/Example%20Project/_workitems/edit/311`],
-  ], "in the links' order, a Completed one done; one the query does not find left out");
-  assert.deepEqual(board.parseChildren("", [1], c, states), [], "no output: none");
-  assert.equal(board.parseChildren(JSON.stringify([{ id: 1, fields: { "System.State": "Odd" } }]), [1], c, states)[0].color, "muted", "a state the view does not know");
-  const removed = board.parseChildren(JSON.stringify([{ id: 1, fields: { "System.State": "Removed", "System.WorkItemType": "Task" } }, { id: 2, fields: { "System.State": "In Progress" } }]), [1, 2], c, states);
-  assert.deepEqual(removed.map((l) => l.done), [true, false], "a Removed one done too, one in progress not");
+  const lines = board.parseChildren(fixture("azure-related-children.json"), [312, 311, 399], c);
+  assert.deepEqual(lines.map((l) => [l.key, l.source, l.kind, l.title, l.type, l.state, l.url, l.draft, "color" in l, "done" in l]), [
+    ["AB#312", "azure", "workitem", "Keep the last good copy", "Task", "Done", `${ORG}/Example%20Project/_workitems/edit/312`, false, false, false],
+    ["AB#311", "azure", "workitem", "Parse the sample file", "Task", "To Do", `${ORG}/Example%20Project/_workitems/edit/311`, false, false, false],
+  ], "work items as the board reads them, in the links' order; one the query does not find left out; color and done come from the view when drawn");
+  assert.deepEqual(board.parseChildren("", [1], c), [], "no output: none");
+  const data = sprintData();
+  assert.deepEqual(["Done", "Removed", "In Progress", "To Do", "Odd"].map((n) => [board.stateColor(data, n), board.stateDone(data, n)]),
+    [["ansi2", true], ["dim", true], ["ansi4", false], ["muted", false], ["muted", false]], "a Completed or Removed state is done");
   const reads = board.makeAzure(null).related.reads;
-  assert.deepEqual([reads({ source: "azure", kind: "workitem", number: 3 }), reads({ source: "azure", kind: "pr", number: 3 }), reads({ source: "azure", kind: "workitem", number: null }), reads({ source: "github", kind: "issue", number: 3 })],
-    [true, false, false, false]);
+  assert.deepEqual([reads({ source: "azure", kind: "workitem", number: 3 }), reads({ source: "azure", kind: "pr", number: 3 }), reads({ source: "azure", kind: "workitem", number: null })],
+    [true, false, false]);
 });
 
 test("UI: a Sprint story's details read its related items: its description as HTML without images, its children with their states, a linked pull request by its id; Tab walks them", async () => {
@@ -6177,7 +6219,7 @@ test("UI: a Sprint story's details read its related items: its description as HT
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "lädt …"]);
   await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
   assert.equal(childrenQuery(host).length, 1, "then one query for the children");
-  assert.ok(childrenQuery(host)[0].args.includes(board.childrenWiql([312, 311, 399])));
+  assert.ok(childrenQuery(host)[0].args.includes(board.idsWiql([312, 311, 399])));
   await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
   assert.equal(host.open("az").length, 0);
   const view = textViewOf(b);
@@ -6186,10 +6228,13 @@ test("UI: a Sprint story's details read its related items: its description as HT
   assert.match(view.source, /<a href="https:\/\/dev\.azure\.com\/[^"]+fileName=shot\.png">Bild: shot<\/a>/);
   assert.doesNotMatch(view.source, /<img/i);
   assert.deepEqual(sectionTexts(b), [
-    "UNTERAUFGABEN", "AB#312", "Keep the last good copy", "Done", "AB#311", "Parse the sample file", "To Do", "1 ohne Zugriff",
+    "UNTERAUFGABEN", "AB#312", "Keep the last good copy", "Done", "AB#311", "Parse the sample file", "To Do", "1 nicht gefunden",
     "VERKNÜPFTE PRS · 1", "!57", "Pull Request", "verknüpft",
   ]);
-  assert.equal(byId(detailPanel(b), "related-line-0").with.opacity[0], 0.55, "a done child dimmed");
+  assert.deepEqual([0, 1, 2].map((i) => byId(detailPanel(b), `related-line-${i}`).with.opacity[0]), [0.55, 1, 1], "a done child dimmed");
+  host.theme = () => ({ ansi2: "#green", muted: "#grey" });
+  const chipColor = (i) => byId(detailPanel(b), `related-line-${i}`).kids.at(-1).with.bg[0];
+  assert.deepEqual([0, 1, 2].map(chipColor), ["#green", "#grey", "#grey"], "a child's state in the view's color for it");
   await tab(b, cx);
   await press(b, cx, "j");
   await press(b, cx, "j");
@@ -6220,6 +6265,15 @@ test("UI: an Azure related read that fails says why; a children query that fails
   await host.answer("az", azRefused("Operation returned a 400 status code."), AZ.query);
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "Operation returned a 400 status code.", "VERKNÜPFTE PRS · 1", "!57", "Pull Request", "verknüpft"]);
   assert.equal(textViewOf(b).format, "html", "the description stays");
+  await refreshSprint(b, cx);
+  assert.equal(azureRelatedOf(host).length, 0, "not while the refresh runs");
+  await answerRefresh(host, { me: false });
+  assert.equal(azureRelatedOf(host).length, 1, "a failed children query: read again after the next refresh");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await refreshSprint(b, cx);
+  await answerRefresh(host, { me: false });
+  assert.equal(azureRelatedOf(host).length, 0, "once it is read, kept over a refresh");
 });
 
 test("UI: the detail panel takes a third of the board area as a share, no narrower than one of the columns beside it, the 420 and 720 pixel bounds last", async () => {
@@ -6576,6 +6630,8 @@ test("the details block's offset stays within its content; a span comes into vie
   assert.deepEqual([board.thumbOf(s), board.thumbOf({ ...s, offset: 0 }), board.thumbOf({ ...s, offset: 200 }), board.thumbOf({ offset: 0, content: 90, viewport: 100 })],
     [{ top: 17, height: 33 }, { top: 0, height: 33 }, { top: 67, height: 33 }, null]);
   assert.deepEqual(board.thumbOf({ offset: 0, content: 10000, viewport: 100 }), { top: 0, height: 16 }, "never thinner than 16");
+  assert.deepEqual([board.thumbOf({ offset: 0, content: 300, viewport: 0 }), board.thumbOf({ offset: 0, content: 100, viewport: 100 })], [null, null],
+    "a window not measured, or content as tall as it: none");
   assert.deepEqual([board.rowSpan([18, 40, 18], 0, 6, 12), board.rowSpan([18, 40, 18], 2, 6, 12)], [{ top: 12, height: 18 }, { top: 82, height: 18 }]);
 });
 
@@ -6603,6 +6659,9 @@ test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its windo
   await press(b, cx, "home");
   await press(b, cx, "d", { modifiers: { control: true, shift: true } });
   assert.equal(offsetOf(b), 0, "with Shift too: not the panel's");
+  layOut(b, cx, 20);
+  await press(b, cx, "d", { modifiers: { control: true } });
+  assert.equal(offsetOf(b), 18, "a window of 20 pixels: one line, not half of it");
   assert.equal(b.panel.line, null, "the lines stay as they were");
 });
 
@@ -6695,6 +6754,7 @@ test("UI: on a board gg and Home go to the first card of the selected column, G 
   await press(b, cx, "x", { modifiers: { control: true } });
   await press(b, cx, "g");
   assert.equal(st().sel.key, "PVTI_rec2", "a key between the two g drops the first");
+
   await press(b, cx, "end", { modifiers: { control: true } });
   assert.equal(st().sel.key, "PVTI_rec2", "with Control End is not the board's");
   await press(b, cx, "l");
@@ -6709,6 +6769,19 @@ test("UI: gg, G, Home and End before a view's data came do nothing", async () =>
   await press(b, cx, "g");
   await press(b, cx, "g");
   assert.deepEqual([st().data, st().sel], [null, null]);
+});
+
+test("UI: a Tab the board takes as its action between two g drops the first", async () => {
+  const { b, cx, st } = await openRelated();
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec5");
+  await press(b, cx, "g");
+  await action(b, cx, "board_tab");
+  await action(b, cx, "board_shift_tab");
+  await press(b, cx, "g");
+  assert.equal(st().sel.key, "PVTI_rec5", "no gg: the column's first card is PVTI_rec4");
+  await press(b, cx, "g");
+  assert.equal(st().sel.key, "PVTI_rec4", "a gg after it");
 });
 
 test("UI: in the Backlog and a PR list gg and G go to the first and last row; on a Sprint to the first and last item of the column", async () => {

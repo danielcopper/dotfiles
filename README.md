@@ -406,11 +406,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   state, since two columns may map to one state; az takes the request from a
   file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state
   from its type's states, a click selects, and `Enter` shows the details
-  (parent, state, assignee, column, area and iteration). On a Backlog `j/k` move, `s` sets the
-  state, `Enter` shows the details (parent, state, assignee, area, iteration
-  and sprint), `o` opens the item in the browser, and `n` creates a work item:
-  a dialog asks for its type (the level's, Story first; with a Story selected
-  also Task, as its child) and its title (`h/l` switch the type). It is
+  (parent, state, assignee, column, area and iteration). On a Backlog `j/k`
+  move, `s` sets the state, `Enter` shows the details (parent, state,
+  assignee, area, iteration and sprint), `o` opens the item in the browser,
+  and `n` creates a work item: a dialog asks for its type (the level's, Story
+  first; with a Story selected also Task, as its child) and its title (`h/l`
+  switch the type). It is
   created in the team's default area and iteration, assigned to me, and
   shows, selected, once Azure has named its id and the Backlog is read again;
   a Task is linked to the selected Story as its parent and, being no Story,
@@ -451,20 +452,28 @@ herdr-app`. Which files of the package git tracks is set in the root
   head and selected tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
-  tables; "keine Beschreibung" where it has none), then list its sub-issues
+  tables, but no HTML in it, which shows as text; "keine Beschreibung" where
+  it has none), then list its sub-issues
   ("UNTERAUFGABEN · 7/11", the count the card shows; the first 50, with
   "erste 50 von N" where it has more) and the pull requests linked to it by a
   closing keyword or by hand in its Development sidebar, open, merged or
   closed ("VERKNÜPFTE PRS", where it has any), each with its key, title and
   state, a closed or merged one dimmed, a draft marked, and how many GitHub
   sent without access. The details of an Azure work item, on the Sprint and
-  on the Backlog, show the same: its description formatted from its HTML, its
-  children ("UNTERAUFGABEN", each with its state, a done one dimmed, and how
-  many az did not find) and the pull requests linked to it, each by its id
-  only ("!57 Pull Request"): reading a pull request's title and state would
-  cost an az call each. A description's images are never loaded: herdr's
-  TextView would fetch them from wherever the text points, so each shows as a
-  link "Bild: <alt>" to it; a link opens in the browser, http and https only.
+  on the Backlog, show the same: its description formatted from its HTML
+  (its headings, paragraphs, lists, tables, emphasis, code and links; any
+  other tag shows as text, a `<pre>` as code that wraps), its children
+  ("UNTERAUFGABEN", each with its state, a done one dimmed, and how many
+  the query did not find) and the pull requests linked to it, each by its
+  id only ("!57 Pull Request"): reading a pull request's title and state
+  would cost an az call each. A description's images are never loaded:
+  herdr's TextView would fetch them from wherever the text points. A
+  Markdown image `![alt](url)`, and an `<img>` tag in Markdown or HTML, show
+  as a link "Bild: alt" to an http or https URL (its text alone for any
+  other); an image by reference becomes a link where its reference is
+  defined (`![alt][ref]`), else text (`![alt][]`, `![ref]`). A link opens in
+  the browser, http and https only; `mods/board/src/description.js` says
+  what a description keeps and why.
   A description taller than about 12 lines shows folded to that height with
   "… mehr (e)"; `e` or a click unfolds it and folds it again. What reading
   them costs and what a refresh keeps of them, the header of
@@ -480,9 +489,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   gives a mod no scroll position to set), so they have no scrollbar to drag:
   the mouse wheel scrolls them, and a thin mark at the right shows where they
   are. `Enter` selects a line's item on the board and shows its details, or
-  opens it in the browser where the board does not show it, `o` opens it, and with no line selected `Enter` and `o` do what they do on
-  the board; a click on a line does what `Enter` on it does. `Enter` opens the
-  details, a second `Enter` goes to the item's session or starts one: a new
+  opens it in the browser where the board does not show it, `o` opens it,
+  and with no line selected `Enter` and `o` do what they do on the board; a
+  click on a line does what `Enter` on it does. `Enter` opens the details, a
+  second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets
   the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
   pull request) and makes its own worktree. In the start dialog and the

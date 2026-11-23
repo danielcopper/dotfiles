@@ -1,10 +1,14 @@
 // How the details block scrolls: the one home of its offset. herdr gives a
 // script no scroll offset of a scroll area (a ScrollHandle only reveals a
 // child, with the smallest scroll needed), so the board scrolls the block
-// itself: it keeps the offset, in `s` = { offset, content, viewport } (the
-// content's and the visible window's heights, as measured), shifts the
-// content up by it, and draws the position as a thumb. All lengths are the
-// script's pixels (measured ones divided by herdr's zoom: ui/related.js).
+// itself: it keeps the offset in the related items' state (`ui`:
+// ui/related.js, relatedState) with the heights of the window and the
+// content as measured (`viewport`, `content`), shifts the content up by it,
+// and draws the position as a thumb. All lengths are the script's pixels
+// (measured ones divided by herdr's zoom: ui/related.js).
+
+// One line of the details, the step of j/k.
+export const LINE_PX = 18;
 
 // The offset `offset` kept within the content: from 0 to where its end
 // meets the window's; 0 where the content fits.
@@ -27,7 +31,8 @@ export function revealOffset(s, top, height) {
 export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
 
 // The thumb that shows the position: { top, height } within the window, at
-// least `min` high; null where the content fits.
+// least `min` high; null where the content fits or the window is not
+// measured.
 export function thumbOf(s, min = 16) {
   if (!(s.content > s.viewport) || s.viewport <= 0) return null;
   const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
@@ -43,3 +48,24 @@ export function rowSpan(heights, i, gap, pad) {
   for (let j = 0; j < i; j++) top += heights[j] + gap;
   return { top, height: heights[i] ?? 0 };
 }
+
+// The block's offset when it draws the details of the item `key`: 0 for
+// another item than the last (ui.at), kept within the content, which a
+// resize or a refresh may have changed.
+export function offsetOf(ui, key) {
+  if (ui.at !== key) {
+    ui.at = key;
+    ui.offset = 0;
+  }
+  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
+  return ui.offset;
+}
+
+// The block moved by `by` pixels: ctrl-d/ctrl-u by halfWindow, j/k by
+// LINE_PX, the wheel by its move.
+export const scrollBy = (ui, by) => (ui.offset = offsetBy(ui, by));
+export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
+// The block at its top or bottom (gg/G, Home/End).
+export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+// The block moved so that `span` ({ top, height }) shows.
+export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));

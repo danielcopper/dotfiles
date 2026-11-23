@@ -1,6 +1,6 @@
 // The Azure source as the board uses it (makeAzure); its team views'
-// calls and data are in sprint.js and backlog.js, what both use in
-// common.js.
+// calls and data are in sprint.js and backlog.js, a work item's related
+// items' in related.js, what they share in common.js.
 
 import { BoardError, errorText } from "../../shared.js";
 import { AZ_TIMEOUT, call } from "../../tools.js";

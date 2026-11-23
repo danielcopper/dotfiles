@@ -209,7 +209,10 @@ export const detailWidth = (columns) => `${(100 * (columns > 0 ? Math.max(1 / 3,
 
 // A section of the detail panel: its frame (sectionFrame), a title
 // (sectionTitle) over its rows.
-export const sectionFrame = (t) => v_flex().px(18).py(12).gap(6).border_b(1).border_color(t.border);
+// A detail section's padding and the gap between its rows; the related
+// items' block (ui/related.js) lays its rows out by them too.
+export const FRAME = { px: 18, py: 12, gap: 6 };
+export const sectionFrame = (t) => v_flex().px(FRAME.px).py(FRAME.py).gap(FRAME.gap).border_b(1).border_color(t.border);
 export const sectionTitle = (t, title) => div().text_size(11).text_color(t.muted).child(title);
 export const detailSection = (t, title, ...kids) => sectionFrame(t).child(sectionTitle(t, title)).children(kids);
 
