@@ -10,8 +10,8 @@
 // loads (false for the placeholder, which draws without data), received
 // (the data as kept after a refresh) and warnings; and where it has them,
 // the actions it lends the action table (commands.js, which says their
-// keys and hints): move (b, view, st, by, cx: H/L) with movable (st, item,
-// by: whether the item has a column that way) and moveHint, fold (b,
+// keys and hints): move (b, view, st, by, cx: H/L, which the menu offers
+// where the item has a column that way: stepTarget) and moveHint, fold (b,
 // view, st, cx: z), create (b, view, cx: n) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a

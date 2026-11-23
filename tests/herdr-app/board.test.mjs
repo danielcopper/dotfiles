@@ -8073,6 +8073,7 @@ test("the command menu's filter: the letters in their order, a word's start and 
   assert.deepEqual(rank("spa"), ["Spalte ausblenden: Ready", "Spalten…"], "a word's start beats letters in a row");
   assert.deepEqual(rank("spal"), ["Spalten…", "Spalte ausblenden: Ready"], "a tie: the shorter name");
   assert.deepEqual(rank("n l"), ["Neu laden", "Nach links verschieben"], "spaces left out");
+  assert.deepEqual(rank("zu w"), ["Zuweisen…"], "also where the name has none");
   assert.deepEqual(rank("uz"), [], "the letters in their order");
   assert.deepEqual(rank("tb", ["Tabelle", "Tab bearbeiten"]), ["Tab bearbeiten", "Tabelle"], "a word's start before a shorter name");
   assert.deepEqual(rank("ei", ["xexxi", "xxxeix"]), ["xxxeix", "xexxi"], "letters in a row before a shorter name");
@@ -8342,4 +8343,25 @@ test("UI: on a Sprint z folds the selected story while the board has the keyboar
   assert.equal(byId(b.render(), "folded-AB#301"), null, "the story not folded");
   assert.deepEqual(texts(byId(detailPanel(b), "description-fold")), ["weniger (z)"]);
   assert.deepEqual(hintOf(":"), ["Befehle"]);
+});
+
+test("UI: the command menu runs its action as things stand when it runs: on the selection the board keeps then, and not where it can no longer run", async () => {
+  const byKey = await openBoard();
+  byKey.b.filterText = "BUG input";
+  await press(byKey.b, byKey.cx, "o");
+  const { b, cx, st } = await openBoard();
+  await openMenu(b, cx);
+  b.filterText = "BUG input";
+  b.modal.input.type("Im Browser");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual(cx.opened, byKey.cx.opened, "the card the filter leaves, as o opens it");
+  assert.notDeepEqual(cx.opened, ["https://github.com/example/tender/issues/3004"]);
+  b.filterText = "";
+  await openMenu(b, cx);
+  st().sel = { col: 2, key: null };
+  b.modal.input.type("Im Browser");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([cx.opened.length, b.notice], [1, null], "an empty column selected since it opened: nothing runs");
 });

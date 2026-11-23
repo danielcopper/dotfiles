@@ -47,12 +47,11 @@ export const boardShape = {
   dirs: ["up", "down", "left", "right"],
   loads: true,
   // H/L: the selected card one column on (`by` 1) or back (-1), hidden
-  // columns too; movable says where there is one.
+  // columns too.
   move(b, view, st, by, cx) {
     const target = st.sel?.key && stepTarget(st.data, st.sel?.key, by);
     if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
-  movable: (st, item, by) => Boolean(stepTarget(st.data, item.key, by)),
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>

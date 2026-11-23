@@ -85,7 +85,7 @@ export const sprintShape = {
   dirs: ["up", "down", "left", "right"],
   loads: true,
   // H/L: the selected task one column on (`by` 1) or back (-1); a story
-  // says that only tasks move. movable says where a task has one.
+  // says that only tasks move.
   move(b, view, st, by, cx) {
     const item = b.selected(view);
     if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
@@ -94,7 +94,6 @@ export const sprintShape = {
       if (target) b.moveTo(view, item.key, target.id, cx);
     }
   },
-  movable: (st, item, by) => isTask(item) && Boolean(stepTarget(st.data, item.key, by)),
   moveHint: "Task verschieben",
   fold: (b, view, st, cx) => foldKey(b, view, st, cx),
   received: (data, st) => applyMoves(data, st.moves),

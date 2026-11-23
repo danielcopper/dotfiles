@@ -4669,10 +4669,10 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // - id, and name: the menu's name for it (a string, or name(c));
 // - key: the key that runs it, as keyName names it; null for one the menu
 //   (or a button, or a click) alone runs;
-// - menu: its place in the menu (lower first); none for one the menu does
-//   not list; group: what it acts on, the menu's heading over it
-//   (groupTitle): the selected item, the details panel, the shown view or
-//   the board;
+// - menu: its place in the menu (lower first: the item's, the details
+//   panel's, the view's, the board's); none for one the menu does not list;
+//   group: what it acts on, the menu's heading over it (groupTitle): the
+//   selected item, the details panel, the shown view or the board;
 // - when(c): whether it can run now; the menu offers only those;
 // - takes(c): whether its key is taken (when by default): a few keys are
 //   taken where they do nothing, or say why they do nothing;
@@ -4714,8 +4714,6 @@ export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === nam
 
 const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
 
-// The menu's groups, in its order.
-const GROUPS = ["item", "details", "view", "board"];
 const KIND_NAMES = { issue: "Issue", pr: "PR" };
 
 // The heading of a group of the menu: the item it acts on ("Task AB#311 ·
@@ -4729,13 +4727,12 @@ export function groupTitle(group, c) {
 }
 
 // The command menu's entries now: { action, name, key, head } for each
-// action the menu lists that can run, by group and in the menu's order,
-// with its key where that key runs it now (actionFor), else none, and its
-// group's heading.
+// action the menu lists that can run, in the menu's order, with its key
+// where that key runs it now (actionFor), else none, and its group's
+// heading.
 export function menuActions(c) {
-  const rank = (a) => GROUPS.indexOf(a.group) * 1000 + a.menu;
   return ACTIONS.filter((a) => a.menu && a.when(c))
-    .sort((x, y) => rank(x) - rank(y))
+    .sort((x, y) => x.menu - y.menu)
     .map((a) => ({ action: a, name: nameOf(a, c), key: a.key && actionFor(a.key, c) === a ? keyLabel(a.key) : null, head: groupTitle(a.group, c) }));
 }
 
@@ -4808,7 +4805,7 @@ const moveAction = (id, key, by, name) => ({
   name,
   key,
   menu: by < 0 ? 5 : 6,
-  when: (c) => has(c, "move") && Boolean(c.item) && c.shape.movable(c.st, c.item, by),
+  when: (c) => has(c, "move") && Boolean(c.item) && Boolean(stepTarget(c.st.data, c.item.key, by)),
   takes: (c) => has(c, "move"),
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
   ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
@@ -4863,8 +4860,9 @@ export const ACTIONS = [
   // z folds what is where the keyboard is: on a Sprint the selected
   // story's tasks while the board has it, the description while the details
   // panel has it, and on a view whose shape folds nothing of its own the
-  // description whenever the details show one that folds. The menu offers
-  // both where they can run, z beside the one it runs.
+  // description whenever the details show one that folds (the story's comes
+  // first in the table, so it wins while it takes z). The menu offers both
+  // where they can run, z beside the one it runs.
   {
     id: "fold-story", group: "item", name: "Story zu-/aufklappen", key: "z", menu: 8,
     when: (c) => has(c, "fold") && Boolean(c.item), takes: (c) => !c.panel && has(c, "fold"),
@@ -4873,7 +4871,7 @@ export const ACTIONS = [
   },
   {
     id: "details", group: "item", name: "Details zeigen", key: "enter", menu: 1,
-    when: (c) => Boolean(c.item) && !c.st.detail, takes: (c) => onItem(c) && !c.st.detail,
+    when: (c) => Boolean(c.item) && !c.st.detail,
     run: (b, c, cx) => b.enter(c.view, cx),
     hint: (c) => (walks(c) ? c.shape.enterHint ?? "Detail · Agent" : null),
   },
@@ -4896,7 +4894,6 @@ export const ACTIONS = [
     id: "fold-description", group: "details", key: "z", menu: 9,
     name: (c) => (c.b.relatedUi.unfolded === c.details.key ? "Beschreibung weniger" : "Beschreibung mehr"),
     when: (c) => c.related && descriptionFolds(c.b.relatedUi, c.details),
-    takes: (c) => c.related && descriptionFolds(c.b.relatedUi, c.details) && (Boolean(c.panel) || !c.shape.fold),
     run: (b, c, cx) => b.toggleFold(cx),
     hint: (c) => (actionFor("z", c)?.id === "fold-description" ? (c.b.relatedUi.unfolded === c.details.key ? "weniger" : "mehr") : null),
   },
@@ -5750,12 +5747,11 @@ export const boardShape = {
   dirs: ["up", "down", "left", "right"],
   loads: true,
   // H/L: the selected card one column on (`by` 1) or back (-1), hidden
-  // columns too; movable says where there is one.
+  // columns too.
   move(b, view, st, by, cx) {
     const target = st.sel?.key && stepTarget(st.data, st.sel?.key, by);
     if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
-  movable: (st, item, by) => Boolean(stepTarget(st.data, item.key, by)),
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
@@ -6160,7 +6156,7 @@ export const sprintShape = {
   dirs: ["up", "down", "left", "right"],
   loads: true,
   // H/L: the selected task one column on (`by` 1) or back (-1); a story
-  // says that only tasks move. movable says where a task has one.
+  // says that only tasks move.
   move(b, view, st, by, cx) {
     const item = b.selected(view);
     if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
@@ -6169,7 +6165,6 @@ export const sprintShape = {
       if (target) b.moveTo(view, item.key, target.id, cx);
     }
   },
-  movable: (st, item, by) => isTask(item) && Boolean(stepTarget(st.data, item.key, by)),
   moveHint: "Task verschieben",
   fold: (b, view, st, cx) => foldKey(b, view, st, cx),
   received: (data, st) => applyMoves(data, st.moves),
@@ -6388,8 +6383,8 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
 // loads (false for the placeholder, which draws without data), received
 // (the data as kept after a refresh) and warnings; and where it has them,
 // the actions it lends the action table (commands.js, which says their
-// keys and hints): move (b, view, st, by, cx: H/L) with movable (st, item,
-// by: whether the item has a column that way) and moveHint, fold (b,
+// keys and hints): move (b, view, st, by, cx: H/L, which the menu offers
+// where the item has a column that way: stepTarget) and moveHint, fold (b,
 // view, st, cx: z), create (b, view, cx: n) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a
