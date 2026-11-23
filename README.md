@@ -460,10 +460,17 @@ herdr-app`. Which files of the package git tracks is set in the root
   type's named color as its chip has it. A type without a color, and an
   item without a type (an Epic by its title too), has no line; where the
   Backlog could not read the types, or where they name their colors in a
-  form the board does not read, the view says so and draws none. A selected card
-  or row sits on a tint of the accent, so its chips stay readable.
-  `mods/board/src/ui/tones.js` holds the label and type colors, the selected
-  background and how strong the chip, head and selected tints are.
+  form the board does not read, the view says so and draws none. Text and
+  lines take the theme's colors; the tints under chips, heads and a selected
+  card or row depend on the theme. The copper themes carry copper's palette
+  steps for mods, and there a chip or a head stands on its color's tinted
+  step (`copper-<color>-3`, or `-4` where step 3 stands too close to the card
+  or column it is drawn on), and a selected card or row on the theme's
+  `selected`, copper's blue step for it. A theme without those steps
+  (catppuccin-mocha) gets its colors at a low alpha, and a selected card or
+  row a tint of the accent, so its chips stay readable.
+  `mods/board/src/ui/tones.js` holds the label and type colors, which theme
+  takes which tints, the selected background and how strong the tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
   tables; its HTML shows as text, its comments not at all, but for one not

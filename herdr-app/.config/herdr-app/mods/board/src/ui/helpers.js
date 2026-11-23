@@ -13,7 +13,7 @@ import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
-import { CHIP_ALPHA, headBg, hueTone, selectedBg, tint, typeLineTone, typeTone } from "./tones.js";
+import { chipBg, headBg, hueTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -263,11 +263,11 @@ export function statusPill(t, label, color, open) {
 }
 
 // A column's color (a column of a board or a Sprint, a status menu's
-// target): its theme color, "muted" where the theme has none.
-export const columnColor = (t, col) => t[col.color] ?? t.muted;
+// target): its tone's color (toneColor), "muted" where the theme has none.
+export const columnColor = (t, col) => toneColor(t, col.color) ?? t.muted;
 
-// A column's head, on a tint of its color laid over the `ground` it stands
-// on (headBg): its color as a dot, its name and `count`.
+// A column's head, on a tint of its color for the `ground` it stands on
+// (headBg): its color as a dot, its name and `count`.
 export const columnHead = (t, col, count, ground) =>
   h_flex()
     .gap(6)
@@ -275,7 +275,7 @@ export const columnHead = (t, col, count, ground) =>
     .py(4)
     .rounded(6)
     .items_center()
-    .bg(headBg(t, columnColor(t, col), ground))
+    .bg(headBg(t, col.color, ground))
     .child(div().size(9).flex_none().rounded(5).bg(columnColor(t, col)))
     .child(div().flex_1().min_w(0).truncate().font_semibold().child(col.name))
     .child(div().flex_none().text_size(12).text_color(t.muted).child(count));
@@ -292,7 +292,7 @@ export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnC
 export function typeLine(t, item, hex, inset = 0) {
   const tone = typeLineTone(t, item, hex);
   if (!tone) return null;
-  return div().id("type-line").absolute().top(0).left(inset).right(inset).h(2).rounded(1).bg(t[tone] ?? t.muted);
+  return div().id("type-line").absolute().top(0).left(inset).right(inset).h(2).rounded(1).bg(toneColor(t, tone) ?? t.muted);
 }
 
 // A card's or row's look as selected or not, in every shape alike, for an
@@ -305,10 +305,10 @@ export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
-// A chip in a `tone` (a theme name): `text` in that color on a tint of it.
-// A tone the theme does not have gives the plain chip (chip's defaults); one
-// it cannot tint, its text on `raised`.
-export const toneChip = (t, text, tone) => chip(t, text, t[tone], tint(t[tone], CHIP_ALPHA, t.raised));
+// A chip in a `tone` (a theme name): `text` in the tone's color
+// (toneColor) on the tone's chip background (chipBg). A tone the theme has
+// no color for gives the plain chip's text (chip's default).
+export const toneChip = (t, text, tone) => chip(t, text, toneColor(t, tone), chipBg(t, tone));
 
 // A card's chip for its label `name`, in the label's color brought onto the
 // theme (hueTone).
