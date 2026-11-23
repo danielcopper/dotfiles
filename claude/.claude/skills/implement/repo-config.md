@@ -24,127 +24,53 @@ owner. Before a skill writes about a repo, it states **"own repo"** or **"foreig
 
 Each holds in every repo unless its profile departs from it under `defaults`.
 
-- **`merge_policy: user`** — the owner merges every PR, and this policy has no departure. Two layers block the merge
-  paths a session reaches by shell:
-  - The hook `hooks/block_pr_merge.py`, a coarse filter that fails closed. It judges the whole Bash command as one
-    text: backslash-newlines joined, every quote, backslash and `$'`/`$"` prefix removed, lowercased; the rules
-    that name a simple command or a tool's options read the command by the shell's quoting instead. It first
-    lets through a whole command that is exactly one read-only
-    gh form — optional `VAR=value`, `env` and `timeout N`, then `gh` with an optional `-R`/`--repo`, then `pr view`,
-    `list`, `status`, `checks` or `diff`, `issue view` or `list`, `search <word>` or `run <word>`, followed by plain
-    words — with no shell syntax, quote or backslash, and no second `gh`, `az`, `curl` or `wget`. It also lets through
-    `gh` (optional `-R`/`--repo`) `pr create` or `pr edit` followed by flags and values, `--body-file <path>`
-    included, where quoted strings may be values: outside the quotes no shell syntax or backslash, inside double
-    quotes no `$`, backtick or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command is denied
-    when its text
-    - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge, auto-merge or
-      merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge` — in either order when
-      `xargs` or `parallel` stands in the text or a shell reads it again), or runs `gh` or `az`
-      with a word that can be the subcommand — past the options, also right after one, where it may be the
-      option's value (`gh -R o/merge-tool pr view` is refused) — that is no known subcommand and holds `merge`
-      anywhere (`automerge`, `pr_merge`), or runs `gh extension exec` with an extension so named;
-    - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
-      (`az` with `completed` or `auto-complete`, also as the start of a name such as `autoCompleteSetBy`, or
-      `devops invoke` writing — an `--http-method` other than GET, or `--in-file`; without a method it reads
-      and passes — to `--resource pullRequests` itself, a pull-request resource named for completion or
-      merge, a resource built at run time, or no named resource; threads, comments, reviewers, labels and
-      statuses pass);
-    - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
-      string also read as a command — that runs `gh api`, `az rest`, `az devops invoke` or `az repos pr` (the
-      subcommand right after the tool's options, with no quoted word or redirection before it) and reads a request
-      from a file (an `@` at the start of a word or after `=`, in re-read or open-quoted text any `@`, an
-      `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i`
-      option), or that runs `curl` or `wget` with a writing request (a method other than GET or HEAD, `-d`,
-      `--data…`, `--json`, `-F`, `--form`, `-T`, `--upload-file`, `-K`, `--config`, `--post-…`, `--body-…`);
-      only that command's words count, not other stages of a pipeline. Either counts only when the target may
-      be a merge surface: an Azure `pullRequests/<id>` with nothing after the id (the pull request that
-      completion PATCHes), a GitHub `/pulls/<n>/merge` or `/merges`, `graphql` (whose body is not read), a
-      target built at run time (`$`, a backtick, for curl also `{` or `[`) or written percent-encoded, a path
-      with a `.` or `..` segment, `//` after the host or a `;` (it may resolve to the pull request), or no
-      literal target at all (curl and wget without a `://` URL, `-K`/`--config`, wget's `-i`; `gh api` with no
-      endpoint past its options and their values; `az rest` without a URL or path; `az repos pr`). For `gh api`
-      only the endpoint counts, not option values such as `--input "$S/review.json"`. A write to a literal
-      sub-resource — a
-      pull request's threads, comments, reviews, reviewers, labels or statuses, or a GitHub pull request
-      itself — passes, also with its body from a file. In re-read or open-quoted text the file rule reads the
-      whole text and keeps no such exception;
-    - mentions `merge` as a word anywhere next to `curl`, `wget`, `gh api`, `az rest`, `az devops invoke` or
-      `az repos pr` — not `merged`, `merges`, `merger`, `merge_…`, `merge-base` or `merge-tree`; `mergeBranch` and
-      `merge-upstream` count. This rule reads the merge word only, no completion or alias;
-    - holds a construct the shell expands at run time (a `$` or a backtick outside single quotes, a `{a,b}` or
-      `{a..b}` brace or a `*`, `?` or `[` next to a letter outside any quotes) next to a merge mention — `merge` as
-      a word as in the rule above, a completion (`status` or `-s` followed by `completed`, or `auto-complete`), or
-      `alias` followed later by `set` or `import` — anywhere in the text, except the parameters named below. A
-      run-time construct next to `gh`, `az`, `curl` or `wget` alone does not count, nor do words that `xargs` or
-      `parallel` supplies to one of them: the merge must be spelled to be caught. A spelled merge word still
-      counts then, before `pr` as well as after it;
-    - is nested too deep, too long or holds too many substitutions to check.
+- **`merge_policy: user`** — the owner merges every PR, and this policy has no departure. A session leaves its PR
+  open, reports its state and what is left, and stops; after a refusal it does not look for another way to merge,
+  complete or auto-complete the PR. Two layers stop a session that merges by mistake; against a command built to get
+  past them they promise nothing.
+  - The hook `hooks/block_pr_merge.py` reads the whole Bash command text — backslash-newlines joined, quotes and
+    backslashes removed — so a form counts wherever it stands: chained with `&&`, `||`, `;`, `|`, `&` or a newline,
+    inside `$( )`, backticks or a subshell, in `bash -c`, `sh -c` or `eval`, after `xargs`. It refuses:
+    - `gh … pr … merge`, `merge` as the `pr` subcommand (options such as `-R o/r` may stand between);
+    - a write by gh, curl or wget — a method other than GET or HEAD, or a body (gh's `-f`, `-F`, `--input`; curl's
+      `-d`, `--data…`, `--json`, `-F`, `-T`; wget's `--post-…`, `--body-…`) — toward a GitHub `pulls/<n>/merge` or
+      `repos/<o>/<r>/merges` endpoint (also percent-encoded), or with a `merge_method` field; a GET on
+      `pulls/<n>/merge` passes;
+    - the GraphQL mutation `mergePullRequest`, `enablePullRequestAutoMerge` or `enqueuePullRequest`, in the text or
+      in a body file, in a command that runs gh, curl or wget;
+    - `az repos pr update` with `--status completed` (an option prefix such as `--stat` too, and a variable when the
+      text spells `completed`) or with `--auto-complete` set to anything but `false` or `0`;
+    - a body holding `"status": "completed"` (or `3`) or `autoCompleteSetBy`, sent by `az rest`, `az devops invoke`,
+      curl or wget toward an Azure DevOps pull request itself (`pullrequests/<id>`, any case, or devops invoke's
+      `--resource pullRequests`) or toward a target the request does not spell out (a URL in a variable; a URL in a
+      header or in another request does not name it).
 
-    The hook fails closed on itself too. Input that is no JSON object, has no `tool_input` object or no
-    `command` string, and any error while checking, are denied as "could not be checked", with the error's
-    class and message: a bug in the hook, to report to the owner. A check that runs past five seconds is
-    denied as "took too long to check". In both cases, split or simplify the command. Only an empty command
-    passes unchecked.
+    Body files are the paths after `@`, `key=@`, `--input`, `--in-file`, `--body-file`, `--post-file`,
+    `--upload-file`, jq's `--rawfile`/`--slurpfile`, `cat` and `<` (so `$(cat path)` and `$(< path)` too): a
+    regular file, read up to 1 MB, with `~` and `$HOME` expanded and a relative path taken from the session's
+    working directory. A path the hook cannot resolve or read adds nothing.
 
-    The run-time rule does not read the body of a heredoc with a quoted delimiter (`<<'D'`, `<<"D"`, `<<\D`,
-    also with `<<-`) fed to `cat`, `tee`, `python`, `python3`, or `git commit`, `tag` or `notes` without `-c`,
-    when no word of that command is a shell word, at most an output redirection to a plain word follows the
-    marker on its line, a line ends the body, and the marker stands outside quotes, comments, other heredoc
-    bodies, parentheses, brace groups and substitutions. A backtick, a `$'` string, a `$(`, `${` or backtick
-    inside double quotes, a process substitution, `((`, `$[`, `case`, a `{` or `}` that is no command word, a
-    backslash escape right before a `#`, a `<<` with no delimiter name after it, a `)` or `}` without its
-    opening, or a heredoc without the line that ends it, anywhere in the text, leaves every body counted. All
-    other rules read the bodies.
-
-    The run-time rule spares a parameter only when the whole command is plain and runs only listed commands.
-    Plain: every word is only the characters `A-Z a-z 0-9 _ . / : , @ % + = -`, or exactly one double-quoted
-    `"$NAME"` or `"${NAME}"` (NAME a name, not a digit), or exactly `$?`, `$#` or `$$`, or a double-quoted string
-    of those characters, spaces and `$?`, `$#`, `$$`; between the words stand only blanks, `;`, `&&`, `||`, `|`
-    and newlines; after the command word (after its subcommand for gh) only the redirections `>`, `>>`, `2>`,
-    `2>>` and `<` to a word of those characters, and `2>&1`. Listed: every simple command is only `NAME=word`
-    assignments, or its command word after them is, unquoted and without a path, `echo`, `printf`, `test`,
-    `true`, `false`, `exit`, `:`, `head`, `tail`, `grep`, `jq`, `wc`, `uniq`, `cut`, `tr` or `cat`, or `gh`
-    followed at once by `pr view`, `list`, `status`, `checks` or `diff`, `issue view` or `list`, or `run view`,
-    `list` or `watch`; a listed name the shell resolves to a function or alias is trusted unseen. Anything else
-    anywhere in the text — another character, quoting, expansion, comment or redirection, or any other command,
-    builtin or keyword — makes every parameter count. In such a command the rule does not count a word
-    `"$NAME"` or `"${NAME}"` in a simple command that starts with that `gh` form, when the word before it is a
-    plain word that is no option.
-
-    When the command hands text to a shell that reads it again — a shell with a `-c` option, `eval`, `<<<`,
-    `source` or `.`, or a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `fish`, `busybox sh`, as a word or
-    a path's basename) as the command word of any simple command: after `|`, `|&`, `;`, `&`, a newline, a
-    parenthesis or a backtick, past assignments, redirections other than a named or moved descriptor, keywords
-    such as `if`, `then`, `do`, `!` and `{`, after a wrapper (`sudo`, `env`, `timeout`, `nice`, `nohup`,
-    `command`, `exec`, `time`, `stdbuf`, `setsid`, `ionice`, `doas`) or `coproc` (and a named coproc's name
-    before `{`) with or without options, also after `2>&1` or `>&2`, in a process substitution, or plainly
-    (`bash s.sh`) — or to a command that runs a program from its arguments or data —
-    `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs`,
-    `parallel` — quoting no longer separates anything: the file, write and run-time rules then read the whole
-    de-quoted text, next to any `gh`, `az`, `curl` or `wget` (every word decides the write rule; the words of
-    the simple commands that name a tool pick its reason), and `$` and backticks count everywhere, no
-    parameter is spared and no heredoc body is left out. For the run-time rule, such a word counts only
-    outside the heredoc bodies it leaves out. Other gh subcommands (issues, comments, reviews, releases, labels …)
-    may read their body from a file. False denials are accepted: a merge mentioned in a message next to one of
-    those tools is denied like a call.
+    It lets through `git merge`, `merge-base` and `merge-tree`, paths and names with "merge", "completed" outside
+    an Azure DevOps completion, `gh pr view`, `list`, `checks`, `create`, `edit` and `update-branch`, comments and
+    reviews, and a heredoc body fed to a command that only reads it (`cat`, `tee`, `git commit -F -`). A heredoc
+    whose receiving command or pipe runs a shell or an interpreter (`bash`, `sh`, `python`, `node`, `ruby`,
+    `perl`, `ssh`) is read as commands. A merge form spelled as text — a `grep` pattern, a string in a Python
+    heredoc, a commit message with `-m` — is refused like a call. Each refusal names the form it found. An error
+    inside the hook, and a command over 1 MB, refuse only when the raw input holds `merge`, `complet` or
+    `enqueue`; otherwise the call passes and the error goes to stderr.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
     `curl` or `wget`, not a GraphQL query from a file, not a `gh` flag before `pr` — so a Bash call that only mentions
     one (a `grep`, a heredoc, a commit message) is denied too: write such text with an edit tool and keep it out of
     commit messages.
 
-  A renamed gh, another interpreter, a script file, a config file the command reads, a remote workflow that merges
-  when started (`gh workflow run …`), a gh extension, or a merge word the shell builds at run time (such as
-  `gh pr $(printf mer)ge` or `gh api "$EP"` with a merge endpoint in `$EP`) stays out of both layers' sight; this
-  policy alone rules those out. Shell forms the hook's reading does not follow stay out of its sight too, and this
-  policy alone rules them out: a named file descriptor (`{fd}>&2`), a moved one (`3>&1-`), a named `coproc`
-  before a keyword, and an apostrophe inside a `#` comment, which hides the text up to the next apostrophe from
-  the run-time rule.
-
-  Both layers are built against a session that follows this policy and would merge by mistake; against a command
-  built to get past them they promise nothing. A review of the hook judges it by that: a bypass that a command
-  written without intent to evade could hit is a finding against the hook or against that rule's sentence; one
-  that only a command built to get past the hook reaches goes on the user's list as an accepted gap, and its form
-  joins the paragraph before only on the owner's word.
+  Out of both layers' sight, and ruled out by this policy alone: a verb or endpoint the shell builds at run time
+  (`gh pr $(printf mer)ge`), a shell variable as the verb or the endpoint (`gh pr "$V"`, `gh api -X PUT "$EP"`), a
+  script written to a file and run from it, Python or Node HTTP clients, gh aliases and extensions, and a remote
+  workflow that merges when started (`gh workflow run …`). A bypass that a command written without intent to evade
+  could hit is a finding against the hook; one that only a command built to get past it reaches is an accepted
+  gap. `hooks/merge_corpus.py` is the local acceptance run: it puts every Bash command of the local transcripts
+  through the hook, counts the refusals by form and lists each explicit merge the hook lets through — none is the
+  bar.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two
