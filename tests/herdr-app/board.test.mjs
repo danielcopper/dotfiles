@@ -6802,7 +6802,7 @@ test("UI: the details show an issue's parent under „ÜBERGEORDNET“ before it
   assert.equal(relatedTexts(none.b).includes("ÜBERGEORDNET"), false, "none without a parent");
 });
 
-test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read with its children and its parent; one the query does not find is counted; none without a parent, also where the query fails", async () => {
+test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read in its children's query; one the query does not find is counted; none without a parent, also where the query fails", async () => {
   const { b, cx, host } = await openSprint();
   await press(b, cx, "enter");
   await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
@@ -7177,7 +7177,29 @@ test("UI: Enter on an Azure work item's pull request line shows it a level down:
 });
 
 
-// ---- The levels' fixes: partial reads, discarded reads, other views ----
+test("UI: a state's chip is its state in the theme's background on its color, alike on the Sprint's stories and tasks (not shrinking), the Backlog's rows, the details' lines and a level", async () => {
+  const theme = () => ({ background: "#bg", ansi2: "#green", ansi4: "#blue", muted: "#grey", dim: "#dim" });
+  const look = (el) => [el.kids[0], el.with.text_color[0], el.with.bg[0], el.styles.includes("flex_none")];
+  const sprint = await openSprint();
+  sprint.host.theme = theme;
+  const sprintRoot = sprint.b.render();
+  assert.deepEqual(look(chipOf(byId(sprintRoot, "story-AB#301"), "In Progress")), ["In Progress", "#bg", "#blue", true], "a story");
+  assert.deepEqual(look(chipOf(byId(sprintRoot, "card-AB#312"), "In Progress")), ["In Progress", "#bg", "#blue", true], "a task");
+  const backlog = await openBacklog();
+  backlog.host.theme = theme;
+  const row = backlog.st().data.rows[0];
+  const color = theme()[board.stateColor(backlog.st().data, row.state)];
+  assert.deepEqual(look(chipOf(byId(backlog.b.render(), `row-${row.key}`), row.state)), [row.state, "#bg", color, false], "a Backlog row");
+  const related = await openRelated();
+  related.host.theme = theme;
+  assert.deepEqual(look(byId(detailPanel(related.b), "related-line-0").kids.at(-1)), ["offen", "#bg", "#green", false], "a line, in its source's color");
+  const level = await onFirstLine();
+  await press(level.b, level.cx, "enter");
+  level.host.theme = theme;
+  assert.deepEqual([levelsNow(level.b)[0], look(chipOf(detailPanel(level.b), "offen"))], [[3001], ["offen", "#bg", "#green", false]], "a level, in its line's color");
+});
+
+// ---- Levels on partial reads, dropped reads and other views ----
 
 // The related items' answer of tender#3004 with `patch` applied to its
 // issue; `errors` beside them.
@@ -7252,6 +7274,27 @@ test("UI: on Azure a level stays where the children's query failed after the wor
   const found = [...json("azure-related-children.json"), { id: 399, fields: { "System.Title": "Third" } }, { id: 290, fields: { "System.Title": "Epic" } }];
   await reload(unlinked, ok(JSON.stringify(found)));
   assert.deepEqual([levelsNow(b)[0], b.notice?.text], [[], "AB#312 steht nicht mehr bei AB#301: zurück zu AB#301"], "it ran without it: gone");
+});
+
+test("UI: on Azure a pull request's level goes where the work item came without its link, though the children's query failed: its section came whole", async () => {
+  const { b, cx, host } = await openSprint();
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await tab(b, cx);
+  await press(b, cx, ...SHIFT_G);
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-pr-show.json")), (a) => a[0] === "repos");
+  assert.deepEqual(levelsNow(b), [[57], null]);
+  await press(b, cx, "r");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false });
+  const unlinked = json("azure-related-item.json");
+  unlinked.relations = unlinked.relations.filter((r) => !/PullRequestId/.test(r.url));
+  await host.answer("az", ok(JSON.stringify(unlinked)), (a) => a.includes("relations"));
+  await host.answer("az", azRefused("Operation returned a 400 status code."), AZ.query);
+  assert.equal(b.state(b.view().id).related.get("AB#301").data.retry, true, "the read is to be repeated");
+  assert.deepEqual([levelsNow(b)[0], b.notice?.text], [[], "!57 steht nicht mehr bei AB#301: zurück zu AB#301"]);
 });
 
 test("UI: a read that r dropped decides nothing when it comes: r twice keeps the level", async () => {

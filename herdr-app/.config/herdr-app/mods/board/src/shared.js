@@ -66,7 +66,11 @@ export const personName = ({ name, login }) => name || login || null;
 
 // What names an issue, pull request or work item wherever it shows (on
 // the board, as a line of the details, as a level the details panel went
-// down to): its source, kind, repo (none on Azure) and number.
+// down to): its source, kind, repo (none on Azure) and number. Its
+// identity, for comparing (sameItem) and for keying a level; unlike
+// itemKey, a label to show ("tender#3004", null for a draft), and unlike
+// an item's `key`, the board's own for a card or row (a Projects item's id
+// on GitHub).
 export const lineKey = (item) => `${item.source}:${item.kind}:${item.repo ?? ""}#${item.number}`;
 
 // Whether `a` and `b` are the same issue, pull request or work item.

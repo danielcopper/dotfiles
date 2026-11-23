@@ -36,9 +36,9 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, TextView } from "gpui-base";
 import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, subIssuesHead } from "../related.js";
-import { stateColor, stateDone } from "../kinds/states.js";
+import { stateDone } from "../kinds/states.js";
 import { LINE_PX, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
-import { FRAME, checksSection, chip, sectionTitle, selectedLook, unzoomed } from "./helpers.js";
+import { FRAME, checksSection, chip, sectionTitle, selectedLook, stateChip, unzoomed } from "./helpers.js";
 import { NOTE_TONES, toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
@@ -158,14 +158,14 @@ function description(b, t, item, r) {
 }
 
 // The detail panel's rows of an item the panel went down to (a line's
-// item: it has no card, so no shape lends it rows): its state as a chip,
-// in its own color where its source names one (GitHub), else its state's
-// in the view's data (Azure), as its line has it. A pull request's
-// (`entry` its read: { data: { pr }, error }) add what the PR list's
-// details show beside the header: its checks where its source reads them
-// (GitHub), and while they load or after a failure, a note.
+// item: it has no card, so no shape lends it rows): its state as a chip
+// (stateChip), as its line has it. A pull request's (`entry` its read: {
+// data: { pr }, error }) add what the PR list's details show beside the
+// header: its checks where its source reads them (GitHub); what GitHub
+// said besides, a warning each; and while they load or after a failure, a
+// note.
 export function levelParts(b, t, view, item, entry) {
-  const chips = [lineStateChip(t, b.state(view.id).data, item)];
+  const chips = [stateChip(t, b.state(view.id).data, item.state, item.color)];
   if (item.kind !== "pr") return { chips };
   const note = (text, level) => div().id("level-note").px(18).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES[level])).child(text);
   if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note("lädt …", "info")] };
@@ -173,18 +173,10 @@ export function levelParts(b, t, view, item, entry) {
   return { chips, sections: [...(checks ? [checksSection(t, checks)] : []), ...(warnings ?? []).map((w) => note(w, "warning"))] };
 }
 
-// The chip of a line's or a level's state: in its own color where its
-// source names one (GitHub), else its state's in the view's `data`
-// (Azure); muted before the view is read.
-function lineStateChip(t, data, line) {
-  const color = line.color ?? (data ? stateColor(data, line.state) : "muted");
-  return chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color));
-}
-
 // The block of the related items of `item` (relatedRows) in `view`, the
-// line `at` marked (null: none). A line's state's color, and whether it is
-// done, are its own where its source names them (GitHub), else its state's
-// in the view's data (Azure).
+// line `at` marked (null: none), each with its state as a chip (stateChip).
+// Whether a line is done is its own where its source names it (GitHub),
+// else its state's in the view's data (Azure).
 export function relatedSections(b, t, mono, view, item, entry, at) {
   const ui = b.relatedUi;
   const data = b.state(view.id).data;
@@ -212,7 +204,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(lineStateChip(t, data, line));
+      .child(stateChip(t, data, line.state, line.color));
   };
   const offset = offsetOf(ui, item.key);
   const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))

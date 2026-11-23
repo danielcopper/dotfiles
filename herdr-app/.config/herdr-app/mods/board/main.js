@@ -32,42 +32,39 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh, and an issue's
-// related items (its description, parent, sub-issues and linked pull
-// requests) one
+// Calls: a GitHub view costs one gh call per refresh, and an issue's related
+// items (its description, parent, sub-issues and linked pull requests) one
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
 // keeps of them keptRelated says); an item the details panel went down to
-// (Enter on a line, related.js) costs the same when it shows, a pull
-// request one gh or az call for its details (az repos pr show), and on `r`
-// each level's again, so that a level whose item is no longer among the
-// lines of the one above can go. An Azure work item's related items (its
-// description, parent, children and linked pull requests) cost the same,
-// one az
-// call (az boards work-item show --expand relations), and one WIQL query
-// more for its children's and its parent's titles and states where it has
-// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// (Enter on a line, related.js) costs the same when it shows, a pull request
+// one gh or az call for its details (az repos pr show), and on `r` each
+// level's again, so that a level whose item is no longer among the lines of
+// the one above can go. An Azure work item's related items (its description,
+// parent, children and linked pull requests) cost the same, one az call (az
+// boards work-item show --expand relations), and one WIQL query more for its
+// children's and its parent's titles and states where it has either
+// (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the level's work items in
 // their list by az rest, then one WIQL query for their fields; one for an
 // empty backlog), and one more for the project's work item types (their
 // colors) while neither view keeps them; either one more while who az is
-// stays unknown. What the Sprint and the Backlog read once and keep, and
-// for how long, makeAzure says. An assignment costs one gh or az call, and
-// the assignee picker one more per repo or team the first time it opens
-// there (GitHub's assignable users with who gh is; the team's members, and
-// who az is while that is unknown). A state change costs one az call, a
-// Backlog's create one and a child's parent link one more; a create reads
-// the Backlog again, and one whose answer was unclear asks one WIQL query
-// more after that refresh; a create for a team whose default iteration
-// follows the current one reads the team's settings first, one call more.
-// The PR tabs read nothing yet. Finding gh and az costs one sh call now
-// and then (toolPaths says when). A view refreshes when its tab first
-// shows, on `r` (which first drops what its source keeps of it: its
-// source's forget), after a column is hidden or shown (the command menu's
-// "Spalte ausblenden", a name in the hidden line, the column menu), when it
-// is shown again older than refreshMinutes, and every refreshMinutes while
-// it shows.
+// stays unknown. What the Sprint and the Backlog read once and keep, and for
+// how long, makeAzure says. An assignment costs one gh or az call, and the
+// assignee picker one more per repo or team the first time it opens there
+// (GitHub's assignable users with who gh is; the team's members, and who az
+// is while that is unknown). A state change costs one az call, a Backlog's
+// create one and a child's parent link one more; a create reads the Backlog
+// again, and one whose answer was unclear asks one WIQL query more after
+// that refresh; a create for a team whose default iteration follows the
+// current one reads the team's settings first, one call more. The PR tabs
+// read nothing yet. Finding gh and az costs one sh call now and then
+// (toolPaths says when). A view refreshes when its tab first shows, on `r`
+// (which first drops what its source keeps of it: its source's forget),
+// after a column is hidden or shown (the command menu's "Spalte ausblenden",
+// a name in the hidden line, the column menu), when it is shown again older
+// than refreshMinutes, and every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -165,7 +162,11 @@ export const personName = ({ name, login }) => name || login || null;
 
 // What names an issue, pull request or work item wherever it shows (on
 // the board, as a line of the details, as a level the details panel went
-// down to): its source, kind, repo (none on Azure) and number.
+// down to): its source, kind, repo (none on Azure) and number. Its
+// identity, for comparing (sameItem) and for keying a level; unlike
+// itemKey, a label to show ("tender#3004", null for a draft), and unlike
+// an item's `key`, the board's own for a card or row (a Projects item's id
+// on GitHub).
 export const lineKey = (item) => `${item.source}:${item.kind}:${item.repo ?? ""}#${item.number}`;
 
 // Whether `a` and `b` are the same issue, pull request or work item.
@@ -3188,9 +3189,20 @@ export function pathLabel(root, levels) {
   return [cardLabel(root), ...levels.map(label)].join(" › ");
 }
 
-// The lines of read related items (`data`, or null while none are read),
-// the parent first, then the sub-issues, then the linked pull requests.
-export const relatedLines = (data) => (data ? [...data.parents.lines, ...data.subIssues.lines, ...data.prs.lines] : []);
+// The sections of read related items, in the order of their lines: the
+// parent first, then the sub-issues, then the linked pull requests.
+export const RELATED_SECTIONS = ["parents", "subIssues", "prs"];
+
+// The lines of read related items (`data`, or null while none are read).
+export const relatedLines = (data) => (data ? RELATED_SECTIONS.flatMap((name) => data[name].lines) : []);
+
+// The name of the section of `data` that holds `line` (one of its lines,
+// as relatedLines gives them); null for none.
+export const sectionOf = (data, line) => RELATED_SECTIONS.find((name) => data?.[name]?.lines.includes(line)) ?? null;
+
+// Whether a section came whole, so that what it lacks is not there: no
+// error, not cut short, none it could not read.
+export const wholeSection = (section) => Boolean(section) && !section.error && !section.cut && !section.hidden;
 
 // The line one step `dir` (+1 down, -1 up) from `line` (an index, or null
 // for none) over `count` lines: down from none to the first, up from the
@@ -3583,6 +3595,17 @@ export function typeTone(t, item) {
   return label ? hueTone(t, item.labelColors?.[label]) : "muted";
 }
 
+// ==== src/kinds/states.js ====
+
+// A work item's state as the board shows it: its theme color, and whether
+// it counts as done.
+
+// The theme color of a state, and whether it is done, by its category
+// (data.meta.states: categoryStates, from parseAzureTypes and
+// parseBacklogConfig).
+export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
+export const stateDone = (data, name) => data.meta.states.find((s) => s.name === name)?.done === true;
+
 // ==== src/ui/helpers.js ====
 
 // UI helpers: lasting settings, colors and machine names, whether the board
@@ -3970,6 +3993,13 @@ export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
+// A state as a chip, in the theme's background on its color: `color` where
+// its source names one (GitHub's lines), else its state's in the view's
+// `data` (Azure; kinds/states.js), muted before the view is read; "ohne
+// Status" for none.
+export const stateChip = (t, data, state, color = null) =>
+  chip(t, state ?? "ohne Status", t.background, toneColor(t, color ?? (data ? stateColor(data, state) : "muted")));
+
 // A chip in a `tone` (a theme name): `text` in the tone's color
 // (toneColor) on the tone's chip background (chipBg).
 export const toneChip = (t, text, tone) => chip(t, text, toneColor(t, tone), chipBg(t, tone));
@@ -4227,17 +4257,6 @@ export function unclearAssignLines(due, data, how) {
     return { text: `${has}, nicht ${u.logins.length ? u.who : "niemandem"}`, warn: true };
   });
 }
-
-// ==== src/kinds/states.js ====
-
-// A work item's state as the board shows it: its theme color, and whether
-// it counts as done.
-
-// The theme color of a state, and whether it is done, by its category
-// (data.meta.states: categoryStates, from parseAzureTypes and
-// parseBacklogConfig).
-export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
-export const stateDone = (data, name) => data.meta.states.find((s) => s.name === name)?.done === true;
 
 // ==== src/actions/state.js ====
 
@@ -4828,14 +4847,14 @@ function description(b, t, item, r) {
 }
 
 // The detail panel's rows of an item the panel went down to (a line's
-// item: it has no card, so no shape lends it rows): its state as a chip,
-// in its own color where its source names one (GitHub), else its state's
-// in the view's data (Azure), as its line has it. A pull request's
-// (`entry` its read: { data: { pr }, error }) add what the PR list's
-// details show beside the header: its checks where its source reads them
-// (GitHub), and while they load or after a failure, a note.
+// item: it has no card, so no shape lends it rows): its state as a chip
+// (stateChip), as its line has it. A pull request's (`entry` its read: {
+// data: { pr }, error }) add what the PR list's details show beside the
+// header: its checks where its source reads them (GitHub); what GitHub
+// said besides, a warning each; and while they load or after a failure, a
+// note.
 export function levelParts(b, t, view, item, entry) {
-  const chips = [lineStateChip(t, b.state(view.id).data, item)];
+  const chips = [stateChip(t, b.state(view.id).data, item.state, item.color)];
   if (item.kind !== "pr") return { chips };
   const note = (text, level) => div().id("level-note").px(18).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES[level])).child(text);
   if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note("lädt …", "info")] };
@@ -4843,18 +4862,10 @@ export function levelParts(b, t, view, item, entry) {
   return { chips, sections: [...(checks ? [checksSection(t, checks)] : []), ...(warnings ?? []).map((w) => note(w, "warning"))] };
 }
 
-// The chip of a line's or a level's state: in its own color where its
-// source names one (GitHub), else its state's in the view's `data`
-// (Azure); muted before the view is read.
-function lineStateChip(t, data, line) {
-  const color = line.color ?? (data ? stateColor(data, line.state) : "muted");
-  return chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color));
-}
-
 // The block of the related items of `item` (relatedRows) in `view`, the
-// line `at` marked (null: none). A line's state's color, and whether it is
-// done, are its own where its source names them (GitHub), else its state's
-// in the view's data (Azure).
+// line `at` marked (null: none), each with its state as a chip (stateChip).
+// Whether a line is done is its own where its source names it (GitHub),
+// else its state's in the view's data (Azure).
 export function relatedSections(b, t, mono, view, item, entry, at) {
   const ui = b.relatedUi;
   const data = b.state(view.id).data;
@@ -4882,7 +4893,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(lineStateChip(t, data, line));
+      .child(stateChip(t, data, line.state, line.color));
   };
   const offset = offsetOf(ui, item.key);
   const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))
@@ -5938,7 +5949,7 @@ function drawBacklog(b, t, mono, view, st) {
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()
         .child(div().min_w(0).truncate().child(r.title))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
-      .child(div().w(WIDTH.state).flex_none().child(chip(t, r.state ?? "ohne Status", t.background, toneColor(t, stateColor(data, r.state)))))
+      .child(div().w(WIDTH.state).flex_none().child(stateChip(t, data, r.state)))
       .child(cell(WIDTH.sprint, r.sprint ?? "—"))
       .child(cell(WIDTH.assignee, r.assignees.join(", ")))
       .when(Boolean(line), (el) => el.child(line));
@@ -6641,12 +6652,10 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
     .child(h_flex().gap(5).flex_wrap().items_center()
-      .child(stateChip(t, st.data, story.state))
+      .child(stateChip(t, st.data, story.state).flex_none())
       .when(story.assignees.length > 0, (el) => el.child(assigneeText(t, story))))
     .when(Boolean(line), (el) => el.child(line));
 }
-
-const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, toneColor(t, stateColor(data, state))).flex_none();
 
 // A task's card: its left edge in its column's color, its key, title, own
 // state, assignee and session, and a line across its top in its type's
@@ -6679,7 +6688,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
         .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
       .child(h_flex().gap(5).flex_wrap().items_center()
-        .child(stateChip(t, st.data, shownState(card, col)))
+        .child(stateChip(t, st.data, shownState(card, col)).flex_none())
         .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
     .when(Boolean(line), (el) => el.child(line));
@@ -7605,8 +7614,7 @@ export default class Board extends View {
   // view, and of each level the details panel went down to from it, where
   // its source has some to read and the view keeps none (keptRelated says
   // what a refresh keeps; Calls, above). While a refresh of the view runs
-  // it waits:
-  // the refresh reads them once it ended (refresh).
+  // it waits: the refresh reads them once it ended (refresh).
   readRelated(cx) {
     const view = this.view();
     const item = this.detailsRoot();
@@ -7647,12 +7655,12 @@ export default class Board extends View {
   }
 
   // After the related items of the item `key` came: where the panel went
-  // down from that item, the level below is checked against the section
-  // its line came from (drillLine), where that section came whole (no
-  // error, not cut short, none hidden): its line is found
-  // there again, whose item the level then shows as it is now, or it is no
-  // longer there (`r` read them again), and the panel goes back up to that
-  // item, and says so. A section that did not come whole decides nothing.
+  // down from that item, the level below is checked against the section its
+  // line came from (drillLine), where that section came whole (wholeSection,
+  // related.js): its line is found there again, whose item the level then
+  // shows as it is now, or it is no longer there (`r` read them again), and
+  // the panel goes back up to that item, and says so. A section that did not
+  // come whole decides nothing.
   checkLevels(view, key, cx) {
     const panel = this.panelIn(view);
     if (!panel) return;
@@ -7660,9 +7668,8 @@ export default class Board extends View {
     const way = [this.detailsRootOf(view), ...levels.map((l) => l.item)];
     const at = way.findIndex((i) => i?.key === key);
     if (at < 0 || at >= levels.length) return;
-    const data = this.relatedOf(view, way[at])?.data;
-    const section = data?.[levels[at].section];
-    if (!section || section.error || section.cut || section.hidden) return;
+    const section = this.relatedOf(view, way[at])?.data?.[levels[at].section];
+    if (!wholeSection(section)) return;
     const next = levels[at].item;
     const found = section.lines.find((l) => sameItem(l, next));
     if (found) return void (levels[at].item = { ...found, key: next.key });
@@ -7753,8 +7760,7 @@ export default class Board extends View {
     if (!this.readsRelated(item) && !this.readsPullRequest(item)) return this.say(`${itemLabel(line)} lässt sich hier nicht zeigen`, "info", cx);
     const ui = this.relatedUi;
     const back = { line: panel.line, offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes, unfolded: ui.unfolded };
-    const data = this.relatedOf(view, this.levelItem(view))?.data;
-    const section = ["parents", "subIssues", "prs"].find((name) => data?.[name]?.lines.includes(line));
+    const section = sectionOf(this.relatedOf(view, this.levelItem(view))?.data, line);
     panel.levels.push({ item, back, section });
     panel.line = null;
     ui.sizes = new Map();

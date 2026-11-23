@@ -15,6 +15,7 @@ import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
+import { stateColor } from "../kinds/states.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -391,6 +392,13 @@ export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
 
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
+
+// A state as a chip, in the theme's background on its color: `color` where
+// its source names one (GitHub's lines), else its state's in the view's
+// `data` (Azure; kinds/states.js), muted before the view is read; "ohne
+// Status" for none.
+export const stateChip = (t, data, state, color = null) =>
+  chip(t, state ?? "ohne Status", t.background, toneColor(t, color ?? (data ? stateColor(data, state) : "muted")));
 
 // A chip in a `tone` (a theme name): `text` in the tone's color
 // (toneColor) on the tone's chip background (chipBg).

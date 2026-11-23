@@ -30,42 +30,39 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh, and an issue's
-// related items (its description, parent, sub-issues and linked pull
-// requests) one
+// Calls: a GitHub view costs one gh call per refresh, and an issue's related
+// items (its description, parent, sub-issues and linked pull requests) one
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
 // keeps of them keptRelated says); an item the details panel went down to
-// (Enter on a line, related.js) costs the same when it shows, a pull
-// request one gh or az call for its details (az repos pr show), and on `r`
-// each level's again, so that a level whose item is no longer among the
-// lines of the one above can go. An Azure work item's related items (its
-// description, parent, children and linked pull requests) cost the same,
-// one az
-// call (az boards work-item show --expand relations), and one WIQL query
-// more for its children's and its parent's titles and states where it has
-// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// (Enter on a line, related.js) costs the same when it shows, a pull request
+// one gh or az call for its details (az repos pr show), and on `r` each
+// level's again, so that a level whose item is no longer among the lines of
+// the one above can go. An Azure work item's related items (its description,
+// parent, children and linked pull requests) cost the same, one az call (az
+// boards work-item show --expand relations), and one WIQL query more for its
+// children's and its parent's titles and states where it has either
+// (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the level's work items in
 // their list by az rest, then one WIQL query for their fields; one for an
 // empty backlog), and one more for the project's work item types (their
 // colors) while neither view keeps them; either one more while who az is
-// stays unknown. What the Sprint and the Backlog read once and keep, and
-// for how long, makeAzure says. An assignment costs one gh or az call, and
-// the assignee picker one more per repo or team the first time it opens
-// there (GitHub's assignable users with who gh is; the team's members, and
-// who az is while that is unknown). A state change costs one az call, a
-// Backlog's create one and a child's parent link one more; a create reads
-// the Backlog again, and one whose answer was unclear asks one WIQL query
-// more after that refresh; a create for a team whose default iteration
-// follows the current one reads the team's settings first, one call more.
-// The PR tabs read nothing yet. Finding gh and az costs one sh call now
-// and then (toolPaths says when). A view refreshes when its tab first
-// shows, on `r` (which first drops what its source keeps of it: its
-// source's forget), after a column is hidden or shown (the command menu's
-// "Spalte ausblenden", a name in the hidden line, the column menu), when it
-// is shown again older than refreshMinutes, and every refreshMinutes while
-// it shows.
+// stays unknown. What the Sprint and the Backlog read once and keep, and for
+// how long, makeAzure says. An assignment costs one gh or az call, and the
+// assignee picker one more per repo or team the first time it opens there
+// (GitHub's assignable users with who gh is; the team's members, and who az
+// is while that is unknown). A state change costs one az call, a Backlog's
+// create one and a child's parent link one more; a create reads the Backlog
+// again, and one whose answer was unclear asks one WIQL query more after
+// that refresh; a create for a team whose default iteration follows the
+// current one reads the team's settings first, one call more. The PR tabs
+// read nothing yet. Finding gh and az costs one sh call now and then
+// (toolPaths says when). A view refreshes when its tab first shows, on `r`
+// (which first drops what its source keeps of it: its source's forget),
+// after a column is hidden or shown (the command menu's "Spalte ausblenden",
+// a name in the hidden line, the column menu), when it is shown again older
+// than refreshMinutes, and every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -104,7 +101,7 @@ import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, v
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
-import { keptRelated, pathLabel, relatedLines, stepLine } from "./related.js";
+import { keptRelated, pathLabel, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
 import { store, migrateShownView, boardShown, shownOf, button, detailSection, detailWidth, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
@@ -577,8 +574,7 @@ export default class Board extends View {
   // view, and of each level the details panel went down to from it, where
   // its source has some to read and the view keeps none (keptRelated says
   // what a refresh keeps; Calls, above). While a refresh of the view runs
-  // it waits:
-  // the refresh reads them once it ended (refresh).
+  // it waits: the refresh reads them once it ended (refresh).
   readRelated(cx) {
     const view = this.view();
     const item = this.detailsRoot();
@@ -619,12 +615,12 @@ export default class Board extends View {
   }
 
   // After the related items of the item `key` came: where the panel went
-  // down from that item, the level below is checked against the section
-  // its line came from (drillLine), where that section came whole (no
-  // error, not cut short, none hidden): its line is found
-  // there again, whose item the level then shows as it is now, or it is no
-  // longer there (`r` read them again), and the panel goes back up to that
-  // item, and says so. A section that did not come whole decides nothing.
+  // down from that item, the level below is checked against the section its
+  // line came from (drillLine), where that section came whole (wholeSection,
+  // related.js): its line is found there again, whose item the level then
+  // shows as it is now, or it is no longer there (`r` read them again), and
+  // the panel goes back up to that item, and says so. A section that did not
+  // come whole decides nothing.
   checkLevels(view, key, cx) {
     const panel = this.panelIn(view);
     if (!panel) return;
@@ -632,9 +628,8 @@ export default class Board extends View {
     const way = [this.detailsRootOf(view), ...levels.map((l) => l.item)];
     const at = way.findIndex((i) => i?.key === key);
     if (at < 0 || at >= levels.length) return;
-    const data = this.relatedOf(view, way[at])?.data;
-    const section = data?.[levels[at].section];
-    if (!section || section.error || section.cut || section.hidden) return;
+    const section = this.relatedOf(view, way[at])?.data?.[levels[at].section];
+    if (!wholeSection(section)) return;
     const next = levels[at].item;
     const found = section.lines.find((l) => sameItem(l, next));
     if (found) return void (levels[at].item = { ...found, key: next.key });
@@ -725,8 +720,7 @@ export default class Board extends View {
     if (!this.readsRelated(item) && !this.readsPullRequest(item)) return this.say(`${itemLabel(line)} lässt sich hier nicht zeigen`, "info", cx);
     const ui = this.relatedUi;
     const back = { line: panel.line, offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes, unfolded: ui.unfolded };
-    const data = this.relatedOf(view, this.levelItem(view))?.data;
-    const section = ["parents", "subIssues", "prs"].find((name) => data?.[name]?.lines.includes(line));
+    const section = sectionOf(this.relatedOf(view, this.levelItem(view))?.data, line);
     panel.levels.push({ item, back, section });
     panel.line = null;
     ui.sizes = new Map();

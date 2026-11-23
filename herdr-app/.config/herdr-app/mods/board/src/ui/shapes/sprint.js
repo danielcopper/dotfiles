@@ -31,8 +31,7 @@ import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { assigneeText, cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, store, typeLine, workItemDetail } from "../helpers.js";
-import { toneColor } from "../tones.js";
+import { assigneeText, cardEdge, columnHead, selectedLook, sessionChip, shownOf, stateChip, store, typeLine, workItemDetail } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -254,12 +253,10 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
     .child(h_flex().gap(5).flex_wrap().items_center()
-      .child(stateChip(t, st.data, story.state))
+      .child(stateChip(t, st.data, story.state).flex_none())
       .when(story.assignees.length > 0, (el) => el.child(assigneeText(t, story))))
     .when(Boolean(line), (el) => el.child(line));
 }
-
-const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, toneColor(t, stateColor(data, state))).flex_none();
 
 // A task's card: its left edge in its column's color, its key, title, own
 // state, assignee and session, and a line across its top in its type's
@@ -292,7 +289,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
         .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
       .child(h_flex().gap(5).flex_wrap().items_center()
-        .child(stateChip(t, st.data, shownState(card, col)))
+        .child(stateChip(t, st.data, shownState(card, col)).flex_none())
         .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
     .when(Boolean(line), (el) => el.child(line));

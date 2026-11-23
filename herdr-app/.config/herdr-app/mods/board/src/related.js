@@ -65,9 +65,20 @@ export function pathLabel(root, levels) {
   return [cardLabel(root), ...levels.map(label)].join(" › ");
 }
 
-// The lines of read related items (`data`, or null while none are read),
-// the parent first, then the sub-issues, then the linked pull requests.
-export const relatedLines = (data) => (data ? [...data.parents.lines, ...data.subIssues.lines, ...data.prs.lines] : []);
+// The sections of read related items, in the order of their lines: the
+// parent first, then the sub-issues, then the linked pull requests.
+export const RELATED_SECTIONS = ["parents", "subIssues", "prs"];
+
+// The lines of read related items (`data`, or null while none are read).
+export const relatedLines = (data) => (data ? RELATED_SECTIONS.flatMap((name) => data[name].lines) : []);
+
+// The name of the section of `data` that holds `line` (one of its lines,
+// as relatedLines gives them); null for none.
+export const sectionOf = (data, line) => RELATED_SECTIONS.find((name) => data?.[name]?.lines.includes(line)) ?? null;
+
+// Whether a section came whole, so that what it lacks is not there: no
+// error, not cut short, none it could not read.
+export const wholeSection = (section) => Boolean(section) && !section.error && !section.cut && !section.hidden;
 
 // The line one step `dir` (+1 down, -1 up) from `line` (an index, or null
 // for none) over `count` lines: down from none to the first, up from the
