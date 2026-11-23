@@ -3844,7 +3844,10 @@ const markedCopy = (file, block) => {
   const at = src.indexOf(`// ---- ${block}:`);
   return at < 0 ? null : src.slice(at, src.indexOf(`// ---- end ${block} ----`, at));
 };
-const THEME = { chrome: "#chrome", border: "#border", muted: "#muted", foreground: "#fg", hover: "#hover", selected: "#selected" };
+const THEME = {
+  chrome: "#chrome", border: "#border", muted: "#muted", foreground: "#fg", hover: "#hover", selected: "#selected",
+  accent: "#accent", accent_foreground: "#onaccent",
+};
 
 // A board button on a fake host whose layout() is `tree()`; render() draws
 // it as herdr does after a change, and press(button) presses it.
@@ -4002,16 +4005,24 @@ test("UI: a press on the board button whose switch throws says so", async () => 
   assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Board button failed", "panes broke", "error"]]);
 });
 
-test("UI: the board button is highlighted while the board layer shows the board, and plain otherwise", async () => {
+test("UI: the board button is on the accent while the board layer shows the board, since the tab row keeps its tab marked, and plain otherwise", async () => {
   let tree = () => layerLayout("main");
   const { render } = await boardButton({ tree: () => tree() });
   const look = () => {
     const el = byId(render(), "board-open");
     return [el.with.bg?.[0] ?? null, el.with.text_color[0]];
   };
+  const hovered = () => {
+    const style = { with: {} };
+    const proxy = { bg: (c) => ((style.with.bg = c), proxy), text_color: (c) => ((style.with.text_color = c), proxy) };
+    byId(render(), "board-open").with.hover[0](proxy);
+    return style.with;
+  };
   assert.deepEqual(look(), [null, "#muted"], "the tab's content shows");
+  assert.deepEqual(hovered(), { bg: "#hover", text_color: "#fg" }, "hovered while the tab's content shows");
   tree = () => layerLayout("board");
-  assert.deepEqual(look(), ["#selected", "#fg"], "the board shows");
+  assert.deepEqual(look(), ["#accent", "#onaccent"], "the board shows");
+  assert.deepEqual(hovered(), {}, "hovered while the board shows: it stays on the accent");
   tree = () => null;
   assert.deepEqual(look(), [null, "#muted"], "a layout without the layer");
 });

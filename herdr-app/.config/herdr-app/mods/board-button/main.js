@@ -166,9 +166,12 @@ export default class BoardButton extends View {
           .items_center()
           .justify_center()
           .rounded(6)
-          .text_color(shown ? t.foreground : t.muted)
-          .when(shown, (el) => el.bg(t.selected))
-          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          // The tab row keeps highlighting the last pane tab while the board
+          // shows (herdr's tabs mod reads only the tab's own active flag), so
+          // the button carries the "board is shown" mark itself: the accent.
+          .text_color(shown ? t.accent_foreground : t.muted)
+          .when(shown, (el) => el.bg(t.accent))
+          .hover((s) => (shown ? s : s.bg(t.hover).text_color(t.foreground)))
           .tooltip("Board")
           .accessibility_label("Board")
           .on_mouse_down("left", press)
