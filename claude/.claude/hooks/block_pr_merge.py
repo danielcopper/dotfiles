@@ -25,29 +25,45 @@ SUSPECT = re.compile(r"merge|complet|enqueue", re.IGNORECASE)
 # A heredoc marker (not the here-string <<<). The command receiving it runs its body, sends it as
 # a request body, writes it to a file, or only reads it.
 HEREDOC = re.compile(r"(?<!<)<<-?\s*(['\"]?)\\?([\w.-]+)\1")
-RUNNER = re.compile(r"bash|sh|zsh|dash|ksh|fish|python[\d.]*|node|ruby|perl|ssh")
-# Programs that run the command after them, by the options of theirs that take a separate value.
-# env's -S takes the command itself as its value, so it is read as a flag.
+SHELLS = r"(?:bash|sh|zsh|dash|ksh|fish)"
+RUNNER = re.compile(rf"{SHELLS}|python[\d.]*|node|ruby|perl|ssh")
+# Programs that run another command given after them; a heredoc or a written file handed to one
+# counts as run, whatever its options are.
 WRAPPERS = {
-    "env": {"-u", "-C", "--unset", "--chdir"},
-    "sudo": {"-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U"},
-    "nohup": set[str](),
-    "exec": {"-a"},
-    "command": set[str](),
-    "time": {"-f", "-o"},
-    "timeout": {"-s", "-k", "--signal", "--kill-after"},
-    "nice": {"-n", "--adjustment"},
-    "ionice": {"-c", "-n", "-p", "-P", "-u"},
-    "stdbuf": {"-i", "-o", "-e"},
-    "setsid": set[str](),
-    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"},
+    "env",
+    "sudo",
+    "nohup",
+    "exec",
+    "command",
+    "time",
+    "timeout",
+    "nice",
+    "ionice",
+    "stdbuf",
+    "setsid",
+    "xargs",
+    "flock",
+    "watch",
 }
+WRAPPER_PAIRS = {
+    ("uv", "run"),
+    ("poetry", "run"),
+    ("mise", "exec"),
+    ("mise", "x"),
+    ("docker", "exec"),
+    ("kubectl", "exec"),
+}
+RESERVED = {"!", "{", "if", "then", "elif", "else", "do", "while", "until"}
+# A cat heredoc inside the `$( )` that is a shell's -c argument: `bash -c "$(cat <<X`.
+SHELL_C_CAT = re.compile(
+    rf"(?:^|[\s;&|(])(?:\S*/)?{SHELLS}\s+(?:-\w+\s+)*-\w*c\w*\s+[\"']?\$\(\s*cat\s*$"
+)
 SEPARATOR = re.compile(r"&&|\|\||[;&|\n()`]")  # ends a simple command
 STATEMENT = re.compile(r"&&|\|\||[;&\n]")  # ends a pipeline
 ASSIGNMENT = re.compile(r"\w+=\S*")
 SUBSTITUTION = re.compile(r"(?:(\w+)=)?\$\(([^()]*)\)")
-ASSIGNMENTS = re.compile(
-    r"\s*(?:(?:export|local|readonly|declare|typeset)(?:\s+-\w+)*\s+)?(?:\w+=\S*\s+)*"
+ASSIGNMENT_PREFIX = re.compile(
+    rf"\s*(?:(?:export|local|readonly|declare|typeset)(?:\s+-\w+)*\s+)?(?:{ASSIGNMENT.pattern}\s+)*"
 )
 GITHUB_TOOLS = {"gh", "curl", "wget"}  # the tools that reach GitHub
 REQUEST_TOOLS = GITHUB_TOOLS | {"az"}  # the tools that send a request body
@@ -75,31 +91,41 @@ def tools(words: list[str]) -> set[str]:
     return {os.path.basename(word) for word in words}
 
 
+def unquoted(text: str) -> str:
+    """*text* with quotes and backslashes deleted, as the hook reads every word."""
+    return re.sub(r"['\"\\]", "", text.replace("$'", "'").replace('$"', '"'))
+
+
 def command_word(words: list[str]) -> int:
-    """Index of the command word of the simple command *words*: past assignments and the
-    wrappers in WRAPPERS and `uv run`, with their options and option values (and timeout's
-    duration); len(words) when there is none."""
+    """Index of the command word of the simple command *words*, past assignments and the
+    reserved words `!`, `{`, `if`, `then`, `elif`, `else`, `do`, `while` and `until`;
+    len(words) when there is none. The word found may be a wrapper (see wrapper_at)."""
     k = 0
-    while k < len(words):
-        name = os.path.basename(words[k])
-        if ASSIGNMENT.fullmatch(words[k]):
-            k += 1
-            continue
-        if name == "uv" and words[k + 1 : k + 2] == ["run"]:
-            k += 1
-        elif name not in WRAPPERS:
-            break
+    while k < len(words) and (ASSIGNMENT.fullmatch(words[k]) or words[k] in RESERVED):
         k += 1
-        while k < len(words) and words[k].startswith("-"):
-            k += 2 if words[k] in WRAPPERS.get(name, set()) else 1
-        if name == "timeout":
-            k += 1
     return k
 
 
-def outside_quotes(line: str, end: int) -> bool:
-    """Whether position *end* of *line* stands outside quotes and before an unquoted comment;
-    a `$( )`, also inside double quotes, starts afresh."""
+def wrapper_at(words: list[str], k: int) -> int:
+    """How many words the wrapper at index *k* of *words* spans (`sudo` 1, `uv run` 2), or 0."""
+    name = os.path.basename(words[k]) if k < len(words) else ""
+    if name in WRAPPERS:
+        return 1
+    return 2 if (name, words[k + 1] if k + 1 < len(words) else "") in WRAPPER_PAIRS else 0
+
+
+def skip_options(words: list[str], k: int, values: tuple[str, ...] = ()) -> int:
+    """Index of the first word from *k* that is no option, an option in *values* taking the
+    next word as its value."""
+    while k < len(words) and words[k].startswith(("-", "+")):
+        k += 2 if words[k] in values else 1
+    return k
+
+
+def opens_heredoc(line: str, end: int) -> bool:
+    """Whether a marker at position *end* of *line* opens a heredoc: it stands outside quotes and
+    before a comment (a `#` at the start of a word or after `;`, `&`, `|` or `(`); a `$( )`,
+    also inside double quotes, starts afresh (the caller checks the delimiter line)."""
     quote = ""
     outer: list[str] = []  # the quote each open `$(` stands in
     k = 0
@@ -118,80 +144,88 @@ def outside_quotes(line: str, end: int) -> bool:
             quote = char
         elif char == ")" and outer:
             quote = outer.pop()
-        elif char == "#" and (k == 0 or line[k - 1].isspace()):
+        elif char == "#" and (k == 0 or line[k - 1].isspace() or line[k - 1] in ";&|("):
             return False
         k += 1
     return not quote
 
 
-def heredoc_role(line: str, marker: re.Match[str]) -> tuple[str, list[str]]:
+def heredoc_role(line: str, marker: re.Match[str]) -> tuple[str, list[tuple[str, bool]]]:
     """What the command receiving the heredoc opened by *marker* does with its body, judged by
     the command words of that command and of the pipeline stages after it: "run" it (a shell or
-    an interpreter, or a wrapper whose command the hook cannot find), "send" it (a request tool),
-    or "read" it, writing it to the files it names with a `>`, `>>` or `tee`."""
+    an interpreter, any wrapper, or the -c string of a shell), "send" it (a request tool), or
+    "read" it, writing it to the files it names with `>`, `>>`, `tee` or `tee -a` (the flag
+    says whether it appends)."""
+    if SHELL_C_CAT.search(line[: marker.start()]):
+        return "run", []
     before = SEPARATOR.split(line[: marker.start()])[-1]
     after = STATEMENT.split(line[marker.end() :])[0]
-    stages = [re.sub(r"['\"]", " ", stage).split() for stage in f"{before} {after}".split("|")]
+    stages = [unquoted(stage).split() for stage in f"{before} {after}".split("|")]
     names: set[str] = set()
     for stage in stages:
         k = command_word(stage)
+        if wrapper_at(stage, k):
+            return "run", []
         if k < len(stage):
             names.add(os.path.basename(stage[k]))
-        elif tools(stage) & WRAPPERS.keys():
-            return "run", []
     if any(RUNNER.fullmatch(name) for name in names):
         return "run", []
     if REQUEST_TOOLS & names:
         return "send", []
-    paths: list[str] = []
+    paths: list[tuple[str, bool]] = []
     for words in stages:
-        tee = False
+        tee = append = False
         for k, word in enumerate(words):
             if word in (">", ">>") and k + 1 < len(words):
-                paths.append(words[k + 1])
+                paths.append((words[k + 1], word == ">>"))
             elif re.fullmatch(r">>?[^>&].*", word):
-                paths.append(word.lstrip(">"))
+                paths.append((word.lstrip(">"), word.startswith(">>")))
             elif os.path.basename(word) == "tee":
                 tee = True
+            elif tee and word in ("-a", "--append"):
+                append = True
             elif tee and not word.startswith("-"):
-                paths.append(word)
+                paths.append((word, append))
     return "read", paths
 
 
 def literal(word: str) -> str:
-    """*word* as a key for a file this command writes: `${NAME}` as `$NAME`, the path
-    normalised."""
-    return os.path.normpath(re.sub(r"\$\{(\w+)\}", r"$\1", word))
+    """*word* as a key for a file this command writes: `${NAME}` as `$NAME`, a leading `$HOME`
+    as `~`, the path normalised."""
+    word = re.sub(r"\$\{(\w+)\}", r"$\1", word)
+    return os.path.normpath(re.sub(r"^\$HOME(?=/|$)", "~", word))
 
 
 def normalise(command: str) -> tuple[str, str, dict[str, str]]:
-    """*command* with backslash-newlines joined, the bodies of heredocs that no shell or
-    interpreter runs dropped, quotes, backslashes and the commas and brackets of a list removed;
-    the bodies of the heredocs a request tool receives; and the heredoc bodies written to a file,
-    by the file's literal word. A marker opens a heredoc only outside quotes and comments, and
-    only when its delimiter line comes."""
+    """*command* with backslash-newlines joined, the bodies of heredocs that are not run dropped,
+    quotes, backslashes and the commas and brackets of a list removed; the bodies of the heredocs
+    a request tool receives; and the heredoc bodies written to a file, by the file's literal
+    word (a body `>>` or `tee -a` appends is added to it). A marker opens a heredoc only outside
+    quotes and comments, and only when its delimiter line comes."""
     lines = command.replace("\\\n", "").split("\n")
     kept: list[str] = []
     sent: list[str] = []
     written: dict[str, str] = {}
-    pending: list[tuple[str, str, list[str], list[str]]] = []  # delimiter, role, paths, body
+    pending: list[tuple[str, str, list[tuple[str, bool]], list[str]]] = []
     last = {line.strip(): i for i, line in enumerate(lines)}
     for i, line in enumerate(lines):
         if pending:
             delimiter, role, paths, body = pending[0]
             if line.strip() == delimiter:
                 _ = pending.pop(0)
-                written.update(dict.fromkeys(map(literal, paths), "\n".join(body)))
+                for path, append in paths:
+                    key = literal(path)
+                    written[key] = (written.get(key, "") + "\n" if append else "") + "\n".join(body)
             else:
                 body.append(line)
                 {"run": kept, "send": sent}.get(role, []).append(line)
             continue
         kept.append(line)
         for marker in HEREDOC.finditer(line):
-            if last.get(marker[2], -1) > i and outside_quotes(line, marker.start()):
-                pending.append((marker[2], *heredoc_role(line, marker), []))
-    text = "\n".join(kept).replace("$'", "'").replace('$"', '"')
-    return re.sub(r"[,\[\]]", " ", re.sub(r"['\"\\]", "", text)), "\n".join(sent), written
+            if last.get(marker[2], -1) > i and opens_heredoc(line, marker.start()):
+                role, paths = heredoc_role(line, marker)
+                pending.append((marker[2], role, paths, []))
+    return re.sub(r"[,\[\]]", " ", unquoted("\n".join(kept))), "\n".join(sent), written
 
 
 def next_word_is(words: list[str], start: int, wanted: str) -> int | None:
@@ -327,7 +361,7 @@ def fed_paths(text: str) -> list[str]:
         for found in SUBSTITUTION.finditer(statement):
             # `NAME=$( )` before the command word assigns a variable; elsewhere, as in
             # `-f query=$( )`, the substitution is a word of the command
-            assigned = found[1] and ASSIGNMENTS.fullmatch(statement[: found.start()])
+            assigned = found[1] and ASSIGNMENT_PREFIX.fullmatch(statement[: found.start()])
             if has_request(flat) or (assigned and found[1] in used):
                 paths += stdin_paths(found[2].split(), cat=True)
         stages = flat.split("|")
@@ -340,11 +374,12 @@ def fed_paths(text: str) -> list[str]:
 
 def read_body(path: str, cwd: str | None, written: dict[str, str]) -> str:
     """The text the file *path* holds: a heredoc this command writes to it, found by the same
-    word, or else the regular file on disk up to MAX_SIZE (`~` and `$HOME` expanded, a relative
-    path taken from *cwd*); empty when neither can be read."""
-    if literal(path) in written:
-        return written[literal(path)]
-    path = os.path.expanduser(re.sub(r"^\$(?:HOME|\{HOME\})(?=/|$)", "~", path))
+    word with quotes deleted, or else the regular file on disk up to MAX_SIZE (`~` and `$HOME`
+    expanded, a relative path taken from *cwd*); empty when neither can be read."""
+    key = literal(path)
+    if key in written:
+        return written[key]
+    path = os.path.expanduser(key)
     if "$" in path or path in ("", "-"):
         return ""
     try:
@@ -358,19 +393,24 @@ def read_body(path: str, cwd: str | None, written: dict[str, str]) -> str:
 
 
 def run_scripts(segments: list[list[str]]) -> set[str]:
-    """The script words *segments* run: the command word itself, the file `source` or `.`
-    reads, or the first argument of a shell or an interpreter (past its options and the values
-    of -o and -O)."""
+    """The script words *segments* may run, to be looked up among the files the command writes:
+    the command word, the file `source` or `.` reads, every argument of a wrapper, and the first
+    argument after any shell or interpreter word (past its options and the values of -o and -O).
+    """
     scripts: set[str] = set()
     for words in segments:
         k = command_word(words)
         if k >= len(words):
             continue
-        name = os.path.basename(words[k])
-        if name in ("source", ".") or RUNNER.fullmatch(name):
-            k += 1
-            while k < len(words) and words[k].startswith(("-", "+")):
-                k += 2 if words[k] in ("-o", "-O", "+o", "+O") else 1
+        span = wrapper_at(words, k)
+        if span:
+            scripts.update(literal(arg) for arg in words[k + span :] if not arg.startswith("-"))
+        elif os.path.basename(words[k]) in ("source", "."):
+            k = skip_options(words, k + 1)
+        for r, word in enumerate(words):
+            if RUNNER.fullmatch(os.path.basename(word)):
+                first = skip_options(words, r + 1, ("-o", "-O", "+o", "+O"))
+                scripts.update(literal(arg) for arg in words[first : first + 1])
         if k < len(words):
             scripts.add(literal(words[k]))
     return scripts
@@ -403,8 +443,10 @@ def check(command: str, cwd: str | None = None) -> str | None:
     segments = simple_commands(text)
     ran = [written[word] for word in run_scripts(segments) if word in written]
     if ran:  # a script this command writes and runs is read as commands too
-        more_text, more_sent, _ = normalise("\n".join(ran))
+        more_text, more_sent, more_written = normalise("\n".join(ran))
         text, sent = f"{text}\n{more_text}", f"{sent}\n{more_sent}"
+        for key, body in more_written.items():  # joined: any version of a file counts
+            written[key] = f"{written.get(key, '')}\n{body}"
         segments = simple_commands(text)
     names = tools([word for segment in segments for word in segment])
 
@@ -455,18 +497,28 @@ def judge(raw: str) -> tuple[str | None, Exception | None]:
         cwd = field(data, "cwd")
         return (check(command, cwd if isinstance(cwd, str) else None) if command else None), None
     except Exception as error:  # noqa: BLE001 - judged by its merge words instead
-        if SUSPECT.search(command):
-            return f"{UNCHECKED}: {error!r}; split it or tell the owner", error
-        return None, error
+        return unchecked(repr(error), command), error
+
+
+def unchecked(detail: str, text: str) -> str | None:
+    """The form to refuse a command the hook could not check for, naming *detail*, when *text*
+    holds a merge word; None to let it through."""
+    return f"{UNCHECKED}: {detail}; split it or tell the owner" if SUSPECT.search(text) else None
 
 
 def main() -> int:
+    detail = ""  # what stopped the check, if anything did
     try:
         form, error = judge(sys.stdin.buffer.read().decode("utf-8"))
-    except (OSError, ValueError, UnicodeError) as unread:
-        form, error = None, unread
-    if error is not None:
-        print(f"block_pr_merge: {error!r}", file=sys.stderr)
+        detail = repr(error) if error is not None else ""
+    except UnicodeDecodeError as unread:
+        # Name the bad byte, not the input; refuse only when the input holds a merge word.
+        detail = f"UnicodeDecodeError at byte {unread.start}"
+        form = unchecked(detail, unread.object.decode("utf-8", "replace"))
+    except OSError as unread:
+        form, detail = None, repr(unread)
+    if detail:
+        print(f"block_pr_merge: {detail}", file=sys.stderr)
     if form:
         decision = {
             "hookEventName": "PreToolUse",
@@ -474,8 +526,8 @@ def main() -> int:
             "permissionDecisionReason": REASON.format(form=form),
         }
         print(json.dumps({"hookSpecificOutput": decision}))
-    elif error is not None:
-        message = f"block_pr_merge: could not check this command ({error!r}); it was allowed"
+    elif detail:
+        message = f"block_pr_merge: could not check this command ({detail}); it was allowed"
         print(json.dumps({"systemMessage": message}))
     return 0
 

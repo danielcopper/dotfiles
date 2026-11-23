@@ -84,8 +84,9 @@ DENIED = {
         "gh pr list -q .[].number | xargs -I{} gh pr merge {} --squash",
         "for n in 1 2; do gh pr merge $n; done",
         "bash <<'EOF'\ngh pr checks 5\ngh pr merge 5\nEOF",
+        "FOO=1 bash <<'EOF'\ngh pr merge 5\nEOF",
         "cat <<'EOF' | sh\ngh pr merge 5\nEOF",
-        # a heredoc a shell receives behind a wrapper and its option values
+        # a heredoc fed to a wrapper, whatever its options
         "sudo -u x bash <<'EOF'\ngh pr merge 5\nEOF",
         "timeout -s KILL 60 bash <<'EOF'\ngh pr merge 5\nEOF",
         "nice -n 5 bash <<'EOF'\ngh pr merge 5\nEOF",
@@ -99,6 +100,16 @@ DENIED = {
         "env --split-string=bash <<'EOF'\ngh pr merge 5\nEOF",
         "env -S \"sh -s\" arg1 <<'EOF'\ngh pr merge 5\nEOF",
         "uv run python - <<'PY'\nimport os\nos.system('gh pr merge 5')\nPY",
+        'uv run --no-project --with pyyaml python - <<\'PY\'\nimport subprocess\nsubprocess.run(["gh", "pr", "merge", "5"])\nPY',
+        "sudo --user x bash <<'EOF'\ngh pr merge 5\nEOF",
+        "mise exec -- bash <<'EOF'\ngh pr merge 5\nEOF",
+        "docker exec -i c bash <<'EOF'\ngh pr merge 5\nEOF",
+        "flock /tmp/l bash <<'EOF'\ngh pr merge 5\nEOF",
+        "if ! python3 - <<'PY'\nimport os\nos.system('gh pr merge 5')\nPY\nthen echo failed; fi",
+        "bash -c \"$(cat <<'X'\ngh pr merge 5\nX\n)\"",
+        "true;# note: cat <<EOF\ngh pr merge 5\ncat > x.txt <<EOF\nhi\nEOF",
+        # a # right after a $( ) close starts no comment
+        "cat >/dev/null $(true)#<<A\ncat >/dev/null <<B\nA\ngh pr merge 5\nB",
         'python3 - <<\'PY\'\nimport subprocess\nsubprocess.run(["gh", "pr", "merge", "5"])\nPY',
         "gh pr \\\nmerge 5",
         "gh pr 'merge' 5",
@@ -118,6 +129,12 @@ DENIED = {
             'subprocess.run(["gh", "pr", "merge", "5"])\nEOF\nuv run python m.py'
         ),
         "cat > ${S}/m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash $S/m.sh",
+        'cat > s.py <<\'EOF\'\nimport subprocess\nsubprocess.run(["gh", "pr", "merge", "5"])\nEOF\nuv run --with httpx python s.py',
+        'cat > land.py <<\'EOF\'\nimport subprocess\nsubprocess.run(["gh", "pr", "merge", "5"])\nEOF\nif python3 land.py; then echo done; fi',
+        "cat > x.sh <<'EOF'\ngh pr merge 5\nEOF\nfor i in 1; do bash x.sh; done",
+        "cat > x.sh <<'EOF'\ngh pr merge 5\nEOF\n{ bash x.sh; }",
+        'cat > x.py <<\'EOF\'\nimport subprocess\nsubprocess.run(["gh", "pr", "merge", "5"])\nEOF\npoetry run python x.py',
+        'cat > "$D"/x.sh <<\'EOF\'\ngh pr merge 5\nEOF\nbash "$D"/x.sh',
         # a << whose delimiter line never comes opens no heredoc
         'echo "use <<EOF for heredocs"\ngh pr merge 5',
         "x=$((1<<3))\ngh pr merge 5",
@@ -180,6 +197,7 @@ DENIED = {
         f"cat > q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input q.json",
         f'tmp=$(mktemp); cat > "$tmp" <<\'EOF\'\n{MERGE_QUERY}\nEOF\ngh api graphql -F query=@"$tmp"',
         f"cat > ~/q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input ~/q.json",
+        f"cat > $HOME/q2.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input ~/q2.json",
         # a body file assigned to an exported or declared variable first
         'export Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
         'declare -x Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
@@ -237,6 +255,36 @@ DENIED = {
         (
             'cat > "$S/b.json" <<\'EOF\'\n{"status": "completed"}\nEOF\n'
             f"az rest --method patch --uri '{AZ_PR}' --body @\"$S/b.json\""
+        ),
+        (
+            'cat > "$D"/b.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+            f"az rest --method patch --uri '{AZ_PR}' --body @\"$D\"/b.json"
+        ),
+        (
+            'cat > $D/"b.json" <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+            f"az rest --method patch --uri '{AZ_PR}' --body @$D/\"b.json\""
+        ),
+        (
+            'cat > b2.json <<\'EOF\'\n{"status": "completed",\nEOF\n'
+            "cat >> b2.json <<'EOF'\n\"x\": 1}\nEOF\n"
+            f"az rest --method patch --uri '{AZ_PR}' --body @b2.json"
+        ),
+        (
+            'tee b3.json <<\'EOF\' >/dev/null\n{"status": "completed",\nEOF\n'
+            "tee -a b3.json <<'EOF' >/dev/null\n\"x\": 1}\nEOF\n"
+            f"az rest --method patch --uri '{AZ_PR}' --body @b3.json"
+        ),
+        (
+            "cat > m.sh <<'EOF'\ncat > in.json <<'X'\n"
+            '{"status": "completed"}\nX\n'
+            f"az rest --method patch --uri '{AZ_PR}' --body @in.json\nEOF\nbash m.sh"
+        ),
+        # a script that rewrites a body file does not hide what the command wrote first
+        (
+            'cat > b.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+            "cat > m.sh <<'EOF'\ncat > b.json <<'X'\n"
+            '{"title": "x"}\nX\nEOF\nbash m.sh\n'
+            f"az rest --method patch --uri '{AZ_PR}' --body @b.json"
         ),
         (
             'cat > body.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
@@ -327,6 +375,11 @@ PASSES = [
         'curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -d \'{"status":"completed"}\''
         " https://api.github.com/repos/o/r/check-runs/9"
     ),
+    # out of scope by decision: a literal URL in a header beside a target from a variable
+    (
+        "curl -s -X PATCH -H 'Referer: https://dev.azure.com/o'"
+        ' -d \'{"status": "completed"}\' "$PRURL"'
+    ),
     f"az rest --method patch --uri '{AZ_PR}' --body @{{d}}/title.json",
     # a write toward Home Assistant with a variable in the body and the URL
     (
@@ -347,6 +400,7 @@ PASSES = [
     ),
     f"tee q.graphql <<'EOF'\n{MERGE_QUERY}\nEOF",
     "cat > notes.md <<'EOF' && bash lint.sh notes.md\nRun gh pr merge 5 later.\nEOF",
+    "cat > notes#1.md <<'EOF'\nRun gh pr merge 5 later.\nEOF",
     "cat > cases.txt <<'EOF'\ngh pr merge 5\nEOF\npython3 harness.py cases.txt",
     # request bodies from stdin that cannot merge, and a PR body that only mentions one
     'gh api graphql --input - <<\'EOF\'\n{"query": "query { viewer { login } }"}\nEOF',
@@ -412,6 +466,9 @@ NOT_DETECTED = {
     'declare -x Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
     # the script written as ${S}/m.sh and run as $S/m.sh
     "cat > ${S}/m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash $S/m.sh",
+    f"cat > $HOME/q2.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input ~/q2.json",
+    # a cat heredoc fed to a shell's -c, which the detector strips as data
+    "bash -c \"$(cat <<'X'\ngh pr merge 5\nX\n)\"",
 }
 
 
@@ -517,6 +574,20 @@ class BlockPrMerge(unittest.TestCase):
                 started = time.monotonic()
                 self.assertEqual(self.stdout(command), "")
                 self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_unreadable_input_with_a_merge_word_is_refused_naming_the_byte(self):
+        proc = subprocess.run(
+            [sys.executable, "-I", str(HOOK)],
+            input=b'{"tool_input": {"command": "gh pr merge 5 \xff"}}',
+            capture_output=True,
+            check=True,
+        )
+        out = decision(proc.stdout.decode())
+        assert out is not None
+        self.assertIn(
+            "(found: a command the hook could not check: UnicodeDecodeError at byte 42;",
+            out["permissionDecisionReason"],
+        )
 
     def test_unreadable_input_is_allowed_with_a_notice(self):
         proc = subprocess.run(

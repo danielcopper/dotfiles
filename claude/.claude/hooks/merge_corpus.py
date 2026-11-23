@@ -12,9 +12,12 @@ prints:
 - every command the detector calls a real merge that the hook lets through. None is the bar.
 With --show it also prints the refused commands and the errors, tokens masked and each cut to
 --width characters. The detector reads only the command's text, heredoc bodies that cat, tee
-or git only read left out unless the file they write is sent or run later in the command: a
-merge that lies in a file on disk or a variable is the hook's to find. Reading the commands'
-body files is the hook's doing; this script writes nothing but stdout.
+or git only read left out unless the file they write is sent (`@file`, `--input`, `--in-file`,
+`--body-file`) or run by a shell, an interpreter, `source`, `.` or as `./file` later in the
+command, spelled the same way: a merge that lies in a file on disk or a variable is the hook's
+to find. It counts only the hook's scope, not the spellings merge_policy leaves out as
+deliberate. Reading the commands' body files is the hook's doing; this script writes nothing
+but stdout.
 
 Run: python3 claude/.claude/hooks/merge_corpus.py [--show] [--width N]
 """
@@ -61,9 +64,11 @@ CURL_WRITE = (
     r"|\s-d|--data|--json)"
 )
 COMPLETION = r"(?:\"?status\"?\s*:\s*\"?(?:completed|3)\b|autoCompleteSetBy)"
+# Toward an Azure DevOps pull request itself, or toward a URL from a variable in a simple command
+# that spells no literal URL (the hook's scope; a header URL beside it is out of scope).
 AZURE_TARGET = (
-    r"(?:pullrequests[/\\][^/\\\s'\"?]+(?=[?'\"\s]|$)|--resource\s+pullRequests\b"
-    r"|\$\{?\w*(?:URL|URI)\w*\}?)"
+    r"(?:(?=.*?(?:pullrequests/[^/\s'\"?]+(?=[?'\"\s]|$)|--resource\s+pullRequests\b))"
+    r"|(?=[^\n;&|]*\$\{?\w*(?:URL|URI)\w*\}?)(?![^\n;&|]*://))"
 )
 REAL_MERGE = re.compile(
     "|".join(
@@ -88,12 +93,12 @@ REAL_MERGE = re.compile(
                 r"(?:--st\w*[\s=]+['\"]?completed|--auto-c[\w-]*(?![\w-])(?![\s=]+['\"]?(?:false|0)\b))"
             ),
             (
-                rf"\b(?:az\s+rest|az\s+devops\s+invoke|curl|wget)\b(?=.*?{AZURE_TARGET})"
+                rf"\b(?:az\s+rest|az\s+devops\s+invoke|curl|wget)\b{AZURE_TARGET}"
                 rf"(?=.*?{COMPLETION})"
             ),
             (
                 rf"{COMPLETION}.*?\b(?:az\s+rest|az\s+devops\s+invoke|curl|wget)\b"
-                rf"(?=.*?{AZURE_TARGET})"
+                rf"{AZURE_TARGET}"
             ),
         ]
     ),
