@@ -10,8 +10,9 @@
 
 import { assignModal } from "./assign.js";
 import { columnsModal } from "./columns.js";
+import { commandsModal } from "./commands.js";
 import { createModal } from "./create.js";
 import { startModal } from "./start.js";
 import { statusModal } from "./status.js";
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal };

@@ -56,17 +56,19 @@
 // The PR tabs read nothing yet. Finding gh and az costs one sh call now
 // and then (toolPaths says when). A view refreshes when its tab first
 // shows, on `r` (which first drops what its source keeps of it: its
-// source's forget), after a column is hidden or shown (x, a name in the
-// hidden line, the column menu), when it is shown again older than
-// refreshMinutes, and every refreshMinutes while it shows.
+// source's forget), after a column is hidden or shown (the command menu's
+// "Spalte ausblenden", a name in the hidden line, the column menu), when it
+// is shown again older than refreshMinutes, and every refreshMinutes while
+// it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
-// (a state's color), select.js (filter, "nur meine", selection),
-// related.js (the items related to an item, read when its details open:
+// (a state's color), select.js (filter, "nur meine", selection, the
+// command menu's filter), commands.js (the action table: what each key,
+// hint and menu entry runs), related.js (the items related to an item, read when its details open:
 // what is kept, their lines), description.js (a description as drawn,
 // without anything it could load), scroll.js (how the details scroll),
 // sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
@@ -77,8 +79,8 @@
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
 // drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
 // sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign) and this one, the Board, which looks the shape
-// up.
+// columns, create, assign, commands) and this one, the Board, which looks
+// the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -91,7 +93,7 @@ import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/bo
 import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
-import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
+import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
@@ -102,6 +104,7 @@ import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
 import { descriptionFolds, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
+import { actionFor, hintsOf, keyName } from "./commands.js";
 import { LINE_PX, halfWindow, scrollBy, scrollToEnd } from "./scroll.js";
 import { shownDescription, webUrl } from "./description.js";
 export * from "./shared.js";
@@ -113,6 +116,7 @@ export * from "./kinds/sprint.js";
 export * from "./kinds/backlog.js";
 export * from "./kinds/states.js";
 export * from "./select.js";
+export * from "./commands.js";
 export * from "./related.js";
 export * from "./description.js";
 export * from "./scroll.js";
@@ -144,6 +148,7 @@ export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
 export * from "./ui/modals/create.js";
 export * from "./ui/modals/assign.js";
+export * from "./ui/modals/commands.js";
 export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 
@@ -588,10 +593,10 @@ export default class Board extends View {
   // A key while the details panel has the keyboard: j/k or the arrows walk
   // its lines, each scrolled into view; with no line selected they scroll
   // the block a line (LINE_PX), j until the first line shows whole, which
-  // it then selects, k from the first line to none and then up. Enter and
-  // o act on the selected line (with none, they do what they do on the
-  // board), Esc gives the keyboard back. True when the panel took the key.
-  panelKey(view, panel, k, cx) {
+  // it then selects, k from the first line to none and then up. Esc gives
+  // the keyboard back. True when the panel took the key. Enter and o on
+  // the selected line are actions (commands.js: line-board, line-open).
+  panelKey(view, panel, k) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
     const lines = this.linesOf(view);
     if (dir) {
@@ -606,14 +611,7 @@ export default class Board extends View {
       return true;
     }
     if (k === "escape") return (this.panel = null), true;
-    if ((k !== "enter" && k !== "o") || panel.line === null) return false;
-    // A line selected before `r` read the related items again is gone until
-    // they come: the key does nothing.
-    const line = lines[panel.line];
-    if (!line) return true;
-    if (k === "enter") this.enterLine(view, line, cx);
-    else this.open(line, cx);
-    return true;
+    return false;
   }
 
   // Enter on a line: where a shown column holds the line's item, that item
@@ -668,8 +666,8 @@ export default class Board extends View {
     if (sel) this.choose(view, sel, cx);
   }
 
-  // e, or a click on the description's switch: the shown details'
-  // description unfolded, or folded again, where it is taller than its fold
+  // z (commands.js, fold-description), or a click on the description's
+  // switch: the shown details' description unfolded, or folded again, where it is taller than its fold
   // (ui/related.js); true when it is.
   toggleFold(cx) {
     const item = this.shownDetailsItem();
@@ -767,19 +765,20 @@ export default class Board extends View {
     this.showContext(cx);
   }
 
+  // ] and [: the shown source's next or previous tab (`by` 1 or -1), past
+  // the last the first and back.
+  stepTab(by, cx) {
+    const tabs = this.contexts();
+    const at = tabs.findIndex((c) => c.id === this.context()?.id);
+    if (tabs.length) this.switchTab((at + by + tabs.length) % tabs.length, cx);
+  }
+
   // Shows another source with the tab it showed last.
   switchSource(id, cx) {
     if (!sourcesOf(this.config).some((s) => s.id === id)) return;
     this.sourceId = id;
     store.set("source", id);
     this.showContext(cx);
-  }
-
-  // The next source in the toggle's order, after the last the first.
-  nextSource(cx) {
-    const list = sourcesOf(this.config);
-    const at = list.findIndex((s) => s.id === this.source()?.id);
-    if (list.length > 1) this.switchSource(list[(at + 1) % list.length].id, cx);
   }
 
   // After another tab came up: the notice goes, and its view, without data
@@ -981,6 +980,32 @@ export default class Board extends View {
 
   // ---- keys ----
 
+  // What the board says of the moment, for its actions (commands.js): the
+  // shown view, its state and shape, the selected item, the item whose
+  // details show and whether those read related items, the details panel's
+  // keyboard and its selected line, and the related items' lines.
+  actionContext() {
+    const view = this.view();
+    const st = view ? this.state(view.id) : null;
+    const details = this.shownDetailsItem();
+    const panel = view ? this.panelOf(view) : null;
+    return {
+      b: this, view, st, shape: view ? this.shape(view) : null, item: view ? this.selected(view) : null, details,
+      related: this.readsRelated(details), panel, line: panel?.line ?? null, lines: panel ? this.linesOf(view) : [],
+    };
+  }
+
+  // An action the menu picked (ui/modals/commands.js): run as its key runs
+  // it (key), the selection kept first but for the top bar's, where it can
+  // still run.
+  runAction(action, cx) {
+    const view = this.view();
+    if (!action.bar && view && this.state(view.id).data) this.keepSelection(view);
+    const c = this.actionContext();
+    if (action.when(c)) action.run(this, c, cx);
+    cx.notify();
+  }
+
   key(e, cx) {
     const k = e.key;
     const ch = e.key_char ?? "";
@@ -1016,26 +1041,13 @@ export default class Board extends View {
     if (end === "pending") return (this.afterG = true), done();
     if (end) return this.toEdge(view, end, cx), done();
     const panel = view && bare ? this.panelOf(view) : null;
-    if (panel && this.panelKey(view, panel, k, cx)) return done();
-    if (k === "e" && bare && this.toggleFold(cx)) return done();
-    // [ ] and / may come with Shift, or with Control+Alt; Control alone
-    // stays herdr's. Alt alone is let through: a key herdr binds with Alt
-    // never reaches a mod (logged), so this costs herdr nothing; how AltGr
-    // arrives on a German layout is untested.
-    const typed = !(mod.control && !mod.alt) && !mod.platform;
-    if (typed && (ch === "[" || ch === "]")) {
-      const tabs = this.contexts();
-      const at = tabs.findIndex((c) => c.id === this.context()?.id);
-      if (tabs.length) this.switchTab((at + (ch === "[" ? -1 : 1) + tabs.length) % tabs.length, cx);
-      return done();
-    }
-    if (typed && ch === "/") return this.filterInput.focus(), done();
+    if (panel && this.panelKey(view, panel, k)) return done();
+    // The top bar's actions run first; the others after the selection is
+    // kept, Esc and the arrows, each from the action table (commands.js).
+    const name = keyName(k, ch, mod);
+    const first = name ? actionFor(name, this.actionContext()) : null;
+    if (first?.bar) return first.run(this, this.actionContext(), cx), done();
     if (mod.control || mod.alt || mod.platform) return;
-    if (/^[1-9]$/.test(ch)) return this.switchTab(Number(ch) - 1, cx), done();
-    if (!mod.shift) {
-      const action = { r: () => this.reload(cx), q: () => this.nextSource(cx), v: () => this.nextTeamView(cx), m: () => this.toggleMine(cx) }[k];
-      if (action) return action(), done();
-    }
     const st = view ? this.state(view.id) : null;
     if (st?.data) this.keepSelection(view);
     if (k === "escape") {
@@ -1054,13 +1066,11 @@ export default class Board extends View {
       if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir), cx);
       return done();
     }
-    if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
-    if (k === "a" && !mod.shift && st.data) return this.openAssign(view, cx), done();
     // With nothing selected (loading, failed, empty, a placeholder) Enter
-    // and o stay herdr's.
-    const item = this.selected(view);
-    if (k === "enter" && item) return this.enter(view, cx), done();
-    if (k === "o" && item) return this.open(item, cx), done();
+    // and o stay herdr's (their actions do not take them).
+    const c = this.actionContext();
+    const action = name ? actionFor(name, c) : null;
+    if (action) return action.run(this, c, cx), done();
   }
 
   openStatusMenu(view, cx) {
@@ -1068,6 +1078,17 @@ export default class Board extends View {
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
     open(this, view, cx);
     cx.notify();
+  }
+
+  // The column menu (ui/modals/columns.js), where the view's shape has
+  // columns to hide.
+  openColumns(view, cx) {
+    MODALS.columns.open(this, view, cx);
+  }
+
+  // The command menu (ui/modals/commands.js): the actions that can run now.
+  openCommands(cx) {
+    MODALS.commands.open(this, cx);
   }
 
   // a: the assignee picker, where the shape's items can be assigned.
@@ -1131,7 +1152,7 @@ export default class Board extends View {
           .child(this.main(t, mono, view, st))
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
       )
-      .child(this.hints(t, view));
+      .child(this.hints(t));
     if (this.modal) out = out.child(MODALS[this.modal.kind].render(this, t));
     return out;
   }
@@ -1422,27 +1443,13 @@ export default class Board extends View {
       );
   }
 
-  // The details panel's keys, where the details of an item with related
-  // items to read show (readsRelated): Tab into it, and in it its own.
-  panelHints(view) {
-    const item = view ? this.shownDetailsItem() : null;
-    if (!this.readsRelated(item)) return [];
-    const ui = this.relatedUi;
-    const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
-    if (!this.panelOf(view)) return [["Tab", "Details"], ...fold];
-    return [["Tab", "Board"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
-  }
-
-  // The keys of what shows: the top bar's (a team's v), those of the shown
-  // view's shape, the details panel's (panelHints), and those that always
-  // work; Esc gives the keyboard back while the panel has it.
-  hints(t, view) {
-    const context = this.context();
-    const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
-    const switches = hasViewSwitch(context) ? [["v", viewSwitchHint(context)]] : [];
-    const esc = view && this.panelOf(view) ? "zurück" : "schließen";
-    const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", esc]];
-    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...this.panelHints(view), ...always];
+  // The keys of what shows now, as the action table says them (hintsOf):
+  // the top bar's, the moves and those of the shown view's shape that it
+  // keeps a key for, the details panel's, and those that always work; Esc
+  // gives the keyboard back while the panel has it. What has no key of its
+  // own is in the command menu (`:`).
+  hints(t) {
+    const keys = hintsOf(this.actionContext());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

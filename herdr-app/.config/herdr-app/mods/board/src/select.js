@@ -11,6 +11,61 @@ export function wordsMatch(texts, filter) {
   return words.every((w) => hay.includes(w));
 }
 
+// The command menu's filter: the entries of `list` whose text (`textOf`)
+// holds the letters of `query` in its order (fuzzyMatch), best first. A
+// tie keeps the shorter text first, then the list's order. An empty query
+// keeps the list as it is.
+export function fuzzyRank(list, query, textOf) {
+  if (!String(query ?? "").trim()) return [...list];
+  const scored = list.map((entry, at) => ({ entry, at, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
+  return scored
+    .filter((s) => s.match)
+    .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.at - y.at)
+    .map((s) => s.entry);
+}
+
+// How the letters of `query` fit `text`, case-insensitive and spaces left
+// out ("nlv" fits "nach links verschieben"): { score, at (the index in the
+// text of each letter, as the best fit places them) }, or null where they
+// do not fit in their order; an empty query fits with no letters. A letter
+// scores 1, 8 more where it starts a word (the text's start or after a
+// character that is no letter or digit), 4 more where it follows the
+// letter before it, and the text's first letter 2 more; of all the ways
+// the letters fit, the best counts.
+export function fuzzyMatch(text, query) {
+  const q = Array.from(String(query ?? "").toLowerCase().replace(/\s+/g, ""));
+  const t = Array.from(String(text).toLowerCase());
+  if (!q.length) return { score: 0, at: [] };
+  const startsWord = (j) => j === 0 || !/[\p{L}\p{N}]/u.test(t[j - 1]);
+  const own = (j) => 1 + (startsWord(j) ? 8 : 0) + (j === 0 ? 2 : 0);
+  // Per letter, per place in the text: the best score with that letter
+  // there, and where the letter before it stands (`from`).
+  let best = t.map((c, j) => (c === q[0] ? { score: own(j), from: null } : null));
+  const steps = [best];
+  for (const letter of q.slice(1)) {
+    const next = t.map(() => null);
+    let apart = null; // the best of best[0..j-2], by its place
+    for (let j = 1; j < t.length; j++) {
+      if (j >= 2 && best[j - 2] && (apart === null || best[j - 2].score > best[apart].score)) apart = j - 2;
+      if (t[j] !== letter) continue;
+      const after = best[j - 1] ? best[j - 1].score + own(j) + 4 : null;
+      const away = apart === null ? null : best[apart].score + own(j);
+      if (after === null && away === null) continue;
+      next[j] = after !== null && (away === null || after >= away) ? { score: after, from: j - 1 } : { score: away, from: apart };
+    }
+    best = next;
+    steps.push(best);
+  }
+  let end = -1;
+  best.forEach((b, j) => {
+    if (b && (end < 0 || b.score > best[end].score)) end = j;
+  });
+  if (end < 0) return null;
+  const at = [];
+  for (let i = steps.length - 1, j = end; i >= 0; j = steps[i][j].from, i--) at.unshift(j);
+  return { score: best[end].score, at };
+}
+
 // Cards whose text holds every word of the filter (wordsMatch); their
 // assignees count by name and by login.
 export function matches(card, text) {

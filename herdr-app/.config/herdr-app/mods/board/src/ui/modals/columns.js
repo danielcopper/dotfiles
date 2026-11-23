@@ -1,8 +1,8 @@
 // The column menu: every column of a board view, shown or hidden, walked
 // with j/k; Enter, a digit or a click hides or shows one, and the menu stays
-// open until Esc. The board shape opens it (X) as b.modal = { kind:
-// "columns", view, at }; it reads the columns from the view's data as they
-// are now, so a toggle shows at once.
+// open until Esc. The command menu's "Spalten…" opens it (Board.openColumns)
+// as b.modal = { kind: "columns", view, at }; it reads the columns from the
+// view's data as they are now, so a toggle shows at once.
 
 import { div } from "gpui-kit";
 import { columnColor, menu, menuKey } from "../helpers.js";
@@ -20,6 +20,11 @@ function toggleAt(b, m, at, cx) {
 }
 
 export const columnsModal = {
+  open(b, view, cx) {
+    b.modal = { kind: "columns", view, at: 0 };
+    cx.notify();
+  },
+
   render(b, t) {
     const m = b.modal;
     return menu(t, {

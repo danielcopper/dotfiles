@@ -12,10 +12,8 @@ export const placeholderShape = {
   count: () => null,
   render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text ?? "Diese Ansicht gibt es noch nicht"),
   items: () => [],
-  hints: [],
   dirs: [],
   loads: false,
-  keys: () => false,
   received: (data) => data,
   warnings: () => [],
 };

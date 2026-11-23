@@ -1,14 +1,15 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
-// alike (a button, a backdrop for a dialog, a menu and its keys, a detail
-// section, a check's color, a status pill, a column's color and head, a
-// card's edge, the line of its type, a selected card's or row's look, a
-// card's chip in a tone, for a label, for its type and for a session). Which
-// tones and tints they take: tones.js.
+// alike (a button, a backdrop for a dialog, a menu, its keys and its
+// window, a length in the script's pixels, a detail section, a check's
+// color, a status pill, a column's color and head, a card's edge, the line
+// of its type, a selected card's or row's look, a card's chip in a tone,
+// for a label, for its type and for a session). Which tones and tints they
+// take: tones.js.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { layout, panes, spaces } from "herdr";
+import { layout, panes, settings, spaces } from "herdr";
 import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
@@ -106,15 +107,47 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
-// A menu over the board (the status, the column and the assignee menu): a
-// panel `width` wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a
-// title line, `head` (children under it, such as a filter), one row per
-// entry of `rows` (its own children), each `<rowId>-<i>` and led by its
-// digit (1–9) unless `digits` is false, and `foot` (children under them).
-// `rows` may be a window of a longer list whose first row is `from`: `i`
-// counts in the whole list. The row `at` is marked; a click on a row picks
-// it (`pick(i, cx)`); menuKey takes its keys.
-export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, foot = [] }) {
+// A menu over the board (the status, the column, the assignee and the
+// command menu): a panel `width` wide, `<id>-menu` on a backdrop
+// `<id>-backdrop`, with a title line, `head` (children under it, such as a
+// filter), its rows in `<id>-rows`: one per entry of `rows` (its own
+// children), each `<rowId>-<i>` and led by its digit (1–9) unless `digits`
+// is false, a heading `<id>-head-<i>` before a row where `heads` names one
+// (by the row's place in `rows`), then `foot` (children under them).
+// `rows` may be a window of a longer list of `count` rows whose first row
+// is `from`: `i` counts in the whole list; then a thin thumb
+// `<id>-thumb` at the rows' right shows where the window is, a line under
+// them says how many rows follow ("↓ 3 weitere"), and the mouse wheel over
+// them calls `wheel(by, cx)` (by: the script's pixels, down for more than
+// 0; menuWheel). The row `at` is marked; a click on a row picks it
+// (`pick(i, cx)`); menuKey takes its keys.
+export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
+  const below = count - from - rows.length;
+  const share = (n) => `${((100 * n) / count).toFixed(2)}%`;
+  const row = (kids, n) =>
+    h_flex()
+      .id(`${rowId}-${from + n}`)
+      .px(8)
+      .py(6)
+      .gap(8)
+      .items_center()
+      .rounded(6)
+      .cursor_pointer()
+      .when(from + n === at, (el) => el.bg(t.selected))
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => pick(from + n, cx))
+      .when(digits, (el) => el.child(div().w(14).text_size(11).text_color(t.dim).child(from + n < 9 ? String(from + n + 1) : "")))
+      .children(kids);
+  const heading = (text, n) => div().id(`${id}-head-${from + n}`).px(8).pt(n ? 8 : 4).pb(2).truncate().text_size(11).text_color(t.muted).child(text);
+  const list = v_flex()
+    .id(`${id}-rows`)
+    .relative()
+    .gap(2)
+    .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(-unzoomed(e.delta?.y ?? 0), cx)))
+    .children(rows.flatMap((kids, n) => [...(heads[n] ? [heading(heads[n], n)] : []), row(kids, n)]))
+    .when(count > rows.length, (el) => el.child(
+      div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
+    ));
   return backdrop(
     t,
     `${id}-backdrop`,
@@ -130,25 +163,39 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
       .shadow_lg()
       .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
       .children(head)
-      .children(
-        rows.map((kids, n) =>
-          h_flex()
-            .id(`${rowId}-${from + n}`)
-            .px(8)
-            .py(6)
-            .gap(8)
-            .items_center()
-            .rounded(6)
-            .cursor_pointer()
-            .when(from + n === at, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => pick(from + n, cx))
-            .when(digits, (el) => el.child(div().w(14).text_size(11).text_color(t.dim).child(from + n < 9 ? String(from + n + 1) : "")))
-            .children(kids),
-        ),
-      )
+      .child(list)
+      .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))
       .children(foot),
   );
+}
+
+// A length herdr measured, or a wheel's move, in the script's pixels: herdr
+// reports them in the window's pixels and scales a script's lengths by its
+// zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
+export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
+
+// How far the wheel moves a menu's window by one row: about a row's height
+// in the script's pixels.
+export const MENU_ROW_PX = 28;
+
+// A menu's window of `size` rows over `count`, its first row m.top: moved so
+// that the marked row m.at shows, after a key moved the mark.
+export function followMark(m, count, size) {
+  if (m.at >= 0 && m.at < m.top) m.top = m.at;
+  if (m.at >= m.top + size) m.top = m.at - size + 1;
+  m.top = Math.max(0, Math.min(m.top, count - size));
+}
+
+// The wheel over a menu's window (menu's `wheel`): `by` pixels down (up for
+// less than 0) move it a row per MENU_ROW_PX, what is left kept for the
+// next move (m.wheel), within the list (at its end nothing is kept); the
+// mark stays where it is.
+export function menuWheel(m, by, count, size) {
+  m.wheel = (m.wheel ?? 0) + by;
+  const step = Math.trunc(m.wheel / MENU_ROW_PX);
+  const top = Math.max(0, Math.min(m.top + step, count - size));
+  m.wheel = top === m.top + step ? m.wheel - step * MENU_ROW_PX : 0;
+  m.top = top;
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;

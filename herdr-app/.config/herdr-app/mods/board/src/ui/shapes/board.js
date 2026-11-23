@@ -1,7 +1,8 @@
 // The board shape: a view's data as columns of cards, which a card moves
-// between (H/L, the status menu, a drag). A hidden column is not drawn: x
-// hides one, the line above the columns names the hidden ones and a click
-// on a name shows it again; X opens the column menu (modals/columns.js).
+// between (H/L, the status menu, a drag). A hidden column is not drawn: the
+// command menu's "Spalte ausblenden" hides the selected one, the line above
+// the columns names the hidden ones and a click on a name shows it again;
+// the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
 // count, target, cards }], total, limited, viewer, limit }
 // (parseGithubBoard). View fields it reads: id, source, layout, hide (the
@@ -43,29 +44,15 @@ export const boardShape = {
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
   },
   render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["x", "Spalte ausblenden"], ["X", "Spalten"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
-  keys(b, view, st, { k, ch, mod }, cx) {
-    if (!st.data) return false;
-    const upper = mod.shift && (k === "h" || k === "l" || k === "x") ? k.toUpperCase() : ch;
-    if (upper === "H" || upper === "L") {
-      const target = st.sel?.key && stepTarget(st.data, st.sel?.key, upper === "H" ? -1 : 1);
-      if (target) b.moveTo(view, st.sel?.key, target.id, cx);
-      return true;
-    }
-    if (k === "s") return b.openStatusMenu(view, cx), true;
-    if (upper === "X") {
-      b.modal = { kind: "columns", view, at: 0 };
-      return true;
-    }
-    if (k === "x") {
-      const col = b.navColumns(view)[st.sel?.col];
-      if (col) b.toggleColumn(view, col, cx);
-      return true;
-    }
-    return false;
+  // H/L: the selected card one column on (`by` 1) or back (-1), hidden
+  // columns too; movable says where there is one.
+  move(b, view, st, by, cx) {
+    const target = st.sel?.key && stepTarget(st.data, st.sel?.key, by);
+    if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
+  movable: (st, item, by) => Boolean(stepTarget(st.data, item.key, by)),
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
@@ -150,7 +137,7 @@ function drawBoard(b, t, mono, view, st) {
     .child(
       cols.length
         ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
-        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder"),
+        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder „Spalten…“ im Befehlsmenü (:) zeigt eine wieder"),
     )
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))

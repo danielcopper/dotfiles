@@ -14,8 +14,9 @@
 // opens through the Board's openLink.
 //
 // A description taller than about 12 lines shows folded to that height,
-// with "… mehr (e)" below; `e` or a click on it unfolds it ("weniger (e)"
-// folds it again). TextView tells no count of its lines, so the fold goes
+// with "… mehr (z)" below; `z` (commands.js, fold-description: while the
+// details panel has the keyboard, or on a view whose shape folds nothing
+// of its own) or a click on it unfolds it ("weniger (z)" folds it again). TextView tells no count of its lines, so the fold goes
 // by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
 // description is, its block measures (on_size_change), and it folds only
 // once that is known to be more.
@@ -32,12 +33,11 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, TextView } from "gpui-base";
-import { settings } from "herdr";
 import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateColor, stateDone } from "../kinds/states.js";
 import { LINE_PX, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
-import { FRAME, chip, sectionTitle, selectedLook } from "./helpers.js";
+import { FRAME, chip, sectionTitle, selectedLook, unzoomed } from "./helpers.js";
 import { NOTE_TONES, toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
@@ -52,11 +52,6 @@ export const relatedState = () => ({ heights: new Map(), unfolded: null, offset:
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
 export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
-
-// A measured length in the script's pixels: herdr reports a size and a
-// wheel's move in the window's pixels, and scales a script's lengths by
-// its zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
-const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
 // `el` measuring its height into `keep(height)` after each layout that
 // changes it, under the id `id` (on_size_change needs a lasting one).
@@ -150,7 +145,7 @@ function description(b, t, item, r) {
         .on_click((_e, cx) => {
           if (!b.modal) b.toggleFold(cx);
         })
-        .child(open ? "weniger (e)" : "… mehr (e)"),
+        .child(open ? "weniger (z)" : "… mehr (z)"),
     ));
 }
 

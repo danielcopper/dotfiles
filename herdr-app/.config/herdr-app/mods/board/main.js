@@ -58,17 +58,19 @@
 // The PR tabs read nothing yet. Finding gh and az costs one sh call now
 // and then (toolPaths says when). A view refreshes when its tab first
 // shows, on `r` (which first drops what its source keeps of it: its
-// source's forget), after a column is hidden or shown (x, a name in the
-// hidden line, the column menu), when it is shown again older than
-// refreshMinutes, and every refreshMinutes while it shows.
+// source's forget), after a column is hidden or shown (the command menu's
+// "Spalte ausblenden", a name in the hidden line, the column menu), when it
+// is shown again older than refreshMinutes, and every refreshMinutes while
+// it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
-// (a state's color), select.js (filter, "nur meine", selection),
-// related.js (the items related to an item, read when its details open:
+// (a state's color), select.js (filter, "nur meine", selection, the
+// command menu's filter), commands.js (the action table: what each key,
+// hint and menu entry runs), related.js (the items related to an item, read when its details open:
 // what is kept, their lines), description.js (a description as drawn,
 // without anything it could load), scroll.js (how the details scroll),
 // sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
@@ -79,8 +81,8 @@
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
 // drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
 // sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign) and this one, the Board, which looks the shape
-// up.
+// columns, create, assign, commands) and this one, the Board, which looks
+// the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -515,6 +517,61 @@ export function wordsMatch(texts, filter) {
   const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   const hay = texts.filter(Boolean).join("\n").toLowerCase();
   return words.every((w) => hay.includes(w));
+}
+
+// The command menu's filter: the entries of `list` whose text (`textOf`)
+// holds the letters of `query` in its order (fuzzyMatch), best first. A
+// tie keeps the shorter text first, then the list's order. An empty query
+// keeps the list as it is.
+export function fuzzyRank(list, query, textOf) {
+  if (!String(query ?? "").trim()) return [...list];
+  const scored = list.map((entry, at) => ({ entry, at, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
+  return scored
+    .filter((s) => s.match)
+    .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.at - y.at)
+    .map((s) => s.entry);
+}
+
+// How the letters of `query` fit `text`, case-insensitive and spaces left
+// out ("nlv" fits "nach links verschieben"): { score, at (the index in the
+// text of each letter, as the best fit places them) }, or null where they
+// do not fit in their order; an empty query fits with no letters. A letter
+// scores 1, 8 more where it starts a word (the text's start or after a
+// character that is no letter or digit), 4 more where it follows the
+// letter before it, and the text's first letter 2 more; of all the ways
+// the letters fit, the best counts.
+export function fuzzyMatch(text, query) {
+  const q = Array.from(String(query ?? "").toLowerCase().replace(/\s+/g, ""));
+  const t = Array.from(String(text).toLowerCase());
+  if (!q.length) return { score: 0, at: [] };
+  const startsWord = (j) => j === 0 || !/[\p{L}\p{N}]/u.test(t[j - 1]);
+  const own = (j) => 1 + (startsWord(j) ? 8 : 0) + (j === 0 ? 2 : 0);
+  // Per letter, per place in the text: the best score with that letter
+  // there, and where the letter before it stands (`from`).
+  let best = t.map((c, j) => (c === q[0] ? { score: own(j), from: null } : null));
+  const steps = [best];
+  for (const letter of q.slice(1)) {
+    const next = t.map(() => null);
+    let apart = null; // the best of best[0..j-2], by its place
+    for (let j = 1; j < t.length; j++) {
+      if (j >= 2 && best[j - 2] && (apart === null || best[j - 2].score > best[apart].score)) apart = j - 2;
+      if (t[j] !== letter) continue;
+      const after = best[j - 1] ? best[j - 1].score + own(j) + 4 : null;
+      const away = apart === null ? null : best[apart].score + own(j);
+      if (after === null && away === null) continue;
+      next[j] = after !== null && (away === null || after >= away) ? { score: after, from: j - 1 } : { score: away, from: apart };
+    }
+    best = next;
+    steps.push(best);
+  }
+  let end = -1;
+  best.forEach((b, j) => {
+    if (b && (end < 0 || b.score > best[end].score)) end = j;
+  });
+  if (end < 0) return null;
+  const at = [];
+  for (let i = steps.length - 1, j = end; i >= 0; j = steps[i][j].from, i--) at.unshift(j);
+  return { score: best[end].score, at };
 }
 
 // Cards whose text holds every word of the filter (wordsMatch); their
@@ -3322,11 +3379,12 @@ export function typeTone(t, item) {
 
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
-// alike (a button, a backdrop for a dialog, a menu and its keys, a detail
-// section, a check's color, a status pill, a column's color and head, a
-// card's edge, the line of its type, a selected card's or row's look, a
-// card's chip in a tone, for a label, for its type and for a session). Which
-// tones and tints they take: tones.js.
+// alike (a button, a backdrop for a dialog, a menu, its keys and its
+// window, a length in the script's pixels, a detail section, a check's
+// color, a status pill, a column's color and head, a card's edge, the line
+// of its type, a selected card's or row's look, a card's chip in a tone,
+// for a label, for its type and for a session). Which tones and tints they
+// take: tones.js.
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -3419,15 +3477,47 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
-// A menu over the board (the status, the column and the assignee menu): a
-// panel `width` wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a
-// title line, `head` (children under it, such as a filter), one row per
-// entry of `rows` (its own children), each `<rowId>-<i>` and led by its
-// digit (1–9) unless `digits` is false, and `foot` (children under them).
-// `rows` may be a window of a longer list whose first row is `from`: `i`
-// counts in the whole list. The row `at` is marked; a click on a row picks
-// it (`pick(i, cx)`); menuKey takes its keys.
-export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, foot = [] }) {
+// A menu over the board (the status, the column, the assignee and the
+// command menu): a panel `width` wide, `<id>-menu` on a backdrop
+// `<id>-backdrop`, with a title line, `head` (children under it, such as a
+// filter), its rows in `<id>-rows`: one per entry of `rows` (its own
+// children), each `<rowId>-<i>` and led by its digit (1–9) unless `digits`
+// is false, a heading `<id>-head-<i>` before a row where `heads` names one
+// (by the row's place in `rows`), then `foot` (children under them).
+// `rows` may be a window of a longer list of `count` rows whose first row
+// is `from`: `i` counts in the whole list; then a thin thumb
+// `<id>-thumb` at the rows' right shows where the window is, a line under
+// them says how many rows follow ("↓ 3 weitere"), and the mouse wheel over
+// them calls `wheel(by, cx)` (by: the script's pixels, down for more than
+// 0; menuWheel). The row `at` is marked; a click on a row picks it
+// (`pick(i, cx)`); menuKey takes its keys.
+export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
+  const below = count - from - rows.length;
+  const share = (n) => `${((100 * n) / count).toFixed(2)}%`;
+  const row = (kids, n) =>
+    h_flex()
+      .id(`${rowId}-${from + n}`)
+      .px(8)
+      .py(6)
+      .gap(8)
+      .items_center()
+      .rounded(6)
+      .cursor_pointer()
+      .when(from + n === at, (el) => el.bg(t.selected))
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => pick(from + n, cx))
+      .when(digits, (el) => el.child(div().w(14).text_size(11).text_color(t.dim).child(from + n < 9 ? String(from + n + 1) : "")))
+      .children(kids);
+  const heading = (text, n) => div().id(`${id}-head-${from + n}`).px(8).pt(n ? 8 : 4).pb(2).truncate().text_size(11).text_color(t.muted).child(text);
+  const list = v_flex()
+    .id(`${id}-rows`)
+    .relative()
+    .gap(2)
+    .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(-unzoomed(e.delta?.y ?? 0), cx)))
+    .children(rows.flatMap((kids, n) => [...(heads[n] ? [heading(heads[n], n)] : []), row(kids, n)]))
+    .when(count > rows.length, (el) => el.child(
+      div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
+    ));
   return backdrop(
     t,
     `${id}-backdrop`,
@@ -3443,25 +3533,39 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
       .shadow_lg()
       .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
       .children(head)
-      .children(
-        rows.map((kids, n) =>
-          h_flex()
-            .id(`${rowId}-${from + n}`)
-            .px(8)
-            .py(6)
-            .gap(8)
-            .items_center()
-            .rounded(6)
-            .cursor_pointer()
-            .when(from + n === at, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => pick(from + n, cx))
-            .when(digits, (el) => el.child(div().w(14).text_size(11).text_color(t.dim).child(from + n < 9 ? String(from + n + 1) : "")))
-            .children(kids),
-        ),
-      )
+      .child(list)
+      .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))
       .children(foot),
   );
+}
+
+// A length herdr measured, or a wheel's move, in the script's pixels: herdr
+// reports them in the window's pixels and scales a script's lengths by its
+// zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
+export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
+
+// How far the wheel moves a menu's window by one row: about a row's height
+// in the script's pixels.
+export const MENU_ROW_PX = 28;
+
+// A menu's window of `size` rows over `count`, its first row m.top: moved so
+// that the marked row m.at shows, after a key moved the mark.
+export function followMark(m, count, size) {
+  if (m.at >= 0 && m.at < m.top) m.top = m.at;
+  if (m.at >= m.top + size) m.top = m.at - size + 1;
+  m.top = Math.max(0, Math.min(m.top, count - size));
+}
+
+// The wheel over a menu's window (menu's `wheel`): `by` pixels down (up for
+// less than 0) move it a row per MENU_ROW_PX, what is left kept for the
+// next move (m.wheel), within the list (at its end nothing is kept); the
+// mark stays where it is.
+export function menuWheel(m, by, count, size) {
+  m.wheel = (m.wheel ?? 0) + by;
+  const step = Math.trunc(m.wheel / MENU_ROW_PX);
+  const top = Math.max(0, Math.min(m.top + step, count - size));
+  m.wheel = top === m.top + step ? m.wheel - step * MENU_ROW_PX : 0;
+  m.top = top;
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;
@@ -4092,17 +4196,20 @@ export function unclearParentLines(due, data) {
 // Its rows are "Ich", "niemand", then the people its source offers (the repo's
 // assignable people on GitHub, the team's members on Azure), narrowed by a
 // filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
-// Enter or a click assigns it (actions/assign.js). Which row is marked when the
-// rows come and after each change of the filter: where the people were read and
-// "Ich" is among them, the first row the filter leaves that is no "niemand",
-// and "niemand" only where it is all that is left; else (the people could not
-// be read, or GitHub named no viewer) none, so that Enter assigns nothing until
-// a row is chosen. Board.openAssign opens it as b.modal = { kind: "assign",
-// view, key, label, input (the filter's InputState, made for this dialog),
-// field and textField ("filter"), inputFocused, filter, at (the marked row, -1
-// for none), top (the first row drawn), list ({ me, people, note }, null while
-// it loads), error }. Where the people cannot be read, it says so in the dialog
-// and as a toast, and offers what its source can write without them.
+// Enter or a click assigns it (actions/assign.js). Ten rows show at once: the
+// window follows the mark, and the mouse wheel moves it (helpers.js,
+// followMark and menuWheel). Which row is marked when the rows come and after
+// each change of the filter: where the people were read and "Ich" is among
+// them, the first row the filter leaves that is no "niemand", and "niemand"
+// only where it is all that is left; else (the people could not be read, or
+// GitHub named no viewer) none, so that Enter assigns nothing until a row is
+// chosen. Board.openAssign opens it as b.modal = { kind: "assign", view, key,
+// label, input (the filter's InputState, made for this dialog), field and
+// textField ("filter"), inputFocused, filter, at (the marked row, -1 for
+// none), top (the first row drawn), wheel (the wheel's move left over:
+// menuWheel), list ({ me, people, note }, null while it loads), error }.
+// Where the people cannot be read, it says so in the dialog and as a toast,
+// and offers what its source can write without them.
 
 // How many rows show at once.
 const VISIBLE = 10;
@@ -4182,7 +4289,9 @@ export const assignModal = {
     const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
     if (!by) return;
     cx.stop_propagation();
-    m.at = Math.max(0, Math.min(m.at + by, rowsOf(m).length - 1));
+    const count = rowsOf(m).length;
+    m.at = Math.max(0, Math.min(m.at + by, count - 1));
+    followMark(m, count, VISIBLE);
     cx.notify();
   },
 
@@ -4190,8 +4299,7 @@ export const assignModal = {
     const m = b.modal;
     const rows = rowsOf(m);
     m.at = Math.max(-1, Math.min(m.at, rows.length - 1));
-    if (m.at >= 0 && m.at < m.top) m.top = m.at;
-    if (m.at >= m.top + VISIBLE) m.top = m.at - VISIBLE + 1;
+    m.top = Math.max(0, Math.min(m.top, rows.length - VISIBLE));
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
     const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
     return menu(t, {
@@ -4209,6 +4317,11 @@ export const assignModal = {
         ...(r.sub ? [div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub)] : []),
       ]),
       from: m.top,
+      count: rows.length,
+      wheel: (by, cx) => {
+        menuWheel(m, by, rows.length, VISIBLE);
+        cx.notify();
+      },
       at: m.at,
       pick: (i, cx) => assignPick(b, m, i, cx),
       foot: [...(message ? [line(message, t.muted)] : []), ...(m.list?.note ? [line(`Personen: ${m.list.note}`, t.dim, 11)] : [])],
@@ -4220,9 +4333,9 @@ export const assignModal = {
 
 // The column menu: every column of a board view, shown or hidden, walked
 // with j/k; Enter, a digit or a click hides or shows one, and the menu stays
-// open until Esc. The board shape opens it (X) as b.modal = { kind:
-// "columns", view, at }; it reads the columns from the view's data as they
-// are now, so a toggle shows at once.
+// open until Esc. The command menu's "Spalten…" opens it (Board.openColumns)
+// as b.modal = { kind: "columns", view, at }; it reads the columns from the
+// view's data as they are now, so a toggle shows at once.
 
 // The view's columns, all of them, in the board's order.
 const columnsOf = (b, m) => b.state(m.view.id).data?.columns ?? [];
@@ -4237,6 +4350,11 @@ function toggleAt(b, m, at, cx) {
 }
 
 export const columnsModal = {
+  open(b, view, cx) {
+    b.modal = { kind: "columns", view, at: 0 };
+    cx.notify();
+  },
+
   render(b, t) {
     const m = b.modal;
     return menu(t, {
@@ -4257,6 +4375,701 @@ export const columnsModal = {
   },
 
   key: (b, e, cx) => menuKey(e, cx, b.modal, columnsOf(b, b.modal).length, (i, cx) => toggleAt(b, b.modal, i, cx)),
+};
+
+// ==== src/scroll.js ====
+
+// How the details block scrolls: the one home of its offset. herdr gives a
+// script no scroll offset of a scroll area (a ScrollHandle only reveals a
+// child, with the smallest scroll needed), so the board scrolls the block
+// itself: it keeps the offset in the related items' state (`ui`:
+// ui/related.js, relatedState) with the heights of the window and the
+// content as measured (`viewport`, `content`), shifts the content up by it,
+// and draws the position as a thumb. All lengths are the script's pixels
+// (measured ones divided by herdr's zoom: ui/related.js).
+
+// One line of the details, the step of j/k.
+export const LINE_PX = 18;
+
+// The offset `offset` kept within the content: from 0 to where its end
+// meets the window's; 0 where the content fits.
+export const clampOffset = (offset, content, viewport) => Math.max(0, Math.min(offset, content - viewport));
+
+// The offset after a move by `by` pixels (down for more than 0).
+export const offsetBy = (s, by) => clampOffset(s.offset + by, s.content, s.viewport);
+
+// The offset at which the span [top, top + height] of the content shows,
+// moved as little as needed: one above the window to its top, one below to
+// its bottom (one taller than the window to its top).
+export function revealOffset(s, top, height) {
+  let at = s.offset;
+  if (top + height > at + s.viewport) at = top + height - s.viewport;
+  if (top < at) at = top;
+  return clampOffset(at, s.content, s.viewport);
+}
+
+// Whether the span shows whole; true while the window is not measured yet.
+export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
+
+// The thumb that shows the position: { top, height } within the window, at
+// least `min` high; null where the content fits or the window is not
+// measured.
+export function thumbOf(s, min = 16) {
+  if (!(s.content > s.viewport) || s.viewport <= 0) return null;
+  const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
+  const top = Math.round(((s.viewport - height) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
+  return { top, height };
+}
+
+// Where row `i` of a column of rows stands: the heights of the rows before
+// it (`heights`, one per row), `gap` between rows, after `pad` above the
+// first → { top, height }.
+export function rowSpan(heights, i, gap, pad) {
+  let top = pad;
+  for (let j = 0; j < i; j++) top += heights[j] + gap;
+  return { top, height: heights[i] ?? 0 };
+}
+
+// The block's offset when it draws the details of the item `key`: 0 for
+// another item than the last (ui.at), kept within the content, which a
+// resize or a refresh may have changed.
+export function offsetOf(ui, key) {
+  if (ui.at !== key) {
+    ui.at = key;
+    ui.offset = 0;
+  }
+  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
+  return ui.offset;
+}
+
+// The block moved by `by` pixels: ctrl-d/ctrl-u by halfWindow, j/k by
+// LINE_PX, the wheel by its move.
+export const scrollBy = (ui, by) => (ui.offset = offsetBy(ui, by));
+export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
+// The block at its top or bottom (gg/G, Home/End).
+export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+// The block moved so that `span` ({ top, height }) shows.
+export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));
+
+// ==== src/ui/related.js ====
+
+// The detail panel's sections of an item's related items (related.js): its
+// description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
+// Markdown or HTML as its source writes it, without anything it could load:
+// description.js; "keine Beschreibung" where it has none), its sub-issues
+// (an Azure work item's children), then, where it has any or the source
+// could not send them, the pull requests linked to it; one line each with
+// its key, title and state (a done one dimmed, a draft marked), and below
+// a section how many it has that cannot be read. While they load the
+// description's and the sub-issues' sections say "lädt …", after a
+// failure the reason; a section the source could not send says why in its
+// place; what the source said besides follows at the end. The line the
+// panel has selected while it has the keyboard is marked; a click on a
+// line is Enter on it (the Board's pickLine). A link in the description
+// opens through the Board's openLink.
+//
+// A description taller than about 12 lines shows folded to that height,
+// with "… mehr (z)" below; `z` (commands.js, fold-description: while the
+// details panel has the keyboard, or on a view whose shape folds nothing
+// of its own) or a click on it unfolds it ("weniger (z)" folds it again). TextView tells no count of its lines, so the fold goes
+// by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
+// description is, its block measures (on_size_change), and it folds only
+// once that is known to be more.
+//
+// The block scrolls by an offset the board keeps (scroll.js, its one home,
+// says why): its window measures its height, the content its own and each
+// row its own (on_size_change), the content stands shifted up by the
+// offset, the mouse wheel moves it, and a thin thumb at the right shows
+// where it is (no scrollbar to drag). The shift is a relative position,
+// which moves the content without changing what it gives the layout: a
+// negative top margin would make the window, which takes its height from
+// the content, shorter by the offset, so that a content which shrinks
+// while scrolled (a refresh, a fold) would leave it short, down to none.
+
+export const FOLDED_H = 12 * LINE_PX;
+
+// What the related items keep per Board, plain values the Board makes once
+// when it starts and every draw reads: the measured height of each
+// description by its item's key, the key of the item whose description is
+// unfolded (null: none; another item's shows folded), and the block's
+// scroll (scroll.js): its offset, the item it is of (`at`), the heights of
+// its window and its content, and of each row by its id.
+export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, at: null, viewport: 0, content: 0, sizes: new Map() });
+
+// Whether the description of `item` is taller than FOLDED_H, as measured.
+export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
+
+// `el` measuring its height into `keep(height)` after each layout that
+// changes it, under the id `id` (on_size_change needs a lasting one).
+const measured = (el, id, keep) => el.id(id).on_size_change((size, cx) => {
+  keep(unzoomed(size.height));
+  cx.notify();
+});
+
+// The id each row of relatedRows draws with.
+const rowId = (r, i) => (r.kind === "line" ? `related-line-${r.n}` : `related-row-${i}`);
+
+// Where line `n` of the related items stands in the block's content, from
+// the measured heights (LINE_PX for a row not measured yet); null where no
+// such line shows.
+function lineSpan(ui, item, entry, n) {
+  const rows = relatedRows(item, entry);
+  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
+  return i < 0 ? null : rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, FRAME.gap, FRAME.py);
+}
+
+// Scrolls line `n` into view.
+export function revealLine(ui, item, entry, n) {
+  const span = lineSpan(ui, item, entry, n);
+  if (span) revealSpan(ui, span);
+}
+
+// Whether line `n` shows whole (true while the block is not measured yet).
+export function lineShows(ui, item, entry, n) {
+  const span = lineSpan(ui, item, entry, n);
+  return Boolean(span) && spanShows(ui, span.top, span.height);
+}
+
+// The rows of the related items of `item` as drawn, in order, from `entry`
+// (the Board's kept read: { data, error, shown }, data and error null
+// while it loads, shown the description as drawn (shownDescription, made
+// once per read); null before a read starts): { kind: "head" | "note" |
+// "text" | "line", text, a note's level ("info", "error", "warning";
+// NOTE_TONES) or, for a line, `line` and its index `n` among relatedLines
+// (the one order of the lines); a "text" is the description, one row: its
+// `text` as drawn and its `format`.
+export function relatedRows(item, entry) {
+  const data = entry?.data;
+  const description = { kind: "head", text: "BESCHREIBUNG" };
+  if (!data) {
+    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: "lädt …", level: "info" };
+    return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
+  }
+  const lines = relatedLines(data);
+  const rows = [description];
+  if (typeof entry.shown === "string") rows.push({ kind: "text", text: entry.shown, format: data.format === "html" ? "html" : "markdown" });
+  else rows.push({ kind: "note", text: "keine Beschreibung", level: "info" });
+  const body = (section, none) => {
+    if (section.error) rows.push({ kind: "note", text: section.error, level: "error" });
+    for (const line of section.lines) rows.push({ kind: "line", line, n: lines.indexOf(line) });
+    if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", level: "info" });
+    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, level: "info" });
+  };
+  rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
+  body(data.subIssues, true);
+  const prs = data.prs;
+  if (prs.lines.length || prs.error || prs.hidden) {
+    rows.push({ kind: "head", text: prsHead(prs) });
+    body(prs, false);
+  }
+  for (const text of data.warnings ?? []) rows.push({ kind: "note", text, level: "warning" });
+  return rows;
+}
+
+// The description row `r` of `item`: the TextView in a block that measures
+// it, folded to FOLDED_H where it is taller and not unfolded, and below it
+// the fold's switch.
+function description(b, t, item, r) {
+  const ui = b.relatedUi;
+  const folds = descriptionFolds(ui, item);
+  const open = ui.unfolded === item.key;
+  const id = `description-${item.key}`;
+  const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
+    .text_size(12)
+    .on_link_click((url, cx) => b.openLink(url, cx));
+  const size = measured(div().flex_none(), `description-size-${item.key}`, (h) => ui.heights.set(item.key, h)).child(view);
+  const box = div().id("description").overflow_hidden().when(folds && !open, (el) => el.max_h(FOLDED_H)).child(size);
+  return v_flex()
+    .gap(4)
+    .child(box)
+    .when(folds, (el) => el.child(
+      div()
+        .id("description-fold")
+        .text_size(12)
+        .text_color(t.accent)
+        .cursor_pointer()
+        .on_click((_e, cx) => {
+          if (!b.modal) b.toggleFold(cx);
+        })
+        .child(open ? "weniger (z)" : "… mehr (z)"),
+    ));
+}
+
+// The block of the related items of `item` (relatedRows) in `view`, the
+// line `at` marked (null: none). A line's state's color, and whether it is
+// done, are its own where its source names them (GitHub), else its state's
+// in the view's data (Azure).
+export function relatedSections(b, t, mono, view, item, entry, at) {
+  const ui = b.relatedUi;
+  const data = b.state(view.id).data;
+  const rowOf = (r) => {
+    if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
+    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, NOTE_TONES[r.level])).child(r.text);
+    if (r.kind === "text") return description(b, t, item, r);
+    const { line, n } = r;
+    const color = line.color ?? stateColor(data, line.state);
+    const done = line.done ?? stateDone(data, line.state);
+    return h_flex()
+      .flex_none()
+      .gap(8)
+      .px(8)
+      .py(4)
+      .items_center()
+      .rounded(6)
+      .border_1()
+      .map(selectedLook(t, n === at, t.chrome))
+      .cursor_pointer()
+      .opacity(done ? 0.55 : 1)
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => {
+        if (!b.modal) b.pickLine(view, n, cx);
+      })
+      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
+      .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
+      .child(chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color)));
+  };
+  const offset = offsetOf(ui, item.key);
+  const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))
+    .flex_none()
+    .px(FRAME.px)
+    .py(FRAME.py)
+    .gap(FRAME.gap)
+    .relative()
+    .top(offset ? -offset : 0)
+    .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
+  const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
+    .min_h(0)
+    .overflow_hidden()
+    .on_scroll_wheel((e, cx) => {
+      scrollBy(ui, -unzoomed(e.delta?.y ?? 0));
+      cx.notify();
+    })
+    .child(content);
+  const thumb = thumbOf(ui);
+  return v_flex()
+    .id("related-scroll")
+    .relative()
+    .min_h(0)
+    .border_b(1)
+    .border_color(t.border)
+    .child(windowEl)
+    .when(Boolean(thumb), (el) => el.child(
+      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
+    ));
+}
+
+// ==== src/commands.js ====
+
+// The board's actions, their one home: the action table ACTIONS, which the
+// keys (Board.key, through keyName and actionFor), the hint line (hintsOf)
+// and the command menu (menuActions; ui/modals/commands.js) all read, so a
+// key, its hint and its menu entry run one action and say one thing. An
+// action:
+// - id, and name: the menu's name for it (a string, or name(c));
+// - key: the key that runs it, as keyName names it; null for one the menu
+//   (or a button, or a click) alone runs;
+// - menu: its place in the menu (lower first); none for one the menu does
+//   not list; group: what it acts on, the menu's heading over it
+//   (groupTitle): the selected item, the details panel, the shown view or
+//   the board;
+// - when(c): whether it can run now; the menu offers only those;
+// - takes(c): whether its key is taken (when by default): a few keys are
+//   taken where they do nothing, or say why they do nothing;
+// - bar: the top bar's keys (tabs, sources, views, nur meine, filter,
+//   reload, the menu), which run before the board keeps its selection
+//   (Board.key);
+// - run(b, c, cx);
+// - hint(c): its text on the hint line, null for none; hintKey: the key
+//   the hint line names (its key by default).
+// An entry without run is a hint only: a core key the Board handles itself
+// (moving, gg/G, Tab, the details panel's keys, Esc).
+// `c` is what the Board says of the moment (Board.actionContext): { b,
+// view, st, shape, item (the selected one), details (the item whose details
+// show), related (whether those read related items), panel (the details
+// panel's keyboard, or null), line (its selected line's index, or null),
+// lines (the related items' lines) }.
+
+// What a key event names (an action's key), or null for one no action has:
+// [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
+// stays herdr's, and Alt alone is let through: a key herdr binds with Alt
+// never reaches a mod), else with no Control, Alt or platform key a digit,
+// Enter, or a letter (upper case with Shift).
+export function keyName(k, ch, mod) {
+  const typed = !(mod.control && !mod.alt) && !mod.platform;
+  if (typed && ["[", "]", "/", ":"].includes(ch)) return ch;
+  if (mod.control || mod.alt || mod.platform) return null;
+  if (/^[1-9]$/.test(ch)) return ch;
+  if (k === "enter") return "enter";
+  if (!/^[a-z]$/.test(k)) return null;
+  return mod.shift || ch === k.toUpperCase() ? k.toUpperCase() : k;
+}
+
+// How the hint line and the menu write a key.
+const keyLabel = (key) => (key === "enter" ? "Enter" : key);
+
+// The action the key `name` runs now: the first in the table that has it
+// and takes it; null for none.
+export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && (a.takes ?? a.when)(c)) ?? null;
+
+const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
+
+// The menu's groups, in its order.
+const GROUPS = ["item", "details", "view", "board"];
+const KIND_NAMES = { issue: "Issue", pr: "PR" };
+
+// The heading of a group of the menu: the item it acts on ("Task AB#311 ·
+// Export als CSV"), the details panel's item ("Detailfenster · #2217 …"),
+// the view's name ("Sprint"), or "Board".
+export function groupTitle(group, c) {
+  if (group === "item") return `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`;
+  if (group === "details") return `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`;
+  if (group === "view") return c.view.name;
+  return "Board";
+}
+
+// The command menu's entries now: { action, name, key, head } for each
+// action the menu lists that can run, by group and in the menu's order,
+// with its key where that key runs it now (actionFor), else none, and its
+// group's heading.
+export function menuActions(c) {
+  const rank = (a) => GROUPS.indexOf(a.group) * 1000 + a.menu;
+  return ACTIONS.filter((a) => a.menu && a.when(c))
+    .sort((x, y) => rank(x) - rank(y))
+    .map((a) => ({ action: a, name: nameOf(a, c), key: a.key && actionFor(a.key, c) === a ? keyLabel(a.key) : null, head: groupTitle(a.group, c) }));
+}
+
+// The menu's entries its filter leaves, best first (fuzzyRank).
+export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) => e.name);
+
+// The hint line's entries now: [key, text], in the table's order.
+export function hintsOf(c) {
+  return ACTIONS.filter((a) => a.hint)
+    .map((a) => [a.hintKey ?? keyLabel(a.key), a.hint(c)])
+    .filter(([, text]) => text);
+}
+
+// The shown source's tabs, and the shown one's index.
+const tabsOf = (c) => c.b.contexts();
+const tabAt = (c) => tabsOf(c).findIndex((x) => x.id === c.b.context()?.id);
+
+// The source after the shown one in the toggle's order.
+function nextSource(c) {
+  const list = sourcesOf(c.b.config);
+  return list[(list.findIndex((s) => s.id === c.b.source()?.id) + 1) % list.length];
+}
+
+// The shown team's next view.
+function nextView(c) {
+  const context = c.b.context();
+  const views = context.views;
+  return views[(views.indexOf(c.b.teamViewOf(context)) + 1) % views.length];
+}
+
+// Whether the shown view has items to move over (none: the placeholder).
+const walks = (c) => Boolean(c.shape?.dirs.length);
+// Whether an item is selected and no line of the details panel, which
+// takes Enter and o while one is.
+const onItem = (c) => Boolean(c.item) && c.line === null;
+// Whether the shown view's data is read, and its shape has `what`.
+const has = (c, what) => Boolean(c.st?.data && c.shape?.[what]);
+
+// The selected column, where the shape hides columns and it can be hidden.
+function hideableColumn(c) {
+  if (!has(c, "toggleColumn")) return null;
+  const col = c.b.navColumns(c.view)[c.st.sel?.col];
+  return col?.target ? col : null;
+}
+
+// What the second Enter does with the item: go to its session, or start one.
+function startName(item) {
+  if (linkedSession(item, spaces())) return "Zur Sitzung";
+  return item.kind === "pr" ? "Review starten…" : "Agent starten…";
+}
+
+// The digit keys' tabs; the first carries the hint for them all.
+const tabAction = (n) => ({
+  id: `tab-${n}`,
+  group: "board",
+  name: (c) => `Tab ${n}: ${tabsOf(c)[n - 1].name}`,
+  key: String(n),
+  menu: 30 + n,
+  bar: true,
+  when: (c) => Boolean(tabsOf(c)[n - 1]) && n - 1 !== tabAt(c),
+  takes: () => true,
+  run: (b, c, cx) => b.switchTab(n - 1, cx),
+  ...(n === 1 ? { hint: () => "Tab", hintKey: "1 2 3 [ ]" } : {}),
+});
+
+// A move of the selected card or task one column on (`by` 1) or back (-1).
+const moveAction = (id, key, by, name) => ({
+  id,
+  group: "item",
+  name,
+  key,
+  menu: by < 0 ? 5 : 6,
+  when: (c) => has(c, "move") && Boolean(c.item) && c.shape.movable(c.st, c.item, by),
+  takes: (c) => has(c, "move"),
+  run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
+  ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
+});
+
+export const ACTIONS = [
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(tabAction),
+  {
+    id: "tab-next", group: "board", name: "Nächster Tab", key: "]", menu: 40, bar: true,
+    when: (c) => tabsOf(c).length > 1, takes: () => true,
+    run: (b, c, cx) => b.stepTab(1, cx),
+  },
+  {
+    id: "tab-previous", group: "board", name: "Vorheriger Tab", key: "[", menu: 41, bar: true,
+    when: (c) => tabsOf(c).length > 1, takes: () => true,
+    run: (b, c, cx) => b.stepTab(-1, cx),
+  },
+  {
+    id: "source", group: "board", name: (c) => `Quelle wechseln: ${nextSource(c).name}`, key: null, menu: 42, bar: true,
+    when: (c) => sourcesOf(c.b.config).length > 1,
+    run: (b, c, cx) => b.switchSource(nextSource(c).id, cx),
+  },
+  {
+    id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 23, bar: true,
+    when: (c) => hasViewSwitch(c.b.context()), takes: () => true,
+    run: (b, c, cx) => b.nextTeamView(cx),
+    hint: (c) => (hasViewSwitch(c.b.context()) ? viewSwitchHint(c.b.context()) : null),
+  },
+  { id: "move-hint", hint: (c) => (c.shape?.dirs.length === 4 ? "bewegen" : null), hintKey: "h/l j/k" },
+  { id: "move-list-hint", hint: (c) => (c.shape?.dirs.length === 2 ? "bewegen" : null), hintKey: "j/k" },
+  { id: "edge-hint", hint: (c) => (walks(c) ? "erste/letzte" : null), hintKey: "gg/G" },
+  moveAction("move-left", "H", -1, "Nach links verschieben"),
+  moveAction("move-right", "L", 1, "Nach rechts verschieben"),
+  {
+    id: "create", group: "view", name: "Neu…", key: "n", menu: 20,
+    when: (c) => has(c, "create"),
+    run: (b, c, cx) => c.shape.create(b, c.view, cx),
+    hint: (c) => (c.shape?.create ? "neu" : null),
+  },
+  {
+    id: "status", group: "item", name: "Status ändern…", key: "s", menu: 3,
+    when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu"),
+    run: (b, c, cx) => b.openStatusMenu(c.view, cx),
+    hint: (c) => (c.shape?.openStatusMenu ? "Status" : null),
+  },
+  {
+    id: "assign", group: "item", name: "Zuweisen…", key: "a", menu: 4,
+    when: (c) => has(c, "assign") && Boolean(c.item), takes: (c) => Boolean(c.st?.data),
+    run: (b, c, cx) => b.openAssign(c.view, cx),
+    hint: (c) => (c.shape?.assign ? "zuweisen" : null),
+  },
+  // z folds what is where the keyboard is: on a Sprint the selected
+  // story's tasks while the board has it, the description while the details
+  // panel has it, and on a view whose shape folds nothing of its own the
+  // description whenever the details show one that folds. The menu offers
+  // both where they can run, z beside the one it runs.
+  {
+    id: "fold-story", group: "item", name: "Story zu-/aufklappen", key: "z", menu: 8,
+    when: (c) => has(c, "fold") && Boolean(c.item), takes: (c) => !c.panel && has(c, "fold"),
+    run: (b, c, cx) => c.shape.fold(b, c.view, c.st, cx),
+    hint: (c) => (!c.panel && c.shape?.fold ? "Story zuklappen" : null),
+  },
+  {
+    id: "details", group: "item", name: "Details zeigen", key: "enter", menu: 1,
+    when: (c) => Boolean(c.item) && !c.st.detail, takes: (c) => onItem(c) && !c.st.detail,
+    run: (b, c, cx) => b.enter(c.view, cx),
+    hint: (c) => (walks(c) ? c.shape.enterHint ?? "Detail · Agent" : null),
+  },
+  {
+    id: "start", group: "item", name: (c) => startName(c.item), key: "enter", menu: 2,
+    when: (c) => Boolean(c.item) && c.st.detail, takes: (c) => onItem(c) && c.st.detail,
+    run: (b, c, cx) => b.enter(c.view, cx),
+  },
+  {
+    id: "open", group: "item", name: "Im Browser öffnen", key: "o", menu: 7,
+    when: (c) => Boolean(c.item), takes: onItem,
+    run: (b, c, cx) => b.open(c.item, cx),
+    hint: (c) => (walks(c) ? "öffnen" : null),
+  },
+  { id: "tab-hint", hint: (c) => (c.related ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
+  { id: "lines-hint", hint: (c) => (c.panel ? "Zeilen" : null), hintKey: "j/k" },
+  { id: "page-hint", hint: (c) => (c.panel ? "halbe Seite" : null), hintKey: "ctrl-d/u" },
+  { id: "panel-edge-hint", hint: (c) => (c.panel ? "oben/unten" : null), hintKey: "gg/G" },
+  {
+    id: "fold-description", group: "details", key: "z", menu: 9,
+    name: (c) => (c.b.relatedUi.unfolded === c.details.key ? "Beschreibung weniger" : "Beschreibung mehr"),
+    when: (c) => c.related && descriptionFolds(c.b.relatedUi, c.details),
+    takes: (c) => c.related && descriptionFolds(c.b.relatedUi, c.details) && (Boolean(c.panel) || !c.shape.fold),
+    run: (b, c, cx) => b.toggleFold(cx),
+    hint: (c) => (actionFor("z", c)?.id === "fold-description" ? (c.b.relatedUi.unfolded === c.details.key ? "weniger" : "mehr") : null),
+  },
+  // The details panel's selected line (a line selected before `r` read the
+  // related items again is gone until they come: its key does nothing).
+  {
+    id: "line-board", group: "details", name: "Zeile auf dem Board", key: "enter", menu: 10,
+    when: (c) => c.line !== null && Boolean(c.lines[c.line]), takes: (c) => c.line !== null,
+    run: (b, c, cx) => c.lines[c.line] && b.enterLine(c.view, c.lines[c.line], cx),
+    hint: (c) => (c.panel ? "Zeile auf dem Board" : null),
+  },
+  {
+    id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 11,
+    when: (c) => c.line !== null && Boolean(c.lines[c.line]), takes: (c) => c.line !== null,
+    run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
+    hint: (c) => (c.panel ? "Zeile öffnen" : null),
+  },
+  {
+    id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,
+    when: (c) => Boolean(hideableColumn(c)),
+    run: (b, c, cx) => b.toggleColumn(c.view, hideableColumn(c), cx),
+  },
+  {
+    id: "columns", group: "view", name: "Spalten…", key: null, menu: 22,
+    when: (c) => has(c, "toggleColumn"),
+    run: (b, c, cx) => b.openColumns(c.view, cx),
+  },
+  {
+    id: "mine", group: "board", name: (c) => (c.b.mine ? "Nur meine aus" : "Nur meine an"), key: "m", menu: 24, bar: true,
+    when: (c) => Boolean(c.b.source()), takes: () => true,
+    run: (b, c, cx) => b.toggleMine(cx),
+    hint: (c) => (c.b.source() ? "nur meine" : null),
+  },
+  {
+    id: "filter", group: "board", name: "Filter", key: "/", menu: 25, bar: true,
+    when: () => true,
+    run: (b) => b.filterInput.focus(),
+    hint: () => "Filter",
+  },
+  {
+    id: "reload", group: "board", name: "Neu laden", key: "r", menu: 26, bar: true,
+    when: () => true,
+    run: (b, c, cx) => b.reload(cx),
+    hint: () => "neu laden",
+  },
+  {
+    id: "commands", name: "Befehle", key: ":", bar: true,
+    when: () => true,
+    run: (b, c, cx) => b.openCommands(cx),
+    hint: () => "Befehle",
+  },
+  { id: "escape-hint", hint: (c) => (c.panel ? "zurück" : "schließen"), hintKey: "Esc" },
+];
+
+// ==== src/ui/modals/commands.js ====
+
+// The command menu: the actions that can run now (commands.js,
+// menuActions: by the selected item or row, the view's kind, the details
+// and whether their panel has the keyboard, the source), each by its name
+// with its key at the right where it has one, under a heading for what
+// they act on (the item, the details panel, the view, the board), as a
+// menu like the assignee picker's (helpers.js menu, without digits: typing
+// goes to the filter). The filter has the keyboard and narrows them as one
+// types (filterActions): best first, each group under its best entry, the
+// filter's letters in the accent color (fuzzyMatch). Up/down, ctrl-j/k and
+// ctrl-n/p mark one, Enter or a click runs it (Board.runAction), Esc
+// closes. COMMAND_ROWS rows show at once: the window follows the mark, and
+// the mouse wheel moves it (helpers.js, followMark and menuWheel). `:`
+// opens it (Board.openCommands) as b.modal = { kind: "commands", entries
+// (the actions as it opened), input (the filter's InputState, made for
+// this dialog), field and textField ("filter"), inputFocused, filter, at
+// (the marked row, -1 for none), top (the first row drawn), wheel (the
+// wheel's move left over: menuWheel) }.
+
+// How many of its rows show at once.
+const COMMAND_ROWS = 10;
+
+// The entries the filter leaves, best first, each group together after the
+// group's best (with no filter, in the menu's order).
+export function shownCommands(entries, filter) {
+  const ranked = filterActions(entries, filter);
+  const heads = [...new Set(ranked.map((e) => e.head))];
+  return heads.flatMap((head) => ranked.filter((e) => e.head === head));
+}
+
+const entriesOf = (m) => shownCommands(m.entries, m.filter);
+
+// Runs the row at `i`, where there is one, after the menu closed.
+function runEntry(b, m, i, cx) {
+  const entry = entriesOf(m)[i];
+  if (!entry) return;
+  b.closeModal(cx);
+  b.runAction(entry.action, cx);
+}
+
+// An entry's name, the letters the filter found in it in the accent color.
+function markedName(t, name, filter) {
+  const at = new Set(fuzzyMatch(name, filter)?.at ?? []);
+  const runs = [];
+  Array.from(name).forEach((ch, i) => {
+    const hit = at.has(i);
+    if (runs.length && runs.at(-1).hit === hit) runs.at(-1).text += ch;
+    else runs.push({ hit, text: ch });
+  });
+  return h_flex()
+    .flex_1()
+    .min_w(0)
+    .overflow_hidden()
+    .children(runs.map((r) => div().flex_none().text_color(r.hit ? t.accent : t.foreground).when(r.hit, (el) => el.font_semibold()).child(r.text)));
+}
+
+export const commandsModal = {
+  open(b, cx) {
+    const input = InputState.new({ placeholder: "Befehl: tippen, um zu filtern" });
+    const m = { kind: "commands", entries: menuActions(b.actionContext()), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
+    wireTextField(b, m, input, "filter", (cx) => runEntry(b, m, m.at, cx));
+    input.on("change", (_e, cx) => {
+      m.filter = input.value();
+      m.at = entriesOf(m).length ? 0 : -1;
+      m.top = 0;
+      cx.notify();
+    });
+    if (!m.entries.length) m.at = -1;
+    b.modal = m;
+    input.focus();
+    cx.notify();
+  },
+
+  // Every key but Esc (the Board's): up/down, ctrl-j/k and ctrl-n/p mark
+  // a row; the rest is the filter's (Enter: its submit).
+  key(b, e, cx) {
+    const m = b.modal;
+    const k = e.key;
+    const ctrl = e.modifiers?.control;
+    const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
+    if (!by) return;
+    cx.stop_propagation();
+    const count = entriesOf(m).length;
+    m.at = Math.max(0, Math.min(m.at + by, count - 1));
+    followMark(m, count, COMMAND_ROWS);
+    cx.notify();
+  },
+
+  render(b, t) {
+    const m = b.modal;
+    const entries = entriesOf(m);
+    m.at = Math.max(-1, Math.min(m.at, entries.length - 1));
+    m.top = Math.max(0, Math.min(m.top, entries.length - COMMAND_ROWS));
+    const shown = entries.slice(m.top, m.top + COMMAND_ROWS);
+    return menu(t, {
+      id: "commands",
+      rowId: "command",
+      width: 440,
+      title: "Befehle · ↑↓ Enter · Esc",
+      head: [fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))],
+      digits: false,
+      rows: shown.map((e) => [
+        markedName(t, e.name, m.filter),
+        ...(e.key ? [div().flex_none().text_size(11).font_semibold().text_color(t.dim).child(e.key)] : []),
+      ]),
+      // A group's heading over its first row, and over the window's first.
+      heads: shown.map((e, n) => (n === 0 || shown[n - 1].head !== e.head ? e.head : null)),
+      from: m.top,
+      count: entries.length,
+      wheel: (by, cx) => {
+        menuWheel(m, by, entries.length, COMMAND_ROWS);
+        cx.notify();
+      },
+      at: m.at,
+      pick: (i, cx) => runEntry(b, m, i, cx),
+      foot: entries.length ? [] : [div().px(8).text_size(12).text_color(t.muted).child(m.entries.length ? "Kein Befehl passt zum Filter" : "Hier gibt es nichts zu tun")],
+    });
+  },
 };
 
 // ==== src/ui/modals/create.js ====
@@ -4679,7 +5492,7 @@ export const statusModal = {
 // between them (Board.tabKey). A new dialog is a module here and its
 // entry in MODALS.
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal };
 
 // ==== src/ui/shapes/backlog.js ====
 
@@ -4724,15 +5537,10 @@ export const backlogShape = {
   items: (data) => data.rows,
   count: (b, data) => ({ shown: data.rows.filter((r) => b.visible(r, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawBacklog(b, t, mono, view, st),
-  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["n", "neu"], ["s", "Status"], ["a", "zuweisen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down"],
   loads: true,
-  keys(b, view, st, { k }, cx) {
-    if (!st.data) return false;
-    if (k === "n") return MODALS.create.open(b, view, cx), true;
-    if (k === "s") return b.openStatusMenu(view, cx), true;
-    return false;
-  },
+  // n: the create dialog.
+  create: (b, view, cx) => MODALS.create.open(b, view, cx),
   received: (data) => data,
   warnings: (_view, data) => backlogWarnings(data),
   // The settled outcomes: a state change's which state its item has, a
@@ -4906,9 +5714,10 @@ export function unclearMoveLines(due, data) {
 // ==== src/ui/shapes/board.js ====
 
 // The board shape: a view's data as columns of cards, which a card moves
-// between (H/L, the status menu, a drag). A hidden column is not drawn: x
-// hides one, the line above the columns names the hidden ones and a click
-// on a name shows it again; X opens the column menu (modals/columns.js).
+// between (H/L, the status menu, a drag). A hidden column is not drawn: the
+// command menu's "Spalte ausblenden" hides the selected one, the line above
+// the columns names the hidden ones and a click on a name shows it again;
+// the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
 // count, target, cards }], total, limited, viewer, limit }
 // (parseGithubBoard). View fields it reads: id, source, layout, hide (the
@@ -4938,29 +5747,15 @@ export const boardShape = {
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
   },
   render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["x", "Spalte ausblenden"], ["X", "Spalten"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
-  keys(b, view, st, { k, ch, mod }, cx) {
-    if (!st.data) return false;
-    const upper = mod.shift && (k === "h" || k === "l" || k === "x") ? k.toUpperCase() : ch;
-    if (upper === "H" || upper === "L") {
-      const target = st.sel?.key && stepTarget(st.data, st.sel?.key, upper === "H" ? -1 : 1);
-      if (target) b.moveTo(view, st.sel?.key, target.id, cx);
-      return true;
-    }
-    if (k === "s") return b.openStatusMenu(view, cx), true;
-    if (upper === "X") {
-      b.modal = { kind: "columns", view, at: 0 };
-      return true;
-    }
-    if (k === "x") {
-      const col = b.navColumns(view)[st.sel?.col];
-      if (col) b.toggleColumn(view, col, cx);
-      return true;
-    }
-    return false;
+  // H/L: the selected card one column on (`by` 1) or back (-1), hidden
+  // columns too; movable says where there is one.
+  move(b, view, st, by, cx) {
+    const target = st.sel?.key && stepTarget(st.data, st.sel?.key, by);
+    if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
+  movable: (st, item, by) => Boolean(stepTarget(st.data, item.key, by)),
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
@@ -5045,7 +5840,7 @@ function drawBoard(b, t, mono, view, st) {
     .child(
       cols.length
         ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
-        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder X zeigt eine wieder"),
+        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder „Spalten…“ im Befehlsmenü (:) zeigt eine wieder"),
     )
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
@@ -5194,10 +5989,8 @@ export const placeholderShape = {
   count: () => null,
   render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text ?? "Diese Ansicht gibt es noch nicht"),
   items: () => [],
-  hints: [],
   dirs: [],
   loads: false,
-  keys: () => false,
   received: (data) => data,
   warnings: () => [],
 };
@@ -5228,10 +6021,9 @@ export const prsShape = {
     return { shown: rows.filter((r) => b.visible(r, data)).length, total: rows.length };
   },
   render: (b, t, mono, view, st) => drawPrs(b, t, mono, view, st),
-  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["Enter", "Detail · Review"], ["o", "öffnen"]],
   dirs: ["up", "down"],
   loads: true,
-  keys: () => false,
+  enterHint: "Detail · Review",
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
   // The detail panel's rows of a pull request: its checks, where it has them.
@@ -5307,8 +6099,9 @@ function scrollToRow(b, view, key) {
 // taskboard's own column, not the state: two columns may map to one state), s
 // changes a story's or a task's state from its type's states (the status menu),
 // Enter shows the details; both write at once (actions/move.js,
-// actions/write.js). z, or a click on the triangle in a story's row, folds its
-// tasks away and back (toggleStoryFold; kept per sprint in the store). Keys
+// actions/write.js). z (while the board has the keyboard), or a click on the
+// triangle in a story's row, folds its tasks away and back (toggleStoryFold;
+// kept per sprint in the store). Keys
 // walk the stories, then each column's tasks but the folded ones (sprintNav,
 // withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
 // finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
@@ -5364,25 +6157,21 @@ export const sprintShape = {
     return { shown: items.filter((i) => b.visible(i, data)).length, total: items.length };
   },
   render: (b, t, mono, view, st) => drawSprint(b, t, mono, view, st),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["a", "zuweisen"], ["z", "Story zuklappen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
-  keys(b, view, st, { k, ch, mod }, cx) {
-    if (!st.data) return false;
-    const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
-    if (upper === "H" || upper === "L") {
-      const item = b.selected(view);
-      if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
-      else if (item) {
-        const target = stepTarget(st.data, item.key, upper === "H" ? -1 : 1);
-        if (target) b.moveTo(view, item.key, target.id, cx);
-      }
-      return true;
+  // H/L: the selected task one column on (`by` 1) or back (-1); a story
+  // says that only tasks move. movable says where a task has one.
+  move(b, view, st, by, cx) {
+    const item = b.selected(view);
+    if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
+    else if (item) {
+      const target = stepTarget(st.data, item.key, by);
+      if (target) b.moveTo(view, item.key, target.id, cx);
     }
-    if (k === "s") return b.openStatusMenu(view, cx), true;
-    if (k === "z" && !mod.shift) return foldKey(b, view, st, cx), true;
-    return false;
   },
+  movable: (st, item, by) => isTask(item) && Boolean(stepTarget(st.data, item.key, by)),
+  moveHint: "Task verschieben",
+  fold: (b, view, st, cx) => foldKey(b, view, st, cx),
   received: (data, st) => applyMoves(data, st.moves),
   // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),
@@ -5595,13 +6384,16 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
 // item), scrollTo, items (every item the shape draws, whatever the filter:
 // on a board, the cards of its shown columns; a shape without items, the
 // placeholder, leaves Enter, o and the arrows to herdr), count ({ shown,
-// total } items, or null), render, hints (the hint line's entries), dirs
-// (the arrow directions that move), loads (false for the placeholder, which
-// draws without data), keys (handles the shape's own keys; true when it
-// took one), received (the data as kept after a refresh) and warnings; and
-// where it has them, columnCount (how many columns it draws side by side,
-// which the detail panel's share of the width is no narrower than one of:
-// detailWidth; a list has none), detailParts (its rows in the detail
+// total } items, or null), render, dirs (the arrow directions that move),
+// loads (false for the placeholder, which draws without data), received
+// (the data as kept after a refresh) and warnings; and where it has them,
+// the actions it lends the action table (commands.js, which says their
+// keys and hints): move (b, view, st, by, cx: H/L) with movable (st, item,
+// by: whether the item has a column that way) and moveHint, fold (b,
+// view, st, cx: z), create (b, view, cx: n) and enterHint (Enter's hint);
+// columnCount (how many columns it draws side by side, which the detail
+// panel's share of the width is no narrower than one of: detailWidth; a
+// list has none), detailParts (its rows in the detail
 // panel), settle (b, view, due, data, cx: says how the unclear writes of
 // its items ended up), moveTo, toggleColumn, openStatusMenu, navigate (its
 // own keyboard movement in place of navigate's, select.js), pickStatus
@@ -5617,292 +6409,6 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
 // is a module here and its entry in SHAPES.
 
 export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
-
-// ==== src/scroll.js ====
-
-// How the details block scrolls: the one home of its offset. herdr gives a
-// script no scroll offset of a scroll area (a ScrollHandle only reveals a
-// child, with the smallest scroll needed), so the board scrolls the block
-// itself: it keeps the offset in the related items' state (`ui`:
-// ui/related.js, relatedState) with the heights of the window and the
-// content as measured (`viewport`, `content`), shifts the content up by it,
-// and draws the position as a thumb. All lengths are the script's pixels
-// (measured ones divided by herdr's zoom: ui/related.js).
-
-// One line of the details, the step of j/k.
-export const LINE_PX = 18;
-
-// The offset `offset` kept within the content: from 0 to where its end
-// meets the window's; 0 where the content fits.
-export const clampOffset = (offset, content, viewport) => Math.max(0, Math.min(offset, content - viewport));
-
-// The offset after a move by `by` pixels (down for more than 0).
-export const offsetBy = (s, by) => clampOffset(s.offset + by, s.content, s.viewport);
-
-// The offset at which the span [top, top + height] of the content shows,
-// moved as little as needed: one above the window to its top, one below to
-// its bottom (one taller than the window to its top).
-export function revealOffset(s, top, height) {
-  let at = s.offset;
-  if (top + height > at + s.viewport) at = top + height - s.viewport;
-  if (top < at) at = top;
-  return clampOffset(at, s.content, s.viewport);
-}
-
-// Whether the span shows whole; true while the window is not measured yet.
-export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
-
-// The thumb that shows the position: { top, height } within the window, at
-// least `min` high; null where the content fits or the window is not
-// measured.
-export function thumbOf(s, min = 16) {
-  if (!(s.content > s.viewport) || s.viewport <= 0) return null;
-  const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
-  const top = Math.round(((s.viewport - height) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
-  return { top, height };
-}
-
-// Where row `i` of a column of rows stands: the heights of the rows before
-// it (`heights`, one per row), `gap` between rows, after `pad` above the
-// first → { top, height }.
-export function rowSpan(heights, i, gap, pad) {
-  let top = pad;
-  for (let j = 0; j < i; j++) top += heights[j] + gap;
-  return { top, height: heights[i] ?? 0 };
-}
-
-// The block's offset when it draws the details of the item `key`: 0 for
-// another item than the last (ui.at), kept within the content, which a
-// resize or a refresh may have changed.
-export function offsetOf(ui, key) {
-  if (ui.at !== key) {
-    ui.at = key;
-    ui.offset = 0;
-  }
-  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
-  return ui.offset;
-}
-
-// The block moved by `by` pixels: ctrl-d/ctrl-u by halfWindow, j/k by
-// LINE_PX, the wheel by its move.
-export const scrollBy = (ui, by) => (ui.offset = offsetBy(ui, by));
-export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
-// The block at its top or bottom (gg/G, Home/End).
-export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
-// The block moved so that `span` ({ top, height }) shows.
-export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, span.height));
-
-// ==== src/ui/related.js ====
-
-// The detail panel's sections of an item's related items (related.js): its
-// description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
-// Markdown or HTML as its source writes it, without anything it could load:
-// description.js; "keine Beschreibung" where it has none), its sub-issues
-// (an Azure work item's children), then, where it has any or the source
-// could not send them, the pull requests linked to it; one line each with
-// its key, title and state (a done one dimmed, a draft marked), and below
-// a section how many it has that cannot be read. While they load the
-// description's and the sub-issues' sections say "lädt …", after a
-// failure the reason; a section the source could not send says why in its
-// place; what the source said besides follows at the end. The line the
-// panel has selected while it has the keyboard is marked; a click on a
-// line is Enter on it (the Board's pickLine). A link in the description
-// opens through the Board's openLink.
-//
-// A description taller than about 12 lines shows folded to that height,
-// with "… mehr (e)" below; `e` or a click on it unfolds it ("weniger (e)"
-// folds it again). TextView tells no count of its lines, so the fold goes
-// by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
-// description is, its block measures (on_size_change), and it folds only
-// once that is known to be more.
-//
-// The block scrolls by an offset the board keeps (scroll.js, its one home,
-// says why): its window measures its height, the content its own and each
-// row its own (on_size_change), the content stands shifted up by the
-// offset, the mouse wheel moves it, and a thin thumb at the right shows
-// where it is (no scrollbar to drag). The shift is a relative position,
-// which moves the content without changing what it gives the layout: a
-// negative top margin would make the window, which takes its height from
-// the content, shorter by the offset, so that a content which shrinks
-// while scrolled (a refresh, a fold) would leave it short, down to none.
-
-export const FOLDED_H = 12 * LINE_PX;
-
-// What the related items keep per Board, plain values the Board makes once
-// when it starts and every draw reads: the measured height of each
-// description by its item's key, the key of the item whose description is
-// unfolded (null: none; another item's shows folded), and the block's
-// scroll (scroll.js): its offset, the item it is of (`at`), the heights of
-// its window and its content, and of each row by its id.
-export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, at: null, viewport: 0, content: 0, sizes: new Map() });
-
-// Whether the description of `item` is taller than FOLDED_H, as measured.
-export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
-
-// A measured length in the script's pixels: herdr reports a size and a
-// wheel's move in the window's pixels, and scales a script's lengths by
-// its zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
-const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
-
-// `el` measuring its height into `keep(height)` after each layout that
-// changes it, under the id `id` (on_size_change needs a lasting one).
-const measured = (el, id, keep) => el.id(id).on_size_change((size, cx) => {
-  keep(unzoomed(size.height));
-  cx.notify();
-});
-
-// The id each row of relatedRows draws with.
-const rowId = (r, i) => (r.kind === "line" ? `related-line-${r.n}` : `related-row-${i}`);
-
-// Where line `n` of the related items stands in the block's content, from
-// the measured heights (LINE_PX for a row not measured yet); null where no
-// such line shows.
-function lineSpan(ui, item, entry, n) {
-  const rows = relatedRows(item, entry);
-  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
-  return i < 0 ? null : rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, FRAME.gap, FRAME.py);
-}
-
-// Scrolls line `n` into view.
-export function revealLine(ui, item, entry, n) {
-  const span = lineSpan(ui, item, entry, n);
-  if (span) revealSpan(ui, span);
-}
-
-// Whether line `n` shows whole (true while the block is not measured yet).
-export function lineShows(ui, item, entry, n) {
-  const span = lineSpan(ui, item, entry, n);
-  return Boolean(span) && spanShows(ui, span.top, span.height);
-}
-
-// The rows of the related items of `item` as drawn, in order, from `entry`
-// (the Board's kept read: { data, error, shown }, data and error null
-// while it loads, shown the description as drawn (shownDescription, made
-// once per read); null before a read starts): { kind: "head" | "note" |
-// "text" | "line", text, a note's level ("info", "error", "warning";
-// NOTE_TONES) or, for a line, `line` and its index `n` among relatedLines
-// (the one order of the lines); a "text" is the description, one row: its
-// `text` as drawn and its `format`.
-export function relatedRows(item, entry) {
-  const data = entry?.data;
-  const description = { kind: "head", text: "BESCHREIBUNG" };
-  if (!data) {
-    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: "lädt …", level: "info" };
-    return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
-  }
-  const lines = relatedLines(data);
-  const rows = [description];
-  if (typeof entry.shown === "string") rows.push({ kind: "text", text: entry.shown, format: data.format === "html" ? "html" : "markdown" });
-  else rows.push({ kind: "note", text: "keine Beschreibung", level: "info" });
-  const body = (section, none) => {
-    if (section.error) rows.push({ kind: "note", text: section.error, level: "error" });
-    for (const line of section.lines) rows.push({ kind: "line", line, n: lines.indexOf(line) });
-    if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", level: "info" });
-    if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, level: "info" });
-  };
-  rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
-  body(data.subIssues, true);
-  const prs = data.prs;
-  if (prs.lines.length || prs.error || prs.hidden) {
-    rows.push({ kind: "head", text: prsHead(prs) });
-    body(prs, false);
-  }
-  for (const text of data.warnings ?? []) rows.push({ kind: "note", text, level: "warning" });
-  return rows;
-}
-
-// The description row `r` of `item`: the TextView in a block that measures
-// it, folded to FOLDED_H where it is taller and not unfolded, and below it
-// the fold's switch.
-function description(b, t, item, r) {
-  const ui = b.relatedUi;
-  const folds = descriptionFolds(ui, item);
-  const open = ui.unfolded === item.key;
-  const id = `description-${item.key}`;
-  const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
-    .text_size(12)
-    .on_link_click((url, cx) => b.openLink(url, cx));
-  const size = measured(div().flex_none(), `description-size-${item.key}`, (h) => ui.heights.set(item.key, h)).child(view);
-  const box = div().id("description").overflow_hidden().when(folds && !open, (el) => el.max_h(FOLDED_H)).child(size);
-  return v_flex()
-    .gap(4)
-    .child(box)
-    .when(folds, (el) => el.child(
-      div()
-        .id("description-fold")
-        .text_size(12)
-        .text_color(t.accent)
-        .cursor_pointer()
-        .on_click((_e, cx) => {
-          if (!b.modal) b.toggleFold(cx);
-        })
-        .child(open ? "weniger (e)" : "… mehr (e)"),
-    ));
-}
-
-// The block of the related items of `item` (relatedRows) in `view`, the
-// line `at` marked (null: none). A line's state's color, and whether it is
-// done, are its own where its source names them (GitHub), else its state's
-// in the view's data (Azure).
-export function relatedSections(b, t, mono, view, item, entry, at) {
-  const ui = b.relatedUi;
-  const data = b.state(view.id).data;
-  const rowOf = (r) => {
-    if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
-    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, NOTE_TONES[r.level])).child(r.text);
-    if (r.kind === "text") return description(b, t, item, r);
-    const { line, n } = r;
-    const color = line.color ?? stateColor(data, line.state);
-    const done = line.done ?? stateDone(data, line.state);
-    return h_flex()
-      .flex_none()
-      .gap(8)
-      .px(8)
-      .py(4)
-      .items_center()
-      .rounded(6)
-      .border_1()
-      .map(selectedLook(t, n === at, t.chrome))
-      .cursor_pointer()
-      .opacity(done ? 0.55 : 1)
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => {
-        if (!b.modal) b.pickLine(view, n, cx);
-      })
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
-      .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color)));
-  };
-  const offset = offsetOf(ui, item.key);
-  const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))
-    .flex_none()
-    .px(FRAME.px)
-    .py(FRAME.py)
-    .gap(FRAME.gap)
-    .relative()
-    .top(offset ? -offset : 0)
-    .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
-  const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
-    .min_h(0)
-    .overflow_hidden()
-    .on_scroll_wheel((e, cx) => {
-      scrollBy(ui, -unzoomed(e.delta?.y ?? 0));
-      cx.notify();
-    })
-    .child(content);
-  const thumb = thumbOf(ui);
-  return v_flex()
-    .id("related-scroll")
-    .relative()
-    .min_h(0)
-    .border_b(1)
-    .border_color(t.border)
-    .child(windowEl)
-    .when(Boolean(thumb), (el) => el.child(
-      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
-    ));
-}
 
 // ==== src/description.js ====
 
@@ -6810,10 +7316,10 @@ export default class Board extends View {
   // A key while the details panel has the keyboard: j/k or the arrows walk
   // its lines, each scrolled into view; with no line selected they scroll
   // the block a line (LINE_PX), j until the first line shows whole, which
-  // it then selects, k from the first line to none and then up. Enter and
-  // o act on the selected line (with none, they do what they do on the
-  // board), Esc gives the keyboard back. True when the panel took the key.
-  panelKey(view, panel, k, cx) {
+  // it then selects, k from the first line to none and then up. Esc gives
+  // the keyboard back. True when the panel took the key. Enter and o on
+  // the selected line are actions (commands.js: line-board, line-open).
+  panelKey(view, panel, k) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
     const lines = this.linesOf(view);
     if (dir) {
@@ -6828,14 +7334,7 @@ export default class Board extends View {
       return true;
     }
     if (k === "escape") return (this.panel = null), true;
-    if ((k !== "enter" && k !== "o") || panel.line === null) return false;
-    // A line selected before `r` read the related items again is gone until
-    // they come: the key does nothing.
-    const line = lines[panel.line];
-    if (!line) return true;
-    if (k === "enter") this.enterLine(view, line, cx);
-    else this.open(line, cx);
-    return true;
+    return false;
   }
 
   // Enter on a line: where a shown column holds the line's item, that item
@@ -6890,8 +7389,8 @@ export default class Board extends View {
     if (sel) this.choose(view, sel, cx);
   }
 
-  // e, or a click on the description's switch: the shown details'
-  // description unfolded, or folded again, where it is taller than its fold
+  // z (commands.js, fold-description), or a click on the description's
+  // switch: the shown details' description unfolded, or folded again, where it is taller than its fold
   // (ui/related.js); true when it is.
   toggleFold(cx) {
     const item = this.shownDetailsItem();
@@ -6989,19 +7488,20 @@ export default class Board extends View {
     this.showContext(cx);
   }
 
+  // ] and [: the shown source's next or previous tab (`by` 1 or -1), past
+  // the last the first and back.
+  stepTab(by, cx) {
+    const tabs = this.contexts();
+    const at = tabs.findIndex((c) => c.id === this.context()?.id);
+    if (tabs.length) this.switchTab((at + by + tabs.length) % tabs.length, cx);
+  }
+
   // Shows another source with the tab it showed last.
   switchSource(id, cx) {
     if (!sourcesOf(this.config).some((s) => s.id === id)) return;
     this.sourceId = id;
     store.set("source", id);
     this.showContext(cx);
-  }
-
-  // The next source in the toggle's order, after the last the first.
-  nextSource(cx) {
-    const list = sourcesOf(this.config);
-    const at = list.findIndex((s) => s.id === this.source()?.id);
-    if (list.length > 1) this.switchSource(list[(at + 1) % list.length].id, cx);
   }
 
   // After another tab came up: the notice goes, and its view, without data
@@ -7203,6 +7703,32 @@ export default class Board extends View {
 
   // ---- keys ----
 
+  // What the board says of the moment, for its actions (commands.js): the
+  // shown view, its state and shape, the selected item, the item whose
+  // details show and whether those read related items, the details panel's
+  // keyboard and its selected line, and the related items' lines.
+  actionContext() {
+    const view = this.view();
+    const st = view ? this.state(view.id) : null;
+    const details = this.shownDetailsItem();
+    const panel = view ? this.panelOf(view) : null;
+    return {
+      b: this, view, st, shape: view ? this.shape(view) : null, item: view ? this.selected(view) : null, details,
+      related: this.readsRelated(details), panel, line: panel?.line ?? null, lines: panel ? this.linesOf(view) : [],
+    };
+  }
+
+  // An action the menu picked (ui/modals/commands.js): run as its key runs
+  // it (key), the selection kept first but for the top bar's, where it can
+  // still run.
+  runAction(action, cx) {
+    const view = this.view();
+    if (!action.bar && view && this.state(view.id).data) this.keepSelection(view);
+    const c = this.actionContext();
+    if (action.when(c)) action.run(this, c, cx);
+    cx.notify();
+  }
+
   key(e, cx) {
     const k = e.key;
     const ch = e.key_char ?? "";
@@ -7238,26 +7764,13 @@ export default class Board extends View {
     if (end === "pending") return (this.afterG = true), done();
     if (end) return this.toEdge(view, end, cx), done();
     const panel = view && bare ? this.panelOf(view) : null;
-    if (panel && this.panelKey(view, panel, k, cx)) return done();
-    if (k === "e" && bare && this.toggleFold(cx)) return done();
-    // [ ] and / may come with Shift, or with Control+Alt; Control alone
-    // stays herdr's. Alt alone is let through: a key herdr binds with Alt
-    // never reaches a mod (logged), so this costs herdr nothing; how AltGr
-    // arrives on a German layout is untested.
-    const typed = !(mod.control && !mod.alt) && !mod.platform;
-    if (typed && (ch === "[" || ch === "]")) {
-      const tabs = this.contexts();
-      const at = tabs.findIndex((c) => c.id === this.context()?.id);
-      if (tabs.length) this.switchTab((at + (ch === "[" ? -1 : 1) + tabs.length) % tabs.length, cx);
-      return done();
-    }
-    if (typed && ch === "/") return this.filterInput.focus(), done();
+    if (panel && this.panelKey(view, panel, k)) return done();
+    // The top bar's actions run first; the others after the selection is
+    // kept, Esc and the arrows, each from the action table (commands.js).
+    const name = keyName(k, ch, mod);
+    const first = name ? actionFor(name, this.actionContext()) : null;
+    if (first?.bar) return first.run(this, this.actionContext(), cx), done();
     if (mod.control || mod.alt || mod.platform) return;
-    if (/^[1-9]$/.test(ch)) return this.switchTab(Number(ch) - 1, cx), done();
-    if (!mod.shift) {
-      const action = { r: () => this.reload(cx), q: () => this.nextSource(cx), v: () => this.nextTeamView(cx), m: () => this.toggleMine(cx) }[k];
-      if (action) return action(), done();
-    }
     const st = view ? this.state(view.id) : null;
     if (st?.data) this.keepSelection(view);
     if (k === "escape") {
@@ -7276,13 +7789,11 @@ export default class Board extends View {
       if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir), cx);
       return done();
     }
-    if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
-    if (k === "a" && !mod.shift && st.data) return this.openAssign(view, cx), done();
     // With nothing selected (loading, failed, empty, a placeholder) Enter
-    // and o stay herdr's.
-    const item = this.selected(view);
-    if (k === "enter" && item) return this.enter(view, cx), done();
-    if (k === "o" && item) return this.open(item, cx), done();
+    // and o stay herdr's (their actions do not take them).
+    const c = this.actionContext();
+    const action = name ? actionFor(name, c) : null;
+    if (action) return action.run(this, c, cx), done();
   }
 
   openStatusMenu(view, cx) {
@@ -7290,6 +7801,17 @@ export default class Board extends View {
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
     open(this, view, cx);
     cx.notify();
+  }
+
+  // The column menu (ui/modals/columns.js), where the view's shape has
+  // columns to hide.
+  openColumns(view, cx) {
+    MODALS.columns.open(this, view, cx);
+  }
+
+  // The command menu (ui/modals/commands.js): the actions that can run now.
+  openCommands(cx) {
+    MODALS.commands.open(this, cx);
   }
 
   // a: the assignee picker, where the shape's items can be assigned.
@@ -7353,7 +7875,7 @@ export default class Board extends View {
           .child(this.main(t, mono, view, st))
           .when(Boolean(item), (el) => el.child(this.detail(t, mono, view, item))),
       )
-      .child(this.hints(t, view));
+      .child(this.hints(t));
     if (this.modal) out = out.child(MODALS[this.modal.kind].render(this, t));
     return out;
   }
@@ -7644,27 +8166,13 @@ export default class Board extends View {
       );
   }
 
-  // The details panel's keys, where the details of an item with related
-  // items to read show (readsRelated): Tab into it, and in it its own.
-  panelHints(view) {
-    const item = view ? this.shownDetailsItem() : null;
-    if (!this.readsRelated(item)) return [];
-    const ui = this.relatedUi;
-    const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
-    if (!this.panelOf(view)) return [["Tab", "Details"], ...fold];
-    return [["Tab", "Board"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
-  }
-
-  // The keys of what shows: the top bar's (a team's v), those of the shown
-  // view's shape, the details panel's (panelHints), and those that always
-  // work; Esc gives the keyboard back while the panel has it.
-  hints(t, view) {
-    const context = this.context();
-    const bar = [...(sourcesOf(this.config).length > 1 ? [["q", "Quelle"]] : []), ["1 2 3 [ ]", "Tab"]];
-    const switches = hasViewSwitch(context) ? [["v", viewSwitchHint(context)]] : [];
-    const esc = view && this.panelOf(view) ? "zurück" : "schließen";
-    const always = [...(this.source() ? [["m", "nur meine"]] : []), ["/", "Filter"], ["r", "neu laden"], ["Esc", esc]];
-    const keys = [...bar, ...switches, ...(view ? this.shape(view).hints : []), ...this.panelHints(view), ...always];
+  // The keys of what shows now, as the action table says them (hintsOf):
+  // the top bar's, the moves and those of the shown view's shape that it
+  // keeps a key for, the details panel's, and those that always work; Esc
+  // gives the keyboard back while the panel has it. What has no key of its
+  // own is in the command menu (`:`).
+  hints(t) {
+    const keys = hintsOf(this.actionContext());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

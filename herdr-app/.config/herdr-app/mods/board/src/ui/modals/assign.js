@@ -3,17 +3,20 @@
 // Its rows are "Ich", "niemand", then the people its source offers (the repo's
 // assignable people on GitHub, the team's members on Azure), narrowed by a
 // filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
-// Enter or a click assigns it (actions/assign.js). Which row is marked when the
-// rows come and after each change of the filter: where the people were read and
-// "Ich" is among them, the first row the filter leaves that is no "niemand",
-// and "niemand" only where it is all that is left; else (the people could not
-// be read, or GitHub named no viewer) none, so that Enter assigns nothing until
-// a row is chosen. Board.openAssign opens it as b.modal = { kind: "assign",
-// view, key, label, input (the filter's InputState, made for this dialog),
-// field and textField ("filter"), inputFocused, filter, at (the marked row, -1
-// for none), top (the first row drawn), list ({ me, people, note }, null while
-// it loads), error }. Where the people cannot be read, it says so in the dialog
-// and as a toast, and offers what its source can write without them.
+// Enter or a click assigns it (actions/assign.js). Ten rows show at once: the
+// window follows the mark, and the mouse wheel moves it (helpers.js,
+// followMark and menuWheel). Which row is marked when the rows come and after
+// each change of the filter: where the people were read and "Ich" is among
+// them, the first row the filter leaves that is no "niemand", and "niemand"
+// only where it is all that is left; else (the people could not be read, or
+// GitHub named no viewer) none, so that Enter assigns nothing until a row is
+// chosen. Board.openAssign opens it as b.modal = { kind: "assign", view, key,
+// label, input (the filter's InputState, made for this dialog), field and
+// textField ("filter"), inputFocused, filter, at (the marked row, -1 for
+// none), top (the first row drawn), wheel (the wheel's move left over:
+// menuWheel), list ({ me, people, note }, null while it loads), error }.
+// Where the people cannot be read, it says so in the dialog and as a toast,
+// and offers what its source can write without them.
 
 import { div } from "gpui-kit";
 import { Input, InputState } from "gpui-base";
@@ -21,7 +24,7 @@ import { notify } from "herdr";
 import { itemLabel, report } from "../../shared.js";
 import { wordsMatch } from "../../select.js";
 import { assignAtOnce } from "../../actions/assign.js";
-import { fieldFrame, menu, wireTextField } from "../helpers.js";
+import { fieldFrame, followMark, menu, menuWheel, wireTextField } from "../helpers.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
 // How many rows show at once.
@@ -102,7 +105,9 @@ export const assignModal = {
     const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
     if (!by) return;
     cx.stop_propagation();
-    m.at = Math.max(0, Math.min(m.at + by, rowsOf(m).length - 1));
+    const count = rowsOf(m).length;
+    m.at = Math.max(0, Math.min(m.at + by, count - 1));
+    followMark(m, count, VISIBLE);
     cx.notify();
   },
 
@@ -110,8 +115,7 @@ export const assignModal = {
     const m = b.modal;
     const rows = rowsOf(m);
     m.at = Math.max(-1, Math.min(m.at, rows.length - 1));
-    if (m.at >= 0 && m.at < m.top) m.top = m.at;
-    if (m.at >= m.top + VISIBLE) m.top = m.at - VISIBLE + 1;
+    m.top = Math.max(0, Math.min(m.top, rows.length - VISIBLE));
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
     const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
     return menu(t, {
@@ -129,6 +133,11 @@ export const assignModal = {
         ...(r.sub ? [div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub)] : []),
       ]),
       from: m.top,
+      count: rows.length,
+      wheel: (by, cx) => {
+        menuWheel(m, by, rows.length, VISIBLE);
+        cx.notify();
+      },
       at: m.at,
       pick: (i, cx) => assignPick(b, m, i, cx),
       foot: [...(message ? [line(message, t.muted)] : []), ...(m.list?.note ? [line(`Personen: ${m.list.note}`, t.dim, 11)] : [])],

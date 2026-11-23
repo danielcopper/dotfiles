@@ -6,8 +6,9 @@
 // taskboard's own column, not the state: two columns may map to one state), s
 // changes a story's or a task's state from its type's states (the status menu),
 // Enter shows the details; both write at once (actions/move.js,
-// actions/write.js). z, or a click on the triangle in a story's row, folds its
-// tasks away and back (toggleStoryFold; kept per sprint in the store). Keys
+// actions/write.js). z (while the board has the keyboard), or a click on the
+// triangle in a story's row, folds its tasks away and back (toggleStoryFold;
+// kept per sprint in the store). Keys
 // walk the stories, then each column's tasks but the folded ones (sprintNav,
 // withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
 // finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
@@ -81,25 +82,21 @@ export const sprintShape = {
     return { shown: items.filter((i) => b.visible(i, data)).length, total: items.length };
   },
   render: (b, t, mono, view, st) => drawSprint(b, t, mono, view, st),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["a", "zuweisen"], ["z", "Story zuklappen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
-  keys(b, view, st, { k, ch, mod }, cx) {
-    if (!st.data) return false;
-    const upper = mod.shift && (k === "h" || k === "l") ? k.toUpperCase() : ch;
-    if (upper === "H" || upper === "L") {
-      const item = b.selected(view);
-      if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
-      else if (item) {
-        const target = stepTarget(st.data, item.key, upper === "H" ? -1 : 1);
-        if (target) b.moveTo(view, item.key, target.id, cx);
-      }
-      return true;
+  // H/L: the selected task one column on (`by` 1) or back (-1); a story
+  // says that only tasks move. movable says where a task has one.
+  move(b, view, st, by, cx) {
+    const item = b.selected(view);
+    if (item && !isTask(item)) b.say(`${itemLabel(item)} ist eine Story: H/L verschieben Tasks, s ändert ihren Status`, "info", cx);
+    else if (item) {
+      const target = stepTarget(st.data, item.key, by);
+      if (target) b.moveTo(view, item.key, target.id, cx);
     }
-    if (k === "s") return b.openStatusMenu(view, cx), true;
-    if (k === "z" && !mod.shift) return foldKey(b, view, st, cx), true;
-    return false;
   },
+  movable: (st, item, by) => isTask(item) && Boolean(stepTarget(st.data, item.key, by)),
+  moveHint: "Task verschieben",
+  fold: (b, view, st, cx) => foldKey(b, view, st, cx),
   received: (data, st) => applyMoves(data, st.moves),
   // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),

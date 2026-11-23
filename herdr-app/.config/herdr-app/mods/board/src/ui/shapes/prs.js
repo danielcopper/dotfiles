@@ -27,10 +27,9 @@ export const prsShape = {
     return { shown: rows.filter((r) => b.visible(r, data)).length, total: rows.length };
   },
   render: (b, t, mono, view, st) => drawPrs(b, t, mono, view, st),
-  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["Enter", "Detail · Review"], ["o", "öffnen"]],
   dirs: ["up", "down"],
   loads: true,
-  keys: () => false,
+  enterHint: "Detail · Review",
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
   // The detail panel's rows of a pull request: its checks, where it has them.
