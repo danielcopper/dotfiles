@@ -41,12 +41,35 @@ export function shownState(item, column) {
 
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
-// (a task moved in comes last in its column's data).
-export function sprintNav(data, filter, mine) {
+// (a task moved in comes last in its column's data); the tasks of the rows
+// in `folded` (story keys) are left out.
+export function sprintNav(data, filter, mine, folded = new Set()) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
   const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
-  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
+  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: c.shown.filter((t) => !folded.has(t.row)).sort(byRow) }))];
+}
+
+// The tasks of the row `key`, in every column.
+export const rowTasks = (data, key) => data.columns.flatMap((c) => c.cards.filter((t) => t.row === key));
+
+// Which stories a Sprint view has folded, as the store keeps it
+// ("folded:<view>": { sprint: the iteration's id, stories: [story keys] });
+// null for anything else.
+export function readStoredFolds(v) {
+  return typeof v?.sprint === "string" && Array.isArray(v.stories) && v.stories.every((k) => typeof k === "string") ? v : null;
+}
+
+// The stories folded in the sprint `data` shows, from what is kept
+// (`folds`, readStoredFolds): none where they were folded in another
+// sprint.
+export const foldedStories = (folds, data) => new Set(folds?.sprint === data.meta.iterationId ? folds.stories : []);
+
+// `folds` with the story `key` folded, or unfolded where it was, in the
+// sprint `data` shows; the folds of another sprint are dropped.
+export function toggledFolds(folds, data, key) {
+  const now = [...foldedStories(folds, data)];
+  return { sprint: data.meta.iterationId, stories: now.includes(key) ? now.filter((k) => k !== key) : [...now, key] };
 }
 
 // The rows that show: those with a story or a task that shows (`nav`,

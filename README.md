@@ -407,7 +407,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   next column its type has (through the taskboard's own column, not the
   state, since two columns may map to one state; az takes the request from a
   file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state
-  from its type's states, a click selects, and `Enter` shows the details
+  from its type's states, `z` folds a story's tasks away and back (on a task,
+  its story's, which it then selects; a click on the triangle in a story's
+  row does the same and selects nothing): the row then says how many tasks it
+  holds, the keys pass over them, and the board remembers the folded stories
+  per sprint, after a restart too (a new sprint starts unfolded), a click
+  selects, and `Enter` shows the details
   (parent, state, assignee, column, area and iteration). On a Backlog `j/k`
   move, `s` sets the state, `Enter` shows the details (parent, state,
   assignee, area, iteration and sprint), `o` opens the item in the browser,

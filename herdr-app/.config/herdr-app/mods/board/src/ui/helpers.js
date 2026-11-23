@@ -17,7 +17,8 @@ import { CHIP_ALPHA, headBg, hueTone, selectedBg, tint, typeLineTone, typeTone }
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
-// "nur meine" ("mine") and each view's hidden columns ("hidden:<view>"). A
+// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>") and a
+// Sprint's folded stories ("folded:<view>", readStoredFolds). A
 // full or missing localStorage keeps them for this session only.
 export const store = {
   get(key) {

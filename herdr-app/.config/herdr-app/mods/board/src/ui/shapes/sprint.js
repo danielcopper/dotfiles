@@ -6,7 +6,9 @@
 // taskboard's own column, not the state: two columns may map to one state), s
 // changes a story's or a task's state from its type's states (the status menu),
 // Enter shows the details; both write at once (actions/move.js,
-// actions/write.js). Keys walk the stories, then each column (sprintNav). The
+// actions/write.js). z, or a click on the triangle in a story's row, folds its
+// tasks away and back (toggleFold; kept per sprint in the store). Keys walk
+// the stories, then each column's tasks but the folded ones (sprintNav). The
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
 // states, typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
 // hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
@@ -19,13 +21,16 @@ import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { cardLabel, itemLabel } from "../../shared.js";
 import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
-import { findSprintItem, isTask, rowOf, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, sprintWarnings, withItemState } from "../../kinds/sprint.js";
+import {
+  NO_STORY, findSprintItem, foldedStories, isTask, rowOf, rowTasks, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, sprintWarnings,
+  toggledFolds, withItemState,
+} from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, typeLine, workItemDetail } from "../helpers.js";
+import { cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, store, typeLine, workItemDetail } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -34,7 +39,12 @@ const STORY_WIDTH = 260;
 // rows' scroll handle.
 const sprintState = (b) => b.shapeState.sprint;
 
-const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
+// The columns the keys walk, the folded rows' tasks left out, and the
+// columns with every task the filter and "nur meine" leave (openColumns),
+// which say which rows show and what the column heads count: folding is no
+// filter.
+const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine, foldedStories(st.folds, st.data));
+const openColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
 
 // An item's state as shown: a task's as its column maps it (shownState).
 const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
@@ -49,7 +59,7 @@ export const sprintShape = {
   scrollTo(b, view) {
     const st = b.state(view.id);
     const item = findSprintItem(st.data, st.sel?.key);
-    const at = item ? shownRows(st.data, sprintColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
+    const at = item ? shownRows(st.data, openColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
     if (at >= 0) sprintState(b).scroll.scroll_to_item(at);
   },
   navigate: (b, view, st, dir) => sprintNavigate(sprintColumns(b, st), st.sel, dir),
@@ -59,7 +69,7 @@ export const sprintShape = {
     return { shown: items.filter((i) => b.visible(i, data)).length, total: items.length };
   },
   render: (b, t, mono, view, st) => drawSprint(b, t, mono, view, st),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["z", "Story zuklappen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
@@ -75,6 +85,7 @@ export const sprintShape = {
       return true;
     }
     if (k === "s") return b.openStatusMenu(view, cx), true;
+    if (k === "z" && !mod.shift) return foldKey(b, view, st, cx), true;
     return false;
   },
   received: (data, st) => applyMoves(data, st.moves),
@@ -110,11 +121,40 @@ function sprintEnd(finish) {
   return Number.isNaN(at.getTime()) ? "" : ` · bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
 }
 
+// z: the selected story's tasks folded away, or back; on a task, its row's,
+// and its story is chosen where it shows.
+function foldKey(b, view, st, cx) {
+  const item = b.selected(view);
+  if (!item) return;
+  const key = isTask(item) ? item.row : item.key;
+  if (key === NO_STORY) return b.say("Die Zeile „Ohne Story“ lässt sich nicht zuklappen", "info", cx);
+  if (!rowTasks(st.data, key).length) return b.say(`${itemLabel(item)} hat keine Tasks zum Zuklappen`, "info", cx);
+  toggleFold(b, view, key, cx);
+  if (isTask(item) && sprintColumns(b, st)[0].shown.some((s) => s.key === key)) b.choose(view, { col: 0, key }, cx);
+}
+
+// Folds the tasks of the story `key` away, or back, in the shown sprint,
+// and keeps that in the store per view and sprint (toggledFolds). A
+// selected task that is folded away hands the selection to its story where
+// that shows (no choice: reselect), else as after new data.
+function toggleFold(b, view, key, cx) {
+  const st = b.state(view.id);
+  st.folds = toggledFolds(st.folds, st.data, key);
+  store.set(`folded:${view.id}`, st.folds);
+  const item = b.selected(view);
+  const nav = sprintColumns(b, st);
+  if (item && isTask(item) && item.row === key && nav[0].shown.some((s) => s.key === key)) b.reselect(view, { col: 0, key });
+  else b.keepSelection(view);
+  cx.notify();
+}
+
 function drawSprint(b, t, mono, view, st) {
   const data = st.data;
   const nav = sprintColumns(b, st);
+  const open = openColumns(b, st);
   const [, ...cols] = nav;
-  const rows = shownRows(data, nav);
+  const rows = shownRows(data, open);
+  const folded = foldedStories(st.folds, data);
   const stories = sprintStories(data);
   const allSpaces = spaces();
   const head = h_flex()
@@ -129,7 +169,7 @@ function drawSprint(b, t, mono, view, st) {
       div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
         .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
     )
-    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
+    .children(open.slice(1).map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
@@ -144,11 +184,12 @@ function drawSprint(b, t, mono, view, st) {
     .border_b(1)
     .border_color(t.border)
     .child(storyCell(b, t, mono, view, st, r, nav))
-    .children(cols.map((col, ci) => v_flex()
+    .when(folded.has(r.key), (el) => el.child(foldedCell(t, data, open, r)))
+    .when(!folded.has(r.key), (el) => el.children(cols.map((col, ci) => v_flex()
       .flex_1()
       .min_w(0)
       .gap(6)
-      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces)))));
+      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces))))));
   return v_flex()
     .flex_1()
     .min_h(0)
@@ -156,10 +197,21 @@ function drawSprint(b, t, mono, view, st) {
     .child(v_flex().id("sprint-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(sprintState(b).scroll).children(rows.map(rowEl)));
 }
 
-// A row's story at the left: its key and type, title and state, and a line
-// across its top in its type's color (typeLine); one the filter or "nur
-// meine" hides (it shows for its tasks) is dimmed and takes no click. The
-// row "Ohne Story" names itself.
+// A folded row's place of its tasks, across the taskboard's columns: how
+// many it holds, as many as the filter and "nur meine" leave of them
+// (`open`, openColumns) where they thin them.
+function foldedCell(t, data, open, r) {
+  const shown = open.slice(1).reduce((n, c) => n + c.shown.filter((card) => card.row === r.key).length, 0);
+  const total = rowTasks(data, r.key).length;
+  return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
+}
+
+// A row's story at the left: its triangle where its row holds tasks (▾, ▸
+// folded; a click folds or unfolds them and chooses nothing), its key and
+// type, title and state, and a line across its top in its type's color
+// (typeLine); one the filter or "nur meine" hides (it shows for its tasks)
+// is dimmed and takes no click but on its triangle. The row "Ohne Story"
+// names itself.
 function storyCell(b, t, mono, view, st, r, nav) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
@@ -167,6 +219,8 @@ function storyCell(b, t, mono, view, st, r, nav) {
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
   const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
+  const folds = rowTasks(st.data, story.key).length > 0;
+  const folded = foldedStories(st.folds, st.data).has(story.key);
   return cell
     .id(`story-${story.key}`)
     .relative()
@@ -179,6 +233,13 @@ function storyCell(b, t, mono, view, st, r, nav) {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
     .child(h_flex().gap(6).items_center()
+      .when(folds, (el) => el.child(div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
+        .hover((s) => s.text_color(t.foreground))
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          if (!b.modal) toggleFold(b, view, story.key, cx);
+        })
+        .child(folded ? "▸" : "▾")))
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))

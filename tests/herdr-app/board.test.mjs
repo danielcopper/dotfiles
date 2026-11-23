@@ -3295,7 +3295,7 @@ test("UI: an Azure team tab shows its Sprint or its Backlog, and v switches them
   const shown = () => texts(b.render());
   const layout = () => b.view().layout;
   assert.ok(shown().includes("az ist nicht installiert"), "the Sprint reads with az, which is not found here");
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "gg/G", "H/L", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "gg/G", "H/L", "s", "z", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
   await press(b, cx, "v");
   assert.deepEqual([layout(), shown().includes("az ist nicht installiert")], ["backlog", true], "the Backlog reads with az too");
   assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "j/k", "gg/G", "n", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Backlog's keys");
@@ -4477,7 +4477,7 @@ test("UI: s on a story offers its type's states; a refusal sets the state back, 
 test("UI: a Sprint's cards and stories and a Backlog's rows show a work item's number without AB#; its details, notices and toasts keep AB#, a GitHub card its repo", async () => {
   const { b, cx, host } = await openSprint();
   assert.equal(texts(byId(b.render(), "card-AB#311"))[0], "311");
-  assert.equal(texts(byId(b.render(), "story-AB#301"))[0], "301");
+  assert.deepEqual(texts(byId(b.render(), "story-AB#301")).slice(0, 2), ["▾", "301"], "after its triangle");
   await click(b, cx, "card-AB#311");
   await click(b, cx, "card-AB#311");
   assert.ok(texts(byId(b.render(), "detail")).includes("AB#311"), "the details' head");
@@ -4537,6 +4537,113 @@ test("UI: a Sprint that cannot be read says why in its view; a failed read of it
   assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 1], "the settings are asked again");
   await host.answer("az", azRefused("Before you can run Azure DevOps commands, you need to run the login command (az login if using AAD/MSA identity else az devops login if using PAT token) to setup credentials."), AZ.iteration);
   assert.equal(b.state(b.view().id).error, "az ist nicht angemeldet (az login oder az devops login)");
+});
+
+// The keys of the items in each taskboard column the keys walk.
+const navTasks = (b) => b.navColumns(b.view()).slice(1).map((c) => c.shown.map((i) => i.key));
+
+test("UI: z on a story folds its tasks away: its triangle closes, its row says how many tasks it holds, the keys skip them, the column heads count them still; z again unfolds them", async () => {
+  const { b, cx, st } = await openSprint();
+  let root = b.render();
+  assert.deepEqual([texts(byId(root, "fold-AB#301")), byId(root, "folded-AB#301")], [["▾"], null]);
+  await click(b, cx, "story-AB#301");
+  await press(b, cx, "z");
+  root = b.render();
+  assert.deepEqual(texts(byId(root, "fold-AB#301")), ["▸"]);
+  assert.deepEqual(["card-AB#311", "card-AB#312", "card-AB#313"].map((id) => byId(root, id)), [null, null, null], "its tasks are not drawn");
+  assert.deepEqual(texts(byId(root, "folded-AB#301")), ["3 Tasks"]);
+  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301", "row-AB#302"]);
+  assert.deepEqual(rowCells(root, "AB#302"), [[], [], [], ["card-AB#321"]], "another row keeps its tasks");
+  assert.deepEqual(st().sel, { col: 0, key: "AB#301" });
+  assert.deepEqual(navTasks(b), [["AB#331"], ["AB#332"], [], ["AB#321"]]);
+  await press(b, cx, "l");
+  assert.equal(st().sel.key, "AB#301", "no task of its row to go to");
+  assert.deepEqual(byId(root, "sprint-head").kids.slice(1).map((h) => texts(h).at(-1)), ["2", "2", "1", "1"], "folding is no filter");
+  assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "8");
+  await press(b, cx, "z");
+  root = b.render();
+  assert.deepEqual([texts(byId(root, "fold-AB#301")), byId(root, "folded-AB#301")], [["▾"], null]);
+  assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], ["card-AB#312"], ["card-AB#313"], []]);
+  assert.deepEqual(navTasks(b), [["AB#331", "AB#311"], ["AB#332", "AB#312"], ["AB#313"], ["AB#321"]], "in row order, „Ohne Story“ first");
+});
+
+test("UI: a click on a row's triangle folds or unfolds it and chooses nothing; z on a task folds its row and chooses its story; „Ohne Story“ and a story without tasks have no triangle, and z there says so", async () => {
+  const { b, cx, st } = await openSprint({ places: taskboardAnswer({}, [321]) });
+  const before = st().sel;
+  await click(b, cx, "fold-AB#301");
+  assert.equal(byId(b.render(), "card-AB#312"), null);
+  assert.deepEqual(st().sel, before, "the click chooses nothing");
+  assert.ok(cx.stopped > 0, "nor does the story under it take the click");
+  await click(b, cx, "fold-AB#301");
+  assert.ok(byId(b.render(), "card-AB#312"));
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "z");
+  assert.equal(byId(b.render(), "card-AB#312"), null);
+  assert.deepEqual([st().sel, st().picked], [{ col: 0, key: "AB#301" }, "AB#301"], "its story, chosen");
+  const root = b.render();
+  assert.deepEqual([byId(root, "fold-none"), byId(root, "fold-AB#302")], [null, null], "no tasks in the row of AB#302");
+  await click(b, cx, "card-AB#331");
+  await press(b, cx, "z");
+  assert.equal(b.notice.text, "Die Zeile „Ohne Story“ lässt sich nicht zuklappen");
+  assert.ok(byId(b.render(), "card-AB#331"));
+  await click(b, cx, "story-AB#302");
+  await press(b, cx, "z");
+  assert.equal(b.notice.text, "AB#302 hat keine Tasks zum Zuklappen");
+});
+
+test("UI: a folded row counts the tasks the filter leaves of all it holds; its story, hidden by the filter, stays dimmed for them", async () => {
+  const { b, cx } = await openSprint();
+  await click(b, cx, "story-AB#301");
+  await press(b, cx, "z");
+  b.filterText = "parse";
+  const root = b.render();
+  assert.deepEqual(drawnRows(root), ["row-AB#301"]);
+  assert.deepEqual(texts(byId(root, "folded-AB#301")), ["1/3 Tasks"]);
+  assert.deepEqual(byId(root, "story-AB#301").with.opacity, [0.5]);
+  b.filterText = "";
+  b.mine = true;
+  assert.deepEqual(texts(byId(b.render(), "folded-AB#301")), ["2/3 Tasks"], "„nur meine“ thins it too");
+});
+
+test("UI: a fold that takes the selected task away selects its story without choosing it; a row of one task says so; the rows scroll as drawn, a folded row of a hidden story too", async () => {
+  const { b, cx, st, host } = await openSprint({ me: ok('{ "name": "robin.example@example.com", "type": "user" }\n') });
+  await click(b, cx, "card-AB#312");
+  await click(b, cx, "card-AB#312");
+  assert.equal(st().detail, true);
+  await click(b, cx, "fold-AB#301");
+  assert.deepEqual([st().sel, st().picked, st().detail], [{ col: 0, key: "AB#301" }, null, false]);
+  await click(b, cx, "fold-AB#302");
+  assert.deepEqual(texts(byId(b.render(), "folded-AB#302")), ["1 Task"]);
+  await click(b, cx, "fold-AB#302");
+  await press(b, cx, "m");
+  assert.deepEqual(drawnRows(b.render()), ["row-none", "row-AB#301", "row-AB#302"], "both stories dimmed for Robin's tasks");
+  await click(b, cx, "card-AB#321");
+  assert.equal(host.scrolled.at(-1).row, 2, "its row as drawn, below the folded row of a hidden story");
+});
+
+test("a Sprint's folds as the store keeps them: a sprint's id and story keys, anything else none", () => {
+  const folds = { sprint: ITERATION_ID, stories: ["AB#301"] };
+  assert.equal(board.readStoredFolds(folds), folds);
+  for (const bad of [null, "x", { sprint: 1, stories: [] }, { sprint: "s" }, { sprint: "s", stories: [3] }]) assert.equal(board.readStoredFolds(bad), null, JSON.stringify(bad));
+});
+
+test("UI: which stories are folded is remembered per sprint: a new board shows them folded, a new sprint all unfolded", async () => {
+  const first = await openSprint();
+  await click(first.b, first.cx, "story-AB#301");
+  await press(first.b, first.cx, "z");
+  const key = `folded:${first.view.id}`;
+  const saved = JSON.parse(memory.get(key));
+  assert.deepEqual(saved, { sprint: ITERATION_ID, stories: ["AB#301"] });
+  const again = await openSprint({ stored: { source: "azure", [key]: saved } });
+  assert.equal(byId(again.b.render(), "card-AB#311"), null, "folded after a restart");
+  assert.deepEqual(navTasks(again.b)[0], ["AB#331"]);
+  const next = JSON.parse(iterationAnswer());
+  next[0].id = "next-sprint";
+  const later = await openSprint({ stored: { source: "azure", [key]: saved }, iteration: JSON.stringify(next) });
+  assert.ok(byId(later.b.render(), "card-AB#311"), "another sprint starts unfolded");
+  await click(later.b, later.cx, "story-AB#302");
+  await press(later.b, later.cx, "z");
+  assert.deepEqual(JSON.parse(memory.get(key)), { sprint: "next-sprint", stories: ["AB#302"] }, "the new sprint's folds replace the old");
 });
 
 test("UI: on the Sprint h/l j/k walk stories and tasks by row, and the chosen item's row is scrolled into view", async () => {

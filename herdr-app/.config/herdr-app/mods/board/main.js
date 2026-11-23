@@ -695,6 +695,127 @@ export function shownColumns(board, filter, mine = false) {
   return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }
 
+// ==== src/kinds/sprint.js ====
+
+// A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
+// whose story is not in the sprint), the items it holds, what shows and how the
+// keys walk it, a task's state as shown, a state change laid over the data, and
+// its warnings (sprintWarnings). The data is a board's (kinds/board.js: its
+// columns hold the tasks, so moves, their rollback and H/L work on it as on a
+// board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
+
+// The key of the row "Ohne Story", and the id of the column of stories the
+// keys walk first.
+export const NO_STORY = "none";
+export const STORY_COLUMN = "stories";
+
+// The stories of a sprint, in row order.
+export const sprintStories = (data) => data.rows.map((r) => r.story).filter(Boolean);
+
+// Every story and task of a sprint.
+export const sprintItems = (data) => [...sprintStories(data), ...data.columns.flatMap((c) => c.cards)];
+
+// The story or task with `key`, or null.
+export function findSprintItem(data, key) {
+  return data?.rows.find((r) => r.story?.key === key)?.story ?? findCard(data, key)?.card ?? null;
+}
+
+// The row an item stands in: a story its own, a task its story's (or
+// NO_STORY).
+export const rowOf = (item) => item.row ?? item.key;
+
+// Whether an item is a task (a card in a column) rather than a story.
+export const isTask = (item) => Boolean(item?.row);
+
+// A task's state as shown: moved since it was read, the state its new
+// column maps its type to (Azure sets that state with the move), until a
+// refresh reads it; else its own.
+export function shownState(item, column) {
+  if (!isTask(item) || !column || item.column === item.readColumn) return item.state;
+  return column.mappings?.[item.type] ?? item.state;
+}
+
+// The columns keyboard movement and selection walk: the stories that show,
+// then the taskboard's columns with the tasks that show, each in row order
+// (a task moved in comes last in its column's data); the tasks of the rows
+// in `folded` (story keys) are left out.
+export function sprintNav(data, filter, mine, folded = new Set()) {
+  const order = new Map(data.rows.map((r, i) => [r.key, i]));
+  const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
+  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
+  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: c.shown.filter((t) => !folded.has(t.row)).sort(byRow) }))];
+}
+
+// The tasks of the row `key`, in every column.
+export const rowTasks = (data, key) => data.columns.flatMap((c) => c.cards.filter((t) => t.row === key));
+
+// Which stories a Sprint view has folded, as the store keeps it
+// ("folded:<view>": { sprint: the iteration's id, stories: [story keys] });
+// null for anything else.
+export function readStoredFolds(v) {
+  return typeof v?.sprint === "string" && Array.isArray(v.stories) && v.stories.every((k) => typeof k === "string") ? v : null;
+}
+
+// The stories folded in the sprint `data` shows, from what is kept
+// (`folds`, readStoredFolds): none where they were folded in another
+// sprint.
+export const foldedStories = (folds, data) => new Set(folds?.sprint === data.meta.iterationId ? folds.stories : []);
+
+// `folds` with the story `key` folded, or unfolded where it was, in the
+// sprint `data` shows; the folds of another sprint are dropped.
+export function toggledFolds(folds, data, key) {
+  const now = [...foldedStories(folds, data)];
+  return { sprint: data.meta.iterationId, stories: now.includes(key) ? now.filter((k) => k !== key) : [...now, key] };
+}
+
+// The rows that show: those with a story or a task that shows (`nav`,
+// sprintNav), in the data's order.
+export function shownRows(data, nav) {
+  const used = new Set(nav.flatMap((c) => c.shown.map(rowOf)));
+  return data.rows.filter((r) => used.has(r.key));
+}
+
+// The warnings of a sprint: tasks left out (sprintBoard counts them), and
+// a query az may have cut at data.limit.
+export function sprintWarnings(data) {
+  const { unplaced, unknownColumns } = data.meta;
+  return [
+    ...(unplaced ? [`${unplaced} ${unplaced === 1 ? "Task" : "Tasks"} ohne Platz auf dem Taskboard`] : []),
+    ...(unknownColumns ? [`${unknownColumns} ${unknownColumns === 1 ? "Task steht" : "Tasks stehen"} in einer Spalte, die das Board nicht kennt; die Spalten werden beim nächsten Neuladen neu gelesen`] : []),
+    ...(data.limited ? [`Nur die ersten ${data.limit} Work Items des Sprints (so viele gibt az boards query)`] : []),
+  ];
+}
+
+// Keyboard movement over sprintNav's columns: j/k as everywhere (navigate),
+// the only keys that change the row; h/l stay in the selected item's row,
+// onto that row's item in the next column in their direction that has one
+// (the stories' column holds the row's story), past the empty cells; where
+// none has one, nothing moves. With no item selected (an empty column) h/l
+// move as navigate does.
+export function sprintNavigate(nav, sel, dir) {
+  if (dir === "up" || dir === "down" || !nav.length) return navigate(nav, sel, dir);
+  const ci = Math.min(Math.max(sel?.col ?? 0, 0), nav.length - 1);
+  const from = nav[ci].shown.find((i) => i.key === sel?.key);
+  if (!from) return navigate(nav, sel, dir);
+  const step = dir === "left" ? -1 : 1;
+  for (let to = ci + step; to >= 0 && to < nav.length; to += step) {
+    const next = nav[to].shown.find((i) => rowOf(i) === rowOf(from));
+    if (next) return { col: to, key: next.key };
+  }
+  return { col: ci, key: from.key };
+}
+
+// The data with the item `key` in `state`; a task's column then counts as
+// read (shownState shows its own state).
+export function withItemState(data, key, state) {
+  const set = (i) => (i.key === key ? { ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) } : i);
+  return {
+    ...data,
+    rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)),
+    columns: data.columns.map((c) => ({ ...c, cards: c.cards.map(set) })),
+  };
+}
+
 // ==== src/contexts.js ====
 
 // The top bar's order of things: the sources it toggles between, the
@@ -1251,104 +1372,6 @@ export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", .
 export function checkStateResult(stdout, state) {
   const json = jsonOrNull(stdout);
   if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
-}
-
-// ==== src/kinds/sprint.js ====
-
-// A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
-// whose story is not in the sprint), the items it holds, what shows and how the
-// keys walk it, a task's state as shown, a state change laid over the data, and
-// its warnings (sprintWarnings). The data is a board's (kinds/board.js: its
-// columns hold the tasks, so moves, their rollback and H/L work on it as on a
-// board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
-
-// The key of the row "Ohne Story", and the id of the column of stories the
-// keys walk first.
-export const NO_STORY = "none";
-export const STORY_COLUMN = "stories";
-
-// The stories of a sprint, in row order.
-export const sprintStories = (data) => data.rows.map((r) => r.story).filter(Boolean);
-
-// Every story and task of a sprint.
-export const sprintItems = (data) => [...sprintStories(data), ...data.columns.flatMap((c) => c.cards)];
-
-// The story or task with `key`, or null.
-export function findSprintItem(data, key) {
-  return data?.rows.find((r) => r.story?.key === key)?.story ?? findCard(data, key)?.card ?? null;
-}
-
-// The row an item stands in: a story its own, a task its story's (or
-// NO_STORY).
-export const rowOf = (item) => item.row ?? item.key;
-
-// Whether an item is a task (a card in a column) rather than a story.
-export const isTask = (item) => Boolean(item?.row);
-
-// A task's state as shown: moved since it was read, the state its new
-// column maps its type to (Azure sets that state with the move), until a
-// refresh reads it; else its own.
-export function shownState(item, column) {
-  if (!isTask(item) || !column || item.column === item.readColumn) return item.state;
-  return column.mappings?.[item.type] ?? item.state;
-}
-
-// The columns keyboard movement and selection walk: the stories that show,
-// then the taskboard's columns with the tasks that show, each in row order
-// (a task moved in comes last in its column's data).
-export function sprintNav(data, filter, mine) {
-  const order = new Map(data.rows.map((r, i) => [r.key, i]));
-  const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
-  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
-  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
-}
-
-// The rows that show: those with a story or a task that shows (`nav`,
-// sprintNav), in the data's order.
-export function shownRows(data, nav) {
-  const used = new Set(nav.flatMap((c) => c.shown.map(rowOf)));
-  return data.rows.filter((r) => used.has(r.key));
-}
-
-// The warnings of a sprint: tasks left out (sprintBoard counts them), and
-// a query az may have cut at data.limit.
-export function sprintWarnings(data) {
-  const { unplaced, unknownColumns } = data.meta;
-  return [
-    ...(unplaced ? [`${unplaced} ${unplaced === 1 ? "Task" : "Tasks"} ohne Platz auf dem Taskboard`] : []),
-    ...(unknownColumns ? [`${unknownColumns} ${unknownColumns === 1 ? "Task steht" : "Tasks stehen"} in einer Spalte, die das Board nicht kennt; die Spalten werden beim nächsten Neuladen neu gelesen`] : []),
-    ...(data.limited ? [`Nur die ersten ${data.limit} Work Items des Sprints (so viele gibt az boards query)`] : []),
-  ];
-}
-
-// Keyboard movement over sprintNav's columns: j/k as everywhere (navigate),
-// the only keys that change the row; h/l stay in the selected item's row,
-// onto that row's item in the next column in their direction that has one
-// (the stories' column holds the row's story), past the empty cells; where
-// none has one, nothing moves. With no item selected (an empty column) h/l
-// move as navigate does.
-export function sprintNavigate(nav, sel, dir) {
-  if (dir === "up" || dir === "down" || !nav.length) return navigate(nav, sel, dir);
-  const ci = Math.min(Math.max(sel?.col ?? 0, 0), nav.length - 1);
-  const from = nav[ci].shown.find((i) => i.key === sel?.key);
-  if (!from) return navigate(nav, sel, dir);
-  const step = dir === "left" ? -1 : 1;
-  for (let to = ci + step; to >= 0 && to < nav.length; to += step) {
-    const next = nav[to].shown.find((i) => rowOf(i) === rowOf(from));
-    if (next) return { col: to, key: next.key };
-  }
-  return { col: ci, key: from.key };
-}
-
-// The data with the item `key` in `state`; a task's column then counts as
-// read (shownState shows its own state).
-export function withItemState(data, key, state) {
-  const set = (i) => (i.key === key ? { ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) } : i);
-  return {
-    ...data,
-    rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)),
-    columns: data.columns.map((c) => ({ ...c, cards: c.cards.map(set) })),
-  };
 }
 
 // ==== src/sources/azure/sprint.js ====
@@ -2908,7 +2931,8 @@ export function typeTone(t, item) {
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
-// "nur meine" ("mine") and each view's hidden columns ("hidden:<view>"). A
+// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>") and a
+// Sprint's folded stories ("folded:<view>", readStoredFolds). A
 // full or missing localStorage keeps them for this session only.
 export const store = {
   get(key) {
@@ -4655,7 +4679,9 @@ function scrollToRow(b, view, key) {
 // taskboard's own column, not the state: two columns may map to one state), s
 // changes a story's or a task's state from its type's states (the status menu),
 // Enter shows the details; both write at once (actions/move.js,
-// actions/write.js). Keys walk the stories, then each column (sprintNav). The
+// actions/write.js). z, or a click on the triangle in a story's row, folds its
+// tasks away and back (toggleFold; kept per sprint in the store). Keys walk
+// the stories, then each column's tasks but the folded ones (sprintNav). The
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
 // states, typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
 // hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
@@ -4670,7 +4696,12 @@ const STORY_WIDTH = 260;
 // rows' scroll handle.
 const sprintState = (b) => b.shapeState.sprint;
 
-const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
+// The columns the keys walk, the folded rows' tasks left out, and the
+// columns with every task the filter and "nur meine" leave (openColumns),
+// which say which rows show and what the column heads count: folding is no
+// filter.
+const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine, foldedStories(st.folds, st.data));
+const openColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
 
 // An item's state as shown: a task's as its column maps it (shownState).
 const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
@@ -4685,7 +4716,7 @@ export const sprintShape = {
   scrollTo(b, view) {
     const st = b.state(view.id);
     const item = findSprintItem(st.data, st.sel?.key);
-    const at = item ? shownRows(st.data, sprintColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
+    const at = item ? shownRows(st.data, openColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
     if (at >= 0) sprintState(b).scroll.scroll_to_item(at);
   },
   navigate: (b, view, st, dir) => sprintNavigate(sprintColumns(b, st), st.sel, dir),
@@ -4695,7 +4726,7 @@ export const sprintShape = {
     return { shown: items.filter((i) => b.visible(i, data)).length, total: items.length };
   },
   render: (b, t, mono, view, st) => drawSprint(b, t, mono, view, st),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["z", "Story zuklappen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
@@ -4711,6 +4742,7 @@ export const sprintShape = {
       return true;
     }
     if (k === "s") return b.openStatusMenu(view, cx), true;
+    if (k === "z" && !mod.shift) return foldKey(b, view, st, cx), true;
     return false;
   },
   received: (data, st) => applyMoves(data, st.moves),
@@ -4746,11 +4778,40 @@ function sprintEnd(finish) {
   return Number.isNaN(at.getTime()) ? "" : ` · bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
 }
 
+// z: the selected story's tasks folded away, or back; on a task, its row's,
+// and its story is chosen where it shows.
+function foldKey(b, view, st, cx) {
+  const item = b.selected(view);
+  if (!item) return;
+  const key = isTask(item) ? item.row : item.key;
+  if (key === NO_STORY) return b.say("Die Zeile „Ohne Story“ lässt sich nicht zuklappen", "info", cx);
+  if (!rowTasks(st.data, key).length) return b.say(`${itemLabel(item)} hat keine Tasks zum Zuklappen`, "info", cx);
+  toggleFold(b, view, key, cx);
+  if (isTask(item) && sprintColumns(b, st)[0].shown.some((s) => s.key === key)) b.choose(view, { col: 0, key }, cx);
+}
+
+// Folds the tasks of the story `key` away, or back, in the shown sprint,
+// and keeps that in the store per view and sprint (toggledFolds). A
+// selected task that is folded away hands the selection to its story where
+// that shows (no choice: reselect), else as after new data.
+function toggleFold(b, view, key, cx) {
+  const st = b.state(view.id);
+  st.folds = toggledFolds(st.folds, st.data, key);
+  store.set(`folded:${view.id}`, st.folds);
+  const item = b.selected(view);
+  const nav = sprintColumns(b, st);
+  if (item && isTask(item) && item.row === key && nav[0].shown.some((s) => s.key === key)) b.reselect(view, { col: 0, key });
+  else b.keepSelection(view);
+  cx.notify();
+}
+
 function drawSprint(b, t, mono, view, st) {
   const data = st.data;
   const nav = sprintColumns(b, st);
+  const open = openColumns(b, st);
   const [, ...cols] = nav;
-  const rows = shownRows(data, nav);
+  const rows = shownRows(data, open);
+  const folded = foldedStories(st.folds, data);
   const stories = sprintStories(data);
   const allSpaces = spaces();
   const head = h_flex()
@@ -4765,7 +4826,7 @@ function drawSprint(b, t, mono, view, st) {
       div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
         .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
     )
-    .children(cols.map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
+    .children(open.slice(1).map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
@@ -4780,11 +4841,12 @@ function drawSprint(b, t, mono, view, st) {
     .border_b(1)
     .border_color(t.border)
     .child(storyCell(b, t, mono, view, st, r, nav))
-    .children(cols.map((col, ci) => v_flex()
+    .when(folded.has(r.key), (el) => el.child(foldedCell(t, data, open, r)))
+    .when(!folded.has(r.key), (el) => el.children(cols.map((col, ci) => v_flex()
       .flex_1()
       .min_w(0)
       .gap(6)
-      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces)))));
+      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces))))));
   return v_flex()
     .flex_1()
     .min_h(0)
@@ -4792,10 +4854,21 @@ function drawSprint(b, t, mono, view, st) {
     .child(v_flex().id("sprint-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(sprintState(b).scroll).children(rows.map(rowEl)));
 }
 
-// A row's story at the left: its key and type, title and state, and a line
-// across its top in its type's color (typeLine); one the filter or "nur
-// meine" hides (it shows for its tasks) is dimmed and takes no click. The
-// row "Ohne Story" names itself.
+// A folded row's place of its tasks, across the taskboard's columns: how
+// many it holds, as many as the filter and "nur meine" leave of them
+// (`open`, openColumns) where they thin them.
+function foldedCell(t, data, open, r) {
+  const shown = open.slice(1).reduce((n, c) => n + c.shown.filter((card) => card.row === r.key).length, 0);
+  const total = rowTasks(data, r.key).length;
+  return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
+}
+
+// A row's story at the left: its triangle where its row holds tasks (▾, ▸
+// folded; a click folds or unfolds them and chooses nothing), its key and
+// type, title and state, and a line across its top in its type's color
+// (typeLine); one the filter or "nur meine" hides (it shows for its tasks)
+// is dimmed and takes no click but on its triangle. The row "Ohne Story"
+// names itself.
 function storyCell(b, t, mono, view, st, r, nav) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
@@ -4803,6 +4876,8 @@ function storyCell(b, t, mono, view, st, r, nav) {
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
   const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
+  const folds = rowTasks(st.data, story.key).length > 0;
+  const folded = foldedStories(st.folds, st.data).has(story.key);
   return cell
     .id(`story-${story.key}`)
     .relative()
@@ -4815,6 +4890,13 @@ function storyCell(b, t, mono, view, st, r, nav) {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
     .child(h_flex().gap(6).items_center()
+      .when(folds, (el) => el.child(div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
+        .hover((s) => s.text_color(t.foreground))
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          if (!b.modal) toggleFold(b, view, story.key, cx);
+        })
+        .child(folded ? "▸" : "▾")))
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
@@ -5829,12 +5911,13 @@ export default class Board extends View {
   // data), picked (the key of the item the person chose, see clickItem),
   // runs (how many refreshes have started), want (an item to choose once a
   // refresh has it: chooseWanted) and detail; related (the related items
-  // readRelated read, by item key).
+  // readRelated read, by item key); folds (a Sprint's folded stories, as
+  // the store keeps them: readStoredFolds).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
-      related: new Map(),
+      related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)),
     };
     return this.views[id];
   }

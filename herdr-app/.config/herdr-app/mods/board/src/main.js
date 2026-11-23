@@ -85,6 +85,7 @@ import { appHome, checking, exec, focused, layout, nextCommand, notify, props, r
 import { MOD, CONFIG_NAME, cardType, errorText, firstLine, itemKey, itemLabel, parentLabel, report, updatedLabel } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
+import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, viewSwitchHint } from "./contexts.js";
@@ -320,12 +321,13 @@ export default class Board extends View {
   // data), picked (the key of the item the person chose, see clickItem),
   // runs (how many refreshes have started), want (an item to choose once a
   // refresh has it: chooseWanted) and detail; related (the related items
-  // readRelated read, by item key).
+  // readRelated read, by item key); folds (a Sprint's folded stories, as
+  // the store keeps them: readStoredFolds).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
-      related: new Map(),
+      related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)),
     };
     return this.views[id];
   }
