@@ -395,26 +395,41 @@ herdr-app`. Which files of the package git tracks is set in the root
   tab's count leaves the cards of hidden columns out. The code holds nothing
   of mine; the header of `mods/board/src/main.js` describes the file's
   fields.
-  Keys: `q` switches the source, `1 2 3` or `[ ]` the tab, `v` a team's Sprint
-  and Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
-  switch and "nur meine" take clicks too), `/` filters, `r` refreshes (the shown
-  view also refreshes every few minutes while the board shows), `Esc` closes,
-  `gg` and `Home` go to the first card of the selected column (in a list, the
-  first row), `G` and `End` to its last. On a Sprint `j/k` move within a
-  column (the stories' or a taskboard column) and `h/l` stay in the row: they
-  go to the row's item in the next column that has one, past empty cells, and
-  move nothing where no column further on has one; `H/L` move a task to the
-  next column its type has (through the taskboard's own column, not the
-  state, since two columns may map to one state; az takes the request from a
-  file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state
-  from its type's states, a click selects, and `Enter` shows the details
-  (parent, state, assignee, column, area and iteration). `z` folds the selected
-  story's tasks away and back; on a task it folds its story's, which it then
-  selects where it shows. A click on the triangle in a story's row folds it
-  without choosing anything; a fold that takes the selected task away selects
-  its story, where that shows. A folded row says how many tasks it holds, the
-  keys pass over them, and the board remembers the folded stories per sprint,
-  after a restart too (a new sprint starts unfolded). On a Backlog `j/k` move,
+  Keys: `1 2 3` or `[ ]` switch the tab, `v` a team's Sprint and Backlog, `m`
+  turns "nur meine" on and off (the source toggle, the tabs, the switch and
+  "nur meine" take clicks too), `/` filters, `r` refreshes (the shown view
+  also refreshes every few minutes while the board shows), `Esc` closes, `gg`
+  and `Home` go to the first card of the selected column (in a list, the first
+  row), `G` and `End` to its last, and `:` opens the command menu: the
+  actions that can run now, under a heading for what they act on (the
+  selected item, the details panel, the view, the board), each with its key
+  where that key runs it right then. Typing filters it: an entry stays where
+  it holds the typed letters in their order, those that hold them at a
+  word's start or one after another first, the letters in the accent color.
+  `↑`/`↓`, `ctrl-j/k` and `ctrl-n/p` mark an entry (a bare `j` or `k` is a
+  letter for the filter, as in the assignee picker), `Enter` or a click runs
+  it, `Esc` closes. Ten rows show at a time: the window follows the mark, the
+  mouse wheel moves it, and a thin mark at the right and "↓ N weitere" say
+  there are more. Switching the source (also a click on its name in the top
+  bar), hiding the selected column and the column menu have no key and run
+  from the menu. The hint line names the keys of what shows, and `:`; the
+  keys, the hint line and the menu read one action table,
+  `mods/board/src/commands.js`, so each runs the same code. On a Sprint `j/k`
+  move within a column (the stories' or a taskboard column) and `h/l` stay in
+  the row: they go to the row's item in the next column that has one, past
+  empty cells, and move nothing where no column further on has one; `H/L` move
+  a task to the next column its type has (through the taskboard's own column,
+  not the state, since two columns may map to one state; az takes the request
+  from a file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's
+  state from its type's states, a click selects, and `Enter` shows the details
+  (parent, state, assignee, column, area and iteration). `z`, while the board
+  and not the details panel has the keyboard, folds the selected story's tasks
+  away and back; on a task it folds its story's, which it then selects where it
+  shows. A click on the triangle in a story's row folds it without choosing
+  anything; a fold that takes the selected task away selects its story, where
+  that shows. A folded row says how many tasks it holds, the keys pass over
+  them, and the board remembers the folded stories per sprint, after a restart
+  too (a new sprint starts unfolded). On a Backlog `j/k` move,
   `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
   iteration and sprint), `o` opens the item in the browser, and `n` creates a
   work item: a dialog asks for its type (the level's, Story first; with a Story
@@ -432,13 +447,14 @@ herdr-app`. Which files of the package git tracks is set in the root
   `start.checkout` so far. On a GitHub view `h/l j/k` move over the
   columns shown, `H/L` move a card one column, hidden ones included (`s` picks
   from a menu, hidden ones too, or drag the card onto a column; the notice
-  says when a card went to a hidden column), `x` hides a column (views.json
-  sets which start hidden), `o` opens the item in the browser. A hidden
-  column is not drawn: the line above the columns names the hidden ones
-  ("ausgeblendet: Backlog, Done"), a click on a name shows that column
-  again, and `X` opens a menu of every column, shown or hidden, where
-  `Enter`, a digit or a click hides or shows one. A click on a
-  card or a list's row selects it; a click on one I chose (clicked before, moved
+  says when a card went to a hidden column), the command menu's "Spalte
+  ausblenden" hides the selected column (views.json sets which start hidden),
+  `o` opens the item in the browser. A hidden column is not drawn: the line
+  above the columns names the hidden ones ("ausgeblendet: Backlog, Done"), a
+  click on a name shows that column again, and the command menu's "Spalten…"
+  opens a menu of every column, shown or hidden, where `Enter`, a digit or a
+  click hides or shows one. A click on a card or a list's row selects it; a
+  click on one I chose (clicked before, moved
   to with the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
   refresh, the filter, a hidden column), open details close. The details take
@@ -502,9 +518,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   (`![alt][ref]`), else as text (`![alt][]`, `![ref]`). A link opens in the
   browser, http and https only.
   A description taller than about 12 lines shows folded to that height with
-  "… mehr (e)"; `e` or a click unfolds it and folds it again. What reading
-  them costs and what a refresh keeps of them, the header of
-  `mods/board/src/main.js` says; `r` reads them again while they are open.
+  "… mehr (z)"; `z` or a click unfolds it and folds it again. `z` folds what is
+  where the keyboard is: the description while the details panel has it, and
+  while the board has it the Sprint's story there, the description on a view
+  that folds nothing of its own. What reading them costs and what a refresh
+  keeps of them, the header of `mods/board/src/main.js` says; `r` reads them
+  again while they are open.
   While they show, `Tab` moves the keyboard into the details panel and back
   (`Esc` gives it back too; elsewhere, and while the filter is typed, `Tab`
   stays herdr's): there
@@ -541,8 +560,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   row opens a picker: "Ich", "niemand", then the people of the item's repo
   that GitHub lets it be assigned to (the first 100), or the members of the
   view's team on Azure, narrowed by typing; `↑`/`↓` (or `ctrl-j/k`,
-  `ctrl-n/p`) mark one, `Enter` or a click assigns it. It always sets exactly
-  one person, or no one: on GitHub the chosen one replaces all assignees.
+  `ctrl-n/p`) mark one, `Enter` or a click assigns it. Ten show at a time, the
+  window following the mark and moved by the mouse wheel, as in the command
+  menu. It always sets exactly one person, or no one: on GitHub the chosen one
+  replaces all assignees.
   The people are read once per repo or team and kept while the board runs;
   where they cannot be read, the picker and a toast say why, and it still
   offers "niemand" (and "Ich" on Azure, which az resolves itself) with no
