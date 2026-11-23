@@ -54,6 +54,9 @@ WRAPPER_PAIRS = {
     ("kubectl", "exec"),
 }
 RESERVED = {"!", "{", "if", "then", "elif", "else", "do", "while", "until"}
+SHELL_VALUES = ("-o", "-O", "+o", "+O")  # a shell's options that take the next word as value
+# ssh's options that take the next word as value; the word after them is the host.
+SSH_VALUES = tuple(f"-{flag}" for flag in "BbcDEeFIiJLlmOopQRSWw")
 # A cat heredoc inside the `$( )` that is a shell's -c argument: `bash -c "$(cat <<X`.
 SHELL_C_CAT = re.compile(
     rf"(?:^|[\s;&|(])(?:\S*/)?{SHELLS}\s+(?:-\w+\s+)*-\w*c\w*\s+[\"']?\$\(\s*cat\s*$"
@@ -392,13 +395,72 @@ def read_body(path: str, cwd: str | None, written: dict[str, str]) -> str:
     return ""
 
 
-def run_scripts(segments: list[list[str]]) -> set[str]:
-    """The script words *segments* may run, to be looked up among the files the command writes:
-    the command word, the file `source` or `.` reads, every argument of a wrapper, and the first
-    argument after any shell or interpreter word (past its options and the values of -o and -O).
-    """
-    scripts: set[str] = set()
-    for words in segments:
+def without_redirects(words: list[str]) -> list[str]:
+    """*words* without their redirections: `<`, `>` or `>>` with the word after it, and a word
+    that starts with one (`<path`, `2>/dev/null`, a heredoc marker)."""
+    kept: list[str] = []
+    target = False
+    for word in words:
+        if target:
+            target = False
+        elif re.fullmatch(r"\d*(?:<{1,3}|>>?)", word):
+            target = True
+        elif not re.match(r"\d*[<>]", word):
+            kept.append(word)
+    return kept
+
+
+def runs_stdin(words: list[str]) -> bool:
+    """Whether the simple command *words* runs a shell or an interpreter that reads its script
+    from stdin: the command word, or the first one behind a wrapper, with no script argument past
+    its options, or given `-`; a shell given -s; ssh with nothing past the host."""
+    words = without_redirects(words)
+    k = command_word(words)
+    span = wrapper_at(words, k)
+    if span:
+        runners = (
+            r for r in range(k + span, len(words)) if RUNNER.fullmatch(os.path.basename(words[r]))
+        )
+        k = next(runners, len(words))
+    name = os.path.basename(words[k]) if k < len(words) else ""
+    if not RUNNER.fullmatch(name):
+        return False
+    first = skip_options(words, k + 1, SSH_VALUES if name == "ssh" else SHELL_VALUES)
+    options = words[k + 1 : first]
+    if name == "ssh":
+        first += 1
+    shell_s = re.fullmatch(SHELLS, name) and any(re.fullmatch(r"-\w*s\w*", o) for o in options)
+    return first >= len(words) or "-" in options or bool(shell_s)
+
+
+def stdin_scripts(text: str) -> list[str]:
+    """The files *text* feeds to a command that runs its stdin (runs_stdin): with `<`, or with
+    `cat` or `<` in an earlier stage of its pipeline."""
+    paths: list[str] = []
+    for statement in STATEMENT.split(text):
+        stages = [
+            [command.split() for command in SEPARATOR.split(stage) if command.strip()]
+            for stage in statement.split("|")
+        ]
+        for i, commands in enumerate(stages):
+            paths += [
+                path
+                for words in commands
+                if runs_stdin(words)
+                for path in stdin_paths(words, cat=False)
+            ]
+            if commands and any(later and runs_stdin(later[0]) for later in stages[i + 1 :]):
+                paths += stdin_paths(commands[-1], cat=True)
+    return paths
+
+
+def run_scripts(text: str) -> set[str]:
+    """The script words *text* may run, to be looked up among the files the command writes: the
+    command word, the file `source` or `.` reads, every argument of a wrapper, the first argument
+    after any shell or interpreter word (past its options and the values of -o and -O), and the
+    files fed to a shell or an interpreter that runs its stdin (stdin_scripts)."""
+    scripts = {literal(path) for path in stdin_scripts(text)}
+    for words in simple_commands(text):
         k = command_word(words)
         if k >= len(words):
             continue
@@ -409,7 +471,7 @@ def run_scripts(segments: list[list[str]]) -> set[str]:
             k = skip_options(words, k + 1)
         for r, word in enumerate(words):
             if RUNNER.fullmatch(os.path.basename(word)):
-                first = skip_options(words, r + 1, ("-o", "-O", "+o", "+O"))
+                first = skip_options(words, r + 1, SHELL_VALUES)
                 scripts.update(literal(arg) for arg in words[first : first + 1])
         if k < len(words):
             scripts.add(literal(words[k]))
@@ -441,7 +503,7 @@ def check(command: str, cwd: str | None = None) -> str | None:
         raise ValueError(f"the command is longer than {MAX_SIZE:,} characters")
     text, sent, written = normalise(command)
     segments = simple_commands(text)
-    ran = [written[word] for word in run_scripts(segments) if word in written]
+    ran = [written[word] for word in run_scripts(text) if word in written]
     if ran:  # a script this command writes and runs is read as commands too
         more_text, more_sent, more_written = normalise("\n".join(ran))
         text, sent = f"{text}\n{more_text}", f"{sent}\n{more_sent}"

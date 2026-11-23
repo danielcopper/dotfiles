@@ -59,6 +59,29 @@ AZ_THREAD = (
 )
 INVOKE_PR = "az devops invoke --area git --resource pullRequests --route-parameters pullRequestId=5"
 
+
+def written_then(body: str, then: str) -> str:
+    """A command that writes *body* to m.sh with a heredoc, then runs *then*."""
+    return f"cat > m.sh <<'EOF'\n{body}\nEOF\n{then}"
+
+
+# Ways to feed the written m.sh to a shell or interpreter that runs its stdin.
+STDIN_FORMS = [
+    "bash < m.sh",
+    "bash <m.sh",
+    "sh -s < m.sh",
+    "sh -s -- a b < m.sh",
+    "sudo -n bash < m.sh",
+    "python3 - < m.sh",
+    "ssh host < m.sh",
+    "ssh -i key -p 22 host < m.sh",
+    "cat m.sh | bash",
+    "cat m.sh | sh -s",
+    "cat m.sh | tr -d x | bash",
+    "< m.sh tr -d x | bash",
+]
+STDIN_RUNS = [written_then("gh pr merge 5", form) for form in STDIN_FORMS]
+
 # Every explicit merge form, by the text its refusal names.
 DENIED = {
     "gh pr merge": [
@@ -135,6 +158,8 @@ DENIED = {
         "cat > x.sh <<'EOF'\ngh pr merge 5\nEOF\n{ bash x.sh; }",
         'cat > x.py <<\'EOF\'\nimport subprocess\nsubprocess.run(["gh", "pr", "merge", "5"])\nEOF\npoetry run python x.py',
         'cat > "$D"/x.sh <<\'EOF\'\ngh pr merge 5\nEOF\nbash "$D"/x.sh',
+        # a script the command writes and feeds to a shell through stdin
+        *STDIN_RUNS,
         # a << whose delimiter line never comes opens no heredoc
         'echo "use <<EOF for heredocs"\ngh pr merge 5',
         "x=$((1<<3))\ngh pr merge 5",
@@ -402,6 +427,18 @@ PASSES = [
     "cat > notes.md <<'EOF' && bash lint.sh notes.md\nRun gh pr merge 5 later.\nEOF",
     "cat > notes#1.md <<'EOF'\nRun gh pr merge 5 later.\nEOF",
     "cat > cases.txt <<'EOF'\ngh pr merge 5\nEOF\npython3 harness.py cases.txt",
+    # a written script without a merge, fed through stdin
+    *(written_then("gh pr view 5", form) for form in STDIN_FORMS),
+    # a written file fed through stdin to a runner that has a script of its own
+    written_then("gh pr merge 5", "python3 harness.py < m.sh"),
+    written_then("gh pr merge 5", "cat m.sh | python3 harness.py"),
+    written_then("gh pr merge 5", "bash lint.sh < m.sh"),
+    written_then("gh pr merge 5", "bash -c 'wc -l' < m.sh"),
+    written_then("gh pr merge 5", "ssh host wc -l < m.sh"),
+    written_then("gh pr merge 5", "cat m.sh | wc -l"),
+    # gh pr create and edit inside a chain
+    "git push -u origin HEAD && gh pr create --title 'fix: x' --body-file body.md",
+    "gh pr edit 5 --title 'fix: y' && gh pr view 5",
     # request bodies from stdin that cannot merge, and a PR body that only mentions one
     'gh api graphql --input - <<\'EOF\'\n{"query": "query { viewer { login } }"}\nEOF',
     "gh pr create --title 'fix: x' --body-file - <<'EOF'\nRun gh pr merge after review.\nEOF",
@@ -469,6 +506,8 @@ NOT_DETECTED = {
     f"cat > $HOME/q2.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input ~/q2.json",
     # a cat heredoc fed to a shell's -c, which the detector strips as data
     "bash -c \"$(cat <<'X'\ngh pr merge 5\nX\n)\"",
+    # a written script fed to a runner through stdin, which the detector strips as data
+    *STDIN_RUNS,
 }
 
 
