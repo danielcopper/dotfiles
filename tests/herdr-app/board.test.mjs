@@ -6122,7 +6122,7 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
   assert.equal(md(`<https://example.com/${"a".repeat(3000)}>`), `<https://example.com/${"a".repeat(3000)}>`, "however long");
   assert.equal(md("<!x --> y"), "<\u200b!x --> y", "no other <! is a comment");
   assert.equal(md("<https://a/![b](c)> <https://a/ ![b](https://e/x.png)>"), "<https://a/%21%5Bb%5D%28c%29> <https://a/%20%21%5Bb%5D%28https://e/x.png%29>",
-    "its ! [ ] ( ) encoded in path, query and fragment, so no link, image or code span can start in it however the span is read");
+    "its ! [ ] ( ) encoded outside its host, so no link, image or code span can start in the encoded parts however the span is read");
   assert.equal(md("<https://[::1]:8080/a(b)?q=[c]#!d> <https://u:p!@example.com/x>"), "<https://[::1]:8080/a%28b%29?q=%5Bc%5D#%21d> <https://u:p%21@example.com/x>",
     "an IPv6 host keeps its brackets; the user's part is encoded too");
   const tricky = "<https://evil.example\\@good.example/>";
@@ -6131,6 +6131,22 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
   assert.equal(md("<https://en.wikipedia.org/wiki/A_(b)>"), "<https://en.wikipedia.org/wiki/A_%28b%29>");
   assert.equal(board.keptUrl("https://e/a(b)"), "https://e/a%28b%29");
   assert.deepEqual([board.keptUrl("javascript:alert(1)"), board.keptUrl("https://%zz")], [null, null], "no http(s) URL: none");
+  assert.deepEqual(
+    [board.keptUrl("https://:p@h.example/x"), board.keptUrl("https://:token@internal.example.com/"), board.keptUrl("https://:p!@[::1]:8080/a(b)"), board.keptUrl("https://u:p!@example.com/x")],
+    ["https://:p@h.example/x", "https://:token@internal.example.com/", "https://:p%21@[::1]:8080/a%28b%29", "https://u:p%21@example.com/x"],
+    "a password without a user, IPv6 with a password, a user and password",
+  );
+  const odd = [
+    "https://:p@good.co/x", "https://u@h.example", "https://u:@h.example/", "https://@h.example/", "https://h.example:443/a", "HTTPS://H.Example/A?b#c",
+    "https://[::1]/", "https://[2001:db8::1]:8443/x(y)", "https://xn--bcher-kva.example/", "https://bücher.example/(a)", "https://h.example/a\\b?c\\d#e\\f",
+    "https://evil.example\\@good.example/", "https://a!b@h.example/![x](y)", "https://h.example/%5B%5D", "http://127.0.0.1:80/", "https://h.example/`code`",
+  ];
+  for (const url of odd) {
+    const kept = board.keptUrl(url);
+    assert.ok(kept, url);
+    assert.equal(new URL(kept).host, new URL(board.webUrl(url)).host, url);
+    assert.doesNotMatch(kept.slice(kept.indexOf(new URL(kept).host) + new URL(kept).host.length), /[![\]()`\\]/, `${url}: nothing to encode left outside the host`);
+  }
   assert.equal(md("\\<https://a/![b](https://e/x.png)>"), "\\<https://a/%21%5Bb%5D%28https://e/x.png%29>", "after a backslash, where it is no autolink");
   assert.equal(md("a `<https://a/` ![b](https://e/x.png)>"), "a `<https://a/%60%20%21%5Bb%5D%28https://e/x.png%29>", "across a code span, its backtick too");
   assert.equal(md("a <https://%zz> b"), "a <\u200bhttps://%zz> b", "one the URL parser takes for none: text");

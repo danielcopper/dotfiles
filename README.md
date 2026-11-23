@@ -452,9 +452,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   head and selected tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
-  tables; its HTML shows as text, its comments not at all, but for an inline
-  one that spans an empty line or one that starts in code, which shows as
-  text; "keine Beschreibung" where it has none), then list its sub-issues
+  tables; its HTML shows as text, its comments not at all, but for one not
+  closed, one that starts in code, or one that spans an empty line without
+  starting a line, which shows as text; "keine Beschreibung" where it has
+  none), then list its sub-issues
   ("UNTERAUFGABEN · 7/11", the count the card shows; the first 50, with
   "erste 50 von N" where it has more) and the pull requests linked to it by
   a closing keyword or by hand in its Development sidebar, open, merged or

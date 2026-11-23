@@ -5129,9 +5129,11 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 //   <textarea> too, which so never stands in one); any other `<` (none of a
 //   tag, or a tag left open or longer than MAX_TAG) is written `&lt;`.
 // - Markdown keeps no HTML. A comment outside code (codeRanges) goes as
-//   CommonMark reads it: one that starts a line (at most 3 spaces in) is an
-//   HTML block to its `-->`, across blank lines; one anywhere else goes
-//   only where it crosses no blank line; one not closed stays. Every other
+//   CommonMark reads it at the top level: one that starts a line (at most 3
+//   spaces in) is an HTML block to its `-->`, across blank lines; one
+//   anywhere else goes only where it crosses no blank line (one after a
+//   list marker that crosses a blank line stays as text); one not closed
+//   stays. Every other
 //   `<` but that of an http(s) URL in `<…>` gets a zero-width space after
 //   it, which no HTML tag starts with, so Markdown reads it as text, and in
 //   code it looks unchanged. An http(s) URL in `<…>` stays, as an autolink
@@ -5139,10 +5141,11 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 //   `[x](<https://…>)`, `[r]: <https://…>`): HTML has no tag of that name,
 //   so it can only be a link, or text. It is written as the WHATWG parser
 //   reads it (webUrl), and its `\`, `!`, `[`, `]`, `(`, `)` and backtick
-//   are encoded in path, query and fragment (keptUrl), so no link, image or
-//   code span can start in it however the span is read; its host stays as
-//   it is (an IPv6 one keeps its brackets). An inline image becomes a
-//   Markdown link
+//   are encoded outside its host (user part, path, query, fragment:
+//   keptUrl), so no link, image or code span can start in the encoded
+//   parts however the span is read; its host stays as it is (an IPv6 one
+//   keeps its brackets), and where the URL so written would name another
+//   host, it is no URL but text. An inline image becomes a Markdown link
 //   "Bild: <alt>" to its http(s) URL (its text alone for another URL), and
 //   an <img> or <image> tag the same; a `![` that starts no inline image
 //   the scanner reads (an image by reference, or one longer than
@@ -5303,20 +5306,19 @@ function keptHtml(text) {
 // escaped, each `<` followed by a zero-width space.
 const markdownLabel = (text) => text.replace(/[\\[\]!]/g, "\\$&").replace(/</g, `<${ZWSP}`);
 
-// An http(s) URL as the Markdown keeps it in `<…>` (see the header): as
-// the WHATWG parser writes it (webUrl), a `\` left in it, which there would
-// escape the next character, and each character that could start Markdown
-// (`!`, `[`, `]`, `(`, `)`, backtick) percent-encoded outside its host;
-// null for no http(s) URL.
+// An http(s) URL as the Markdown keeps it in `<…>` (see the header), built
+// from the parsed pieces; null for no http(s) URL, and for one whose host
+// would change.
 const URL_ESCAPES = { "\\": "%5C", "!": "%21", "[": "%5B", "]": "%5D", "(": "%28", ")": "%29", "`": "%60" };
 const urlText = (text) => text.replace(/[\\![\]()`]/g, (c) => URL_ESCAPES[c]);
 export function keptUrl(text) {
   const href = webUrl(text);
   if (!href) return null;
   const url = new URL(href);
-  const user = url.username ? `${url.username}${url.password ? `:${url.password}` : ""}@` : "";
-  const head = `${url.protocol}//${user}${url.host}`;
-  return `${url.protocol}//${urlText(user)}${url.host}${urlText(href.slice(head.length))}`;
+  const user = url.username || url.password ? `${url.username}${url.password ? `:${url.password}` : ""}@` : "";
+  const kept = `${url.protocol}//${urlText(user)}${url.host}${urlText(`${url.pathname}${url.search}${url.hash}`)}`;
+  const again = webUrl(kept);
+  return again && new URL(again).host === url.host ? kept : null;
 }
 
 // An image as a Markdown link (see the header).
