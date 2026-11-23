@@ -408,13 +408,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   word's start or one after another first, the letters in the accent color.
   `↑`/`↓`, `ctrl-j/k` and `ctrl-n/p` mark an entry (a bare `j` or `k` is a
   letter for the filter, as in the assignee picker), `Enter` or a click runs
-  it, `Esc` closes. Ten rows show at a time: the window follows the mark, the
-  mouse wheel moves it, and a thin mark at the right and "↓ N weitere" say
-  there are more. Switching the source (also a click on its name in the top
-  bar), hiding the selected column and the column menu have no key and run
-  from the menu. The hint line names the keys of what shows, and `:`; the
-  keys, the hint line and the menu read one action table,
-  `mods/board/src/commands.js`, so each runs the same code. On a Sprint `j/k`
+  it, `Esc` closes; it runs only on what it was opened for, and where a
+  refresh took that away it says so instead. Ten rows show at a time: the
+  window follows the mark, the mouse wheel moves it, and a thin mark at the
+  right and "↓ N weitere" say there are more. Switching the source (also a
+  click on its name in the top bar), hiding the selected column and the
+  column menu have no key and run from the menu. A letter key is the same
+  with Caps Lock, and Shift makes it another key (`S` is no `s`). The hint
+  line names the keys of what shows, and `:`; the keys of its actions, the
+  hint line and the menu read one action table, `mods/board/src/commands.js`,
+  so each runs the same code. On a Sprint `j/k`
   move within a column (the stories' or a taskboard column) and `h/l` stay in
   the row: they go to the row's item in the next column that has one, past
   empty cells, and move nothing where no column further on has one; `H/L` move
@@ -518,12 +521,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   (`![alt][ref]`), else as text (`![alt][]`, `![ref]`). A link opens in the
   browser, http and https only.
   A description taller than about 12 lines shows folded to that height with
-  "… mehr (z)"; `z` or a click unfolds it and folds it again. `z` folds what is
-  where the keyboard is: the description while the details panel has it, and
-  while the board has it the Sprint's story there, the description on a view
-  that folds nothing of its own. What reading them costs and what a refresh
-  keeps of them, the header of `mods/board/src/main.js` says; `r` reads them
-  again while they are open.
+  "… mehr (z)" ("(z)" where `z` folds it then); `z` or a click unfolds it and
+  folds it again. `z` folds what is where the keyboard is: the description
+  while the details panel has it, and while the board has it the Sprint's story
+  there, the description on a view that folds nothing of its own. What reading
+  them costs and what a refresh keeps of them, the header of
+  `mods/board/src/main.js` says; `r` reads them again while they are open.
   While they show, `Tab` moves the keyboard into the details panel and back
   (`Esc` gives it back too; elsewhere, and while the filter is typed, `Tab`
   stays herdr's): there

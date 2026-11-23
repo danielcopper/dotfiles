@@ -119,6 +119,10 @@ export function stepTarget(board, key, step) {
   return null;
 }
 
+// Whether the card `key` has a column to go to `step` columns on
+// (stepTarget): what H/L move it to.
+export const hasStep = (board, key, step) => Boolean(stepTarget(board, key, step));
+
 // A view's columns with the person's hidden set applied.
 export function withHidden(board, hidden) {
   return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hidden.has(c.name) })) };

@@ -11,17 +11,18 @@ export function wordsMatch(texts, filter) {
   return words.every((w) => hay.includes(w));
 }
 
-// The command menu's filter: the entries of `list` whose text (`textOf`)
-// holds the letters of `query` in its order (fuzzyMatch), best first. A
-// tie keeps the shorter text first, then the list's order. An empty query
-// keeps the list as it is.
+// The command menu's filter: { entry, at } for each entry of `list` whose
+// text (`textOf`) holds the letters of `query` in its order, `at` where
+// they stand in it (fuzzyMatch), best first. A tie keeps the shorter text
+// first, then the list's order. An empty query keeps the list as it is,
+// with no letters.
 export function fuzzyRank(list, query, textOf) {
-  if (!String(query ?? "").trim()) return [...list];
-  const scored = list.map((entry, at) => ({ entry, at, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
+  if (!String(query ?? "").trim()) return list.map((entry) => ({ entry, at: [] }));
+  const scored = list.map((entry, n) => ({ entry, n, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
   return scored
     .filter((s) => s.match)
-    .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.at - y.at)
-    .map((s) => s.entry);
+    .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.n - y.n)
+    .map((s) => ({ entry: s.entry, at: s.match.at }));
 }
 
 // How the letters of `query` fit `text`, case-insensitive and spaces left

@@ -3224,11 +3224,12 @@ async function click(b, cx, id) {
 // The open command menu's entries as its filter leaves them, in its
 // order: [name, key] (key null where it shows none).
 const menuEntries = (b) => board.shownCommands(b.modal.entries, b.modal.filter).map((e) => [e.name, e.key]);
-// `:` as a US layout sends it (Shift and ;); a German one sends Shift and .
-const COLON = [";", { char: ":", modifiers: { shift: true } }];
-// Opens the command menu with `:`; its entries.
+// Opens the command menu with `:`, as herdr sends it whatever the layout:
+// key and character ":", Shift cleared (herdr 0.1.17's keystroke_from_xkb
+// clears it for a key that types one symbol; its quickjs bridge hands key
+// and key_char on as they are); its entries.
 async function openMenu(b, cx) {
-  await press(b, cx, ...COLON);
+  await press(b, cx, ":");
   assert.equal(b.modal?.kind, "commands");
   return menuEntries(b);
 }
@@ -3403,11 +3404,11 @@ const LOGGED = {
   ctrlAlt9: { key: "9", key_char: "9", keystroke: "ctrl-alt-9", modifiers: { shift: false, control: true, alt: true, platform: false, function: false } },
 };
 
-test("UI: Alt+] and Control+Alt+[ switch tabs; Control+] and the logged alt-q stay herdr's", async () => {
+test("UI: Alt+] and Control+Alt+[ switch tabs; Control+] and a logged Alt with a letter stay herdr's", async () => {
   const { b, cx } = await openBoard();
   b.key(LOGGED.altQ, cx);
   await settle();
-  assert.deepEqual([b.source().id, cx.stopped], ["github", 0], "alt-q: neither q nor taken");
+  assert.deepEqual([b.source().id, cx.stopped], ["github", 0], "the logged Alt with a letter: not taken");
   await press(b, cx, "]", { modifiers: { alt: true } });
   assert.equal(b.context().id, "github:prs", "Alt+]");
   await press(b, cx, "[", { modifiers: { ...LOGGED.ctrlAlt9.modifiers } });
@@ -3424,12 +3425,12 @@ test("the GitHub tab id, a team's switch and its hint: githubContextId, hasViewS
   assert.deepEqual([board.hasViewSwitch({ ...team, views: ["backlog"] }), board.hasViewSwitch({ kind: "prs" }), board.hasViewSwitch(null)], [false, false, false]);
 });
 
-test("UI: while one types in the filter, m, q, v and digits are text, not keys", async () => {
+test("UI: while one types in the filter, m, :, v and digits are text, not keys", async () => {
   const { b, cx } = await bootBoard({ stored: { source: "azure" } });
   await press(b, cx, "/");
   assert.equal(b.filtering, true);
-  for (const k of ["m", "q", "v", "2", "]"]) await press(b, cx, k);
-  assert.deepEqual([b.mine, b.source().id, b.teamViewOf(b.context()), b.context().kind], [false, "azure", "sprint", "team"]);
+  for (const k of ["m", ":", "v", "2", "]"]) await press(b, cx, k);
+  assert.deepEqual([b.mine, b.modal, b.teamViewOf(b.context()), b.context().kind], [false, null, "sprint", "team"]);
   await press(b, cx, "escape");
   await press(b, cx, "m");
   assert.equal(b.mine, true, "after Esc they are keys again");
@@ -7988,7 +7989,7 @@ test("UI: while the details panel has the keyboard gg and Home go to its top wit
 // The command menu's headings as it draws them now.
 const menuHeads = (b) => (byId(b.render(), "commands-rows")?.kids ?? []).filter((k) => /^commands-head-/.test(k.with?.id?.[0] ?? "")).map((k) => texts(k)[0]);
 
-test("UI: `:` opens the command menu over a GitHub card: what can run on the card, on its view and on the board, under a heading each, with its key at the right where it has one", async () => {
+test("UI: `:` opens the command menu over a GitHub card: what can run on the card, on its view and on the board, under a heading each, with its key at the right where that key runs it now", async () => {
   const { b, cx } = await openBoard();
   const stopped = cx.stopped;
   const entries = await openMenu(b, cx);
@@ -8066,8 +8067,10 @@ test("UI: the command menu on a Sprint: on a story its fold and no move, on a ta
 
 test("the command menu's filter: the letters in their order, a word's start and letters in a row first, of all fits the best; a tie to the shorter name, then the list's order (fuzzyRank, fuzzyMatch)", () => {
   const names = ["Status ändern…", "Zuweisen…", "Story zu-/aufklappen", "Spalte ausblenden: Ready", "Spalten…", "Nach links verschieben", "Neu laden", "Nur meine an"];
-  const rank = (q, list = names) => board.fuzzyRank(list, q, (n) => n);
+  const rank = (q, list = names) => board.fuzzyRank(list, q, (n) => n).map((r) => r.entry);
   assert.deepEqual(rank(""), names, "no filter: the list as it is");
+  assert.deepEqual(rank("  "), names, "nor spaces alone");
+  assert.deepEqual(board.fuzzyRank(names, "zuw", (n) => n), [{ entry: "Zuweisen…", at: [0, 1, 2] }], "each with where its letters stand");
   assert.deepEqual(rank("zuw"), ["Zuweisen…"]);
   assert.deepEqual(rank("ZU"), ["Zuweisen…", "Story zu-/aufklappen"], "case-insensitive; the text's first letter first");
   assert.deepEqual(rank("spa"), ["Spalte ausblenden: Ready", "Spalten…"], "a word's start beats letters in a row");
@@ -8079,7 +8082,7 @@ test("the command menu's filter: the letters in their order, a word's start and 
   assert.deepEqual(rank("ei", ["xexxi", "xxxeix"]), ["xxxeix", "xexxi"], "letters in a row before a shorter name");
   assert.deepEqual(rank("ab", ["yayb", "xaxxxab"]), ["xaxxxab", "yayb"], "the best fit counts, not the first");
   const twins = [{ n: "Neu", i: 0 }, { n: "Neu", i: 1 }];
-  assert.deepEqual(board.fuzzyRank(twins, "n", (e) => e.n).map((e) => e.i), [0, 1], "then the list's order");
+  assert.deepEqual(board.fuzzyRank(twins, "n", (e) => e.n).map((r) => r.entry.i), [0, 1], "then the list's order");
   assert.deepEqual(board.fuzzyMatch("Spalte ausblenden", "sa"), { score: 20, at: [0, 7] });
   assert.deepEqual(board.fuzzyMatch("xaxxxab", "ab"), { score: 6, at: [5, 6] });
   assert.deepEqual([board.fuzzyMatch("Neu", ""), board.fuzzyMatch("Neu", "q")], [{ score: 0, at: [] }, null]);
@@ -8277,7 +8280,7 @@ test("UI: every action of the action table the menu lists with a key runs from t
   }
 });
 
-test("UI: the actions without a key run from the menu what their button or click runs: the source's name, the column menu, a column hidden", async () => {
+test("UI: the actions without a key run from the menu: the source switch as a click on its name does, the column menu, a column hidden", async () => {
   const viaClick = await openBoard();
   await click(viaClick.b, viaClick.cx, "source-azure");
   const clicked = effectOf(viaClick.b, viaClick.cx, viaClick.host);
@@ -8293,8 +8296,9 @@ test("UI: the actions without a key run from the menu what their button or click
   assert.equal(host.open("gh").length, 1, "and the board refreshes");
 });
 
-test("UI: q, x, X and e are no keys any more: on a card, in its details and in the details panel they do nothing and are not taken", async () => {
-  const removed = [["q"], ["x"], ["x", { char: "X", modifiers: { shift: true } }], ["e"], ["q", { char: "Q", modifiers: { shift: true } }]];
+test("UI: q, x, X and e are no keys any more, and Shift+S, N and O are no s, n and o: on a card, in its details and in the details panel they do nothing and are not taken", async () => {
+  const shift = (k) => [k, { char: k.toUpperCase(), modifiers: { shift: true } }];
+  const removed = [["q"], ["x"], shift("x"), ["e"], shift("q"), shift("s"), shift("n"), shift("o")];
   const places = {
     onCard: openBoard,
     inDetails: async () => {
@@ -8327,6 +8331,7 @@ test("UI: on a Sprint z folds the selected story while the board has the keyboar
   const hintOf = (name) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === name).map((t) => t[1]);
   const folds = (entries) => entries.filter(([name]) => /^(Story|Beschreibung)/.test(name));
   assert.deepEqual(hintOf("z"), ["Story zuklappen"]);
+  assert.deepEqual(texts(byId(detailPanel(b), "description-fold")), ["… mehr"], "z is the story's here: the switch names no key");
   assert.deepEqual(folds(await openMenu(b, cx)), [["Story zu-/aufklappen", "z"], ["Beschreibung mehr", null]]);
   await press(b, cx, "escape");
   await press(b, cx, "z");
@@ -8345,23 +8350,118 @@ test("UI: on a Sprint z folds the selected story while the board has the keyboar
   assert.deepEqual(hintOf(":"), ["Befehle"]);
 });
 
-test("UI: the command menu runs its action as things stand when it runs: on the selection the board keeps then, and not where it can no longer run", async () => {
+test("UI: the command menu opens on the selection the board keeps, as a key runs, and runs an action only where it still can", async () => {
   const byKey = await openBoard();
   byKey.b.filterText = "BUG input";
   await press(byKey.b, byKey.cx, "o");
   const { b, cx, st } = await openBoard();
-  await openMenu(b, cx);
   b.filterText = "BUG input";
-  b.modal.input.type("Im Browser");
-  cx.call((own) => b.modal.input.submit(own));
-  await settle();
-  assert.deepEqual(cx.opened, byKey.cx.opened, "the card the filter leaves, as o opens it");
-  assert.notDeepEqual(cx.opened, ["https://github.com/example/tender/issues/3004"]);
-  b.filterText = "";
   await openMenu(b, cx);
-  st().sel = { col: 2, key: null };
+  assert.equal(st().sel.key, "PVTI_rec6", "the card the filter leaves");
   b.modal.input.type("Im Browser");
   cx.call((own) => b.modal.input.submit(own));
   await settle();
-  assert.deepEqual([cx.opened.length, b.notice], [1, null], "an empty column selected since it opened: nothing runs");
+  assert.deepEqual(cx.opened, byKey.cx.opened, "as o opens it");
+  assert.notDeepEqual(cx.opened, ["https://github.com/example/tender/issues/3004"]);
+  await openMenu(b, cx);
+  b.modal.input.type("Details zeigen");
+  st().detail = true;
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal, b.notice], [null, null], "the details opened since: the first Enter's action runs no more, nor the second's");
+});
+
+test("UI: a letter key goes by Shift alone: with Caps Lock s is s, and Shift with a character that comes without it is the upper case key", async () => {
+  const { b, cx, st } = await openBoard();
+  await press(b, cx, "s", { char: "S" });
+  assert.equal(b.modal?.kind, "status", "Caps Lock: s");
+  await press(b, cx, "escape");
+  await press(b, cx, "l", { char: "l", modifiers: { shift: true } });
+  assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "In progress", "Shift and l: L");
+});
+
+test("UI: the command menu runs an action only on what it opened for: after a refresh that dropped the card, or another column selected, it says so and runs nothing; a reload of views.json without its view closes it", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await openMenu(b, cx);
+  b.modal.input.type("Status");
+  const gone = json("github-board.json");
+  gone.data.repositoryOwner.projectV2.items.nodes = gone.data.repositoryOwner.projectV2.items.nodes.filter((n) => n.id !== "PVTI_rec4");
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(JSON.stringify(gone)), isBoardCall);
+  assert.deepEqual([b.modal?.kind, st().sel.key], ["commands", "PVTI_rec5"], "the menu stays open, the board on the card after it");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal, b.notice?.text], [null, "tender#3004 ist nicht mehr ausgewählt"], "not the neighbour's status");
+  await openMenu(b, cx);
+  b.modal.input.type("Spalte ausblenden");
+  st().sel = { col: 1, key: "PVTI_rec1" };
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.notice?.text, st().hidden.has("Ready")], ["Spalte „Ready“ ist nicht mehr ausgewählt", false]);
+  await openMenu(b, cx);
+  host.config = withoutMine();
+  b.reload(cx);
+  await settle();
+  assert.equal(b.modal, null, "its view is gone: the menu closes");
+});
+
+test("UI: the command menu keeps groups apart by what they act on, also where a view is named „Board“", async () => {
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[0].name = "Board";
+  const { b, cx } = await openBoard({ config: JSON.stringify(config) });
+  await openMenu(b, cx);
+  assert.deepEqual(menuHeads(b), ["Issue tender#3004 · feat(api): page through long lists", "Board", "Board"], "the view's heading and the board's");
+  b.modal.input.type("n");
+  assert.deepEqual(menuEntries(b).map(([name]) => name), [
+    "Neu laden", "Nur meine an", "Nächster Tab", "Quelle wechseln: Azure",
+    "Nach links verschieben", "Nach rechts verschieben", "Zuweisen…", "Details zeigen", "Status ändern…", "Im Browser öffnen",
+    "Spalten…", "Spalte ausblenden: Ready",
+  ]);
+});
+
+test("the action table's couplings: a listed action has a name, a group, when and run, and cannot run without what its group acts on; a hint without a key of its own names the action's key; only the menu itself is not listed", async () => {
+  // A GitHub card's details with the panel on a line, and a Sprint's story,
+  // each taken away only what one group acts on.
+  const onLine = await onFirstLine();
+  sizeDescription(onLine.b, onLine.cx, 500);
+  const sprint = await openSprint();
+  const moments = [onLine.b.actionContext(), sprint.b.actionContext()];
+  const without = { item: { item: null }, details: { details: null }, view: { view: null }, board: {} };
+  for (const a of board.ACTIONS) {
+    if (a.menu != null) {
+      assert.deepEqual([["string", "function"].includes(typeof a.name), a.group in without, typeof a.when, typeof a.run], [true, true, "function", "function"], a.id);
+      if (a.group !== "board") for (const full of moments) assert.equal(a.when({ ...full, ...without[a.group] }), false, `${a.id} needs its ${a.group}`);
+    }
+    if (a.hint && !a.hintKey) assert.ok(a.key, `${a.id}: its hint names its key`);
+    if (a.run && a.menu == null) assert.equal(a.id, "commands", `${a.id} is in the menu`);
+  }
+  const ran = board.ACTIONS.filter((a) => a.menu != null && a.group !== "board" && moments.some((full) => a.when(full))).map((a) => a.id);
+  assert.ok(["status", "fold-description", "line-board", "columns", "team-view"].every((id) => ran.includes(id)), "and each can run with it");
+});
+
+test("UI: the hint line while the details panel has the keyboard: each key and what it does, in the table's order", async () => {
+  const { b, cx } = await openRelated();
+  sizeDescription(b, cx, 500);
+  await tab(b, cx);
+  const pairs = b.render().kids.at(-1).kids.map((h) => texts(h));
+  assert.deepEqual(pairs, [
+    ["1 2 3 [ ]", "Tab"], ["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"],
+    ["Enter", "Detail · Agent"], ["o", "öffnen"], ["Tab", "Board"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"],
+    ["z", "mehr"], ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"], ["m", "nur meine"], ["/", "Filter"], ["r", "neu laden"], [":", "Befehle"],
+    ["Esc", "zurück"],
+  ]);
+});
+
+test("UI: the second Enter's action in the menu is named by what it does: a pull request's review, an item's session", async () => {
+  const list = await openBoard();
+  await press(list.b, list.cx, "2");
+  await list.host.answer("gh", ok(fixture("github-list.json")));
+  await press(list.b, list.cx, "enter");
+  assert.deepEqual((await openMenu(list.b, list.cx))[0], ["Review starten…", "Enter"]);
+  assert.match(menuHeads(list.b)[0], /^PR /);
+  const { b, cx, host } = await openBoard();
+  host.spaceList.push(sessionSpace);
+  await press(b, cx, "enter");
+  assert.deepEqual((await openMenu(b, cx))[0], ["Zur Sitzung", "Enter"]);
 });

@@ -13,7 +13,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { cardLabel, epicLabel } from "../../shared.js";
-import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
+import { applyMoves, canDrop, findCard, hasStep, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
@@ -52,6 +52,9 @@ export const boardShape = {
     const target = st.sel?.key && stepTarget(st.data, st.sel?.key, by);
     if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
+  canMove: (st, item, by) => hasStep(st.data, item.key, by),
+  // A column with a target (a Status option) can be hidden.
+  canHide: (col) => Boolean(col.target),
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
@@ -136,7 +139,7 @@ function drawBoard(b, t, mono, view, st) {
     .child(
       cols.length
         ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
-        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder „Spalten…“ im Befehlsmenü (:) zeigt eine wieder"),
+        : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name oben oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
     )
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
@@ -252,7 +255,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
-  if (!col.target) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
+  if (!boardShape.canHide(col)) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
   const before = b.navColumns(view);
   st.stored = toggleHidden(view, st.stored, col);
   st.hidden = hiddenColumns(view, st.stored);

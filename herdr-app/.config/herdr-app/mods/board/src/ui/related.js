@@ -14,12 +14,12 @@
 // opens through the Board's openLink.
 //
 // A description taller than about 12 lines shows folded to that height,
-// with "… mehr (z)" below; `z` (commands.js, fold-description: while the
-// details panel has the keyboard, or on a view whose shape folds nothing
-// of its own) or a click on it unfolds it ("weniger (z)" folds it again). TextView tells no count of its lines, so the fold goes
-// by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
-// description is, its block measures (on_size_change), and it folds only
-// once that is known to be more.
+// with "… mehr" below, and the key that unfolds it where one does now
+// (commands.js, fold-description, says when z does); that key or a click
+// on it unfolds it ("weniger" folds it again). TextView tells no count of
+// its lines, so the fold goes by height: FOLDED_H, 12 lines of the
+// details' 18 pixels; how tall the description is, its block measures
+// (on_size_change), and it folds only once that is known to be more.
 //
 // The block scrolls by an offset the board keeps (scroll.js, its one home,
 // says why): its window measures its height, the content its own and each
@@ -127,6 +127,8 @@ function description(b, t, item, r) {
   const ui = b.relatedUi;
   const folds = descriptionFolds(ui, item);
   const open = ui.unfolded === item.key;
+  // The key that folds it, where one does now (commands.js).
+  const foldKey = folds ? b.keyShown("fold-description") : null;
   const id = `description-${item.key}`;
   const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
     .text_size(12)
@@ -145,7 +147,7 @@ function description(b, t, item, r) {
         .on_click((_e, cx) => {
           if (!b.modal) b.toggleFold(cx);
         })
-        .child(open ? "weniger (z)" : "… mehr (z)"),
+        .child(`${open ? "weniger" : "… mehr"}${foldKey ? ` (${foldKey})` : ""}`),
     ));
 }
 

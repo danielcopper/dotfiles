@@ -8,9 +8,8 @@
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). z (while the board has the keyboard), or a click on the
 // triangle in a story's row, folds its tasks away and back (toggleStoryFold;
-// kept per sprint in the store). Keys
-// walk the stories, then each column's tasks but the folded ones (sprintNav,
-// withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
+// kept per sprint in the store). Keys walk the stories, then each column's
+// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
 // finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
 // [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
 // [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
@@ -21,7 +20,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { cardLabel, itemLabel } from "../../shared.js";
-import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
+import { applyMoves, findCard, hasStep, stepTarget } from "../../kinds/board.js";
 import {
   NO_STORY, findSprintItem, foldedStories, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories,
   sprintWarnings, toggledFolds, withItemState, withSprintItem, withoutFolded,
@@ -94,6 +93,7 @@ export const sprintShape = {
       if (target) b.moveTo(view, item.key, target.id, cx);
     }
   },
+  canMove: (st, item, by) => hasStep(st.data, item.key, by),
   moveHint: "Task verschieben",
   fold: (b, view, st, cx) => foldKey(b, view, st, cx),
   received: (data, st) => applyMoves(data, st.moves),

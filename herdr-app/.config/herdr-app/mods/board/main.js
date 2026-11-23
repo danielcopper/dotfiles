@@ -69,10 +69,11 @@
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection, the
-// command menu's filter), commands.js (the action table: what each key,
-// hint and menu entry runs), related.js (the items related to an item, read when its details open:
-// what is kept, their lines), description.js (a description as drawn,
-// without anything it could load), scroll.js (how the details scroll),
+// command menu's filter), commands.js (the action table, which the keys of
+// its actions, the hint line and the command menu read), related.js (the
+// items related to an item, read when its details open: what is kept,
+// their lines), description.js (a description as drawn, without anything
+// it could load), scroll.js (how the details scroll),
 // sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
 // backlog.js, related.js, index.js), tools.js (running gh and az),
 // actions/ (starting a session, writing a change at once, moving a card,
@@ -519,17 +520,18 @@ export function wordsMatch(texts, filter) {
   return words.every((w) => hay.includes(w));
 }
 
-// The command menu's filter: the entries of `list` whose text (`textOf`)
-// holds the letters of `query` in its order (fuzzyMatch), best first. A
-// tie keeps the shorter text first, then the list's order. An empty query
-// keeps the list as it is.
+// The command menu's filter: { entry, at } for each entry of `list` whose
+// text (`textOf`) holds the letters of `query` in its order, `at` where
+// they stand in it (fuzzyMatch), best first. A tie keeps the shorter text
+// first, then the list's order. An empty query keeps the list as it is,
+// with no letters.
 export function fuzzyRank(list, query, textOf) {
-  if (!String(query ?? "").trim()) return [...list];
-  const scored = list.map((entry, at) => ({ entry, at, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
+  if (!String(query ?? "").trim()) return list.map((entry) => ({ entry, at: [] }));
+  const scored = list.map((entry, n) => ({ entry, n, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
   return scored
     .filter((s) => s.match)
-    .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.at - y.at)
-    .map((s) => s.entry);
+    .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.n - y.n)
+    .map((s) => ({ entry: s.entry, at: s.match.at }));
 }
 
 // How the letters of `query` fit `text`, case-insensitive and spaces left
@@ -782,6 +784,10 @@ export function stepTarget(board, key, step) {
   return null;
 }
 
+// Whether the card `key` has a column to go to `step` columns on
+// (stepTarget): what H/L move it to.
+export const hasStep = (board, key, step) => Boolean(stepTarget(board, key, step));
+
 // A view's columns with the person's hidden set applied.
 export function withHidden(board, hidden) {
   return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hidden.has(c.name) })) };
@@ -970,6 +976,20 @@ export const viewSwitchHint = (context) => context.views.map(teamViewName).join(
 
 // The sources of a config that have a context, in the toggle's order.
 export const sourcesOf = (config) => SOURCES.filter((s) => contextsOf(config, s.id).length);
+
+// The index `by` places on from `at` in a list `length` long, round past
+// its end to its start and back: the next or previous tab, source or view.
+export const stepIndex = (length, at, by) => (at + by + length) % length;
+
+// The index in `list` of `shown` (by its id), -1 for none: the shown tab
+// among the contexts, the shown source among the sources.
+export const shownIndex = (list, shown) => list.findIndex((x) => x.id === shown?.id);
+
+// The source after `shown` among `sources`, in the toggle's order.
+export const sourceAfter = (sources, shown) => sources[stepIndex(sources.length, shownIndex(sources, shown), 1)];
+
+// The view a team context shows after `shown`, one of its views.
+export const teamViewAfter = (context, shown) => context.views[stepIndex(context.views.length, context.views.indexOf(shown), 1)];
 
 // The entry of `list` whose id is `id`, else the first; null in an empty
 // list. A remembered choice that views.json no longer has falls back so.
@@ -3489,7 +3509,7 @@ export function backdrop(t, id, panel) {
 // `<id>-thumb` at the rows' right shows where the window is, a line under
 // them says how many rows follow ("↓ 3 weitere"), and the mouse wheel over
 // them calls `wheel(by, cx)` (by: the script's pixels, down for more than
-// 0; menuWheel). The row `at` is marked; a click on a row picks it
+// 0; menuWindow). The row `at` is marked; a click on a row picks it
 // (`pick(i, cx)`); menuKey takes its keys.
 export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
   const below = count - from - rows.length;
@@ -3544,28 +3564,61 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 // zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
-// How far the wheel moves a menu's window by one row: about a row's height
-// in the script's pixels.
+// How many rows a menu with a filter shows at once (menuWindow).
+export const MENU_ROWS = 10;
+// How far the wheel moves such a menu's window by one row: about a row's
+// height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
-// A menu's window of `size` rows over `count`, its first row m.top: moved so
-// that the marked row m.at shows, after a key moved the mark.
-export function followMark(m, count, size) {
-  if (m.at >= 0 && m.at < m.top) m.top = m.at;
-  if (m.at >= m.top + size) m.top = m.at - size + 1;
-  m.top = Math.max(0, Math.min(m.top, count - size));
+// The window of a menu with a filter (the assignee picker, the command
+// menu) over its `count` rows: MENU_ROWS at once from m.top, the marked
+// row m.at (-1 for none). Its window follows the mark where a key moves it
+// (followMark); the wheel moves it alone (menuWheel). menuWindow keeps both
+// within the rows, as the filter leaves them, and gives what menu() takes
+// for them.
+export function menuWindow(m, count) {
+  m.at = Math.max(-1, Math.min(m.at, count - 1));
+  m.top = Math.max(0, Math.min(m.top, count - MENU_ROWS));
+  const wheel = (by, cx) => {
+    menuWheel(m, by, count);
+    cx.notify();
+  };
+  return { from: m.top, count, at: m.at, wheel };
 }
 
-// The wheel over a menu's window (menu's `wheel`): `by` pixels down (up for
+// The window moved so that the marked row shows, after a key moved the
+// mark.
+export function followMark(m, count) {
+  if (m.at >= 0 && m.at < m.top) m.top = m.at;
+  if (m.at >= m.top + MENU_ROWS) m.top = m.at - MENU_ROWS + 1;
+  m.top = Math.max(0, Math.min(m.top, count - MENU_ROWS));
+}
+
+// The wheel over the window (menu's `wheel`): `by` pixels down (up for
 // less than 0) move it a row per MENU_ROW_PX, what is left kept for the
-// next move (m.wheel), within the list (at its end nothing is kept); the
+// next move (m.wheel), within the rows (at their end nothing is kept); the
 // mark stays where it is.
-export function menuWheel(m, by, count, size) {
+export function menuWheel(m, by, count) {
   m.wheel = (m.wheel ?? 0) + by;
   const step = Math.trunc(m.wheel / MENU_ROW_PX);
-  const top = Math.max(0, Math.min(m.top + step, count - size));
+  const top = Math.max(0, Math.min(m.top + step, count - MENU_ROWS));
   m.wheel = top === m.top + step ? m.wheel - step * MENU_ROW_PX : 0;
   m.top = top;
+}
+
+// A key in a menu with a filter (every key but Esc, which the Board
+// keeps): up/down, ctrl-j/k and ctrl-n/p mark a row of `count`, the
+// window following (followMark), and are taken; the rest is the filter's
+// (Enter: its submit).
+export function filterMenuKey(e, cx, m, count) {
+  const k = e.key;
+  const ctrl = e.modifiers?.control;
+  const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
+  if (!by) return;
+  cx.stop_propagation();
+  m.at = Math.max(0, Math.min(m.at + by, count - 1));
+  followMark(m, count);
+  cx.notify();
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;
@@ -4196,9 +4249,9 @@ export function unclearParentLines(due, data) {
 // Its rows are "Ich", "niemand", then the people its source offers (the repo's
 // assignable people on GitHub, the team's members on Azure), narrowed by a
 // filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
-// Enter or a click assigns it (actions/assign.js). Ten rows show at once: the
-// window follows the mark, and the mouse wheel moves it (helpers.js,
-// followMark and menuWheel). Which row is marked when the rows come and after
+// Enter or a click assigns it (actions/assign.js). MENU_ROWS rows show at
+// once: the window follows the mark, and the mouse wheel moves it
+// (helpers.js, menuWindow). Which row is marked when the rows come and after
 // each change of the filter: where the people were read and "Ich" is among
 // them, the first row the filter leaves that is no "niemand", and "niemand"
 // only where it is all that is left; else (the people could not be read, or
@@ -4207,12 +4260,9 @@ export function unclearParentLines(due, data) {
 // label, input (the filter's InputState, made for this dialog), field and
 // textField ("filter"), inputFocused, filter, at (the marked row, -1 for
 // none), top (the first row drawn), wheel (the wheel's move left over:
-// menuWheel), list ({ me, people, note }, null while it loads), error }.
+// menuWindow), list ({ me, people, note }, null while it loads), error }.
 // Where the people cannot be read, it says so in the dialog and as a toast,
 // and offers what its source can write without them.
-
-// How many rows show at once.
-const VISIBLE = 10;
 
 // The rows the filter leaves: { text, sub, person } ("Ich" carries its
 // name as `sub`; a person their login), each word of the filter in its
@@ -4280,26 +4330,13 @@ export const assignModal = {
     });
   },
 
-  // Every key but Esc (the Board's): up/down, ctrl-j/k and ctrl-n/p mark
-  // a row; the rest is the filter's (Enter: its submit).
-  key(b, e, cx) {
-    const m = b.modal;
-    const k = e.key;
-    const ctrl = e.modifiers?.control;
-    const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
-    if (!by) return;
-    cx.stop_propagation();
-    const count = rowsOf(m).length;
-    m.at = Math.max(0, Math.min(m.at + by, count - 1));
-    followMark(m, count, VISIBLE);
-    cx.notify();
-  },
+  // Every key but Esc (the Board's): filterMenuKey.
+  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, rowsOf(b.modal).length),
 
   render(b, t) {
     const m = b.modal;
     const rows = rowsOf(m);
-    m.at = Math.max(-1, Math.min(m.at, rows.length - 1));
-    m.top = Math.max(0, Math.min(m.top, rows.length - VISIBLE));
+    const win = menuWindow(m, rows.length);
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
     const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
     return menu(t, {
@@ -4312,17 +4349,11 @@ export const assignModal = {
         ...(m.error ? [line(m.error, toneColor(t, NOTE_TONES.error))] : []),
       ],
       digits: false,
-      rows: rows.slice(m.top, m.top + VISIBLE).map((r) => [
+      rows: rows.slice(m.top, m.top + MENU_ROWS).map((r) => [
         div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),
         ...(r.sub ? [div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub)] : []),
       ]),
-      from: m.top,
-      count: rows.length,
-      wheel: (by, cx) => {
-        menuWheel(m, by, rows.length, VISIBLE);
-        cx.notify();
-      },
-      at: m.at,
+      ...win,
       pick: (i, cx) => assignPick(b, m, i, cx),
       foot: [...(message ? [line(message, t.muted)] : []), ...(m.list?.note ? [line(`Personen: ${m.list.note}`, t.dim, 11)] : [])],
     });
@@ -4469,12 +4500,12 @@ export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, 
 // opens through the Board's openLink.
 //
 // A description taller than about 12 lines shows folded to that height,
-// with "… mehr (z)" below; `z` (commands.js, fold-description: while the
-// details panel has the keyboard, or on a view whose shape folds nothing
-// of its own) or a click on it unfolds it ("weniger (z)" folds it again). TextView tells no count of its lines, so the fold goes
-// by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
-// description is, its block measures (on_size_change), and it folds only
-// once that is known to be more.
+// with "… mehr" below, and the key that unfolds it where one does now
+// (commands.js, fold-description, says when z does); that key or a click
+// on it unfolds it ("weniger" folds it again). TextView tells no count of
+// its lines, so the fold goes by height: FOLDED_H, 12 lines of the
+// details' 18 pixels; how tall the description is, its block measures
+// (on_size_change), and it folds only once that is known to be more.
 //
 // The block scrolls by an offset the board keeps (scroll.js, its one home,
 // says why): its window measures its height, the content its own and each
@@ -4573,6 +4604,8 @@ function description(b, t, item, r) {
   const ui = b.relatedUi;
   const folds = descriptionFolds(ui, item);
   const open = ui.unfolded === item.key;
+  // The key that folds it, where one does now (commands.js).
+  const foldKey = folds ? b.keyShown("fold-description") : null;
   const id = `description-${item.key}`;
   const view = (r.format === "html" ? TextView.html(id, r.text) : TextView.markdown(id, r.text))
     .text_size(12)
@@ -4591,7 +4624,7 @@ function description(b, t, item, r) {
         .on_click((_e, cx) => {
           if (!b.modal) b.toggleFold(cx);
         })
-        .child(open ? "weniger (z)" : "… mehr (z)"),
+        .child(`${open ? "weniger" : "… mehr"}${foldKey ? ` (${foldKey})` : ""}`),
     ));
 }
 
@@ -4662,24 +4695,26 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // ==== src/commands.js ====
 
 // The board's actions, their one home: the action table ACTIONS, which the
-// keys (Board.key, through keyName and actionFor), the hint line (hintsOf)
-// and the command menu (menuActions; ui/modals/commands.js) all read, so a
-// key, its hint and its menu entry run one action and say one thing. An
-// action:
+// keys of its actions (Board.key, through keyName and actionFor), the hint
+// line (hintsOf) and the command menu (menuActions; ui/modals/commands.js)
+// all read, so a key, its hint and its menu entry run one action and say
+// one thing. An action:
 // - id, and name: the menu's name for it (a string, or name(c));
 // - key: the key that runs it, as keyName names it; null for one the menu
 //   (or a button, or a click) alone runs;
 // - menu: its place in the menu (lower first: the item's, the details
 //   panel's, the view's, the board's); none for one the menu does not list;
-//   group: what it acts on, the menu's heading over it (groupTitle): the
-//   selected item, the details panel, the shown view or the board;
-// - when(c): whether it can run now; the menu offers only those;
+//   group: what it acts on (GROUPS: the selected item, the details panel's
+//   item, the shown view, or the board), the menu's heading over it;
+// - when(c): whether it can run now, which needs what its group acts on;
+//   the menu offers only those;
 // - takes(c): whether its key is taken (when by default): a few keys are
 //   taken where they do nothing, or say why they do nothing;
-// - bar: the top bar's keys (tabs, sources, views, nur meine, filter,
-//   reload, the menu), which run before the board keeps its selection
-//   (Board.key);
-// - run(b, c, cx);
+// - bar: an action of the whole board or of the top bar (the tabs, the
+//   source, the team view, nur meine, the filter, reload, the menu), which
+//   runs without the board keeping its selection first (Board.keptContext);
+// - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
+//   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
 //   the hint line names (its key by default).
 // An entry without run is a hint only: a core key the Board handles itself
@@ -4694,7 +4729,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
 // stays herdr's, and Alt alone is let through: a key herdr binds with Alt
 // never reaches a mod), else with no Control, Alt or platform key a digit,
-// Enter, or a letter (upper case with Shift).
+// Enter, or a letter: upper case with Shift alone, so that Caps Lock
+// changes no key, and an upper case letter is its own key (Shift+S is no s).
 export function keyName(k, ch, mod) {
   const typed = !(mod.control && !mod.alt) && !mod.platform;
   if (typed && ["[", "]", "/", ":"].includes(ch)) return ch;
@@ -4702,7 +4738,7 @@ export function keyName(k, ch, mod) {
   if (/^[1-9]$/.test(ch)) return ch;
   if (k === "enter") return "enter";
   if (!/^[a-z]$/.test(k)) return null;
-  return mod.shift || ch === k.toUpperCase() ? k.toUpperCase() : k;
+  return mod.shift ? k.toUpperCase() : k;
 }
 
 // How the hint line and the menu write a key.
@@ -4714,30 +4750,63 @@ export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === nam
 
 const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
 
+// The key of the action `id` as the hint line and the menu write it, where
+// that key runs it now (actionFor), else null; and its name now. The texts
+// that name an action (the description's fold, the hint to the column
+// menu) take them from here.
+export function keyShown(id, c) {
+  const a = ACTIONS.find((x) => x.id === id);
+  return a?.key && actionFor(a.key, c) === a ? keyLabel(a.key) : null;
+}
+export const actionName = (id, c) => nameOf(ACTIONS.find((a) => a.id === id), c);
+
 const KIND_NAMES = { issue: "Issue", pr: "PR" };
 
-// The heading of a group of the menu: the item it acts on ("Task AB#311 ·
-// Export als CSV"), the details panel's item ("Detailfenster · #2217 …"),
-// the view's name ("Sprint"), or "Board".
-export function groupTitle(group, c) {
-  if (group === "item") return `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`;
-  if (group === "details") return `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`;
-  if (group === "view") return c.view.name;
-  return "Board";
-}
+// The menu's groups by what they act on: the heading over each (title:
+// "Task AB#311 · Export als CSV", "Detailfenster · tender#2217 …", the
+// view's name such as "Sprint", or "Board"); `aim`, which of that an
+// action opened for (its view and item, its view and details, its view;
+// the board has none); and `gone`, what the menu says where an action
+// would run on another (Board.runAction).
+const GROUPS = {
+  item: {
+    title: (c) => `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`,
+    aim: (c) => [c.view?.id, c.item?.key],
+    gone: (c) => `${itemLabel(c.item)} ist nicht mehr ausgewählt`,
+  },
+  details: {
+    title: (c) => `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`,
+    aim: (c) => [c.view?.id, c.details?.key],
+    gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
+  },
+  view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ ist nicht mehr gezeigt` },
+  board: { title: () => "Board", aim: () => [], gone: () => "" },
+};
 
-// The command menu's entries now: { action, name, key, head } for each
-// action the menu lists that can run, in the menu's order, with its key
-// where that key runs it now (actionFor), else none, and its group's
-// heading.
+// The command menu's entries now: { action, name, key, group, head, aim,
+// gone } for each action the menu lists that can run, in the menu's order,
+// with its key where that key runs it now (actionFor), else none; its
+// group's heading; and what it aims at and what is said where that has
+// gone (GROUPS; an action may aim closer, as "Spalte ausblenden" at its
+// column).
 export function menuActions(c) {
-  return ACTIONS.filter((a) => a.menu && a.when(c))
+  return ACTIONS.filter((a) => a.menu != null && a.when(c))
     .sort((x, y) => x.menu - y.menu)
-    .map((a) => ({ action: a, name: nameOf(a, c), key: a.key && actionFor(a.key, c) === a ? keyLabel(a.key) : null, head: groupTitle(a.group, c) }));
+    .map((a) => {
+      const group = GROUPS[a.group];
+      return {
+        action: a, name: nameOf(a, c), key: keyShown(a.id, c), group: a.group, head: group.title(c),
+        aim: aimOf(a, c), gone: a.gone?.(c) ?? group.gone(c),
+      };
+    });
 }
 
-// The menu's entries its filter leaves, best first (fuzzyRank).
-export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) => e.name);
+// What the action `a` acts on now, as a text to compare (menuActions).
+export const aimOf = (a, c) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.aim?.(c) ?? [])]);
+
+// The menu's entries its filter leaves, best first (fuzzyRank), each with
+// `at`, where the filter's letters stand in its name.
+export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) => e.name).map(({ entry, at }) => ({ ...entry, at }));
 
 // The hint line's entries now: [key, text], in the table's order.
 export function hintsOf(c) {
@@ -4748,34 +4817,28 @@ export function hintsOf(c) {
 
 // The shown source's tabs, and the shown one's index.
 const tabsOf = (c) => c.b.contexts();
-const tabAt = (c) => tabsOf(c).findIndex((x) => x.id === c.b.context()?.id);
+const tabAt = (c) => shownIndex(tabsOf(c), c.b.context());
 
-// The source after the shown one in the toggle's order.
-function nextSource(c) {
-  const list = sourcesOf(c.b.config);
-  return list[(list.findIndex((s) => s.id === c.b.source()?.id) + 1) % list.length];
-}
-
-// The shown team's next view.
-function nextView(c) {
-  const context = c.b.context();
-  const views = context.views;
-  return views[(views.indexOf(c.b.teamViewOf(context)) + 1) % views.length];
-}
+// The source after the shown one, and the shown team's next view.
+const nextSource = (c) => sourceAfter(sourcesOf(c.b.config), c.b.source());
+const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context()));
 
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
 // takes Enter and o while one is.
 const onItem = (c) => Boolean(c.item) && c.line === null;
-// Whether the shown view's data is read, and its shape has `what`.
-const has = (c, what) => Boolean(c.st?.data && c.shape?.[what]);
+// Whether a line of the details panel is selected and still there.
+const onLine = (c) => Boolean(c.details) && c.line !== null && Boolean(c.lines[c.line]);
+// Whether a view shows, its data is read, and its shape has `what`.
+const has = (c, what) => Boolean(c.view && c.st?.data && c.shape?.[what]);
 
-// The selected column, where the shape hides columns and it can be hidden.
+// The selected column, where the shape hides columns and can hide it
+// (its canHide).
 function hideableColumn(c) {
   if (!has(c, "toggleColumn")) return null;
   const col = c.b.navColumns(c.view)[c.st.sel?.col];
-  return col?.target ? col : null;
+  return col && c.shape.canHide(col) ? col : null;
 }
 
 // What the second Enter does with the item: go to its session, or start one.
@@ -4805,7 +4868,7 @@ const moveAction = (id, key, by, name) => ({
   name,
   key,
   menu: by < 0 ? 5 : 6,
-  when: (c) => has(c, "move") && Boolean(c.item) && Boolean(stepTarget(c.st.data, c.item.key, by)),
+  when: (c) => has(c, "move") && Boolean(c.item) && c.shape.canMove(c.st, c.item, by),
   takes: (c) => has(c, "move"),
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
   ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
@@ -4830,7 +4893,7 @@ export const ACTIONS = [
   },
   {
     id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 23, bar: true,
-    when: (c) => hasViewSwitch(c.b.context()), takes: () => true,
+    when: (c) => Boolean(c.view) && hasViewSwitch(c.b.context()), takes: () => true,
     run: (b, c, cx) => b.nextTeamView(cx),
     hint: (c) => (hasViewSwitch(c.b.context()) ? viewSwitchHint(c.b.context()) : null),
   },
@@ -4893,21 +4956,21 @@ export const ACTIONS = [
   {
     id: "fold-description", group: "details", key: "z", menu: 9,
     name: (c) => (c.b.relatedUi.unfolded === c.details.key ? "Beschreibung weniger" : "Beschreibung mehr"),
-    when: (c) => c.related && descriptionFolds(c.b.relatedUi, c.details),
+    when: (c) => Boolean(c.details) && c.related && descriptionFolds(c.b.relatedUi, c.details),
     run: (b, c, cx) => b.toggleFold(cx),
-    hint: (c) => (actionFor("z", c)?.id === "fold-description" ? (c.b.relatedUi.unfolded === c.details.key ? "weniger" : "mehr") : null),
+    hint: (c) => (keyShown("fold-description", c) ? (c.b.relatedUi.unfolded === c.details.key ? "weniger" : "mehr") : null),
   },
   // The details panel's selected line (a line selected before `r` read the
   // related items again is gone until they come: its key does nothing).
   {
     id: "line-board", group: "details", name: "Zeile auf dem Board", key: "enter", menu: 10,
-    when: (c) => c.line !== null && Boolean(c.lines[c.line]), takes: (c) => c.line !== null,
+    when: onLine, takes: (c) => c.line !== null,
     run: (b, c, cx) => c.lines[c.line] && b.enterLine(c.view, c.lines[c.line], cx),
     hint: (c) => (c.panel ? "Zeile auf dem Board" : null),
   },
   {
     id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 11,
-    when: (c) => c.line !== null && Boolean(c.lines[c.line]), takes: (c) => c.line !== null,
+    when: onLine, takes: (c) => c.line !== null,
     run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
     hint: (c) => (c.panel ? "Zeile öffnen" : null),
   },
@@ -4915,6 +4978,8 @@ export const ACTIONS = [
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,
     when: (c) => Boolean(hideableColumn(c)),
     run: (b, c, cx) => b.toggleColumn(c.view, hideableColumn(c), cx),
+    aim: (c) => [hideableColumn(c)?.id ?? null],
+    gone: (c) => `Spalte „${hideableColumn(c).name}“ ist nicht mehr ausgewählt`,
   },
   {
     id: "columns", group: "view", name: "Spalten…", key: null, menu: 22,
@@ -4950,33 +5015,29 @@ export const ACTIONS = [
 
 // ==== src/ui/modals/commands.js ====
 
-// The command menu: the actions that can run now (commands.js,
-// menuActions: by the selected item or row, the view's kind, the details
-// and whether their panel has the keyboard, the source), each by its name
-// with its key at the right where it has one, under a heading for what
-// they act on (the item, the details panel, the view, the board), as a
-// menu like the assignee picker's (helpers.js menu, without digits: typing
-// goes to the filter). The filter has the keyboard and narrows them as one
-// types (filterActions): best first, each group under its best entry, the
-// filter's letters in the accent color (fuzzyMatch). Up/down, ctrl-j/k and
-// ctrl-n/p mark one, Enter or a click runs it (Board.runAction), Esc
-// closes. COMMAND_ROWS rows show at once: the window follows the mark, and
-// the mouse wheel moves it (helpers.js, followMark and menuWheel). `:`
-// opens it (Board.openCommands) as b.modal = { kind: "commands", entries
-// (the actions as it opened), input (the filter's InputState, made for
-// this dialog), field and textField ("filter"), inputFocused, filter, at
-// (the marked row, -1 for none), top (the first row drawn), wheel (the
-// wheel's move left over: menuWheel) }.
+// The command menu: the actions that can run now, each by its name with its
+// key at the right where that key runs it now, under a heading for what
+// they act on (commands.js, menuActions), as a menu like the assignee
+// picker's (helpers.js menu, without digits: typing goes to the filter).
+// The filter has the keyboard and narrows them as one types, in the order
+// shownCommands gives, the filter's letters in the accent color. Up/down,
+// ctrl-j/k and ctrl-n/p mark one, Enter or a click runs it on what it
+// aimed at when the menu opened (Board.runAction), Esc closes; MENU_ROWS
+// rows show at once (helpers.js: filterMenuKey, menuWindow). `:` opens it
+// (Board.openCommands) as b.modal = { kind: "commands", view (the view it
+// opened on, so that a reload of views.json that drops or changes it
+// closes it), entries (the actions as it opened), input (the filter's
+// InputState, made for this dialog), field and textField ("filter"),
+// inputFocused, filter, at (the marked row, -1 for none), top (the first
+// row drawn), wheel (the wheel's move left over) }.
 
-// How many of its rows show at once.
-const COMMAND_ROWS = 10;
-
-// The entries the filter leaves, best first, each group together after the
-// group's best (with no filter, in the menu's order).
+// The entries the filter leaves (filterActions), best first, each group
+// (an action's group, not its heading's text) together after its best;
+// with no filter, in the menu's order.
 export function shownCommands(entries, filter) {
   const ranked = filterActions(entries, filter);
-  const heads = [...new Set(ranked.map((e) => e.head))];
-  return heads.flatMap((head) => ranked.filter((e) => e.head === head));
+  const groups = [...new Set(ranked.map((e) => e.group))];
+  return groups.flatMap((group) => ranked.filter((e) => e.group === group));
 }
 
 const entriesOf = (m) => shownCommands(m.entries, m.filter);
@@ -4986,15 +5047,16 @@ function runEntry(b, m, i, cx) {
   const entry = entriesOf(m)[i];
   if (!entry) return;
   b.closeModal(cx);
-  b.runAction(entry.action, cx);
+  b.runAction(entry, cx);
 }
 
-// An entry's name, the letters the filter found in it in the accent color.
-function markedName(t, name, filter) {
-  const at = new Set(fuzzyMatch(name, filter)?.at ?? []);
+// An entry's name, the filter's letters in it (its `at`) in the accent
+// color.
+function markedName(t, name, at) {
+  const hits = new Set(at);
   const runs = [];
   Array.from(name).forEach((ch, i) => {
-    const hit = at.has(i);
+    const hit = hits.has(i);
     if (runs.length && runs.at(-1).hit === hit) runs.at(-1).text += ch;
     else runs.push({ hit, text: ch });
   });
@@ -5008,7 +5070,9 @@ function markedName(t, name, filter) {
 export const commandsModal = {
   open(b, cx) {
     const input = InputState.new({ placeholder: "Befehl: tippen, um zu filtern" });
-    const m = { kind: "commands", entries: menuActions(b.actionContext()), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
+    // On the selection the board keeps, as an action's key finds it.
+    const c = b.keptContext(false);
+    const m = { kind: "commands", view: c.view, entries: menuActions(c), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
     wireTextField(b, m, input, "filter", (cx) => runEntry(b, m, m.at, cx));
     input.on("change", (_e, cx) => {
       m.filter = input.value();
@@ -5016,33 +5080,19 @@ export const commandsModal = {
       m.top = 0;
       cx.notify();
     });
-    if (!m.entries.length) m.at = -1;
     b.modal = m;
     input.focus();
     cx.notify();
   },
 
-  // Every key but Esc (the Board's): up/down, ctrl-j/k and ctrl-n/p mark
-  // a row; the rest is the filter's (Enter: its submit).
-  key(b, e, cx) {
-    const m = b.modal;
-    const k = e.key;
-    const ctrl = e.modifiers?.control;
-    const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
-    if (!by) return;
-    cx.stop_propagation();
-    const count = entriesOf(m).length;
-    m.at = Math.max(0, Math.min(m.at + by, count - 1));
-    followMark(m, count, COMMAND_ROWS);
-    cx.notify();
-  },
+  // Every key but Esc (the Board's): filterMenuKey.
+  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, entriesOf(b.modal).length),
 
   render(b, t) {
     const m = b.modal;
     const entries = entriesOf(m);
-    m.at = Math.max(-1, Math.min(m.at, entries.length - 1));
-    m.top = Math.max(0, Math.min(m.top, entries.length - COMMAND_ROWS));
-    const shown = entries.slice(m.top, m.top + COMMAND_ROWS);
+    const win = menuWindow(m, entries.length);
+    const shown = entries.slice(m.top, m.top + MENU_ROWS);
     return menu(t, {
       id: "commands",
       rowId: "command",
@@ -5051,20 +5101,14 @@ export const commandsModal = {
       head: [fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))],
       digits: false,
       rows: shown.map((e) => [
-        markedName(t, e.name, m.filter),
+        markedName(t, e.name, e.at),
         ...(e.key ? [div().flex_none().text_size(11).font_semibold().text_color(t.dim).child(e.key)] : []),
       ]),
       // A group's heading over its first row, and over the window's first.
-      heads: shown.map((e, n) => (n === 0 || shown[n - 1].head !== e.head ? e.head : null)),
-      from: m.top,
-      count: entries.length,
-      wheel: (by, cx) => {
-        menuWheel(m, by, entries.length, COMMAND_ROWS);
-        cx.notify();
-      },
-      at: m.at,
+      heads: shown.map((e, n) => (n === 0 || shown[n - 1].group !== e.group ? e.head : null)),
+      ...win,
       pick: (i, cx) => runEntry(b, m, i, cx),
-      foot: entries.length ? [] : [div().px(8).text_size(12).text_color(t.muted).child(m.entries.length ? "Kein Befehl passt zum Filter" : "Hier gibt es nichts zu tun")],
+      foot: entries.length ? [] : [div().px(8).text_size(12).text_color(t.muted).child("Kein Befehl passt zum Filter")],
     });
   },
 };
@@ -5752,6 +5796,9 @@ export const boardShape = {
     const target = st.sel?.key && stepTarget(st.data, st.sel?.key, by);
     if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
+  canMove: (st, item, by) => hasStep(st.data, item.key, by),
+  // A column with a target (a Status option) can be hidden.
+  canHide: (col) => Boolean(col.target),
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
@@ -5836,7 +5883,7 @@ function drawBoard(b, t, mono, view, st) {
     .child(
       cols.length
         ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
-        : div().p(20).text_color(t.muted).child("Alle Spalten sind ausgeblendet: ein Name oben oder „Spalten…“ im Befehlsmenü (:) zeigt eine wieder"),
+        : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name oben oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
     )
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
@@ -5952,7 +5999,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
-  if (!col.target) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
+  if (!boardShape.canHide(col)) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
   const before = b.navColumns(view);
   st.stored = toggleHidden(view, st.stored, col);
   st.hidden = hiddenColumns(view, st.stored);
@@ -6097,9 +6144,8 @@ function scrollToRow(b, view, key) {
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). z (while the board has the keyboard), or a click on the
 // triangle in a story's row, folds its tasks away and back (toggleStoryFold;
-// kept per sprint in the store). Keys
-// walk the stories, then each column's tasks but the folded ones (sprintNav,
-// withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
+// kept per sprint in the store). Keys walk the stories, then each column's
+// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
 // finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
 // [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
 // [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
@@ -6165,6 +6211,7 @@ export const sprintShape = {
       if (target) b.moveTo(view, item.key, target.id, cx);
     }
   },
+  canMove: (st, item, by) => hasStep(st.data, item.key, by),
   moveHint: "Task verschieben",
   fold: (b, view, st, cx) => foldKey(b, view, st, cx),
   received: (data, st) => applyMoves(data, st.moves),
@@ -6383,9 +6430,10 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
 // loads (false for the placeholder, which draws without data), received
 // (the data as kept after a refresh) and warnings; and where it has them,
 // the actions it lends the action table (commands.js, which says their
-// keys and hints): move (b, view, st, by, cx: H/L, which the menu offers
-// where the item has a column that way: stepTarget) and moveHint, fold (b,
-// view, st, cx: z), create (b, view, cx: n) and enterHint (Enter's hint);
+// keys and hints): move (b, view, st, by, cx: H/L) with canMove (st, item,
+// by: whether the item has a column that way) and moveHint, canHide (col:
+// whether a column can be hidden, beside toggleColumn), fold (b, view, st,
+// cx: z), create (b, view, cx: n) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a
 // list has none), detailParts (its rows in the detail
@@ -7385,8 +7433,8 @@ export default class Board extends View {
   }
 
   // z (commands.js, fold-description), or a click on the description's
-  // switch: the shown details' description unfolded, or folded again, where it is taller than its fold
-  // (ui/related.js); true when it is.
+  // switch: the shown details' description unfolded, or folded again,
+  // where it is taller than its fold (ui/related.js); true when it is.
   toggleFold(cx) {
     const item = this.shownDetailsItem();
     const ui = this.relatedUi;
@@ -7487,8 +7535,7 @@ export default class Board extends View {
   // the last the first and back.
   stepTab(by, cx) {
     const tabs = this.contexts();
-    const at = tabs.findIndex((c) => c.id === this.context()?.id);
-    if (tabs.length) this.switchTab((at + by + tabs.length) % tabs.length, cx);
+    if (tabs.length) this.switchTab(stepIndex(tabs.length, shownIndex(tabs, this.context()), by), cx);
   }
 
   // Shows another source with the tab it showed last.
@@ -7523,8 +7570,7 @@ export default class Board extends View {
   nextTeamView(cx) {
     const context = this.context();
     if (context?.kind !== "team") return;
-    const views = context.views;
-    this.setTeamView(views[(views.indexOf(this.teamViewOf(context)) + 1) % views.length], cx);
+    this.setTeamView(teamViewAfter(context, this.teamViewOf(context)), cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
@@ -7698,10 +7744,8 @@ export default class Board extends View {
 
   // ---- keys ----
 
-  // What the board says of the moment, for its actions (commands.js): the
-  // shown view, its state and shape, the selected item, the item whose
-  // details show and whether those read related items, the details panel's
-  // keyboard and its selected line, and the related items' lines.
+  // The moment an action runs in, `c` as the action table takes it
+  // (commands.js says its fields).
   actionContext() {
     const view = this.view();
     const st = view ? this.state(view.id) : null;
@@ -7713,15 +7757,35 @@ export default class Board extends View {
     };
   }
 
-  // An action the menu picked (ui/modals/commands.js): run as its key runs
-  // it (key), the selection kept first but for the top bar's, where it can
-  // still run.
-  runAction(action, cx) {
+  // The moment an action runs in as its key runs it, the one step the keys
+  // (key) and the menu (runAction) share: the board keeps its selection
+  // first (keepSelection), but for an action of the top bar (`bar`).
+  keptContext(bar) {
     const view = this.view();
-    if (!action.bar && view && this.state(view.id).data) this.keepSelection(view);
-    const c = this.actionContext();
-    if (action.when(c)) action.run(this, c, cx);
+    if (!bar && view && this.state(view.id).data) this.keepSelection(view);
+    return this.actionContext();
+  }
+
+  // An entry the menu picked (ui/modals/commands.js, menuActions): its
+  // action, run as its key runs it (keptContext) where it can still run,
+  // and only on what it aimed at when the menu opened; where that is gone
+  // (a refresh dropped or moved the item, another view shows), the menu
+  // says so and runs nothing.
+  runAction(entry, cx) {
+    const c = this.keptContext(entry.action.bar);
+    if (aimOf(entry.action, c) !== entry.aim) this.say(entry.gone, "info", cx);
+    else if (entry.action.when(c)) entry.action.run(this, c, cx);
     cx.notify();
+  }
+
+  // The key of the action `id` where it runs it now, and its name now
+  // (commands.js), for a text that names it.
+  keyShown(id) {
+    return keyShown(id, this.actionContext());
+  }
+
+  actionName(id) {
+    return actionName(id, this.actionContext());
   }
 
   key(e, cx) {
@@ -7760,14 +7824,16 @@ export default class Board extends View {
     if (end) return this.toEdge(view, end, cx), done();
     const panel = view && bare ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k)) return done();
-    // The top bar's actions run first; the others after the selection is
-    // kept, Esc and the arrows, each from the action table (commands.js).
+    // A key of an action of the top bar runs it at once; then the board
+    // keeps its selection (keptContext), and Esc, the arrows and the keys
+    // of the other actions follow (commands.js, actionFor).
     const name = keyName(k, ch, mod);
-    const first = name ? actionFor(name, this.actionContext()) : null;
-    if (first?.bar) return first.run(this, this.actionContext(), cx), done();
+    const atOnce = name ? this.keptContext(true) : null;
+    const first = name ? actionFor(name, atOnce) : null;
+    if (first?.bar) return first.run(this, atOnce, cx), done();
     if (mod.control || mod.alt || mod.platform) return;
+    const c = this.keptContext(false);
     const st = view ? this.state(view.id) : null;
-    if (st?.data) this.keepSelection(view);
     if (k === "escape") {
       if (st?.detail) st.detail = false;
       else if (this.notice) this.notice = null;
@@ -7786,7 +7852,6 @@ export default class Board extends View {
     }
     // With nothing selected (loading, failed, empty, a placeholder) Enter
     // and o stay herdr's (their actions do not take them).
-    const c = this.actionContext();
     const action = name ? actionFor(name, c) : null;
     if (action) return action.run(this, c, cx), done();
   }
@@ -8161,11 +8226,8 @@ export default class Board extends View {
       );
   }
 
-  // The keys of what shows now, as the action table says them (hintsOf):
-  // the top bar's, the moves and those of the shown view's shape that it
-  // keeps a key for, the details panel's, and those that always work; Esc
-  // gives the keyboard back while the panel has it. What has no key of its
-  // own is in the command menu (`:`).
+  // The hint line: the keys of what shows now, as the action table says
+  // them (hintsOf).
   hints(t) {
     const keys = hintsOf(this.actionContext());
     // On a narrow screen the line wraps rather than cut keys off.

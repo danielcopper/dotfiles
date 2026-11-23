@@ -1,22 +1,24 @@
 // The board's actions, their one home: the action table ACTIONS, which the
-// keys (Board.key, through keyName and actionFor), the hint line (hintsOf)
-// and the command menu (menuActions; ui/modals/commands.js) all read, so a
-// key, its hint and its menu entry run one action and say one thing. An
-// action:
+// keys of its actions (Board.key, through keyName and actionFor), the hint
+// line (hintsOf) and the command menu (menuActions; ui/modals/commands.js)
+// all read, so a key, its hint and its menu entry run one action and say
+// one thing. An action:
 // - id, and name: the menu's name for it (a string, or name(c));
 // - key: the key that runs it, as keyName names it; null for one the menu
 //   (or a button, or a click) alone runs;
 // - menu: its place in the menu (lower first: the item's, the details
 //   panel's, the view's, the board's); none for one the menu does not list;
-//   group: what it acts on, the menu's heading over it (groupTitle): the
-//   selected item, the details panel, the shown view or the board;
-// - when(c): whether it can run now; the menu offers only those;
+//   group: what it acts on (GROUPS: the selected item, the details panel's
+//   item, the shown view, or the board), the menu's heading over it;
+// - when(c): whether it can run now, which needs what its group acts on;
+//   the menu offers only those;
 // - takes(c): whether its key is taken (when by default): a few keys are
 //   taken where they do nothing, or say why they do nothing;
-// - bar: the top bar's keys (tabs, sources, views, nur meine, filter,
-//   reload, the menu), which run before the board keeps its selection
-//   (Board.key);
-// - run(b, c, cx);
+// - bar: an action of the whole board or of the top bar (the tabs, the
+//   source, the team view, nur meine, the filter, reload, the menu), which
+//   runs without the board keeping its selection first (Board.keptContext);
+// - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
+//   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
 //   the hint line names (its key by default).
 // An entry without run is a hint only: a core key the Board handles itself
@@ -29,9 +31,8 @@
 
 import { spaces } from "herdr";
 import { cardType, itemLabel } from "./shared.js";
-import { hasViewSwitch, sourcesOf, teamViewName, viewSwitchHint } from "./contexts.js";
+import { hasViewSwitch, shownIndex, sourceAfter, sourcesOf, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
 import { linkedSession } from "./actions/start.js";
-import { stepTarget } from "./kinds/board.js";
 import { fuzzyRank } from "./select.js";
 import { descriptionFolds } from "./ui/related.js";
 
@@ -39,7 +40,8 @@ import { descriptionFolds } from "./ui/related.js";
 // [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
 // stays herdr's, and Alt alone is let through: a key herdr binds with Alt
 // never reaches a mod), else with no Control, Alt or platform key a digit,
-// Enter, or a letter (upper case with Shift).
+// Enter, or a letter: upper case with Shift alone, so that Caps Lock
+// changes no key, and an upper case letter is its own key (Shift+S is no s).
 export function keyName(k, ch, mod) {
   const typed = !(mod.control && !mod.alt) && !mod.platform;
   if (typed && ["[", "]", "/", ":"].includes(ch)) return ch;
@@ -47,7 +49,7 @@ export function keyName(k, ch, mod) {
   if (/^[1-9]$/.test(ch)) return ch;
   if (k === "enter") return "enter";
   if (!/^[a-z]$/.test(k)) return null;
-  return mod.shift || ch === k.toUpperCase() ? k.toUpperCase() : k;
+  return mod.shift ? k.toUpperCase() : k;
 }
 
 // How the hint line and the menu write a key.
@@ -59,30 +61,63 @@ export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === nam
 
 const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
 
+// The key of the action `id` as the hint line and the menu write it, where
+// that key runs it now (actionFor), else null; and its name now. The texts
+// that name an action (the description's fold, the hint to the column
+// menu) take them from here.
+export function keyShown(id, c) {
+  const a = ACTIONS.find((x) => x.id === id);
+  return a?.key && actionFor(a.key, c) === a ? keyLabel(a.key) : null;
+}
+export const actionName = (id, c) => nameOf(ACTIONS.find((a) => a.id === id), c);
+
 const KIND_NAMES = { issue: "Issue", pr: "PR" };
 
-// The heading of a group of the menu: the item it acts on ("Task AB#311 ·
-// Export als CSV"), the details panel's item ("Detailfenster · #2217 …"),
-// the view's name ("Sprint"), or "Board".
-export function groupTitle(group, c) {
-  if (group === "item") return `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`;
-  if (group === "details") return `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`;
-  if (group === "view") return c.view.name;
-  return "Board";
-}
+// The menu's groups by what they act on: the heading over each (title:
+// "Task AB#311 · Export als CSV", "Detailfenster · tender#2217 …", the
+// view's name such as "Sprint", or "Board"); `aim`, which of that an
+// action opened for (its view and item, its view and details, its view;
+// the board has none); and `gone`, what the menu says where an action
+// would run on another (Board.runAction).
+const GROUPS = {
+  item: {
+    title: (c) => `${[cardType(c.item) ?? KIND_NAMES[c.item.kind], itemLabel(c.item)].filter(Boolean).join(" ")} · ${c.item.title}`,
+    aim: (c) => [c.view?.id, c.item?.key],
+    gone: (c) => `${itemLabel(c.item)} ist nicht mehr ausgewählt`,
+  },
+  details: {
+    title: (c) => `Detailfenster · ${itemLabel(c.details)} ${c.details.title}`,
+    aim: (c) => [c.view?.id, c.details?.key],
+    gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
+  },
+  view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ ist nicht mehr gezeigt` },
+  board: { title: () => "Board", aim: () => [], gone: () => "" },
+};
 
-// The command menu's entries now: { action, name, key, head } for each
-// action the menu lists that can run, in the menu's order, with its key
-// where that key runs it now (actionFor), else none, and its group's
-// heading.
+// The command menu's entries now: { action, name, key, group, head, aim,
+// gone } for each action the menu lists that can run, in the menu's order,
+// with its key where that key runs it now (actionFor), else none; its
+// group's heading; and what it aims at and what is said where that has
+// gone (GROUPS; an action may aim closer, as "Spalte ausblenden" at its
+// column).
 export function menuActions(c) {
-  return ACTIONS.filter((a) => a.menu && a.when(c))
+  return ACTIONS.filter((a) => a.menu != null && a.when(c))
     .sort((x, y) => x.menu - y.menu)
-    .map((a) => ({ action: a, name: nameOf(a, c), key: a.key && actionFor(a.key, c) === a ? keyLabel(a.key) : null, head: groupTitle(a.group, c) }));
+    .map((a) => {
+      const group = GROUPS[a.group];
+      return {
+        action: a, name: nameOf(a, c), key: keyShown(a.id, c), group: a.group, head: group.title(c),
+        aim: aimOf(a, c), gone: a.gone?.(c) ?? group.gone(c),
+      };
+    });
 }
 
-// The menu's entries its filter leaves, best first (fuzzyRank).
-export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) => e.name);
+// What the action `a` acts on now, as a text to compare (menuActions).
+export const aimOf = (a, c) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.aim?.(c) ?? [])]);
+
+// The menu's entries its filter leaves, best first (fuzzyRank), each with
+// `at`, where the filter's letters stand in its name.
+export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) => e.name).map(({ entry, at }) => ({ ...entry, at }));
 
 // The hint line's entries now: [key, text], in the table's order.
 export function hintsOf(c) {
@@ -93,34 +128,28 @@ export function hintsOf(c) {
 
 // The shown source's tabs, and the shown one's index.
 const tabsOf = (c) => c.b.contexts();
-const tabAt = (c) => tabsOf(c).findIndex((x) => x.id === c.b.context()?.id);
+const tabAt = (c) => shownIndex(tabsOf(c), c.b.context());
 
-// The source after the shown one in the toggle's order.
-function nextSource(c) {
-  const list = sourcesOf(c.b.config);
-  return list[(list.findIndex((s) => s.id === c.b.source()?.id) + 1) % list.length];
-}
-
-// The shown team's next view.
-function nextView(c) {
-  const context = c.b.context();
-  const views = context.views;
-  return views[(views.indexOf(c.b.teamViewOf(context)) + 1) % views.length];
-}
+// The source after the shown one, and the shown team's next view.
+const nextSource = (c) => sourceAfter(sourcesOf(c.b.config), c.b.source());
+const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context()));
 
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
 // takes Enter and o while one is.
 const onItem = (c) => Boolean(c.item) && c.line === null;
-// Whether the shown view's data is read, and its shape has `what`.
-const has = (c, what) => Boolean(c.st?.data && c.shape?.[what]);
+// Whether a line of the details panel is selected and still there.
+const onLine = (c) => Boolean(c.details) && c.line !== null && Boolean(c.lines[c.line]);
+// Whether a view shows, its data is read, and its shape has `what`.
+const has = (c, what) => Boolean(c.view && c.st?.data && c.shape?.[what]);
 
-// The selected column, where the shape hides columns and it can be hidden.
+// The selected column, where the shape hides columns and can hide it
+// (its canHide).
 function hideableColumn(c) {
   if (!has(c, "toggleColumn")) return null;
   const col = c.b.navColumns(c.view)[c.st.sel?.col];
-  return col?.target ? col : null;
+  return col && c.shape.canHide(col) ? col : null;
 }
 
 // What the second Enter does with the item: go to its session, or start one.
@@ -150,7 +179,7 @@ const moveAction = (id, key, by, name) => ({
   name,
   key,
   menu: by < 0 ? 5 : 6,
-  when: (c) => has(c, "move") && Boolean(c.item) && Boolean(stepTarget(c.st.data, c.item.key, by)),
+  when: (c) => has(c, "move") && Boolean(c.item) && c.shape.canMove(c.st, c.item, by),
   takes: (c) => has(c, "move"),
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
   ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
@@ -175,7 +204,7 @@ export const ACTIONS = [
   },
   {
     id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 23, bar: true,
-    when: (c) => hasViewSwitch(c.b.context()), takes: () => true,
+    when: (c) => Boolean(c.view) && hasViewSwitch(c.b.context()), takes: () => true,
     run: (b, c, cx) => b.nextTeamView(cx),
     hint: (c) => (hasViewSwitch(c.b.context()) ? viewSwitchHint(c.b.context()) : null),
   },
@@ -238,21 +267,21 @@ export const ACTIONS = [
   {
     id: "fold-description", group: "details", key: "z", menu: 9,
     name: (c) => (c.b.relatedUi.unfolded === c.details.key ? "Beschreibung weniger" : "Beschreibung mehr"),
-    when: (c) => c.related && descriptionFolds(c.b.relatedUi, c.details),
+    when: (c) => Boolean(c.details) && c.related && descriptionFolds(c.b.relatedUi, c.details),
     run: (b, c, cx) => b.toggleFold(cx),
-    hint: (c) => (actionFor("z", c)?.id === "fold-description" ? (c.b.relatedUi.unfolded === c.details.key ? "weniger" : "mehr") : null),
+    hint: (c) => (keyShown("fold-description", c) ? (c.b.relatedUi.unfolded === c.details.key ? "weniger" : "mehr") : null),
   },
   // The details panel's selected line (a line selected before `r` read the
   // related items again is gone until they come: its key does nothing).
   {
     id: "line-board", group: "details", name: "Zeile auf dem Board", key: "enter", menu: 10,
-    when: (c) => c.line !== null && Boolean(c.lines[c.line]), takes: (c) => c.line !== null,
+    when: onLine, takes: (c) => c.line !== null,
     run: (b, c, cx) => c.lines[c.line] && b.enterLine(c.view, c.lines[c.line], cx),
     hint: (c) => (c.panel ? "Zeile auf dem Board" : null),
   },
   {
     id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 11,
-    when: (c) => c.line !== null && Boolean(c.lines[c.line]), takes: (c) => c.line !== null,
+    when: onLine, takes: (c) => c.line !== null,
     run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
     hint: (c) => (c.panel ? "Zeile öffnen" : null),
   },
@@ -260,6 +289,8 @@ export const ACTIONS = [
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,
     when: (c) => Boolean(hideableColumn(c)),
     run: (b, c, cx) => b.toggleColumn(c.view, hideableColumn(c), cx),
+    aim: (c) => [hideableColumn(c)?.id ?? null],
+    gone: (c) => `Spalte „${hideableColumn(c).name}“ ist nicht mehr ausgewählt`,
   },
   {
     id: "columns", group: "view", name: "Spalten…", key: null, menu: 22,

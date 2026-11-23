@@ -37,6 +37,20 @@ export const viewSwitchHint = (context) => context.views.map(teamViewName).join(
 // The sources of a config that have a context, in the toggle's order.
 export const sourcesOf = (config) => SOURCES.filter((s) => contextsOf(config, s.id).length);
 
+// The index `by` places on from `at` in a list `length` long, round past
+// its end to its start and back: the next or previous tab, source or view.
+export const stepIndex = (length, at, by) => (at + by + length) % length;
+
+// The index in `list` of `shown` (by its id), -1 for none: the shown tab
+// among the contexts, the shown source among the sources.
+export const shownIndex = (list, shown) => list.findIndex((x) => x.id === shown?.id);
+
+// The source after `shown` among `sources`, in the toggle's order.
+export const sourceAfter = (sources, shown) => sources[stepIndex(sources.length, shownIndex(sources, shown), 1)];
+
+// The view a team context shows after `shown`, one of its views.
+export const teamViewAfter = (context, shown) => context.views[stepIndex(context.views.length, context.views.indexOf(shown), 1)];
+
 // The entry of `list` whose id is `id`, else the first; null in an empty
 // list. A remembered choice that views.json no longer has falls back so.
 export const pick = (list, id) => list.find((x) => x.id === id) ?? list[0] ?? null;

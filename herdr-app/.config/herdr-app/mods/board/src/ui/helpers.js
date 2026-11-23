@@ -119,7 +119,7 @@ export function backdrop(t, id, panel) {
 // `<id>-thumb` at the rows' right shows where the window is, a line under
 // them says how many rows follow ("↓ 3 weitere"), and the mouse wheel over
 // them calls `wheel(by, cx)` (by: the script's pixels, down for more than
-// 0; menuWheel). The row `at` is marked; a click on a row picks it
+// 0; menuWindow). The row `at` is marked; a click on a row picks it
 // (`pick(i, cx)`); menuKey takes its keys.
 export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
   const below = count - from - rows.length;
@@ -174,28 +174,61 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 // zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
-// How far the wheel moves a menu's window by one row: about a row's height
-// in the script's pixels.
+// How many rows a menu with a filter shows at once (menuWindow).
+export const MENU_ROWS = 10;
+// How far the wheel moves such a menu's window by one row: about a row's
+// height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
-// A menu's window of `size` rows over `count`, its first row m.top: moved so
-// that the marked row m.at shows, after a key moved the mark.
-export function followMark(m, count, size) {
-  if (m.at >= 0 && m.at < m.top) m.top = m.at;
-  if (m.at >= m.top + size) m.top = m.at - size + 1;
-  m.top = Math.max(0, Math.min(m.top, count - size));
+// The window of a menu with a filter (the assignee picker, the command
+// menu) over its `count` rows: MENU_ROWS at once from m.top, the marked
+// row m.at (-1 for none). Its window follows the mark where a key moves it
+// (followMark); the wheel moves it alone (menuWheel). menuWindow keeps both
+// within the rows, as the filter leaves them, and gives what menu() takes
+// for them.
+export function menuWindow(m, count) {
+  m.at = Math.max(-1, Math.min(m.at, count - 1));
+  m.top = Math.max(0, Math.min(m.top, count - MENU_ROWS));
+  const wheel = (by, cx) => {
+    menuWheel(m, by, count);
+    cx.notify();
+  };
+  return { from: m.top, count, at: m.at, wheel };
 }
 
-// The wheel over a menu's window (menu's `wheel`): `by` pixels down (up for
+// The window moved so that the marked row shows, after a key moved the
+// mark.
+export function followMark(m, count) {
+  if (m.at >= 0 && m.at < m.top) m.top = m.at;
+  if (m.at >= m.top + MENU_ROWS) m.top = m.at - MENU_ROWS + 1;
+  m.top = Math.max(0, Math.min(m.top, count - MENU_ROWS));
+}
+
+// The wheel over the window (menu's `wheel`): `by` pixels down (up for
 // less than 0) move it a row per MENU_ROW_PX, what is left kept for the
-// next move (m.wheel), within the list (at its end nothing is kept); the
+// next move (m.wheel), within the rows (at their end nothing is kept); the
 // mark stays where it is.
-export function menuWheel(m, by, count, size) {
+export function menuWheel(m, by, count) {
   m.wheel = (m.wheel ?? 0) + by;
   const step = Math.trunc(m.wheel / MENU_ROW_PX);
-  const top = Math.max(0, Math.min(m.top + step, count - size));
+  const top = Math.max(0, Math.min(m.top + step, count - MENU_ROWS));
   m.wheel = top === m.top + step ? m.wheel - step * MENU_ROW_PX : 0;
   m.top = top;
+}
+
+// A key in a menu with a filter (every key but Esc, which the Board
+// keeps): up/down, ctrl-j/k and ctrl-n/p mark a row of `count`, the
+// window following (followMark), and are taken; the rest is the filter's
+// (Enter: its submit).
+export function filterMenuKey(e, cx, m, count) {
+  const k = e.key;
+  const ctrl = e.modifiers?.control;
+  const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
+  if (!by) return;
+  cx.stop_propagation();
+  m.at = Math.max(0, Math.min(m.at + by, count - 1));
+  followMark(m, count);
+  cx.notify();
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;

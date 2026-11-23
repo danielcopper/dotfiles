@@ -67,10 +67,11 @@
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection, the
-// command menu's filter), commands.js (the action table: what each key,
-// hint and menu entry runs), related.js (the items related to an item, read when its details open:
-// what is kept, their lines), description.js (a description as drawn,
-// without anything it could load), scroll.js (how the details scroll),
+// command menu's filter), commands.js (the action table, which the keys of
+// its actions, the hint line and the command menu read), related.js (the
+// items related to an item, read when its details open: what is kept,
+// their lines), description.js (a description as drawn, without anything
+// it could load), scroll.js (how the details scroll),
 // sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
 // backlog.js, related.js, index.js), tools.js (running gh and az),
 // actions/ (starting a session, writing a change at once, moving a card,
@@ -93,7 +94,7 @@ import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/bo
 import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
-import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch } from "./contexts.js";
+import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, shownIndex, stepIndex, teamViewAfter } from "./contexts.js";
 import { toolPaths } from "./tools.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
@@ -104,7 +105,7 @@ import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
 import { descriptionFolds, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
-import { actionFor, hintsOf, keyName } from "./commands.js";
+import { actionFor, actionName, aimOf, hintsOf, keyName, keyShown } from "./commands.js";
 import { LINE_PX, halfWindow, scrollBy, scrollToEnd } from "./scroll.js";
 import { shownDescription, webUrl } from "./description.js";
 export * from "./shared.js";
@@ -667,8 +668,8 @@ export default class Board extends View {
   }
 
   // z (commands.js, fold-description), or a click on the description's
-  // switch: the shown details' description unfolded, or folded again, where it is taller than its fold
-  // (ui/related.js); true when it is.
+  // switch: the shown details' description unfolded, or folded again,
+  // where it is taller than its fold (ui/related.js); true when it is.
   toggleFold(cx) {
     const item = this.shownDetailsItem();
     const ui = this.relatedUi;
@@ -769,8 +770,7 @@ export default class Board extends View {
   // the last the first and back.
   stepTab(by, cx) {
     const tabs = this.contexts();
-    const at = tabs.findIndex((c) => c.id === this.context()?.id);
-    if (tabs.length) this.switchTab((at + by + tabs.length) % tabs.length, cx);
+    if (tabs.length) this.switchTab(stepIndex(tabs.length, shownIndex(tabs, this.context()), by), cx);
   }
 
   // Shows another source with the tab it showed last.
@@ -805,8 +805,7 @@ export default class Board extends View {
   nextTeamView(cx) {
     const context = this.context();
     if (context?.kind !== "team") return;
-    const views = context.views;
-    this.setTeamView(views[(views.indexOf(this.teamViewOf(context)) + 1) % views.length], cx);
+    this.setTeamView(teamViewAfter(context, this.teamViewOf(context)), cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
@@ -980,10 +979,8 @@ export default class Board extends View {
 
   // ---- keys ----
 
-  // What the board says of the moment, for its actions (commands.js): the
-  // shown view, its state and shape, the selected item, the item whose
-  // details show and whether those read related items, the details panel's
-  // keyboard and its selected line, and the related items' lines.
+  // The moment an action runs in, `c` as the action table takes it
+  // (commands.js says its fields).
   actionContext() {
     const view = this.view();
     const st = view ? this.state(view.id) : null;
@@ -995,15 +992,35 @@ export default class Board extends View {
     };
   }
 
-  // An action the menu picked (ui/modals/commands.js): run as its key runs
-  // it (key), the selection kept first but for the top bar's, where it can
-  // still run.
-  runAction(action, cx) {
+  // The moment an action runs in as its key runs it, the one step the keys
+  // (key) and the menu (runAction) share: the board keeps its selection
+  // first (keepSelection), but for an action of the top bar (`bar`).
+  keptContext(bar) {
     const view = this.view();
-    if (!action.bar && view && this.state(view.id).data) this.keepSelection(view);
-    const c = this.actionContext();
-    if (action.when(c)) action.run(this, c, cx);
+    if (!bar && view && this.state(view.id).data) this.keepSelection(view);
+    return this.actionContext();
+  }
+
+  // An entry the menu picked (ui/modals/commands.js, menuActions): its
+  // action, run as its key runs it (keptContext) where it can still run,
+  // and only on what it aimed at when the menu opened; where that is gone
+  // (a refresh dropped or moved the item, another view shows), the menu
+  // says so and runs nothing.
+  runAction(entry, cx) {
+    const c = this.keptContext(entry.action.bar);
+    if (aimOf(entry.action, c) !== entry.aim) this.say(entry.gone, "info", cx);
+    else if (entry.action.when(c)) entry.action.run(this, c, cx);
     cx.notify();
+  }
+
+  // The key of the action `id` where it runs it now, and its name now
+  // (commands.js), for a text that names it.
+  keyShown(id) {
+    return keyShown(id, this.actionContext());
+  }
+
+  actionName(id) {
+    return actionName(id, this.actionContext());
   }
 
   key(e, cx) {
@@ -1042,14 +1059,16 @@ export default class Board extends View {
     if (end) return this.toEdge(view, end, cx), done();
     const panel = view && bare ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k)) return done();
-    // The top bar's actions run first; the others after the selection is
-    // kept, Esc and the arrows, each from the action table (commands.js).
+    // A key of an action of the top bar runs it at once; then the board
+    // keeps its selection (keptContext), and Esc, the arrows and the keys
+    // of the other actions follow (commands.js, actionFor).
     const name = keyName(k, ch, mod);
-    const first = name ? actionFor(name, this.actionContext()) : null;
-    if (first?.bar) return first.run(this, this.actionContext(), cx), done();
+    const atOnce = name ? this.keptContext(true) : null;
+    const first = name ? actionFor(name, atOnce) : null;
+    if (first?.bar) return first.run(this, atOnce, cx), done();
     if (mod.control || mod.alt || mod.platform) return;
+    const c = this.keptContext(false);
     const st = view ? this.state(view.id) : null;
-    if (st?.data) this.keepSelection(view);
     if (k === "escape") {
       if (st?.detail) st.detail = false;
       else if (this.notice) this.notice = null;
@@ -1068,7 +1087,6 @@ export default class Board extends View {
     }
     // With nothing selected (loading, failed, empty, a placeholder) Enter
     // and o stay herdr's (their actions do not take them).
-    const c = this.actionContext();
     const action = name ? actionFor(name, c) : null;
     if (action) return action.run(this, c, cx), done();
   }
@@ -1443,11 +1461,8 @@ export default class Board extends View {
       );
   }
 
-  // The keys of what shows now, as the action table says them (hintsOf):
-  // the top bar's, the moves and those of the shown view's shape that it
-  // keeps a key for, the details panel's, and those that always work; Esc
-  // gives the keyboard back while the panel has it. What has no key of its
-  // own is in the command menu (`:`).
+  // The hint line: the keys of what shows now, as the action table says
+  // them (hintsOf).
   hints(t) {
     const keys = hintsOf(this.actionContext());
     // On a narrow screen the line wraps rather than cut keys off.
