@@ -4954,6 +4954,7 @@ test("the sprint picker's call and rows: all the team's iterations in Azure's or
   assert.equal(board.startRow(none, Date.parse("2026-11-27T12:00:00Z")), 3, "a sprint on its last day has not ended: Sprint 13 starts next");
   assert.equal(board.startRow(none.slice(0, 3), Date.parse("2026-11-27T12:00:00Z")), 1, "the one on its last day is no last ended");
   assert.equal(board.startRow(none.slice(4), now), 0, "else the first");
+  assert.equal(board.startRow(none, Date.parse("2026-11-30T00:00:00Z")), 2, "a sprint from its first day on is no next to start");
   assert.deepEqual([board.dayEnd(Date.parse("2026-11-23T10:00:00Z")), board.dayEnd(Date.parse("2026-11-23T00:00:00Z"))], [Date.parse("2026-11-24T00:00:00Z"), Date.parse("2026-11-24T00:00:00Z")]);
   const data = sprintData();
   assert.deepEqual([data.meta.current, data.meta.currentId, data.meta.gone], [true, ITERATION_ID, null], "the current sprint by default, none gone");
@@ -4961,6 +4962,7 @@ test("the sprint picker's call and rows: all the team's iterations in Azure's or
   assert.deepEqual([empty.meta.iterationId, empty.meta.iteration, empty.meta.finish, empty.meta.currentId, empty.rows, empty.total], [null, null, null, null, [], 0], "no sprint running");
   assert.deepEqual(board.parseIteration("[]"), null, "no sprint running is no error");
   assert.throws(() => board.parseIteration('[{"name": "x"}]'), /^Error: Azure nannte den laufenden Sprint ohne Id oder Pfad$/);
+  assert.throws(() => board.parseIteration('[{"id": "x"}]'), /ohne Id oder Pfad/);
 });
 
 test("UI: „Sprint wählen…“ in the command menu opens the sprint picker: the team's iterations, read once while the board runs, the current one „aktuell“ and marked; the filter and ctrl-j/k, ctrl-n/p and the arrows move the mark; no key of its own", async () => {
@@ -5046,6 +5048,9 @@ test("UI: the sprint picker opens with the current sprint marked and in view in 
   wheel(-2 * board.MENU_ROW_PX);
   assert.deepEqual([b.modal.top, b.modal.at], [5, 12], "down two rows, the mark staying");
   assert.equal(byId(b.render(), "sprints-below"), null, "nothing more below");
+  b.modal.input.type("sprint");
+  assert.deepEqual([b.modal.at, b.modal.top], [0, 0], "a new filter starts at its first row, at the top");
+  b.modal.input.type("");
   wheel(5 * board.MENU_ROW_PX);
   assert.equal(b.modal.top, 0);
   await click(b, cx, "sprint-1");
