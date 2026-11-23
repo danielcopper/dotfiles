@@ -55,7 +55,8 @@ WRAPPER_PAIRS = {
 }
 # To find the command a wrapper runs: the wrapper's options that take the next word as value,
 # and how many words it takes before that command (timeout's duration, flock's lock file, the
-# container or pod; -1: mise's tools, up to `--`).
+# container or pod; -1: mise's tools, up to `--`). Any other option leaves the command word
+# unknown (see wrapped).
 WRAPPED: dict[str, tuple[set[str], int]] = {
     "env": ({"-u", "--unset", "-C", "--chdir"}, 0),
     "sudo": (
@@ -457,10 +458,27 @@ def without_redirects(words: list[str]) -> list[str]:
     return kept
 
 
+def option_span(word: str, values: set[str]) -> int | None:
+    """How many words the wrapper option *word* spans: 2 when it takes the next word as value
+    (an option in *values*, or a short-option cluster whose last letter is one), 1 when its
+    value is attached (`--signal=KILL`, `-n1`); None when the wrapper is not known to take it."""
+    if word in values:
+        return 2
+    if word.partition("=")[0] in values:
+        return 1
+    if not word.startswith("--"):
+        if word[:2] in values:
+            return 1
+        if f"-{word[-1]}" in values:
+            return 2
+    return None
+
+
 def wrapped(words: list[str], k: int) -> int:
     """Index of the command word the wrapper at index *k* of *words* runs, len(words) when there
-    is none: past the wrapper's options and the values WRAPPED names, env's assignments, and the
-    words it takes before the command."""
+    is none: past the wrapper's options and the values WRAPPED names, the assignments of env and
+    sudo, and the words it takes before the command. At an option WRAPPED does not know for the
+    wrapper the command word cannot be told; the first runner-named word after it counts then."""
     span = wrapper_at(words, k)
     name = " ".join([os.path.basename(words[k]), *words[k + 1 : k + span]])
     values, left = WRAPPED.get(name, (set[str](), 0))
@@ -470,8 +488,16 @@ def wrapped(words: list[str], k: int) -> int:
         if options and word == "--":
             options, left = False, max(left, 0)
         elif options and word.startswith("-") and len(word) > 1:
-            i += 1 if word in values else 0
-        elif not (name == "env" and ASSIGNMENT.fullmatch(word)):
+            taken = option_span(word, values)
+            if taken is None:
+                runners = (
+                    r
+                    for r in range(k + span, len(words))
+                    if RUNNER.fullmatch(os.path.basename(words[r]))
+                )
+                return next(runners, len(words))
+            i += taken - 1
+        elif not (name in ("env", "sudo") and ASSIGNMENT.fullmatch(word)):
             if not left:
                 return i
             left -= 1

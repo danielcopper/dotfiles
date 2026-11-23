@@ -60,10 +60,12 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     known to take a value. It counts as run too when it reaches through stdin a shell or interpreter that reads its
     script from there: fed with `<` or `0<` (`bash < m.sh`), or by `cat` or `<` in an earlier stage of the
     pipeline (`cat m.sh | bash`). That runner is the command word or the command a wrapper runs — past the
-    wrapper's options, the values of those known to take one, `env`'s assignments, the duration of `timeout`, the
-    lock file of `flock`, the container or pod of `docker exec` or `kubectl exec`, and the tools of `mise` up to
-    `--` — and it takes its script from stdin when it has no script argument, when it is given `-`, as a shell
-    given `-s`, or as ssh with nothing past the host. One with a script of its own
+    wrapper's options known to the hook and their values (also after a short-option cluster that ends in one, as
+    in `sudo -iu root`), the assignments of `env` and `sudo`, the duration of `timeout`, the lock file of `flock`,
+    the container or pod of `docker exec` or `kubectl exec`, and the tools of `mise` up to `--`. At any other
+    option of the wrapper its command word cannot be told, and the first shell or interpreter word after the
+    wrapper counts instead. The runner takes its script from stdin when it has no script argument, when it is
+    given `-`, as a shell given `-s`, or as ssh with nothing past the host. One with a script of its own
     (`python3 check.py < cases.txt`, `bash -c '…' < f`, `ssh host cmd < f`) only reads the file as data, and so
     does a command that is no runner (`cat m.sh | timeout 5 grep bash`).
     The command word is found past `VAR=` assignments and the reserved words `!`, `{`, `if`, `then`, `elif`,

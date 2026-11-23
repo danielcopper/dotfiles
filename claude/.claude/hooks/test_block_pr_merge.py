@@ -95,6 +95,13 @@ STDIN_FORMS = [
     "cat m.sh | mise x node@20 -- node",
     "cat m.sh | docker exec -i c bash",
     "cat m.sh | kubectl exec -i p -- bash",
+    "cat m.sh | sudo -iu root bash",
+    "cat m.sh | sudo -Hu root bash",
+    "cat m.sh | sudo -iu root bash -s",
+    "cat m.sh | sudo FOO=1 bash",
+    # an option the hook does not know for the wrapper: the first runner after it counts
+    "cat m.sh | uv run --index-url u python -",
+    "cat m.sh | kubectl exec -i --kubeconfig k p -- bash",
 ]
 STDIN_RUNS = [written_then("gh pr merge 5", form) for form in STDIN_FORMS]
 
@@ -459,6 +466,8 @@ PASSES = [
     written_then("gh pr merge 5", "cat m.sh | timeout 5 grep bash"),
     written_then("gh pr merge 5", "cat m.sh | nice -n 5 grep python"),
     written_then("gh pr merge 5", "cat notes.md | xargs grep -l python", "notes.md"),
+    written_then("gh pr merge 5", "cat notes.md | xargs -n1 grep -l python", "notes.md"),
+    written_then("gh pr merge 5", "cat notes.md | xargs -rn 1 grep -l python", "notes.md"),
     # gh pr create and edit inside a chain
     "git push -u origin HEAD && gh pr create --title 'fix: x' --body-file body.md",
     "gh pr edit 5 --title 'fix: y' && gh pr view 5",
