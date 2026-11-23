@@ -19,23 +19,93 @@
 // by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
 // description is, its block measures (on_size_change), and it folds only
 // once that is known to be more.
+//
+// The block scrolls by an offset the board keeps (scroll.js says why):
+// its window measures its height, the content its own and each row its
+// own (on_size_change), the content stands shifted up by the offset, the
+// mouse wheel moves it, and a thin thumb at the right shows where it is
+// (no scrollbar to drag). A resize or a refresh that changes a height
+// keeps the offset within the content; another item's details start at
+// the top.
 
 import { div } from "gpui-kit";
-import { h_flex, v_flex, ScrollHandle, TextView } from "gpui-base";
+import { h_flex, v_flex, TextView } from "gpui-base";
+import { settings } from "herdr";
 import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, shownDescription, subIssuesHead } from "../related.js";
-import { chip, sectionFrame, sectionTitle, selectedLook } from "./helpers.js";
+import { clampOffset, offsetBy, revealOffset, rowSpan, spanShows, thumbOf } from "../scroll.js";
+import { chip, sectionTitle, selectedLook } from "./helpers.js";
 
-export const FOLDED_H = 12 * 18;
+export const LINE_PX = 18;
+export const FOLDED_H = 12 * LINE_PX;
+// The content's padding above its first row and the gap between rows.
+const PAD_Y = 12;
+const GAP = 6;
 
 // What the related items keep per Board, made when it starts (why then:
-// ui/shapes/index.js): the lines' scroll handle, the measured height of
-// each description by its item's key, and the key of the item whose
-// description is unfolded (null: none; another item's shows folded).
-export const relatedState = () => ({ scroll: ScrollHandle.new(), heights: new Map(), unfolded: null });
+// ui/shapes/index.js): the measured height of each description by its
+// item's key, the key of the item whose description is unfolded (null:
+// none; another item's shows folded), and the block's scroll: its offset,
+// the item it is of (`at`), the heights of its window and its content, and
+// of each row by its id.
+export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
 export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
+
+// A measured length in the script's pixels: herdr reports a size and a
+// wheel's move in the window's pixels, and scales a script's lengths by
+// its zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
+const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
+
+// The block's offset for `item`: 0 for another item than the last, kept
+// within the content.
+function offsetFor(ui, item) {
+  if (ui.at !== item.key) {
+    ui.at = item.key;
+    ui.offset = 0;
+  }
+  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
+  return ui.offset;
+}
+
+// The block's scroll as scroll.js takes it.
+const scrollOf = (ui) => ({ offset: ui.offset, content: ui.content, viewport: ui.viewport });
+
+// Moves the block by `by` pixels; ctrl-d/ctrl-u by half its window
+// (halfWindow), j/k by LINE_PX, the wheel by its move.
+export const scrollBlock = (ui, by) => (ui.offset = offsetBy(scrollOf(ui), by));
+export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
+// The block's top or bottom (gg/G, Home/End).
+export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+
+// The id each row of relatedRows draws with.
+const rowId = (r, i) => (r.kind === "line" ? `related-line-${r.n}` : `related-row-${i}`);
+
+// Where row `i` of the rows of `item` stands in the content, from the
+// measured heights (LINE_PX for one not measured yet).
+function spanOf(ui, rows, i) {
+  return rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, GAP, PAD_Y);
+}
+
+// Scrolls line `n` of the related items into view.
+export function revealLine(ui, item, entry, n) {
+  const rows = relatedRows(item, entry);
+  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
+  if (i < 0) return;
+  const { top, height } = spanOf(ui, rows, i);
+  ui.offset = revealOffset(scrollOf(ui), top, height);
+}
+
+// Whether line `n` shows whole in the block (true while it is not
+// measured yet).
+export function lineShows(ui, item, entry, n) {
+  const rows = relatedRows(item, entry);
+  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
+  if (i < 0) return false;
+  const { top, height } = spanOf(ui, rows, i);
+  return spanShows(scrollOf(ui), top, height);
+}
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
 // (the Board's kept read: { data, error }, both null while it loads; null
@@ -74,9 +144,6 @@ export function relatedRows(item, entry) {
   return rows;
 }
 
-// The child of the scrolled block that holds line `n`.
-export const lineChild = (item, entry, n) => relatedRows(item, entry).findIndex((r) => r.kind === "line" && r.n === n);
-
 // The description row `r` of `item`: the TextView in a block that measures
 // it, folded to FOLDED_H where it is taller and not unfolded, and below it
 // the fold's switch.
@@ -92,7 +159,7 @@ function description(b, t, item, r) {
     .id(`description-size-${item.key}`)
     .flex_none()
     .on_size_change((size, cx) => {
-      ui.heights.set(item.key, size.height);
+      ui.heights.set(item.key, unzoomed(size.height));
       cx.notify();
     })
     .child(view);
@@ -116,15 +183,21 @@ function description(b, t, item, r) {
 // The block of the related items of `item` (relatedRows), the line `at`
 // marked (null: none).
 export function relatedSections(b, t, mono, view, item, entry, at) {
+  const ui = b.relatedUi;
   const tones = { muted: t.muted, error: t.ansi1, warning: t.ansi3 };
-  const row = (r) => {
+  // Each row measures its height, under its id.
+  const measure = (el, id) => el.id(id).on_size_change((size, cx) => {
+    ui.sizes.set(id, unzoomed(size.height));
+    cx.notify();
+  });
+  const row = (r, i) => measure(rowOf(r), rowId(r, i));
+  const rowOf = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const marked = n === at;
     return h_flex()
-      .id(`related-line-${n}`)
       .flex_none()
       .gap(8)
       .px(8)
@@ -144,10 +217,41 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
       .child(chip(t, line.state, t.background, t[line.color] ?? t.muted));
   };
-  return sectionFrame(t)
+  const offset = offsetFor(ui, item);
+  const content = v_flex()
     .id("related-lines")
-    .min_h(0)
-    .overflow_y_scrollbar()
-    .track_scroll(b.relatedUi.scroll)
+    .flex_none()
+    .px(18)
+    .py(PAD_Y)
+    .gap(GAP)
+    .mt(offset ? -offset : 0)
+    .on_size_change((size, cx) => {
+      ui.content = unzoomed(size.height);
+      cx.notify();
+    })
     .children(relatedRows(item, entry).map(row));
+  const windowEl = v_flex()
+    .id("related-window")
+    .min_h(0)
+    .overflow_hidden()
+    .on_size_change((size, cx) => {
+      ui.viewport = unzoomed(size.height);
+      cx.notify();
+    })
+    .on_scroll_wheel((e, cx) => {
+      scrollBlock(ui, -unzoomed(e.delta?.y ?? 0));
+      cx.notify();
+    })
+    .child(content);
+  const thumb = thumbOf(scrollOf(ui));
+  return v_flex()
+    .id("related-scroll")
+    .relative()
+    .min_h(0)
+    .border_b(1)
+    .border_color(t.border)
+    .child(windowEl)
+    .when(Boolean(thumb), (el) => el.child(
+      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
+    ));
 }

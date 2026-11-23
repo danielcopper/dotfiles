@@ -65,7 +65,7 @@
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection),
 // related.js (the items related to an item, read when its details open:
-// what is kept, their lines), sources/
+// what is kept, their lines), scroll.js (how the details scroll), sources/
 // (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
 // related.js, index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
@@ -4856,6 +4856,54 @@ const SPRINT_STATES = {
 
 export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
 
+// ==== src/scroll.js ====
+
+// How the details block scrolls: the one home of its offset. herdr gives a
+// script no scroll offset of a scroll area (a ScrollHandle only reveals a
+// child, with the smallest scroll needed), so the board scrolls the block
+// itself: it keeps the offset, in `s` = { offset, content, viewport } (the
+// content's and the visible window's heights, as measured), shifts the
+// content up by it, and draws the position as a thumb. All lengths are the
+// script's pixels (measured ones divided by herdr's zoom: ui/related.js).
+
+// The offset `offset` kept within the content: from 0 to where its end
+// meets the window's; 0 where the content fits.
+export const clampOffset = (offset, content, viewport) => Math.max(0, Math.min(offset, content - viewport));
+
+// The offset after a move by `by` pixels (down for more than 0).
+export const offsetBy = (s, by) => clampOffset(s.offset + by, s.content, s.viewport);
+
+// The offset at which the span [top, top + height] of the content shows,
+// moved as little as needed: one above the window to its top, one below to
+// its bottom (one taller than the window to its top).
+export function revealOffset(s, top, height) {
+  let at = s.offset;
+  if (top + height > at + s.viewport) at = top + height - s.viewport;
+  if (top < at) at = top;
+  return clampOffset(at, s.content, s.viewport);
+}
+
+// Whether the span shows whole; true while the window is not measured yet.
+export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
+
+// The thumb that shows the position: { top, height } within the window, at
+// least `min` high; null where the content fits.
+export function thumbOf(s, min = 16) {
+  if (!(s.content > s.viewport) || s.viewport <= 0) return null;
+  const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
+  const top = Math.round(((s.viewport - height) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
+  return { top, height };
+}
+
+// Where row `i` of a column of rows stands: the heights of the rows before
+// it (`heights`, one per row), `gap` between rows, after `pad` above the
+// first → { top, height }.
+export function rowSpan(heights, i, gap, pad) {
+  let top = pad;
+  for (let j = 0; j < i; j++) top += heights[j] + gap;
+  return { top, height: heights[i] ?? 0 };
+}
+
 // ==== src/ui/related.js ====
 
 // The detail panel's sections of an item's related items (related.js): its
@@ -4879,17 +4927,85 @@ export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, b
 // by height: FOLDED_H, 12 lines of the details' 18 pixels; how tall the
 // description is, its block measures (on_size_change), and it folds only
 // once that is known to be more.
+//
+// The block scrolls by an offset the board keeps (scroll.js says why):
+// its window measures its height, the content its own and each row its
+// own (on_size_change), the content stands shifted up by the offset, the
+// mouse wheel moves it, and a thin thumb at the right shows where it is
+// (no scrollbar to drag). A resize or a refresh that changes a height
+// keeps the offset within the content; another item's details start at
+// the top.
 
-export const FOLDED_H = 12 * 18;
+export const LINE_PX = 18;
+export const FOLDED_H = 12 * LINE_PX;
+// The content's padding above its first row and the gap between rows.
+const PAD_Y = 12;
+const GAP = 6;
 
 // What the related items keep per Board, made when it starts (why then:
-// ui/shapes/index.js): the lines' scroll handle, the measured height of
-// each description by its item's key, and the key of the item whose
-// description is unfolded (null: none; another item's shows folded).
-export const relatedState = () => ({ scroll: ScrollHandle.new(), heights: new Map(), unfolded: null });
+// ui/shapes/index.js): the measured height of each description by its
+// item's key, the key of the item whose description is unfolded (null:
+// none; another item's shows folded), and the block's scroll: its offset,
+// the item it is of (`at`), the heights of its window and its content, and
+// of each row by its id.
+export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
 export const descriptionFolds = (ui, item) => (ui.heights.get(item.key) ?? 0) > FOLDED_H;
+
+// A measured length in the script's pixels: herdr reports a size and a
+// wheel's move in the window's pixels, and scales a script's lengths by
+// its zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
+const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
+
+// The block's offset for `item`: 0 for another item than the last, kept
+// within the content.
+function offsetFor(ui, item) {
+  if (ui.at !== item.key) {
+    ui.at = item.key;
+    ui.offset = 0;
+  }
+  ui.offset = clampOffset(ui.offset, ui.content, ui.viewport);
+  return ui.offset;
+}
+
+// The block's scroll as scroll.js takes it.
+const scrollOf = (ui) => ({ offset: ui.offset, content: ui.content, viewport: ui.viewport });
+
+// Moves the block by `by` pixels; ctrl-d/ctrl-u by half its window
+// (halfWindow), j/k by LINE_PX, the wheel by its move.
+export const scrollBlock = (ui, by) => (ui.offset = offsetBy(scrollOf(ui), by));
+export const halfWindow = (ui) => Math.max(LINE_PX, Math.floor(ui.viewport / 2));
+// The block's top or bottom (gg/G, Home/End).
+export const scrollToEnd = (ui, end) => (ui.offset = end === "top" ? 0 : clampOffset(Infinity, ui.content, ui.viewport));
+
+// The id each row of relatedRows draws with.
+const rowId = (r, i) => (r.kind === "line" ? `related-line-${r.n}` : `related-row-${i}`);
+
+// Where row `i` of the rows of `item` stands in the content, from the
+// measured heights (LINE_PX for one not measured yet).
+function spanOf(ui, rows, i) {
+  return rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, GAP, PAD_Y);
+}
+
+// Scrolls line `n` of the related items into view.
+export function revealLine(ui, item, entry, n) {
+  const rows = relatedRows(item, entry);
+  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
+  if (i < 0) return;
+  const { top, height } = spanOf(ui, rows, i);
+  ui.offset = revealOffset(scrollOf(ui), top, height);
+}
+
+// Whether line `n` shows whole in the block (true while it is not
+// measured yet).
+export function lineShows(ui, item, entry, n) {
+  const rows = relatedRows(item, entry);
+  const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
+  if (i < 0) return false;
+  const { top, height } = spanOf(ui, rows, i);
+  return spanShows(scrollOf(ui), top, height);
+}
 
 // The rows of the related items of `item` as drawn, in order, from `entry`
 // (the Board's kept read: { data, error }, both null while it loads; null
@@ -4928,9 +5044,6 @@ export function relatedRows(item, entry) {
   return rows;
 }
 
-// The child of the scrolled block that holds line `n`.
-export const lineChild = (item, entry, n) => relatedRows(item, entry).findIndex((r) => r.kind === "line" && r.n === n);
-
 // The description row `r` of `item`: the TextView in a block that measures
 // it, folded to FOLDED_H where it is taller and not unfolded, and below it
 // the fold's switch.
@@ -4946,7 +5059,7 @@ function description(b, t, item, r) {
     .id(`description-size-${item.key}`)
     .flex_none()
     .on_size_change((size, cx) => {
-      ui.heights.set(item.key, size.height);
+      ui.heights.set(item.key, unzoomed(size.height));
       cx.notify();
     })
     .child(view);
@@ -4970,15 +5083,21 @@ function description(b, t, item, r) {
 // The block of the related items of `item` (relatedRows), the line `at`
 // marked (null: none).
 export function relatedSections(b, t, mono, view, item, entry, at) {
+  const ui = b.relatedUi;
   const tones = { muted: t.muted, error: t.ansi1, warning: t.ansi3 };
-  const row = (r) => {
+  // Each row measures its height, under its id.
+  const measure = (el, id) => el.id(id).on_size_change((size, cx) => {
+    ui.sizes.set(id, unzoomed(size.height));
+    cx.notify();
+  });
+  const row = (r, i) => measure(rowOf(r), rowId(r, i));
+  const rowOf = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
     if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const marked = n === at;
     return h_flex()
-      .id(`related-line-${n}`)
       .flex_none()
       .gap(8)
       .px(8)
@@ -4998,12 +5117,43 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
       .child(chip(t, line.state, t.background, t[line.color] ?? t.muted));
   };
-  return sectionFrame(t)
+  const offset = offsetFor(ui, item);
+  const content = v_flex()
     .id("related-lines")
-    .min_h(0)
-    .overflow_y_scrollbar()
-    .track_scroll(b.relatedUi.scroll)
+    .flex_none()
+    .px(18)
+    .py(PAD_Y)
+    .gap(GAP)
+    .mt(offset ? -offset : 0)
+    .on_size_change((size, cx) => {
+      ui.content = unzoomed(size.height);
+      cx.notify();
+    })
     .children(relatedRows(item, entry).map(row));
+  const windowEl = v_flex()
+    .id("related-window")
+    .min_h(0)
+    .overflow_hidden()
+    .on_size_change((size, cx) => {
+      ui.viewport = unzoomed(size.height);
+      cx.notify();
+    })
+    .on_scroll_wheel((e, cx) => {
+      scrollBlock(ui, -unzoomed(e.delta?.y ?? 0));
+      cx.notify();
+    })
+    .child(content);
+  const thumb = thumbOf(scrollOf(ui));
+  return v_flex()
+    .id("related-scroll")
+    .relative()
+    .min_h(0)
+    .border_b(1)
+    .border_color(t.border)
+    .child(windowEl)
+    .when(Boolean(thumb), (el) => el.child(
+      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
+    ));
 }
 
 // ==== src/main.js ====
@@ -5439,17 +5589,22 @@ export default class Board extends View {
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
-  // its lines, Enter and o act on the selected one (with none, they do
-  // what they do on the board), Esc gives the keyboard back. True when the
-  // panel took the key.
+  // its lines, each scrolled into view; with no line selected they scroll
+  // the block a line (LINE_PX), j until the first line shows whole, which
+  // it then selects, k from the first line to none and then up. Enter and
+  // o act on the selected line (with none, they do what they do on the
+  // board), Esc gives the keyboard back. True when the panel took the key.
   panelKey(view, panel, k, cx) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
     const lines = this.linesOf(view);
     if (dir) {
-      panel.line = stepLine(panel.line, dir, lines.length);
-      if (panel.line !== null) {
-        const item = this.selected(view);
-        this.relatedUi.scroll.scroll_to_item(lineChild(item, this.relatedOf(view, item), panel.line));
+      const item = this.selected(view);
+      const entry = this.relatedOf(view, item);
+      const ui = this.relatedUi;
+      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBlock(ui, dir * LINE_PX);
+      else {
+        panel.line = stepLine(panel.line, dir, lines.length);
+        if (panel.line !== null) revealLine(ui, item, entry, panel.line);
       }
       return true;
     }
@@ -5492,11 +5647,15 @@ export default class Board extends View {
   // its top, with no line selected, or its bottom, on its last line where it
   // has lines.
   panelEdge(view, panel, end) {
-    const item = this.selected(view);
-    const rows = relatedRows(item, this.relatedOf(view, item));
     const count = this.linesOf(view).length;
     panel.line = end === "bottom" && count ? count - 1 : null;
-    this.relatedUi.scroll.scroll_to_item(end === "top" ? 0 : rows.length - 1);
+    scrollToEnd(this.relatedUi, end);
+  }
+
+  // ctrl-d and ctrl-u while the details panel has the keyboard: its block
+  // half its window down or up.
+  panelPage(dir) {
+    scrollBlock(this.relatedUi, dir * halfWindow(this.relatedUi));
   }
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
@@ -5852,6 +6011,9 @@ export default class Board extends View {
     };
     // Where Tab comes here rather than as the board's action: its one home.
     if (k === "tab") return this.tabKey(Boolean(mod.shift), cx);
+    if (view && mod.control && !(mod.alt || mod.platform || mod.shift) && (k === "d" || k === "u") && this.panelOf(view)) {
+      return this.panelPage(k === "d" ? 1 : -1), done();
+    }
     const end = view ? edgeKey(k, ch, mod, g) : null;
     if (end === "pending") return (this.pendingG = true), done();
     if (end) return this.toEdge(view, end, cx), done();
@@ -6263,7 +6425,7 @@ export default class Board extends View {
     const ui = this.relatedUi;
     const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
     if (!this.panelOf(view)) return [["Tab", "Zeilen"], ...fold];
-    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
   // The keys of what shows: the top bar's (a team's v), those of the shown

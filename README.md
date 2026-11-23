@@ -472,10 +472,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   While they show, `Tab` moves the keyboard into the details panel and back
   (`Esc` gives it back too; elsewhere, and while the filter is typed, `Tab`
   stays herdr's): there
-  `j/k` walk those lines, `gg` and `Home` go to the panel's top with no line
-  selected, `G` and `End` to its bottom on its last line, `Enter` selects a
-  line's item on the board and shows its details, or opens it in the browser where the board does not show it,
-  `o` opens it, and with no line selected `Enter` and `o` do what they do on
+  `j/k` walk those lines, each scrolled into view; with no line selected they
+  scroll the details a line, `j` until the first line shows whole, which it
+  then selects. `ctrl-d` and `ctrl-u` scroll half the details' height, `gg`
+  and `Home` go to the panel's top with no line selected, `G` and `End` to
+  its bottom on its last line. The board scrolls the details itself (herdr
+  gives a mod no scroll position to set), so they have no scrollbar to drag:
+  the mouse wheel scrolls them, and a thin mark at the right shows where they
+  are. `Enter` selects a line's item on the board and shows its details, or
+  opens it in the browser where the board does not show it, `o` opens it, and with no line selected `Enter` and `o` do what they do on
   the board; a click on a line does what `Enter` on it does. `Enter` opens the
   details, a second `Enter` goes to the item's session or starts one: a new
   space or tab on the chosen machine, in the repo's checkout, whose agent gets

@@ -5511,7 +5511,30 @@ async function action(b, cx, name) {
   await settle();
 }
 const readsOf = (host, number) => host.open("gh").filter((c) => isRelatedCall(c.args) && (number === undefined || c.args.includes(`number=${number}`)));
-const scrolledTo = (b, host) => host.scrolled.filter((s) => s.handle === b.relatedUi.scroll).at(-1)?.row;
+// The details block laid out as herdr would report it: each row `rowH`
+// high (or as `heights` says by its id), the content as tall as they are
+// with its padding and gaps, the window `windowH` high (on_size_change on
+// each, with a cx of its own); its content's height.
+function layOut(b, cx, windowH, { rowH = 18, heights = {} } = {}) {
+  const panel = detailPanel(b);
+  const content = byId(panel, "related-lines");
+  const size = (el, height) => cx.call((own) => el.with.on_size_change[0]({ width: 400, height }, own));
+  let total = 24;
+  content.kids.forEach((k, i) => {
+    const h = heights[k.with.id[0]] ?? rowH;
+    size(k, h);
+    total += h + (i ? 6 : 0);
+  });
+  size(content, total);
+  size(byId(panel, "related-window"), windowH);
+  return total;
+}
+// The block's offset, and the shift its content is drawn with.
+const offsetOf = (b) => {
+  const drawn = byId(detailPanel(b), "related-lines").with.mt[0];
+  assert.equal(drawn, -b.relatedUi.offset || 0, "drawn as kept");
+  return b.relatedUi.offset;
+};
 
 test("an issue's related items are one GraphQL query: its first 50 sub-issues and its first 20 linked pull requests, merged and closed ones too, each with whether there are more", () => {
   const args = board.githubRelatedArgs(issueItem());
@@ -5833,13 +5856,15 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   assert.deepEqual([hint("j/k"), hintOf("Esc")], [true, ["zurück"]]);
   const marked = () => [0, 1, 2, 3, 4].filter((i) => byId(detailPanel(b), `related-line-${i}`).styles.includes("bg"));
   assert.deepEqual(marked(), [], "no line yet");
+  // Nine rows of 18 pixels: the first line's ends at 102, the second's at 126.
+  layOut(b, cx, 120);
   await press(b, cx, "j");
   await press(b, cx, "down");
   assert.deepEqual([b.panel.line, marked(), st().sel.key], [1, [1], "PVTI_rec4"], "the lines move, the board's selection stays");
-  assert.equal(scrolledTo(b, host), 4, "scrolled to the second sub-issue's line, below the description's two rows");
+  assert.equal(offsetOf(b), 6, "scrolled to the second sub-issue's line, below the description's two rows");
   for (let i = 0; i < 6; i++) await press(b, cx, "j");
   assert.equal(b.panel.line, 4, "the last stays");
-  assert.equal(scrolledTo(b, host), 8, "scrolled to the last pull request's line");
+  assert.equal(offsetOf(b), 102, "scrolled to the last pull request's line, at the block's bottom");
   await press(b, cx, "k", { modifiers: { control: true } });
   await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
   assert.equal(b.panel.line, 4, "with Control or Shift a key is not the panel's");
@@ -5866,13 +5891,28 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   assert.equal(takesTab(b), false, "nor does the root take it: herdr's own Tab runs");
 });
 
-test("UI: with no description and no sub-issues the first pull request's line is the block's sixth child", async () => {
+test("UI: with no line selected j scrolls the block a line until the first line shows whole, then selects it; k from none scrolls up", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "enter");
   await answerRelated(host, ok(relatedAnswer({ prs: [prNode(3020)] })));
   await tab(b, cx);
+  // The description's head, „keine Beschreibung“, the sub-issues' head,
+  // „keine“, the pull requests' head, the line: it ends at 150.
+  assert.equal(layOut(b, cx, 100), 162);
   await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [0, 5], "the description's head, „keine Beschreibung“, the sub-issues' head, „keine“, the pull requests' head, the line");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 18], "a line down");
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 54], "until the line shows whole");
+  await press(b, cx, "j");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [0, 54], "then it is selected, nothing moves");
+  await press(b, cx, "j");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [0, 54], "the last line stays");
+  await press(b, cx, "k");
+  await press(b, cx, "k");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 36], "k: to no line, then a line up");
+  for (let i = 0; i < 4; i++) await press(b, cx, "up");
+  assert.equal(offsetOf(b), 0, "not above the top");
 });
 
 test("UI: the details panel has the keyboard only for the item and view it took it in, with the details open", async () => {
@@ -6515,6 +6555,96 @@ test("UI: a selected row of the Backlog and of a PR list, and a marked line of t
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-1")), ["none", t.chrome]);
 });
 
+// ---- The details block's own scroll (scroll.js) ----
+
+test("the details block's offset stays within its content; a span comes into view with the least move; the thumb shows the position; a row's place adds the rows above it", () => {
+  assert.deepEqual([board.clampOffset(-5, 300, 100), board.clampOffset(250, 300, 100), board.clampOffset(80, 300, 100), board.clampOffset(40, 90, 100)], [0, 200, 80, 0]);
+  const s = { offset: 50, content: 300, viewport: 100 };
+  assert.deepEqual([board.offsetBy(s, 30), board.offsetBy(s, -80), board.offsetBy(s, 500)], [80, 0, 200]);
+  assert.deepEqual(
+    [board.revealOffset(s, 60, 20), board.revealOffset(s, 140, 30), board.revealOffset(s, 10, 20), board.revealOffset(s, 120, 150), board.revealOffset(s, 290, 30)],
+    [50, 70, 10, 120, 200],
+    "already shown: stays; below: to the bottom; above: to the top; taller than the window: to its top; within the content",
+  );
+  assert.deepEqual([board.spanShows(s, 50, 100), board.spanShows(s, 49, 10), board.spanShows(s, 140, 11), board.spanShows({ ...s, viewport: 0 }, 900, 10)], [true, false, false, true],
+    "not measured yet: shown");
+  assert.deepEqual([board.thumbOf(s), board.thumbOf({ ...s, offset: 0 }), board.thumbOf({ ...s, offset: 200 }), board.thumbOf({ offset: 0, content: 90, viewport: 100 })],
+    [{ top: 17, height: 33 }, { top: 0, height: 33 }, { top: 67, height: 33 }, null]);
+  assert.deepEqual(board.thumbOf({ offset: 0, content: 10000, viewport: 100 }), { top: 0, height: 16 }, "never thinner than 16");
+  assert.deepEqual([board.rowSpan([18, 40, 18], 0, 6, 12), board.rowSpan([18, 40, 18], 2, 6, 12)], [{ top: 12, height: 18 }, { top: 82, height: 18 }]);
+});
+
+test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its window, clamped at both ends; without the panel's keyboard they do nothing; the hint names them", async () => {
+  const { b, cx } = await openRelated();
+  const content = layOut(b, cx, 100);
+  assert.equal(content, 234);
+  await press(b, cx, "d", { modifiers: { control: true } });
+  assert.equal(offsetOf(b), 0, "the board has the keyboard: nothing");
+  await tab(b, cx);
+  assert.ok(hintKeys(b).includes("ctrl-d/u"));
+  const stopped = cx.stopped;
+  await press(b, cx, "d", { modifiers: { control: true } });
+  assert.deepEqual([offsetOf(b), cx.stopped], [50, stopped + 1]);
+  await press(b, cx, "d", { modifiers: { control: true } });
+  await press(b, cx, "d", { modifiers: { control: true } });
+  assert.equal(offsetOf(b), 134, "not past the bottom");
+  await press(b, cx, "u", { modifiers: { control: true } });
+  assert.equal(offsetOf(b), 84);
+  for (let i = 0; i < 3; i++) await press(b, cx, "u", { modifiers: { control: true } });
+  assert.equal(offsetOf(b), 0, "not above the top");
+  await press(b, cx, "d", { modifiers: { control: true, shift: true } });
+  assert.equal(offsetOf(b), 0, "with Shift too: not the panel's");
+  assert.equal(b.panel.line, null, "the lines stay as they were");
+});
+
+test("UI: the mouse wheel scrolls the block, in the script's pixels at herdr's zoom; a thumb at the right shows where it is, none where all fits", async () => {
+  const { b, cx, host } = await openRelated();
+  host.theme = () => ({ muted: "#muted", border: "#border" });
+  const wheel = (y) => cx.call((own) => byId(detailPanel(b), "related-window").with.on_scroll_wheel[0]({ delta: { x: 0, y } }, own));
+  layOut(b, cx, 300);
+  assert.equal(byId(detailPanel(b), "related-thumb"), null, "all fits: no thumb");
+  wheel(-40);
+  assert.equal(offsetOf(b), 0, "nothing to scroll");
+  layOut(b, cx, 100);
+  wheel(-40);
+  assert.equal(offsetOf(b), 40, "down");
+  wheel(15);
+  assert.equal(offsetOf(b), 25, "up");
+  const thumb = byId(detailPanel(b), "related-thumb");
+  assert.deepEqual([thumb.with.top[0], thumb.with.h[0], thumb.with.w[0], thumb.styles.includes("absolute"), thumb.with.bg[0]], [11, 43, 3, true, "#muted"]);
+  assert.equal(thumb.with.on_mouse_down, undefined, "nothing to drag");
+  host.settings = () => ({ zoom: 2 });
+  layOut(b, cx, 200, { rowH: 36 });
+  assert.deepEqual([b.relatedUi.viewport, b.relatedUi.content], [100, 198], "measured at zoom 2: halved");
+  wheel(-40);
+  assert.equal(offsetOf(b), 45, "a wheel's 40 pixels at zoom 2 are 20");
+});
+
+test("UI: a resize or a refresh that shrinks the block keeps its offset within it; another item's details start at the top", async () => {
+  const { b, cx, host, st } = await openRelated();
+  layOut(b, cx, 100);
+  await tab(b, cx);
+  await press(b, cx, "G", { char: "G" });
+  assert.equal(offsetOf(b), 134);
+  layOut(b, cx, 200);
+  assert.equal(offsetOf(b), 34, "a taller window: the content's end at its bottom");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  await answerRelated(host, ok(relatedAnswer()));
+  assert.equal(layOut(b, cx, 200), 114);
+  assert.equal(offsetOf(b), 0, "less content after the refresh: within it");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  await answerRelated(host, ok(fixture("github-related.json")));
+  layOut(b, cx, 100);
+  await press(b, cx, "G", { char: "G" });
+  assert.equal(offsetOf(b), 134);
+  await press(b, cx, "escape");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec5");
+  assert.equal(offsetOf(b), 0, "another item: the top");
+});
+
 // ---- gg, G, Home and End ----
 
 test("gg, G, Home and End name an end; a first g waits for a second; with Control, Alt or the platform key they are no ends", () => {
@@ -6600,17 +6730,18 @@ test("UI: while the details panel has the keyboard gg and Home go to its top wit
   const { b, cx, st, host } = await openRelated();
   await tab(b, cx);
   assert.ok(hintKeys(b).includes("gg/G"), "the panel's hint");
+  const content = layOut(b, cx, 60);
   await press(b, cx, "G", { char: "G" });
-  const rows = byId(detailPanel(b), "related-lines").kids.length;
-  assert.deepEqual([b.panel.line, scrolledTo(b, host), st().sel.key], [4, rows - 1, "PVTI_rec4"], "the last line, the block's last child; the board's selection stays");
+  assert.deepEqual([b.panel.line, offsetOf(b), st().sel.key], [4, content - 60, "PVTI_rec4"], "the last line, the block's bottom; the board's selection stays");
   await press(b, cx, "g");
   await press(b, cx, "g");
-  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [null, 0]);
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 0]);
   await press(b, cx, "end");
-  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [4, rows - 1]);
+  assert.deepEqual([b.panel.line, offsetOf(b)], [4, content - 60]);
   await press(b, cx, "home");
-  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [null, 0]);
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 0]);
   await press(b, cx, "r");
+  assert.equal(layOut(b, cx, 60), 114);
   await press(b, cx, "end");
-  assert.deepEqual([b.panel.line, scrolledTo(b, host)], [null, 3], "while the related items load: no line, the block's last child");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 54], "while the related items load: no line, the block's bottom");
 });

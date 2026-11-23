@@ -63,7 +63,7 @@
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection),
 // related.js (the items related to an item, read when its details open:
-// what is kept, their lines), sources/
+// what is kept, their lines), scroll.js (how the details scroll), sources/
 // (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
 // related.js, index.js), tools.js (running gh and az), actions/ (starting a session,
 // writing a change at once, moving a card, changing a state, creating a
@@ -93,7 +93,7 @@ import { store, migrateShownView, boardShown, shownOf, button, detailSection, de
 import { layers } from "./ui/layer.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
-import { descriptionFolds, lineChild, relatedRows, relatedSections, relatedState } from "./ui/related.js";
+import { LINE_PX, descriptionFolds, halfWindow, lineShows, relatedSections, relatedState, revealLine, scrollBlock, scrollToEnd } from "./ui/related.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./contexts.js";
@@ -104,6 +104,7 @@ export * from "./kinds/backlog.js";
 export * from "./kinds/states.js";
 export * from "./select.js";
 export * from "./related.js";
+export * from "./scroll.js";
 export * from "./sources/github.js";
 export * from "./sources/azure/common.js";
 export * from "./sources/azure/sprint.js";
@@ -564,17 +565,22 @@ export default class Board extends View {
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
-  // its lines, Enter and o act on the selected one (with none, they do
-  // what they do on the board), Esc gives the keyboard back. True when the
-  // panel took the key.
+  // its lines, each scrolled into view; with no line selected they scroll
+  // the block a line (LINE_PX), j until the first line shows whole, which
+  // it then selects, k from the first line to none and then up. Enter and
+  // o act on the selected line (with none, they do what they do on the
+  // board), Esc gives the keyboard back. True when the panel took the key.
   panelKey(view, panel, k, cx) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
     const lines = this.linesOf(view);
     if (dir) {
-      panel.line = stepLine(panel.line, dir, lines.length);
-      if (panel.line !== null) {
-        const item = this.selected(view);
-        this.relatedUi.scroll.scroll_to_item(lineChild(item, this.relatedOf(view, item), panel.line));
+      const item = this.selected(view);
+      const entry = this.relatedOf(view, item);
+      const ui = this.relatedUi;
+      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBlock(ui, dir * LINE_PX);
+      else {
+        panel.line = stepLine(panel.line, dir, lines.length);
+        if (panel.line !== null) revealLine(ui, item, entry, panel.line);
       }
       return true;
     }
@@ -617,11 +623,15 @@ export default class Board extends View {
   // its top, with no line selected, or its bottom, on its last line where it
   // has lines.
   panelEdge(view, panel, end) {
-    const item = this.selected(view);
-    const rows = relatedRows(item, this.relatedOf(view, item));
     const count = this.linesOf(view).length;
     panel.line = end === "bottom" && count ? count - 1 : null;
-    this.relatedUi.scroll.scroll_to_item(end === "top" ? 0 : rows.length - 1);
+    scrollToEnd(this.relatedUi, end);
+  }
+
+  // ctrl-d and ctrl-u while the details panel has the keyboard: its block
+  // half its window down or up.
+  panelPage(dir) {
+    scrollBlock(this.relatedUi, dir * halfWindow(this.relatedUi));
   }
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
@@ -977,6 +987,9 @@ export default class Board extends View {
     };
     // Where Tab comes here rather than as the board's action: its one home.
     if (k === "tab") return this.tabKey(Boolean(mod.shift), cx);
+    if (view && mod.control && !(mod.alt || mod.platform || mod.shift) && (k === "d" || k === "u") && this.panelOf(view)) {
+      return this.panelPage(k === "d" ? 1 : -1), done();
+    }
     const end = view ? edgeKey(k, ch, mod, g) : null;
     if (end === "pending") return (this.pendingG = true), done();
     if (end) return this.toEdge(view, end, cx), done();
@@ -1388,7 +1401,7 @@ export default class Board extends View {
     const ui = this.relatedUi;
     const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
     if (!this.panelOf(view)) return [["Tab", "Zeilen"], ...fold];
-    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
   // The keys of what shows: the top bar's (a team's v), those of the shown
