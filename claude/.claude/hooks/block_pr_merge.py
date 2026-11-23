@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) hook: refuse the explicit forms of merging or completing a pull request.
 
-Built against a well-meaning agent that merges by accident or reaches for another merge path
-after a refusal, not against an attacker. It reads the whole command text, quotes removed, so a
-form counts wherever it stands: chained, in a substitution, in `bash -c`, after `xargs`. What it
-refuses and what it leaves alone is written once, in `merge_policy`
-(~/.claude/skills/implement/repo-config.md).
+What it refuses, how it reads a command, and why an error of its own lets most calls through are
+written once, in `merge_policy` (~/.claude/skills/implement/repo-config.md).
 """
 
 import json
@@ -13,6 +10,7 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Callable
 from typing import cast
 from urllib.parse import unquote
 
@@ -24,12 +22,16 @@ REASON = (
 MAX_SIZE = 1_000_000  # characters of a command, bytes of a body file
 SUSPECT = re.compile(r"merge|complet|enqueue", re.IGNORECASE)
 
-# A heredoc marker (not the here-string <<<); its body is data unless a shell or an
-# interpreter in the receiving command runs it.
+# A heredoc marker (not the here-string <<<). The command receiving it runs its body, sends it as
+# a request body, writes it to a file, or only reads it.
 HEREDOC = re.compile(r"(?<!<)<<-?\s*(['\"]?)\\?([\w.-]+)\1")
 RUNNER = re.compile(r"bash|sh|zsh|dash|ksh|fish|python[\d.]*|node|ruby|perl|ssh")
-SEPARATOR = re.compile(r"&&|\|\||[;&|\n()`]")
-REQUEST_TOOLS = {"gh", "curl", "wget"}
+SEPARATOR = re.compile(r"&&|\|\||[;&|\n()`]")  # ends a simple command
+STATEMENT = re.compile(r"&&|\|\||[;&\n]")  # ends a pipeline
+SUBSTITUTION = re.compile(r"(?:(\w+)=)?\$\(([^()]*)\)")
+ASSIGNMENTS = re.compile(r"\s*(?:\w+=\S*\s+)*")
+GITHUB_TOOLS = {"gh", "curl", "wget"}  # the tools that reach GitHub
+REQUEST_TOOLS = GITHUB_TOOLS | {"az"}  # the tools that send a request body
 
 METHOD = re.compile(r"(?:-X|--method|--request|--http-method)=?(.*)")
 BODY_OPTION = {  # options that make the tool send a request body
@@ -49,40 +51,61 @@ ALIAS_MERGE = re.compile(r"(?<![\w-])pr(?![\w-]).*?(?<![\w-])merge(?![\w-])", re
 FILE_OPTION = re.compile(r"--(?:input|in-f[\w-]*|body-file|post-file|upload-file)")
 
 
-def name(word: str) -> str:
-    return word.rsplit("/", 1)[-1]
-
-
-def heredoc_role(line: str, marker: re.Match[str]) -> str:
+def heredoc_role(line: str, marker: re.Match[str]) -> tuple[str, list[str]]:
     """What the command receiving the heredoc opened by *marker* does with its body: "run" it
-    (a shell or an interpreter), "send" it (gh, az, curl or wget, as a request body), or
-    "read" it as data."""
+    (a shell or an interpreter), "send" it (a request tool), or "read" it, writing it to the
+    files it names with a `>`, `>>` or `tee`."""
     before = SEPARATOR.split(line[: marker.start()])[-1]
-    after = re.split(r"&&|\|\||[;&]", line[marker.end() :])[0]
-    names = [name(word) for word in re.sub(r"['\"]", " ", f"{before} {after}").split()]
+    after = STATEMENT.split(line[marker.end() :])[0]
+    words = re.sub(r"['\"]", " ", f"{before} {after}").split()
+    names = {os.path.basename(word) for word in words}
     if any(RUNNER.fullmatch(word) for word in names):
-        return "run"
-    return "send" if (REQUEST_TOOLS | {"az"}) & set(names) else "read"
+        return "run", []
+    if REQUEST_TOOLS & names:
+        return "send", []
+    paths: list[str] = []
+    tee = False
+    for k, word in enumerate(words):
+        if word in (">", ">>") and k + 1 < len(words):
+            paths.append(words[k + 1])
+        elif re.fullmatch(r">>?[^>&].*", word):
+            paths.append(word.lstrip(">"))
+        elif word == "|":
+            tee = False
+        elif os.path.basename(word) == "tee":
+            tee = True
+        elif tee and not word.startswith("-"):
+            paths.append(word)
+    return "read", paths
 
 
-def normalise(command: str) -> tuple[str, str]:
-    """*command* with backslash-newlines joined, heredoc bodies dropped unless a shell or an
-    interpreter runs them, quotes, backslashes and the commas and brackets of a list removed;
-    and the bodies of the heredocs a request tool receives."""
+def normalise(command: str) -> tuple[str, str, dict[str, str]]:
+    """*command* with backslash-newlines joined, the bodies of heredocs that no shell or
+    interpreter runs dropped, quotes, backslashes and the commas and brackets of a list removed;
+    the bodies of the heredocs a request tool receives; and the heredoc bodies written to a file,
+    by its path. A marker whose delimiter line never comes opens no heredoc."""
+    lines = command.replace("\\\n", "").split("\n")
     kept: list[str] = []
     sent: list[str] = []
-    pending: list[tuple[str, str]] = []  # (delimiter, role) of the heredocs opened
-    for line in command.replace("\\\n", "").split("\n"):
+    written: dict[str, str] = {}
+    pending: list[tuple[str, str, list[str], list[str]]] = []  # delimiter, role, paths, body
+    last = {line.strip(): i for i, line in enumerate(lines)}
+    for i, line in enumerate(lines):
         if pending:
-            if line.strip() == pending[0][0]:
+            delimiter, role, paths, body = pending[0]
+            if line.strip() == delimiter:
                 _ = pending.pop(0)
-            elif pending[0][1] != "read":
-                (kept if pending[0][1] == "run" else sent).append(line)
+                written.update(dict.fromkeys(paths, "\n".join(body)))
+            else:
+                body.append(line)
+                {"run": kept, "send": sent}.get(role, []).append(line)
             continue
         kept.append(line)
-        pending += [(m[2], heredoc_role(line, m)) for m in HEREDOC.finditer(line)]
+        for marker in HEREDOC.finditer(line):
+            if last.get(marker[2], -1) > i:
+                pending.append((marker[2], *heredoc_role(line, marker), []))
     text = "\n".join(kept).replace("$'", "'").replace('$"', '"')
-    return re.sub(r"[,\[\]]", " ", re.sub(r"['\"\\]", "", text)), "\n".join(sent)
+    return re.sub(r"[,\[\]]", " ", re.sub(r"['\"\\]", "", text)), "\n".join(sent), written
 
 
 def next_word_is(words: list[str], start: int, wanted: str) -> int | None:
@@ -102,7 +125,7 @@ def next_word_is(words: list[str], start: int, wanted: str) -> int | None:
 def subcommand(words: list[str], tool: str, path: list[str]) -> int | None:
     """Index past `tool <path…>` (options allowed between), the first place it stands."""
     for i, word in enumerate(words):
-        if name(word) != tool:
+        if os.path.basename(word) != tool:
             continue
         k: int | None = i
         for part in path:
@@ -117,42 +140,44 @@ def option_value(words: list[str], k: int) -> tuple[str, str]:
     return option, value if eq else (words[k + 1] if k + 1 < len(words) else "")
 
 
-def az_pr_update(words: list[str], text: str) -> str | None:
-    start = subcommand(words, "az", ["repos", "pr", "update"])
-    for k in range(start, len(words)) if start is not None else ():
-        option, value = option_value(words, k)
-        # az takes an unambiguous prefix of an option; a status from a variable counts when
-        # the text spells completed.
-        completes = value.lower().startswith("complet") or (
-            value.startswith("$") and "completed" in text.lower()
-        )
-        if len(option) > 3 and "--status".startswith(option) and completes:
-            return "az repos pr update --status completed"
-        if (
-            len(option) > 5
-            and "--auto-complete".startswith(option)
-            and value.lower() not in ("false", "0")
-        ):
-            return "az repos pr update --auto-complete"
+def az_pr_completes(words: list[str], text: str) -> str | None:
+    """The completion `az repos pr update` or `create` in *words* sets, or None. az takes an
+    unambiguous prefix of an option; a status from a variable counts when the text spells
+    completed."""
+    for verb in ("update", "create"):
+        start = subcommand(words, "az", ["repos", "pr", verb])
+        for k in range(start, len(words)) if start is not None else ():
+            option, value = option_value(words, k)
+            completes = value.lower().startswith("complet") or (
+                value.startswith("$") and "completed" in text.lower()
+            )
+            if verb == "update" and len(option) > 3 and "--status".startswith(option) and completes:
+                return "az repos pr update --status completed"
+            if (
+                len(option) > 5
+                and "--auto-complete".startswith(option)
+                and value.lower() not in ("false", "0")
+            ):
+                return f"az repos pr {verb} --auto-complete"
     return None
 
 
-def alias_merges(words: list[str], sent: str, cwd: str | None) -> bool:
+def alias_merges(words: list[str], imported: Callable[[list[str]], str]) -> bool:
     """Whether *words* define a gh alias whose expansion holds `pr … merge` or a merge mutation;
-    for `alias import`, the expansion is the file it names or the heredoc it receives."""
+    for `alias import`, *imported* gives the text its arguments name."""
     start = subcommand(words, "gh", ["alias"])
     if start is None or start >= len(words) or words[start] not in ("set", "import"):
         return False
-    rest = words[start + 1 :]
-    expansion = " ".join(rest)
+    expansion = " ".join(words[start + 1 :])
     if words[start] == "import":
-        expansion += "\n" + "\n".join([sent] + [read_body(word, cwd) for word in rest])
+        expansion += "\n" + imported(words[start + 1 :])
     return bool(ALIAS_MERGE.search(expansion) or MUTATION.search(expansion))
 
 
 def writes(words: list[str]) -> bool:
-    """Whether a gh, curl or wget among *words* sends a method other than GET or a body."""
-    tools = {name(word) for word in words} & REQUEST_TOOLS
+    """Whether a gh, curl or wget among *words* sends a method other than GET or HEAD, or a
+    body."""
+    tools = {os.path.basename(word) for word in words} & GITHUB_TOOLS
     for k, word in enumerate(words):
         method = METHOD.fullmatch(word)
         if method:
@@ -165,43 +190,115 @@ def writes(words: list[str]) -> bool:
 
 
 def body_paths(words: list[str]) -> list[str]:
-    """The files the simple command *words* hands a request as its body, or feeds it through
-    cat, < or jq."""
+    """The files the simple command *words* names as a request body: `@path`, `key=@path`,
+    a file option, or jq's `--rawfile`/`--slurpfile`."""
     paths: list[str] = []
     for k, word in enumerate(words):
         following = words[k + 1 : k + 3]
         if word.startswith("@") or "=@" in word or re.match(r"-[a-zA-Z]@", word):
             paths.append(word.split("@", 1)[1])
-        elif word.startswith("<") and not word.startswith("<<") and len(word) > 1:
-            paths.append(word[1:])
         elif FILE_OPTION.fullmatch(word.split("=", 1)[0]) and "=" in word:
             paths.append(word.split("=", 1)[1])
-        elif (FILE_OPTION.fullmatch(word) or word == "<") and following:
+        elif FILE_OPTION.fullmatch(word) and following:
             paths.append(following[0])
         elif word in ("--rawfile", "--slurpfile") and len(following) == 2:
             paths.append(following[1])
-        elif name(word) == "cat":
+    return paths
+
+
+def has_request(text: str) -> bool:
+    return bool(REQUEST_TOOLS & {os.path.basename(word) for word in text.split()})
+
+
+def stdin_paths(words: list[str], cat: bool) -> list[str]:
+    """The files a `< path` among *words* feeds, and with *cat* the files `cat` prints."""
+    paths: list[str] = []
+    for k, word in enumerate(words):
+        if word == "<" and k + 1 < len(words):
+            paths.append(words[k + 1])
+        elif word.startswith("<") and not word.startswith("<<") and len(word) > 1:
+            paths.append(word[1:])
+        elif cat and os.path.basename(word) == "cat":
             for arg in words[k + 1 :]:
-                if "<" in arg or ">" in arg:
+                if re.search(r"[<>|]", arg):
                     break
                 if not arg.startswith("-"):
                     paths.append(arg)
     return paths
 
 
-def read_body(path: str, cwd: str | None) -> str:
-    """The text of the regular file *path* names, up to MAX_SIZE; empty when it cannot be read."""
+def fed_paths(text: str) -> list[str]:
+    """The files `cat` or `<` feeds a request tool in *text*: in a `$( )` within the request's
+    pipeline or assigned to a variable the request uses, through a pipe into it, or as its
+    stdin."""
+    paths: list[str] = []
+    statements = STATEMENT.split(text)
+    for statement in statements:
+        flat = SUBSTITUTION.sub(" ", statement)
+        for found in SUBSTITUTION.finditer(statement):
+            # `NAME=$( )` before the command word assigns a variable; elsewhere, as in
+            # `-f query=$( )`, the substitution is a word of the command
+            assigned = found[1] and ASSIGNMENTS.fullmatch(statement[: found.start()])
+            variable = re.compile(rf"\$\{{?{found[1]}\b")
+            if has_request(flat) or (
+                assigned and any(has_request(s) and variable.search(s) for s in statements)
+            ):
+                paths += stdin_paths(found[2].split(), cat=True)
+        stages = flat.split("|")
+        for i, stage in enumerate(stages):
+            later = any(has_request(other) for other in stages[i + 1 :])
+            if later or has_request(stage):
+                paths += stdin_paths(stage.split(), cat=later)
+    return paths
+
+
+def candidates(path: str, bases: list[str]) -> list[str]:
+    """The absolute paths *path* may name: `~` and `$HOME` expanded, a relative path taken from
+    each of *bases*; none when another variable stands in it."""
     path = os.path.expanduser(re.sub(r"^\$(?:HOME|\{HOME\})(?=/|$)", "~", path))
     if "$" in path or path in ("", "-"):
-        return ""
-    path = os.path.join(cwd or "", path)
-    try:
-        if not stat.S_ISREG(os.stat(path).st_mode):
-            return ""
-        with open(path, "rb") as file:
-            return file.read(MAX_SIZE).decode("utf-8", "replace")
-    except OSError:
-        return ""
+        return []
+    return [os.path.normpath(os.path.join(base, path)) for base in bases]
+
+
+def cd_bases(segments: list[list[str]], cwd: str | None) -> list[str]:
+    """The literal `cd` targets in *segments*, taken from *cwd*, and *cwd* itself."""
+    bases = [cwd or ""]
+    for words in segments:
+        if len(words) > 1 and words[0] == "cd" and "$" not in words[1]:
+            bases.insert(-1, os.path.join(cwd or "", os.path.expanduser(words[1])))
+    return bases
+
+
+def read_body(path: str, bases: list[str], written: dict[str, str]) -> str:
+    """The text the file *path* holds, up to MAX_SIZE: a heredoc this command writes to it, or
+    the regular file on disk; empty when none can be read."""
+    texts: list[str] = []
+    for candidate in candidates(path, bases):
+        if candidate in written:
+            texts.append(written[candidate])
+            continue
+        try:
+            if stat.S_ISREG(os.stat(candidate).st_mode):
+                with open(candidate, "rb") as file:
+                    texts.append(file.read(MAX_SIZE).decode("utf-8", "replace"))
+        except (OSError, ValueError, UnicodeError):
+            continue
+    return "\n".join(texts)
+
+
+def run_scripts(segments: list[list[str]]) -> list[str]:
+    """The script paths *segments* run: the command word, or the first argument of a shell or
+    an interpreter."""
+    scripts: list[str] = []
+    for words in segments:
+        command = next((w for w in words if not re.fullmatch(r"\w+=\S*", w)), None)
+        if command:
+            scripts.append(command)
+        for k, word in enumerate(words):
+            if RUNNER.fullmatch(os.path.basename(word)):
+                scripts += [w for w in words[k + 1 :] if not w.startswith("-")][:1]
+    return scripts
 
 
 def azure_requests(segments: list[list[str]]) -> list[list[str]]:
@@ -209,7 +306,7 @@ def azure_requests(segments: list[list[str]]) -> list[list[str]]:
     --next splitting one simple command into several."""
     requests: list[list[str]] = []
     for words in segments:
-        names = {name(word) for word in words}
+        names = {os.path.basename(word) for word in words}
         if {"curl", "wget"} & names or ("az" in names and {"rest", "invoke"} & set(words)):
             requests += [part.split() for part in re.split(r"\s(?:--next|-:)\s", " ".join(words))]
     return requests
@@ -226,30 +323,48 @@ def literal_target(words: list[str]) -> bool:
     )
 
 
+def split(text: str) -> list[list[str]]:
+    return [segment.split() for segment in SEPARATOR.split(text)]
+
+
 def check(command: str, cwd: str | None = None) -> str | None:
     """The merge form *command* holds, or None."""
     if len(command) > MAX_SIZE:
-        raise ValueError("the command is past the size cap")
-    text, sent = normalise(command)
-    segments = [segment.split() for segment in SEPARATOR.split(text)]
-    words = [word for segment in segments for word in segment]
-    names = {name(word) for word in words}
+        raise ValueError(f"the command is longer than {MAX_SIZE:,} characters")
+    text, sent, heredocs = normalise(command)
+    bases = cd_bases(split(text), cwd)
+    written = {key: body for path, body in heredocs.items() for key in candidates(path, bases)}
+    ran = [
+        written[key]
+        for path in run_scripts(split(text))
+        for key in candidates(path, bases)
+        if key in written
+    ]
+    if ran:  # a script this command writes and runs is read as commands too
+        more_text, more_sent, _ = normalise("\n".join(ran))
+        text, sent = f"{text}\n{more_text}", f"{sent}\n{more_sent}"
+    segments = split(text)
+    names = {os.path.basename(word) for segment in segments for word in segment}
+
+    def imported(args: list[str]) -> str:
+        return "\n".join([sent] + [read_body(arg, bases, written) for arg in args])
+
     for segment in segments:
         if subcommand(segment, "gh", ["pr", "merge"]) is not None:
             return "gh pr merge"
-        if alias_merges(segment, sent, cwd):
+        if alias_merges(segment, imported):
             return "a gh alias that merges"
-        found = az_pr_update(segment, text)
+        found = az_pr_completes(segment, text)
         if found:
             return found
         if writes(segment) and REST_MERGE.search(unquote(" ".join(segment))):
             return "a GitHub REST merge (pulls/<n>/merge, /merges or merge_method)"
-    if not names & (REQUEST_TOOLS | {"az"}):
+    if not names & REQUEST_TOOLS:
         return None
-    paths = [path for segment in segments for path in body_paths(segment)]
-    bodies = "\n".join([text, sent] + [read_body(path, cwd) for path in paths])
+    paths = [path for segment in segments for path in body_paths(segment)] + fed_paths(text)
+    bodies = "\n".join([text, sent] + [read_body(path, bases, written) for path in paths])
     mutation = MUTATION.search(bodies)
-    if mutation and names & REQUEST_TOOLS:
+    if mutation and names & GITHUB_TOOLS:
         return f"the GraphQL mutation {mutation[0]}"
     # Toward a pull request itself (a backslash may stand for the slash), or a request whose
     # target is not spelled out.
@@ -268,20 +383,35 @@ def field(value: object, key: str) -> object:
     return cast("dict[str, object]", value).get(key) if isinstance(value, dict) else None
 
 
-def main() -> int:
-    raw = sys.stdin.read()
+def judge(raw: str) -> tuple[str | None, Exception | None]:
+    """The form to refuse the hook input *raw* for, or None to let it through; and the error
+    that stopped the check, if one did. After an error, the command (or the raw input when it
+    holds none) is refused only when it holds a merge word."""
+    command = raw
     try:
         data = cast("object", json.loads(raw))
-        command = field(field(data, "tool_input"), "command")
-        if not isinstance(command, str):
+        found = field(field(data, "tool_input"), "command")
+        if not isinstance(found, str):
             raise TypeError("no command string")
+        command = found
         cwd = field(data, "cwd")
-        form = check(command, cwd if isinstance(cwd, str) else None) if command else None
+        return (check(command, cwd if isinstance(cwd, str) else None) if command else None), None
     except Exception as error:  # noqa: BLE001 - judged by its merge words instead
-        # By design the hook fails open on its own error unless the input holds a merge word:
-        # it guards against a session's accident, not against an attacker provoking an error.
+        if SUSPECT.search(command):
+            return (
+                f"a command the hook could not check: {error!r}; split it or tell the owner",
+                error,
+            )
+        return None, error
+
+
+def main() -> int:
+    try:
+        form, error = judge(sys.stdin.read())
+    except (OSError, ValueError, UnicodeError) as unread:
+        form, error = None, unread
+    if error is not None:
         print(f"block_pr_merge: {error!r}", file=sys.stderr)
-        form = "a command the hook could not check" if SUSPECT.search(raw) else None
     if form:
         decision = {
             "hookEventName": "PreToolUse",
@@ -289,6 +419,9 @@ def main() -> int:
             "permissionDecisionReason": REASON.format(form=form),
         }
         print(json.dumps({"hookSpecificOutput": decision}))
+    elif error is not None:
+        message = f"block_pr_merge: could not check this command ({error!r}); it was allowed"
+        print(json.dumps({"systemMessage": message}))
     return 0
 
 

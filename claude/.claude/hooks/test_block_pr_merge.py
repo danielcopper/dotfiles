@@ -13,21 +13,24 @@ import unittest
 from pathlib import Path
 from typing import ClassVar, cast, override
 
+from merge_corpus import real_merge
+
 HOOK = Path(__file__).with_name("block_pr_merge.py")
 SECRET = "SECRET_PLACEHOLDER"  # stands in for a token the real command held
 
 # Body files the commands name as {d}/<file>; HOME is {d}/home, the hook's cwd is {d}.
 MERGE_QUERY = 'mutation { mergePullRequest(input: {pullRequestId: "PR_x"}) { clientMutationId } }'
+QUEUE_JSON = (
+    '{"query": "mutation { enqueuePullRequest(input: {pullRequestId: \\"PR_x\\"})'
+    ' { clientMutationId } }"}'
+)
 BODIES = {
     "merge.graphql": MERGE_QUERY,
     "auto.graphql": (
         "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id})"
         " { clientMutationId } }"
     ),
-    "queue.json": (
-        '{"query": "mutation { enqueuePullRequest(input: {pullRequestId: \\"PR_x\\"})'
-        ' { clientMutationId } }"}'
-    ),
+    "queue.json": QUEUE_JSON,
     "read.graphql": "query { viewer { login } }",
     "done.json": '{"status": "completed", "lastMergeSourceCommit": {"commitId": "abc"}}',
     "done3.json": '{"status": 3}',
@@ -38,12 +41,17 @@ BODIES = {
     "rel/q.graphql": MERGE_QUERY,
     "aliases.yml": "mm: pr merge --squash\n",
     "other-aliases.yml": "co: pr checkout\n",
+    # files that name the merge forms, read without feeding a request
+    "hook_source.py": f'QUERY = """{MERGE_QUERY}"""\nBODY = {{"status": "completed"}}\n',
+    "settings.json": '{"deny": ["Bash(*mergePullRequest*)"]}',
+    "repo-config.md": 'A body holding `"status": "completed"` completes the pull request.\n',
 }
 
 AZ_PR = "https://dev.azure.com/o/p/_apis/git/repositories/r/pullrequests/5?api-version=7.1"
 AZ_THREAD = (
     "https://dev.azure.com/o/p/_apis/git/repositories/r/pullRequests/5/threads/7?api-version=7.1"
 )
+INVOKE_PR = "az devops invoke --area git --resource pullRequests --route-parameters pullRequestId=5"
 
 # Every explicit merge form, by the text its refusal names.
 DENIED = {
@@ -75,6 +83,13 @@ DENIED = {
         "gh pr \\\nmerge 5",
         "gh pr 'merge' 5",
         "gh pr $'merge' 5",
+        # a script the command writes and then runs
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nchmod +x m.sh && ./m.sh",
+        # a << whose delimiter line never comes opens no heredoc
+        'echo "use <<EOF for heredocs"\ngh pr merge 5',
+        "x=$((1<<3))\ngh pr merge 5",
+        "# note: cat <<EOF\ngh pr merge 5",
     ],
     "pulls/<n>/merge": [
         "gh api -X PUT repos/o/r/pulls/5/merge",
@@ -119,13 +134,19 @@ DENIED = {
         "gh api graphql -F query=@~/q.graphql",
         "gh api graphql -F query=@$HOME/q.graphql",
         "gh api graphql -F query=@rel/q.graphql",
+        # a relative body path after a literal cd
+        "cd rel && gh api graphql -F query=@q.graphql",
+        "cd {d}/rel; gh api graphql --input q.graphql",
         # a body the request reads from stdin: a heredoc, a here-string, a redirect
-        f'gh api graphql --input - <<\'EOF\'\n{{"query": "{MERGE_QUERY.replace('"', '\\\\"')}"}}\nEOF',
+        f"gh api graphql --input - <<'EOF'\n{QUEUE_JSON}\nEOF",
         f"gh api graphql -F query=@- <<EOF\n{MERGE_QUERY}\nEOF",
         f"cat <<'EOF' | gh api graphql -F query=@-\n{MERGE_QUERY}\nEOF",
         f"curl -s -X POST -d @- https://api.github.com/graphql <<'EOF'\n{MERGE_QUERY}\nEOF",
         f"gh api graphql -F query=@- <<< '{MERGE_QUERY}'",
         "gh api graphql --input - < {d}/queue.json",
+        # a body file the command writes from a heredoc first
+        f"tee q2.graphql <<'EOF' >/dev/null\n{MERGE_QUERY}\nEOF\ngh api graphql -F query=@q2.graphql",
+        f"cat > q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input q.json",
     ],
     "a gh alias that merges": [
         "gh alias set mm 'pr merge --squash'",
@@ -134,15 +155,19 @@ DENIED = {
         "gh alias import {d}/aliases.yml",
         "gh alias import - <<'EOF'\nmm: pr merge --squash\nEOF",
     ],
-    "az repos pr update": [
+    "az repos pr update --status completed": [
         "az repos pr update --id 5 --status completed",
         "az repos pr update --id 5 --status=completed",
-        "az repos pr update --id 5 --auto-complete true",
-        "az repos pr update --id 5 --auto-complete",
-        "az repos pr update --id 5 --auto-comp true",
         "az repos pr update --id 5 --stat Completed",
         "S=completed; az repos pr update --id 5 --status $S",
         "git push && az repos pr update --id 5 --status completed --squash",
+    ],
+    "--auto-complete": [
+        "az repos pr update --id 5 --auto-complete true",
+        "az repos pr update --id 5 --auto-complete",
+        "az repos pr update --id 5 --auto-comp true",
+        "az repos pr create --title 'fix: x' --source-branch f --auto-complete true",
+        "az repos pr create --source-branch f --auto-comp",
     ],
     "Azure DevOps pull request completion": [
         f"az rest --method patch --uri '{AZ_PR}' --body '{{\"status\": \"completed\"}}'",
@@ -152,14 +177,8 @@ DENIED = {
         f"az rest --method patch --uri '{AZ_PR}' --body \"$(cat {{d}}/done.json)\"",
         'BODY=$(cat {d}/done.json); az rest --method patch --uri "$PRURL" --body "$BODY"',
         'az rest --method patch --uri "$PRURL" --body \'{"status":"completed"}\'',
-        (
-            "az devops invoke --area git --resource pullRequests --route-parameters project=p"
-            " repositoryId=r pullRequestId=5 --http-method PATCH --in-file {d}/done.json"
-        ),
-        (
-            "az devops invoke --area git --resource pullRequests --route-parameters pullRequestId=5"
-            " --http-m PATCH --in-f {d}/autocomplete.json"
-        ),
+        f"{INVOKE_PR} project=p repositoryId=r --http-method PATCH --in-file {{d}}/done.json",
+        f"{INVOKE_PR} --http-m PATCH --in-f {{d}}/autocomplete.json",
         (
             f"curl -s -u \":$PAT\" -X PATCH -H 'Content-Type: application/json' -d @{{d}}/done3.json"
             f" '{AZ_PR}'"
@@ -168,6 +187,7 @@ DENIED = {
             f"curl -s -u :{SECRET} -X PATCH -d @{{d}}/done.json"
             f" '{AZ_PR.replace('pullrequests', 'PullRequests')}'"
         ),
+        f"curl -s -X PATCH -d@{{d}}/done.json '{AZ_PR}'",
         (
             "curl -s -u \":$PAT\" -X PATCH -H 'Referer: https://dev.azure.com/o'"
             ' -d @{d}/done.json "$PRURL"'
@@ -191,6 +211,23 @@ DENIED = {
         (
             'curl -s -u ":$PAT" -X PATCH -d @{d}/done.json'
             ' "https://dev.azure.com/o/p/_apis/git/repositories/r/pullRequests\\5?api-version=7.1"'
+        ),
+        # a body file the command writes from a heredoc first
+        (
+            'cat > body.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+            f"az rest --method patch --uri '{AZ_PR}' --body @body.json"
+        ),
+        (
+            "cat >> body3.json <<'EOF'\n{\"status\": 3}\nEOF\n"
+            f"curl -s -X PATCH -d @body3.json '{AZ_PR}'"
+        ),
+        (
+            'cat >body4.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+            f"curl -s -X PATCH -d @body4.json '{AZ_PR}'"
+        ),
+        (
+            'cat <<\'EOF\' > {d}/w.json\n{"autoCompleteSetBy": {"id": "me"}}\nEOF\n'
+            f"{INVOKE_PR} --http-method PATCH --in-file {{d}}/w.json"
         ),
     ],
 }
@@ -225,6 +262,11 @@ PASSES = [
     "gh api graphql -F query=@{d}/read.graphql",
     "gh api graphql -F query=@{d}/missing.graphql",
     'gh api graphql -F query=@"$S/q.graphql"',
+    "gh api graphql -F query=@bad\x00path",
+    # files that name a merge form, printed without feeding a request
+    "cat {d}/hook_source.py | head; gh pr view 5",
+    "cat {d}/settings.json | head -3; gh pr list",
+    'cat {d}/repo-config.md | grep -n status; curl -s "$URL"',
     # git's own merge commands, and paths or names with merge next to a variable
     "git merge --ff-only origin/main",
     "git merge-base HEAD origin/main",
@@ -243,8 +285,11 @@ PASSES = [
     ),
     "gh run list --status completed --limit 5",
     "az repos pr update --id 5 --status active",
+    "S=active; az repos pr update --id 5 --status $S",
     "az repos pr update --id 5 --auto-complete false",
     "az repos pr update --id 5 --auto-complete=0 --title 'fix: x'",
+    "az repos pr create --title 'fix: x' --source-branch f",
+    "az repos pr create --title x --source-branch f --auto-complete false",
     "az repos pr show --id 5 --query status",
     f"curl -s -u \":$PAT\" -X PATCH -d '{{\"status\": 3}}' '{AZ_THREAD}'",
     (
@@ -262,7 +307,7 @@ PASSES = [
         f' -H "Authorization: Bearer {SECRET}" -H "Content-Type: application/json"'
         ' -d "{\\"area\\":\\"$a\\"}" "$HA_URL/api/services/script/heating_resume"; done'
     ),
-    # heredoc bodies that are only data
+    # heredoc bodies that are only data, or written to a file nothing sends or runs
     "cat > notes.md <<'EOF'\nRun `gh pr merge 5` when the owner says so; `$VAR` stays.\nEOF",
     "git commit -q -F - <<'EOF'\nfix(hooks): refuse gh pr merge in chained commands\nEOF",
     (
@@ -274,6 +319,7 @@ PASSES = [
         "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge\nEOF"
     ),
     f"tee q.graphql <<'EOF'\n{MERGE_QUERY}\nEOF",
+    "cat > notes.md <<'EOF' && bash lint.sh notes.md\nRun gh pr merge 5 later.\nEOF",
     # request bodies from stdin that cannot merge, and a PR body that only mentions one
     'gh api graphql --input - <<\'EOF\'\n{"query": "query { viewer { login } }"}\nEOF',
     "gh pr create --title 'fix: x' --body-file - <<'EOF'\nRun gh pr merge after review.\nEOF",
@@ -288,6 +334,90 @@ PASSES = [
     "az boards work-item update --id 5 --discussion 'needs the mergePullRequest scope'",
     "echo 'status: completed'",
 ]
+
+# DENIED forms the corpus detector does not flag: the merge lies in a file, a variable or an
+# encoding, not in the command's text.
+NOT_DETECTED = {
+    "gh api -X PUT repos/o/r/pulls/5/%6Derge",
+    "gh api graphql -F query=@{d}/merge.graphql",
+    'gh api graphql -f query="$(cat {d}/merge.graphql)" -f id=PR_x',
+    'gh api graphql -f query="$(< {d}/auto.graphql)" -F prId="$PR_ID"',
+    'Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q" -f id=PR_x',
+    "gh api --input {d}/queue.json graphql",
+    "gh api --input={d}/queue.json graphql",
+    "gh api -iF query=@{d}/merge.graphql graphql",
+    "cat {d}/merge.graphql | gh api graphql -F query=@-",
+    "jq -n --rawfile q {d}/merge.graphql '{query:$q}' | gh api graphql --input -",
+    (
+        'curl -s -H "Authorization: bearer $TOKEN" -X POST -d @{d}/queue.json'
+        " https://api.github.com/graphql"
+    ),
+    'curl -s -X POST -d "$(cat {d}/queue.json)" https://api.github.com/graphql',
+    "gh api graphql -F query=@~/q.graphql",
+    "gh api graphql -F query=@$HOME/q.graphql",
+    "gh api graphql -F query=@rel/q.graphql",
+    "cd rel && gh api graphql -F query=@q.graphql",
+    "cd {d}/rel; gh api graphql --input q.graphql",
+    "gh api graphql --input - < {d}/queue.json",
+    "gh alias import {d}/aliases.yml",
+    "S=completed; az repos pr update --id 5 --status $S",
+    f"az rest --method patch --uri '{AZ_PR}' --body @{{d}}/done.json",
+    f"az rest --method patch --uri '{AZ_PR}' --body \"$(cat {{d}}/done.json)\"",
+    'BODY=$(cat {d}/done.json); az rest --method patch --uri "$PRURL" --body "$BODY"',
+    f"{INVOKE_PR} project=p repositoryId=r --http-method PATCH --in-file {{d}}/done.json",
+    f"{INVOKE_PR} --http-m PATCH --in-f {{d}}/autocomplete.json",
+    (
+        f"curl -s -u \":$PAT\" -X PATCH -H 'Content-Type: application/json' -d @{{d}}/done3.json"
+        f" '{AZ_PR}'"
+    ),
+    (
+        f"curl -s -u :{SECRET} -X PATCH -d @{{d}}/done.json"
+        f" '{AZ_PR.replace('pullrequests', 'PullRequests')}'"
+    ),
+    f"curl -s -X PATCH -d@{{d}}/done.json '{AZ_PR}'",
+    (
+        "curl -s -u \":$PAT\" -X PATCH -H 'Referer: https://dev.azure.com/o'"
+        ' -d @{d}/done.json "$PRURL"'
+    ),
+    (
+        "wget -q --method=PATCH --body-file={d}/done.json --header='Origin: https://dev.azure.com'"
+        ' "$PRURL"'
+    ),
+    'bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"',
+    (
+        'curl -s https://dev.azure.com/o/_apis/connectionData --next -u ":$PAT" -X PATCH'
+        ' -d @{d}/done.json "$PRURL"'
+    ),
+    (
+        "curl -s https://dev.azure.com/o/_apis/connectionData;"
+        ' bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"'
+    ),
+    (
+        'curl -s -u ":$PAT" -X PATCH -d @{d}/done.json'
+        ' "https://dev.azure.com/o/p/_apis/git/repositories/r/pullRequests\\5?api-version=7.1"'
+    ),
+    # written to a file by a cat or tee heredoc, then sent or run
+    "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash m.sh",
+    "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nchmod +x m.sh && ./m.sh",
+    f"tee q2.graphql <<'EOF' >/dev/null\n{MERGE_QUERY}\nEOF\ngh api graphql -F query=@q2.graphql",
+    f"cat > q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input q.json",
+    (
+        'cat > body.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+        f"az rest --method patch --uri '{AZ_PR}' --body @body.json"
+    ),
+    (
+        "cat >> body3.json <<'EOF'\n{\"status\": 3}\nEOF\n"
+        f"curl -s -X PATCH -d @body3.json '{AZ_PR}'"
+    ),
+    (
+        'cat >body4.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+        f"curl -s -X PATCH -d @body4.json '{AZ_PR}'"
+    ),
+    (
+        'cat <<\'EOF\' > {d}/w.json\n{"autoCompleteSetBy": {"id": "me"}}\nEOF\n'
+        f"{INVOKE_PR} --http-method PATCH --in-file {{d}}/w.json"
+    ),
+}
 
 
 def payload(command: str, cwd: str) -> str:
@@ -306,10 +436,15 @@ def run_hook(raw: str, home: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def output(stdout: str) -> dict[str, dict[str, str] | str]:
+    """The JSON object the hook printed, empty when it printed nothing."""
+    return cast("dict[str, dict[str, str] | str]", json.loads(stdout)) if stdout.strip() else {}
+
+
 def decision(stdout: str) -> dict[str, str] | None:
-    if not stdout.strip():
+    out = output(stdout).get("hookSpecificOutput")
+    if not isinstance(out, dict):
         return None
-    out = cast("dict[str, dict[str, str]]", json.loads(stdout))["hookSpecificOutput"]
     assert out["hookEventName"] == "PreToolUse"
     return out
 
@@ -333,9 +468,12 @@ class BlockPrMerge(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.tmp.cleanup()
 
-    def decide(self, command: str) -> dict[str, str] | None:
+    def stdout(self, command: str) -> str:
         raw = payload(command.replace("{d}", self.d), self.d)
-        return decision(run_hook(raw, f"{self.d}/home").stdout)
+        return run_hook(raw, f"{self.d}/home").stdout
+
+    def decide(self, command: str) -> dict[str, str] | None:
+        return decision(self.stdout(command))
 
     def test_denied(self):
         for form, commands in DENIED.items():
@@ -349,7 +487,17 @@ class BlockPrMerge(unittest.TestCase):
     def test_passes(self):
         for command in PASSES:
             with self.subTest(command=command):
-                self.assertIsNone(self.decide(command))
+                self.assertEqual(self.stdout(command), "")
+
+    def test_the_corpus_detector_flags_the_denied_forms_it_can_read(self):
+        denied = [command for commands in DENIED.values() for command in commands]
+        self.assertLessEqual(NOT_DETECTED, set(denied))
+        for command in denied:
+            with self.subTest(command=command):
+                self.assertEqual(real_merge(command), command not in NOT_DETECTED)
+        for command in PASSES:
+            with self.subTest(command=command):
+                self.assertFalse(real_merge(command))
 
     def test_the_reason_reminds_and_names_the_form(self):
         out = self.decide("gh pr checks 5 && gh pr merge 5")
@@ -364,32 +512,36 @@ class BlockPrMerge(unittest.TestCase):
         )
 
     def test_an_empty_command_passes(self):
-        self.assertIsNone(self.decide(""))
+        self.assertEqual(self.stdout(""), "")
 
-    def test_input_it_cannot_read_refuses_only_with_a_merge_word(self):
+    def test_an_error_refuses_only_with_a_merge_word_in_the_command(self):
+        too_long = "echo " + "x" * 1_100_000
         for raw, denied in [
             ("not json", False),
             ('{"tool_input": {"command": 5}}', False),
+            (json.dumps({"tool_input": {"command": too_long}, "cwd": "/srv/merge-work"}), False),
             ("not json, but gh pr merge 5", True),
             ('{"tool_input": "az repos pr update --status Completed"}', True),
             ('["enqueue"]', True),
+            (json.dumps({"tool_input": {"command": "echo merge " + too_long}}), True),
         ]:
-            with self.subTest(raw=raw):
+            with self.subTest(raw=raw[:80]):
                 proc = run_hook(raw, f"{self.d}/home")
                 self.assertIn("block_pr_merge:", proc.stderr)
                 out = decision(proc.stdout)
                 self.assertEqual(out is not None, denied)
                 if out is not None:
-                    self.assertIn(
-                        "(found: a command the hook could not check)",
-                        out["permissionDecisionReason"],
+                    reason = out["permissionDecisionReason"]
+                    self.assertIn("(found: a command the hook could not check: ", reason)
+                    self.assertTrue(reason.endswith("; split it or tell the owner)"), reason)
+                else:
+                    message = output(proc.stdout)["systemMessage"]
+                    assert isinstance(message, str)
+                    self.assertTrue(
+                        message.startswith("block_pr_merge: could not check this command ("),
+                        message,
                     )
-
-    def test_a_command_past_the_size_cap_is_judged_by_its_merge_words(self):
-        self.assertIsNone(self.decide("echo " + "x" * 1_100_000))
-        out = self.decide("echo merge " + "x" * 1_100_000)
-        assert out is not None
-        self.assertIn("could not check", out["permissionDecisionReason"])
+                    self.assertTrue(message.endswith("); it was allowed"), message)
 
 
 if __name__ == "__main__":
