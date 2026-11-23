@@ -2,7 +2,7 @@
 // backlog shape shows it (backlogList), a create and a parent link, and
 // the view as makeAzure uses it (backlogView).
 
-import { BoardError, failure, isObject } from "../../shared.js";
+import { BoardError, errorText, failure, isObject } from "../../shared.js";
 import { AZ_QUERY_LIMIT, TEAM_KEEP_MS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, idsWiql, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
 
 // The Backlog view's calls for a team context `c`: the team's backlog
@@ -126,8 +126,10 @@ export function sprintName(path, backlogIteration) {
 // (parseBacklogIds) comes in backlog order, so it is not relied on; it
 // orders only what has no order value, after all that has one. Ids the
 // query did not find are counted (meta.missing); `limited` says the ids
-// were more than one query reads (AZ_QUERY_LIMIT).
-export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer }) {
+// were more than one query reads (AZ_QUERY_LIMIT). `typeColors` are the
+// colors of the project's work item types (parseAzureTypes), none where
+// they were not read.
+export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer, typeColors = {} }) {
   const at = new Map(ids.map((id, i) => [id, i]));
   const rank = (i) => i.order ?? Infinity;
   const rows = items
@@ -138,7 +140,7 @@ export function backlogList({ level, childLevel, config, settings, area, ids, it
   return {
     shape: "backlog",
     meta: {
-      level, childLevel, typeStates: config.typeStates, states: config.states, orderField: config.orderField,
+      level, childLevel, typeStates: config.typeStates, states: config.states, typeColors, orderField: config.orderField,
       area, iteration: settings.defaultIteration, follows: Boolean(settings.follows), missing: read - rows.length,
     },
     rows,
@@ -225,18 +227,34 @@ export function backlogView(s) {
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
+  // The colors of the project's work item types, as kept (s.typesKey: the
+  // Sprint keeps the same entry), else read and kept BACKLOG_KEEP_MS; a read
+  // that fails gives none and the warning that says so, and keeps nothing.
+  async function typeColorsOf(c) {
+    const held = s.keptValue(s.typesKey(c));
+    if (held) return { colors: held.value.colors, warnings: [] };
+    try {
+      const types = await s.readTypes(c);
+      s.keep(s.typesKey(c), types, Date.now() + BACKLOG_KEEP_MS);
+      return { colors: types.colors, warnings: [] };
+    } catch (e) {
+      return { colors: {}, warnings: [`Farben der Work-Item-Typen nicht gelesen: ${errorText(e)}`] };
+    }
+  }
   return {
     forget,
     async load(view) {
       const c = view.context;
       const me = s.whoAmI();
       const kept = await backlogSettingsOf(c);
+      const types = typeColorsOf(c);
       const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
       const read = ids.slice(0, AZ_QUERY_LIMIT);
       const out = read.length ? await s.az(azQueryArgs(c, idsWiql(read, kept.config.orderField ? [kept.config.orderField] : []))) : "";
-      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me });
+      const { colors, warnings } = await types;
+      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me, typeColors: colors });
       s.noViewerOf(data);
-      return { data, warnings: [] };
+      return { data, warnings };
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
     // Creates a work item ({ type, title }) in the team's default area and

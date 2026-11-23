@@ -5,6 +5,7 @@
     {
       "name": "User Story",
       "referenceName": "Custom.UserStory",
+      "color": "009CCC",
       "states": [
         {
           "name": "To Do",
@@ -41,6 +42,7 @@
     {
       "name": "Task",
       "referenceName": "Microsoft.VSTS.WorkItemTypes.Task",
+      "color": "F2CB1D",
       "states": [
         {
           "name": "To Do",
@@ -67,6 +69,7 @@
     {
       "name": "Bug",
       "referenceName": "Microsoft.VSTS.WorkItemTypes.Bug",
+      "color": "CC293D",
       "states": [
         {
           "name": "New",

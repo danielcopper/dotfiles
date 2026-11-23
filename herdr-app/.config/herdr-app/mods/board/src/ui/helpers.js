@@ -2,9 +2,9 @@
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu and its keys, a detail
 // section, a check's color, a status pill, a column's color and head, a
-// card's edge, a selected card's or row's look, a card's chip in a tone, for
-// a label, for its type and for a session). Which tones and tints they take:
-// tones.js.
+// card's edge, the line of its type, a selected card's or row's look, a
+// card's chip in a tone, for a label, for its type and for a session). Which
+// tones and tints they take: tones.js.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
@@ -13,7 +13,7 @@ import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
-import { CHIP_ALPHA, headBg, hueTone, selectedBg, tint, typeTone } from "./tones.js";
+import { CHIP_ALPHA, headBg, hueTone, selectedBg, tint, typeLineTone, typeTone } from "./tones.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -273,6 +273,17 @@ export const columnHead = (t, col, count, ground) =>
 // A card's left edge: a narrow bar in its column's color, as tall as the
 // card's content beside it.
 export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
+
+// A thin line across the top of a card or row in its type's color
+// (typeLineTone: `hex`, an Azure type's color, or a GitHub issue type's),
+// laid over its top edge, `inset` from each side (a rounded card's corner);
+// null where its type has no color. The card or row it stands in is
+// relative(), so it is placed in that one.
+export function typeLine(t, item, hex, inset = 0) {
+  const tone = typeLineTone(t, item, hex);
+  if (!tone) return null;
+  return div().id("type-line").absolute().top(0).left(inset).right(inset).h(2).rounded(1).bg(t[tone] ?? t.muted);
+}
 
 // A card's or row's look as selected or not, in every shape alike, for an
 // element's map(): a selected one has the accent border and selectedBg; one

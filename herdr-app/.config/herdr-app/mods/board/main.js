@@ -44,8 +44,10 @@
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
-// their fields; one for an empty backlog); either one more while who az is
-// stays unknown. What the Sprint and the Backlog read once and keep, and
+// their fields; one for an empty backlog), and one more for the project's
+// work item types (their colors) while neither view keeps them; either one
+// more while who az is stays unknown. What the Sprint and the Backlog read
+// once and keep, and
 // for how long, makeAzure says. A state change costs one az call, a
 // Backlog's create one and a child's parent link one more; a create reads
 // the Backlog again, and one whose answer was unclear asks one WIQL query
@@ -1365,12 +1367,16 @@ export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", 
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
 // The work item types' answer → { states (categoryStates, common.js),
-// types: { [type]: [state names] } }.
+// types: { [type]: [state names] }, colors: { [type]: "#rrggbb" } (each
+// type's own color, read as six hex digits without #, the form of its
+// states' colors in the same answer; a type without one, or with another
+// form, has none) }.
 export function parseAzureTypes(stdout) {
   const value = azJson(stdout, "die Work-Item-Typen")?.value;
   if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
   const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
-  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
+  const colors = Object.fromEntries(value.filter((type) => typeof type.color === "string" && /^[0-9a-f]{6}$/i.test(type.color)).map((type) => [type.name, `#${type.color.toLowerCase()}`]));
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types, colors };
 }
 
 // One WIQL query for the work items of the sprint `iteration` in the team's
@@ -1453,7 +1459,10 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
   const loose = cols.some((c) => c.cards.some((card) => card.row === NO_STORY));
   return {
     shape: "sprint",
-    meta: { iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states, unplaced, unknownColumns },
+    meta: {
+      iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states, typeColors: types.colors,
+      unplaced, unknownColumns,
+    },
     columns: cols,
     rows: [...(loose ? [{ key: NO_STORY, story: null }] : []), ...stories.map((s) => ({ key: s.key, story: s }))],
     viewer,
@@ -1514,19 +1523,18 @@ export function checkTaskboardMove(stdout, card, column) {
 export function sprintView(s) {
   async function settingsOf(c) {
     const team = s.teamKey(c);
-    const project = `types\n${c.org}\n${c.project}`;
-    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(project)];
+    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(s.typesKey(c))];
     const [it, areas, columns, ty] = await Promise.all([
       iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
       s.areasOf(c),
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
-      types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
+      types?.value ?? s.readTypes(c),
     ]);
     const until = iteration?.until ?? iterationUntil(it.finish, Date.now());
     s.keepAreasUntil(c, until);
     if (!iteration) s.keep(`iteration\n${team}`, it, until);
     if (!board) s.keep(`board\n${team}`, { columns }, until);
-    if (!types) s.keep(project, ty, until);
+    if (!types) s.keep(s.typesKey(c), ty, until);
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
@@ -1683,8 +1691,10 @@ export function sprintName(path, backlogIteration) {
 // (parseBacklogIds) comes in backlog order, so it is not relied on; it
 // orders only what has no order value, after all that has one. Ids the
 // query did not find are counted (meta.missing); `limited` says the ids
-// were more than one query reads (AZ_QUERY_LIMIT).
-export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer }) {
+// were more than one query reads (AZ_QUERY_LIMIT). `typeColors` are the
+// colors of the project's work item types (parseAzureTypes), none where
+// they were not read.
+export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer, typeColors = {} }) {
   const at = new Map(ids.map((id, i) => [id, i]));
   const rank = (i) => i.order ?? Infinity;
   const rows = items
@@ -1695,7 +1705,7 @@ export function backlogList({ level, childLevel, config, settings, area, ids, it
   return {
     shape: "backlog",
     meta: {
-      level, childLevel, typeStates: config.typeStates, states: config.states, orderField: config.orderField,
+      level, childLevel, typeStates: config.typeStates, states: config.states, typeColors, orderField: config.orderField,
       area, iteration: settings.defaultIteration, follows: Boolean(settings.follows), missing: read - rows.length,
     },
     rows,
@@ -1782,18 +1792,34 @@ export function backlogView(s) {
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
+  // The colors of the project's work item types, as kept (s.typesKey: the
+  // Sprint keeps the same entry), else read and kept BACKLOG_KEEP_MS; a read
+  // that fails gives none and the warning that says so, and keeps nothing.
+  async function typeColorsOf(c) {
+    const held = s.keptValue(s.typesKey(c));
+    if (held) return { colors: held.value.colors, warnings: [] };
+    try {
+      const types = await s.readTypes(c);
+      s.keep(s.typesKey(c), types, Date.now() + BACKLOG_KEEP_MS);
+      return { colors: types.colors, warnings: [] };
+    } catch (e) {
+      return { colors: {}, warnings: [`Farben der Work-Item-Typen nicht gelesen: ${errorText(e)}`] };
+    }
+  }
   return {
     forget,
     async load(view) {
       const c = view.context;
       const me = s.whoAmI();
       const kept = await backlogSettingsOf(c);
+      const types = typeColorsOf(c);
       const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
       const read = ids.slice(0, AZ_QUERY_LIMIT);
       const out = read.length ? await s.az(azQueryArgs(c, idsWiql(read, kept.config.orderField ? [kept.config.orderField] : []))) : "";
-      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me });
+      const { colors, warnings } = await types;
+      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me, typeColors: colors });
       s.noViewerOf(data);
-      return { data, warnings: [] };
+      return { data, warnings };
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
     // Creates a work item ({ type, title }) in the team's default area and
@@ -1953,7 +1979,8 @@ export const azureRelated = (az) => ({
 // What the Sprint keeps, each read once and kept until the sprint ends
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns; per project
-// the work item types, until the sprint of the team that read them ends.
+// the work item types, until the sprint of the team that read them ends
+// (the Backlog reads and keeps the same entry: typesKey).
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -1968,7 +1995,10 @@ export const azureRelated = (az) => ({
 // configuration and its settings. A refresh then reads the level's ids (az
 // rest) and, after them, one query for their fields; a backlog without
 // ids asks no query. `r` on the Backlog and a state change or create Azure
-// refuses drop what it keeps.
+// refuses drop what it keeps. Beside the ids, a refresh reads the project's
+// work item types (for their colors) where neither view keeps them, and
+// keeps them BACKLOG_KEEP_MS; one that fails is a warning, keeps nothing
+// and is read again with the next refresh.
 //
 // Both views read the team's areas (the Backlog for its default area) and
 // keep them as one, for the shorter of their times (areasOf); `r` on
@@ -2008,11 +2038,15 @@ export function makeAzure(paths) {
       });
   const noViewer = "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)";
   const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
+  // The key of a project's work item types, which both views keep.
+  const typesKey = (c) => `types\n${c.org}\n${c.project}`;
   const areasKey = (c) => `areas\n${teamKey(c)}`;
   // What the views share: az, what is kept, who az is (and the data's words
-  // for why it is not known), and a state change.
+  // for why it is not known), a project's work item types (readTypes, kept
+  // under typesKey), and a state change.
   const shared = {
-    az, keptValue, whoAmI, teamKey,
+    az, keptValue, whoAmI, teamKey, typesKey,
+    readTypes: (c) => az(azTypesArgs(c)).then(parseAzureTypes),
     // The team's areas (parseAreas), one entry for both views: read where
     // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
@@ -2839,6 +2873,17 @@ export function chipTone(name) {
   return n ? `ansi${Number(n) - 8}` : name;
 }
 
+// The tone of the line across the top of a card or row (typeLine,
+// helpers.js) in the theme `t`: an Azure work item type's color (`hex`, from
+// the project's type definitions) by hue (hueTone), as a label's; a GitHub
+// issue type's by its named color (chipTone), as its chip's. Null where the
+// type has no color, and for an item without an issue type (an Epic by its
+// title alone too): no line.
+export function typeLineTone(t, item, hex) {
+  if (hex) return hueTone(t, hex);
+  return item.typeColor ? chipTone(item.typeColor) : null;
+}
+
 // The tone of an item's type marker in the theme `t`, or null for a type
 // without a color (it keeps the plain chip). An issue type's own color
 // (typeColor) wins; an Epic by its title alone takes its "epic" label's
@@ -2857,9 +2902,9 @@ export function typeTone(t, item) {
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu and its keys, a detail
 // section, a check's color, a status pill, a column's color and head, a
-// card's edge, a selected card's or row's look, a card's chip in a tone, for
-// a label, for its type and for a session). Which tones and tints they take:
-// tones.js.
+// card's edge, the line of its type, a selected card's or row's look, a
+// card's chip in a tone, for a label, for its type and for a session). Which
+// tones and tints they take: tones.js.
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -3119,6 +3164,17 @@ export const columnHead = (t, col, count, ground) =>
 // A card's left edge: a narrow bar in its column's color, as tall as the
 // card's content beside it.
 export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
+
+// A thin line across the top of a card or row in its type's color
+// (typeLineTone: `hex`, an Azure type's color, or a GitHub issue type's),
+// laid over its top edge, `inset` from each side (a rounded card's corner);
+// null where its type has no color. The card or row it stands in is
+// relative(), so it is placed in that one.
+export function typeLine(t, item, hex, inset = 0) {
+  const tone = typeLineTone(t, item, hex);
+  if (!tone) return null;
+  return div().id("type-line").absolute().top(0).left(inset).right(inset).h(2).rounded(1).bg(t[tone] ?? t.muted);
+}
 
 // A card's or row's look as selected or not, in every shape alike, for an
 // element's map(): a selected one has the accent border and selectedBg; one
@@ -3987,15 +4043,17 @@ export const MODALS = { start: startModal, status: statusModal, columns: columns
 
 // The backlog shape: a team's backlog level (its Stories) as a list in
 // backlog order, one row per work item with its id, type, title, state,
-// sprint ("—" for none) and assignee, walked as one column. n creates a
-// work item (the create dialog, actions/create.js), s changes the selected
-// item's state from its type's states (the status menu, actions/state.js),
-// Enter shows the details. Not the prs shape: that one draws sections of
-// GitHub pull requests with their author, draft mark, checks and age. The
-// data: { shape: "backlog", meta: { level, childLevel, typeStates, states,
-// orderField, area, iteration, missing }, rows, viewer, noViewer, total,
-// limited, limit } (backlogList, sources/azure/backlog.js). View fields it reads:
-// id, source, layout (as writeAtOnce does), context (the create dialog).
+// sprint ("—" for none) and assignee, a line across its top in its type's
+// color (typeLine), walked as one column. n creates a work item (the create
+// dialog, actions/create.js), s changes the selected item's state from its
+// type's states (the status menu, actions/state.js), Enter shows the
+// details. Not the prs shape: that one draws sections of GitHub pull
+// requests with their author, draft mark, checks and age. The data: {
+// shape: "backlog", meta: { level, childLevel, typeStates, states,
+// typeColors, orderField, area, iteration, missing }, rows, viewer, noViewer,
+// total, limited, limit } (backlogList, sources/azure/backlog.js). View
+// fields it reads: id, source, layout (as writeAtOnce does), context (the
+// create dialog).
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -4090,8 +4148,10 @@ function drawBacklog(b, t, mono, view, st) {
   const row = (r) => {
     const selected = st.sel?.key === r.key;
     const session = linkedSession(r, allSpaces);
+    const line = typeLine(t, r, data.meta.typeColors?.[r.type]);
     return h_flex()
       .id(`row-${r.key}`)
+      .relative()
       .flex_none()
       .gap(12)
       .px(18)
@@ -4113,7 +4173,8 @@ function drawBacklog(b, t, mono, view, st) {
         .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
       .child(div().w(WIDTH.state).flex_none().child(chip(t, r.state ?? "ohne Status", t.background, t[stateColor(data, r.state)] ?? t.muted)))
       .child(cell(WIDTH.sprint, r.sprint ?? "—"))
-      .child(cell(WIDTH.assignee, r.assignees.join(", ")));
+      .child(cell(WIDTH.assignee, r.assignees.join(", ")))
+      .when(Boolean(line), (el) => el.child(line));
   };
   return v_flex()
     .flex_1()
@@ -4376,15 +4437,18 @@ function hiddenLine(b, t, view, st) {
 // A card in its column `col`: its left edge in the column's color, its key,
 // its title, and a line of its type and labels as chips (not the label an
 // Epic by its title takes its type's color from: epicLabel), its
-// sub-issues' count, its assignees and its session's chip.
+// sub-issues' count, its assignees and its session's chip; an issue type
+// with a color draws a line across its top in that color too (typeLine).
 function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const session = linkedSession(card, allSpaces);
   const type = typeChip(t, card);
   const labels = card.labels.filter((l) => l !== epicLabel(card));
+  const line = typeLine(t, card, null, 6);
   return h_flex()
     .id(`card-${card.key}`)
+    .relative()
     .flex_none()
     .items_stretch()
     .py(9)
@@ -4436,7 +4500,8 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
           .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
           .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
-      ));
+      ))
+    .when(Boolean(line), (el) => el.child(line));
 }
 
 // Hides a shown column or shows a hidden one; the selection follows
@@ -4592,10 +4657,11 @@ function scrollToRow(b, view, key) {
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). Keys walk the stories, then each column (sprintNav). The
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
-// states, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
-// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
-// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js). View
-// fields it reads: id, source, layout (as writeAtOnce does).
+// states, typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
+// viewer, noViewer, total, limited, limit } (sprintBoard,
+// sources/azure/sprint.js). View fields it reads: id, source, layout (as
+// writeAtOnce does).
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -4726,17 +4792,20 @@ function drawSprint(b, t, mono, view, st) {
     .child(v_flex().id("sprint-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(sprintState(b).scroll).children(rows.map(rowEl)));
 }
 
-// A row's story at the left: its key and type, title and state; one the
-// filter or "nur meine" hides (it shows for its tasks) is dimmed and takes
-// no click. The row "Ohne Story" names itself.
+// A row's story at the left: its key and type, title and state, and a line
+// across its top in its type's color (typeLine); one the filter or "nur
+// meine" hides (it shows for its tasks) is dimmed and takes no click. The
+// row "Ohne Story" names itself.
 function storyCell(b, t, mono, view, st, r, nav) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
   const story = r.story;
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
+  const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
   return cell
     .id(`story-${story.key}`)
+    .relative()
     .p(6)
     .rounded(8)
     .border_1()
@@ -4750,18 +4819,22 @@ function storyCell(b, t, mono, view, st, r, nav) {
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
-    .child(stateChip(t, st.data, story.state));
+    .child(stateChip(t, st.data, story.state))
+    .when(Boolean(line), (el) => el.child(line));
 }
 
 const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, t[stateColor(data, state)] ?? t.muted).flex_none();
 
 // A task's card: its left edge in its column's color, its key, title, own
-// state, assignee and session; a click selects it (clickItem).
+// state, assignee and session, and a line across its top in its type's
+// color (typeLine); a click selects it (clickItem).
 function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
   const session = linkedSession(card, allSpaces);
+  const line = typeLine(t, card, st.data.meta.typeColors?.[card.type], 6);
   return h_flex()
     .id(`card-${card.key}`)
+    .relative()
     .flex_none()
     .items_stretch()
     .py(8)
@@ -4785,7 +4858,8 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
       .child(h_flex().gap(5).flex_wrap().items_center()
         .child(stateChip(t, st.data, shownState(card, col)))
         .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))));
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
+    .when(Boolean(line), (el) => el.child(line));
 }
 
 // How the sprint finds, changes and shows its items' states (actions/state.js).

@@ -5,7 +5,7 @@
 import { BoardError, errorText } from "../../shared.js";
 import { AZ_TIMEOUT, call } from "../../tools.js";
 import { AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azFailure, azStateArgs, checkStateResult, parseAreas, parseViewer } from "./common.js";
-import { sprintView } from "./sprint.js";
+import { azTypesArgs, parseAzureTypes, sprintView } from "./sprint.js";
 import { backlogView } from "./backlog.js";
 import { azureRelated } from "./related.js";
 
@@ -18,7 +18,8 @@ import { azureRelated } from "./related.js";
 // What the Sprint keeps, each read once and kept until the sprint ends
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns; per project
-// the work item types, until the sprint of the team that read them ends.
+// the work item types, until the sprint of the team that read them ends
+// (the Backlog reads and keeps the same entry: typesKey).
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -33,7 +34,10 @@ import { azureRelated } from "./related.js";
 // configuration and its settings. A refresh then reads the level's ids (az
 // rest) and, after them, one query for their fields; a backlog without
 // ids asks no query. `r` on the Backlog and a state change or create Azure
-// refuses drop what it keeps.
+// refuses drop what it keeps. Beside the ids, a refresh reads the project's
+// work item types (for their colors) where neither view keeps them, and
+// keeps them BACKLOG_KEEP_MS; one that fails is a warning, keeps nothing
+// and is read again with the next refresh.
 //
 // Both views read the team's areas (the Backlog for its default area) and
 // keep them as one, for the shorter of their times (areasOf); `r` on
@@ -73,11 +77,15 @@ export function makeAzure(paths) {
       });
   const noViewer = "az hat nicht gesagt, wer angemeldet ist (az account show; das braucht az login)";
   const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
+  // The key of a project's work item types, which both views keep.
+  const typesKey = (c) => `types\n${c.org}\n${c.project}`;
   const areasKey = (c) => `areas\n${teamKey(c)}`;
   // What the views share: az, what is kept, who az is (and the data's words
-  // for why it is not known), and a state change.
+  // for why it is not known), a project's work item types (readTypes, kept
+  // under typesKey), and a state change.
   const shared = {
-    az, keptValue, whoAmI, teamKey,
+    az, keptValue, whoAmI, teamKey, typesKey,
+    readTypes: (c) => az(azTypesArgs(c)).then(parseAzureTypes),
     // The team's areas (parseAreas), one entry for both views: read where
     // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's

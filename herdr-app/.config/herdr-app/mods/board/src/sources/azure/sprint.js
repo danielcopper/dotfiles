@@ -17,12 +17,16 @@ export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", 
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
 // The work item types' answer → { states (categoryStates, common.js),
-// types: { [type]: [state names] } }.
+// types: { [type]: [state names] }, colors: { [type]: "#rrggbb" } (each
+// type's own color, read as six hex digits without #, the form of its
+// states' colors in the same answer; a type without one, or with another
+// form, has none) }.
 export function parseAzureTypes(stdout) {
   const value = azJson(stdout, "die Work-Item-Typen")?.value;
   if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
   const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
-  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types };
+  const colors = Object.fromEntries(value.filter((type) => typeof type.color === "string" && /^[0-9a-f]{6}$/i.test(type.color)).map((type) => [type.name, `#${type.color.toLowerCase()}`]));
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types, colors };
 }
 
 // One WIQL query for the work items of the sprint `iteration` in the team's
@@ -105,7 +109,10 @@ export function sprintBoard({ iteration, columns, types, items, places, viewer }
   const loose = cols.some((c) => c.cards.some((card) => card.row === NO_STORY));
   return {
     shape: "sprint",
-    meta: { iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states, unplaced, unknownColumns },
+    meta: {
+      iterationId: iteration.id, iteration: iteration.name, finish: iteration.finish, typeStates: types.types, states: types.states, typeColors: types.colors,
+      unplaced, unknownColumns,
+    },
     columns: cols,
     rows: [...(loose ? [{ key: NO_STORY, story: null }] : []), ...stories.map((s) => ({ key: s.key, story: s }))],
     viewer,
@@ -166,19 +173,18 @@ export function checkTaskboardMove(stdout, card, column) {
 export function sprintView(s) {
   async function settingsOf(c) {
     const team = s.teamKey(c);
-    const project = `types\n${c.org}\n${c.project}`;
-    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(project)];
+    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(s.typesKey(c))];
     const [it, areas, columns, ty] = await Promise.all([
       iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
       s.areasOf(c),
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
-      types?.value ?? s.az(azTypesArgs(c)).then(parseAzureTypes),
+      types?.value ?? s.readTypes(c),
     ]);
     const until = iteration?.until ?? iterationUntil(it.finish, Date.now());
     s.keepAreasUntil(c, until);
     if (!iteration) s.keep(`iteration\n${team}`, it, until);
     if (!board) s.keep(`board\n${team}`, { columns }, until);
-    if (!types) s.keep(project, ty, until);
+    if (!types) s.keep(s.typesKey(c), ty, until);
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {

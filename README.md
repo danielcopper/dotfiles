@@ -448,7 +448,14 @@ herdr-app`. Which files of the package git tracks is set in the root
   issue types are chips in their named GitHub color, orange as yellow and
   pink as violet. An Epic by its "[Epic]" title alone gets an "Epic" chip in
   its "epic" label's color, in place of that label's own chip, and the
-  details name it an Epic. A selected card or row sits on a tint of the
+  details name it an Epic. A thin line across the top of a card or row is in
+  its type's color: on Azure, of every work item, the color the project's
+  work item types define (read once per project, kept by the Sprint and the
+  Backlog alike), brought onto the theme by hue as a label's is; on GitHub,
+  of an issue with an issue type, that type's named color as its chip has
+  it. A type without a color, and an item without a type (an Epic by its
+  title too), has no line; where the Backlog could not read the types, it
+  says so and draws none. A selected card or row sits on a tint of the
   accent, so its chips stay readable. `mods/board/src/ui/tones.js` holds the
   label and type colors, the selected background and how strong the chip,
   head and selected tints are.

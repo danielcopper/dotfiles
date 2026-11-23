@@ -42,8 +42,10 @@
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the
 // level's work items in their list by az rest, then one WIQL query for
-// their fields; one for an empty backlog); either one more while who az is
-// stays unknown. What the Sprint and the Backlog read once and keep, and
+// their fields; one for an empty backlog), and one more for the project's
+// work item types (their colors) while neither view keeps them; either one
+// more while who az is stays unknown. What the Sprint and the Backlog read
+// once and keep, and
 // for how long, makeAzure says. A state change costs one az call, a
 // Backlog's create one and a child's parent link one more; a create reads
 // the Backlog again, and one whose answer was unclear asks one WIQL query

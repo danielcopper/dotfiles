@@ -49,7 +49,10 @@
 //   boards iteration team list --timeframe current),
 //   azure-sprint-areas.json (az boards area team list),
 //   azure-sprint-columns.json (taskboardColumns), azure-sprint-types.json
-//   (workitemtypes), azure-sprint-taskboard.json (taskboardWorkItems, with
+//   (workitemtypes; each type's color, which the REST reference only names,
+//   written as its states' colors are, six hex digits without #, with the
+//   values of Azure's Agile process),
+//   azure-sprint-taskboard.json (taskboardWorkItems, with
 //   one work item the query does not find), azure-sprint-items.json (az
 //   boards query) and azure-sprint-account.json (az account show --query
 //   user);
@@ -4558,6 +4561,14 @@ test("UI: a Sprint with as many work items as az boards query gives says it may 
   assert.ok(texts(b.render()).includes("Nur die ersten 1000 Work Items des Sprints (so viele gibt az boards query)"));
 });
 
+test("the work item types' colors: each type's own as #rrggbb from six hex digits without #, the form of its states' colors; none for a type without one or in another form; the Sprint carries them", () => {
+  const { colors } = board.parseAzureTypes(fixture("azure-sprint-types.json"));
+  assert.deepEqual(colors, { "User Story": "#009ccc", Task: "#f2cb1d", Bug: "#cc293d" });
+  const odd = { value: [{ name: "A", color: "12345" }, { name: "B", color: "#123456" }, { name: "C" }, { name: "D", color: 7 }, { name: "E", color: "a1B2c3" }, { name: "F", color: "a1b2c3d4" }, { name: "G", color: 123456 }] };
+  assert.deepEqual(board.parseAzureTypes(JSON.stringify(odd)).colors, { E: "#a1b2c3" });
+  assert.deepEqual(sprintData().meta.typeColors, colors);
+});
+
 test("the sprint's tasks are the work items of the types the taskboard's columns map: one it does not place is left out and counted, as is one in a column it does not list", () => {
   const parts = sprintParts();
   const places = board.parseTaskboard(taskboardAnswer({}, [312]));
@@ -4784,6 +4795,7 @@ const AZB = {
   settings: (a) => a.includes("show-default-iteration"),
   areas: (a) => a[0] === "boards" && a[1] === "area",
   ids: (a) => a[0] === "rest",
+  types: (a) => a.includes("workitemtypes"),
   query: (a) => a[0] === "boards" && a[1] === "query" && !a.some((x) => x.includes("@Me")),
   created: (a) => a[0] === "boards" && a[1] === "query" && a.some((x) => x.includes("@Me")),
   me: (a) => a[0] === "account",
@@ -4800,11 +4812,13 @@ async function answerBacklogSettings(host, { settings = fixture("azure-backlog-s
   const answers = { levels: fixture("azure-backlog-levels.json"), config: fixture("azure-backlog-config.json"), settings, areas };
   for (const [kind, out] of Object.entries(answers)) if (openAzb(host, kind).length) await host.answer("az", ok(out), AZB[kind]);
 }
-// One refresh's answers: the ids, then the query for their fields; `me`
-// as answerRefresh takes it.
-async function answerBacklog(host, { me = true, ids = fixture("azure-backlog-ids.json"), items = fixture("azure-backlog-items.json") } = {}) {
+// One refresh's answers: the ids, then the query for their fields, and the
+// project's work item types where they are asked (`types`: their answer);
+// `me` as answerRefresh takes it.
+async function answerBacklog(host, { me = true, ids = fixture("azure-backlog-ids.json"), items = fixture("azure-backlog-items.json"), types = ok(fixture("azure-sprint-types.json")) } = {}) {
   await host.answer("az", typeof ids === "string" ? ok(ids) : ids, AZB.ids);
   if (openAzb(host, "query").length) await host.answer("az", ok(items), AZB.query);
+  if (openAzb(host, "types").length) await host.answer("az", types, AZB.types);
   if (me) await host.answer("az", me === true ? ok(fixture("azure-sprint-account.json")) : me, AZB.me);
 }
 // The fixture's ids with more appended (`extra`: ids).
@@ -4927,8 +4941,10 @@ test("UI: the Backlog reads its settings once, all at the same time, then per re
   assert.equal(b.view().layout, "backlog");
   assert.deepEqual(backlogCounts(host, [...BACKLOG_SETTINGS, "me", "ids"]), [1, 1, 1, 1, 1, 0], "at the same time, beside who az is");
   await answerBacklogSettings(host);
-  assert.deepEqual(backlogCounts(host, ["ids", "query"]), [1, 0], "the ids first");
+  assert.deepEqual(backlogCounts(host, ["ids", "types", "query"]), [1, 1, 0], "the ids first, beside the project's work item types");
   assert.ok(openAzb(host, "ids")[0].args.includes(board.backlogIdsUrl(b.view().context, "Microsoft.RequirementCategory")));
+  assert.deepEqual(openAzb(host, "types")[0].args, board.azTypesArgs(b.view().context));
+  await host.answer("az", ok(fixture("azure-sprint-types.json")), AZB.types);
   await host.answer("az", ok(fixture("azure-backlog-ids.json")), AZB.ids);
   const [query] = openAzb(host, "query");
   assert.ok(query.args.includes(board.idsWiql([302, 401, 301, 402, 403], ["Microsoft.VSTS.Common.StackRank"])), "their fields, after them");
@@ -4936,7 +4952,7 @@ test("UI: the Backlog reads its settings once, all at the same time, then per re
   await host.answer("az", ok(fixture("azure-sprint-account.json")), AZB.me);
   assert.equal(b.state(b.view().id).data.shape, "backlog");
   await refreshSprint(b, cx);
-  assert.deepEqual(backlogCounts(host, [...BACKLOG_SETTINGS, "me", "ids"]), [0, 0, 0, 0, 0, 1], "a refresh: the ids, then the query");
+  assert.deepEqual(backlogCounts(host, [...BACKLOG_SETTINGS, "me", "ids", "types"]), [0, 0, 0, 0, 0, 1, 0], "a refresh: the ids, then the query");
   await answerBacklog(host, { me: false });
   assert.equal(board.BACKLOG_KEEP_MS, 4 * 3600000, "four hours");
   advance(board.BACKLOG_KEEP_MS - 60000);
@@ -4952,6 +4968,7 @@ test("UI: an empty backlog asks no query and says so; r reads the Backlog's sett
   const { b, cx, host } = await bootBoard({ stored: BACKLOG_STORED, which: found });
   await answerBacklogSettings(host);
   await host.answer("az", ok('{"workItems": []}'), AZB.ids);
+  await host.answer("az", ok(fixture("azure-sprint-types.json")), AZB.types);
   assert.equal(openAzb(host, "query").length, 0, "no ids, no query");
   await host.answer("az", ok(fixture("azure-sprint-account.json")), AZB.me);
   assert.ok(texts(b.render()).includes("Der Backlog ist leer"));
@@ -4960,7 +4977,7 @@ test("UI: an empty backlog asks no query and says so; r reads the Backlog's sett
   await answerBacklogSettings(host);
   await answerBacklog(host, { me: false });
   await press(b, cx, "v");
-  assert.deepEqual(openCounts(host, SETTINGS), [1, 0, 1, 1], "the Sprint reads its own; the team's areas are kept for both");
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 0, 1, 0], "the Sprint reads its own; the team's areas and the project's work item types are kept for both");
 });
 
 test("UI: r on the Backlog reads its own settings and the team's areas again, not the Sprint's sprint, columns or types", async () => {
@@ -5305,6 +5322,7 @@ test("UI: a backlog longer than one query reads asks for the first ones and says
   const { b, host } = await bootBoard({ stored: BACKLOG_STORED, which: found });
   await answerBacklogSettings(host);
   await host.answer("az", ok(ids), AZB.ids);
+  await host.answer("az", ok(fixture("azure-sprint-types.json")), AZB.types);
   const [query] = openAzb(host, "query");
   const asked = query.args.find((a) => a.startsWith("SELECT")).match(/IN \(([^)]*)\)/)[1].split(", ");
   assert.deepEqual([asked.length, asked[0], asked.at(-1)], [1000, "1000", "1999"]);
@@ -6771,6 +6789,84 @@ test("UI: a selected row of the Backlog and of a PR list, and a marked line of t
   await press(related.b, related.cx, "j");
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-0")), [board.selectedBg(t), t.accent]);
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-1")), ["none", t.chrome]);
+});
+
+// The thin line across the top of a card or row in its type's color, or
+// null where it has none.
+const typeLine = (root, id) => byId(byId(root, id), "type-line");
+// A line's color, whether it is laid over the top edge of the card or row
+// `id` (absolute, at its top, which is relative), its height, and its inset
+// from each side.
+const lineLook = (root, id) => {
+  const line = typeLine(root, id);
+  return [line?.with.bg?.[0], line?.styles.includes("absolute") && byId(root, id).styles.includes("relative"), line?.with.top?.[0], line?.with.h?.[0],
+    line?.with.left?.[0], line?.with.right?.[0]];
+};
+
+test("a type line's tone: an Azure type's color by hue, a GitHub issue type's by its named color (a bright one as its plain color); none for a type without a color or an item without an issue type", () => {
+  const cards = colorsBoard().columns.flatMap((c) => c.cards);
+  const card = (key) => cards.find((c) => c.key === key);
+  for (const mode of COPPER) {
+    const t = copperTheme(mode);
+    assert.deepEqual(["#cc293d", "#f2cb1d", "#009ccc", "#b2b2b2"].map((hex) => board.typeLineTone(t, azureItem(), hex)), ["ansi1", "ansi3", "ansi4", "muted"], mode);
+    assert.equal(board.typeLineTone(t, azureItem(), "#773b93"), board.hueTone(t, "#773b93"));
+    assert.equal(board.typeLineTone(t, azureItem(), undefined), null, "an Azure type without a color");
+    assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col5"].map((k) => board.typeLineTone(t, card(k))), ["ansi1", "ansi3", "ansi2"], "Bug RED, Task ORANGE, Epic GREEN");
+    assert.deepEqual(["PVTI_col3", "PVTI_col4"].map((k) => board.typeLineTone(t, card(k))), [null, null], "an Epic by its title has no issue type");
+    assert.equal(board.typeLineTone(t, { ...card("PVTI_col1"), typeColor: null }), null, "an issue type without a color");
+  }
+});
+
+test("UI: the Sprint draws a thin line across the top of each story and task in its type's color from the project's type definitions, by hue; a type they give no color has none", async () => {
+  const { b, host, st } = await openSprint();
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  let root = b.render();
+  for (const [id, tone] of [["story-AB#301", "ansi4"], ["story-AB#302", "ansi4"], ["card-AB#311", "ansi3"], ["card-AB#332", "ansi1"]]) {
+    assert.deepEqual(lineLook(root, id), [t[tone], true, 0, 2, 6, 6], id);
+  }
+  assert.equal(byId(root, "card-AB#311").kids[0].with.bg[0], t.muted, "the card's edge stays first, in its column's color");
+  st().data.meta.typeColors = { Task: "#f2cb1d" };
+  root = b.render();
+  assert.deepEqual([typeLine(root, "card-AB#332"), typeLine(root, "story-AB#301")], [null, null]);
+  assert.ok(typeLine(root, "card-AB#311"));
+});
+
+test("UI: the Backlog reads the project's work item types beside its first refresh for a line across the top of each row in its type's color, and keeps them: neither its next refresh nor the project's Sprint reads them again", async () => {
+  const { b, cx, host } = await openBacklog();
+  const t = copperTheme("light");
+  host.theme = () => t;
+  const root = b.render();
+  assert.deepEqual([lineLook(root, "row-AB#401"), lineLook(root, "row-AB#402")], [[t.ansi4, true, 0, 2, 0, 0], [t.ansi1, true, 0, 2, 0, 0]]);
+  await refreshSprint(b, cx);
+  assert.deepEqual(backlogCounts(host, ["ids", "types"]), [1, 0], "a refresh reads the types no more");
+  await answerBacklog(host, { me: false });
+  assert.equal(lineLook(b.render(), "row-AB#402")[0], t.ansi1, "it draws them from what it keeps");
+  await press(b, cx, "v");
+  assert.deepEqual(openCounts(host, ["iteration", "columns", "types"]), [1, 1, 0], "the Sprint of the same project reads them no more");
+});
+
+test("UI: the Backlog whose read of the work item types fails says so and draws no type lines; its next refresh asks again", async () => {
+  const { b, cx, host, st } = await openBacklog({ types: azRefused("Operation returned a 403 status code.") });
+  assert.deepEqual(st().warnings, ["Farben der Work-Item-Typen nicht gelesen: Operation returned a 403 status code."]);
+  assert.equal(st().error, null, "the Backlog itself shows");
+  host.theme = () => copperTheme("dark");
+  assert.equal(typeLine(b.render(), "row-AB#401"), null);
+  await refreshSprint(b, cx);
+  assert.equal(backlogCounts(host, ["types"])[0], 1, "asked again");
+  await answerBacklog(host, { me: false });
+  assert.deepEqual(st().warnings, []);
+  assert.ok(typeLine(b.render(), "row-AB#401"));
+});
+
+test("UI: a GitHub card with an issue type has a line across its top in the type's color; one without an issue type, an Epic by its title too, has none", async () => {
+  const { b, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const t = copperTheme("light");
+  host.theme = () => t;
+  const root = b.render();
+  assert.deepEqual(["PVTI_col1", "PVTI_col2", "PVTI_col5"].map((k) => lineLook(root, `card-${k}`)),
+    [[t.ansi1, true, 0, 2, 6, 6], [t.ansi3, true, 0, 2, 6, 6], [t.ansi2, true, 0, 2, 6, 6]]);
+  assert.deepEqual(["PVTI_col3", "PVTI_col4"].map((k) => typeLine(root, `card-${k}`)), [null, null]);
 });
 
 // ---- The details block's own scroll (scroll.js) ----

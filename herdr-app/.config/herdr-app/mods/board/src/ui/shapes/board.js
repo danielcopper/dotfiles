@@ -16,7 +16,7 @@ import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget,
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
-import { button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip } from "../helpers.js";
+import { button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -187,15 +187,18 @@ function hiddenLine(b, t, view, st) {
 // A card in its column `col`: its left edge in the column's color, its key,
 // its title, and a line of its type and labels as chips (not the label an
 // Epic by its title takes its type's color from: epicLabel), its
-// sub-issues' count, its assignees and its session's chip.
+// sub-issues' count, its assignees and its session's chip; an issue type
+// with a color draws a line across its top in that color too (typeLine).
 function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const session = linkedSession(card, allSpaces);
   const type = typeChip(t, card);
   const labels = card.labels.filter((l) => l !== epicLabel(card));
+  const line = typeLine(t, card, null, 6);
   return h_flex()
     .id(`card-${card.key}`)
+    .relative()
     .flex_none()
     .items_stretch()
     .py(9)
@@ -247,7 +250,8 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
           .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
           .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
-      ));
+      ))
+    .when(Boolean(line), (el) => el.child(line));
 }
 
 // Hides a shown column or shows a hidden one; the selection follows

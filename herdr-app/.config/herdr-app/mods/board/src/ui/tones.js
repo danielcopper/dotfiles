@@ -115,6 +115,17 @@ export function chipTone(name) {
   return n ? `ansi${Number(n) - 8}` : name;
 }
 
+// The tone of the line across the top of a card or row (typeLine,
+// helpers.js) in the theme `t`: an Azure work item type's color (`hex`, from
+// the project's type definitions) by hue (hueTone), as a label's; a GitHub
+// issue type's by its named color (chipTone), as its chip's. Null where the
+// type has no color, and for an item without an issue type (an Epic by its
+// title alone too): no line.
+export function typeLineTone(t, item, hex) {
+  if (hex) return hueTone(t, hex);
+  return item.typeColor ? chipTone(item.typeColor) : null;
+}
+
 // The tone of an item's type marker in the theme `t`, or null for a type
 // without a color (it keeps the plain chip). An issue type's own color
 // (typeColor) wins; an Epic by its title alone takes its "epic" label's

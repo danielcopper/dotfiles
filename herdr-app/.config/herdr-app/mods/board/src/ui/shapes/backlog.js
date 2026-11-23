@@ -1,14 +1,16 @@
 // The backlog shape: a team's backlog level (its Stories) as a list in
 // backlog order, one row per work item with its id, type, title, state,
-// sprint ("—" for none) and assignee, walked as one column. n creates a
-// work item (the create dialog, actions/create.js), s changes the selected
-// item's state from its type's states (the status menu, actions/state.js),
-// Enter shows the details. Not the prs shape: that one draws sections of
-// GitHub pull requests with their author, draft mark, checks and age. The
-// data: { shape: "backlog", meta: { level, childLevel, typeStates, states,
-// orderField, area, iteration, missing }, rows, viewer, noViewer, total,
-// limited, limit } (backlogList, sources/azure/backlog.js). View fields it reads:
-// id, source, layout (as writeAtOnce does), context (the create dialog).
+// sprint ("—" for none) and assignee, a line across its top in its type's
+// color (typeLine), walked as one column. n creates a work item (the create
+// dialog, actions/create.js), s changes the selected item's state from its
+// type's states (the status menu, actions/state.js), Enter shows the
+// details. Not the prs shape: that one draws sections of GitHub pull
+// requests with their author, draft mark, checks and age. The data: {
+// shape: "backlog", meta: { level, childLevel, typeStates, states,
+// typeColors, orderField, area, iteration, missing }, rows, viewer, noViewer,
+// total, limited, limit } (backlogList, sources/azure/backlog.js). View
+// fields it reads: id, source, layout (as writeAtOnce does), context (the
+// create dialog).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -21,7 +23,7 @@ import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/
 import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
 import { MODALS } from "../modals/index.js";
-import { chip, selectedLook, sessionChip, shownOf, workItemDetail } from "../helpers.js";
+import { chip, selectedLook, sessionChip, shownOf, typeLine, workItemDetail } from "../helpers.js";
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -116,8 +118,10 @@ function drawBacklog(b, t, mono, view, st) {
   const row = (r) => {
     const selected = st.sel?.key === r.key;
     const session = linkedSession(r, allSpaces);
+    const line = typeLine(t, r, data.meta.typeColors?.[r.type]);
     return h_flex()
       .id(`row-${r.key}`)
+      .relative()
       .flex_none()
       .gap(12)
       .px(18)
@@ -139,7 +143,8 @@ function drawBacklog(b, t, mono, view, st) {
         .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
       .child(div().w(WIDTH.state).flex_none().child(chip(t, r.state ?? "ohne Status", t.background, t[stateColor(data, r.state)] ?? t.muted)))
       .child(cell(WIDTH.sprint, r.sprint ?? "—"))
-      .child(cell(WIDTH.assignee, r.assignees.join(", ")));
+      .child(cell(WIDTH.assignee, r.assignees.join(", ")))
+      .when(Boolean(line), (el) => el.child(line));
   };
   return v_flex()
     .flex_1()

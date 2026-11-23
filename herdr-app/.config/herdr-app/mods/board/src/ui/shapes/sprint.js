@@ -8,10 +8,11 @@
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). Keys walk the stories, then each column (sprintNav). The
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
-// states, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
-// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
-// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js). View
-// fields it reads: id, source, layout (as writeAtOnce does).
+// states, typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
+// viewer, noViewer, total, limited, limit } (sprintBoard,
+// sources/azure/sprint.js). View fields it reads: id, source, layout (as
+// writeAtOnce does).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -24,7 +25,7 @@ import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, workItemDetail } from "../helpers.js";
+import { cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, typeLine, workItemDetail } from "../helpers.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -155,17 +156,20 @@ function drawSprint(b, t, mono, view, st) {
     .child(v_flex().id("sprint-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(sprintState(b).scroll).children(rows.map(rowEl)));
 }
 
-// A row's story at the left: its key and type, title and state; one the
-// filter or "nur meine" hides (it shows for its tasks) is dimmed and takes
-// no click. The row "Ohne Story" names itself.
+// A row's story at the left: its key and type, title and state, and a line
+// across its top in its type's color (typeLine); one the filter or "nur
+// meine" hides (it shows for its tasks) is dimmed and takes no click. The
+// row "Ohne Story" names itself.
 function storyCell(b, t, mono, view, st, r, nav) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
   const story = r.story;
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
+  const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
   return cell
     .id(`story-${story.key}`)
+    .relative()
     .p(6)
     .rounded(8)
     .border_1()
@@ -179,18 +183,22 @@ function storyCell(b, t, mono, view, st, r, nav) {
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
-    .child(stateChip(t, st.data, story.state));
+    .child(stateChip(t, st.data, story.state))
+    .when(Boolean(line), (el) => el.child(line));
 }
 
 const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, t[stateColor(data, state)] ?? t.muted).flex_none();
 
 // A task's card: its left edge in its column's color, its key, title, own
-// state, assignee and session; a click selects it (clickItem).
+// state, assignee and session, and a line across its top in its type's
+// color (typeLine); a click selects it (clickItem).
 function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
   const session = linkedSession(card, allSpaces);
+  const line = typeLine(t, card, st.data.meta.typeColors?.[card.type], 6);
   return h_flex()
     .id(`card-${card.key}`)
+    .relative()
     .flex_none()
     .items_stretch()
     .py(8)
@@ -214,7 +222,8 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
       .child(h_flex().gap(5).flex_wrap().items_center()
         .child(stateChip(t, st.data, shownState(card, col)))
         .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
-        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))));
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
+    .when(Boolean(line), (el) => el.child(line));
 }
 
 // How the sprint finds, changes and shows its items' states (actions/state.js).
