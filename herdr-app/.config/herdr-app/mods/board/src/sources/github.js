@@ -31,15 +31,31 @@ const ITEM_FIELDS = `
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
 
+// How many items GitHub sends a page at most (a connection's `first`).
+export const PAGE = 100;
+
+// The first page of a board's items, or the one after `read` items: up to
+// PAGE, and no more than the view's limit leaves (views.json's `limit`, the
+// most a board reads: 1000 by default, ten pages).
+const pageSize = (view, read = 0) => Math.min(PAGE, view.limit - read);
+
+// The filter of a board's items: the view's, without the hidden columns.
+function boardFilter(view, hidden) {
+  const names = [...hidden];
+  const key = fieldKey(view.project.field);
+  return [view.filter, names.length ? `-${key}:${names.map(quoted).join(",")}` : ""].filter(Boolean).join(" ");
+}
+
 // One GraphQL request for a board view: the project, its field's options and
-// the items of the shown columns, plus one count per hidden column (`h0`,
-// `h1`, … aliases, first: 0) for the column menu, and the login gh runs as
-// (for "nur meine").
+// the first page of the items of the shown columns, plus one count per
+// hidden column (`h0`, `h1`, … aliases, first: 0) for the column menu, and
+// the login gh runs as (for "nur meine"). The pages after it come by
+// githubBoardPageArgs.
 export function githubBoardArgs(view, hidden) {
   const { owner, number, field } = view.project;
   const names = [...hidden];
   const key = fieldKey(field);
-  const filter = [view.filter, names.length ? `-${key}:${names.map(quoted).join(",")}` : ""].filter(Boolean).join(" ");
+  const filter = boardFilter(view, hidden);
   const counts = names.map((_, i) => `h${i}: items(first: 0, query: $h${i}) { totalCount }`).join("\n");
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
   const doc = `query($login: String!, $number: Int!, $field: String!, $filter: String!${vars}) {
@@ -49,7 +65,7 @@ export function githubBoardArgs(view, hidden) {
       projectV2(number: $number) {
         id title url
         field(name: $field) { ... on ProjectV2SingleSelectField { id name options { id name color } } }
-        items(first: ${view.limit}, query: $filter) { totalCount pageInfo { hasNextPage } nodes { ${ITEM_FIELDS} } }
+        items(first: ${pageSize(view)}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes { ${ITEM_FIELDS} } }
         ${counts}
       }
     }
@@ -60,6 +76,53 @@ export function githubBoardArgs(view, hidden) {
     "-f", `filter=${filter}`,
     ...names.flatMap((n, i) => ["-f", `h${i}=${[view.filter, `${key}:${quoted(n)}`].filter(Boolean).join(" ")}`]),
   ];
+}
+
+// One GraphQL request for the page of a board's items after the cursor
+// `after`, `read` items read before it: the same items as the first page's
+// query, nothing else.
+export function githubBoardPageArgs(view, hidden, after, read) {
+  const { owner, number, field } = view.project;
+  const doc = `query($login: String!, $number: Int!, $field: String!, $filter: String!, $after: String!) {
+  repositoryOwner(login: $login) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        items(first: ${pageSize(view, read)}, after: $after, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes { ${ITEM_FIELDS} } }
+      }
+    }
+  }
+}`;
+  return [
+    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`,
+    "-f", `filter=${boardFilter(view, hidden)}`, "-f", `after=${after}`,
+  ];
+}
+
+// The board answer `json` (githubBoardArgs) with the items of the next
+// page's answer `page` (githubBoardPageArgs, and its GraphQL errors)
+// added, each item once (one that moved between two reads may come
+// twice), and that page's pageInfo, which says whether more follow. A page
+// without its items is explained by the error at their path.
+export function addBoardPage(json, page, errors = []) {
+  const items = json.data.repositoryOwner.projectV2.items;
+  const next = page?.data?.repositoryOwner?.projectV2?.items;
+  if (!Array.isArray(next?.nodes)) {
+    const e = errorAt(errors, ["repositoryOwner", "projectV2", "items"]) ?? errorAt(errors, ["repositoryOwner"]);
+    const title = json.data.repositoryOwner.projectV2.title;
+    throw new BoardError(e ? `Projekt „${title}“: ${firstLine(e.message)}` : `Projekt „${title}“ lieferte die Einträge nach den ersten ${items.nodes.length} nicht`);
+  }
+  const seen = new Set(items.nodes.map((n) => n?.id));
+  items.nodes.push(...next.nodes.filter((n) => !seen.has(n?.id)));
+  items.pageInfo = next.pageInfo;
+  return json;
+}
+
+// Whether the board answer `json` has a page more to read: GitHub says so
+// and names where it starts, and the view's limit leaves room for it.
+export function nextBoardPage(json, view) {
+  const items = json?.data?.repositoryOwner?.projectV2?.items;
+  const after = items?.pageInfo?.hasNextPage ? items.pageInfo.endCursor : null;
+  return Array.isArray(items?.nodes) && typeof after === "string" && items.nodes.length < view.limit ? { after, read: items.nodes.length } : null;
 }
 
 // The logins of the people a pull request asks to review; a team's request,
@@ -123,7 +186,9 @@ export function errorAt(errors, path) {
 // gh's answer for githubBoardArgs (and the GraphQL errors that came with its
 // data) → a board:
 // { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer, limit }
-// (viewer: the login gh runs as, null when GitHub did not say).
+// (viewer: the login gh runs as, null when GitHub did not say; limited:
+// whether GitHub has more than the answer holds, which the view's limit
+// cut).
 // A hidden column's cards are only those moved there since the last refresh;
 // its count is the server's plus those. Items without a status, or in an
 // option the field no longer has, go to "Ohne Status", which takes no drops.
@@ -655,9 +720,16 @@ export function makeGithub(paths) {
     },
     views: {
       board: {
+        // The first page, then each next one, one call each, until GitHub
+        // has no more or the view's limit is read.
         async load(view, hiddenFor) {
           const hidden = hiddenFor(view);
           const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden));
+          for (let next = nextBoardPage(json, view); next; next = nextBoardPage(json, view)) {
+            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read));
+            addBoardPage(json, page.json, page.errors);
+            warnings.push(...page.warnings);
+          }
           return { data: parseGithubBoard(json, view, hidden, errors), warnings };
         },
         async move(view, data, card, column) {

@@ -11,10 +11,11 @@
 //     context either { team: { project, team }, views?: ["sprint",
 //     "backlog"] (both when missing) } or { prs: { project } }.
 //   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
-//     names], limit?, start? }] }, and by kind (VIEW_KINDS): a board has
-//     project { owner, number, field? ("Status") } and filter? (a Projects
-//     filter such as "assignee:@me"); its columns are the options of that
-//     single-select field. A list has sections [{ name, query }], one GitHub
+//     names], limit? (a board: the most items it reads, 1000; a list: per
+//     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
+//     board has project { owner, number, field? ("Status") } and filter? (a
+//     Projects filter such as "assignee:@me"); its columns are the options
+//     of that single-select field. A list has sections [{ name, query }], one GitHub
 //     search for pull requests each. A view may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
@@ -30,9 +31,11 @@
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
-// Calls: a GitHub view costs one gh call per refresh, and an issue's related
-// items (its description, parent, sub-issues and linked pull requests) one
-// more when its details open, again on `r` while they are open, and again
+// Calls: a GitHub board view costs one gh call per refresh for each page of
+// up to 100 items it reads (GitHub's most), at most ten for the 1000 items
+// of its limit; a list view one. An issue's related items (its
+// description, parent, sub-issues and linked pull requests) cost one more
+// when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
 // keeps of them keptRelated says); an item the details panel went down to
 // (Enter on a line, related.js) costs the same when it shows, a pull request

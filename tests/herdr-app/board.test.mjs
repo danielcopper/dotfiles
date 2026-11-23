@@ -611,7 +611,7 @@ test("the board query leaves hidden columns out and counts them in the same requ
   assert.ok(args.includes("-F") && args.includes("number=7"));
   const doc = value("query");
   assert.match(doc, /h0: items\(first: 0, query: \$h0\)/);
-  assert.match(doc, /items\(first: 100, query: \$filter\)/);
+  assert.match(doc, /items\(first: 100, query: \$filter\) \{ totalCount pageInfo \{ hasNextPage endCursor \}/, "a page of GitHub's 100, and where the next starts");
   assert.match(doc, /\$h1: String!/);
   assert.doesNotMatch(board.githubBoardArgs({ ...githubView(), filter: "" }, new Set()).find((a) => a.startsWith("query=")), /\$h0/);
   assert.match(doc, /^query\([^)]*\) \{\n  viewer \{ login \}\n/, "and who gh runs as, for „nur meine“");
@@ -703,6 +703,94 @@ test("a board with more items than one page says it is cut", () => {
   data.data.repositoryOwner.projectV2.items.totalCount = 290;
   const b = board.parseGithubBoard(data, githubView(), HIDDEN);
   assert.deepEqual([b.limited, b.total], [true, 290]);
+});
+
+// A board answer of github-board.json's items from `from` to `to`, as a
+// page: the first (with the project, its field and the counts) or a next
+// one (its items alone); `next` the cursor of the page after it, or null
+// for none.
+function boardPage(from, to, next, { first = from === 0, total = 6 } = {}) {
+  const data = json("github-board.json");
+  const project = data.data.repositoryOwner.projectV2;
+  const items = { totalCount: total, pageInfo: { hasNextPage: next !== null, endCursor: next ?? "end" }, nodes: project.items.nodes.slice(from, to) };
+  if (!first) return { data: { repositoryOwner: { projectV2: { items } } } };
+  project.items = items;
+  return data;
+}
+
+test("a board's next page is one query of its items after the cursor: the same filter and field, no counts, as many as its limit leaves (githubBoardPageArgs)", () => {
+  const args = board.githubBoardPageArgs(githubView(), HIDDEN, "Y3Vyc29y", 100);
+  const value = (name) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
+  assert.deepEqual([value("filter"), value("after"), value("login"), value("field")], ['assignee:@me -status:"Backlog","Done"', "Y3Vyc29y", "sample-user", "Status"]);
+  assert.ok(args.includes("-F") && args.includes("number=7"));
+  const doc = value("query").replace(/\s+/g, " ");
+  assert.match(doc, /items\(first: 100, after: \$after, query: \$filter\) \{ totalCount pageInfo \{ hasNextPage endCursor \} nodes \{ id fieldValueByName\(name: \$field\)/);
+  assert.doesNotMatch(doc, /\bviewer \{|h0:|options \{/, "nothing the first page read");
+  assert.equal(value("h0"), undefined);
+  assert.match(board.githubBoardPageArgs({ ...githubView(), limit: 250 }, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
+  assert.match(board.githubBoardArgs({ ...githubView(), limit: 30 }, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
+});
+
+test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addBoardPage, nextBoardPage)", () => {
+  const view = githubView();
+  const first = boardPage(0, 3, "c1");
+  assert.deepEqual(board.nextBoardPage(first, view), { after: "c1", read: 3 });
+  const second = boardPage(2, 6, null, { first: false });
+  board.addBoardPage(first, second);
+  const items = first.data.repositoryOwner.projectV2.items;
+  assert.deepEqual(items.nodes.map((n) => n.id), ["PVTI_rec1", "PVTI_rec2", "PVTI_rec3", "PVTI_rec4", "PVTI_rec5", "PVTI_rec6"], "the item both pages hold, once");
+  assert.equal(board.nextBoardPage(first, view), null, "no page more");
+  assert.equal(board.nextBoardPage(boardPage(0, 3, "c1"), { ...view, limit: 3 }), null, "the limit read");
+  const noCursor = boardPage(0, 3, "c1");
+  noCursor.data.repositoryOwner.projectV2.items.pageInfo.endCursor = null;
+  assert.equal(board.nextBoardPage(noCursor, view), null, "no cursor to go on from");
+  assert.equal(board.nextBoardPage({ data: { repositoryOwner: null } }, view), null, "no items: the parser explains");
+  const cut = board.parseGithubBoard(board.addBoardPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN);
+  assert.deepEqual([cut.limited, cut.total, cut.limit], [true, 9, 5], "cut at the limit: said, with the limit");
+  const missing = { data: { repositoryOwner: { projectV2: { items: null } } } };
+  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), missing, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items"], message: "no access" }]),
+    { message: "Projekt „Sample“: no access" });
+  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), missing), { message: "Projekt „Sample“ lieferte die Einträge nach den ersten 3 nicht" });
+});
+
+test("validateConfig: a board's limit is the most items it reads, 1000 by default and at most; a list's at most 100, 50 by default", () => {
+  const board1 = (limit) => ({ id: `b${limit}`, name: "B", layout: "board", project: { owner: "o", number: 1 }, ...(limit === undefined ? {} : { limit }) });
+  const list = (limit) => ({ id: `l${limit}`, name: "L", layout: "list", sections: [{ name: "A", query: "is:pr" }], ...(limit === undefined ? {} : { limit }) });
+  const { config, errors } = board.validateConfig({ sources: { github: { views: [board1(undefined), board1(1000), board1(1001), list(undefined), list(100), list(101), board1(0)] } } });
+  assert.deepEqual(config.github.views.map((v) => [v.id, v.limit]), [["bundefined", 1000], ["b1000", 1000], ["lundefined", 50], ["l100", 100]]);
+  assert.deepEqual(errors.map((e) => e.replace(/^.*: /, "")), ["„limit“ ist eine ganze Zahl von 1 bis 1000", "„limit“ ist eine ganze Zahl von 1 bis 100", "„limit“ ist eine ganze Zahl von 1 bis 1000"]);
+});
+
+test("UI: a GitHub board reads every page, one gh call each, and shows all their items; at its limit it stops and says the board is cut", async () => {
+  const { b, cx, host, st } = await bootBoard();
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  assert.equal(st().loading, true, "still reading");
+  const next = host.open("gh");
+  assert.equal(next.length, 1, "the next page");
+  assert.ok(next[0].args.includes("after=c1"));
+  await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, null, { first: false }))), isBoardCall);
+  assert.deepEqual([st().loading, host.open("gh").length, host.calls.filter((c) => isBoardCall(c.args)).length], [false, 0, 2], "two calls, then done");
+  const shown = (name) => b.navColumns(b.view()).find((c) => c.name === name).shown.map((c) => c.number);
+  assert.deepEqual([shown("Ready"), shown("In progress")], [[3004, 3005, 3007], [3000, 3001, 3003]], "the items of both pages");
+  assert.equal(texts(b.render()).some((s) => s.startsWith("Nur die ersten")), false, "nothing cut");
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[0].limit = 5;
+  const capped = await bootBoard({ config: JSON.stringify(config) });
+  assert.match(capped.host.open("gh")[0].args[3], /items\(first: 5, query/);
+  await capped.host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1", { total: 9 }))), isBoardCall);
+  assert.match(capped.host.open("gh")[0].args[3], /items\(first: 2, after/, "the rest to the limit");
+  await capped.host.answer("gh", ok(JSON.stringify(boardPage(3, 5, "c2", { first: false, total: 9 }))), isBoardCall);
+  assert.deepEqual([capped.host.open("gh").length, capped.st().loading], [0, false], "the limit read: no call more");
+  assert.ok(texts(capped.b.render()).some((s) => s.startsWith("Nur die ersten 5 von 9 Einträgen")), "and the board says it is cut");
+});
+
+test("UI: a board whose next page fails shows the error, as a failed first page does", async () => {
+  const { b, host, st } = await bootBoard();
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isBoardCall);
+  assert.deepEqual([st().loading, st().data, host.open("gh").length], [false, null, 0]);
+  assert.equal(st().error, "GitHub antwortete mit HTTP 502: Bad Gateway");
+  assert.ok(texts(b.render()).some((s) => /502/.test(s)), "the board says so");
 });
 
 // ---- gh's answers ----

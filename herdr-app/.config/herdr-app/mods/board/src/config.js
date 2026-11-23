@@ -37,10 +37,13 @@ const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"]
 
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
 // kinds/index.js, says how it shows): its own keys, what is wrong with them,
-// and its fields with their defaults filled in.
+// its fields with their defaults filled in, and the largest `limit` it takes:
+// a board's is the most items it reads, in pages of GitHub's 100 (one gh
+// call each); a list's is each search's `first`, one page.
 const VIEW_KINDS = {
   "github board": {
     keys: ["project", "filter"],
+    maxLimit: 1000,
     problems(v) {
       const p = v.project;
       const out = [];
@@ -52,11 +55,12 @@ const VIEW_KINDS = {
     defaults: (v) => ({
       project: { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" },
       filter: v.filter ?? "",
-      limit: v.limit ?? 100,
+      limit: v.limit ?? 1000,
     }),
   },
   "github list": {
     keys: ["sections"],
+    maxLimit: 100,
     problems: (v) =>
       Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query))
         ? []
@@ -81,7 +85,7 @@ function viewProblems(v) {
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
   if (v.hide !== undefined && !textList(v.hide)) out.push("„hide“ muss eine Liste von Texten sein");
-  if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= 100)) out.push("„limit“ ist eine ganze Zahl von 1 bis 100");
+  if (v.limit !== undefined && !(Number.isInteger(v.limit) && v.limit >= 1 && v.limit <= kind.maxLimit)) out.push(`„limit“ ist eine ganze Zahl von 1 bis ${kind.maxLimit}`);
   return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 

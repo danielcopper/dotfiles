@@ -473,7 +473,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   from a menu, hidden ones too, or drag the card onto a column; the notice
   says when a card went to a hidden column), the command menu's "Spalte
   ausblenden" hides the selected column (views.json sets which start hidden),
-  `o` opens the item in the browser. A hidden column is not drawn: the line
+  `o` opens the item in the browser. A GitHub board reads its items in pages
+  of 100, one gh call each, up to views.json's `limit` (1000 by default);
+  where that cuts them, a note under the columns says so. A hidden column is
+  not drawn: the line
   above the columns names the hidden ones ("ausgeblendet: Backlog, Done"), a
   click on a name shows that column again, and the command menu's "Spalten…"
   opens a menu of every column, shown or hidden, where `Enter`, a digit or a
