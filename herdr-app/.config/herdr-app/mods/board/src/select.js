@@ -3,24 +3,29 @@
 
 import { itemKey } from "./shared.js";
 
-// Cards whose text holds every word of the filter, case-insensitive; their
+// Whether `texts` (falsy ones left out) hold every word of `filter`
+// between them, case-insensitive; an empty filter matches anything.
+export function wordsMatch(texts, filter) {
+  const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = texts.filter(Boolean).join("\n").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+// Cards whose text holds every word of the filter (wordsMatch); their
 // assignees count by name and by login.
 export function matches(card, text) {
-  const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
-  const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
-    ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])].filter(Boolean).join("\n").toLowerCase();
-  return words.every((w) => hay.includes(w));
+  return wordsMatch([card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
+    ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])], text);
 }
 
 // Whether an item is one's own, for "nur meine": it came from a search of
 // one's own (ownByQuery), or `me` (the login the data was read as; null
-// when the source did not say) is one of its assignees (their logins, where
-// the item names them apart from the names it shows: assigneeLogins), its
-// author, or a reviewer asked for.
+// when the source did not say) is the login of one of its assignees
+// (assigneeLogins; `assignees` are their names), its author, or a reviewer
+// asked for.
 export const isMine = (item, me) =>
   item.ownByQuery === true ||
-  (Boolean(me) && ((item.assigneeLogins ?? item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
+  (Boolean(me) && ((item.assigneeLogins ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
 
 // Whether an item shows in data read as `viewer`: it matches the filter and,
 // with `mine` on, it is one's own.

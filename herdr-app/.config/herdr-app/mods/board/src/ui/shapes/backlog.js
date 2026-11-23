@@ -7,10 +7,10 @@
 // details. Not the prs shape: that one draws sections of GitHub pull
 // requests with their author, draft mark, checks and age. The data: {
 // shape: "backlog", meta: { level, childLevel, typeStates, states,
-// typeColors, orderField, area, iteration, missing }, rows, viewer, noViewer,
-// total, limited, limit } (backlogList, sources/azure/backlog.js). View
-// fields it reads: id, source, layout (as writeAtOnce does), context (the
-// create dialog).
+// typeColors, orderField, area, iteration, follows, missing }, rows, viewer,
+// noViewer, total, limited, limit } (backlogList, sources/azure/backlog.js).
+// View fields it reads: id, source, layout (as writeAtOnce does), context
+// (the create dialog).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -38,6 +38,7 @@ const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 const BACKLOG_STATES = {
   find: findBacklogItem, withState: withBacklogState, stateOf: (_data, item) => item.state, where: "im Backlog", again: false,
 };
+const BACKLOG_ASSIGN = { find: findBacklogItem, withItem: withBacklogItem, where: "im Backlog" };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
@@ -62,14 +63,15 @@ export const backlogShape = {
   received: (data) => data,
   warnings: (_view, data) => backlogWarnings(data),
   // The settled outcomes: a state change's which state its item has, a
-  // parent link's whether the item hangs under its parent; then, once Azure
+  // parent link's whether the item hangs under its parent, an assignment's
+  // whom it has; then, once Azure
   // has answered (one query each, unclearCreateLines), a create's whether
   // it landed.
   settle(b, view, due, data, cx) {
     tellOutcomes(b, [
       ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
       ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
-      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findBacklogItem),
+      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BACKLOG_ASSIGN),
     ], cx);
     const creates = due.filter((u) => u.kind === "create");
     if (!creates.length) return;
@@ -81,10 +83,7 @@ export const backlogShape = {
       }
     });
   },
-  // A work item by its key, and the data with its fields set
-  // (actions/assign.js).
-  find: findBacklogItem,
-  withItem: withBacklogItem,
+  assign: BACKLOG_ASSIGN,
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, BACKLOG_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, BACKLOG_STATES, cx),
   // The detail panel's rows of a work item: its state as a pill (a click

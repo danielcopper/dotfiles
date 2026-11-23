@@ -2,7 +2,7 @@
 // parsing, the status mutation, what gh's answers and failures mean, and the
 // source as the board uses it (makeGithub).
 
-import { CONFIG_NAME, BoardError, failure, firstLine } from "../shared.js";
+import { CONFIG_NAME, BoardError, failure, firstLine, personName, readMemo } from "../shared.js";
 import { GH_TIMEOUT, call } from "../tools.js";
 
 // Theme colors for GitHub's named colors: a Projects v2 option's and an
@@ -73,18 +73,21 @@ export const labelColor = (color) => (/^[0-9a-f]{6}$/i.test(color ?? "") ? `#${c
 // the theme, tones.js hueTone).
 const labelColors = (labels) => Object.fromEntries((labels?.nodes ?? []).map((l) => [l.name, labelColor(l.color)]));
 
-// People as the board names them, in every source alike: by name where the
-// account has one, else by login; their logins apart (select.js isMine).
-const personName = (p) => p.name || p.login;
+// People as the board names them (personName), and their logins apart.
 const peopleOf = (nodes) => {
   const people = (nodes ?? []).filter((p) => typeof p?.login === "string");
   return { names: people.map(personName), logins: people.map((p) => p.login) };
 };
 
+// An item's assignees: { assignees (names), assigneeLogins }.
+const assigneesOf = (nodes) => {
+  const { names, logins } = peopleOf(nodes);
+  return { assignees: names, assigneeLogins: logins };
+};
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
-  const assignees = peopleOf(c.assignees?.nodes);
   return {
     key: node.id,
     itemId: node.id,
@@ -97,8 +100,7 @@ function githubCard(node) {
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
     labelColors: labelColors(c.labels),
-    assignees: assignees.names,
-    assigneeLogins: assignees.logins,
+    ...assigneesOf(c.assignees?.nodes),
     // The issue's or pull request's own id, which an assignment names (the
     // query asks no draft's).
     contentId: c.id ?? null,
@@ -214,7 +216,7 @@ const PR_FIELDS = `
     ... on PullRequest {
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
-      assignees(first: 10) { nodes { login } }
+      assignees(first: 10) { nodes { login name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
         checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
@@ -311,7 +313,7 @@ export function parseGithubList(json, view, errors = []) {
         createdAt: pr.createdAt,
         branch: pr.headRefName,
         labels: [],
-        assignees: (pr.assignees?.nodes ?? []).map((a) => a.login),
+        ...assigneesOf(pr.assignees?.nodes),
         reviewers: reviewerLogins(pr.reviewRequests),
         ownByQuery: own,
       });
@@ -564,10 +566,10 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // related to an issue, its sub-issues and linked pull requests, read with
 // its description (related.js says what `related` holds); and an item's
 // assignment (assign: actions/assign.js says what it holds), whose people
-// are read once per repo and kept for the session (one that fails is not
-// kept). gh runs by the path `paths` (toolPaths) finds.
+// are read once per repo and kept while the board runs (one that fails is
+// not kept). gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
-  const people = new Map();
+  const people = readMemo();
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
@@ -584,14 +586,7 @@ export function makeGithub(paths) {
         if (!item.contentId || !ASSIGN[item.kind]) return "Auf diesen Eintrag hat gh keinen Zugriff";
         return null;
       },
-      people(item) {
-        if (!people.has(item.repo)) {
-          const read = gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors));
-          people.set(item.repo, read);
-          read.catch(() => people.get(item.repo) === read && people.delete(item.repo));
-        }
-        return people.get(item.repo);
-      },
+      people: (item) => people.get(item.repo, () => gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors))),
       // Without the list, GitHub names no one to assign but no one.
       fallbackMe: () => null,
       async write(view, item, person) {

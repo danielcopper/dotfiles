@@ -16,17 +16,28 @@ export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ..
 export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
+// A work item type's color as "#rrggbb", from six hex digits (the form of
+// its states' colors in the same answer), with or without #, or eight
+// (aarrggbb, Azure's process files' form: the alpha is dropped); null for
+// anything else.
+export function typeColor(color) {
+  const hex = typeof color === "string" ? /^#?(?:[0-9a-f]{2})?([0-9a-f]{6})$/i.exec(color)?.[1] : null;
+  return hex ? `#${hex.toLowerCase()}` : null;
+}
+
 // The work item types' answer → { states (categoryStates, common.js),
 // types: { [type]: [state names] }, colors: { [type]: "#rrggbb" } (each
-// type's own color, read as six hex digits without #, the form of its
-// states' colors in the same answer; a type without one, or with another
-// form, has none) }.
+// type's own color, typeColor; a type without one, or with another form,
+// has none), warnings (where the answer names colors but none in a form
+// typeColor reads: the views say so beside their data) }.
 export function parseAzureTypes(stdout) {
   const value = azJson(stdout, "die Work-Item-Typen")?.value;
   if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
   const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
-  const colors = Object.fromEntries(value.filter((type) => typeof type.color === "string" && /^[0-9a-f]{6}$/i.test(type.color)).map((type) => [type.name, `#${type.color.toLowerCase()}`]));
-  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types, colors };
+  const colors = Object.fromEntries(value.map((type) => [type.name, typeColor(type.color)]).filter(([, color]) => color));
+  const named = [...new Set(value.map((type) => type.color).filter((c) => typeof c === "string" && c))];
+  const warnings = named.length && !Object.keys(colors).length ? [`Farben der Work-Item-Typen in unbekannter Form: ${named.slice(0, 3).join(", ")}`] : [];
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types, colors, warnings };
 }
 
 // One WIQL query for the work items of the sprint `iteration` in the team's
@@ -173,18 +184,18 @@ export function checkTaskboardMove(stdout, card, column) {
 export function sprintView(s) {
   async function settingsOf(c) {
     const team = s.teamKey(c);
-    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(s.typesKey(c))];
-    const [it, areas, columns, ty] = await Promise.all([
+    const [iteration, board] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`)];
+    const [it, areas, columns, { types: ty, fresh }] = await Promise.all([
       iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
       s.areasOf(c),
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
-      types?.value ?? s.readTypes(c),
+      s.typesOf(c),
     ]);
     const until = iteration?.until ?? iterationUntil(it.finish, Date.now());
     s.keepAreasUntil(c, until);
     if (!iteration) s.keep(`iteration\n${team}`, it, until);
     if (!board) s.keep(`board\n${team}`, { columns }, until);
-    if (!types) s.keep(s.typesKey(c), ty, until);
+    if (fresh) s.keepTypesUntil(c, until);
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
@@ -203,7 +214,7 @@ export function sprintView(s) {
       const data = sprintBoard({ ...kept, items: parseWorkItems(items, c), places: parseTaskboard(places), viewer: await me });
       s.noViewerOf(data);
       if (data.meta.unknownColumns) forget(c);
-      return { data, warnings: [] };
+      return { data, warnings: kept.types.warnings };
     },
     async move(view, data, card, column) {
       const file = await writeMoveBody(card.number, column);

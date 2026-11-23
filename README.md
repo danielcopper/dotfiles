@@ -366,7 +366,7 @@ herdr-app`. Which files of the package git tracks is set in the root
   project's board, in the columns of its Status field) and "PRs" (pull requests
   I opened or am asked to review, with checks and review state). A team's
   Sprint shows its current sprint the way Azure's taskboard does: one row per
-  story (its id, title and own state), its tasks as cards in the team's
+  story (its id, title, own state and assignee), its tasks as cards in the team's
   taskboard columns, each with its own state, assignee and id, and the tasks
   whose story is not in the sprint in a row "Ohne Story" at the top; it holds
   the work items of the sprint in the team's areas, and its tasks are the work
@@ -379,7 +379,7 @@ herdr-app`. Which files of the package git tracks is set in the root
   assignee. It needs `az login`: the level's work items come through
   `az rest`, which takes no PAT, and the Backlog says so when the login is
   missing. What it keeps and for how long, makeAzure says; `r` reads that
-  again. On the Sprint's cards and stories and the Backlog's rows a work
+  again (not the project's types). On the Sprint's cards and stories and the Backlog's rows a work
   item's id stands without its "AB#"; its details, the notices and the
   toasts keep it. The pull request tabs read nothing yet; each says which
   view it will hold.
@@ -407,13 +407,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   next column its type has (through the taskboard's own column, not the
   state, since two columns may map to one state; az takes the request from a
   file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state
-  from its type's states, `z` folds a story's tasks away and back (on a task,
-  its story's, which it then selects; a click on the triangle in a story's
-  row does the same and selects nothing): the row then says how many tasks it
-  holds, the keys pass over them, and the board remembers the folded stories
-  per sprint, after a restart too (a new sprint starts unfolded), a click
-  selects, and `Enter` shows the details
-  (parent, state, assignee, column, area and iteration). On a Backlog `j/k`
+  from its type's states, `z` folds a story's tasks (see below), a click
+  selects, and `Enter` shows the details (parent, state, assignee, column,
+  area and iteration). `z` folds the selected story's tasks away and back;
+  on a task it folds its story's, which it then selects where it shows. A
+  click on the triangle in a story's row folds it without choosing anything;
+  a fold that takes the selected task away selects its story, where that
+  shows. A folded row says how many tasks it holds, the keys pass over them,
+  and the board remembers the folded stories per sprint, after a restart too
+  (a new sprint starts unfolded). On a Backlog `j/k`
   move, `s` sets the state, `Enter` shows the details (parent, state,
   assignee, area, iteration and sprint), `o` opens the item in the browser,
   and `n` creates a work item: a dialog asks for its type (the level's, Story
@@ -455,12 +457,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   its "epic" label's color, in place of that label's own chip, and the
   details name it an Epic. A thin line across the top of a card or row is in
   its type's color: on Azure, of every work item, the color the project's
-  work item types define (read once per project, kept by the Sprint and the
-  Backlog alike), brought onto the theme by hue as a label's is; on GitHub,
-  of an issue with an issue type, that type's named color as its chip has
-  it. A type without a color, and an item without a type (an Epic by its
-  title too), has no line; where the Backlog could not read the types, it
-  says so and draws none. A selected card or row sits on a tint of the
+  work item types define (kept as makeAzure says), brought onto the theme by
+  hue as a label's is; on GitHub, of an issue with an issue type, that
+  type's named color as its chip has it. A type without a color, and an
+  item without a type (an Epic by its title too), has no line; where the
+  Backlog could not read the types, or where they name their colors in a
+  form the board does not read, the view says so and draws none. A selected card or row sits on a tint of the
   accent, so its chips stay readable. `mods/board/src/ui/tones.js` holds the
   label and type colors, the selected background and how strong the chip,
   head and selected tints are.
@@ -532,9 +534,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   view's team on Azure, narrowed by typing; `↑`/`↓` (or `ctrl-j/k`,
   `ctrl-n/p`) mark one, `Enter` or a click assigns it. It always sets exactly
   one person, or no one: on GitHub the chosen one replaces all assignees.
-  The people are read once per repo or team and kept until herdr restarts;
+  The people are read once per repo or team and kept while the board runs;
   where they cannot be read, the picker and a toast say why, and it still
-  offers "niemand" (and "Ich" on Azure, which az resolves itself). A draft
+  offers "niemand" (and "Ich" on Azure, which az resolves itself) with no
+  row marked, so that `Enter` assigns no one until a row is chosen. A draft
   takes no assignment. The change shows at once and goes back with the error
   where it is refused, as a status change does; one without a clear answer
   refreshes the view and then says who has the item. It runs gh and az by

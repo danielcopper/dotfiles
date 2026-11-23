@@ -8,7 +8,7 @@ import { shows } from "../select.js";
 export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
 
 // The data with the item `key` in `state`.
-export const withBacklogState = (data, key, state) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, state } : r)) });
+export const withBacklogState = (data, key, state) => withBacklogItem(data, key, { state });
 
 // The data with the item `key`'s fields set to those of `patch`.
 export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });

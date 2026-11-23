@@ -6,7 +6,7 @@
 // board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
 
 import { navigate, shows } from "../select.js";
-import { findCard, shownColumns, withCard } from "./board.js";
+import { findCard, shownColumns } from "./board.js";
 
 // The key of the row "Ohne Story", and the id of the column of stories the
 // keys walk first.
@@ -42,12 +42,25 @@ export function shownState(item, column) {
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
 // (a task moved in comes last in its column's data); the tasks of the rows
-// in `folded` (story keys) are left out.
+// in `folded` (story keys) are left out (withoutFolded).
 export function sprintNav(data, filter, mine, folded = new Set()) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
   const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
-  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: c.shown.filter((t) => !folded.has(t.row)).sort(byRow) }))];
+  return withoutFolded([stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))], folded);
+}
+
+// sprintNav's columns without the tasks of the rows in `folded`.
+export const withoutFolded = (nav, folded) => (folded.size ? nav.map((c, i) => (i ? { ...c, shown: c.shown.filter((t) => !folded.has(t.row)) } : c)) : nav);
+
+// Per row key, how many tasks it holds (total) and how many of them show
+// in `nav` (sprintNav's columns, none folded: shown).
+export function rowCounts(data, nav) {
+  const counts = new Map();
+  const count = (key) => counts.get(key) ?? counts.set(key, { shown: 0, total: 0 }).get(key);
+  for (const t of data.columns.flatMap((c) => c.cards)) count(t.row).total++;
+  for (const t of nav.slice(1).flatMap((c) => c.shown)) count(t.row).shown++;
+  return counts;
 }
 
 // The tasks of the row `key`, in every column.
@@ -109,19 +122,19 @@ export function sprintNavigate(nav, sel, dir) {
   return { col: ci, key: from.key };
 }
 
-// The data with the story or task `key`'s fields set to those of `patch`.
-export function withSprintItem(data, key, patch) {
-  const set = (i) => (i.key === key ? { ...i, ...patch } : i);
-  return { ...withCard(data, key, patch), rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)) };
-}
-
-// The data with the item `key` in `state`; a task's column then counts as
-// read (shownState shows its own state).
-export function withItemState(data, key, state) {
-  const set = (i) => (i.key === key ? { ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) } : i);
+// The data with the story or task `key` replaced by fn(it).
+export function mapSprintItem(data, key, fn) {
+  const set = (i) => (i.key === key ? fn(i) : i);
   return {
     ...data,
     rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)),
     columns: data.columns.map((c) => ({ ...c, cards: c.cards.map(set) })),
   };
 }
+
+// The data with the story or task `key`'s fields set to those of `patch`.
+export const withSprintItem = (data, key, patch) => mapSprintItem(data, key, (i) => ({ ...i, ...patch }));
+
+// The data with the item `key` in `state`; a task's column then counts as
+// read (shownState shows its own state).
+export const withItemState = (data, key, state) => mapSprintItem(data, key, (i) => ({ ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) }));

@@ -5,7 +5,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { ageLabel, itemLabel } from "../../shared.js";
+import { ageLabel, cardLabel } from "../../shared.js";
 import { checkColor, detailSection, selectedLook, shownOf } from "../helpers.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
@@ -67,7 +67,7 @@ function drawPrs(b, t, mono, view, st) {
         // A click on a row (clickItem).
         if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
-      .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
+      .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
       .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
       // Every row keeps the draft cell, so the columns after it line up.

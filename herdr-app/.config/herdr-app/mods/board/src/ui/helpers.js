@@ -106,12 +106,15 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
-// A menu over the board (the status and the column menu): a panel `width`
-// wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a title line and one
-// row per entry of `rows` (its own children), each `<rowId>-<i>` and led by
-// its digit (1–9). The row `at` is marked; a click on a row picks it
-// (`pick(i, cx)`); menuKey takes its keys.
-export function menu(t, { id, rowId, width, title, rows, at, pick }) {
+// A menu over the board (the status, the column and the assignee menu): a
+// panel `width` wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a
+// title line, `head` (children under it, such as a filter), one row per
+// entry of `rows` (its own children), each `<rowId>-<i>` and led by its
+// digit (1–9) unless `digits` is false, and `foot` (children under them).
+// `rows` may be a window of a longer list whose first row is `from`: `i`
+// counts in the whole list. The row `at` is marked; a click on a row picks
+// it (`pick(i, cx)`); menuKey takes its keys.
+export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, foot = [] }) {
   return backdrop(
     t,
     `${id}-backdrop`,
@@ -126,25 +129,31 @@ export function menu(t, { id, rowId, width, title, rows, at, pick }) {
       .bg(t.popover)
       .shadow_lg()
       .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
+      .children(head)
       .children(
-        rows.map((kids, i) =>
+        rows.map((kids, n) =>
           h_flex()
-            .id(`${rowId}-${i}`)
+            .id(`${rowId}-${from + n}`)
             .px(8)
             .py(6)
             .gap(8)
             .items_center()
             .rounded(6)
             .cursor_pointer()
-            .when(i === at, (el) => el.bg(t.selected))
+            .when(from + n === at, (el) => el.bg(t.selected))
             .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => pick(i, cx))
-            .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+            .on_click((_e, cx) => pick(from + n, cx))
+            .when(digits, (el) => el.child(div().w(14).text_size(11).text_color(t.dim).child(from + n < 9 ? String(from + n + 1) : "")))
             .children(kids),
         ),
-      ),
+      )
+      .children(foot),
   );
 }
+
+// A card's line of who it is assigned to (by name), in every shape alike;
+// null for no one.
+export const assigneeText = (t, item) => ((item.assignees ?? []).length ? div().text_size(11).text_color(t.dim).child(item.assignees.join(", ")) : null);
 
 // A menu's keys (every key but Esc, which the Board keeps; all are taken):
 // j/k or the arrows move m.at over `count` rows, Enter picks the row at

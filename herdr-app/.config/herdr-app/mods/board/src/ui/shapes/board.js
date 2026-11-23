@@ -11,15 +11,15 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { epicLabel, itemLabel } from "../../shared.js";
+import { cardLabel, epicLabel } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
-import { button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
+import { assigneeText, button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
 
-const findItem = (data, key) => findCard(data, key)?.card ?? null;
+const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -67,10 +67,8 @@ export const boardShape = {
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
-    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findItem)], cx),
-  // A card by its key, and the data with its fields set (actions/assign.js).
-  find: (data, key) => findItem(data, key),
-  withItem: withCard,
+    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
+  assign: BOARD_ASSIGN,
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
@@ -242,7 +240,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
         h_flex()
           .gap(6)
           .items_center()
-          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
           .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
       )
       .child(div().text_size(12.5).line_height("17px").child(card.title))
@@ -255,7 +253,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
           .children(labels.slice(0, 3).map((l) => labelChip(t, card, l)))
           .when(labels.length > 3, (el) => el.child(chip(t, `+${labels.length - 3}`)))
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
-          .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+          .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
           .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
       ))
     .when(Boolean(line), (el) => el.child(line));

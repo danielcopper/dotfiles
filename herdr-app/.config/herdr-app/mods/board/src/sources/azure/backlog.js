@@ -227,16 +227,13 @@ export function backlogView(s) {
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
-  // The colors of the project's work item types, as kept (s.typesKey: the
-  // Sprint keeps the same entry), else read and kept BACKLOG_KEEP_MS; a read
-  // that fails gives none and the warning that says so, and keeps nothing.
+  // The colors of the project's work item types (s.typesOf, which keeps
+  // them) and their warnings; a read that fails gives none and the warning
+  // that says so.
   async function typeColorsOf(c) {
-    const held = s.keptValue(s.typesKey(c));
-    if (held) return { colors: held.value.colors, warnings: [] };
     try {
-      const types = await s.readTypes(c);
-      s.keep(s.typesKey(c), types, Date.now() + BACKLOG_KEEP_MS);
-      return { colors: types.colors, warnings: [] };
+      const { types } = await s.typesOf(c);
+      return { colors: types.colors, warnings: types.warnings };
     } catch (e) {
       return { colors: {}, warnings: [`Farben der Work-Item-Typen nicht gelesen: ${errorText(e)}`] };
     }

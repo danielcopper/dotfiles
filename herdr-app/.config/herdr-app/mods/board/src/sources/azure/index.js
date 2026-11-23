@@ -2,11 +2,11 @@
 // calls and data are in sprint.js and backlog.js, a work item's related
 // items' in related.js, what they share in common.js.
 
-import { BoardError, errorText } from "../../shared.js";
+import { BoardError, errorText, readMemo } from "../../shared.js";
 import { AZ_TIMEOUT, call } from "../../tools.js";
 import {
-  AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azAssignArgs, azFailure, azMembersArgs, azStateArgs, checkAzAssigned, checkStateResult, parseAreas,
-  parseMembers, parseViewer,
+  AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azAssignArgs, azFailure, azMembersArgs, azStateArgs, checkAzAssigned, checkStateResult, membersFor,
+  parseAreas, parseMemberList, parseViewer,
 } from "./common.js";
 import { azTypesArgs, parseAzureTypes, sprintView } from "./sprint.js";
 import { backlogView } from "./backlog.js";
@@ -22,7 +22,7 @@ import { azureRelated } from "./related.js";
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns; per project
 // the work item types, until the sprint of the team that read them ends
-// (the Backlog reads and keeps the same entry: typesKey).
+// (the Backlog reads and keeps the same entry: typesOf).
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -37,10 +37,11 @@ import { azureRelated } from "./related.js";
 // configuration and its settings. A refresh then reads the level's ids (az
 // rest) and, after them, one query for their fields; a backlog without
 // ids asks no query. `r` on the Backlog and a state change or create Azure
-// refuses drop what it keeps. Beside the ids, a refresh reads the project's
-// work item types (for their colors) where neither view keeps them, and
-// keeps them BACKLOG_KEEP_MS; one that fails is a warning, keeps nothing
-// and is read again with the next refresh.
+// refuses drop what it keeps (not the project's types). Beside the ids, a
+// refresh reads the project's work item types (for their colors) where
+// neither view keeps them, and keeps them TEAM_KEEP_MS (typesOf); one that
+// fails is a warning, keeps nothing and is read again with the next
+// refresh.
 //
 // Both views read the team's areas (the Backlog for its default area) and
 // keep them as one, for the shorter of their times (areasOf); `r` on
@@ -53,7 +54,7 @@ import { azureRelated } from "./related.js";
 //
 // A team's members, whom the assignee picker offers (assign:
 // actions/assign.js says what it holds), are read once per team and kept
-// for the session; a read that fails is not kept.
+// while the board runs; a read that fails is not kept.
 export function makeAzure(paths) {
   // An az call's output; a failed one throws what `failure` (azFailure by
   // default) makes of it.
@@ -88,11 +89,25 @@ export function makeAzure(paths) {
   const typesKey = (c) => `types\n${c.org}\n${c.project}`;
   const areasKey = (c) => `areas\n${teamKey(c)}`;
   // What the views share: az, what is kept, who az is (and the data's words
-  // for why it is not known), a project's work item types (readTypes, kept
-  // under typesKey), and a state change.
+  // for why it is not known), a project's work item types (typesOf), and a
+  // state change.
   const shared = {
-    az, keptValue, whoAmI, teamKey, typesKey,
-    readTypes: (c) => az(azTypesArgs(c)).then(parseAzureTypes),
+    az, keptValue, whoAmI, teamKey,
+    // The project's work item types (parseAzureTypes), one entry for both
+    // views: read where it is not kept and kept TEAM_KEEP_MS (the
+    // Backlog's time), or until the sprint ends where the Sprint read them
+    // (keepTypesUntil); no forget drops it.
+    async typesOf(c) {
+      const held = keptValue(typesKey(c));
+      if (held) return { types: held.value, fresh: false };
+      const types = parseAzureTypes(await az(azTypesArgs(c)));
+      keep(typesKey(c), types, Date.now() + TEAM_KEEP_MS);
+      return { types, fresh: true };
+    },
+    keepTypesUntil(c, until) {
+      const entry = kept.get(typesKey(c));
+      if (entry) entry.until = until;
+    },
     // The team's areas (parseAreas), one entry for both views: read where
     // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
@@ -125,7 +140,7 @@ export function makeAzure(paths) {
       az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
   };
   const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
-  const members = new Map();
+  const members = readMemo();
   return {
     site: "Azure",
     noViewer,
@@ -134,19 +149,16 @@ export function makeAzure(paths) {
     related: azureRelated(az),
     assign: {
       refuse: (item) => (item.kind === "workitem" ? null : "Hier lässt sich niemand zuweisen"),
-      people(item, view) {
+      // The team's members, kept (parseMemberList); who az is is asked
+      // each time, so a viewer read since counts.
+      async people(item, view) {
         const c = view.context;
-        const key = teamKey(c);
-        if (!members.has(key)) {
-          const read = Promise.all([az(azMembersArgs(c)), whoAmI()]).then(([out, me]) => parseMembers(out, me));
-          members.set(key, read);
-          read.catch(() => members.get(key) === read && members.delete(key));
-        }
-        return members.get(key);
+        const [list, me] = await Promise.all([members.get(teamKey(c), () => az(azMembersArgs(c)).then(parseMemberList)), whoAmI()]);
+        return membersFor(list, me);
       },
       // Without the list, az still knows its own account: "me".
       fallbackMe: () => ({ login: viewer, name: null, me: true }),
-      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true }), person),
+      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true }), item.number, person),
     },
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {

@@ -149,6 +149,11 @@ export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 // itemLabel.
 export const cardLabel = (item) => (item.source === "azure" && item.kind === "workitem" ? String(item.number) : itemLabel(item));
 
+// A person as the board names one, in every source alike: by name where
+// there is one, else by login; null for neither. Logins are kept apart
+// (assigneeLogins: select.js isMine).
+export const personName = ({ name, login }) => name || login || null;
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
@@ -165,6 +170,28 @@ export const cardType = (item) => item.type ?? (EPIC_TITLE.test(item.title ?? ""
 // marker: its "epic" label, whatever its case; null for another item.
 export const epicLabel = (item) =>
   (!item.type && cardType(item) ? (item.labels ?? []).find((l) => l.toLowerCase() === "epic") ?? null : null);
+
+// Reads kept by key as their promises: get(key, read) gives the one kept
+// for `key`, else starts read() and keeps that; a read that fails is
+// dropped (where no newer one has taken its place), so the next get reads
+// again. forget(key, promise) drops `promise` where it is still the one
+// kept; clear() drops all.
+export function readMemo() {
+  const kept = new Map();
+  const forget = (key, promise) => kept.get(key) === promise && kept.delete(key);
+  return {
+    get(key, read) {
+      if (!kept.has(key)) {
+        const promise = read();
+        kept.set(key, promise);
+        promise.catch(() => forget(key, promise));
+      }
+      return kept.get(key);
+    },
+    forget,
+    clear: () => kept.clear(),
+  };
+}
 
 export function updatedLabel(at, now) {
   if (!at) return "";
@@ -482,24 +509,29 @@ export function startSettings(config, view, repo) {
 // What shows and what is selected, whatever a view's shape: the text filter,
 // "nur meine", and keyboard movement over columns (a list is one column).
 
-// Cards whose text holds every word of the filter, case-insensitive; their
+// Whether `texts` (falsy ones left out) hold every word of `filter`
+// between them, case-insensitive; an empty filter matches anything.
+export function wordsMatch(texts, filter) {
+  const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = texts.filter(Boolean).join("\n").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+// Cards whose text holds every word of the filter (wordsMatch); their
 // assignees count by name and by login.
 export function matches(card, text) {
-  const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
-  const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
-    ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])].filter(Boolean).join("\n").toLowerCase();
-  return words.every((w) => hay.includes(w));
+  return wordsMatch([card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
+    ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])], text);
 }
 
 // Whether an item is one's own, for "nur meine": it came from a search of
 // one's own (ownByQuery), or `me` (the login the data was read as; null
-// when the source did not say) is one of its assignees (their logins, where
-// the item names them apart from the names it shows: assigneeLogins), its
-// author, or a reviewer asked for.
+// when the source did not say) is the login of one of its assignees
+// (assigneeLogins; `assignees` are their names), its author, or a reviewer
+// asked for.
 export const isMine = (item, me) =>
   item.ownByQuery === true ||
-  (Boolean(me) && ((item.assigneeLogins ?? item.assignees ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
+  (Boolean(me) && ((item.assigneeLogins ?? []).includes(me) || item.author === me || (item.reviewers ?? []).includes(me)));
 
 // Whether an item shows in data read as `viewer`: it matches the filter and,
 // with `mine` on, it is one's own.
@@ -747,12 +779,25 @@ export function shownState(item, column) {
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
 // (a task moved in comes last in its column's data); the tasks of the rows
-// in `folded` (story keys) are left out.
+// in `folded` (story keys) are left out (withoutFolded).
 export function sprintNav(data, filter, mine, folded = new Set()) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
   const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
-  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: c.shown.filter((t) => !folded.has(t.row)).sort(byRow) }))];
+  return withoutFolded([stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))], folded);
+}
+
+// sprintNav's columns without the tasks of the rows in `folded`.
+export const withoutFolded = (nav, folded) => (folded.size ? nav.map((c, i) => (i ? { ...c, shown: c.shown.filter((t) => !folded.has(t.row)) } : c)) : nav);
+
+// Per row key, how many tasks it holds (total) and how many of them show
+// in `nav` (sprintNav's columns, none folded: shown).
+export function rowCounts(data, nav) {
+  const counts = new Map();
+  const count = (key) => counts.get(key) ?? counts.set(key, { shown: 0, total: 0 }).get(key);
+  for (const t of data.columns.flatMap((c) => c.cards)) count(t.row).total++;
+  for (const t of nav.slice(1).flatMap((c) => c.shown)) count(t.row).shown++;
+  return counts;
 }
 
 // The tasks of the row `key`, in every column.
@@ -814,22 +859,22 @@ export function sprintNavigate(nav, sel, dir) {
   return { col: ci, key: from.key };
 }
 
-// The data with the story or task `key`'s fields set to those of `patch`.
-export function withSprintItem(data, key, patch) {
-  const set = (i) => (i.key === key ? { ...i, ...patch } : i);
-  return { ...withCard(data, key, patch), rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)) };
-}
-
-// The data with the item `key` in `state`; a task's column then counts as
-// read (shownState shows its own state).
-export function withItemState(data, key, state) {
-  const set = (i) => (i.key === key ? { ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) } : i);
+// The data with the story or task `key` replaced by fn(it).
+export function mapSprintItem(data, key, fn) {
+  const set = (i) => (i.key === key ? fn(i) : i);
   return {
     ...data,
     rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)),
     columns: data.columns.map((c) => ({ ...c, cards: c.cards.map(set) })),
   };
 }
+
+// The data with the story or task `key`'s fields set to those of `patch`.
+export const withSprintItem = (data, key, patch) => mapSprintItem(data, key, (i) => ({ ...i, ...patch }));
+
+// The data with the item `key` in `state`; a task's column then counts as
+// read (shownState shows its own state).
+export const withItemState = (data, key, state) => mapSprintItem(data, key, (i) => ({ ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) }));
 
 // ==== src/contexts.js ====
 
@@ -1039,26 +1084,21 @@ export async function findTool(execute, tool, on, timeoutMs) {
 // started, so even a write may run again. Gone a second time, the run fails
 // and the next run asks again; a bare name is not asked for again.
 export function toolPaths(execute) {
-  const known = new Map();
+  const known = readMemo();
   return {
     // start(program) runs the program; its rejection passes on unchanged,
     // but for the second time it is gone.
     async run(tool, on, timeoutMs, start) {
       const key = `${on ?? ""}\n${tool}`;
       for (let again = false; ; again = true) {
-        if (!known.has(key)) {
-          const fresh = findTool(execute, tool, on, timeoutMs);
-          known.set(key, fresh);
-          fresh.catch(() => known.get(key) === fresh && known.delete(key));
-        }
-        const lookup = known.get(key);
+        const lookup = known.get(key, () => findTool(execute, tool, on, timeoutMs));
         const { program, bare } = await lookup;
         try {
           return await start(program);
         } catch (e) {
           const msg = firstLine(e?.message ?? e);
           if (bare || !NOT_INSTALLED.test(msg)) throw e;
-          if (known.get(key) === lookup) known.delete(key);
+          known.forget(key, lookup);
           if (again) throw notStarted(tool, on, msg);
         }
       }
@@ -1328,10 +1368,10 @@ export const workItemUrl = (c, id) => `${c.org}/${encodeURIComponent(c.project)}
 export function azPerson(who) {
   if (typeof who === "string") {
     const login = who.match(/<([^>]+)>\s*$/)?.[1] ?? null;
-    return { name: who.replace(/\s*<[^>]*>\s*$/, "") || null, login: login?.toLowerCase() ?? null };
+    return { name: personName({ name: who.replace(/\s*<[^>]*>\s*$/, ""), login }), login: login?.toLowerCase() ?? null };
   }
   if (!isObject(who)) return { name: null, login: null };
-  return { name: who.displayName ?? who.uniqueName ?? null, login: who.uniqueName?.toLowerCase() ?? null };
+  return { name: personName({ name: who.displayName, login: who.uniqueName }), login: who.uniqueName?.toLowerCase() ?? null };
 }
 
 // A work item of az boards query's answer as the board shows it, keyed as
@@ -1386,22 +1426,31 @@ export const MEMBERS_LIMIT = 1000;
 export const azMembersArgs = (c) =>
   ["devops", "team", "list-member", ...azOrg(c.org), "--project", c.project, "--team", c.team, "--top", String(MEMBERS_LIMIT), "-o", "json"];
 
-// A team's members → { me (the account az is, `viewer`, lower case: its
-// member where it is one, else az's own "me" with what is known of it;
-// me: true), people (the other members by name, { login, name }; a group
-// is none), note (that the list may be cut, or null) }.
-export function parseMembers(stdout, viewer) {
+// A team's members as az lists them → { all ({ login (lower case), name
+// (personName) }; a group is none), note (that the list may be cut, or
+// null) }.
+export function parseMemberList(stdout) {
   const list = azList(azJson(stdout, "die Mitglieder des Teams"));
   if (!list) throw new BoardError("Azure lieferte keine Mitglieder des Teams");
   const all = list
     .map((m) => m?.identity)
     .filter((i) => isObject(i) && i.isContainer !== true && typeof i.uniqueName === "string" && i.uniqueName)
-    .map((i) => ({ login: i.uniqueName.toLowerCase(), name: i.displayName || i.uniqueName }));
+    .map((i) => ({ login: i.uniqueName.toLowerCase(), name: personName({ name: i.displayName, login: i.uniqueName }) }));
+  return { all, note: list.length >= MEMBERS_LIMIT ? `erste ${MEMBERS_LIMIT}` : null };
+}
+
+// A team's members (parseMemberList) as the picker offers them to
+// `viewer` (the account az is, lower case, or null) → { me (its member
+// where it is one, else az's own "me" with what is known of it; me:
+// true), people (the other members by name), note }.
+export function membersFor({ all, note }, viewer) {
   const own = all.find((p) => p.login === viewer);
   const me = { login: viewer ?? null, name: own?.name ?? null, me: true };
   const people = all.filter((p) => p.login !== viewer).sort((a, b) => a.name.localeCompare(b.name));
-  return { me, people, note: list.length >= MEMBERS_LIMIT ? `erste ${MEMBERS_LIMIT}` : null };
+  return { me, people, note };
 }
+
+export const parseMembers = (stdout, viewer) => membersFor(parseMemberList(stdout), viewer);
 
 // Assigning the work item `id` to `person`: its login, "me" for az's own
 // account (me: true; az resolves it), "" for no one, which az writes as an
@@ -1409,14 +1458,14 @@ export function parseMembers(stdout, viewer) {
 export const azAssignArgs = (c, id, person) =>
   ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--assigned-to", person ? (person.me ? "me" : person.login) : "", "-o", "json"];
 
-// az's answer to an assignment must be the work item and name `person` as
-// its Assigned To (anyone for me without a known login), or no one for null;
-// then → { names, logins } as it names them, else it is open whether the
-// change landed.
-export function checkAzAssigned(stdout, person) {
+// az's answer to an assignment must be the work item `id` and name
+// `person` as its Assigned To (anyone for me without a known login), or no
+// one for null; then → { names, logins } as it names them, else it is open
+// whether the change landed.
+export function checkAzAssigned(stdout, id, person) {
   const json = jsonOrNull(stdout);
   const who = azPerson(json ? fieldOf(json, "AssignedTo") : undefined);
-  const fits = !Number.isInteger(json?.id) ? false : !person ? !who.login : Boolean(who.login) && (person.me && !person.login ? true : who.login === person.login);
+  const fits = json?.id !== id ? false : !person ? !who.login : Boolean(who.login) && (person.me && !person.login ? true : who.login === person.login);
   if (!fits) throw failure("Azure hat die Zuweisung nicht bestätigt", { write: true, unclear: true });
   return { names: who.name ? [who.name] : [], logins: who.login ? [who.login] : [] };
 }
@@ -1445,17 +1494,28 @@ export const azIterationArgs = (c) => ["boards", "iteration", "team", "list", ..
 export const azColumnsArgs = (c) => azInvokeArgs(c, "work", "taskboardColumns", { project: c.project, team: c.team });
 export const azTypesArgs = (c) => azInvokeArgs(c, "wit", "workitemtypes", { project: c.project });
 export const azTaskboardArgs = (c, iterationId) => azInvokeArgs(c, "work", "taskboardWorkItems", { project: c.project, team: c.team, iterationId });
+// A work item type's color as "#rrggbb", from six hex digits (the form of
+// its states' colors in the same answer), with or without #, or eight
+// (aarrggbb, Azure's process files' form: the alpha is dropped); null for
+// anything else.
+export function typeColor(color) {
+  const hex = typeof color === "string" ? /^#?(?:[0-9a-f]{2})?([0-9a-f]{6})$/i.exec(color)?.[1] : null;
+  return hex ? `#${hex.toLowerCase()}` : null;
+}
+
 // The work item types' answer → { states (categoryStates, common.js),
 // types: { [type]: [state names] }, colors: { [type]: "#rrggbb" } (each
-// type's own color, read as six hex digits without #, the form of its
-// states' colors in the same answer; a type without one, or with another
-// form, has none) }.
+// type's own color, typeColor; a type without one, or with another form,
+// has none), warnings (where the answer names colors but none in a form
+// typeColor reads: the views say so beside their data) }.
 export function parseAzureTypes(stdout) {
   const value = azJson(stdout, "die Work-Item-Typen")?.value;
   if (!Array.isArray(value)) throw new BoardError("Azure lieferte keine Work-Item-Typen");
   const types = Object.fromEntries(value.map((type) => [type.name, (type.states ?? []).map((s) => s.name)]));
-  const colors = Object.fromEntries(value.filter((type) => typeof type.color === "string" && /^[0-9a-f]{6}$/i.test(type.color)).map((type) => [type.name, `#${type.color.toLowerCase()}`]));
-  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types, colors };
+  const colors = Object.fromEntries(value.map((type) => [type.name, typeColor(type.color)]).filter(([, color]) => color));
+  const named = [...new Set(value.map((type) => type.color).filter((c) => typeof c === "string" && c))];
+  const warnings = named.length && !Object.keys(colors).length ? [`Farben der Work-Item-Typen in unbekannter Form: ${named.slice(0, 3).join(", ")}`] : [];
+  return { states: categoryStates(value.flatMap((type) => (type.states ?? []).map((s) => [s.name, s.category]))), types, colors, warnings };
 }
 
 // One WIQL query for the work items of the sprint `iteration` in the team's
@@ -1602,18 +1662,18 @@ export function checkTaskboardMove(stdout, card, column) {
 export function sprintView(s) {
   async function settingsOf(c) {
     const team = s.teamKey(c);
-    const [iteration, board, types] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`), s.keptValue(s.typesKey(c))];
-    const [it, areas, columns, ty] = await Promise.all([
+    const [iteration, board] = [s.keptValue(`iteration\n${team}`), s.keptValue(`board\n${team}`)];
+    const [it, areas, columns, { types: ty, fresh }] = await Promise.all([
       iteration?.value ?? s.az(azIterationArgs(c)).then(parseIteration),
       s.areasOf(c),
       board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
-      types?.value ?? s.readTypes(c),
+      s.typesOf(c),
     ]);
     const until = iteration?.until ?? iterationUntil(it.finish, Date.now());
     s.keepAreasUntil(c, until);
     if (!iteration) s.keep(`iteration\n${team}`, it, until);
     if (!board) s.keep(`board\n${team}`, { columns }, until);
-    if (!types) s.keep(s.typesKey(c), ty, until);
+    if (fresh) s.keepTypesUntil(c, until);
     return { iteration: it, areas, columns, types: ty };
   }
   const forget = (c) => {
@@ -1632,7 +1692,7 @@ export function sprintView(s) {
       const data = sprintBoard({ ...kept, items: parseWorkItems(items, c), places: parseTaskboard(places), viewer: await me });
       s.noViewerOf(data);
       if (data.meta.unknownColumns) forget(c);
-      return { data, warnings: [] };
+      return { data, warnings: kept.types.warnings };
     },
     async move(view, data, card, column) {
       const file = await writeMoveBody(card.number, column);
@@ -1871,16 +1931,13 @@ export function backlogView(s) {
     s.forgetAreas(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
-  // The colors of the project's work item types, as kept (s.typesKey: the
-  // Sprint keeps the same entry), else read and kept BACKLOG_KEEP_MS; a read
-  // that fails gives none and the warning that says so, and keeps nothing.
+  // The colors of the project's work item types (s.typesOf, which keeps
+  // them) and their warnings; a read that fails gives none and the warning
+  // that says so.
   async function typeColorsOf(c) {
-    const held = s.keptValue(s.typesKey(c));
-    if (held) return { colors: held.value.colors, warnings: [] };
     try {
-      const types = await s.readTypes(c);
-      s.keep(s.typesKey(c), types, Date.now() + BACKLOG_KEEP_MS);
-      return { colors: types.colors, warnings: [] };
+      const { types } = await s.typesOf(c);
+      return { colors: types.colors, warnings: types.warnings };
     } catch (e) {
       return { colors: {}, warnings: [`Farben der Work-Item-Typen nicht gelesen: ${errorText(e)}`] };
     }
@@ -2059,7 +2116,7 @@ export const azureRelated = (az) => ({
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns; per project
 // the work item types, until the sprint of the team that read them ends
-// (the Backlog reads and keeps the same entry: typesKey).
+// (the Backlog reads and keeps the same entry: typesOf).
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -2074,10 +2131,11 @@ export const azureRelated = (az) => ({
 // configuration and its settings. A refresh then reads the level's ids (az
 // rest) and, after them, one query for their fields; a backlog without
 // ids asks no query. `r` on the Backlog and a state change or create Azure
-// refuses drop what it keeps. Beside the ids, a refresh reads the project's
-// work item types (for their colors) where neither view keeps them, and
-// keeps them BACKLOG_KEEP_MS; one that fails is a warning, keeps nothing
-// and is read again with the next refresh.
+// refuses drop what it keeps (not the project's types). Beside the ids, a
+// refresh reads the project's work item types (for their colors) where
+// neither view keeps them, and keeps them TEAM_KEEP_MS (typesOf); one that
+// fails is a warning, keeps nothing and is read again with the next
+// refresh.
 //
 // Both views read the team's areas (the Backlog for its default area) and
 // keep them as one, for the shorter of their times (areasOf); `r` on
@@ -2090,7 +2148,7 @@ export const azureRelated = (az) => ({
 //
 // A team's members, whom the assignee picker offers (assign:
 // actions/assign.js says what it holds), are read once per team and kept
-// for the session; a read that fails is not kept.
+// while the board runs; a read that fails is not kept.
 export function makeAzure(paths) {
   // An az call's output; a failed one throws what `failure` (azFailure by
   // default) makes of it.
@@ -2125,11 +2183,25 @@ export function makeAzure(paths) {
   const typesKey = (c) => `types\n${c.org}\n${c.project}`;
   const areasKey = (c) => `areas\n${teamKey(c)}`;
   // What the views share: az, what is kept, who az is (and the data's words
-  // for why it is not known), a project's work item types (readTypes, kept
-  // under typesKey), and a state change.
+  // for why it is not known), a project's work item types (typesOf), and a
+  // state change.
   const shared = {
-    az, keptValue, whoAmI, teamKey, typesKey,
-    readTypes: (c) => az(azTypesArgs(c)).then(parseAzureTypes),
+    az, keptValue, whoAmI, teamKey,
+    // The project's work item types (parseAzureTypes), one entry for both
+    // views: read where it is not kept and kept TEAM_KEEP_MS (the
+    // Backlog's time), or until the sprint ends where the Sprint read them
+    // (keepTypesUntil); no forget drops it.
+    async typesOf(c) {
+      const held = keptValue(typesKey(c));
+      if (held) return { types: held.value, fresh: false };
+      const types = parseAzureTypes(await az(azTypesArgs(c)));
+      keep(typesKey(c), types, Date.now() + TEAM_KEEP_MS);
+      return { types, fresh: true };
+    },
+    keepTypesUntil(c, until) {
+      const entry = kept.get(typesKey(c));
+      if (entry) entry.until = until;
+    },
     // The team's areas (parseAreas), one entry for both views: read where
     // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
@@ -2162,7 +2234,7 @@ export function makeAzure(paths) {
       az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
   };
   const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
-  const members = new Map();
+  const members = readMemo();
   return {
     site: "Azure",
     noViewer,
@@ -2171,19 +2243,16 @@ export function makeAzure(paths) {
     related: azureRelated(az),
     assign: {
       refuse: (item) => (item.kind === "workitem" ? null : "Hier lässt sich niemand zuweisen"),
-      people(item, view) {
+      // The team's members, kept (parseMemberList); who az is is asked
+      // each time, so a viewer read since counts.
+      async people(item, view) {
         const c = view.context;
-        const key = teamKey(c);
-        if (!members.has(key)) {
-          const read = Promise.all([az(azMembersArgs(c)), whoAmI()]).then(([out, me]) => parseMembers(out, me));
-          members.set(key, read);
-          read.catch(() => members.get(key) === read && members.delete(key));
-        }
-        return members.get(key);
+        const [list, me] = await Promise.all([members.get(teamKey(c), () => az(azMembersArgs(c)).then(parseMemberList)), whoAmI()]);
+        return membersFor(list, me);
       },
       // Without the list, az still knows its own account: "me".
       fallbackMe: () => ({ login: viewer, name: null, me: true }),
-      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true }), person),
+      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true }), item.number, person),
     },
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
@@ -2267,18 +2336,21 @@ export const labelColor = (color) => (/^[0-9a-f]{6}$/i.test(color ?? "") ? `#${c
 // the theme, tones.js hueTone).
 const labelColors = (labels) => Object.fromEntries((labels?.nodes ?? []).map((l) => [l.name, labelColor(l.color)]));
 
-// People as the board names them, in every source alike: by name where the
-// account has one, else by login; their logins apart (select.js isMine).
-const personName = (p) => p.name || p.login;
+// People as the board names them (personName), and their logins apart.
 const peopleOf = (nodes) => {
   const people = (nodes ?? []).filter((p) => typeof p?.login === "string");
   return { names: people.map(personName), logins: people.map((p) => p.login) };
 };
 
+// An item's assignees: { assignees (names), assigneeLogins }.
+const assigneesOf = (nodes) => {
+  const { names, logins } = peopleOf(nodes);
+  return { assignees: names, assigneeLogins: logins };
+};
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
-  const assignees = peopleOf(c.assignees?.nodes);
   return {
     key: node.id,
     itemId: node.id,
@@ -2291,8 +2363,7 @@ function githubCard(node) {
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
     labelColors: labelColors(c.labels),
-    assignees: assignees.names,
-    assigneeLogins: assignees.logins,
+    ...assigneesOf(c.assignees?.nodes),
     // The issue's or pull request's own id, which an assignment names (the
     // query asks no draft's).
     contentId: c.id ?? null,
@@ -2408,7 +2479,7 @@ const PR_FIELDS = `
     ... on PullRequest {
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
-      assignees(first: 10) { nodes { login } }
+      assignees(first: 10) { nodes { login name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
         checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
@@ -2505,7 +2576,7 @@ export function parseGithubList(json, view, errors = []) {
         createdAt: pr.createdAt,
         branch: pr.headRefName,
         labels: [],
-        assignees: (pr.assignees?.nodes ?? []).map((a) => a.login),
+        ...assigneesOf(pr.assignees?.nodes),
         reviewers: reviewerLogins(pr.reviewRequests),
         ownByQuery: own,
       });
@@ -2758,10 +2829,10 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // related to an issue, its sub-issues and linked pull requests, read with
 // its description (related.js says what `related` holds); and an item's
 // assignment (assign: actions/assign.js says what it holds), whose people
-// are read once per repo and kept for the session (one that fails is not
-// kept). gh runs by the path `paths` (toolPaths) finds.
+// are read once per repo and kept while the board runs (one that fails is
+// not kept). gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
-  const people = new Map();
+  const people = readMemo();
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
@@ -2778,14 +2849,7 @@ export function makeGithub(paths) {
         if (!item.contentId || !ASSIGN[item.kind]) return "Auf diesen Eintrag hat gh keinen Zugriff";
         return null;
       },
-      people(item) {
-        if (!people.has(item.repo)) {
-          const read = gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors));
-          people.set(item.repo, read);
-          read.catch(() => people.get(item.repo) === read && people.delete(item.repo));
-        }
-        return people.get(item.repo);
-      },
+      people: (item) => people.get(item.repo, () => gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors))),
       // Without the list, GitHub names no one to assign but no one.
       fallbackMe: () => null,
       async write(view, item, person) {
@@ -3199,12 +3263,15 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
-// A menu over the board (the status and the column menu): a panel `width`
-// wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a title line and one
-// row per entry of `rows` (its own children), each `<rowId>-<i>` and led by
-// its digit (1–9). The row `at` is marked; a click on a row picks it
-// (`pick(i, cx)`); menuKey takes its keys.
-export function menu(t, { id, rowId, width, title, rows, at, pick }) {
+// A menu over the board (the status, the column and the assignee menu): a
+// panel `width` wide, `<id>-menu` on a backdrop `<id>-backdrop`, with a
+// title line, `head` (children under it, such as a filter), one row per
+// entry of `rows` (its own children), each `<rowId>-<i>` and led by its
+// digit (1–9) unless `digits` is false, and `foot` (children under them).
+// `rows` may be a window of a longer list whose first row is `from`: `i`
+// counts in the whole list. The row `at` is marked; a click on a row picks
+// it (`pick(i, cx)`); menuKey takes its keys.
+export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, foot = [] }) {
   return backdrop(
     t,
     `${id}-backdrop`,
@@ -3219,25 +3286,31 @@ export function menu(t, { id, rowId, width, title, rows, at, pick }) {
       .bg(t.popover)
       .shadow_lg()
       .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
+      .children(head)
       .children(
-        rows.map((kids, i) =>
+        rows.map((kids, n) =>
           h_flex()
-            .id(`${rowId}-${i}`)
+            .id(`${rowId}-${from + n}`)
             .px(8)
             .py(6)
             .gap(8)
             .items_center()
             .rounded(6)
             .cursor_pointer()
-            .when(i === at, (el) => el.bg(t.selected))
+            .when(from + n === at, (el) => el.bg(t.selected))
             .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => pick(i, cx))
-            .child(div().w(14).text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+            .on_click((_e, cx) => pick(from + n, cx))
+            .when(digits, (el) => el.child(div().w(14).text_size(11).text_color(t.dim).child(from + n < 9 ? String(from + n + 1) : "")))
             .children(kids),
         ),
-      ),
+      )
+      .children(foot),
   );
 }
+
+// A card's line of who it is assigned to (by name), in every shape alike;
+// null for no one.
+export const assigneeText = (t, item) => ((item.assignees ?? []).length ? div().text_size(11).text_color(t.dim).child(item.assignees.join(", ")) : null);
 
 // A menu's keys (every key but Esc, which the Board keeps; all are taken):
 // j/k or the arrows move m.at over `count` rows, Enter picks the row at
@@ -3420,7 +3493,7 @@ export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] 
 export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
 
 // The data with the item `key` in `state`.
-export const withBacklogState = (data, key, state) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, state } : r)) });
+export const withBacklogState = (data, key, state) => withBacklogItem(data, key, { state });
 
 // The data with the item `key`'s fields set to those of `patch`.
 export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
@@ -3494,7 +3567,7 @@ export function viewStands(b, view) {
 // - w.again: refresh after a write that landed too; w.againOnRefusal:
 //   after one that was refused too (what it met may have been out of date).
 // A write that landed or was refused refreshes the view too while an open
-// outcome of the item, of either kind, remains: the refresh tells it, so
+// outcome of the item, of any kind, remains: the refresh tells it, so
 // it does not wait for the timer. A refresh follows only while the view
 // stands (viewStands).
 export function writeAtOnce(b, view, w, cx) {
@@ -3561,7 +3634,7 @@ export function writeAtOnce(b, view, w, cx) {
   }
 }
 
-// Whether an outcome of the item `key`, of either kind, is still open.
+// Whether an outcome of the item `key`, of any kind, is still open.
 const openOf = (st, key) => st.unclear.some((u) => u.key === key);
 
 // Says the lines of settled outcomes ({ text, warn }) in one notice; one
@@ -3584,9 +3657,9 @@ export function tellOutcomes(b, lines, cx) {
 // people, note }, persons { login, name, id?, me? }; kept per repo or team
 // by the source), fallbackMe() (the "Ich" it can write without that list,
 // or null), write(view, item, person) (makes `person` the only assignee,
-// null no one; → { names, logins } as the answer names them) }. A shape
-// whose items can be assigned has find(data, key) and withItem(data, key,
-// patch). The picker is modals/assign.js.
+// null no one; → { names, logins } as the answer names them) }. How a
+// shape finds and changes its items' assignees (`how`): its assign, which
+// ui/shapes/index.js describes. The picker is ui/modals/assign.js.
 
 // Who is assigned, as a notice says it.
 export const assignedText = (names) => (names.length ? `${names.join(", ")} zugewiesen` : "niemandem zugewiesen");
@@ -3601,8 +3674,8 @@ const same = (a, b) => (a ?? []).join("\n") === (b ?? []).join("\n");
 // since.
 export function assignAtOnce(b, view, key, person, cx) {
   const st = b.state(view.id);
-  const shape = b.shape(view);
-  const item = shape.find(st.data, key);
+  const how = b.shape(view).assign;
+  const item = how.find(st.data, key);
   if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
   const label = itemLabel(item);
   const before = { assignees: item.assignees ?? [], assigneeLogins: item.assigneeLogins ?? [] };
@@ -3614,12 +3687,12 @@ export function assignAtOnce(b, view, key, person, cx) {
   writeAtOnce(b, view, {
     key,
     label,
-    apply: () => (st.data = shape.withItem(st.data, key, after)),
+    apply: () => (st.data = how.withItem(st.data, key, after)),
     write: async () => (answer = await b.sources[item.source].assign.write(view, item, person)),
-    landed: () => (st.data = shape.withItem(st.data, key, { assignees: answer.names, assigneeLogins: answer.logins })),
+    landed: () => (st.data = how.withItem(st.data, key, { assignees: answer.names, assigneeLogins: answer.logins })),
     undo() {
-      const now = shape.find(st.data, key);
-      if (now && same(now.assignees, after.assignees) && same(now.assigneeLogins, after.assigneeLogins)) st.data = shape.withItem(st.data, key, before);
+      const now = how.find(st.data, key);
+      if (now && same(now.assignees, after.assignees) && same(now.assigneeLogins, after.assigneeLogins)) st.data = how.withItem(st.data, key, before);
     },
     open: { kind: "assign", logins, who },
     texts: {
@@ -3634,14 +3707,14 @@ export function assignAtOnce(b, view, key, person, cx) {
 }
 
 // Whom the items of settled unclear assignments (`due`, of kind "assign")
-// have in the new data (`find`, the shape's), one line each: the one they
-// were set to (info), others (warning), or not in the view any more
+// have in the new data (`how`, the shape's assign), one line each: the one
+// they were set to (info), others (warning), or not in the view any more
 // (warning). An assignment to az's "me" whose login was unknown says
 // whom the item has.
-export function unclearAssignLines(due, data, find) {
+export function unclearAssignLines(due, data, how) {
   return due.map((u) => {
-    const now = find(data, u.key);
-    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht mehr zu sehen`, warn: true };
+    const now = how.find(data, u.key);
+    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht ${how.where}`, warn: true };
     const has = `${u.label} ist nach dem Neuladen ${assignedText(now.assignees ?? [])}`;
     if (!u.logins || same(now.assigneeLogins, u.logins)) return { text: has, warn: false };
     return { text: `${has}, nicht ${u.logins.length ? u.who : "niemandem"}`, warn: true };
@@ -3858,23 +3931,27 @@ export function unclearParentLines(due, data) {
 // ==== src/ui/modals/assign.js ====
 
 // The assignee picker: whom the selected item is assigned to, one person or
-// no one. Its rows are "Ich", "niemand", then the people its source offers
-// (the repo's assignable people on GitHub, the team's members on Azure),
-// narrowed by a filter that has the keyboard; up/down (or ctrl-j/k,
-// ctrl-n/p) mark a row, Enter or a click assigns it (actions/assign.js).
-// a opens it (Board.key) as b.modal = { kind: "assign", view, key, label,
-// input (the filter's InputState, made for this dialog), field and
-// textField ("filter"), inputFocused, filter, at (the marked row), top
-// (the first row drawn), list ({ me, people, note }, null while it loads),
-// error }. Where the people cannot be read, it says so in the dialog and
-// as a toast, and offers what its source can write without them.
+// no one, as a menu (helpers.js menu, without digits: typing goes to the
+// filter). Its rows are "Ich", "niemand", then the people its source
+// offers (the repo's assignable people on GitHub, the team's members on
+// Azure), narrowed by a filter that has the keyboard; up/down (or
+// ctrl-j/k, ctrl-n/p) mark a row, Enter or a click assigns it
+// (actions/assign.js). The first row is marked where it is "Ich"; else
+// (the people could not be read, or GitHub named no viewer) none is, so
+// that Enter assigns nothing until a row is chosen. Board.openAssign opens
+// it as b.modal = { kind: "assign", view, key, label, input (the filter's
+// InputState, made for this dialog), field and textField ("filter"),
+// inputFocused, filter, at (the marked row, -1 for none), top (the first
+// row drawn), list ({ me, people, note }, null while it loads), error }.
+// Where the people cannot be read, it says so in the dialog and as a
+// toast, and offers what its source can write without them.
 
 // How many rows show at once.
 const VISIBLE = 10;
 
 // The rows the filter leaves: { text, sub, person } ("Ich" carries its
 // name as `sub`; a person their login), each word of the filter in its
-// text, sub or login.
+// text, sub or login (wordsMatch).
 export function assignRows(list, filter) {
   if (!list) return [];
   const rows = [
@@ -3882,12 +3959,14 @@ export function assignRows(list, filter) {
     { text: "niemand", sub: null, person: null },
     ...list.people.map((p) => ({ text: p.name, sub: p.login, person: p })),
   ];
-  const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = (r) => [r.text, r.sub, r.person?.login].filter(Boolean).join("\n").toLowerCase();
-  return rows.filter((r) => words.every((w) => hay(r).includes(w)));
+  return rows.filter((r) => wordsMatch([r.text, r.sub, r.person?.login], filter));
 }
 
 const rowsOf = (m) => assignRows(m.list, m.filter);
+
+// The row marked when the rows come or the filter changes: the first where
+// the people were read and "Ich" is among them, else none (-1).
+const startAt = (m) => (m.error || !m.list?.me ? -1 : 0);
 
 // Assigns the row at `i`, where there is one, and closes the dialog.
 function assignPick(b, m, i, cx) {
@@ -3903,16 +3982,15 @@ export const assignModal = {
   open(b, view, cx) {
     const item = b.selected(view);
     if (!item) return;
-    const source = b.sources[item.source]?.assign;
-    if (!source || !b.shape(view).withItem) return;
+    const source = b.sources[item.source].assign;
     const why = source.refuse(item);
     if (why) return b.say(why, "info", cx);
     const input = InputState.new({ placeholder: "Filter: Name oder Login" });
-    const m = { kind: "assign", view, key: item.key, label: itemLabel(item), input, field: "filter", filter: "", at: 0, top: 0, list: null, error: null };
+    const m = { kind: "assign", view, key: item.key, label: itemLabel(item), input, field: "filter", filter: "", at: -1, top: 0, list: null, error: null };
     wireTextField(b, m, input, "filter", (cx) => assignPick(b, m, m.at, cx));
     input.on("change", (_e, cx) => {
       m.filter = input.value();
-      m.at = 0;
+      m.at = startAt(m);
       m.top = 0;
       cx.notify();
     });
@@ -3926,10 +4004,10 @@ export const assignModal = {
         m.list = { me: source.fallbackMe(), people: [], note: null };
         notify({ title: "Zuweisen: Personen nicht gelesen", body: m.error, level: "error" });
       } finally {
+        m.at = startAt(m);
         cx.notify();
       }
     });
-    cx.notify();
   },
 
   // Every key but Esc (the Board's): up/down, ctrl-j/k and ctrl-n/p mark
@@ -3948,44 +4026,30 @@ export const assignModal = {
   render(b, t) {
     const m = b.modal;
     const rows = rowsOf(m);
-    m.at = Math.max(0, Math.min(m.at, rows.length - 1));
-    if (m.at < m.top) m.top = m.at;
+    m.at = Math.max(-1, Math.min(m.at, rows.length - 1));
+    if (m.at >= 0 && m.at < m.top) m.top = m.at;
     if (m.at >= m.top + VISIBLE) m.top = m.at - VISIBLE + 1;
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
-    const row = (r, i) =>
-      h_flex()
-        .id(`assign-row-${i}`)
-        .px(8)
-        .py(6)
-        .gap(8)
-        .items_center()
-        .rounded(6)
-        .cursor_pointer()
-        .when(i === m.at, (el) => el.bg(t.selected))
-        .hover((s) => s.bg(t.hover))
-        .on_click((_e, cx) => assignPick(b, m, i, cx))
-        .child(div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text))
-        .when(Boolean(r.sub), (el) => el.child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub ?? "")));
-    return backdrop(
-      t,
-      "assign-backdrop",
-      v_flex()
-        .id("assign-dialog")
-        .w(420)
-        .p(12)
-        .gap(8)
-        .rounded(10)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(div().px(4).text_size(12).text_color(t.muted).child(`Zuweisen · ${m.label} · ↑↓ Enter · Esc`))
-        .child(fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)))
-        .when(Boolean(m.error), (el) => el.child(div().px(4).text_size(12).text_color(t.ansi1).child(m.error ?? "")))
-        .child(v_flex().id("assign-rows").gap(2).children(rows.slice(m.top, m.top + VISIBLE).map((r, i) => row(r, m.top + i))))
-        .when(Boolean(message), (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.muted).child(message ?? "")))
-        .when(Boolean(m.list?.note), (el) => el.child(div().px(4).text_size(11).text_color(t.dim).child(`Personen: ${m.list?.note}`))),
-    );
+    const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
+    return menu(t, {
+      id: "assign",
+      rowId: "assign-row",
+      width: 420,
+      title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
+      head: [
+        fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
+        ...(m.error ? [line(m.error, t.ansi1)] : []),
+      ],
+      digits: false,
+      rows: rows.slice(m.top, m.top + VISIBLE).map((r) => [
+        div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),
+        ...(r.sub ? [div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub)] : []),
+      ]),
+      from: m.top,
+      at: m.at,
+      pick: (i, cx) => assignPick(b, m, i, cx),
+      foot: [...(message ? [line(message, t.muted)] : []), ...(m.list?.note ? [line(`Personen: ${m.list.note}`, t.dim, 11)] : [])],
+    });
   },
 };
 
@@ -4465,10 +4529,10 @@ export const MODALS = { start: startModal, status: statusModal, columns: columns
 // details. Not the prs shape: that one draws sections of GitHub pull
 // requests with their author, draft mark, checks and age. The data: {
 // shape: "backlog", meta: { level, childLevel, typeStates, states,
-// typeColors, orderField, area, iteration, missing }, rows, viewer, noViewer,
-// total, limited, limit } (backlogList, sources/azure/backlog.js). View
-// fields it reads: id, source, layout (as writeAtOnce does), context (the
-// create dialog).
+// typeColors, orderField, area, iteration, follows, missing }, rows, viewer,
+// noViewer, total, limited, limit } (backlogList, sources/azure/backlog.js).
+// View fields it reads: id, source, layout (as writeAtOnce does), context
+// (the create dialog).
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -4482,6 +4546,7 @@ const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 const BACKLOG_STATES = {
   find: findBacklogItem, withState: withBacklogState, stateOf: (_data, item) => item.state, where: "im Backlog", again: false,
 };
+const BACKLOG_ASSIGN = { find: findBacklogItem, withItem: withBacklogItem, where: "im Backlog" };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
@@ -4506,14 +4571,15 @@ export const backlogShape = {
   received: (data) => data,
   warnings: (_view, data) => backlogWarnings(data),
   // The settled outcomes: a state change's which state its item has, a
-  // parent link's whether the item hangs under its parent; then, once Azure
+  // parent link's whether the item hangs under its parent, an assignment's
+  // whom it has; then, once Azure
   // has answered (one query each, unclearCreateLines), a create's whether
   // it landed.
   settle(b, view, due, data, cx) {
     tellOutcomes(b, [
       ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
       ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
-      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findBacklogItem),
+      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BACKLOG_ASSIGN),
     ], cx);
     const creates = due.filter((u) => u.kind === "create");
     if (!creates.length) return;
@@ -4525,10 +4591,7 @@ export const backlogShape = {
       }
     });
   },
-  // A work item by its key, and the data with its fields set
-  // (actions/assign.js).
-  find: findBacklogItem,
-  withItem: withBacklogItem,
+  assign: BACKLOG_ASSIGN,
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, BACKLOG_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, BACKLOG_STATES, cx),
   // The detail panel's rows of a work item: its state as a pill (a click
@@ -4688,7 +4751,7 @@ export function unclearMoveLines(due, data) {
 // columns hidden by default) and, where the data does not name its own,
 // limit.
 
-const findItem = (data, key) => findCard(data, key)?.card ?? null;
+const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -4736,10 +4799,8 @@ export const boardShape = {
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
-    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findItem)], cx),
-  // A card by its key, and the data with its fields set (actions/assign.js).
-  find: (data, key) => findItem(data, key),
-  withItem: withCard,
+    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
+  assign: BOARD_ASSIGN,
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
@@ -4911,7 +4972,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
         h_flex()
           .gap(6)
           .items_center()
-          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(card)))
+          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
           .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
       )
       .child(div().text_size(12.5).line_height("17px").child(card.title))
@@ -4924,7 +4985,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
           .children(labels.slice(0, 3).map((l) => labelChip(t, card, l)))
           .when(labels.length > 3, (el) => el.child(chip(t, `+${labels.length - 3}`)))
           .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
-          .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+          .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
           .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
       ))
     .when(Boolean(line), (el) => el.child(line));
@@ -5042,7 +5103,7 @@ function drawPrs(b, t, mono, view, st) {
         // A click on a row (clickItem).
         if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
       })
-      .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(r)))
+      .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
       .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
       // Every row keeps the draft cell, so the columns after it line up.
@@ -5102,11 +5163,13 @@ const sprintState = (b) => b.shapeState.sprint;
 // columns with every task the filter and "nur meine" leave (openColumns),
 // which say which rows show and what the column heads count: folding is no
 // filter.
-const sprintColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine, foldedStories(st.folds, st.data));
 const openColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
+const sprintColumns = (b, st) => withoutFolded(openColumns(b, st), foldedStories(st.folds, st.data));
 
 // An item's state as shown: a task's as its column maps it (shownState).
 const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
+
+const SPRINT_ASSIGN = { find: findSprintItem, withItem: withSprintItem, where: "im Sprint" };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -5151,16 +5214,13 @@ export const sprintShape = {
   // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),
   // The settled outcomes: a move's where its card stands, a state change's
-  // which state its item has.
+  // which state its item has, an assignment's whom it has.
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [
       ...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data, SPRINT_STATES),
-      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findSprintItem),
+      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, SPRINT_ASSIGN),
     ], cx),
-  // A story or task by its key, and the data with its fields set
-  // (actions/assign.js).
-  find: findSprintItem,
-  withItem: withSprintItem,
+  assign: SPRINT_ASSIGN,
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, SPRINT_STATES, cx),
@@ -5195,7 +5255,7 @@ function foldKey(b, view, st, cx) {
   const key = isTask(item) ? item.row : item.key;
   if (key === NO_STORY) return b.say("Die Zeile „Ohne Story“ lässt sich nicht zuklappen", "info", cx);
   if (!rowTasks(st.data, key).length) return b.say(`${itemLabel(item)} hat keine Tasks zum Zuklappen`, "info", cx);
-  toggleFold(b, view, key, cx);
+  toggleStoryFold(b, view, key, cx);
   if (isTask(item) && sprintColumns(b, st)[0].shown.some((s) => s.key === key)) b.choose(view, { col: 0, key }, cx);
 }
 
@@ -5203,7 +5263,7 @@ function foldKey(b, view, st, cx) {
 // and keeps that in the store per view and sprint (toggledFolds). A
 // selected task that is folded away hands the selection to its story where
 // that shows (no choice: reselect), else as after new data.
-function toggleFold(b, view, key, cx) {
+function toggleStoryFold(b, view, key, cx) {
   const st = b.state(view.id);
   st.folds = toggledFolds(st.folds, st.data, key);
   store.set(`folded:${view.id}`, st.folds);
@@ -5216,11 +5276,12 @@ function toggleFold(b, view, key, cx) {
 
 function drawSprint(b, t, mono, view, st) {
   const data = st.data;
-  const nav = sprintColumns(b, st);
   const open = openColumns(b, st);
+  const folded = foldedStories(st.folds, data);
+  const nav = withoutFolded(open, folded);
   const [, ...cols] = nav;
   const rows = shownRows(data, open);
-  const folded = foldedStories(st.folds, data);
+  const counts = rowCounts(data, open);
   const stories = sprintStories(data);
   const allSpaces = spaces();
   const head = h_flex()
@@ -5249,8 +5310,8 @@ function drawSprint(b, t, mono, view, st) {
     .items_start()
     .border_b(1)
     .border_color(t.border)
-    .child(storyCell(b, t, mono, view, st, r, nav))
-    .when(folded.has(r.key), (el) => el.child(foldedCell(t, data, open, r)))
+    .child(storyCell(b, t, mono, view, st, r, nav, folded, counts))
+    .when(folded.has(r.key), (el) => el.child(foldedCell(t, r, counts.get(r.key))))
     .when(!folded.has(r.key), (el) => el.children(cols.map((col, ci) => v_flex()
       .flex_1()
       .min_w(0)
@@ -5264,29 +5325,25 @@ function drawSprint(b, t, mono, view, st) {
 }
 
 // A folded row's place of its tasks, across the taskboard's columns: how
-// many it holds, as many as the filter and "nur meine" leave of them
-// (`open`, openColumns) where they thin them.
-function foldedCell(t, data, open, r) {
-  const shown = open.slice(1).reduce((n, c) => n + c.shown.filter((card) => card.row === r.key).length, 0);
-  const total = rowTasks(data, r.key).length;
+// many it holds, as many as the filter and "nur meine" leave of them where
+// they thin them (`count`, rowCounts).
+function foldedCell(t, r, { shown, total }) {
   return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
 }
 
 // A row's story at the left: its triangle where its row holds tasks (▾, ▸
 // folded; a click folds or unfolds them and chooses nothing), its key and
-// type, title, state and assignee, and a line across its top in its type's color
-// (typeLine); one the filter or "nur meine" hides (it shows for its tasks)
-// is dimmed and takes no click but on its triangle. The row "Ohne Story"
-// names itself.
-function storyCell(b, t, mono, view, st, r, nav) {
+// type, title, state and assignee, and a line across its top in its type's
+// color (typeLine); one the filter or "nur meine" hides (it shows for its
+// tasks) is dimmed and takes no click but on its triangle. The row "Ohne
+// Story" names itself.
+function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
   const story = r.story;
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
   const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
-  const folds = rowTasks(st.data, story.key).length > 0;
-  const folded = foldedStories(st.folds, st.data).has(story.key);
   return cell
     .id(`story-${story.key}`)
     .relative()
@@ -5299,20 +5356,20 @@ function storyCell(b, t, mono, view, st, r, nav) {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
     .child(h_flex().gap(6).items_center()
-      .when(folds, (el) => el.child(div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
+      .when(Boolean(counts.get(story.key)?.total), (el) => el.child(div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
         .on_click((_e, cx) => {
           cx.stop_propagation();
-          if (!b.modal) toggleFold(b, view, story.key, cx);
+          if (!b.modal) toggleStoryFold(b, view, story.key, cx);
         })
-        .child(folded ? "▸" : "▾")))
+        .child(folded.has(story.key) ? "▸" : "▾")))
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
     .child(h_flex().gap(5).flex_wrap().items_center()
       .child(stateChip(t, st.data, story.state))
-      .when(story.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(story.assignees.join(", ")))))
+      .when(story.assignees.length > 0, (el) => el.child(assigneeText(t, story))))
     .when(Boolean(line), (el) => el.child(line));
 }
 
@@ -5350,7 +5407,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
       .child(div().text_size(12.5).line_height("17px").child(card.title))
       .child(h_flex().gap(5).flex_wrap().items_center()
         .child(stateChip(t, st.data, shownState(card, col)))
-        .when(card.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(card.assignees.join(", "))))
+        .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
     .when(Boolean(line), (el) => el.child(line));
 }
@@ -5383,8 +5440,11 @@ const SPRINT_STATES = {
 // its items ended up), moveTo, toggleColumn, openStatusMenu, navigate (its
 // own keyboard movement in place of navigate's, select.js), pickStatus
 // (what a pick in the status menu does in place of a move to that column),
-// and find and withItem (an item by its key, and the data with its fields
-// set: a shape that has them takes a, the assignee picker).
+// and assign (how its items' assignees are found and changed: { find(data,
+// key), withItem(data, key, patch) (the data with the item's fields set),
+// where (where an item no longer is: "im Sprint") }; a shape that has it
+// takes a, the assignee picker, ui/modals/assign.js, and its settle says
+// the outcomes of unclear assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw
@@ -7052,8 +7112,7 @@ export default class Board extends View {
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
-    // a: the assignee picker, where the shape's items can be assigned.
-    if (k === "a" && !mod.shift && st.data && shape.withItem) return MODALS.assign.open(this, view, cx), done();
+    if (k === "a" && !mod.shift && st.data) return this.openAssign(view, cx), done();
     // With nothing selected (loading, failed, empty, a placeholder) Enter
     // and o stay herdr's.
     const item = this.selected(view);
@@ -7065,6 +7124,13 @@ export default class Board extends View {
     const open = this.shape(view).openStatusMenu;
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
     open(this, view, cx);
+    cx.notify();
+  }
+
+  // a: the assignee picker, where the shape's items can be assigned.
+  openAssign(view, cx) {
+    if (!this.shape(view).assign) return this.say("Hier gibt es keine Zuweisung zu ändern", "info", cx);
+    MODALS.assign.open(this, view, cx);
     cx.notify();
   }
 

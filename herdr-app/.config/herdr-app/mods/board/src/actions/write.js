@@ -45,7 +45,7 @@ export function viewStands(b, view) {
 // - w.again: refresh after a write that landed too; w.againOnRefusal:
 //   after one that was refused too (what it met may have been out of date).
 // A write that landed or was refused refreshes the view too while an open
-// outcome of the item, of either kind, remains: the refresh tells it, so
+// outcome of the item, of any kind, remains: the refresh tells it, so
 // it does not wait for the timer. A refresh follows only while the view
 // stands (viewStands).
 export function writeAtOnce(b, view, w, cx) {
@@ -112,7 +112,7 @@ export function writeAtOnce(b, view, w, cx) {
   }
 }
 
-// Whether an outcome of the item `key`, of either kind, is still open.
+// Whether an outcome of the item `key`, of any kind, is still open.
 const openOf = (st, key) => st.unclear.some((u) => u.key === key);
 
 // Says the lines of settled outcomes ({ text, warn }) in one notice; one

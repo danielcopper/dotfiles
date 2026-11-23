@@ -59,6 +59,11 @@ export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 // itemLabel.
 export const cardLabel = (item) => (item.source === "azure" && item.kind === "workitem" ? String(item.number) : itemLabel(item));
 
+// A person as the board names one, in every source alike: by name where
+// there is one, else by login; null for neither. Logins are kept apart
+// (assigneeLogins: select.js isMine).
+export const personName = ({ name, login }) => name || login || null;
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
@@ -75,6 +80,28 @@ export const cardType = (item) => item.type ?? (EPIC_TITLE.test(item.title ?? ""
 // marker: its "epic" label, whatever its case; null for another item.
 export const epicLabel = (item) =>
   (!item.type && cardType(item) ? (item.labels ?? []).find((l) => l.toLowerCase() === "epic") ?? null : null);
+
+// Reads kept by key as their promises: get(key, read) gives the one kept
+// for `key`, else starts read() and keeps that; a read that fails is
+// dropped (where no newer one has taken its place), so the next get reads
+// again. forget(key, promise) drops `promise` where it is still the one
+// kept; clear() drops all.
+export function readMemo() {
+  const kept = new Map();
+  const forget = (key, promise) => kept.get(key) === promise && kept.delete(key);
+  return {
+    get(key, read) {
+      if (!kept.has(key)) {
+        const promise = read();
+        kept.set(key, promise);
+        promise.catch(() => forget(key, promise));
+      }
+      return kept.get(key);
+    },
+    forget,
+    clear: () => kept.clear(),
+  };
+}
 
 export function updatedLabel(at, now) {
   if (!at) return "";

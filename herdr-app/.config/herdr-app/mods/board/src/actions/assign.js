@@ -6,9 +6,9 @@
 // people, note }, persons { login, name, id?, me? }; kept per repo or team
 // by the source), fallbackMe() (the "Ich" it can write without that list,
 // or null), write(view, item, person) (makes `person` the only assignee,
-// null no one; → { names, logins } as the answer names them) }. A shape
-// whose items can be assigned has find(data, key) and withItem(data, key,
-// patch). The picker is modals/assign.js.
+// null no one; → { names, logins } as the answer names them) }. How a
+// shape finds and changes its items' assignees (`how`): its assign, which
+// ui/shapes/index.js describes. The picker is ui/modals/assign.js.
 
 import { itemLabel } from "../shared.js";
 import { writeAtOnce } from "./write.js";
@@ -26,8 +26,8 @@ const same = (a, b) => (a ?? []).join("\n") === (b ?? []).join("\n");
 // since.
 export function assignAtOnce(b, view, key, person, cx) {
   const st = b.state(view.id);
-  const shape = b.shape(view);
-  const item = shape.find(st.data, key);
+  const how = b.shape(view).assign;
+  const item = how.find(st.data, key);
   if (!item) return b.say("Den Eintrag gibt es nicht mehr", "warning", cx);
   const label = itemLabel(item);
   const before = { assignees: item.assignees ?? [], assigneeLogins: item.assigneeLogins ?? [] };
@@ -39,12 +39,12 @@ export function assignAtOnce(b, view, key, person, cx) {
   writeAtOnce(b, view, {
     key,
     label,
-    apply: () => (st.data = shape.withItem(st.data, key, after)),
+    apply: () => (st.data = how.withItem(st.data, key, after)),
     write: async () => (answer = await b.sources[item.source].assign.write(view, item, person)),
-    landed: () => (st.data = shape.withItem(st.data, key, { assignees: answer.names, assigneeLogins: answer.logins })),
+    landed: () => (st.data = how.withItem(st.data, key, { assignees: answer.names, assigneeLogins: answer.logins })),
     undo() {
-      const now = shape.find(st.data, key);
-      if (now && same(now.assignees, after.assignees) && same(now.assigneeLogins, after.assigneeLogins)) st.data = shape.withItem(st.data, key, before);
+      const now = how.find(st.data, key);
+      if (now && same(now.assignees, after.assignees) && same(now.assigneeLogins, after.assigneeLogins)) st.data = how.withItem(st.data, key, before);
     },
     open: { kind: "assign", logins, who },
     texts: {
@@ -59,14 +59,14 @@ export function assignAtOnce(b, view, key, person, cx) {
 }
 
 // Whom the items of settled unclear assignments (`due`, of kind "assign")
-// have in the new data (`find`, the shape's), one line each: the one they
-// were set to (info), others (warning), or not in the view any more
+// have in the new data (`how`, the shape's assign), one line each: the one
+// they were set to (info), others (warning), or not in the view any more
 // (warning). An assignment to az's "me" whose login was unknown says
 // whom the item has.
-export function unclearAssignLines(due, data, find) {
+export function unclearAssignLines(due, data, how) {
   return due.map((u) => {
-    const now = find(data, u.key);
-    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht mehr zu sehen`, warn: true };
+    const now = how.find(data, u.key);
+    if (!now) return { text: `${u.label} ist nach dem Neuladen nicht ${how.where}`, warn: true };
     const has = `${u.label} ist nach dem Neuladen ${assignedText(now.assignees ?? [])}`;
     if (!u.logins || same(now.assigneeLogins, u.logins)) return { text: has, warn: false };
     return { text: `${has}, nicht ${u.logins.length ? u.who : "niemandem"}`, warn: true };

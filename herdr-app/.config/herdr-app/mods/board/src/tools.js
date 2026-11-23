@@ -3,7 +3,7 @@
 // on its machine.
 
 import { exec } from "herdr";
-import { BoardError, failure, firstLine, lastLine } from "./shared.js";
+import { BoardError, failure, firstLine, lastLine, readMemo } from "./shared.js";
 
 // How long gh may take, and az: an az run starts Python, and most ask Azure
 // a few times.
@@ -143,26 +143,21 @@ export async function findTool(execute, tool, on, timeoutMs) {
 // started, so even a write may run again. Gone a second time, the run fails
 // and the next run asks again; a bare name is not asked for again.
 export function toolPaths(execute) {
-  const known = new Map();
+  const known = readMemo();
   return {
     // start(program) runs the program; its rejection passes on unchanged,
     // but for the second time it is gone.
     async run(tool, on, timeoutMs, start) {
       const key = `${on ?? ""}\n${tool}`;
       for (let again = false; ; again = true) {
-        if (!known.has(key)) {
-          const fresh = findTool(execute, tool, on, timeoutMs);
-          known.set(key, fresh);
-          fresh.catch(() => known.get(key) === fresh && known.delete(key));
-        }
-        const lookup = known.get(key);
+        const lookup = known.get(key, () => findTool(execute, tool, on, timeoutMs));
         const { program, bare } = await lookup;
         try {
           return await start(program);
         } catch (e) {
           const msg = firstLine(e?.message ?? e);
           if (bare || !NOT_INSTALLED.test(msg)) throw e;
-          if (known.get(key) === lookup) known.delete(key);
+          known.forget(key, lookup);
           if (again) throw notStarted(tool, on, msg);
         }
       }

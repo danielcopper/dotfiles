@@ -5,7 +5,7 @@
 // Backlog's in backlog.js, the related items' in related.js, the source as
 // the board uses it in index.js (makeAzure).
 
-import { BoardError, failure, isObject, itemKey } from "../../shared.js";
+import { BoardError, failure, isObject, itemKey, personName } from "../../shared.js";
 
 // Theme colors and column order for Azure's state categories, and the
 // categories whose states count as done (a done related item is dimmed).
@@ -168,10 +168,10 @@ export const workItemUrl = (c, id) => `${c.org}/${encodeURIComponent(c.project)}
 export function azPerson(who) {
   if (typeof who === "string") {
     const login = who.match(/<([^>]+)>\s*$/)?.[1] ?? null;
-    return { name: who.replace(/\s*<[^>]*>\s*$/, "") || null, login: login?.toLowerCase() ?? null };
+    return { name: personName({ name: who.replace(/\s*<[^>]*>\s*$/, ""), login }), login: login?.toLowerCase() ?? null };
   }
   if (!isObject(who)) return { name: null, login: null };
-  return { name: who.displayName ?? who.uniqueName ?? null, login: who.uniqueName?.toLowerCase() ?? null };
+  return { name: personName({ name: who.displayName, login: who.uniqueName }), login: who.uniqueName?.toLowerCase() ?? null };
 }
 
 // A work item of az boards query's answer as the board shows it, keyed as
@@ -226,22 +226,31 @@ export const MEMBERS_LIMIT = 1000;
 export const azMembersArgs = (c) =>
   ["devops", "team", "list-member", ...azOrg(c.org), "--project", c.project, "--team", c.team, "--top", String(MEMBERS_LIMIT), "-o", "json"];
 
-// A team's members → { me (the account az is, `viewer`, lower case: its
-// member where it is one, else az's own "me" with what is known of it;
-// me: true), people (the other members by name, { login, name }; a group
-// is none), note (that the list may be cut, or null) }.
-export function parseMembers(stdout, viewer) {
+// A team's members as az lists them → { all ({ login (lower case), name
+// (personName) }; a group is none), note (that the list may be cut, or
+// null) }.
+export function parseMemberList(stdout) {
   const list = azList(azJson(stdout, "die Mitglieder des Teams"));
   if (!list) throw new BoardError("Azure lieferte keine Mitglieder des Teams");
   const all = list
     .map((m) => m?.identity)
     .filter((i) => isObject(i) && i.isContainer !== true && typeof i.uniqueName === "string" && i.uniqueName)
-    .map((i) => ({ login: i.uniqueName.toLowerCase(), name: i.displayName || i.uniqueName }));
+    .map((i) => ({ login: i.uniqueName.toLowerCase(), name: personName({ name: i.displayName, login: i.uniqueName }) }));
+  return { all, note: list.length >= MEMBERS_LIMIT ? `erste ${MEMBERS_LIMIT}` : null };
+}
+
+// A team's members (parseMemberList) as the picker offers them to
+// `viewer` (the account az is, lower case, or null) → { me (its member
+// where it is one, else az's own "me" with what is known of it; me:
+// true), people (the other members by name), note }.
+export function membersFor({ all, note }, viewer) {
   const own = all.find((p) => p.login === viewer);
   const me = { login: viewer ?? null, name: own?.name ?? null, me: true };
   const people = all.filter((p) => p.login !== viewer).sort((a, b) => a.name.localeCompare(b.name));
-  return { me, people, note: list.length >= MEMBERS_LIMIT ? `erste ${MEMBERS_LIMIT}` : null };
+  return { me, people, note };
 }
+
+export const parseMembers = (stdout, viewer) => membersFor(parseMemberList(stdout), viewer);
 
 // Assigning the work item `id` to `person`: its login, "me" for az's own
 // account (me: true; az resolves it), "" for no one, which az writes as an
@@ -249,14 +258,14 @@ export function parseMembers(stdout, viewer) {
 export const azAssignArgs = (c, id, person) =>
   ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--assigned-to", person ? (person.me ? "me" : person.login) : "", "-o", "json"];
 
-// az's answer to an assignment must be the work item and name `person` as
-// its Assigned To (anyone for me without a known login), or no one for null;
-// then → { names, logins } as it names them, else it is open whether the
-// change landed.
-export function checkAzAssigned(stdout, person) {
+// az's answer to an assignment must be the work item `id` and name
+// `person` as its Assigned To (anyone for me without a known login), or no
+// one for null; then → { names, logins } as it names them, else it is open
+// whether the change landed.
+export function checkAzAssigned(stdout, id, person) {
   const json = jsonOrNull(stdout);
   const who = azPerson(json ? fieldOf(json, "AssignedTo") : undefined);
-  const fits = !Number.isInteger(json?.id) ? false : !person ? !who.login : Boolean(who.login) && (person.me && !person.login ? true : who.login === person.login);
+  const fits = json?.id !== id ? false : !person ? !who.login : Boolean(who.login) && (person.me && !person.login ? true : who.login === person.login);
   if (!fits) throw failure("Azure hat die Zuweisung nicht bestätigt", { write: true, unclear: true });
   return { names: who.name ? [who.name] : [], logins: who.login ? [who.login] : [] };
 }

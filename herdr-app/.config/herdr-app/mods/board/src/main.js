@@ -1054,8 +1054,7 @@ export default class Board extends View {
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
-    // a: the assignee picker, where the shape's items can be assigned.
-    if (k === "a" && !mod.shift && st.data && shape.withItem) return MODALS.assign.open(this, view, cx), done();
+    if (k === "a" && !mod.shift && st.data) return this.openAssign(view, cx), done();
     // With nothing selected (loading, failed, empty, a placeholder) Enter
     // and o stay herdr's.
     const item = this.selected(view);
@@ -1067,6 +1066,13 @@ export default class Board extends View {
     const open = this.shape(view).openStatusMenu;
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
     open(this, view, cx);
+    cx.notify();
+  }
+
+  // a: the assignee picker, where the shape's items can be assigned.
+  openAssign(view, cx) {
+    if (!this.shape(view).assign) return this.say("Hier gibt es keine Zuweisung zu ändern", "info", cx);
+    MODALS.assign.open(this, view, cx);
     cx.notify();
   }
 
