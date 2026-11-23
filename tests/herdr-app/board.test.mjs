@@ -7102,7 +7102,11 @@ const over = (top, ground) => {
   const alpha = top.length === 9 ? parseInt(top.slice(7), 16) / 255 : 1;
   return `#${[1, 3, 5].map((i) => Math.round(parseInt(top.slice(i, i + 2), 16) * alpha + parseInt(ground.slice(i, i + 2), 16) * (1 - alpha)).toString(16).padStart(2, "0")).join("")}`;
 };
-const ratio = (fg, ground) => Math.round(contrast(fg, ground) * 100) / 100;
+// The entries of `ratios` (name → contrasts) with a contrast below `need`,
+// measured unrounded, each contrast shown to two places.
+const shown = (r) => Math.round(r * 100) / 100;
+const below = (ratios, need) => Object.entries(ratios).filter(([, rs]) => rs.some((r) => r < need)).map(([name, rs]) => [name, rs.map(shown)]);
+const shownRatios = (ratios) => JSON.stringify(ratios, (_k, v) => (typeof v === "number" ? shown(v) : v));
 const OPAQUE = /^#[0-9a-f]{6}$/;
 
 // A copper theme's file in themes/.
@@ -7201,12 +7205,11 @@ test("a selected card's or row's background is the accent laid opaque over the t
       const [fg, bg] = chipLook(board.toneChip(t, "x", tone));
       assert.equal(fg, t[tone], `${mode} ${tone}: text in its tone`);
       assert.equal(bg, `${t[tone]}${board.CHIP_ALPHA}`, `${mode} ${tone}: on its tint`);
-      ratios[`${mode} chip ${tone}`] = [ratio(fg, over(bg, t.background)), ratio(fg, over(bg, selected))];
+      ratios[`${mode} chip ${tone}`] = [contrast(fg, over(bg, t.background)), contrast(fg, over(bg, selected))];
     }
-    ratios[`${mode} text`] = [t.foreground, t.muted, t.dim].map((fg) => ratio(fg, selected));
+    ratios[`${mode} text`] = [t.foreground, t.muted, t.dim].map((fg) => contrast(fg, selected));
   }
-  const weak = Object.entries(ratios).filter(([, rs]) => rs.some((r) => r < 4.5));
-  assert.deepEqual(weak, [], JSON.stringify(ratios));
+  assert.deepEqual(below(ratios, 4.5), [], shownRatios(ratios));
 });
 
 test("a column head's background is its color laid opaque over the ground it stands on; its name and muted count read at 4.5:1 or more on a column's chrome and on the Sprint's background, for every status color, in copper-dark and copper-light", () => {
@@ -7220,12 +7223,11 @@ test("a column head's background is its color laid opaque over the ground it sta
         const bg = head.with.bg[0];
         assert.match(bg, OPAQUE, `${mode} ${color} on ${ground}`);
         assert.equal(bg, over(`${t[color]}${board.HEAD_ALPHA}`, t[ground]), `${mode} ${color} on ${ground}`);
-        ratios[`${mode} ${color} on ${ground}`] = [t.foreground, t.muted].map((fg) => ratio(fg, bg));
+        ratios[`${mode} ${color} on ${ground}`] = [t.foreground, t.muted].map((fg) => contrast(fg, bg));
       }
     }
   }
-  const weak = Object.entries(ratios).filter(([, rs]) => rs.some((r) => r < 4.5));
-  assert.deepEqual(weak, [], JSON.stringify(ratios));
+  assert.deepEqual(below(ratios, 4.5), [], shownRatios(ratios));
 });
 
 test("a tone or ground the theme has no color for falls back: a chip to the plain one, a head to the translucent tint or raised, the selected look to the theme's selected; tint takes a color's first six digits", () => {
