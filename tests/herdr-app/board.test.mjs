@@ -5913,6 +5913,10 @@ test("UI: with no line selected j scrolls the block a line until the first line 
   assert.deepEqual([b.panel.line, offsetOf(b)], [null, 36], "k: to no line, then a line up");
   for (let i = 0; i < 4; i++) await press(b, cx, "up");
   assert.equal(offsetOf(b), 0, "not above the top");
+  // A description row of 100 pixels moves the line down to end at 232.
+  layOut(b, cx, 100, { heights: { "related-row-1": 100 } });
+  for (let i = 0; i < 4; i++) await press(b, cx, "j");
+  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 72], "the line does not show yet: measured rows count");
 });
 
 test("UI: the details panel has the keyboard only for the item and view it took it in, with the details open", async () => {
@@ -6142,6 +6146,7 @@ test("an Azure work item's related items: one az call for the item with its link
   assert.deepEqual(read.prs, [{ project: "0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88", repo: "6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c", number: 57 }]);
   const bare = board.parseRelatedItem(JSON.stringify({ id: 5, fields: {}, relations: null }));
   assert.deepEqual(bare, { description: "", children: [], prs: [] }, "no description, no links");
+  assert.equal(board.parseRelatedItem(JSON.stringify({ id: 5, fields: { "System.Description": { text: "x" } } })).description, "", "a description that is no text: none");
   const twice = JSON.parse(fixture("azure-related-item.json"));
   twice.relations.push(twice.relations[0], twice.relations[3], { rel: "System.LinkTypes.Hierarchy-Forward", url: "https://dev.azure.com/x/_apis/wit/workItems/abc" });
   assert.deepEqual([board.parseRelatedItem(JSON.stringify(twice)).children, board.parseRelatedItem(JSON.stringify(twice)).prs.length], [[312, 311, 399], 1], "each once; a link without an id left out");
@@ -6592,6 +6597,10 @@ test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its windo
   assert.equal(offsetOf(b), 84);
   for (let i = 0; i < 3; i++) await press(b, cx, "u", { modifiers: { control: true } });
   assert.equal(offsetOf(b), 0, "not above the top");
+  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, "u", { modifiers: { control: true } });
+  assert.equal(offsetOf(b), 84, "from the bottom G went to, which is within the content");
+  await press(b, cx, "home");
   await press(b, cx, "d", { modifiers: { control: true, shift: true } });
   assert.equal(offsetOf(b), 0, "with Shift too: not the panel's");
   assert.equal(b.panel.line, null, "the lines stay as they were");
@@ -6691,6 +6700,15 @@ test("UI: on a board gg and Home go to the first card of the selected column, G 
   await press(b, cx, "l");
   await press(b, cx, "G", { char: "G" });
   assert.deepEqual(st().sel, { col: 2, key: null }, "an empty column stays selected as such");
+});
+
+test("UI: gg, G, Home and End before a view's data came do nothing", async () => {
+  const { b, cx, st } = await bootBoard();
+  for (const k of ["home", "end"]) await press(b, cx, k);
+  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, "g");
+  await press(b, cx, "g");
+  assert.deepEqual([st().data, st().sel], [null, null]);
 });
 
 test("UI: in the Backlog and a PR list gg and G go to the first and last row; on a Sprint to the first and last item of the column", async () => {

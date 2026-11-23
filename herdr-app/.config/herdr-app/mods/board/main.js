@@ -1840,11 +1840,9 @@ export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
 export const childrenWiql = (ids) =>
   `SELECT [${SYSTEM}Id], [${SYSTEM}Title], [${SYSTEM}WorkItemType], [${SYSTEM}State] FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
 
-// The work item's id at the end of a link's URL (…/workItems/<id>), or null.
-const linkedId = (url) => {
-  const id = Number(String(url ?? "").match(/\/workItems\/(\d+)$/i)?.[1]);
-  return Number.isInteger(id) ? id : null;
-};
+// The work item's id at the end of a link's URL (…/workItems/<id>); NaN
+// for none.
+const linkedId = (url) => Number(String(url ?? "").match(/\/workItems\/(\d+)$/i)?.[1]);
 
 // A pull request link's URL → { project, repo, number }, or null.
 export function pullRequestOf(url) {
