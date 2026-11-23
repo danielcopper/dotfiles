@@ -45,55 +45,53 @@
 // boards work-item show --expand relations), and one WIQL query more for its
 // children's and its parent's titles and states where it has either
 // (sources/azure/related.js). An Azure team's Sprint two az calls (the
-// taskboard's column of each work item, and one WIQL query for their
-// fields; for a sprint the sprint picker chose, by its id and path), its
-// Backlog two, one after the other (the level's work items in
-// their list by az rest, then one WIQL query for their fields; one for an
-// empty backlog), and one more for the project's work item types (their
-// colors) while neither view keeps them; either one more while who az is
-// stays unknown. What the Sprint and the Backlog read once and keep, and for
-// how long, makeAzure says. An assignment costs one gh or az call, and the
-// assignee picker one more per repo or team the first time it opens there
-// (GitHub's assignable users with who gh is; the team's members, and who az
-// is while that is unknown). The sprint picker costs one az call (the
-// team's iterations) the first time it opens for a team, one more for the
-// team's current sprint where the Sprint keeps none, and a refresh of a
-// sprint it chose one where `r` dropped them; with no sprint running, a
-// Sprint reads no work items. A state change costs one az call, a
-// Backlog's create one and a child's parent link one more; a
-// create reads the Backlog again, and one whose answer was unclear asks
-// one WIQL query more after that refresh; a create for a team whose
-// default iteration follows the current one reads the team's settings
-// first, one call more. The PR tabs read nothing yet. Finding gh and az
-// costs one sh call now and then (toolPaths says when). A view refreshes
-// when its tab first shows, on `r` (which first drops what its source
-// keeps of it: its source's forget), after a column is hidden or shown
-// (the command menu's "Spalte ausblenden", a name in the hidden line, the
-// column menu), when it is shown again older than refreshMinutes, and
+// taskboard's column of each work item, and one WIQL query for their fields;
+// for a sprint the sprint picker chose, by its id and path; none while the
+// team has no sprint running and none is chosen), its Backlog two, one after
+// the other (the level's work items in their list by az rest, then one WIQL
+// query for their fields; one for an empty backlog), and one more for the
+// project's work item types (their colors) while neither view keeps them;
+// either one more while who az is stays unknown. What the Sprint and the
+// Backlog read once and keep, and for how long, makeAzure says. An
+// assignment costs one gh or az call, and the assignee picker one more per
+// repo or team the first time it opens there (GitHub's assignable users with
+// who gh is; the team's members, and who az is while that is unknown). The
+// sprint picker costs one az call (the team's iterations) the first time it
+// opens for a team, one more for the team's current sprint where the Sprint
+// keeps none, and a refresh of a sprint it chose one where `r` dropped them.
+// A state change costs one az call, a Backlog's create one and a child's
+// parent link one more; a create reads the Backlog again, and one whose
+// answer was unclear asks one WIQL query more after that refresh; a create
+// for a team whose default iteration follows the current one reads the
+// team's settings first, one call more. The PR tabs read nothing yet.
+// Finding gh and az costs one sh call now and then (toolPaths says when). A
+// view refreshes when its tab first shows, on `r` (which first drops what
+// its source keeps of it: its source's forget), after a column is hidden or
+// shown (the command menu's "Spalte ausblenden", a name in the hidden line,
+// the column menu), when it is shown again older than refreshMinutes, and
 // every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), kinds/sprint.js (a
-// sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
-// (a state's color), select.js (filter, "nur meine", selection, the
-// filter of the command menu and the sprint picker), commands.js (the
-// action table, which the keys of its actions, the hint line and the
-// command menu read), related.js (the
-// items related to an item, read when its details open: what is kept,
-// their lines), description.js (a description as drawn, without anything
-// it could load), scroll.js (how the details scroll),
-// sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
-// backlog.js, related.js, index.js), tools.js (running gh and az),
-// actions/ (starting a session, writing a change at once, moving a card,
-// changing a state, creating a work item, assigning an item), ui/helpers.js,
-// ui/tones.js (the tones of labels and types, the selected background, the
-// tints), ui/layer.js (the board layer), ui/related.js (the related items as
-// drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
-// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign, commands, sprints) and this one, the Board,
-// which looks the shape up.
+// kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
+// taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
+// state's color), select.js (filter, "nur meine", selection, the filter of
+// the command menu and the sprint picker), commands.js (the action table,
+// which the keys of its actions, the hint line and the command menu read),
+// related.js (the items related to an item, read when its details open: what
+// is kept, their lines), description.js (a description as drawn, without
+// anything it could load), scroll.js (how the details scroll), sources/
+// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
+// related.js, index.js), tools.js (running gh and az), actions/ (starting a
+// session, writing a change at once, moving a card, changing a state,
+// creating a work item, assigning an item), ui/helpers.js, ui/tones.js (the
+// tones of labels and types, the selected background, the tints),
+// ui/layer.js (the board layer), ui/related.js (the related items as drawn),
+// ui/shapes/ (how a view's data is drawn and worked: board, prs, sprint,
+// backlog, placeholder), ui/modals/ (the dialogs: start, status, columns,
+// create, assign, commands, sprints) and this one, the Board, which looks
+// the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -241,6 +239,14 @@ export function updatedLabel(at, now) {
   if (s < 3600) return `vor ${Math.floor(s / 60)} min`;
   return `vor ${Math.floor(s / 3600)} h`;
 }
+
+// A day in ms, and the end of an iteration's last day from Azure's
+// finishDate (that day's start, in UTC; NaN for none), and whether that
+// day is over by `now`: what keeps a sprint (iterationUntil) and what the
+// sprint picker counts as ended (startRow) go by it.
+export const DAY_MS = 86400000;
+export const lastDayEnd = (finish) => Date.parse(finish ?? "") + DAY_MS;
+export const lastDayOver = (finish, now) => lastDayEnd(finish) <= now;
 
 // A day label for a past moment, by local calendar days.
 export function ageLabel(iso, now) {
@@ -926,11 +932,21 @@ export function readStoredFolds(v) {
 // sprint.
 export const foldedStories = (folds, data) => new Set(folds?.sprint === data.meta.iterationId ? folds.stories : []);
 
+// What a Sprint's data shows, the one place that tells it: "none" where
+// the team has no sprint running and none is chosen (meta.iterationId
+// null), "current" for the team's current sprint (meta.currentId), and
+// "chosen" for another one the sprint picker chose.
+export function sprintIs(data) {
+  const { iterationId, currentId } = data.meta;
+  if (!iterationId) return "none";
+  return iterationId === currentId ? "current" : "chosen";
+}
+
 // The folds that hold for the sprint `data` shows, of a Sprint view's state
-// `st`: the stored ones (st.folds) for the team's current sprint, and for
-// a sprint the sprint picker chose those of this session (st.chosenFolds,
-// by the sprint's id), which never replace the stored ones.
-export const foldsOf = (st, data) => (data.meta.current === false ? st.chosenFolds.get(data.meta.iterationId) ?? null : st.folds);
+// `st`: for a sprint the sprint picker chose those of this session
+// (st.chosenFolds, by the sprint's id), which never replace the stored
+// ones; else the stored ones (st.folds).
+export const foldsOf = (st, data) => (sprintIs(data) === "chosen" ? st.chosenFolds.get(data.meta.iterationId) ?? null : st.folds);
 
 // `folds` with the story `key` folded, or unfolded where it was, in the
 // sprint `data` shows; the folds of another sprint are dropped.
@@ -1013,14 +1029,14 @@ export function sprintDates(it, year) {
 // The row the sprint picker marks first among `rows` (in Azure's order,
 // each with current, start and finish): the team's current sprint; where
 // it has none, the next to start (the first that starts after `now`), else
-// the last that ended (its last day, as Azure dates it, over by `now`),
+// the last that ended (its last day over by `now`: lastDayOver),
 // else the first.
 export function startRow(rows, now) {
   const current = rows.findIndex((r) => r.current);
   if (current >= 0) return current;
   const next = rows.findIndex((r) => Date.parse(r.start ?? "") > now);
   if (next >= 0) return next;
-  const ended = rows.map((r) => Date.parse(r.finish ?? "") + 86400000 <= now).lastIndexOf(true);
+  const ended = rows.map((r) => lastDayOver(r.finish, now)).lastIndexOf(true);
   return Math.max(ended, 0);
 }
 
@@ -1555,12 +1571,10 @@ export function azWorkItem(wi, c, orderField = null) {
 }
 
 // Until when what an iteration's dates bound stays kept (ms): the end of
-// its last day (Azure's finishDate is that day's start, in UTC), or half a
-// day from `now` where it names none.
-const DAY_MS = 86400000;
+// its last day (lastDayEnd), or half a day from `now` where it names none.
 export function iterationUntil(finish, now) {
-  const at = Date.parse(finish ?? "");
-  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
+  const end = lastDayEnd(finish);
+  return Number.isNaN(end) ? now + DAY_MS / 2 : end;
 }
 
 // Until when the answer that a team has no current sprint stays kept: the
@@ -1760,13 +1774,14 @@ export function parseTaskboard(stdout) {
 // read do not list (meta.unknownColumns). A column's color is that of the
 // state its first mapping names; it takes the types it maps (types) and
 // says which state each gets (mappings).
-// meta.current says whether the sprint shown is the team's current one
-// (true where nothing else is chosen), meta.currentId that one's id (null
-// where the team has none running), meta.gone ({ id, name }) a chosen
-// sprint the team no longer has, which the current one stands in for
-// (sprintView). Without an `iteration` (the team has no sprint running
-// and none is chosen) it holds no work items and meta.iterationId is null.
-export function sprintBoard({ iteration, current = true, currentId = iteration?.id ?? null, gone = null, columns, types, items, places, viewer }) {
+// meta.currentId is the team's current sprint's id (null where it has
+// none running; the shown one's by default), which sprintIs
+// (kinds/sprint.js) compares the shown one with; meta.gone ({ id, name })
+// a chosen sprint the team no longer has, which the current one, or none
+// where none runs, stands in for (sprintView). Without an `iteration` (the
+// team has no sprint running and none is chosen) it holds no work items,
+// and meta.iterationId, iteration and finish are null.
+export function sprintBoard({ iteration, currentId = iteration?.id ?? null, gone = null, columns, types, items, places, viewer }) {
   const colors = new Map(types.states.map((s) => [s.name, s.color]));
   const cols = columns.map((c) => ({
     id: c.id, name: c.name, color: colors.get(c.mappings[0]?.state) ?? "muted", hidden: false, count: 0, target: true,
@@ -1794,7 +1809,7 @@ export function sprintBoard({ iteration, current = true, currentId = iteration?.
   return {
     shape: "sprint",
     meta: {
-      iterationId: iteration?.id ?? null, iteration: iteration?.name ?? null, finish: iteration?.finish ?? null, current, currentId, gone,
+      iterationId: iteration?.id ?? null, iteration: iteration?.name ?? null, finish: iteration?.finish ?? null, currentId, gone,
       typeStates: types.types, states: types.states, typeColors: types.colors, unplaced, unknownColumns,
     },
     columns: cols,
@@ -1864,10 +1879,10 @@ export function checkTaskboardMove(stdout, card, column) {
 // null: the current one), looked up by its id among the team's
 // iterations: its taskboard and query by its id and path, the team's
 // settings as for the current one. Where the team no longer has it, the
-// current sprint shows, meta.gone names it and the load says so (notice);
-// a read of it that fails names it. Where the team has no sprint running
-// (the answer kept until the day ends, dayEnd) and none is chosen, it
-// reads no work items (sprintBoard without an iteration).
+// current sprint, or none where none runs, shows, meta.gone names it and
+// the load says so (notice); a read of it that fails names it. Where the
+// team has no sprint running and none is chosen, it reads no work items
+// (sprintBoard without an iteration).
 export function sprintView(s) {
   const iterations = readMemo();
   const iterationsOf = (c) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c)).then(parseIterations));
@@ -1912,7 +1927,7 @@ export function sprintView(s) {
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
     const data = sprintBoard({
-      ...kept, iteration, current: Boolean(iteration) && iteration.id === currentId, currentId, gone,
+      ...kept, iteration, currentId, gone,
       items: items === null ? [] : parseWorkItems(items, c), places: places === null ? new Map() : parseTaskboard(places), viewer: await me,
     });
     s.noViewerOf(data);
@@ -2416,20 +2431,21 @@ export const azureRelated = (az) => ({
 // the path `paths` (toolPaths) finds.
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
-// (iterationUntil; one that fails keeps nothing): per team, by organisation,
-// project and team, its current sprint and taskboard columns. The team's
-// iterations, which the sprint picker lists, are read when it first opens
-// and kept while the board runs (one that fails keeps nothing); which of
-// them is current, the kept current sprint says. The project's work item
-// types, one entry for both views (typesOf), are kept TEAM_KEEP_MS from
-// their read (even where another read of the Sprint's settings fails), or,
-// where a Sprint's whole settings read brought them, until its sprint ends.
-// What is not kept is read at the same time. A refresh then reads the
-// taskboard's columns of the work items and the sprint's work items, also
-// at the same time. The team's kept settings (not the project's types) are
-// dropped, so that they are read again, by `r` on the Sprint (forget), by
-// a task in a column the columns read do not know, and by a move or state
-// change Azure refuses; its iterations only by `r`.
+// (iterationUntil), or, where the team has no sprint running, until that day
+// ends (dayEnd; one that fails keeps nothing): per team, by organisation,
+// project and team, its current sprint (or that none runs) and taskboard
+// columns. The team's iterations, which the sprint picker lists, are read
+// when it first opens and kept while the board runs (one that fails keeps
+// nothing); which of them is current, the kept current sprint says. The
+// project's work item types, one entry for both views (typesOf), are kept
+// TEAM_KEEP_MS from their read (even where another read of the Sprint's
+// settings fails), or, where a Sprint's whole settings read brought them, as
+// long as the Sprint's settings. What is not kept is read at the same time.
+// A refresh then reads the taskboard's columns of the work items and the
+// sprint's work items, also at the same time. The team's kept settings (not
+// the project's types) are dropped, so that they are read again, by `r` on
+// the Sprint (forget), by a task in a column the columns read do not know,
+// and by a move or state change Azure refuses; its iterations only by `r`.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
 // for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the
@@ -2497,7 +2513,7 @@ export function makeAzure(paths) {
     // The project's work item types (parseAzureTypes), one entry for both
     // views: read where it is not kept and kept TEAM_KEEP_MS from their read
     // (even where another read of the Sprint's settings fails), or, where a
-    // Sprint's whole settings read brought them, until its sprint ends
+    // Sprint's whole settings read brought them, as long as those
     // (keepTypesUntil); no forget drops it.
     async typesOf(c) {
       const held = keptValue(typesKey(c));
@@ -2513,7 +2529,7 @@ export function makeAzure(paths) {
     // The team's areas (parseAreas), one entry for both views: read where
     // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
-    // until its sprint ends, the Backlog's until backlogUntil); either
+    // as long as its settings, the Backlog's until backlogUntil); either
     // view's forget drops it.
     async areasOf(c) {
       const held = keptValue(areasKey(c));
@@ -4006,28 +4022,40 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
-// A menu with a filter whose rows come from a read (the assignee picker,
-// the sprint picker): opens the dialog `m` ({ kind, view, … }) as
-// b.modal with its filter, an InputState with `placeholder` made for it
-// (m.input; field and textField "filter", inputFocused, filter; at, the
-// marked row; top and wheel, its window), and starts read(), whose rows
-// land in m.list (null until then). Enter in the filter picks the marked
-// row (pick(i, cx)); the rows' coming and each change of the filter mark
-// the row startAt(m) gives, the window following (followMark over
-// count(m) rows). A read that fails sets m.error and m.list as failed(e)
-// gives them ({ error, list }) and says so as a toast titled `title`.
-export function openReadMenu(b, m, { placeholder, count, startAt, pick, read, failed, title }, cx) {
+// A menu with a filter (the command menu, the assignee picker, the sprint
+// picker): opens the dialog `m` ({ kind, view, … }) as b.modal with its
+// filter, an InputState with `placeholder` made for it (m.input; field and
+// textField "filter", inputFocused, filter; at, the marked row; top and
+// wheel, its window). Enter in the filter picks the marked row (pick(i,
+// cx)). When it opens and at each change of the filter the row startAt(m)
+// gives is marked, and the window, from the top, follows it into view
+// (followMark over count(m) rows).
+export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
   const input = InputState.new({ placeholder });
-  Object.assign(m, { input, field: "filter", filter: "", at: -1, top: 0, wheel: 0, list: null, error: null });
+  Object.assign(m, { input, field: "filter", filter: "", top: 0, wheel: 0 });
+  m.at = startAt(m);
   wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
   input.on("change", (_e, cx) => {
     m.filter = input.value();
     m.at = startAt(m);
     m.top = 0;
+    followMark(m, count(m));
     cx.notify();
   });
   b.modal = m;
   input.focus();
+  cx.notify();
+}
+
+// Such a menu whose rows come from a read (the assignee picker, the
+// sprint picker): openFilterMenu, then read(), whose rows land in m.list
+// (null until then); when they come the row startAt(m) gives is marked and
+// followed. A read that fails sets m.error and m.list as failed(e) gives
+// them ({ error, list }) and says so as a toast titled `title`.
+export function openReadMenu(b, m, { read, failed, title, ...menu }, cx) {
+  const { startAt, count } = menu;
+  Object.assign(m, { list: null, error: null });
+  openFilterMenu(b, m, menu, cx);
   cx.spawn(async (cx) => {
     try {
       m.list = await read();
@@ -4040,12 +4068,11 @@ export function openReadMenu(b, m, { placeholder, count, startAt, pick, read, fa
       cx.notify();
     }
   });
-  cx.notify();
 }
 
-// Such a menu's head: its filter, and the read's error where it failed;
-// and a line of text under its rows (menuNote).
-export const readMenuHead = (t, m) => [
+// Such a menu's head: its filter, and a read's error where it failed; and
+// a line of text under its rows (menuNote).
+export const filterMenuHead = (t, m) => [
   fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
   ...(m.error ? [menuNote(t, m.error, toneColor(t, NOTE_TONES.error))] : []),
 ];
@@ -4736,7 +4763,7 @@ export const assignModal = {
       rowId: "assign-row",
       width: 420,
       title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
-      head: readMenuHead(t, m),
+      head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
         div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),
@@ -5453,7 +5480,7 @@ export const ACTIONS = [
   },
   {
     id: "sprint-current", group: "view", name: "Aktueller Sprint", key: null, menu: 24,
-    when: (c) => has(c, "showSprint") && c.st.data.meta.current === false && Boolean(c.st.data.meta.currentId),
+    when: (c) => has(c, "showSprint") && sprintIs(c.st.data) === "chosen" && Boolean(c.st.data.meta.currentId),
     run: (b, c, cx) => c.shape.showSprint(b, c.view, null, cx),
   },
   {
@@ -5493,13 +5520,12 @@ export const ACTIONS = [
 // shownCommands gives, the filter's letters in the accent color. Up/down,
 // ctrl-j/k and ctrl-n/p mark one, Enter or a click runs it on what it
 // aimed at when the menu opened (Board.runAction), Esc closes; its window
-// shows MENU_ROWS rows (helpers.js: filterMenuKey, menuWindow). `:` opens it
-// (Board.openCommands) as b.modal = { kind: "commands", view (the view it
-// opened on, so that a reload of views.json that drops it, or makes it
-// another kind, closes it), entries (the actions as it opened), input (the
-// filter's InputState, made for this dialog), field and textField
-// ("filter"), inputFocused, filter, at (the marked row, -1 for none), top
-// (the first row drawn), wheel (the wheel's move left over) }.
+// shows MENU_ROWS rows (helpers.js: openFilterMenu, filterMenuKey,
+// menuWindow). `:` opens it (Board.openCommands) as b.modal = { kind:
+// "commands", view (the view it opened on, so that a reload of views.json
+// that drops it, or makes it another kind, closes it), entries (the
+// actions as it opened), and openFilterMenu's fields }; its first row is
+// marked, -1 where the filter leaves none.
 
 // The entries the filter leaves (rankByName), best first, each group
 // (an action's group, not its heading's text) together after its best;
@@ -5523,18 +5549,13 @@ function runEntry(b, m, i, cx) {
 export const commandsModal = {
   // Opens the menu on the moment `c` (Board.openCommands).
   open(b, c, cx) {
-    const input = InputState.new({ placeholder: "Befehl: tippen, um zu filtern" });
-    const m = { kind: "commands", view: c.view, entries: menuActions(c), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
-    wireTextField(b, m, input, "filter", (cx) => runEntry(b, m, m.at, cx));
-    input.on("change", (_e, cx) => {
-      m.filter = input.value();
-      m.at = entriesOf(m).length ? 0 : -1;
-      m.top = 0;
-      cx.notify();
-    });
-    b.modal = m;
-    input.focus();
-    cx.notify();
+    const m = { kind: "commands", view: c.view, entries: menuActions(c) };
+    openFilterMenu(b, m, {
+      placeholder: "Befehl: tippen, um zu filtern",
+      count: (m) => entriesOf(m).length,
+      startAt: (m) => (entriesOf(m).length ? 0 : -1),
+      pick: (i, cx) => runEntry(b, m, i, cx),
+    }, cx);
   },
 
   // Every key but Esc (the Board's): filterMenuKey.
@@ -5549,7 +5570,7 @@ export const commandsModal = {
       rowId: "command",
       width: 440,
       title: "Befehle · ↑↓ Enter · Esc",
-      head: [fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))],
+      head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((e) => [
         markedName(t, e.name, e.at),
@@ -5559,7 +5580,7 @@ export const commandsModal = {
       heads: shown.map((e, n) => (n === 0 || shown[n - 1].group !== e.group ? e.head : null)),
       ...win,
       pick: (i, cx) => runEntry(b, m, i, cx),
-      foot: entries.length ? [] : [div().px(8).text_size(12).text_color(t.muted).child("Kein Befehl passt zum Filter")],
+      foot: entries.length ? [] : [menuNote(t, "Kein Befehl passt zum Filter", t.muted)],
     });
   },
 };
@@ -5727,7 +5748,7 @@ function pickSprintRow(b, m, i, cx) {
   const row = sprintRowsOf(m)[i];
   if (!row) return;
   b.closeModal(cx);
-  b.shape(m.view).showSprint(b, m.view, row.current ? null : { id: row.id, name: row.name }, cx);
+  b.shape(m.view).showSprint(b, m.view, row.current ? null : { id: row.id, name: row.name }, cx, row.id);
 }
 
 export const sprintsModal = {
@@ -5761,7 +5782,7 @@ export const sprintsModal = {
       rowId: "sprint",
       width: 440,
       title: `Sprint · ${m.team} · ↑↓ Enter · Esc`,
-      head: readMenuHead(t, m),
+      head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
         markedName(t, r.name, r.at),
@@ -6667,7 +6688,8 @@ function scrollToRow(b, view, key) {
 
 // ==== src/ui/shapes/sprint.js ====
 
-// The sprint shape: a team's current sprint as a taskboard. One row per story
+// The sprint shape: a team's sprint (its current one, or one the sprint picker
+// chose) as a taskboard. One row per story
 // (its id, title and own state at the left), its tasks as cards in the team's
 // taskboard columns, each with its own state, assignee and id and the chip of
 // its session where it has one; tasks whose story is not in the sprint stand in
@@ -6680,11 +6702,15 @@ function scrollToRow(b, view, key) {
 // foldsOf says where that is kept). Keys walk the stories, then each column's
 // tasks but the folded ones (sprintNav, withoutFolded). Another sprint of the
 // team shows through the sprint picker (ui/modals/sprints.js says what opens
-// it; pickSprint, showSprint), and says so in the head ("nicht aktuell"). The
-// data: { shape: "sprint", meta: { iterationId, iteration, finish, current,
-// gone, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
-// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
-// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
+// it; pickSprint, showSprint), and says so in the head ("nicht aktuell");
+// with no sprint running and none chosen the head says that, and no taskboard
+// shows (sprintIs tells the three apart). The data: { shape: "sprint", meta:
+// { iterationId, iteration, finish (null with none running), currentId (the
+// team's current sprint's, null with none running), gone ({ id, name } of a
+// chosen sprint the team no longer has, or null), typeStates, states,
+// typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
+// viewer, noViewer, total, limited, limit } (sprintBoard,
 // sources/azure/sprint.js).
 // View fields it reads: id, source, layout (as writeAtOnce does).
 
@@ -6761,7 +6787,7 @@ export const sprintShape = {
   // The sprint picker, and the sprint `sprint` shown ({ id, name }; null:
   // the current one).
   pickSprint: (b, view, cx) => MODALS.sprints.open(b, view, cx),
-  showSprint: (b, view, sprint, cx) => showSprint(b, view, sprint, cx),
+  showSprint: (b, view, sprint, cx, id) => showSprint(b, view, sprint, cx, id),
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has, an assignment's whom it has.
   settle: (b, view, due, data, cx) =>
@@ -6797,13 +6823,13 @@ function sprintEnd(finish) {
 }
 
 // Shows the sprint `sprint` ({ id, name }; null: the current one) in the
-// Sprint view `view` while the board runs, and reads it; where that one
-// shows already, read without an error and no read under way, it reads
-// nothing.
-function showSprint(b, view, sprint, cx) {
+// Sprint view `view` while the board runs, and reads it; where the sprint
+// with the id `id` (the current one's where the picker names it, else as
+// the data last read it) shows already, read without an error and no read
+// under way, it reads nothing.
+function showSprint(b, view, sprint, cx, id = sprint?.id ?? b.state(view.id).data?.meta.currentId ?? null) {
   const st = b.state(view.id);
-  const meta = st.data?.meta;
-  const shows = sprint ? meta?.iterationId === sprint.id : meta?.current === true;
+  const shows = id !== null && st.data?.meta.iterationId === id;
   st.sprint = sprint;
   if (shows && !st.error && !st.loading) return;
   b.refresh(view, cx);
@@ -6815,7 +6841,7 @@ function showSprint(b, view, sprint, cx) {
 // has no sprint running and none is chosen, "kein laufender Sprint" alone,
 // which a click opens the picker on too.
 function sprintTitle(b, t, view, data, nav, stories) {
-  const none = !data.meta.iterationId;
+  const is = sprintIs(data);
   return h_flex()
     .id("sprint-title")
     .w(STORY_WIDTH)
@@ -6827,9 +6853,9 @@ function sprintTitle(b, t, view, data, nav, stories) {
     .text_color(t.muted)
     .child(div().id("sprint-name").flex_none().cursor_pointer().hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => {
       if (!b.modal) sprintShape.pickSprint(b, view, cx);
-    }).child(none ? "kein laufender Sprint" : data.meta.iteration))
-    .when(!none && data.meta.current === false, (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
-    .when(!none, (el) => el.child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`)));
+    }).child(is === "none" ? "kein laufender Sprint" : data.meta.iteration))
+    .when(is === "chosen", (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
+    .when(is !== "none", (el) => el.child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`)));
 }
 
 // z: the selected story's tasks folded away, or back; on a task, its row's,
@@ -6852,7 +6878,7 @@ function foldKey(b, view, st, cx) {
 function toggleStoryFold(b, view, key, cx) {
   const st = b.state(view.id);
   const folds = toggledFolds(foldsOf(st, st.data), st.data, key);
-  if (st.data.meta.current === false) st.chosenFolds.set(st.data.meta.iterationId, folds);
+  if (sprintIs(st.data) === "chosen") st.chosenFolds.set(st.data.meta.iterationId, folds);
   else store.set(`folded:${view.id}`, (st.folds = folds));
   const item = b.selected(view);
   const nav = sprintColumns(b, st);
@@ -6871,7 +6897,7 @@ function drawSprint(b, t, mono, view, st) {
   const counts = rowCounts(data, open);
   const stories = sprintStories(data);
   const allSpaces = spaces();
-  const none = !data.meta.iterationId;
+  const none = sprintIs(data) === "none";
   const head = h_flex()
     .id("sprint-head")
     .flex_none()
@@ -7018,8 +7044,9 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
 // by: whether the item has a column that way) and moveHint, canHide (col:
 // whether a column can be hidden, beside toggleColumn), fold (b, view, st,
 // cx: z), create (b, view, cx: n), pickSprint (b, view, cx: the sprint
-// picker, ui/modals/sprints.js) with showSprint (b, view, sprint, cx: the
-// sprint it shows, null for the current one) and enterHint (Enter's hint);
+// picker, ui/modals/sprints.js) with showSprint (b, view, sprint, cx, id:
+// the sprint it shows, null for the current one, whose id `id` names
+// where it is known) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a
 // list has none), detailParts (its rows in the detail

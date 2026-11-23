@@ -117,13 +117,14 @@ export function parseTaskboard(stdout) {
 // read do not list (meta.unknownColumns). A column's color is that of the
 // state its first mapping names; it takes the types it maps (types) and
 // says which state each gets (mappings).
-// meta.current says whether the sprint shown is the team's current one
-// (true where nothing else is chosen), meta.currentId that one's id (null
-// where the team has none running), meta.gone ({ id, name }) a chosen
-// sprint the team no longer has, which the current one stands in for
-// (sprintView). Without an `iteration` (the team has no sprint running
-// and none is chosen) it holds no work items and meta.iterationId is null.
-export function sprintBoard({ iteration, current = true, currentId = iteration?.id ?? null, gone = null, columns, types, items, places, viewer }) {
+// meta.currentId is the team's current sprint's id (null where it has
+// none running; the shown one's by default), which sprintIs
+// (kinds/sprint.js) compares the shown one with; meta.gone ({ id, name })
+// a chosen sprint the team no longer has, which the current one, or none
+// where none runs, stands in for (sprintView). Without an `iteration` (the
+// team has no sprint running and none is chosen) it holds no work items,
+// and meta.iterationId, iteration and finish are null.
+export function sprintBoard({ iteration, currentId = iteration?.id ?? null, gone = null, columns, types, items, places, viewer }) {
   const colors = new Map(types.states.map((s) => [s.name, s.color]));
   const cols = columns.map((c) => ({
     id: c.id, name: c.name, color: colors.get(c.mappings[0]?.state) ?? "muted", hidden: false, count: 0, target: true,
@@ -151,7 +152,7 @@ export function sprintBoard({ iteration, current = true, currentId = iteration?.
   return {
     shape: "sprint",
     meta: {
-      iterationId: iteration?.id ?? null, iteration: iteration?.name ?? null, finish: iteration?.finish ?? null, current, currentId, gone,
+      iterationId: iteration?.id ?? null, iteration: iteration?.name ?? null, finish: iteration?.finish ?? null, currentId, gone,
       typeStates: types.types, states: types.states, typeColors: types.colors, unplaced, unknownColumns,
     },
     columns: cols,
@@ -221,10 +222,10 @@ export function checkTaskboardMove(stdout, card, column) {
 // null: the current one), looked up by its id among the team's
 // iterations: its taskboard and query by its id and path, the team's
 // settings as for the current one. Where the team no longer has it, the
-// current sprint shows, meta.gone names it and the load says so (notice);
-// a read of it that fails names it. Where the team has no sprint running
-// (the answer kept until the day ends, dayEnd) and none is chosen, it
-// reads no work items (sprintBoard without an iteration).
+// current sprint, or none where none runs, shows, meta.gone names it and
+// the load says so (notice); a read of it that fails names it. Where the
+// team has no sprint running and none is chosen, it reads no work items
+// (sprintBoard without an iteration).
 export function sprintView(s) {
   const iterations = readMemo();
   const iterationsOf = (c) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c)).then(parseIterations));
@@ -269,7 +270,7 @@ export function sprintView(s) {
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
     const data = sprintBoard({
-      ...kept, iteration, current: Boolean(iteration) && iteration.id === currentId, currentId, gone,
+      ...kept, iteration, currentId, gone,
       items: items === null ? [] : parseWorkItems(items, c), places: places === null ? new Map() : parseTaskboard(places), viewer: await me,
     });
     s.noViewerOf(data);

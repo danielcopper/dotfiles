@@ -139,6 +139,14 @@ export function updatedLabel(at, now) {
   return `vor ${Math.floor(s / 3600)} h`;
 }
 
+// A day in ms, and the end of an iteration's last day from Azure's
+// finishDate (that day's start, in UTC; NaN for none), and whether that
+// day is over by `now`: what keeps a sprint (iterationUntil) and what the
+// sprint picker counts as ended (startRow) go by it.
+export const DAY_MS = 86400000;
+export const lastDayEnd = (finish) => Date.parse(finish ?? "") + DAY_MS;
+export const lastDayOver = (finish, now) => lastDayEnd(finish) <= now;
+
 // A day label for a past moment, by local calendar days.
 export function ageLabel(iso, now) {
   const then = new Date(iso), today = new Date(now);

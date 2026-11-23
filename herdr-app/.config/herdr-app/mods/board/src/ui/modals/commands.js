@@ -6,19 +6,17 @@
 // shownCommands gives, the filter's letters in the accent color. Up/down,
 // ctrl-j/k and ctrl-n/p mark one, Enter or a click runs it on what it
 // aimed at when the menu opened (Board.runAction), Esc closes; its window
-// shows MENU_ROWS rows (helpers.js: filterMenuKey, menuWindow). `:` opens it
-// (Board.openCommands) as b.modal = { kind: "commands", view (the view it
-// opened on, so that a reload of views.json that drops it, or makes it
-// another kind, closes it), entries (the actions as it opened), input (the
-// filter's InputState, made for this dialog), field and textField
-// ("filter"), inputFocused, filter, at (the marked row, -1 for none), top
-// (the first row drawn), wheel (the wheel's move left over) }.
+// shows MENU_ROWS rows (helpers.js: openFilterMenu, filterMenuKey,
+// menuWindow). `:` opens it (Board.openCommands) as b.modal = { kind:
+// "commands", view (the view it opened on, so that a reload of views.json
+// that drops it, or makes it another kind, closes it), entries (the
+// actions as it opened), and openFilterMenu's fields }; its first row is
+// marked, -1 where the filter leaves none.
 
 import { div } from "gpui-kit";
-import { Input, InputState } from "gpui-base";
 import { menuActions } from "../../commands.js";
 import { rankByName } from "../../select.js";
-import { fieldFrame, filterMenuKey, markedName, menu, menuWindow, wireTextField } from "../helpers.js";
+import { filterMenuHead, filterMenuKey, markedName, menu, menuNote, menuWindow, openFilterMenu } from "../helpers.js";
 
 // The entries the filter leaves (rankByName), best first, each group
 // (an action's group, not its heading's text) together after its best;
@@ -42,18 +40,13 @@ function runEntry(b, m, i, cx) {
 export const commandsModal = {
   // Opens the menu on the moment `c` (Board.openCommands).
   open(b, c, cx) {
-    const input = InputState.new({ placeholder: "Befehl: tippen, um zu filtern" });
-    const m = { kind: "commands", view: c.view, entries: menuActions(c), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
-    wireTextField(b, m, input, "filter", (cx) => runEntry(b, m, m.at, cx));
-    input.on("change", (_e, cx) => {
-      m.filter = input.value();
-      m.at = entriesOf(m).length ? 0 : -1;
-      m.top = 0;
-      cx.notify();
-    });
-    b.modal = m;
-    input.focus();
-    cx.notify();
+    const m = { kind: "commands", view: c.view, entries: menuActions(c) };
+    openFilterMenu(b, m, {
+      placeholder: "Befehl: tippen, um zu filtern",
+      count: (m) => entriesOf(m).length,
+      startAt: (m) => (entriesOf(m).length ? 0 : -1),
+      pick: (i, cx) => runEntry(b, m, i, cx),
+    }, cx);
   },
 
   // Every key but Esc (the Board's): filterMenuKey.
@@ -68,7 +61,7 @@ export const commandsModal = {
       rowId: "command",
       width: 440,
       title: "Befehle · ↑↓ Enter · Esc",
-      head: [fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))],
+      head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((e) => [
         markedName(t, e.name, e.at),
@@ -78,7 +71,7 @@ export const commandsModal = {
       heads: shown.map((e, n) => (n === 0 || shown[n - 1].group !== e.group ? e.head : null)),
       ...win,
       pick: (i, cx) => runEntry(b, m, i, cx),
-      foot: entries.length ? [] : [div().px(8).text_size(12).text_color(t.muted).child("Kein Befehl passt zum Filter")],
+      foot: entries.length ? [] : [menuNote(t, "Kein Befehl passt zum Filter", t.muted)],
     });
   },
 };

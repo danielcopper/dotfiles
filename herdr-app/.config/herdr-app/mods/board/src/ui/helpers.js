@@ -275,28 +275,40 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
-// A menu with a filter whose rows come from a read (the assignee picker,
-// the sprint picker): opens the dialog `m` ({ kind, view, … }) as
-// b.modal with its filter, an InputState with `placeholder` made for it
-// (m.input; field and textField "filter", inputFocused, filter; at, the
-// marked row; top and wheel, its window), and starts read(), whose rows
-// land in m.list (null until then). Enter in the filter picks the marked
-// row (pick(i, cx)); the rows' coming and each change of the filter mark
-// the row startAt(m) gives, the window following (followMark over
-// count(m) rows). A read that fails sets m.error and m.list as failed(e)
-// gives them ({ error, list }) and says so as a toast titled `title`.
-export function openReadMenu(b, m, { placeholder, count, startAt, pick, read, failed, title }, cx) {
+// A menu with a filter (the command menu, the assignee picker, the sprint
+// picker): opens the dialog `m` ({ kind, view, … }) as b.modal with its
+// filter, an InputState with `placeholder` made for it (m.input; field and
+// textField "filter", inputFocused, filter; at, the marked row; top and
+// wheel, its window). Enter in the filter picks the marked row (pick(i,
+// cx)). When it opens and at each change of the filter the row startAt(m)
+// gives is marked, and the window, from the top, follows it into view
+// (followMark over count(m) rows).
+export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
   const input = InputState.new({ placeholder });
-  Object.assign(m, { input, field: "filter", filter: "", at: -1, top: 0, wheel: 0, list: null, error: null });
+  Object.assign(m, { input, field: "filter", filter: "", top: 0, wheel: 0 });
+  m.at = startAt(m);
   wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
   input.on("change", (_e, cx) => {
     m.filter = input.value();
     m.at = startAt(m);
     m.top = 0;
+    followMark(m, count(m));
     cx.notify();
   });
   b.modal = m;
   input.focus();
+  cx.notify();
+}
+
+// Such a menu whose rows come from a read (the assignee picker, the
+// sprint picker): openFilterMenu, then read(), whose rows land in m.list
+// (null until then); when they come the row startAt(m) gives is marked and
+// followed. A read that fails sets m.error and m.list as failed(e) gives
+// them ({ error, list }) and says so as a toast titled `title`.
+export function openReadMenu(b, m, { read, failed, title, ...menu }, cx) {
+  const { startAt, count } = menu;
+  Object.assign(m, { list: null, error: null });
+  openFilterMenu(b, m, menu, cx);
   cx.spawn(async (cx) => {
     try {
       m.list = await read();
@@ -309,12 +321,11 @@ export function openReadMenu(b, m, { placeholder, count, startAt, pick, read, fa
       cx.notify();
     }
   });
-  cx.notify();
 }
 
-// Such a menu's head: its filter, and the read's error where it failed;
-// and a line of text under its rows (menuNote).
-export const readMenuHead = (t, m) => [
+// Such a menu's head: its filter, and a read's error where it failed; and
+// a line of text under its rows (menuNote).
+export const filterMenuHead = (t, m) => [
   fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
   ...(m.error ? [menuNote(t, m.error, toneColor(t, NOTE_TONES.error))] : []),
 ];

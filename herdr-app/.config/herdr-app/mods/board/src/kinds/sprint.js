@@ -6,6 +6,7 @@
 // moves, their rollback and H/L work on it as on a board) plus its rows;
 // sprintBoard (sources/azure/sprint.js) builds it.
 
+import { lastDayOver } from "../shared.js";
 import { navigate, shows } from "../select.js";
 import { findCard, shownColumns } from "./board.js";
 
@@ -79,11 +80,21 @@ export function readStoredFolds(v) {
 // sprint.
 export const foldedStories = (folds, data) => new Set(folds?.sprint === data.meta.iterationId ? folds.stories : []);
 
+// What a Sprint's data shows, the one place that tells it: "none" where
+// the team has no sprint running and none is chosen (meta.iterationId
+// null), "current" for the team's current sprint (meta.currentId), and
+// "chosen" for another one the sprint picker chose.
+export function sprintIs(data) {
+  const { iterationId, currentId } = data.meta;
+  if (!iterationId) return "none";
+  return iterationId === currentId ? "current" : "chosen";
+}
+
 // The folds that hold for the sprint `data` shows, of a Sprint view's state
-// `st`: the stored ones (st.folds) for the team's current sprint, and for
-// a sprint the sprint picker chose those of this session (st.chosenFolds,
-// by the sprint's id), which never replace the stored ones.
-export const foldsOf = (st, data) => (data.meta.current === false ? st.chosenFolds.get(data.meta.iterationId) ?? null : st.folds);
+// `st`: for a sprint the sprint picker chose those of this session
+// (st.chosenFolds, by the sprint's id), which never replace the stored
+// ones; else the stored ones (st.folds).
+export const foldsOf = (st, data) => (sprintIs(data) === "chosen" ? st.chosenFolds.get(data.meta.iterationId) ?? null : st.folds);
 
 // `folds` with the story `key` folded, or unfolded where it was, in the
 // sprint `data` shows; the folds of another sprint are dropped.
@@ -166,13 +177,13 @@ export function sprintDates(it, year) {
 // The row the sprint picker marks first among `rows` (in Azure's order,
 // each with current, start and finish): the team's current sprint; where
 // it has none, the next to start (the first that starts after `now`), else
-// the last that ended (its last day, as Azure dates it, over by `now`),
+// the last that ended (its last day over by `now`: lastDayOver),
 // else the first.
 export function startRow(rows, now) {
   const current = rows.findIndex((r) => r.current);
   if (current >= 0) return current;
   const next = rows.findIndex((r) => Date.parse(r.start ?? "") > now);
   if (next >= 0) return next;
-  const ended = rows.map((r) => Date.parse(r.finish ?? "") + 86400000 <= now).lastIndexOf(true);
+  const ended = rows.map((r) => lastDayOver(r.finish, now)).lastIndexOf(true);
   return Math.max(ended, 0);
 }

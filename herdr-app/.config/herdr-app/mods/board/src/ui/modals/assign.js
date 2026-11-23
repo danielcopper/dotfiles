@@ -20,7 +20,7 @@ import { div } from "gpui-kit";
 import { itemLabel, report } from "../../shared.js";
 import { wordsMatch } from "../../select.js";
 import { assignAtOnce } from "../../actions/assign.js";
-import { filterMenuKey, menu, menuNote, menuWindow, openReadMenu, readMenuHead } from "../helpers.js";
+import { filterMenuKey, menu, menuNote, menuWindow, openReadMenu, filterMenuHead } from "../helpers.js";
 
 // The rows the filter leaves: { text, sub, person } ("Ich" carries its
 // name as `sub`; a person their login), each word of the filter in its
@@ -88,7 +88,7 @@ export const assignModal = {
       rowId: "assign-row",
       width: 420,
       title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
-      head: readMenuHead(t, m),
+      head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
         div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),

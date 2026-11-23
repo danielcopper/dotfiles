@@ -5,7 +5,7 @@
 // Backlog's in backlog.js, the related items' in related.js, the source as
 // the board uses it in index.js (makeAzure).
 
-import { BoardError, failure, isObject, itemKey, personName } from "../../shared.js";
+import { BoardError, DAY_MS, failure, isObject, itemKey, lastDayEnd, personName } from "../../shared.js";
 
 // Theme colors and column order for Azure's state categories, and the
 // categories whose states count as done (a done related item is dimmed).
@@ -193,12 +193,10 @@ export function azWorkItem(wi, c, orderField = null) {
 }
 
 // Until when what an iteration's dates bound stays kept (ms): the end of
-// its last day (Azure's finishDate is that day's start, in UTC), or half a
-// day from `now` where it names none.
-const DAY_MS = 86400000;
+// its last day (lastDayEnd), or half a day from `now` where it names none.
 export function iterationUntil(finish, now) {
-  const at = Date.parse(finish ?? "");
-  return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
+  const end = lastDayEnd(finish);
+  return Number.isNaN(end) ? now + DAY_MS / 2 : end;
 }
 
 // Until when the answer that a team has no current sprint stays kept: the

@@ -1,4 +1,5 @@
-// The sprint shape: a team's current sprint as a taskboard. One row per story
+// The sprint shape: a team's sprint (its current one, or one the sprint picker
+// chose) as a taskboard. One row per story
 // (its id, title and own state at the left), its tasks as cards in the team's
 // taskboard columns, each with its own state, assignee and id and the chip of
 // its session where it has one; tasks whose story is not in the sprint stand in
@@ -11,11 +12,15 @@
 // foldsOf says where that is kept). Keys walk the stories, then each column's
 // tasks but the folded ones (sprintNav, withoutFolded). Another sprint of the
 // team shows through the sprint picker (ui/modals/sprints.js says what opens
-// it; pickSprint, showSprint), and says so in the head ("nicht aktuell"). The
-// data: { shape: "sprint", meta: { iterationId, iteration, finish, current,
-// gone, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
-// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
-// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
+// it; pickSprint, showSprint), and says so in the head ("nicht aktuell");
+// with no sprint running and none chosen the head says that, and no taskboard
+// shows (sprintIs tells the three apart). The data: { shape: "sprint", meta:
+// { iterationId, iteration, finish (null with none running), currentId (the
+// team's current sprint's, null with none running), gone ({ id, name } of a
+// chosen sprint the team no longer has, or null), typeStates, states,
+// typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
+// viewer, noViewer, total, limited, limit } (sprintBoard,
 // sources/azure/sprint.js).
 // View fields it reads: id, source, layout (as writeAtOnce does).
 
@@ -25,7 +30,7 @@ import { spaces } from "herdr";
 import { cardLabel, itemLabel } from "../../shared.js";
 import { applyMoves, findCard, hasStep, stepTarget } from "../../kinds/board.js";
 import {
-  NO_STORY, dayText, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories,
+  NO_STORY, dayText, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintIs, sprintItems, sprintNav, sprintNavigate, sprintStories,
   sprintWarnings, toggledFolds, withItemState, withSprintItem, withoutFolded,
 } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
@@ -111,7 +116,7 @@ export const sprintShape = {
   // The sprint picker, and the sprint `sprint` shown ({ id, name }; null:
   // the current one).
   pickSprint: (b, view, cx) => MODALS.sprints.open(b, view, cx),
-  showSprint: (b, view, sprint, cx) => showSprint(b, view, sprint, cx),
+  showSprint: (b, view, sprint, cx, id) => showSprint(b, view, sprint, cx, id),
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has, an assignment's whom it has.
   settle: (b, view, due, data, cx) =>
@@ -147,13 +152,13 @@ function sprintEnd(finish) {
 }
 
 // Shows the sprint `sprint` ({ id, name }; null: the current one) in the
-// Sprint view `view` while the board runs, and reads it; where that one
-// shows already, read without an error and no read under way, it reads
-// nothing.
-function showSprint(b, view, sprint, cx) {
+// Sprint view `view` while the board runs, and reads it; where the sprint
+// with the id `id` (the current one's where the picker names it, else as
+// the data last read it) shows already, read without an error and no read
+// under way, it reads nothing.
+function showSprint(b, view, sprint, cx, id = sprint?.id ?? b.state(view.id).data?.meta.currentId ?? null) {
   const st = b.state(view.id);
-  const meta = st.data?.meta;
-  const shows = sprint ? meta?.iterationId === sprint.id : meta?.current === true;
+  const shows = id !== null && st.data?.meta.iterationId === id;
   st.sprint = sprint;
   if (shows && !st.error && !st.loading) return;
   b.refresh(view, cx);
@@ -165,7 +170,7 @@ function showSprint(b, view, sprint, cx) {
 // has no sprint running and none is chosen, "kein laufender Sprint" alone,
 // which a click opens the picker on too.
 function sprintTitle(b, t, view, data, nav, stories) {
-  const none = !data.meta.iterationId;
+  const is = sprintIs(data);
   return h_flex()
     .id("sprint-title")
     .w(STORY_WIDTH)
@@ -177,9 +182,9 @@ function sprintTitle(b, t, view, data, nav, stories) {
     .text_color(t.muted)
     .child(div().id("sprint-name").flex_none().cursor_pointer().hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => {
       if (!b.modal) sprintShape.pickSprint(b, view, cx);
-    }).child(none ? "kein laufender Sprint" : data.meta.iteration))
-    .when(!none && data.meta.current === false, (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
-    .when(!none, (el) => el.child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`)));
+    }).child(is === "none" ? "kein laufender Sprint" : data.meta.iteration))
+    .when(is === "chosen", (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
+    .when(is !== "none", (el) => el.child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`)));
 }
 
 // z: the selected story's tasks folded away, or back; on a task, its row's,
@@ -202,7 +207,7 @@ function foldKey(b, view, st, cx) {
 function toggleStoryFold(b, view, key, cx) {
   const st = b.state(view.id);
   const folds = toggledFolds(foldsOf(st, st.data), st.data, key);
-  if (st.data.meta.current === false) st.chosenFolds.set(st.data.meta.iterationId, folds);
+  if (sprintIs(st.data) === "chosen") st.chosenFolds.set(st.data.meta.iterationId, folds);
   else store.set(`folded:${view.id}`, (st.folds = folds));
   const item = b.selected(view);
   const nav = sprintColumns(b, st);
@@ -221,7 +226,7 @@ function drawSprint(b, t, mono, view, st) {
   const counts = rowCounts(data, open);
   const stories = sprintStories(data);
   const allSpaces = spaces();
-  const none = !data.meta.iterationId;
+  const none = sprintIs(data) === "none";
   const head = h_flex()
     .id("sprint-head")
     .flex_none()

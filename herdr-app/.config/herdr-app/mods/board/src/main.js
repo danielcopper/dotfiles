@@ -43,55 +43,53 @@
 // boards work-item show --expand relations), and one WIQL query more for its
 // children's and its parent's titles and states where it has either
 // (sources/azure/related.js). An Azure team's Sprint two az calls (the
-// taskboard's column of each work item, and one WIQL query for their
-// fields; for a sprint the sprint picker chose, by its id and path), its
-// Backlog two, one after the other (the level's work items in
-// their list by az rest, then one WIQL query for their fields; one for an
-// empty backlog), and one more for the project's work item types (their
-// colors) while neither view keeps them; either one more while who az is
-// stays unknown. What the Sprint and the Backlog read once and keep, and for
-// how long, makeAzure says. An assignment costs one gh or az call, and the
-// assignee picker one more per repo or team the first time it opens there
-// (GitHub's assignable users with who gh is; the team's members, and who az
-// is while that is unknown). The sprint picker costs one az call (the
-// team's iterations) the first time it opens for a team, one more for the
-// team's current sprint where the Sprint keeps none, and a refresh of a
-// sprint it chose one where `r` dropped them; with no sprint running, a
-// Sprint reads no work items. A state change costs one az call, a
-// Backlog's create one and a child's parent link one more; a
-// create reads the Backlog again, and one whose answer was unclear asks
-// one WIQL query more after that refresh; a create for a team whose
-// default iteration follows the current one reads the team's settings
-// first, one call more. The PR tabs read nothing yet. Finding gh and az
-// costs one sh call now and then (toolPaths says when). A view refreshes
-// when its tab first shows, on `r` (which first drops what its source
-// keeps of it: its source's forget), after a column is hidden or shown
-// (the command menu's "Spalte ausblenden", a name in the hidden line, the
-// column menu), when it is shown again older than refreshMinutes, and
+// taskboard's column of each work item, and one WIQL query for their fields;
+// for a sprint the sprint picker chose, by its id and path; none while the
+// team has no sprint running and none is chosen), its Backlog two, one after
+// the other (the level's work items in their list by az rest, then one WIQL
+// query for their fields; one for an empty backlog), and one more for the
+// project's work item types (their colors) while neither view keeps them;
+// either one more while who az is stays unknown. What the Sprint and the
+// Backlog read once and keep, and for how long, makeAzure says. An
+// assignment costs one gh or az call, and the assignee picker one more per
+// repo or team the first time it opens there (GitHub's assignable users with
+// who gh is; the team's members, and who az is while that is unknown). The
+// sprint picker costs one az call (the team's iterations) the first time it
+// opens for a team, one more for the team's current sprint where the Sprint
+// keeps none, and a refresh of a sprint it chose one where `r` dropped them.
+// A state change costs one az call, a Backlog's create one and a child's
+// parent link one more; a create reads the Backlog again, and one whose
+// answer was unclear asks one WIQL query more after that refresh; a create
+// for a team whose default iteration follows the current one reads the
+// team's settings first, one call more. The PR tabs read nothing yet.
+// Finding gh and az costs one sh call now and then (toolPaths says when). A
+// view refreshes when its tab first shows, on `r` (which first drops what
+// its source keeps of it: its source's forget), after a column is hidden or
+// shown (the command menu's "Spalte ausblenden", a name in the hidden line,
+// the column menu), when it is shown again older than refreshMinutes, and
 // every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), kinds/sprint.js (a
-// sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
-// (a state's color), select.js (filter, "nur meine", selection, the
-// filter of the command menu and the sprint picker), commands.js (the
-// action table, which the keys of its actions, the hint line and the
-// command menu read), related.js (the
-// items related to an item, read when its details open: what is kept,
-// their lines), description.js (a description as drawn, without anything
-// it could load), scroll.js (how the details scroll),
-// sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
-// backlog.js, related.js, index.js), tools.js (running gh and az),
-// actions/ (starting a session, writing a change at once, moving a card,
-// changing a state, creating a work item, assigning an item), ui/helpers.js,
-// ui/tones.js (the tones of labels and types, the selected background, the
-// tints), ui/layer.js (the board layer), ui/related.js (the related items as
-// drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
-// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign, commands, sprints) and this one, the Board,
-// which looks the shape up.
+// kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
+// taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
+// state's color), select.js (filter, "nur meine", selection, the filter of
+// the command menu and the sprint picker), commands.js (the action table,
+// which the keys of its actions, the hint line and the command menu read),
+// related.js (the items related to an item, read when its details open: what
+// is kept, their lines), description.js (a description as drawn, without
+// anything it could load), scroll.js (how the details scroll), sources/
+// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
+// related.js, index.js), tools.js (running gh and az), actions/ (starting a
+// session, writing a change at once, moving a card, changing a state,
+// creating a work item, assigning an item), ui/helpers.js, ui/tones.js (the
+// tones of labels and types, the selected background, the tints),
+// ui/layer.js (the board layer), ui/related.js (the related items as drawn),
+// ui/shapes/ (how a view's data is drawn and worked: board, prs, sprint,
+// backlog, placeholder), ui/modals/ (the dialogs: start, status, columns,
+// create, assign, commands, sprints) and this one, the Board, which looks
+// the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 

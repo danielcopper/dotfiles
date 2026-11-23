@@ -20,7 +20,7 @@ import { div } from "gpui-kit";
 import { report } from "../../shared.js";
 import { rankByName } from "../../select.js";
 import { sprintDates, startRow } from "../../kinds/sprint.js";
-import { filterMenuKey, markedName, menu, menuNote, menuWindow, openReadMenu, readMenuHead, toneChip } from "../helpers.js";
+import { filterMenuKey, markedName, menu, menuNote, menuWindow, openReadMenu, filterMenuHead, toneChip } from "../helpers.js";
 import { NOTE_TONES } from "../tones.js";
 
 const sprintRowsOf = (m) => rankByName(m.list ?? [], m.filter);
@@ -39,7 +39,7 @@ function pickSprintRow(b, m, i, cx) {
   const row = sprintRowsOf(m)[i];
   if (!row) return;
   b.closeModal(cx);
-  b.shape(m.view).showSprint(b, m.view, row.current ? null : { id: row.id, name: row.name }, cx);
+  b.shape(m.view).showSprint(b, m.view, row.current ? null : { id: row.id, name: row.name }, cx, row.id);
 }
 
 export const sprintsModal = {
@@ -73,7 +73,7 @@ export const sprintsModal = {
       rowId: "sprint",
       width: 440,
       title: `Sprint · ${m.team} · ↑↓ Enter · Esc`,
-      head: readMenuHead(t, m),
+      head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
         markedName(t, r.name, r.at),

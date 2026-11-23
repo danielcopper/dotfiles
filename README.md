@@ -383,13 +383,13 @@ herdr-app`. Which files of the package git tracks is set in the root
   choice is the Sprint view's while the board runs and is stored nowhere, so
   after a restart the Sprint shows the current sprint again. A refresh keeps
   it; `r` reads the team's sprints again too, and where the team no longer
-  has the chosen one, the Sprint shows the current one and says so. Where the
-  team has no sprint running, the Sprint says "kein laufender Sprint" in place
-  of a sprint's name and draws no taskboard; the picker opens there the same
-  way, with no sprint marked "aktuell" (it marks the next sprint to start,
-  else the last one that ended), a sprint picked shows, and "Aktueller
+  has the chosen one, the Sprint shows the current one (or that none runs) and
+  says so. Where the team has no sprint running, the Sprint says "kein laufender
+  Sprint" in place of a sprint's name and draws no taskboard; the picker opens
+  there the same way, with no sprint marked "aktuell" (it marks the next sprint
+  to start, else the last one that ended), a sprint picked shows, and "Aktueller
   Sprint" is not offered; the first refresh on the day a sprint starts shows
-  that sprint. A team's Backlog lists its requirement
+  that sprint as the team's current one. A team's Backlog lists its requirement
   level (its Stories, and Bugs where the team keeps them there) in backlog
   order, one row each with id, type, title, state, sprint ("—" for none) and
   assignee. It needs `az login`: the level's work items come through
@@ -448,9 +448,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   anything; a fold that takes the selected task away selects its story, where
   that shows. A folded row says how many tasks it holds, the keys pass over
   them, and the board remembers the folded stories per sprint, after a restart
-  too (a new sprint starts unfolded); those of a sprint the picker chose only
-  while the board runs, and they leave the current sprint's as they are. On a
-  Backlog `j/k` move,
+  too (a new sprint starts unfolded); a chosen sprint's folds last while the
+  board runs and leave the current sprint's alone. On a Backlog `j/k` move,
   `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
   iteration and sprint), `o` opens the item in the browser, and `n` creates a
   work item: a dialog asks for its type (the level's, Story first; with a Story

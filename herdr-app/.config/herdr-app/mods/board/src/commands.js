@@ -38,6 +38,7 @@ import { cardType, itemLabel, lineKey } from "./shared.js";
 import { hasViewSwitch, shownIndex, sourceAfter, sourcesOf, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
 import { linkedSession } from "./actions/start.js";
 import { descriptionFolds } from "./ui/related.js";
+import { sprintIs } from "./kinds/sprint.js";
 
 // What a key event names (an action's key), or null for one no action has:
 // [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
@@ -353,7 +354,7 @@ export const ACTIONS = [
   },
   {
     id: "sprint-current", group: "view", name: "Aktueller Sprint", key: null, menu: 24,
-    when: (c) => has(c, "showSprint") && c.st.data.meta.current === false && Boolean(c.st.data.meta.currentId),
+    when: (c) => has(c, "showSprint") && sprintIs(c.st.data) === "chosen" && Boolean(c.st.data.meta.currentId),
     run: (b, c, cx) => c.shape.showSprint(b, c.view, null, cx),
   },
   {
