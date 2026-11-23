@@ -110,6 +110,7 @@ class WhatRendersLarge(unittest.TestCase):
     def test_a_bracketed_reference_without_its_definition(self):
         self.assertTrue(refused("- a [#974] b"))
         self.assertTrue(refused("- a [#974] b\n\n[#975]: " + URL))
+        self.assertTrue(refused("- a settles [#974]: closed b"))
 
     def test_a_collapsed_or_full_reference_link_without_its_definition(self):
         for text in (
@@ -233,6 +234,21 @@ class WhatStaysSmall(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertFalse(refused(text))
+
+    def test_a_bracketed_reference_before_a_colon_with_its_definition(self):
+        # `[#974]:` inside a sentence is a shortcut link, not a definition.
+        for text in (
+            f"- The answer also settles [#974]: closed with a fix\n\n[#974]: {URL}",
+            f"1. settles [#974]: closed\n- and [#974]: too\n\n[#974]: {URL}",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(refused(text))
+
+    def test_only_a_line_start_definition_defines_a_label(self):
+        # The definition at the end counts; a `[#974]: url` inside a sentence defines nothing.
+        self.assertFalse(refused(f"- settles [#974]: closed\n\n  [#974]: {URL}"))
+        self.assertTrue(refused(f"See [#974]: {URL}\n\n- D1 ([#974])"))
+        self.assertTrue(refused(f"- D1 ([#974])\n\nSee [#974]: {URL}"))
 
     def test_a_definition_after_a_thematic_break_or_an_html_comment(self):
         for between in (
@@ -391,6 +407,20 @@ class WhereTheTextIsRead(unittest.TestCase):
         self.assertIn(f"renders large: {URL}", stderr)
         self.assertIn("[#N]: https://github.com/<owner>/<repo>/issues/N", stderr)
         self.assertIn("outside the list", stderr)
+
+    def test_the_message_says_a_file_was_read_before_the_command_ran(self):
+        directory = temp_dir(self)
+        _ = (Path(directory) / "body.md").write_text(DECISION + "\n")
+        for command in (
+            "gh pr create --title x --body-file body.md",
+            'gh pr edit 5 --body "$(cat body.md)"',
+        ):
+            with self.subTest(command=command):
+                stderr = run_hook(command, directory).stderr
+                self.assertIn("read before this command ran", stderr)
+                self.assertIn("in a Bash call of its own", stderr)
+        stderr = run_hook("gh pr create --title x --body " + shlex.quote(DECISION), "/").stderr
+        self.assertNotIn("read before this command ran", stderr)
 
     def test_the_fix_names_the_blank_line_before_the_definition(self):
         stderr = run_hook("gh pr create --title x --body " + shlex.quote(DECISION), "/").stderr

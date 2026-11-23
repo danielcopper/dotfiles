@@ -25,7 +25,9 @@ carries `class="issue-link"`:
   continuation of the item: the item, the `[#974]` in it and the definition's
   URL all render large. This hook counts a definition only when it opens the
   text or follows a blank line, a heading, a thematic break, a fenced code
-  block, an HTML comment line or another definition.
+  block, an HTML comment line or another definition, and only at the start of
+  a line (up to three spaces in): `settles [#974]: closed` in a sentence is a
+  link, not a definition.
 - All of these in a task-list item, an ordered item (`1.`, `1)`), a heading
   inside an item (`- ## …`), a lazy continuation line (unindented, no blank
   line before it), an indented paragraph of the item, a quote indented under
@@ -50,7 +52,9 @@ spaces (`***`, `---`, `___`).
 than as the whole command string (`pieces=True`); its docstring lists the
 commands, options, files and heredocs. Every gh command it knows counts but
 `gh pr merge` (its body is a commit message). Not `git commit` (plain text)
-and not `az repos pr` (Azure DevOps renders markdown its own way).
+and not `az repos pr` (Azure DevOps renders markdown its own way). A file is
+read as it stands before the command runs, so a change the same command makes
+to it is not seen; the message says so when a refused line comes from a file.
 
 **What this hook cannot see.** What `published_text.py` names; a body put
 together in a variable from anything but a heredoc or `cat`
@@ -121,7 +125,9 @@ CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")
 HTML_CODE_RE = re.compile(r"<code>.*?</code>", re.IGNORECASE)
 INLINE_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")
 REFERENCE_LINK_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
-BRACKETED_RE = re.compile(r"\[(#\d+)\](?![(\[:])")
+# Followed by `:` too: a definition is only one on a line of its own
+# (`definitions`), and those lines are not read for references.
+BRACKETED_RE = re.compile(r"\[(#\d+)\](?![(\[])")
 # `_…_` and `__…__` emphasis: its delimiters do not stand against a reference
 # the way a `_` in a word does (`_#974_` links, `x_#974_` does not). The text
 # inside holds no `_`, which keeps a line of many `_` linear.
@@ -297,6 +303,11 @@ FIX = (
     "[#N](https://github.com/<owner>/<repo>/issues/N), which also replaces a bare issue URL; "
     "or move the reference into a sentence outside the list."
 )
+FROM_FILE = (
+    "The file was read before this command ran, so a change made to it in the same "
+    "Bash call is not seen: change the file in a Bash call of its own, then run the "
+    "gh command again."
+)
 
 
 def counts(name: str) -> bool:
@@ -308,15 +319,17 @@ def lint_block(command: str, cwd: str) -> str | None:
     """Why the gh text `command` publishes is refused, or None."""
     seen: set[str] = set()
     report: list[str] = []
+    from_file = False
     for where, text in publishing_sources(command, cwd, counts, pieces=True):
         for line, found in list_lines(text):
             if line in seen:
                 continue
             seen.add(line)
+            from_file = from_file or where.startswith("a file ")
             report.append(f"  {where}: {line}\n    renders large: {', '.join(found)}")
     if not report:
         return None
-    return "\n".join([BLOCKED, *report, FIX])
+    return "\n".join([BLOCKED, *report, FIX, *([FROM_FILE] if from_file else [])])
 
 
 def main() -> int:
