@@ -41,13 +41,13 @@ export function shownState(item, column) {
 
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
-// (a task moved in comes last in its column's data); the tasks of the rows
-// in `folded` (story keys) are left out (withoutFolded).
-export function sprintNav(data, filter, mine, folded = new Set()) {
+// (a task moved in comes last in its column's data). withoutFolded leaves
+// the tasks of folded rows out of them.
+export function sprintNav(data, filter, mine) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
   const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
-  return withoutFolded([stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))], folded);
+  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
 }
 
 // sprintNav's columns without the tasks of the rows in `folded`.

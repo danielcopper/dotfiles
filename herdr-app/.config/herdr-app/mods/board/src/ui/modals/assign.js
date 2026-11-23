@@ -4,9 +4,12 @@
 // offers (the repo's assignable people on GitHub, the team's members on
 // Azure), narrowed by a filter that has the keyboard; up/down (or
 // ctrl-j/k, ctrl-n/p) mark a row, Enter or a click assigns it
-// (actions/assign.js). The first row is marked where it is "Ich"; else
-// (the people could not be read, or GitHub named no viewer) none is, so
-// that Enter assigns nothing until a row is chosen. Board.openAssign opens
+// (actions/assign.js). Which row is marked when the rows come and after
+// each change of the filter: where the people were read and "Ich" is among
+// them, the first row the filter leaves that is no "niemand", and
+// "niemand" only where it is all that is left; else (the people could not
+// be read, or GitHub named no viewer) none, so that Enter assigns nothing
+// until a row is chosen. Board.openAssign opens
 // it as b.modal = { kind: "assign", view, key, label, input (the filter's
 // InputState, made for this dialog), field and textField ("filter"),
 // inputFocused, filter, at (the marked row, -1 for none), top (the first
@@ -40,9 +43,14 @@ export function assignRows(list, filter) {
 
 const rowsOf = (m) => assignRows(m.list, m.filter);
 
-// The row marked when the rows come or the filter changes: the first where
-// the people were read and "Ich" is among them, else none (-1).
-const startAt = (m) => (m.error || !m.list?.me ? -1 : 0);
+// The row marked when the rows come or the filter changes (-1 for none),
+// by the rule in the header.
+function startAt(m) {
+  if (m.error || !m.list?.me) return -1;
+  const rows = rowsOf(m);
+  const person = rows.findIndex((r) => r.person);
+  return person >= 0 ? person : rows.length - 1;
+}
 
 // Assigns the row at `i`, where there is one, and closes the dialog.
 function assignPick(b, m, i, cx) {

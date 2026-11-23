@@ -778,13 +778,13 @@ export function shownState(item, column) {
 
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
-// (a task moved in comes last in its column's data); the tasks of the rows
-// in `folded` (story keys) are left out (withoutFolded).
-export function sprintNav(data, filter, mine, folded = new Set()) {
+// (a task moved in comes last in its column's data). withoutFolded leaves
+// the tasks of folded rows out of them.
+export function sprintNav(data, filter, mine) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
   const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
-  return withoutFolded([stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))], folded);
+  return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
 }
 
 // sprintNav's columns without the tasks of the rows in `folded`.
@@ -1450,7 +1450,6 @@ export function membersFor({ all, note }, viewer) {
   return { me, people, note };
 }
 
-export const parseMembers = (stdout, viewer) => membersFor(parseMemberList(stdout), viewer);
 
 // Assigning the work item `id` to `person`: its login, "me" for az's own
 // account (me: true; az resolves it), "" for no one, which az writes as an
@@ -2114,9 +2113,11 @@ export const azureRelated = (az) => ({
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
-// project and team, its current sprint and taskboard columns; per project
-// the work item types, until the sprint of the team that read them ends
-// (the Backlog reads and keeps the same entry: typesOf).
+// project and team, its current sprint and taskboard columns. The
+// project's work item types, one entry for both views (typesOf), are kept
+// TEAM_KEEP_MS from their read, even where another read of the Sprint's
+// settings fails, and until the sprint ends where a Sprint's whole
+// settings read brought them.
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
@@ -2188,9 +2189,10 @@ export function makeAzure(paths) {
   const shared = {
     az, keptValue, whoAmI, teamKey,
     // The project's work item types (parseAzureTypes), one entry for both
-    // views: read where it is not kept and kept TEAM_KEEP_MS (the
-    // Backlog's time), or until the sprint ends where the Sprint read them
-    // (keepTypesUntil); no forget drops it.
+    // views: read where it is not kept and kept TEAM_KEEP_MS from the read,
+    // even where another read beside it fails, and until the sprint ends
+    // where a Sprint's whole settings read brought them (keepTypesUntil);
+    // no forget drops it.
     async typesOf(c) {
       const held = keptValue(typesKey(c));
       if (held) return { types: held.value, fresh: false };
@@ -3309,8 +3311,8 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;
-// null for no one.
-export const assigneeText = (t, item) => ((item.assignees ?? []).length ? div().text_size(11).text_color(t.dim).child(item.assignees.join(", ")) : null);
+// its callers draw it where the item has assignees.
+export const assigneeText = (t, item) => div().text_size(11).text_color(t.dim).child(item.assignees.join(", "));
 
 // A menu's keys (every key but Esc, which the Board keeps; all are taken):
 // j/k or the arrows move m.at over `count` rows, Enter picks the row at
@@ -3664,7 +3666,7 @@ export function tellOutcomes(b, lines, cx) {
 // Who is assigned, as a notice says it.
 export const assignedText = (names) => (names.length ? `${names.join(", ")} zugewiesen` : "niemandem zugewiesen");
 // A person as the board names one before an answer named them.
-const personText = (person) => (person ? person.name ?? person.login ?? "ich" : "niemand");
+const personText = (person) => (person ? personName(person) ?? "ich" : "niemand");
 const same = (a, b) => (a ?? []).join("\n") === (b ?? []).join("\n");
 
 // Makes `person` the only assignee of the item `key` (null: no one) at
@@ -3936,9 +3938,12 @@ export function unclearParentLines(due, data) {
 // offers (the repo's assignable people on GitHub, the team's members on
 // Azure), narrowed by a filter that has the keyboard; up/down (or
 // ctrl-j/k, ctrl-n/p) mark a row, Enter or a click assigns it
-// (actions/assign.js). The first row is marked where it is "Ich"; else
-// (the people could not be read, or GitHub named no viewer) none is, so
-// that Enter assigns nothing until a row is chosen. Board.openAssign opens
+// (actions/assign.js). Which row is marked when the rows come and after
+// each change of the filter: where the people were read and "Ich" is among
+// them, the first row the filter leaves that is no "niemand", and
+// "niemand" only where it is all that is left; else (the people could not
+// be read, or GitHub named no viewer) none, so that Enter assigns nothing
+// until a row is chosen. Board.openAssign opens
 // it as b.modal = { kind: "assign", view, key, label, input (the filter's
 // InputState, made for this dialog), field and textField ("filter"),
 // inputFocused, filter, at (the marked row, -1 for none), top (the first
@@ -3964,9 +3969,14 @@ export function assignRows(list, filter) {
 
 const rowsOf = (m) => assignRows(m.list, m.filter);
 
-// The row marked when the rows come or the filter changes: the first where
-// the people were read and "Ich" is among them, else none (-1).
-const startAt = (m) => (m.error || !m.list?.me ? -1 : 0);
+// The row marked when the rows come or the filter changes (-1 for none),
+// by the rule in the header.
+function startAt(m) {
+  if (m.error || !m.list?.me) return -1;
+  const rows = rowsOf(m);
+  const person = rows.findIndex((r) => r.person);
+  return person >= 0 ? person : rows.length - 1;
+}
 
 // Assigns the row at `i`, where there is one, and closes the dialog.
 function assignPick(b, m, i, cx) {
@@ -4540,13 +4550,15 @@ const backlogState = (b) => b.shapeState.backlog;
 
 const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 
+// How the backlog finds an item, and where one no longer is: what its
+// states and its assignments share.
+const BACKLOG_ITEMS = { find: findBacklogItem, where: "im Backlog" };
 // How the backlog finds, changes and shows its items' states
 // (actions/state.js). A state that landed is the item's own: nothing is
 // read again for it.
-const BACKLOG_STATES = {
-  find: findBacklogItem, withState: withBacklogState, stateOf: (_data, item) => item.state, where: "im Backlog", again: false,
-};
-const BACKLOG_ASSIGN = { find: findBacklogItem, withItem: withBacklogItem, where: "im Backlog" };
+const BACKLOG_STATES = { ...BACKLOG_ITEMS, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
+// How the backlog finds and changes its items' assignees (actions/assign.js).
+const BACKLOG_ASSIGN = { ...BACKLOG_ITEMS, withItem: withBacklogItem };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
@@ -4572,9 +4584,8 @@ export const backlogShape = {
   warnings: (_view, data) => backlogWarnings(data),
   // The settled outcomes: a state change's which state its item has, a
   // parent link's whether the item hangs under its parent, an assignment's
-  // whom it has; then, once Azure
-  // has answered (one query each, unclearCreateLines), a create's whether
-  // it landed.
+  // whom it has; then, once Azure has answered (one query each,
+  // unclearCreateLines), a create's whether it landed.
   settle(b, view, due, data, cx) {
     tellOutcomes(b, [
       ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
@@ -4751,6 +4762,7 @@ export function unclearMoveLines(due, data) {
 // columns hidden by default) and, where the data does not name its own,
 // limit.
 
+// How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
 
 // How many columns keep their own scroll position.
@@ -5143,12 +5155,12 @@ function scrollToRow(b, view, key) {
 // changes a story's or a task's state from its type's states (the status menu),
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). z, or a click on the triangle in a story's row, folds its
-// tasks away and back (toggleFold; kept per sprint in the store). Keys walk
-// the stories, then each column's tasks but the folded ones (sprintNav). The
-// data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
-// states, typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
-// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
-// viewer, noViewer, total, limited, limit } (sprintBoard,
+// tasks away and back (toggleStoryFold; kept per sprint in the store). Keys
+// walk the stories, then each column's tasks but the folded ones (sprintNav,
+// withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
+// finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
+// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
+// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
 // sources/azure/sprint.js). View fields it reads: id, source, layout (as
 // writeAtOnce does).
 
@@ -5169,7 +5181,15 @@ const sprintColumns = (b, st) => withoutFolded(openColumns(b, st), foldedStories
 // An item's state as shown: a task's as its column maps it (shownState).
 const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
 
-const SPRINT_ASSIGN = { find: findSprintItem, withItem: withSprintItem, where: "im Sprint" };
+// How the sprint finds an item, and where one no longer is: what its states
+// and its assignments share.
+const SPRINT_ITEMS = { find: findSprintItem, where: "im Sprint" };
+// How the sprint finds, changes and shows its items' states (actions/state.js).
+// A write that landed refreshes the view too: which column a task's new
+// state puts it in is Azure's to say.
+const SPRINT_STATES = { ...SPRINT_ITEMS, withState: withItemState, stateOf: stateNow, again: true };
+// How the sprint finds and changes its items' assignees (actions/assign.js).
+const SPRINT_ASSIGN = { ...SPRINT_ITEMS, withItem: withSprintItem };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -5326,7 +5346,7 @@ function drawSprint(b, t, mono, view, st) {
 
 // A folded row's place of its tasks, across the taskboard's columns: how
 // many it holds, as many as the filter and "nur meine" leave of them where
-// they thin them (`count`, rowCounts).
+// they thin them (its rowCounts entry).
 function foldedCell(t, r, { shown, total }) {
   return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
 }
@@ -5411,13 +5431,6 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
         .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
     .when(Boolean(line), (el) => el.child(line));
 }
-
-// How the sprint finds, changes and shows its items' states (actions/state.js).
-// A write that landed refreshes the view too: which column a task's new
-// state puts it in is Azure's to say.
-const SPRINT_STATES = {
-  find: findSprintItem, withState: withItemState, stateOf: stateNow, where: "im Sprint", again: true,
-};
 
 // ==== src/ui/shapes/index.js ====
 

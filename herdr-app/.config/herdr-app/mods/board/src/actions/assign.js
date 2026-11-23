@@ -10,13 +10,13 @@
 // shape finds and changes its items' assignees (`how`): its assign, which
 // ui/shapes/index.js describes. The picker is ui/modals/assign.js.
 
-import { itemLabel } from "../shared.js";
+import { itemLabel, personName } from "../shared.js";
 import { writeAtOnce } from "./write.js";
 
 // Who is assigned, as a notice says it.
 export const assignedText = (names) => (names.length ? `${names.join(", ")} zugewiesen` : "niemandem zugewiesen");
 // A person as the board names one before an answer named them.
-const personText = (person) => (person ? person.name ?? person.login ?? "ich" : "niemand");
+const personText = (person) => (person ? personName(person) ?? "ich" : "niemand");
 const same = (a, b) => (a ?? []).join("\n") === (b ?? []).join("\n");
 
 // Makes `person` the only assignee of the item `key` (null: no one) at

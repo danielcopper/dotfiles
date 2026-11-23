@@ -152,8 +152,8 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;
-// null for no one.
-export const assigneeText = (t, item) => ((item.assignees ?? []).length ? div().text_size(11).text_color(t.dim).child(item.assignees.join(", ")) : null);
+// its callers draw it where the item has assignees.
+export const assigneeText = (t, item) => div().text_size(11).text_color(t.dim).child(item.assignees.join(", "));
 
 // A menu's keys (every key but Esc, which the Board keeps; all are taken):
 // j/k or the arrows move m.at over `count` rows, Enter picks the row at

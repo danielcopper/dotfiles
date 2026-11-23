@@ -7,12 +7,12 @@
 // changes a story's or a task's state from its type's states (the status menu),
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). z, or a click on the triangle in a story's row, folds its
-// tasks away and back (toggleFold; kept per sprint in the store). Keys walk
-// the stories, then each column's tasks but the folded ones (sprintNav). The
-// data: { shape: "sprint", meta: { iterationId, iteration, finish, typeStates,
-// states, typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
-// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
-// viewer, noViewer, total, limited, limit } (sprintBoard,
+// tasks away and back (toggleStoryFold; kept per sprint in the store). Keys
+// walk the stories, then each column's tasks but the folded ones (sprintNav,
+// withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
+// finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
+// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
+// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
 // sources/azure/sprint.js). View fields it reads: id, source, layout (as
 // writeAtOnce does).
 
@@ -50,7 +50,15 @@ const sprintColumns = (b, st) => withoutFolded(openColumns(b, st), foldedStories
 // An item's state as shown: a task's as its column maps it (shownState).
 const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
 
-const SPRINT_ASSIGN = { find: findSprintItem, withItem: withSprintItem, where: "im Sprint" };
+// How the sprint finds an item, and where one no longer is: what its states
+// and its assignments share.
+const SPRINT_ITEMS = { find: findSprintItem, where: "im Sprint" };
+// How the sprint finds, changes and shows its items' states (actions/state.js).
+// A write that landed refreshes the view too: which column a task's new
+// state puts it in is Azure's to say.
+const SPRINT_STATES = { ...SPRINT_ITEMS, withState: withItemState, stateOf: stateNow, again: true };
+// How the sprint finds and changes its items' assignees (actions/assign.js).
+const SPRINT_ASSIGN = { ...SPRINT_ITEMS, withItem: withSprintItem };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -207,7 +215,7 @@ function drawSprint(b, t, mono, view, st) {
 
 // A folded row's place of its tasks, across the taskboard's columns: how
 // many it holds, as many as the filter and "nur meine" leave of them where
-// they thin them (`count`, rowCounts).
+// they thin them (its rowCounts entry).
 function foldedCell(t, r, { shown, total }) {
   return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
 }
@@ -293,9 +301,4 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
-// How the sprint finds, changes and shows its items' states (actions/state.js).
-// A write that landed refreshes the view too: which column a task's new
-// state puts it in is Azure's to say.
-const SPRINT_STATES = {
-  find: findSprintItem, withState: withItemState, stateOf: stateNow, where: "im Sprint", again: true,
-};
+

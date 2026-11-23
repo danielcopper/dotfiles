@@ -19,6 +19,7 @@ import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { assigneeText, button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
 
+// How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
 
 // How many columns keep their own scroll position.

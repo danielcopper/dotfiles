@@ -250,7 +250,6 @@ export function membersFor({ all, note }, viewer) {
   return { me, people, note };
 }
 
-export const parseMembers = (stdout, viewer) => membersFor(parseMemberList(stdout), viewer);
 
 // Assigning the work item `id` to `person`: its login, "me" for az's own
 // account (me: true; az resolves it), "" for no one, which az writes as an

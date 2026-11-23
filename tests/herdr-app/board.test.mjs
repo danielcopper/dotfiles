@@ -5528,14 +5528,14 @@ test("the picker's people: GitHub's viewer as me and the others by name, how man
   assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue, [{ path: ["repository"], message: "Could not resolve to a Repository" }]),
     /^Error: GitHub: Could not resolve to a Repository$/);
   assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue), /GitHub kennt example\/tender nicht/);
-  const az = board.parseMembers(fixture("azure-team-members.json"), "alex.sample@example.com");
+  const az = board.membersFor(board.parseMemberList(fixture("azure-team-members.json")), "alex.sample@example.com");
   assert.deepEqual(az.me, { login: "alex.sample@example.com", name: "Alex Sample", me: true });
   assert.deepEqual(az.people, [{ login: "kim.sample@example.com", name: "Kim Sample" }, { login: "robin.example@example.com", name: "Robin Example" }], "no group");
-  assert.deepEqual(board.parseMembers(fixture("azure-team-members.json"), null).me, { login: null, name: null, me: true }, "az's me, whoever that is");
-  assert.equal(board.parseMembers(fixture("azure-team-members.json"), "x@example.com").people.length, 3, "a viewer who is no member leaves all");
+  assert.deepEqual(board.membersFor(board.parseMemberList(fixture("azure-team-members.json")), null).me, { login: null, name: null, me: true }, "az's me, whoever that is");
+  assert.equal(board.membersFor(board.parseMemberList(fixture("azure-team-members.json")), "x@example.com").people.length, 3, "a viewer who is no member leaves all");
   const full = JSON.stringify(Array.from({ length: 1000 }, (_, i) => ({ identity: { displayName: `P${i}`, uniqueName: `p${i}@example.com` } })));
-  assert.equal(board.parseMembers(full, null).note, "erste 1000");
-  assert.throws(() => board.parseMembers('{"x": 1}', null), /Azure lieferte keine Mitglieder des Teams/);
+  assert.equal(board.membersFor(board.parseMemberList(full), null).note, "erste 1000");
+  assert.throws(() => board.parseMemberList('{"x": 1}'), /Azure lieferte keine Mitglieder des Teams/);
 });
 
 test("an assignment's answer must name the people it set: GitHub's item with those logins, az's work item with that person or none; anything else is unclear", () => {
@@ -5743,7 +5743,7 @@ test("a person is named by name, else by login, in every source alike: an empty 
   assert.deepEqual(board.azPerson({ displayName: "", uniqueName: "Kim.Sample@example.com" }), { name: "Kim.Sample@example.com", login: "kim.sample@example.com" });
   assert.deepEqual(board.azPerson("<kim.sample@example.com>"), { name: "kim.sample@example.com", login: "kim.sample@example.com" });
   const members = JSON.stringify([{ identity: { displayName: "", uniqueName: "Kim.Sample@example.com" } }]);
-  assert.deepEqual(board.parseMembers(members, null).people, [{ login: "kim.sample@example.com", name: "Kim.Sample@example.com" }]);
+  assert.deepEqual(board.membersFor(board.parseMemberList(members), null).people, [{ login: "kim.sample@example.com", name: "Kim.Sample@example.com" }]);
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "kim-sample", name: "" }];
   assert.deepEqual(board.findCard(board.parseGithubBoard(data, githubView(), HIDDEN), "PVTI_rec1").card.assignees, ["kim-sample"]);
@@ -5751,7 +5751,7 @@ test("a person is named by name, else by login, in every source alike: an empty 
 
 test("Azure's members say the list may be cut only where az gave as many as it was asked for", () => {
   const list = (n) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ identity: { displayName: `P${i}`, uniqueName: `p${i}@example.com` } })));
-  assert.deepEqual([board.parseMembers(fixture("azure-team-members.json"), null).note, board.parseMembers(list(999), null).note, board.parseMembers(list(1000), null).note],
+  assert.deepEqual([board.membersFor(board.parseMemberList(fixture("azure-team-members.json")), null).note, board.membersFor(board.parseMemberList(list(999)), null).note, board.membersFor(board.parseMemberList(list(1000)), null).note],
     [null, null, "erste 1000"]);
 });
 
@@ -5869,6 +5869,61 @@ test("UI: a card names all its assignees, by name", async () => {
   data.data.repositoryOwner.projectV2.items.nodes.find((n) => n.id === "PVTI_rec4").content.assignees.nodes = [{ login: "robin-example", name: "Robin Example" }, { login: "kim-sample", name: null }];
   const { b } = await openBoard({ answer: JSON.stringify(data) });
   assert.ok(texts(byId(b.render(), "card-PVTI_rec4")).includes("Robin Example, kim-sample"));
+});
+
+test("UI: after a filter the picker marks the first row it leaves but niemand, niemand only where it is all that is left", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "a");
+  const people = json("github-assignable.json");
+  people.data.repository.assignableUsers.nodes.push({ id: "U_nina", login: "nina-ex", name: "Nina Example" });
+  people.data.repository.assignableUsers.totalCount = 4;
+  await host.answer("gh", ok(JSON.stringify(people)), isAssignableCall);
+  assert.equal(b.modal.at, 0, "Ich");
+  b.modal.input.type("ni");
+  assert.deepEqual(pickerRows(b).map((r) => r[0]), ["niemand", "Nina Example"]);
+  assert.equal(b.modal.at, 1, "Nina, not niemand");
+  b.modal.input.type("niemand");
+  assert.deepEqual([pickerRows(b).map((r) => r[0]), b.modal.at], [["niemand"], 0], "niemand alone is marked");
+  b.modal.input.type("nobody here");
+  assert.deepEqual([pickerRows(b), b.modal.at], [[], -1]);
+});
+
+test("UI: a GitHub answer that names no viewer offers no Ich and marks no row; Enter sends nothing", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "a");
+  const people = json("github-assignable.json");
+  people.data.viewer = null;
+  await host.answer("gh", ok(JSON.stringify(people)), isAssignableCall);
+  assert.equal(pickerRows(b)[0][0], "niemand");
+  assert.equal(b.modal.at, -1);
+  await submitPicker(b, cx);
+  assert.deepEqual([b.modal?.kind, host.open("gh").filter((c) => isAssignCall(c.args)).length], ["assign", 0]);
+  b.modal.input.type("rob");
+  assert.equal(b.modal.at, -1, "nor after a filter");
+});
+
+test("UI: a Sprint that uses the work item types the Backlog read keeps them as the Backlog does, not until its sprint ends", async () => {
+  const { b, cx, host } = await openBacklog();
+  await press(b, cx, "v");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false });
+  advance(board.TEAM_KEEP_MS + 60000);
+  await refreshSprint(b, cx);
+  assert.equal(openCounts(host, ["types"])[0], 1, "read again after the Backlog's time");
+});
+
+test("UI: an unclear assignment whose item is gone after the refresh says it is not in the Sprint, as a warning", async () => {
+  const { b, cx, host } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "a");
+  await host.answer("az", ok(fixture("azure-team-members.json")), AZA.members);
+  await press(b, cx, "down");
+  await submitPicker(b, cx);
+  await host.answer("az", ok("{}"), AZA.assign);
+  const items = JSON.stringify(json("azure-sprint-items.json").filter((w) => w.id !== 311));
+  await answerRefresh(host, { me: false, items, places: taskboardAnswer({}, [311]) });
+  assert.deepEqual([b.notice.text, b.notice.level], ["AB#311 ist nach dem Neuladen nicht im Sprint", "warning"]);
+  assert.equal(host.notes.at(-1).level, "warning");
 });
 
 // ---- Tab in the board's dialogs ----

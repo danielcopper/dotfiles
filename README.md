@@ -366,22 +366,22 @@ herdr-app`. Which files of the package git tracks is set in the root
   project's board, in the columns of its Status field) and "PRs" (pull requests
   I opened or am asked to review, with checks and review state). A team's
   Sprint shows its current sprint the way Azure's taskboard does: one row per
-  story (its id, title, own state and assignee), its tasks as cards in the team's
-  taskboard columns, each with its own state, assignee and id, and the tasks
-  whose story is not in the sprint in a row "Ohne Story" at the top; it holds
-  the work items of the sprint in the team's areas, and its tasks are the work
-  items of the types the taskboard's columns map. What it reads per refresh, the
-  header of `mods/board/src/main.js` says, and makeAzure (in
+  story (its id, title, own state and assignee), its tasks as cards in the
+  team's taskboard columns, each with its own state, assignee and id, and the
+  tasks whose story is not in the sprint in a row "Ohne Story" at the top; it
+  holds the work items of the sprint in the team's areas, and its tasks are the
+  work items of the types the taskboard's columns map. What it reads per
+  refresh, the header of `mods/board/src/main.js` says, and makeAzure (in
   `mods/board/src/sources/azure/index.js`) what it keeps; `r` reads the team's
   sprint, areas and columns again. A team's Backlog lists its requirement
   level (its Stories, and Bugs where the team keeps them there) in backlog
   order, one row each with id, type, title, state, sprint ("—" for none) and
   assignee. It needs `az login`: the level's work items come through
   `az rest`, which takes no PAT, and the Backlog says so when the login is
-  missing. What it keeps and for how long, makeAzure says; `r` reads that
-  again (not the project's types). On the Sprint's cards and stories and the Backlog's rows a work
-  item's id stands without its "AB#"; its details, the notices and the
-  toasts keep it. The pull request tabs read nothing yet; each says which
+  missing. What it keeps and for how long, makeAzure says; `r` reads that again
+  (not the project's types). On the Sprint's cards and stories and the Backlog's
+  rows a work item's id stands without its "AB#"; its details, the notices and
+  the toasts keep it. The pull request tabs read nothing yet; each says which
   view it will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
   me, opened by me, or asking for my review; a list section of my own
@@ -407,17 +407,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   next column its type has (through the taskboard's own column, not the
   state, since two columns may map to one state; az takes the request from a
   file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state
-  from its type's states, `z` folds a story's tasks (see below), a click
-  selects, and `Enter` shows the details (parent, state, assignee, column,
-  area and iteration). `z` folds the selected story's tasks away and back;
-  on a task it folds its story's, which it then selects where it shows. A
-  click on the triangle in a story's row folds it without choosing anything;
-  a fold that takes the selected task away selects its story, where that
-  shows. A folded row says how many tasks it holds, the keys pass over them,
-  and the board remembers the folded stories per sprint, after a restart too
-  (a new sprint starts unfolded). On a Backlog `j/k`
-  move, `s` sets the state, `Enter` shows the details (parent, state,
-  assignee, area, iteration and sprint), `o` opens the item in the browser,
+  from its type's states, a click selects, and `Enter` shows the details
+  (parent, state, assignee, column, area and iteration). `z` folds the selected
+  story's tasks away and back; on a task it folds its story's, which it then
+  selects where it shows. A click on the triangle in a story's row folds it
+  without choosing anything; a fold that takes the selected task away selects
+  its story, where that shows. A folded row says how many tasks it holds, the
+  keys pass over them, and the board remembers the folded stories per sprint,
+  after a restart too (a new sprint starts unfolded). On a Backlog `j/k` move,
+  `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
+  iteration and sprint), `o` opens the item in the browser,
   and `n` creates a work item: a dialog asks for its type (the level's, Story
   first; with a Story selected also Task, as its child) and its title (`h/l`
   switch the type). It is
@@ -462,10 +461,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   type's named color as its chip has it. A type without a color, and an
   item without a type (an Epic by its title too), has no line; where the
   Backlog could not read the types, or where they name their colors in a
-  form the board does not read, the view says so and draws none. A selected card or row sits on a tint of the
-  accent, so its chips stay readable. `mods/board/src/ui/tones.js` holds the
-  label and type colors, the selected background and how strong the chip,
-  head and selected tints are.
+  form the board does not read, the view says so and draws none. A selected card
+  or row sits on a tint of the accent, so its chips stay readable.
+  `mods/board/src/ui/tones.js` holds the label and type colors, the selected
+  background and how strong the chip, head and selected tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
   tables; its HTML shows as text, its comments not at all, but for one not
