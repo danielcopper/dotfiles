@@ -103,6 +103,15 @@ EOF
   fi
 fi
 
+# Windows' dark mode does not reach WSLg apps: they ask xdg-desktop-portal's
+# Settings portal for the color scheme, and without one they draw light, also
+# herdr with a light and a dark theme set. The portal and its gtk backend come
+# from wsl-arch.pkglist, host-wsl-arch's portals.conf picks the backend, and
+# the backend reads the scheme from gsettings, set here once to dark.
+if [ "$CLASS" = wsl-arch ]; then
+  gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+fi
+
 # OpenCode reports its panes to the tmux agent sidebar through a plugin file that
 # ships with the sidebar (installed by TPM). OpenCode loads every file in its
 # plugins directory, so the file is linked in by name rather than stowed. On a

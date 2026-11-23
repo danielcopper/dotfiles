@@ -258,6 +258,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   wsl-arch` installs one under `/usr/local/share` with a PNG icon rendered from
   the app's SVG; run it again after the app's installer, and once more `wsl
   --shutdown` if `/usr/local/share/applications` did not exist before.
+- **On WSL, dark comes from the portal, not from Windows.** A WSLg app learns
+  light or dark from xdg-desktop-portal's Settings portal and draws light
+  without one, so herdr's "System" appearance showed the light half of its
+  theme. `wsl-arch.pkglist` installs the portal with its gtk backend,
+  `host-wsl-arch/.config/xdg-desktop-portal/portals.conf` picks that backend
+  (WSL sets no `XDG_CURRENT_DESKTOP`), and `install-dotfiles.sh wsl-arch` sets
+  `color-scheme` to `prefer-dark` in gsettings. It does not follow Windows'
+  mode; `gsettings set org.gnome.desktop.interface color-scheme default` makes
+  it light.
 - **`keys.json` is edited, so it stays mine.** herdr refreshes only an
   untouched keys file on upgrade; new default shortcuts have to be added by
   hand.

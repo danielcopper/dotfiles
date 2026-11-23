@@ -2,3 +2,5 @@
 
 gnome-keyring
 librsvg
+xdg-desktop-portal
+xdg-desktop-portal-gtk
