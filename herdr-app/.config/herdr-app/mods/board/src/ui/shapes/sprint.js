@@ -32,6 +32,7 @@ import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
 import { assigneeText, cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, store, typeLine, workItemDetail } from "../helpers.js";
+import { toneColor } from "../tones.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -262,7 +263,7 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
-const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, t[stateColor(data, state)] ?? t.muted).flex_none();
+const stateChip = (t, data, state) => chip(t, state ?? "ohne Status", t.background, toneColor(t, stateColor(data, state))).flex_none();
 
 // A task's card: its left edge in its column's color, its key, title, own
 // state, assignee and session, and a line across its top in its type's

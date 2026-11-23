@@ -242,11 +242,12 @@ export function workItemDetail(b, t, view, { state, color, title, rows }) {
   };
 }
 
-// The theme color of a check state.
-export const checkColor = (t, state) => ({ failed: t.ansi1, pending: t.ansi3, passed: t.ansi2 })[state] ?? t.dim;
+// The color of a check state: its tone's (toneColor), dim for another.
+const CHECK_TONES = { failed: "ansi1", pending: "ansi3", passed: "ansi2" };
+export const checkColor = (t, state) => (CHECK_TONES[state] ? toneColor(t, CHECK_TONES[state]) : t.dim);
 
-// The detail panel's status pill: `label` on its theme `color`; a click
-// opens the status menu (`open(cx)`).
+// The detail panel's status pill: `label` on its tone `color`'s color
+// (toneColor); a click opens the status menu (`open(cx)`).
 export function statusPill(t, label, color, open) {
   return div()
     .id("status-pill")
@@ -256,15 +257,15 @@ export function statusPill(t, label, color, open) {
     .text_size(12)
     .font_semibold()
     .cursor_pointer()
-    .bg(t[color] ?? t.muted)
+    .bg(toneColor(t, color))
     .text_color(t.background)
     .on_click((_e, cx) => open(cx))
     .child(`${label} ▾`);
 }
 
 // A column's color (a column of a board or a Sprint, a status menu's
-// target): its tone's color (toneColor), "muted" where the theme has none.
-export const columnColor = (t, col) => toneColor(t, col.color) ?? t.muted;
+// target): its tone's color (toneColor).
+export const columnColor = (t, col) => toneColor(t, col.color);
 
 // A column's head, on a tint of its color for the `ground` it stands on
 // (headBg): its color as a dot, its name and `count`.
@@ -292,7 +293,7 @@ export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnC
 export function typeLine(t, item, hex, inset = 0) {
   const tone = typeLineTone(t, item, hex);
   if (!tone) return null;
-  return div().id("type-line").absolute().top(0).left(inset).right(inset).h(2).rounded(1).bg(toneColor(t, tone) ?? t.muted);
+  return div().id("type-line").absolute().top(0).left(inset).right(inset).h(2).rounded(1).bg(toneColor(t, tone));
 }
 
 // A card's or row's look as selected or not, in every shape alike, for an
@@ -306,8 +307,7 @@ export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
 // A chip in a `tone` (a theme name): `text` in the tone's color
-// (toneColor) on the tone's chip background (chipBg). A tone the theme has
-// no color for gives the plain chip's text (chip's default).
+// (toneColor) on the tone's chip background (chipBg).
 export const toneChip = (t, text, tone) => chip(t, text, toneColor(t, tone), chipBg(t, tone));
 
 // A card's chip for its label `name`, in the label's color brought onto the

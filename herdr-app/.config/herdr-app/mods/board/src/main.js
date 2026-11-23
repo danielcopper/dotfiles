@@ -98,6 +98,7 @@ import { makeSources } from "./sources/index.js";
 import { keptRelated, relatedLines, stepLine } from "./related.js";
 import { store, migrateShownView, boardShown, shownOf, button, detailSection, detailWidth, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
+import { toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
 import { descriptionFolds, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
@@ -1286,7 +1287,7 @@ export default class Board extends View {
   }
 
   banner(t) {
-    const color = { error: t.ansi1, warning: t.ansi3, success: t.ansi2, info: t.muted };
+    const tones = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
     const lines = [...this.configErrors.map((text) => ({ text, level: "error" })), ...(this.notice ? [this.notice] : [])];
     return v_flex()
       .flex_none()
@@ -1297,7 +1298,7 @@ export default class Board extends View {
       .border_color(t.border)
       .bg(t.chrome)
       .text_size(12)
-      .children(lines.map((l) => div().text_color(color[l.level] ?? t.muted).child(l.text)));
+      .children(lines.map((l) => div().text_color(toneColor(t, tones[l.level])).child(l.text)));
   }
 
   main(t, mono, view, st) {
@@ -1309,9 +1310,9 @@ export default class Board extends View {
     if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
     if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
     let shown = box;
-    if (st.error) shown = shown.child(div().px(16).pt(14).text_color(t.ansi1).child(st.error));
+    if (st.error) shown = shown.child(div().px(16).pt(14).text_color(toneColor(t, "ansi1")).child(st.error));
     const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];
-    if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(t.ansi3).child(w)));
+    if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(toneColor(t, "ansi3")).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
   }

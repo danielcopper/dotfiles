@@ -7107,6 +7107,11 @@ const over = (top, ground) => {
 const shown = (r) => Math.round(r * 100) / 100;
 const below = (ratios, need) => Object.entries(ratios).filter(([, rs]) => rs.some((r) => r < need)).map(([name, rs]) => [name, rs.map(shown)]);
 const shownRatios = (ratios) => JSON.stringify(ratios, (_k, v) => (typeof v === "number" ? shown(v) : v));
+
+test("the contrast helpers find a ratio below the need unrounded and show it to two places", () => {
+  assert.deepEqual(below({ weak: [4.4951, 7], fine: [4.5, 4.51] }, 4.5), [["weak", [4.5, 7]]]);
+  assert.equal(shownRatios({ x: [4.4951] }), '{"x":[4.5]}');
+});
 const OPAQUE = /^#[0-9a-f]{6}$/;
 
 // A copper theme's file in themes/.
@@ -7253,7 +7258,7 @@ test("a theme takes copper's steps for its chips, heads and selection only where
   assert.equal(board.copperSteps({ ...copperTheme("light"), "copper-neutral-3": "#f2e9e180" }), false, "a step with alpha");
 });
 
-test("without copper's steps, a selected card's or row's background is the accent laid opaque over the theme's background, the same on every ground; a chip's text on its tint reads at 4.5:1 or more on a card and on it, and so does the card's own text (foreground, muted, dim) on it, in copper-dark and copper-light without their steps and in catppuccin-mocha, but for two of catppuccin's, where herdr derives its muted and dim", () => {
+test("without copper's steps, a selected card's or row's background is the accent laid opaque over the theme's background, the same on every ground; a chip's text on its tint reads at 4.5:1 or more on a card and on it, and so does the card's own text (foreground, muted, dim) on it, in copper-dark and copper-light without their steps and in catppuccin-mocha, but for a muted chip and dim text on a selected card in catppuccin-mocha, where herdr derives its muted and dim", () => {
   globalThis.__boardHost = fakeHost();
   const ratios = {};
   for (const [name, t] of Object.entries(TINTED())) {
@@ -7352,8 +7357,28 @@ test("in a copper theme a column head stands on its status color's copper step 3
   assert.deepEqual(below(ratios, 4.5), [], shownRatios(ratios));
   // copper-light's chrome is its neutral step 3, and step 4 stands only
   // 2.38 apart from it: a muted or dim head on a board's column, its dot
-  // and its text mark it.
+  // and its text mark it. The bar of 3 is the board's own for every pair
+  // (tones.js, TINT_APART); copper holds two neutral steps beside each other
+  // to 1.12:1 in luminance instead, which step 4 on step 3 misses in both
+  // modes (dark, on the Sprint's background: 1.087; light, on the chrome:
+  // 1.075).
   assert.deepEqual(below(close, 3), [["light muted", [2.38, 7.21]], ["light dim", [2.38, 7.21]]], shownRatios(close));
+  assert.deepEqual(COPPER.map((mode) => Math.round(contrast(copperTheme(mode)["copper-neutral-4"], copperTheme(mode)["copper-neutral-3"]) * 1000) / 1000), [1.087, 1.075]);
+});
+
+test("a drop target column keeps its ground in a copper theme, which stands 3 or more apart from a selected card and from every head on it but copper-light's muted and dim ones; without copper's steps it takes the theme's selected", () => {
+  globalThis.__boardHost = fakeHost();
+  const close = {};
+  for (const mode of COPPER) {
+    const t = copperTheme(mode);
+    const drop = board.dropBg(t, t.chrome);
+    assert.equal(drop, t.chrome, mode);
+    assert.equal(board.dropBg(t, t.background), t.background, `${mode}: any ground`);
+    close[`${mode} selected card`] = [distance(drop, board.selectedBg(t))];
+    for (const color of STATUS_TONES) close[`${mode} ${color} head`] = [distance(drop, board.headBg(t, color, drop))];
+  }
+  assert.deepEqual(below(close, 3), [["light muted head", [2.38]], ["light dim head", [2.38]]], shownRatios(close));
+  for (const [name, t] of Object.entries(TINTED())) assert.equal(board.dropBg(t, t.chrome), t.selected, name);
 });
 
 test("a tone's color, as a column's dot, a card's edge and a type's line, stands at 3:1 or more from what it is drawn on (a card, a selected one, a column head on a column's chrome and on the Sprint's background), for every tone, in copper-dark and copper-light with and without their steps and in catppuccin-mocha, but for catppuccin's dim on a selected card", () => {
@@ -7373,10 +7398,15 @@ test("a tone's color, as a column's dot, a card's edge and a type's line, stands
   assert.deepEqual(below(ratios, 3), [["catppuccin-mocha dim", [3.21, 2.75, 3.37, 3.02]]], shownRatios(ratios));
 });
 
-test("a tone or ground the theme has no color for falls back: a chip to the plain one, a head to the translucent tint or raised, the selected look to the theme's selected; tint takes a color's first six digits", () => {
+test("a tone or ground the theme has no color for falls back: text to muted, a chip to a tint of muted or the plain one, a head to the translucent tint or raised, the selected look to the theme's selected, a check of another state to dim; tint takes a color's first six digits", () => {
   globalThis.__boardHost = fakeHost();
   const t = { muted: "#muted", raised: "#raised", accent: "#ffffff17", selected: "#selected", ansi4: "#0000ff" };
   assert.deepEqual(chipLook(board.toneChip(t, "x", "ansi1")), ["#muted", "#raised"], "no such color");
+  assert.deepEqual(chipLook(board.toneChip({ ...t, muted: "#808080" }, "x", "ansi1")), ["#808080", `#808080${board.CHIP_ALPHA}`], "no such color: muted's, tinted");
+  assert.deepEqual([board.toneColor(t, "ansi4"), board.toneColor(t, "ansi1"), board.checkColor(t, "failed"), board.checkColor({ ...t, dim: "#dim" }, "other")],
+    ["#0000ff", "#muted", "#muted", "#dim"], "text: muted for a tone the theme has no color for; a check of another state dim");
+  const copper = copperTheme("dark");
+  assert.deepEqual(["failed", "pending", "passed"].map((state) => board.checkColor(copper, state)), [copper.ansi1, copper.ansi3, copper.ansi2], "a check's state in its tone");
   assert.deepEqual(chipLook(board.toneChip(t, "x", "muted")), ["#muted", "#raised"], "no color to tint");
   assert.deepEqual(chipLook(board.toneChip(t, "x", "ansi4")), ["#0000ff", `#0000ff${board.CHIP_ALPHA}`]);
   assert.equal(board.headBg(t, "ansi4", "#ffffff17"), `#0000ff${board.HEAD_ALPHA}`, "a translucent ground: the translucent tint");
@@ -7442,7 +7472,8 @@ test("UI: the board draws labels and types as chips in their tones (an Epic by i
   const before = heads();
   await mouse(b, cx, "card-PVTI_col1", "on_mouse_down");
   byId(b.render(), "col-2").with.on_hover[0](true, cx);
-  assert.equal(byId(b.render(), "col-2").with.bg[0], t.selected, "a drop target");
+  assert.equal(byId(b.render(), "col-2").with.bg[0], t.chrome, "a drop target keeps its ground");
+  assert.equal(byId(b.render(), "col-2").with.border_color[0], t.accent, "the accent marks it");
   assert.deepEqual(heads(), before, "its head as it was");
   b.endDrag(cx);
   await clickCard(b, cx, "PVTI_col1");

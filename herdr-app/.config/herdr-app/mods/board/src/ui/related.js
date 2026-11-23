@@ -38,6 +38,7 @@ import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateColor, stateDone } from "../kinds/states.js";
 import { LINE_PX, offsetOf, revealSpan, rowSpan, scrollBy, spanShows, thumbOf } from "../scroll.js";
 import { FRAME, chip, sectionTitle, selectedLook } from "./helpers.js";
+import { toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
 
@@ -160,10 +161,10 @@ function description(b, t, item, r) {
 export function relatedSections(b, t, mono, view, item, entry, at) {
   const ui = b.relatedUi;
   const data = b.state(view.id).data;
-  const tones = { muted: t.muted, error: t.ansi1, warning: t.ansi3 };
+  const tones = { muted: "muted", error: "ansi1", warning: "ansi3" };
   const rowOf = (r) => {
     if (r.kind === "head") return sectionTitle(t, r.text).pt(4);
-    if (r.kind === "note") return div().text_size(12).text_color(tones[r.tone]).child(r.text);
+    if (r.kind === "note") return div().text_size(12).text_color(toneColor(t, tones[r.tone])).child(r.text);
     if (r.kind === "text") return description(b, t, item, r);
     const { line, n } = r;
     const color = line.color ?? stateColor(data, line.state);
@@ -186,7 +187,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
       .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(itemLabel(line)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).child(line.title))
       .when(line.draft, (el) => el.child(chip(t, "Entwurf")))
-      .child(chip(t, line.state ?? "ohne Status", t.background, t[color] ?? t.muted));
+      .child(chip(t, line.state ?? "ohne Status", t.background, toneColor(t, color)));
   };
   const offset = offsetOf(ui, item.key);
   const content = measured(v_flex(), "related-lines", (h) => (ui.content = h))

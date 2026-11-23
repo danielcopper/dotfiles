@@ -22,6 +22,7 @@ import { itemLabel, report } from "../../shared.js";
 import { wordsMatch } from "../../select.js";
 import { assignAtOnce } from "../../actions/assign.js";
 import { fieldFrame, menu, wireTextField } from "../helpers.js";
+import { toneColor } from "../tones.js";
 
 // How many rows show at once.
 const VISIBLE = 10;
@@ -120,7 +121,7 @@ export const assignModal = {
       title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
       head: [
         fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
-        ...(m.error ? [line(m.error, t.ansi1)] : []),
+        ...(m.error ? [line(m.error, toneColor(t, "ansi1"))] : []),
       ],
       digits: false,
       rows: rows.slice(m.top, m.top + VISIBLE).map((r) => [

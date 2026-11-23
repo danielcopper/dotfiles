@@ -465,10 +465,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   card or row depend on the theme. The copper themes carry copper's palette
   steps for mods, and there a chip or a head stands on its color's tinted
   step (`copper-<color>-3`, or `-4` where step 3 stands too close to the card
-  or column it is drawn on), and a selected card or row on the theme's
-  `selected`, copper's blue step for it. A theme without those steps
-  (catppuccin-mocha) gets its colors at a low alpha, and a selected card or
-  row a tint of the accent, so its chips stay readable.
+  or column it is drawn on), a selected card or row on the theme's
+  `selected`, copper's blue step for it, and a column a card is dragged over
+  keeps its ground, marked by the accent border. A theme without those
+  steps (catppuccin-mocha) gets its colors at a low alpha, a selected card or
+  row a tint of the accent, so its chips stay readable, and a column a card
+  is dragged over the theme's `selected`.
   `mods/board/src/ui/tones.js` holds the label and type colors, which theme
   takes which tints, the selected background and how strong the tints are.
   The details of a GitHub issue show its description formatted, as GitHub

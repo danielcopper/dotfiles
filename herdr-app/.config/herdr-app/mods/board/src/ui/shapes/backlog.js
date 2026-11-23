@@ -25,6 +25,7 @@ import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
 import { MODALS } from "../modals/index.js";
 import { chip, selectedLook, sessionChip, shownOf, typeLine, workItemDetail } from "../helpers.js";
+import { toneColor } from "../tones.js";
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -147,7 +148,7 @@ function drawBacklog(b, t, mono, view, st) {
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()
         .child(div().min_w(0).truncate().child(r.title))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
-      .child(div().w(WIDTH.state).flex_none().child(chip(t, r.state ?? "ohne Status", t.background, t[stateColor(data, r.state)] ?? t.muted)))
+      .child(div().w(WIDTH.state).flex_none().child(chip(t, r.state ?? "ohne Status", t.background, toneColor(t, stateColor(data, r.state)))))
       .child(cell(WIDTH.sprint, r.sprint ?? "—"))
       .child(cell(WIDTH.assignee, r.assignees.join(", ")))
       .when(Boolean(line), (el) => el.child(line));

@@ -14,6 +14,7 @@ import { itemLabel } from "../../shared.js";
 import { createTypes } from "../../kinds/backlog.js";
 import { CREATE_KEY, createItem } from "../../actions/create.js";
 import { backdrop, button, cycleField, fieldFrame, fieldLabel, wireTextField } from "../helpers.js";
+import { toneColor } from "../tones.js";
 
 // The fields Tab walks, in order.
 const CREATE_FIELDS = ["title", "type"];
@@ -113,7 +114,7 @@ export const createModal = {
                 .child(div().text_color(t.dim).child("◂ ▸"))),
             ))
             .child(v_flex().gap(6).child(label("Titel")).child(frame("title", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))))
-            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(m.error ?? ""))),
+            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, "ansi1")).child(m.error ?? ""))),
         )
         .child(
           h_flex().px(20).py(12).gap(8).items_center().border_t(1).border_color(t.border)
