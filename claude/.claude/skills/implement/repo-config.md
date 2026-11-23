@@ -109,8 +109,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     When the command hands text to a shell that reads it again — a shell with a `-c` option, `eval`, `<<<`,
     `source` or `.`, or a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `fish`, `busybox sh`, as a word or
     a path's basename) as the command word of any simple command: after `|`, `|&`, `;`, `&`, a newline, a
-    parenthesis or a backtick, past assignments, redirections, keywords such as `if`, `then`, `do`, `!` and
-    `{`, after one of the wrappers named above or `coproc` (and a named coproc's name) with or without options,
+    parenthesis or a backtick, past assignments, redirections other than a named or moved descriptor, keywords
+    such as `if`, `then`, `do`, `!` and `{`, after one of the wrappers named above or `coproc` (and a named
+    coproc's name before `{`) with or without options,
     also after `2>&1` or `>&2`, in a process substitution,
     or plainly (`bash s.sh`) — or to a command that runs a program from its arguments or data —
     `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs`,
@@ -129,7 +130,16 @@ Each holds in every repo unless its profile departs from it under `defaults`.
   A renamed gh, another interpreter, a script file, a config file the command reads, a remote workflow that merges
   when started (`gh workflow run …`), a gh extension, or a word the shell builds at run time from text that spells
   neither `gh`, `az`, `curl` or `wget` nor a merge (such as `{g..g}h pr {m..m}erge`) stays out of both layers'
-  sight; this policy alone rules those out.
+  sight; this policy alone rules those out. Shell forms the hook's reading does not follow stay out of its sight
+  too, and this policy alone rules them out: a named file descriptor (`{fd}>&2`), a moved one (`3>&1-`), a named
+  `coproc` before a keyword, and an apostrophe inside a `#` comment, which hides the text up to the next
+  apostrophe from the run-time rules.
+
+  Both layers are built against a session that follows this policy and would merge by mistake; against a command
+  built to get past them they promise nothing. A review of the hook judges it by that: a bypass that a command
+  written without intent to evade could hit is a finding against the hook or against that rule's sentence; one
+  that only a command built to get past the hook reaches goes on the user's list as an accepted gap, and its form
+  joins the paragraph before only on the owner's word.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two
