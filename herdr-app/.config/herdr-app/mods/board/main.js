@@ -1822,7 +1822,8 @@ export function backlogView(s) {
 // with all its fields, System.Description among them where it has one
 // (HTML, as Azure keeps it), and its links as REST names them: a child
 // "System.LinkTypes.Hierarchy-Forward" with the child's URL, a pull request
-// an "ArtifactLink" named "Pull Request" whose URL is
+// an "ArtifactLink" named "Pull Request" whose URL (which alone tells it
+// from another artifact, a branch or a commit) is
 // vstfs:///Git/PullRequestId/<project id>%2F<repo id>%2F<pull request id>
 // (how az repos pr work-item add writes one, dev/repos/pull_request.py).
 // (`az boards work-item relation show` would name the links in words, at
@@ -1842,7 +1843,7 @@ export const childrenWiql = (ids) =>
 // The work item's id at the end of a link's URL (…/workItems/<id>), or null.
 const linkedId = (url) => {
   const id = Number(String(url ?? "").match(/\/workItems\/(\d+)$/i)?.[1]);
-  return Number.isInteger(id) && id > 0 ? id : null;
+  return Number.isInteger(id) ? id : null;
 };
 
 // A pull request link's URL → { project, repo, number }, or null.
@@ -1865,8 +1866,9 @@ export function parseRelatedItem(stdout) {
     if (r?.rel === CHILD_LINK) {
       const id = linkedId(r.url);
       if (id && !children.includes(id)) children.push(id);
-    } else if (r?.rel === "ArtifactLink" && r.attributes?.name === "Pull Request") {
-      const pr = pullRequestOf(r.url);
+    } else {
+      // An artifact link is a pull request by its URL alone.
+      const pr = pullRequestOf(r?.url);
       if (pr && !prs.some((p) => p.number === pr.number)) prs.push(pr);
     }
   }
@@ -4934,7 +4936,6 @@ function description(b, t, item, r) {
     .id(`description-size-${item.key}`)
     .flex_none()
     .on_size_change((size, cx) => {
-      if (ui.heights.get(item.key) === size.height) return;
       ui.heights.set(item.key, size.height);
       cx.notify();
     })
@@ -5490,12 +5491,12 @@ export default class Board extends View {
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
   // else the first or last item of the selected column (a list's first or
-  // last row) in a view whose shape moves up and down (edgeOf).
+  // last row: edgeOf) in a view with data.
   toEdge(view, end, cx) {
     const panel = this.panelOf(view);
     if (panel) return this.panelEdge(view, panel, end);
     const st = this.state(view.id);
-    if (!st.data || !this.shape(view).dirs.includes("down")) return;
+    if (!st.data) return;
     this.keepSelection(view);
     const sel = edgeOf(this.navColumns(view), st.sel, end);
     if (sel) this.choose(view, sel, cx);
@@ -5513,13 +5514,12 @@ export default class Board extends View {
     return true;
   }
 
-  // A link in a description: opened where it is http or https with a host,
-  // else said.
+  // A link in a description: opened where it is an http or https URL (which
+  // has a host, or is no URL), else said.
   openLink(url, cx) {
     let ok = false;
     try {
-      const u = new URL(String(url));
-      ok = (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.hostname);
+      ok = ["http:", "https:"].includes(new URL(String(url)).protocol);
     } catch {
       // Not a URL.
     }

@@ -5983,6 +5983,7 @@ test("a description is drawn as written, its images made links: Markdown's, inli
   assert.equal(html("<img\n  data-src=\"https://example.com/x.png\"\n  src = \"https://example.com/f.png\" alt='say \"hi\"'>"),
     "<a href=\"https://example.com/f.png\">Bild: say &quot;hi&quot;</a>", "attributes on lines of their own; data-src is not src");
   assert.equal(html("<img alt=\"no source\">"), "Bild: no source", "no src: its text");
+  assert.equal(html("<img src=\"https://example.com/1.png\" SRC=\"https://example.com/2.png\" alt=a alt=b>"), "<a href=\"https://example.com/1.png\">Bild: a</a>", "the first of an attribute counts, as in HTML");
   assert.equal(html("<imgx src=\"a\"><p>![x](y)</p>"), "<imgx src=\"a\"><p>![x](y)</p>", "another tag, and Markdown in HTML, stay");
   assert.equal(md("<img src=\"a&amp;b\" alt=\"x&y\">"), "<a href=\"a&amp;b\">Bild: x&amp;y</a>", "entities kept, a bare & escaped");
   assert.deepEqual([md(""), md("  \n "), md(null), html("\n")], [null, null, null, null], "blank: none");
@@ -6040,8 +6041,8 @@ const foldBox = (b) => byId(detailPanel(b), "description");
 test("UI: a description taller than 12 lines shows folded to their height with „… mehr (e)“; e or a click unfolds and folds it, on the board and in the panel; a short one has no fold and leaves e alone", async () => {
   const { b, cx, host, st } = await openRelated();
   assert.equal(board.FOLDED_H, 216);
-  sizeDescription(b, cx, 120);
-  assert.deepEqual([foldBox(b).styles.includes("max_h"), byId(detailPanel(b), "description-fold"), hintKeys(b).includes("e")], [false, null, false], "short: no fold");
+  sizeDescription(b, cx, 216);
+  assert.deepEqual([foldBox(b).styles.includes("max_h"), byId(detailPanel(b), "description-fold"), hintKeys(b).includes("e")], [false, null, false], "12 lines high: no fold");
   const stopped = cx.stopped;
   await press(b, cx, "e");
   assert.equal(cx.stopped, stopped, "e is not taken");
@@ -6096,6 +6097,8 @@ test("an Azure work item's related items: one az call for the item with its link
   ], "in the links' order, a Completed one done; one the query does not find left out");
   assert.deepEqual(board.parseChildren("", [1], c, states), [], "no output: none");
   assert.equal(board.parseChildren(JSON.stringify([{ id: 1, fields: { "System.State": "Odd" } }]), [1], c, states)[0].color, "muted", "a state the view does not know");
+  const removed = board.parseChildren(JSON.stringify([{ id: 1, fields: { "System.State": "Removed", "System.WorkItemType": "Task" } }, { id: 2, fields: { "System.State": "In Progress" } }]), [1, 2], c, states);
+  assert.deepEqual(removed.map((l) => l.done), [true, false], "a Removed one done too, one in progress not");
   const reads = board.makeAzure(null).related.reads;
   assert.deepEqual([reads({ source: "azure", kind: "workitem", number: 3 }), reads({ source: "azure", kind: "pr", number: 3 }), reads({ source: "azure", kind: "workitem", number: null }), reads({ source: "github", kind: "issue", number: 3 })],
     [true, false, false, false]);

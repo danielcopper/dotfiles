@@ -626,12 +626,12 @@ export default class Board extends View {
 
   // gg/G and Home/End: the panel's top or bottom where it has the keyboard,
   // else the first or last item of the selected column (a list's first or
-  // last row) in a view whose shape moves up and down (edgeOf).
+  // last row: edgeOf) in a view with data.
   toEdge(view, end, cx) {
     const panel = this.panelOf(view);
     if (panel) return this.panelEdge(view, panel, end);
     const st = this.state(view.id);
-    if (!st.data || !this.shape(view).dirs.includes("down")) return;
+    if (!st.data) return;
     this.keepSelection(view);
     const sel = edgeOf(this.navColumns(view), st.sel, end);
     if (sel) this.choose(view, sel, cx);
@@ -649,13 +649,12 @@ export default class Board extends View {
     return true;
   }
 
-  // A link in a description: opened where it is http or https with a host,
-  // else said.
+  // A link in a description: opened where it is an http or https URL (which
+  // has a host, or is no URL), else said.
   openLink(url, cx) {
     let ok = false;
     try {
-      const u = new URL(String(url));
-      ok = (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.hostname);
+      ok = ["http:", "https:"].includes(new URL(String(url)).protocol);
     } catch {
       // Not a URL.
     }

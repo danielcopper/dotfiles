@@ -92,7 +92,6 @@ function description(b, t, item, r) {
     .id(`description-size-${item.key}`)
     .flex_none()
     .on_size_change((size, cx) => {
-      if (ui.heights.get(item.key) === size.height) return;
       ui.heights.set(item.key, size.height);
       cx.notify();
     })

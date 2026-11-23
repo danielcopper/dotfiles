@@ -8,7 +8,8 @@
 // with all its fields, System.Description among them where it has one
 // (HTML, as Azure keeps it), and its links as REST names them: a child
 // "System.LinkTypes.Hierarchy-Forward" with the child's URL, a pull request
-// an "ArtifactLink" named "Pull Request" whose URL is
+// an "ArtifactLink" named "Pull Request" whose URL (which alone tells it
+// from another artifact, a branch or a commit) is
 // vstfs:///Git/PullRequestId/<project id>%2F<repo id>%2F<pull request id>
 // (how az repos pr work-item add writes one, dev/repos/pull_request.py).
 // (`az boards work-item relation show` would name the links in words, at
@@ -31,7 +32,7 @@ export const childrenWiql = (ids) =>
 // The work item's id at the end of a link's URL (…/workItems/<id>), or null.
 const linkedId = (url) => {
   const id = Number(String(url ?? "").match(/\/workItems\/(\d+)$/i)?.[1]);
-  return Number.isInteger(id) && id > 0 ? id : null;
+  return Number.isInteger(id) ? id : null;
 };
 
 // A pull request link's URL → { project, repo, number }, or null.
@@ -54,8 +55,9 @@ export function parseRelatedItem(stdout) {
     if (r?.rel === CHILD_LINK) {
       const id = linkedId(r.url);
       if (id && !children.includes(id)) children.push(id);
-    } else if (r?.rel === "ArtifactLink" && r.attributes?.name === "Pull Request") {
-      const pr = pullRequestOf(r.url);
+    } else {
+      // An artifact link is a pull request by its URL alone.
+      const pr = pullRequestOf(r?.url);
       if (pr && !prs.some((p) => p.number === pr.number)) prs.push(pr);
     }
   }
