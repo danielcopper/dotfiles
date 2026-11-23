@@ -3,8 +3,8 @@
 // Its rows are "Ich", "niemand", then the people its source offers (the repo's
 // assignable people on GitHub, the team's members on Azure), narrowed by a
 // filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
-// Enter or a click assigns it (actions/assign.js). MENU_ROWS rows show at
-// once: the window follows the mark, and the mouse wheel moves it
+// Enter or a click assigns it (actions/assign.js). Its window shows
+// MENU_ROWS rows, follows the mark, and the mouse wheel moves it
 // (helpers.js, menuWindow). Which row is marked when the rows come and after
 // each change of the filter: where the people were read and "Ich" is among
 // them, the first row the filter leaves that is no "niemand", and "niemand"
@@ -24,7 +24,7 @@ import { notify } from "herdr";
 import { itemLabel, report } from "../../shared.js";
 import { wordsMatch } from "../../select.js";
 import { assignAtOnce } from "../../actions/assign.js";
-import { MENU_ROWS, fieldFrame, filterMenuKey, menu, menuWindow, wireTextField } from "../helpers.js";
+import { fieldFrame, filterMenuKey, menu, menuWindow, wireTextField } from "../helpers.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
 // The rows the filter leaves: { text, sub, person } ("Ich" carries its
@@ -99,7 +99,7 @@ export const assignModal = {
   render(b, t) {
     const m = b.modal;
     const rows = rowsOf(m);
-    const win = menuWindow(m, rows.length);
+    const { shown, ...win } = menuWindow(m, rows);
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
     const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
     return menu(t, {
@@ -112,7 +112,7 @@ export const assignModal = {
         ...(m.error ? [line(m.error, toneColor(t, NOTE_TONES.error))] : []),
       ],
       digits: false,
-      rows: rows.slice(m.top, m.top + MENU_ROWS).map((r) => [
+      rows: shown.map((r) => [
         div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),
         ...(r.sub ? [div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub)] : []),
       ]),

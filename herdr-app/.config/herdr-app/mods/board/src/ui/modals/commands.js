@@ -5,11 +5,11 @@
 // The filter has the keyboard and narrows them as one types, in the order
 // shownCommands gives, the filter's letters in the accent color. Up/down,
 // ctrl-j/k and ctrl-n/p mark one, Enter or a click runs it on what it
-// aimed at when the menu opened (Board.runAction), Esc closes; MENU_ROWS
-// rows show at once (helpers.js: filterMenuKey, menuWindow). `:` opens it
+// aimed at when the menu opened (Board.runAction), Esc closes; its window
+// shows MENU_ROWS rows (helpers.js: filterMenuKey, menuWindow). `:` opens it
 // (Board.openCommands) as b.modal = { kind: "commands", view (the view it
-// opened on, so that a reload of views.json that drops or changes it
-// closes it), entries (the actions as it opened), input (the filter's
+// opened on, so that a reload of views.json that drops it, or makes it
+// another kind, closes it), entries (the actions as it opened), input (the filter's
 // InputState, made for this dialog), field and textField ("filter"),
 // inputFocused, filter, at (the marked row, -1 for none), top (the first
 // row drawn), wheel (the wheel's move left over) }.
@@ -17,7 +17,7 @@
 import { div } from "gpui-kit";
 import { h_flex, Input, InputState } from "gpui-base";
 import { filterActions, menuActions } from "../../commands.js";
-import { MENU_ROWS, fieldFrame, filterMenuKey, menu, menuWindow, wireTextField } from "../helpers.js";
+import { fieldFrame, filterMenuKey, menu, menuWindow, wireTextField } from "../helpers.js";
 
 // The entries the filter leaves (filterActions), best first, each group
 // (an action's group, not its heading's text) together after its best;
@@ -56,10 +56,9 @@ function markedName(t, name, at) {
 }
 
 export const commandsModal = {
-  open(b, cx) {
+  // Opens the menu on the moment `c` (Board.openCommands).
+  open(b, c, cx) {
     const input = InputState.new({ placeholder: "Befehl: tippen, um zu filtern" });
-    // On the selection the board keeps, as an action's key finds it.
-    const c = b.keptContext(false);
     const m = { kind: "commands", view: c.view, entries: menuActions(c), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
     wireTextField(b, m, input, "filter", (cx) => runEntry(b, m, m.at, cx));
     input.on("change", (_e, cx) => {
@@ -79,8 +78,7 @@ export const commandsModal = {
   render(b, t) {
     const m = b.modal;
     const entries = entriesOf(m);
-    const win = menuWindow(m, entries.length);
-    const shown = entries.slice(m.top, m.top + MENU_ROWS);
+    const { shown, ...win } = menuWindow(m, entries);
     return menu(t, {
       id: "commands",
       rowId: "command",

@@ -8372,7 +8372,7 @@ test("UI: the command menu opens on the selection the board keeps, as a key runs
   st().detail = true;
   cx.call((own) => b.modal.input.submit(own));
   await settle();
-  assert.deepEqual([b.modal, b.notice], [null, null], "the details opened since: the first Enter's action runs no more, nor the second's");
+  assert.deepEqual([b.modal, b.notice?.text], [null, "„Details zeigen“ geht hier nicht mehr"], "the details opened since: the first Enter's action runs no more, nor the second's, and the menu says so");
 });
 
 test("UI: a letter key goes by Shift alone: with Caps Lock s is s, and Shift with a character that comes without it is the upper case key", async () => {
@@ -8482,4 +8482,72 @@ test("UI: with Caps Lock g stays g: a bare g whose character is G does not go to
   assert.equal(st().sel.key, "PVTI_rec1", "gg: the column's first");
   await press(b, cx, ...SHIFT_G);
   assert.equal(st().sel.key, "PVTI_rec3", "Shift: G, its last");
+});
+
+test("UI: on the Backlog n opens the create dialog, and Shift+N is no n: nothing opens, the key is not taken", async () => {
+  const { b, cx } = await openBacklog();
+  const stopped = cx.stopped;
+  await press(b, cx, "n", { char: "N", modifiers: { shift: true } });
+  assert.deepEqual([b.modal, cx.stopped], [null, stopped], "Shift+N");
+  await press(b, cx, "n");
+  assert.equal(b.modal?.kind, "create", "n");
+});
+
+test("UI: the command menu runs a line's action only while those details are open: after a refresh dropped their item it says so, the panel and the selection as they are", async () => {
+  const { b, cx, host, st } = await onFirstLine();
+  await openMenu(b, cx);
+  b.modal.input.type("Zeile auf dem Board");
+  const gone = json("github-board.json");
+  gone.data.repositoryOwner.projectV2.items.nodes = gone.data.repositoryOwner.projectV2.items.nodes.filter((n) => n.id !== "PVTI_rec4");
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(JSON.stringify(gone)), isBoardCall);
+  // What the refresh left: the board on the card after it, its details
+  // closed and the panel with them (panelOf drops it once it is not theirs).
+  const before = [b.panelOf(b.view()), st().sel, st().detail];
+  assert.deepEqual(before, [null, { col: 0, key: "PVTI_rec5" }, false]);
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal, b.notice?.text], [null, "Die Details von tender#3004 sind nicht mehr offen"]);
+  assert.deepEqual([b.panelOf(b.view()), st().sel, st().detail], before, "nothing else changed");
+});
+
+test("UI: the command menu says why where its action, on what it opened for, can no longer run: a refresh moved the card into the last column, and „Nach rechts verschieben“ runs nothing", async () => {
+  const { b, cx, host, st } = await openBoard({ config: testConfig({ hide: [] }) });
+  await openMenu(b, cx);
+  b.modal.input.type("Nach rechts");
+  assert.equal(menuEntries(b)[0][0], "Nach rechts verschieben");
+  const moved = json("github-board.json");
+  moved.data.repositoryOwner.projectV2.items.nodes.find((n) => n.id === "PVTI_rec4").fieldValueByName = { optionId: "opt-done", name: "Done" };
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(JSON.stringify(moved)), isBoardCall);
+  assert.equal(st().sel.key, "PVTI_rec4", "the same card, now in Done");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal, b.notice?.text, host.open("gh").length], [null, "„Nach rechts verschieben“ geht hier nicht mehr", 0]);
+});
+
+test("the shapes lend the action table what it asks: a shape that moves says where (canMove), one that hides columns says which (canHide)", () => {
+  for (const [name, shape] of Object.entries(board.SHAPES)) {
+    if (shape.move) assert.equal(typeof shape.canMove, "function", `${name}: canMove`);
+    if (shape.toggleColumn) assert.equal(typeof shape.canHide, "function", `${name}: canHide`);
+  }
+  assert.deepEqual([board.hideable({ target: "opt-done" }), board.hideable({ target: null }), board.hideable(null)], [true, false, false]);
+});
+
+test("UI: an action of the top bar leaves the shown view's selection as it is, by its key and from the menu: a tab switch keeps the details of a card the filter now hides", async () => {
+  for (const how of ["key", "menu"]) {
+    const { b, cx, st } = await openBoard();
+    await press(b, cx, "enter");
+    if (how === "menu") await openMenu(b, cx);
+    b.filterText = "BUG input";
+    if (how === "key") await press(b, cx, "2");
+    else {
+      b.modal.input.type("Tab 2");
+      cx.call((own) => b.modal.input.submit(own));
+      await settle();
+    }
+    assert.deepEqual([b.context().id, st().sel.key, st().detail], ["github:prs", "PVTI_rec4", true], how);
+  }
 });

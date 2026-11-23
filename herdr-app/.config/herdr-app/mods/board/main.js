@@ -688,8 +688,12 @@ export function hiddenColumns(view, stored) {
 // The stored toggles after hiding or showing a column: only what differs from
 // the view's defaults, so a later edit to hide takes effect. A column that
 // takes no drops ("Ohne Status") cannot be hidden: unchanged.
+// Whether a column can be hidden: one with a target (an option of the
+// view's field); the column without status is always shown.
+export const hideable = (column) => Boolean(column?.target);
+
 export function toggleHidden(view, stored, column) {
-  if (!column?.target) return stored;
+  if (!hideable(column)) return stored;
   const own = readStoredHidden(stored) ?? { hide: [], show: [] };
   const byDefault = hiddenColumns(view, null).has(column.name);
   const hideNow = !hiddenColumns(view, own).has(column.name);
@@ -3565,25 +3569,26 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
 // How many rows a menu with a filter shows at once (menuWindow).
-export const MENU_ROWS = 10;
+const MENU_ROWS = 10;
 // How far the wheel moves such a menu's window by one row: about a row's
 // height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
 // The window of a menu with a filter (the assignee picker, the command
-// menu) over its `count` rows: MENU_ROWS at once from m.top, the marked
-// row m.at (-1 for none). Its window follows the mark where a key moves it
-// (followMark); the wheel moves it alone (menuWheel). menuWindow keeps both
-// within the rows, as the filter leaves them, and gives what menu() takes
-// for them.
-export function menuWindow(m, count) {
+// menu) over the rows of `list` the filter leaves: MENU_ROWS at once from
+// m.top, the marked row m.at (-1 for none). Its window follows the mark
+// where a key moves it (followMark); the wheel moves it alone (menuWheel).
+// menuWindow keeps both within the rows and gives the rows it shows
+// (`shown`) and what menu() takes for them.
+export function menuWindow(m, list) {
+  const count = list.length;
   m.at = Math.max(-1, Math.min(m.at, count - 1));
   m.top = Math.max(0, Math.min(m.top, count - MENU_ROWS));
   const wheel = (by, cx) => {
     menuWheel(m, by, count);
     cx.notify();
   };
-  return { from: m.top, count, at: m.at, wheel };
+  return { shown: list.slice(m.top, m.top + MENU_ROWS), from: m.top, count, at: m.at, wheel };
 }
 
 // The window moved so that the marked row shows, after a key moved the
@@ -4249,8 +4254,8 @@ export function unclearParentLines(due, data) {
 // Its rows are "Ich", "niemand", then the people its source offers (the repo's
 // assignable people on GitHub, the team's members on Azure), narrowed by a
 // filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
-// Enter or a click assigns it (actions/assign.js). MENU_ROWS rows show at
-// once: the window follows the mark, and the mouse wheel moves it
+// Enter or a click assigns it (actions/assign.js). Its window shows
+// MENU_ROWS rows, follows the mark, and the mouse wheel moves it
 // (helpers.js, menuWindow). Which row is marked when the rows come and after
 // each change of the filter: where the people were read and "Ich" is among
 // them, the first row the filter leaves that is no "niemand", and "niemand"
@@ -4336,7 +4341,7 @@ export const assignModal = {
   render(b, t) {
     const m = b.modal;
     const rows = rowsOf(m);
-    const win = menuWindow(m, rows.length);
+    const { shown, ...win } = menuWindow(m, rows);
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
     const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
     return menu(t, {
@@ -4349,7 +4354,7 @@ export const assignModal = {
         ...(m.error ? [line(m.error, toneColor(t, NOTE_TONES.error))] : []),
       ],
       digits: false,
-      rows: rows.slice(m.top, m.top + MENU_ROWS).map((r) => [
+      rows: shown.map((r) => [
         div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),
         ...(r.sub ? [div().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub)] : []),
       ]),
@@ -4400,7 +4405,7 @@ export const columnsModal = {
         div().size(9).flex_none().rounded(5).bg(columnColor(t, c)),
         div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
         div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
-        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!c.target ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
+        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!hideable(c) ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
       ]),
     });
   },
@@ -4712,7 +4717,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 //   taken where they do nothing, or say why they do nothing;
 // - bar: an action of the whole board or of the top bar (the tabs, the
 //   source, the team view, nur meine, the filter, reload, the menu), which
-//   runs without the board keeping its selection first (Board.keptContext);
+//   runs on the moment as it is, without the board keeping its selection
+//   first (Board.keptContext);
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
@@ -4779,7 +4785,7 @@ const GROUPS = {
     aim: (c) => [c.view?.id, c.details?.key],
     gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
   },
-  view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ ist nicht mehr gezeigt` },
+  view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ wird nicht mehr gezeigt` },
   board: { title: () => "Board", aim: () => [], gone: () => "" },
 };
 
@@ -5022,11 +5028,11 @@ export const ACTIONS = [
 // The filter has the keyboard and narrows them as one types, in the order
 // shownCommands gives, the filter's letters in the accent color. Up/down,
 // ctrl-j/k and ctrl-n/p mark one, Enter or a click runs it on what it
-// aimed at when the menu opened (Board.runAction), Esc closes; MENU_ROWS
-// rows show at once (helpers.js: filterMenuKey, menuWindow). `:` opens it
+// aimed at when the menu opened (Board.runAction), Esc closes; its window
+// shows MENU_ROWS rows (helpers.js: filterMenuKey, menuWindow). `:` opens it
 // (Board.openCommands) as b.modal = { kind: "commands", view (the view it
-// opened on, so that a reload of views.json that drops or changes it
-// closes it), entries (the actions as it opened), input (the filter's
+// opened on, so that a reload of views.json that drops it, or makes it
+// another kind, closes it), entries (the actions as it opened), input (the filter's
 // InputState, made for this dialog), field and textField ("filter"),
 // inputFocused, filter, at (the marked row, -1 for none), top (the first
 // row drawn), wheel (the wheel's move left over) }.
@@ -5068,10 +5074,9 @@ function markedName(t, name, at) {
 }
 
 export const commandsModal = {
-  open(b, cx) {
+  // Opens the menu on the moment `c` (Board.openCommands).
+  open(b, c, cx) {
     const input = InputState.new({ placeholder: "Befehl: tippen, um zu filtern" });
-    // On the selection the board keeps, as an action's key finds it.
-    const c = b.keptContext(false);
     const m = { kind: "commands", view: c.view, entries: menuActions(c), input, field: "filter", filter: "", at: 0, top: 0, wheel: 0 };
     wireTextField(b, m, input, "filter", (cx) => runEntry(b, m, m.at, cx));
     input.on("change", (_e, cx) => {
@@ -5091,8 +5096,7 @@ export const commandsModal = {
   render(b, t) {
     const m = b.modal;
     const entries = entriesOf(m);
-    const win = menuWindow(m, entries.length);
-    const shown = entries.slice(m.top, m.top + MENU_ROWS);
+    const { shown, ...win } = menuWindow(m, entries);
     return menu(t, {
       id: "commands",
       rowId: "command",
@@ -5797,8 +5801,7 @@ export const boardShape = {
     if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
   canMove: (st, item, by) => hasStep(st.data, item.key, by),
-  // A column with a target (a Status option) can be hidden.
-  canHide: (col) => Boolean(col.target),
+  canHide: hideable,
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>
@@ -6145,12 +6148,12 @@ function scrollToRow(b, view, key) {
 // actions/write.js). z (while the board has the keyboard), or a click on the
 // triangle in a story's row, folds its tasks away and back (toggleStoryFold;
 // kept per sprint in the store). Keys walk the stories, then each column's
-// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
-// finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
-// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
-// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
-// sources/azure/sprint.js). View fields it reads: id, source, layout (as
-// writeAtOnce does).
+// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape:
+// "sprint", meta: { iterationId, iteration, finish, typeStates, states,
+// typeColors, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
+// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
+// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js).
+// View fields it reads: id, source, layout (as writeAtOnce does).
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -6955,14 +6958,16 @@ export const BOARD_KEYS = [
 ];
 
 // Which end gg, G, Home and End go to ("top", "bottom"), "pending" for a
-// first `g` (`g`: one came just before), null for any other key. G is g
-// with Shift, as keyName (commands.js) has it, so that Caps Lock changes
-// no key. No key of the board or of keys.json is a bare g, G, Home or End.
+// first `g` (`g`: one came just before), null for any other key. g and G
+// are the letter keys keyName (commands.js) names, so that Caps Lock
+// changes no key. No key of the board or of keys.json is a bare g, G, Home
+// or End.
 export function edgeKey(k, ch, mod, g) {
   if (mod.control || mod.alt || mod.platform) return null;
   if (k === "home") return "top";
-  if (k === "end" || (k === "g" && mod.shift)) return "bottom";
-  if (k !== "g") return null;
+  const name = keyName(k, ch, mod);
+  if (k === "end" || name === "G") return "bottom";
+  if (name !== "g") return null;
   return g ? "top" : "pending";
 }
 
@@ -7758,24 +7763,28 @@ export default class Board extends View {
     };
   }
 
-  // The moment an action runs in as its key runs it, the one step the keys
-  // (key) and the menu (runAction) share: the board keeps its selection
-  // first (keepSelection), but for an action of the top bar (`bar`).
-  keptContext(bar) {
+  // The moment an action runs in as its key runs it, the step the keys
+  // (key), the menu's opening (openCommands) and its actions (runAction)
+  // share: the board keeps its selection first (keepSelection). An action
+  // of the top bar (`bar`) runs on actionContext as it is.
+  keptContext() {
     const view = this.view();
-    if (!bar && view && this.state(view.id).data) this.keepSelection(view);
+    if (view && this.state(view.id).data) this.keepSelection(view);
     return this.actionContext();
   }
 
   // An entry the menu picked (ui/modals/commands.js, menuActions): its
-  // action, run as its key runs it (keptContext) where it can still run,
-  // and only on what it aimed at when the menu opened; where that is gone
-  // (a refresh dropped or moved the item, another view shows), the menu
-  // says so and runs nothing.
+  // action, run as its key runs it, only on what it aimed at when the menu
+  // opened and where it can still run. Where what it aimed at is gone (a
+  // refresh dropped the item or took it out of sight, another column is
+  // selected for "Spalte ausblenden", another view shows), or the action
+  // cannot run on it any more (a refresh moved the card into the last
+  // column), the menu says so and runs nothing.
   runAction(entry, cx) {
-    const c = this.keptContext(entry.action.bar);
+    const c = entry.action.bar ? this.actionContext() : this.keptContext();
     if (aimOf(entry.action, c) !== entry.aim) this.say(entry.gone, "info", cx);
-    else if (entry.action.when(c)) entry.action.run(this, c, cx);
+    else if (!entry.action.when(c)) this.say(`„${entry.name}“ geht hier nicht mehr`, "info", cx);
+    else entry.action.run(this, c, cx);
     cx.notify();
   }
 
@@ -7829,11 +7838,11 @@ export default class Board extends View {
     // keeps its selection (keptContext), and Esc, the arrows and the keys
     // of the other actions follow (commands.js, actionFor).
     const name = keyName(k, ch, mod);
-    const atOnce = name ? this.keptContext(true) : null;
+    const atOnce = name ? this.actionContext() : null;
     const first = name ? actionFor(name, atOnce) : null;
     if (first?.bar) return first.run(this, atOnce, cx), done();
     if (mod.control || mod.alt || mod.platform) return;
-    const c = this.keptContext(false);
+    const c = this.keptContext();
     const st = view ? this.state(view.id) : null;
     if (k === "escape") {
       if (st?.detail) st.detail = false;
@@ -7870,9 +7879,10 @@ export default class Board extends View {
     MODALS.columns.open(this, view, cx);
   }
 
-  // The command menu (ui/modals/commands.js): the actions that can run now.
+  // The command menu (ui/modals/commands.js): the actions that can run now,
+  // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
-    MODALS.commands.open(this, cx);
+    MODALS.commands.open(this, this.keptContext(), cx);
   }
 
   // a: the assignee picker, where the shape's items can be assigned.

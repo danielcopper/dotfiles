@@ -408,16 +408,16 @@ herdr-app`. Which files of the package git tracks is set in the root
   word's start or one after another first, the letters in the accent color.
   `↑`/`↓`, `ctrl-j/k` and `ctrl-n/p` mark an entry (a bare `j` or `k` is a
   letter for the filter, as in the assignee picker), `Enter` or a click runs
-  it, `Esc` closes; it runs only on what it was opened for, and where a
-  refresh took that away it says so instead. Ten rows show at a time: the
-  window follows the mark, the mouse wheel moves it, and a thin mark at the
-  right and "↓ N weitere" say there are more. Switching the source (also a
-  click on its name in the top bar), hiding the selected column and the
-  column menu have no key and run from the menu. A letter key is the same
-  with Caps Lock, and Shift makes it another key (`S` is no `s`). The hint
-  line names the keys of what shows, and `:`; the keys of its actions, the
-  hint line and the menu read one action table, `mods/board/src/commands.js`,
-  so each runs the same code. On a Sprint `j/k`
+  it, `Esc` closes; it runs only on what it was opened for, and where a refresh
+  took that away, or the action can no longer run on it, it says so instead.
+  Ten rows show at a time: the window follows the mark, the mouse wheel moves
+  it, and a thin mark at the right and "↓ N weitere" say there are more.
+  Switching the source (also a click on its name in the top bar), hiding the
+  selected column and the column menu have no key and run from the menu. A
+  letter key is the same with Caps Lock, and Shift makes it another key (`S` is
+  no `s`). The hint line names the keys of what shows, and `:`; the keys of the
+  board's actions, the hint line and the menu read one action table,
+  `mods/board/src/commands.js`, so each runs the same code. On a Sprint `j/k`
   move within a column (the stories' or a taskboard column) and `h/l` stay in
   the row: they go to the row's item in the next column that has one, past
   empty cells, and move nothing where no column further on has one; `H/L` move

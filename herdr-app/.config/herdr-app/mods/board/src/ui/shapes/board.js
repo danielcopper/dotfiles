@@ -13,7 +13,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { cardLabel, epicLabel } from "../../shared.js";
-import { applyMoves, canDrop, findCard, hasStep, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
+import { applyMoves, canDrop, findCard, hasStep, hideable, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
@@ -53,8 +53,7 @@ export const boardShape = {
     if (target) b.moveTo(view, st.sel?.key, target.id, cx);
   },
   canMove: (st, item, by) => hasStep(st.data, item.key, by),
-  // A column with a target (a Status option) can be hidden.
-  canHide: (col) => Boolean(col.target),
+  canHide: hideable,
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
   settle: (b, view, due, data, cx) =>

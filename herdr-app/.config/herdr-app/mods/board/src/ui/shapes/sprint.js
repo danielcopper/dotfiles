@@ -9,12 +9,12 @@
 // actions/write.js). z (while the board has the keyboard), or a click on the
 // triangle in a story's row, folds its tasks away and back (toggleStoryFold;
 // kept per sprint in the store). Keys walk the stories, then each column's
-// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape: "sprint", meta: { iterationId, iteration,
-// finish, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
-// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
-// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
-// sources/azure/sprint.js). View fields it reads: id, source, layout (as
-// writeAtOnce does).
+// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape:
+// "sprint", meta: { iterationId, iteration, finish, typeStates, states,
+// typeColors, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
+// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
+// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js).
+// View fields it reads: id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";

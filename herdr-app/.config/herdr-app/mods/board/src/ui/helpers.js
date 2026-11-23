@@ -175,25 +175,26 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
 // How many rows a menu with a filter shows at once (menuWindow).
-export const MENU_ROWS = 10;
+const MENU_ROWS = 10;
 // How far the wheel moves such a menu's window by one row: about a row's
 // height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
 // The window of a menu with a filter (the assignee picker, the command
-// menu) over its `count` rows: MENU_ROWS at once from m.top, the marked
-// row m.at (-1 for none). Its window follows the mark where a key moves it
-// (followMark); the wheel moves it alone (menuWheel). menuWindow keeps both
-// within the rows, as the filter leaves them, and gives what menu() takes
-// for them.
-export function menuWindow(m, count) {
+// menu) over the rows of `list` the filter leaves: MENU_ROWS at once from
+// m.top, the marked row m.at (-1 for none). Its window follows the mark
+// where a key moves it (followMark); the wheel moves it alone (menuWheel).
+// menuWindow keeps both within the rows and gives the rows it shows
+// (`shown`) and what menu() takes for them.
+export function menuWindow(m, list) {
+  const count = list.length;
   m.at = Math.max(-1, Math.min(m.at, count - 1));
   m.top = Math.max(0, Math.min(m.top, count - MENU_ROWS));
   const wheel = (by, cx) => {
     menuWheel(m, by, count);
     cx.notify();
   };
-  return { from: m.top, count, at: m.at, wheel };
+  return { shown: list.slice(m.top, m.top + MENU_ROWS), from: m.top, count, at: m.at, wheel };
 }
 
 // The window moved so that the marked row shows, after a key moved the

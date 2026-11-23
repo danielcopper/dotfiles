@@ -16,7 +16,8 @@
 //   taken where they do nothing, or say why they do nothing;
 // - bar: an action of the whole board or of the top bar (the tabs, the
 //   source, the team view, nur meine, the filter, reload, the menu), which
-//   runs without the board keeping its selection first (Board.keptContext);
+//   runs on the moment as it is, without the board keeping its selection
+//   first (Board.keptContext);
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
@@ -90,7 +91,7 @@ const GROUPS = {
     aim: (c) => [c.view?.id, c.details?.key],
     gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
   },
-  view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ ist nicht mehr gezeigt` },
+  view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ wird nicht mehr gezeigt` },
   board: { title: () => "Board", aim: () => [], gone: () => "" },
 };
 

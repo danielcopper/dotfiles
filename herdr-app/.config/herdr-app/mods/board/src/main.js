@@ -190,14 +190,16 @@ export const BOARD_KEYS = [
 ];
 
 // Which end gg, G, Home and End go to ("top", "bottom"), "pending" for a
-// first `g` (`g`: one came just before), null for any other key. G is g
-// with Shift, as keyName (commands.js) has it, so that Caps Lock changes
-// no key. No key of the board or of keys.json is a bare g, G, Home or End.
+// first `g` (`g`: one came just before), null for any other key. g and G
+// are the letter keys keyName (commands.js) names, so that Caps Lock
+// changes no key. No key of the board or of keys.json is a bare g, G, Home
+// or End.
 export function edgeKey(k, ch, mod, g) {
   if (mod.control || mod.alt || mod.platform) return null;
   if (k === "home") return "top";
-  if (k === "end" || (k === "g" && mod.shift)) return "bottom";
-  if (k !== "g") return null;
+  const name = keyName(k, ch, mod);
+  if (k === "end" || name === "G") return "bottom";
+  if (name !== "g") return null;
   return g ? "top" : "pending";
 }
 
@@ -993,24 +995,28 @@ export default class Board extends View {
     };
   }
 
-  // The moment an action runs in as its key runs it, the one step the keys
-  // (key) and the menu (runAction) share: the board keeps its selection
-  // first (keepSelection), but for an action of the top bar (`bar`).
-  keptContext(bar) {
+  // The moment an action runs in as its key runs it, the step the keys
+  // (key), the menu's opening (openCommands) and its actions (runAction)
+  // share: the board keeps its selection first (keepSelection). An action
+  // of the top bar (`bar`) runs on actionContext as it is.
+  keptContext() {
     const view = this.view();
-    if (!bar && view && this.state(view.id).data) this.keepSelection(view);
+    if (view && this.state(view.id).data) this.keepSelection(view);
     return this.actionContext();
   }
 
   // An entry the menu picked (ui/modals/commands.js, menuActions): its
-  // action, run as its key runs it (keptContext) where it can still run,
-  // and only on what it aimed at when the menu opened; where that is gone
-  // (a refresh dropped or moved the item, another view shows), the menu
-  // says so and runs nothing.
+  // action, run as its key runs it, only on what it aimed at when the menu
+  // opened and where it can still run. Where what it aimed at is gone (a
+  // refresh dropped the item or took it out of sight, another column is
+  // selected for "Spalte ausblenden", another view shows), or the action
+  // cannot run on it any more (a refresh moved the card into the last
+  // column), the menu says so and runs nothing.
   runAction(entry, cx) {
-    const c = this.keptContext(entry.action.bar);
+    const c = entry.action.bar ? this.actionContext() : this.keptContext();
     if (aimOf(entry.action, c) !== entry.aim) this.say(entry.gone, "info", cx);
-    else if (entry.action.when(c)) entry.action.run(this, c, cx);
+    else if (!entry.action.when(c)) this.say(`„${entry.name}“ geht hier nicht mehr`, "info", cx);
+    else entry.action.run(this, c, cx);
     cx.notify();
   }
 
@@ -1064,11 +1070,11 @@ export default class Board extends View {
     // keeps its selection (keptContext), and Esc, the arrows and the keys
     // of the other actions follow (commands.js, actionFor).
     const name = keyName(k, ch, mod);
-    const atOnce = name ? this.keptContext(true) : null;
+    const atOnce = name ? this.actionContext() : null;
     const first = name ? actionFor(name, atOnce) : null;
     if (first?.bar) return first.run(this, atOnce, cx), done();
     if (mod.control || mod.alt || mod.platform) return;
-    const c = this.keptContext(false);
+    const c = this.keptContext();
     const st = view ? this.state(view.id) : null;
     if (k === "escape") {
       if (st?.detail) st.detail = false;
@@ -1105,9 +1111,10 @@ export default class Board extends View {
     MODALS.columns.open(this, view, cx);
   }
 
-  // The command menu (ui/modals/commands.js): the actions that can run now.
+  // The command menu (ui/modals/commands.js): the actions that can run now,
+  // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
-    MODALS.commands.open(this, cx);
+    MODALS.commands.open(this, this.keptContext(), cx);
   }
 
   // a: the assignee picker, where the shape's items can be assigned.
