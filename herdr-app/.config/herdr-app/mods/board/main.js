@@ -8941,7 +8941,9 @@ export default class Board extends View {
       );
   }
 
-  // "nur meine": when on, solid and checked.
+  // "nur meine": when on, marked as a chosen tab is, on the theme's
+  // `selected` with the accent border; not as a primary button (solid),
+  // which it is not. Its text and weight stay, so its size never changes.
   mineToggle(t) {
     return div()
       .id("mine")
@@ -8953,14 +8955,13 @@ export default class Board extends View {
       .cursor_pointer()
       .border_1()
       .border_color(this.mine ? t.accent : t.border)
-      .bg(this.mine ? t.solid : t.chrome)
-      .text_color(this.mine ? t.solid_foreground : t.muted)
-      .when(this.mine, (el) => el.font_semibold())
-      .hover((s) => s.bg(this.mine ? t.accent : t.hover))
+      .bg(this.mine ? t.selected : t.chrome)
+      .text_color(this.mine ? t.foreground : t.muted)
+      .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
         if (!this.modal) this.toggleMine(cx);
       })
-      .child(this.mine ? "✓ nur meine" : "nur meine");
+      .child("nur meine");
   }
 
   banner(t) {

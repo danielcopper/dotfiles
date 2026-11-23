@@ -3757,6 +3757,31 @@ test("UI: clicks on the source toggle, a tab and „nur meine“ do what their k
   assert.deepEqual([b.mine, b.source().id, b.context().id], [true, "github", "github:other"], "the dialog keeps them");
 });
 
+test("UI: „nur meine“ on is marked as the chosen tab is, on the theme's selected with the accent border, not as a primary button; its text, weight and padding stay, so its size never changes", async () => {
+  const { b, cx, host } = await openBoard();
+  host.theme = () => ({
+    selected: "#selected", accent: "#accent", border: "#border", chrome: "#chrome", foreground: "#foreground", muted: "#muted",
+    solid: "#solid", solid_foreground: "#solid-foreground", hover: "#hover",
+  });
+  const COLORS = ["bg", "border_color", "text_color", "hover"];
+  const look = () => {
+    const el = byId(b.render(), "mine");
+    const hovered = el.with.hover[0](element("div"));
+    return {
+      text: texts(el), colors: [el.with.bg[0], el.with.border_color[0], el.with.text_color[0], hovered.with.bg[0]],
+      size: el.calls.filter(([name]) => !COLORS.includes(name) && name !== "on_click"),
+    };
+  };
+  const off = look();
+  assert.deepEqual([off.text, off.colors], [["nur meine"], ["#chrome", "#border", "#muted", "#hover"]], "off");
+  await press(b, cx, "m");
+  const on = look();
+  assert.deepEqual([on.text, on.colors], [["nur meine"], ["#selected", "#accent", "#foreground", "#hover"]], "on: no ✓, the chosen tab's ground");
+  assert.deepEqual(on.size, off.size, "the same text size, padding, border and weight on and off");
+  assert.equal(on.size.some(([name]) => /^font_/.test(name)), false, "no weight of its own");
+  assert.equal(byId(b.render(), "tab-github:mine").with.bg[0], "#selected", "as the chosen tab");
+});
+
 test("UI: m shows only one's own items on a board and a list, without reading again, and says so in the top bar", async () => {
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
@@ -3771,7 +3796,7 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   await press(b, cx, "m");
   assert.equal(cards().includes(3000), false);
   assert.equal(cards().length, 5);
-  assert.ok(texts(byId(b.render(), "mine")).includes("✓ nur meine"), "said when on");
+  assert.equal(b.mine, true, "on");
   assert.equal(host.open("gh").length, 0, "nothing read again");
   assert.notEqual(st().sel.key, null);
   assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection leaves the card no longer shown");
