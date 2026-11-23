@@ -220,6 +220,47 @@ export function parseViewer(stdout) {
   return typeof name === "string" && name ? name.toLowerCase() : null;
 }
 
+// The members of a team (az devops team list-member), the first
+// MEMBERS_LIMIT, whom the assignee picker offers.
+export const MEMBERS_LIMIT = 1000;
+export const azMembersArgs = (c) =>
+  ["devops", "team", "list-member", ...azOrg(c.org), "--project", c.project, "--team", c.team, "--top", String(MEMBERS_LIMIT), "-o", "json"];
+
+// A team's members → { me (the account az is, `viewer`, lower case: its
+// member where it is one, else az's own "me" with what is known of it;
+// me: true), people (the other members by name, { login, name }; a group
+// is none), note (that the list may be cut, or null) }.
+export function parseMembers(stdout, viewer) {
+  const list = azList(azJson(stdout, "die Mitglieder des Teams"));
+  if (!list) throw new BoardError("Azure lieferte keine Mitglieder des Teams");
+  const all = list
+    .map((m) => m?.identity)
+    .filter((i) => isObject(i) && i.isContainer !== true && typeof i.uniqueName === "string" && i.uniqueName)
+    .map((i) => ({ login: i.uniqueName.toLowerCase(), name: i.displayName || i.uniqueName }));
+  const own = all.find((p) => p.login === viewer);
+  const me = { login: viewer ?? null, name: own?.name ?? null, me: true };
+  const people = all.filter((p) => p.login !== viewer).sort((a, b) => a.name.localeCompare(b.name));
+  return { me, people, note: list.length >= MEMBERS_LIMIT ? `erste ${MEMBERS_LIMIT}` : null };
+}
+
+// Assigning the work item `id` to `person`: its login, "me" for az's own
+// account (me: true; az resolves it), "" for no one, which az writes as an
+// empty Assigned To.
+export const azAssignArgs = (c, id, person) =>
+  ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--assigned-to", person ? (person.me ? "me" : person.login) : "", "-o", "json"];
+
+// az's answer to an assignment must be the work item and name `person` as
+// its Assigned To (anyone for me without a known login), or no one for null;
+// then → { names, logins } as it names them, else it is open whether the
+// change landed.
+export function checkAzAssigned(stdout, person) {
+  const json = jsonOrNull(stdout);
+  const who = azPerson(json ? fieldOf(json, "AssignedTo") : undefined);
+  const fits = !Number.isInteger(json?.id) ? false : !person ? !who.login : Boolean(who.login) && (person.me && !person.login ? true : who.login === person.login);
+  if (!fits) throw failure("Azure hat die Zuweisung nicht bestätigt", { write: true, unclear: true });
+  return { names: who.name ? [who.name] : [], logins: who.login ? [who.login] : [] };
+}
+
 export const azStateArgs = (c, id, state) => ["boards", "work-item", "update", ...azOrg(c.org), "--id", String(id), "--state", state, "-o", "json"];
 
 // az's answer to a state change must name the state it set; anything else

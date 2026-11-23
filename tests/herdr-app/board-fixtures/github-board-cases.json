@@ -53,6 +53,7 @@
        },
        "content": {
         "__typename": "PullRequest",
+        "id": "PR_sample3050",
         "author": {
          "login": "sample-contributor"
         },
@@ -117,6 +118,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3060",
         "author": null,
         "number": 3060,
         "title": "chore: an item in an option that no longer exists",

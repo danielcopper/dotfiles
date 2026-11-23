@@ -3,8 +3,8 @@
 // whose outcome is unclear keeps the change, refreshes the view and leaves
 // the outcome for the next refresh to settle (Board.settleUnclear, the
 // shape's settle, which says the outcomes with tellOutcomes). A card's
-// move, a work item's state change, a create and a parent link are written
-// so.
+// move, a work item's state change, a create, a parent link and an
+// assignment are written so.
 
 import { notify } from "herdr";
 import { BoardError, report } from "../shared.js";
@@ -31,8 +31,9 @@ export function viewStands(b, view) {
 // - w.open: what an open outcome records beside key, label and time, for
 //   the shape's settle: its kind ("move" with the target `to`, "state"
 //   with the `state`, "create" with the title and type, "parent" with the
-//   parent), and its key where that is not w.key (a create's, whose w.key
-//   only keeps one create at a time). A write replaces or drops only the
+//   parent, "assign" with the logins and whom), and its key where that
+//   is not w.key (a create's, whose w.key only keeps one create at a
+//   time). A write replaces or drops only the
 //   item's open outcome of its own kind, so a move's report waits through
 //   a state change and the other way round;
 // - w.texts: pending() and landed() say how it goes, unclear leads the

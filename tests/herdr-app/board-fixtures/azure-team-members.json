@@ -1,0 +1,41 @@
+[
+  {
+    "identity": {
+      "displayName": "Robin Example",
+      "id": "8e1f0d2c-3a4b-4c5d-9e6f-7a8b9c0d1e2f",
+      "uniqueName": "robin.example@example.com",
+      "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample2",
+      "descriptor": "aad.sample2"
+    },
+    "isTeamAdmin": false
+  },
+  {
+    "identity": {
+      "displayName": "Alex Sample",
+      "id": "2c7a9e10-4b3d-4f61-8a2e-9d0c1b2a3f45",
+      "uniqueName": "Alex.Sample@example.com",
+      "imageUrl": "https://dev.azure.com/example-org/_apis/GraphProfile/MemberAvatars/aad.sample1",
+      "descriptor": "aad.sample1"
+    },
+    "isTeamAdmin": true
+  },
+  {
+    "identity": {
+      "displayName": "Example Reviewers",
+      "id": "5d6e7f80-1a2b-4c3d-8e9f-0a1b2c3d4e5f",
+      "uniqueName": "vstfs:///Classification/TeamProject/5d6e7f80-1a2b-4c3d-8e9f-0a1b2c3d4e5f\\Example Reviewers",
+      "isContainer": true,
+      "descriptor": "vssgp.sample3"
+    },
+    "isTeamAdmin": false
+  },
+  {
+    "identity": {
+      "displayName": "Kim Sample",
+      "id": "0f1e2d3c-4b5a-4968-8776-655443322110",
+      "uniqueName": "kim.sample@example.com",
+      "descriptor": "aad.sample4"
+    },
+    "isTeamAdmin": false
+  }
+]

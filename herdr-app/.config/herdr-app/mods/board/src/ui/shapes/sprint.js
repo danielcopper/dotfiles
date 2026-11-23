@@ -23,11 +23,12 @@ import { cardLabel, itemLabel } from "../../shared.js";
 import { applyMoves, findCard, stepTarget } from "../../kinds/board.js";
 import {
   NO_STORY, findSprintItem, foldedStories, isTask, rowOf, rowTasks, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories, sprintWarnings,
-  toggledFolds, withItemState,
+  toggledFolds, withItemState, withSprintItem,
 } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
+import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
 import { cardEdge, chip, columnHead, selectedLook, sessionChip, shownOf, store, typeLine, workItemDetail } from "../helpers.js";
@@ -69,7 +70,7 @@ export const sprintShape = {
     return { shown: items.filter((i) => b.visible(i, data)).length, total: items.length };
   },
   render: (b, t, mono, view, st) => drawSprint(b, t, mono, view, st),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["z", "Story zuklappen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "Task verschieben"], ["s", "Status"], ["a", "zuweisen"], ["z", "Story zuklappen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
@@ -94,7 +95,14 @@ export const sprintShape = {
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has.
   settle: (b, view, due, data, cx) =>
-    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data, SPRINT_STATES)], cx),
+    tellOutcomes(b, [
+      ...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearStateLines(due.filter((u) => u.kind === "state"), data, SPRINT_STATES),
+      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findSprintItem),
+    ], cx),
+  // A story or task by its key, and the data with its fields set
+  // (actions/assign.js).
+  find: findSprintItem,
+  withItem: withSprintItem,
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, SPRINT_STATES, cx),
@@ -208,7 +216,7 @@ function foldedCell(t, data, open, r) {
 
 // A row's story at the left: its triangle where its row holds tasks (▾, ▸
 // folded; a click folds or unfolds them and chooses nothing), its key and
-// type, title and state, and a line across its top in its type's color
+// type, title, state and assignee, and a line across its top in its type's color
 // (typeLine); one the filter or "nur meine" hides (it shows for its tasks)
 // is dimmed and takes no click but on its triangle. The row "Ohne Story"
 // names itself.
@@ -244,7 +252,9 @@ function storyCell(b, t, mono, view, st, r, nav) {
       .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
       .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
-    .child(stateChip(t, st.data, story.state))
+    .child(h_flex().gap(5).flex_wrap().items_center()
+      .child(stateChip(t, st.data, story.state))
+      .when(story.assignees.length > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(story.assignees.join(", ")))))
     .when(Boolean(line), (el) => el.child(line));
 }
 

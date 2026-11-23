@@ -10,6 +10,9 @@ export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === k
 // The data with the item `key` in `state`.
 export const withBacklogState = (data, key, state) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, state } : r)) });
 
+// The data with the item `key`'s fields set to those of `patch`.
+export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
+
 // The rows that show, as one column (navigate walks a list as one).
 export const backlogNav = (data, filter, mine) => [{ id: "backlog", name: data.meta.level.name, shown: data.rows.filter((r) => shows(r, filter, mine, data.viewer)) }];
 

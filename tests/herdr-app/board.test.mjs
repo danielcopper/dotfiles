@@ -30,7 +30,8 @@
 //   items' authors (a draft's creator) in the first two, the pull requests'
 //   assignees and review requests in github-list.json and the pull
 //   request's in github-board-cases.json, a review request whose reviewer
-//   is gone (null) and an issue whose author is gone (null);
+//   is gone (null) and an issue whose author is gone (null), and each issue's
+//   and pull request's own id (I_sample<number>, PR_sample<number>);
 // - written from GitHub's GraphQL reference (Label's color, IssueType's
 //   color), with colors from GitHub's default labels and its label
 //   palette, and made-up titles, not recorded: github-board-colors.json
@@ -41,6 +42,12 @@
 //   github-related.json (an issue's sub-issues and linked pull requests)
 //   and github-related-not-found.json (an issue GitHub does not find; the
 //   error in the shape of the other NOT_FOUND answers);
+// - written from GitHub's GraphQL reference (Repository's assignableUsers,
+//   Query's viewer), with made-up names, not recorded:
+//   github-assignable.json (one person without a name);
+// - written from the azure-devops extension's az devops team list-member
+//   (core's TeamMember: identity, isTeamAdmin), with made-up names, not
+//   recorded: azure-team-members.json (one group among the members);
 // - written from az's documentation (`az devops invoke` for work item
 //   types), not recorded: azure-types.json;
 // - written in the shapes az prints for the Sprint view's calls (the REST
@@ -1672,6 +1679,11 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
         on: (event, fn) => ((on[event] = fn), true), value: () => value, set_value: (v) => (value = v),
         // Enter in the field, with the cx of the key's call.
         submit: (cx) => on.submit?.({}, cx),
+        // Typing: the value, and its "change" handler told.
+        type: (text) => {
+          value = text;
+          on.change?.({}, { notify() {} });
+        },
         focus: () => {
           for (const h of host.handles) h.held = false;
           for (const other of host.inputs) if (other !== input) other.blur();
@@ -3295,10 +3307,10 @@ test("UI: an Azure team tab shows its Sprint or its Backlog, and v switches them
   const shown = () => texts(b.render());
   const layout = () => b.view().layout;
   assert.ok(shown().includes("az ist nicht installiert"), "the Sprint reads with az, which is not found here");
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "gg/G", "H/L", "s", "z", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "h/l j/k", "gg/G", "H/L", "s", "a", "z", "Enter", "o", "m", "/", "r", "Esc"], "the Sprint's keys");
   await press(b, cx, "v");
   assert.deepEqual([layout(), shown().includes("az ist nicht installiert")], ["backlog", true], "the Backlog reads with az too");
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "j/k", "gg/G", "n", "s", "Enter", "o", "m", "/", "r", "Esc"], "the Backlog's keys");
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "v", "j/k", "gg/G", "n", "s", "a", "Enter", "o", "m", "/", "r", "Esc"], "the Backlog's keys");
   await press(b, cx, "v");
   assert.equal(layout(), "sprint");
   await click(b, cx, "team-view-backlog");
@@ -3321,7 +3333,7 @@ test("UI: a team with one view shows it without a switch; a config with one sour
   const { b, cx } = await bootBoard({ config: JSON.stringify(config), stored: {} });
   assert.equal(b.view().layout, "backlog");
   assert.equal(byId(b.render(), "team-view"), null);
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "j/k", "gg/G", "n", "s", "Enter", "o", "m", "/", "r", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "j/k", "gg/G", "n", "s", "a", "Enter", "o", "m", "/", "r", "Esc"]);
   await press(b, cx, "q");
   await press(b, cx, "v");
   assert.deepEqual([b.source().id, b.teamViewOf(b.context())], ["azure", "backlog"]);
@@ -3425,7 +3437,7 @@ test("UI: the shown GitHub view refreshes every refreshMinutes while the board s
 
 test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
   const { b, cx, host } = await openBoard();
-  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "gg/G", "H/L", "s", "x", "X", "Enter", "o", "m", "/", "r", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "h/l j/k", "gg/G", "H/L", "s", "a", "x", "X", "Enter", "o", "m", "/", "r", "Esc"]);
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
   assert.deepEqual(hintKeys(b), ["q", "1 2 3 [ ]", "j/k", "gg/G", "Enter", "o", "m", "/", "r", "Esc"]);
@@ -5436,6 +5448,278 @@ test("UI: a backlog longer than one query reads asks for the first ones and says
   await host.answer("az", ok("[]"), AZB.query);
   await host.answer("az", ok(fixture("azure-sprint-account.json")), AZB.me);
   assert.ok(texts(b.render()).includes("Nur die ersten 1000 von 1005 Einträgen des Backlogs (so viele liest eine Abfrage)"));
+});
+
+// ---- Assignees: who an item is assigned to, and the picker that sets one ----
+
+const isAssignableCall = (args) => args.some((a) => String(a).includes("assignableUsers"));
+const isAssignCall = (args) => args.some((a) => String(a).includes("assigneeIds"));
+const AZA = {
+  members: (a) => a[0] === "devops" && a[1] === "team" && a[2] === "list-member",
+  assign: (a) => a[1] === "work-item" && a[2] === "update" && a.includes("--assigned-to"),
+};
+// The rows the open picker draws, each as its texts.
+const pickerRows = (b) => (byId(b.render(), "assign-rows")?.kids ?? []).filter((k) => k.with?.id?.[0]?.startsWith("assign-row-")).map(texts);
+// Enter in the picker's filter, as herdr's input reports it.
+const submitPicker = async (b, cx) => {
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+};
+// GitHub's answer to an assignment: the item with the assignees it has now.
+const assignedAnswer = (field, node, id, people) =>
+  ok(JSON.stringify({ data: { [field]: { [node]: { id, assignees: { nodes: people.map(([login, name]) => ({ login, name })) } } } } }));
+// az's answer to an assignment: the work item with the person it names.
+const azAssigned = (id, who) => ok(JSON.stringify({ id, fields: { "System.State": "To Do", ...(who ? { "System.AssignedTo": { displayName: who[1], uniqueName: who[0] } } : {}) } }));
+
+test("a GitHub card names its assignees by name where the account has one, else by login, and keeps their logins and its content's id; the filter and „nur meine“ go by login too", () => {
+  const data = json("github-board.json");
+  data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "robin-example", name: "Robin Example" }, { login: "kim-sample", name: null }];
+  const card = board.parseGithubBoard(data, githubView(), HIDDEN).columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec1");
+  assert.deepEqual([card.assignees, card.assigneeLogins], [["Robin Example", "kim-sample"], ["robin-example", "kim-sample"]]);
+  assert.equal(board.findCard(githubBoard(), "PVTI_rec1").card.contentId, "I_sample3000");
+  assert.equal(board.findCard(casesBoard(), "PVTI_case2").card.contentId, null, "a draft's is not read");
+  assert.equal(board.matches(card, "robin-example"), true);
+  assert.equal(board.matches(card, "Robin"), true);
+  assert.equal(board.isMine(card, "robin-example"), true);
+  assert.equal(board.isMine(card, "Robin Example"), false);
+  const args = board.githubBoardArgs(githubView(), HIDDEN);
+  const query = args.find((a) => a.startsWith("query="));
+  for (const kind of ["Issue", "PullRequest"]) assert.match(query, new RegExp(`\\.\\.\\. on ${kind} \\{ id number `), kind);
+  assert.equal(query.split("assignees(first: 5) { nodes { login name } }").length - 1, 3, "an issue's, a pull request's and a draft's assignees by login and name");
+});
+
+test("the assignee picker's calls: GitHub's assignable users of the item's repo with who gh is, the mutation for an issue or a pull request with one person's id or none; az's team members and its update with a login, me or no one", () => {
+  const issue = board.findCard(githubBoard(), "PVTI_rec4").card;
+  const pr = board.findCard(casesBoard(), "PVTI_case1").card;
+  const q = board.githubAssignableArgs(issue);
+  assert.deepEqual(q.slice(0, 3), ["api", "graphql", "-f"]);
+  assert.match(q[3], /viewer \{ id login name \}/);
+  assert.match(q[3], /assignableUsers\(first: 100\) \{ totalCount nodes \{ id login name \} \}/);
+  assert.deepEqual(q.slice(4), ["-f", "owner=example", "-f", "name=tender"]);
+  const robin = { id: "U_sample2", login: "robin-example", name: "Robin Example" };
+  const m = board.githubAssignArgs(issue, robin);
+  assert.match(m[3], /updateIssue\(input: \{ id: \$id, assigneeIds: \$assignees \}\)/);
+  assert.deepEqual(m.slice(4), ["-f", `id=${issue.contentId}`, "-f", "assignees[]=U_sample2"]);
+  assert.match(board.githubAssignArgs(pr, robin)[3], /updatePullRequest\(input: \{ pullRequestId: \$id, assigneeIds: \$assignees \}\)/);
+  assert.deepEqual(board.githubAssignArgs(issue, null).slice(4), ["-f", `id=${issue.contentId}`, "-f", "assignees[]"], "an empty list: no one");
+  const c = sprintTeam();
+  const org = ["--org", ORG, "--detect", "false"];
+  assert.deepEqual(board.azMembersArgs(c), ["devops", "team", "list-member", ...org, "--project", "Example Project", "--team", "Example Team", "--top", "1000", "-o", "json"]);
+  const at = (who) => ["boards", "work-item", "update", ...org, "--id", "311", "--assigned-to", who, "-o", "json"];
+  assert.deepEqual(board.azAssignArgs(c, 311, { login: "robin.example@example.com", name: "Robin Example" }), at("robin.example@example.com"));
+  assert.deepEqual(board.azAssignArgs(c, 311, { me: true, login: "alex.sample@example.com", name: "Alex Sample" }), at("me"));
+  assert.deepEqual(board.azAssignArgs(c, 311, null), at(""));
+});
+
+test("the picker's people: GitHub's viewer as me and the others by name, how many GitHub did not send, a repo it does not know; Azure's team members but groups, me among them by the account az is", () => {
+  const issue = board.findCard(githubBoard(), "PVTI_rec4").card;
+  const gh = board.parseAssignable(json("github-assignable.json"), issue);
+  assert.deepEqual(gh.me, { id: "U_sample1", login: "sample-user", name: "Sam Sample", me: true });
+  assert.deepEqual(gh.people.map((p) => [p.id, p.login, p.name]), [["U_sample3", "kim-sample", "kim-sample"], ["U_sample2", "robin-example", "Robin Example"]], "by name, me left out");
+  assert.equal(gh.note, null);
+  const more = json("github-assignable.json");
+  more.data.repository.assignableUsers.totalCount = 140;
+  assert.equal(board.parseAssignable(more, issue).note, "erste 3 von 140");
+  assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue, [{ path: ["repository"], message: "Could not resolve to a Repository" }]),
+    /^Error: GitHub: Could not resolve to a Repository$/);
+  assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue), /GitHub kennt example\/tender nicht/);
+  const az = board.parseMembers(fixture("azure-team-members.json"), "alex.sample@example.com");
+  assert.deepEqual(az.me, { login: "alex.sample@example.com", name: "Alex Sample", me: true });
+  assert.deepEqual(az.people, [{ login: "kim.sample@example.com", name: "Kim Sample" }, { login: "robin.example@example.com", name: "Robin Example" }], "no group");
+  assert.deepEqual(board.parseMembers(fixture("azure-team-members.json"), null).me, { login: null, name: null, me: true }, "az's me, whoever that is");
+  assert.equal(board.parseMembers(fixture("azure-team-members.json"), "x@example.com").people.length, 3, "a viewer who is no member leaves all");
+  const full = JSON.stringify(Array.from({ length: 1000 }, (_, i) => ({ identity: { displayName: `P${i}`, uniqueName: `p${i}@example.com` } })));
+  assert.equal(board.parseMembers(full, null).note, "erste 1000");
+  assert.throws(() => board.parseMembers('{"x": 1}', null), /Azure lieferte keine Mitglieder des Teams/);
+});
+
+test("an assignment's answer must name the people it set: GitHub's item with those logins, az's work item with that person or none; anything else is unclear", () => {
+  const issue = board.findCard(githubBoard(), "PVTI_rec4").card;
+  const robin = { id: "U_sample2", login: "robin-example", name: "Robin Example" };
+  const answer = (people, id = issue.contentId) => JSON.parse(assignedAnswer("updateIssue", "issue", id, people).stdout);
+  assert.deepEqual(board.checkAssigned(answer([["robin-example", "Robin Example"]]), issue, robin), { names: ["Robin Example"], logins: ["robin-example"] });
+  assert.deepEqual(board.checkAssigned(answer([]), issue, null), { names: [], logins: [] });
+  for (const [json, why] of [[answer([]), "no one"], [answer([["kim-sample", null]]), "another"], [answer([["robin-example", "R"]], "I_other"), "another item"], [{}, "nothing"]]) {
+    assert.throws(() => board.checkAssigned(json, issue, robin), (e) => e.unclear && e.message === "Ergebnis unklar: GitHub hat die Zuweisung nicht bestätigt", why);
+  }
+  const named = azAssigned(311, ["Robin.Example@example.com", "Robin Example"]).stdout;
+  assert.deepEqual(board.checkAzAssigned(named, { login: "robin.example@example.com" }), { names: ["Robin Example"], logins: ["robin.example@example.com"] });
+  assert.deepEqual(board.checkAzAssigned(named, { me: true, login: null }), { names: ["Robin Example"], logins: ["robin.example@example.com"] }, "me, whoever az is");
+  assert.deepEqual(board.checkAzAssigned(azAssigned(311, null).stdout, null), { names: [], logins: [] });
+  for (const [out, person] of [[named, null], [named, { me: true, login: "alex.sample@example.com" }], [azAssigned(311, null).stdout, { login: "x@example.com" }], ["", null], ["{}", null]]) {
+    assert.throws(() => board.checkAzAssigned(out, person), (e) => e.unclear && e.message === "Ergebnis unklar: Azure hat die Zuweisung nicht bestätigt");
+  }
+});
+
+test("UI: a on a GitHub card opens the picker: Ich, niemand, then the repo's assignable people, narrowed by the filter; Enter assigns the one marked at once, gh replaces all assignees with that one, and the card shows them", async () => {
+  const { b, cx, host, st } = await openBoard();
+  await press(b, cx, "a");
+  assert.equal(b.modal.kind, "assign");
+  assert.deepEqual(pickerRows(b), [], "none before GitHub answers");
+  assert.ok(texts(byId(b.render(), "assign-dialog")).includes("lädt …"));
+  const [ask] = host.open("gh").filter((c) => isAssignableCall(c.args));
+  assert.deepEqual(ask.args, board.githubAssignableArgs(st().data.columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec4")));
+  await host.answer("gh", ok(fixture("github-assignable.json")), isAssignableCall);
+  assert.deepEqual(pickerRows(b), [["Ich", "Sam Sample"], ["niemand"], ["kim-sample", "kim-sample"], ["Robin Example", "robin-example"]]);
+  b.modal.input.type("rob");
+  assert.deepEqual(pickerRows(b), [["Robin Example", "robin-example"]]);
+  b.modal.input.type("sample-user");
+  assert.deepEqual(pickerRows(b), [["Ich", "Sam Sample"]], "by login too");
+  b.modal.input.type("");
+  await press(b, cx, "down");
+  await press(b, cx, "down");
+  b.modal.input.type("sam");
+  assert.equal(pickerRows(b).length, 2);
+  assert.equal(b.modal.at, 0, "a new filter marks its first row");
+  b.modal.input.type("");
+  await press(b, cx, "down");
+  await press(b, cx, "down");
+  await press(b, cx, "down");
+  await press(b, cx, "down");
+  assert.equal(b.modal.at, 3, "the last row, no further");
+  await press(b, cx, "up");
+  assert.equal(b.modal.at, 2);
+  await press(b, cx, "n", { modifiers: { control: true } });
+  assert.equal(b.modal.at, 3);
+  await submitPicker(b, cx);
+  assert.equal(b.modal, null);
+  const [write] = host.open("gh").filter((c) => isAssignCall(c.args));
+  assert.deepEqual(write.args.slice(-2), ["-f", "assignees[]=U_sample2"]);
+  const card = () => board.findCard(st().data, "PVTI_rec4").card;
+  assert.deepEqual([card().assignees, st().pending.PVTI_rec4], [["Robin Example"], true], "at once");
+  assert.ok(texts(byId(b.render(), "card-PVTI_rec4")).includes("Robin Example"));
+  assert.equal(b.notice.text, "tender#3004 → Robin Example …");
+  await host.answer("gh", assignedAnswer("updateIssue", "issue", card().contentId, [["robin-example", "Robin Example"]]), isAssignCall);
+  assert.deepEqual([card().assignees, card().assigneeLogins], [["Robin Example"], ["robin-example"]]);
+  assert.equal(b.notice.text, "tender#3004 ist jetzt Robin Example zugewiesen");
+  assert.equal(host.open("gh").length, 0, "nothing read again");
+  await press(b, cx, "a");
+  b.modal.input.type("robin");
+  await submitPicker(b, cx);
+  assert.deepEqual([b.modal, host.open("gh").length], [null, 0], "the one it has already: nothing sent");
+  await press(b, cx, "a");
+  assert.deepEqual(pickerRows(b)[1], ["niemand"], "the repo's people are kept: no second question");
+  assert.equal(host.open("gh").length, 0);
+  await press(b, cx, "down");
+  await submitPicker(b, cx);
+  assert.deepEqual(host.open("gh").filter((c) => isAssignCall(c.args))[0].args.slice(-2), ["-f", "assignees[]"]);
+  await host.answer("gh", assignedAnswer("updateIssue", "issue", card().contentId, []), isAssignCall);
+  assert.deepEqual([card().assignees, b.notice.text], [[], "tender#3004 ist jetzt niemandem zugewiesen"]);
+  await press(b, cx, "a");
+  await submitPicker(b, cx);
+  assert.deepEqual(host.open("gh").filter((c) => isAssignCall(c.args))[0].args.slice(-2), ["-f", "assignees[]=U_sample1"], "Ich: the viewer's id");
+  assert.deepEqual(card().assignees, ["Sam Sample"]);
+});
+
+test("UI: an assignment GitHub refuses goes back with the error; one without a clear answer reads the board again and says who it has then; a pull request takes its own mutation", async () => {
+  const { b, cx, host, st } = await openBoard({ answer: fixture("github-board-cases.json") });
+  await clickCard(b, cx, "PVTI_case1");
+  await press(b, cx, "a");
+  await host.answer("gh", ok(fixture("github-assignable.json")), isAssignableCall);
+  b.modal.input.type("robin");
+  await submitPicker(b, cx);
+  const card = () => board.findCard(st().data, "PVTI_case1").card;
+  const [write] = host.open("gh").filter((c) => isAssignCall(c.args));
+  assert.match(write.args[3], /updatePullRequest/);
+  await host.answer("gh", { code: 1, stdout: JSON.stringify({ errors: [{ type: "FORBIDDEN", path: ["updatePullRequest"], message: "Resource not accessible" }] }), stderr: "gh: Resource not accessible\n" }, isAssignCall);
+  assert.deepEqual(card().assignees, ["sample-user"], "back as it was");
+  assert.equal(b.notice.text, "tender#3050 bleibt sample-user zugewiesen: Resource not accessible");
+  assert.deepEqual([host.notes.at(-1).title, host.notes.at(-1).level], ["Zuweisung von tender#3050 nicht geändert", "error"]);
+  await press(b, cx, "a");
+  b.modal.input.type("robin");
+  await submitPicker(b, cx);
+  await host.answer("gh", ok('{"data": {"updatePullRequest": null}}'), isAssignCall);
+  assert.equal(b.notice.text, "tender#3050 → Robin Example: Ergebnis unklar: GitHub hat die Zuweisung nicht bestätigt; lädt neu");
+  assert.deepEqual(card().assignees, ["Robin Example"], "kept until the refresh says");
+  await host.answer("gh", ok(fixture("github-board-cases.json")), isBoardCall);
+  assert.equal(b.notice.text, "tender#3050 ist nach dem Neuladen sample-user zugewiesen, nicht Robin Example");
+});
+
+test("UI: a picker whose people cannot be read says what failed, in the dialog and as a toast, and offers what needs no list (on GitHub niemand); the next a asks again; a draft, an item without access and a PR list take no a", async () => {
+  const { b, cx, host } = await openBoard({ answer: fixture("github-board-cases.json") });
+  await clickCard(b, cx, "PVTI_case4");
+  await press(b, cx, "a");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "error connecting to api.github.com\n" }, isAssignableCall);
+  assert.ok(texts(byId(b.render(), "assign-dialog")).includes("Wer zuweisbar ist, ließ sich nicht lesen: GitHub nicht erreichbar: error connecting to api.github.com"));
+  assert.deepEqual([host.notes.at(-1).title, host.notes.at(-1).level], ["Zuweisen: Personen nicht gelesen", "error"]);
+  assert.deepEqual(pickerRows(b), [["niemand"]]);
+  await press(b, cx, "escape");
+  await press(b, cx, "a");
+  assert.equal(host.open("gh").filter((c) => isAssignableCall(c.args)).length, 1, "asked again");
+  await press(b, cx, "escape");
+  await clickCard(b, cx, "PVTI_case2");
+  await press(b, cx, "a");
+  assert.deepEqual([b.modal, b.notice.text], [null, "Entwurf ohne Repo: erst in ein Issue umwandeln"]);
+  await clickCard(b, cx, "PVTI_case3");
+  await press(b, cx, "a");
+  assert.deepEqual([b.modal, b.notice.text], [null, "Auf diesen Eintrag hat gh keinen Zugriff"]);
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  await press(b, cx, "a");
+  assert.equal(b.modal, null, "a PR list has no a");
+});
+
+test("UI: a on a Sprint's task offers the team's members, Ich first; Ich is az's me, the answer names who it is; the Backlog of the same team asks no second time; a story shows its assignee too", async () => {
+  const { b, cx, host, st, view } = await openSprint();
+  assert.ok(texts(byId(b.render(), "story-AB#301")).includes("Alex Sample"), "a story's assignee");
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "a");
+  const [ask] = host.open("az").filter((c) => AZA.members(c.args));
+  assert.deepEqual(ask.args, board.azMembersArgs(view.context));
+  await host.answer("az", ok(fixture("azure-team-members.json")), AZA.members);
+  assert.deepEqual(pickerRows(b), [["Ich", "Alex Sample"], ["niemand"], ["Kim Sample", "kim.sample@example.com"], ["Robin Example", "robin.example@example.com"]]);
+  await submitPicker(b, cx);
+  const [write] = host.open("az").filter((c) => AZA.assign(c.args));
+  assert.deepEqual(write.args, board.azAssignArgs(view.context, 312, { me: true }));
+  const task = () => board.findSprintItem(st().data, "AB#312");
+  assert.deepEqual(task().assignees, ["Alex Sample"], "at once");
+  await host.answer("az", azAssigned(312, ["Alex.Sample@example.com", "Alex Sample"]), AZA.assign);
+  assert.deepEqual([task().assignees, task().assigneeLogins, b.notice.text], [["Alex Sample"], ["alex.sample@example.com"], "AB#312 ist jetzt Alex Sample zugewiesen"]);
+  assert.equal(host.open("az").length, 0, "nothing read again");
+  await click(b, cx, "story-AB#302");
+  await press(b, cx, "a");
+  b.modal.input.type("kim");
+  await submitPicker(b, cx);
+  assert.deepEqual(host.open("az").filter((c) => AZA.assign(c.args))[0].args, board.azAssignArgs(view.context, 302, { login: "kim.sample@example.com" }));
+  assert.deepEqual(board.findSprintItem(st().data, "AB#302").assignees, ["Kim Sample"], "a story at once too");
+  await host.answer("az", azRefused("TF401320: Rule Error for field Assigned To."), AZA.assign);
+  assert.deepEqual([board.findSprintItem(st().data, "AB#302").assignees, b.notice.text], [[], "AB#302 bleibt ohne Zuweisung: TF401320: Rule Error for field Assigned To."]);
+  await press(b, cx, "v");
+  await answerBacklogSettings(host);
+  await answerBacklog(host, { me: false });
+  await click(b, cx, "row-AB#401");
+  await press(b, cx, "a");
+  assert.equal(host.open("az").filter((c) => AZA.members(c.args)).length, 0, "the team's members are kept");
+  assert.equal(pickerRows(b).length, 4);
+  await press(b, cx, "down");
+  await submitPicker(b, cx);
+  assert.deepEqual(host.open("az").filter((c) => AZA.assign(c.args))[0].args, board.azAssignArgs(view.context, 401, null));
+  await host.answer("az", azAssigned(401, null), AZA.assign);
+  assert.deepEqual(board.findBacklogItem(b.state(b.view().id).data, "AB#401").assignees, []);
+});
+
+test("UI: on Azure a picker whose members cannot be read says so and offers Ich and niemand; an unclear assignment reads the Sprint again and says who has the item then", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "a");
+  await host.answer("az", azRefused("Operation returned a 403 status code."), AZA.members);
+  assert.ok(texts(byId(b.render(), "assign-dialog")).includes("Wer zuweisbar ist, ließ sich nicht lesen: Operation returned a 403 status code."));
+  assert.deepEqual(pickerRows(b), [["Ich"], ["niemand"]]);
+  await press(b, cx, "down");
+  await submitPicker(b, cx);
+  await host.answer("az", ok("{}"), AZA.assign);
+  assert.equal(b.notice.text, "AB#311 → niemand: Ergebnis unklar: Azure hat die Zuweisung nicht bestätigt; lädt neu");
+  assert.deepEqual(board.findSprintItem(st().data, "AB#311").assignees, []);
+  await answerRefresh(host, { me: false });
+  assert.equal(b.notice.text, "AB#311 ist nach dem Neuladen Alex Sample zugewiesen, nicht niemandem");
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "a");
+  await host.answer("az", azRefused("Operation returned a 403 status code."), AZA.members);
+  await submitPicker(b, cx);
+  assert.deepEqual(host.open("az").filter((c) => AZA.assign(c.args))[0].args, board.azAssignArgs(b.view().context, 312, { me: true }));
+  assert.deepEqual(board.findSprintItem(st().data, "AB#312").assignees, ["alex.sample@example.com"], "az's me by its login, its name not known yet");
+  await host.answer("az", azAssigned(312, ["Alex.Sample@example.com", "Alex Sample"]), AZA.assign);
+  assert.deepEqual([board.findSprintItem(st().data, "AB#312").assignees, b.notice.text], [["Alex Sample"], "AB#312 ist jetzt Alex Sample zugewiesen"], "as the answer names it");
 });
 
 // ---- Tab in the board's dialogs ----

@@ -16,9 +16,10 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { cardLabel, report } from "../../shared.js";
-import { backlogNav, backlogWarnings, findBacklogItem, withBacklogState } from "../../kinds/backlog.js";
+import { backlogNav, backlogWarnings, findBacklogItem, withBacklogItem, withBacklogState } from "../../kinds/backlog.js";
 import { linkedSession } from "../../actions/start.js";
 import { tellOutcomes } from "../../actions/write.js";
+import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
@@ -49,7 +50,7 @@ export const backlogShape = {
   items: (data) => data.rows,
   count: (b, data) => ({ shown: data.rows.filter((r) => b.visible(r, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawBacklog(b, t, mono, view, st),
-  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["n", "neu"], ["s", "Status"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["j/k", "bewegen"], ["gg/G", "erste/letzte"], ["n", "neu"], ["s", "Status"], ["a", "zuweisen"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down"],
   loads: true,
   keys(b, view, st, { k }, cx) {
@@ -68,6 +69,7 @@ export const backlogShape = {
     tellOutcomes(b, [
       ...unclearStateLines(due.filter((u) => u.kind === "state"), data, BACKLOG_STATES),
       ...unclearParentLines(due.filter((u) => u.kind === "parent"), data),
+      ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findBacklogItem),
     ], cx);
     const creates = due.filter((u) => u.kind === "create");
     if (!creates.length) return;
@@ -79,6 +81,10 @@ export const backlogShape = {
       }
     });
   },
+  // A work item by its key, and the data with its fields set
+  // (actions/assign.js).
+  find: findBacklogItem,
+  withItem: withBacklogItem,
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, BACKLOG_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, BACKLOG_STATES, cx),
   // The detail panel's rows of a work item: its state as a pill (a click

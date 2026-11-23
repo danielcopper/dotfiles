@@ -522,7 +522,23 @@ herdr-app`. Which files of the package git tracks is set in the root
   answer refreshes the board and then says where the card is, or which state
   the work item has. A state set on Azure
   refreshes the Sprint either way, since which column it puts a task in is
-  Azure's to say. It runs gh and az by the path my shell gives, since herdr's
+  Azure's to say. Who an item is assigned to shows the same way on both
+  sources, by name (on GitHub the login where the account has no name): on a
+  card and a story after its state or chips, in the Backlog's "Zugewiesen"
+  column and in the details ("zugewiesen: …"); the filter finds it by name
+  and by login. `a` on a GitHub card, a Sprint's story or task or a Backlog's
+  row opens a picker: "Ich", "niemand", then the people of the item's repo
+  that GitHub lets it be assigned to (the first 100), or the members of the
+  view's team on Azure, narrowed by typing; `↑`/`↓` (or `ctrl-j/k`,
+  `ctrl-n/p`) mark one, `Enter` or a click assigns it. It always sets exactly
+  one person, or no one: on GitHub the chosen one replaces all assignees.
+  The people are read once per repo or team and kept until herdr restarts;
+  where they cannot be read, the picker and a toast say why, and it still
+  offers "niemand" (and "Ich" on Azure, which az resolves itself). A draft
+  takes no assignment. The change shows at once and goes back with the error
+  where it is refused, as a status change does; one without a clear answer
+  refreshes the view and then says who has the item. It runs gh and az by
+  the path my shell gives, since herdr's
   own PATH lacks Homebrew and mise. `mise run
   herdr-board-test` (without mise, `node --test tests/herdr-app/board.test.mjs`
   from the repo) tests that `main.js` is built from its sources, its data

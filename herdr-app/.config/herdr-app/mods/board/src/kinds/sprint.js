@@ -6,7 +6,7 @@
 // board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
 
 import { navigate, shows } from "../select.js";
-import { findCard, shownColumns } from "./board.js";
+import { findCard, shownColumns, withCard } from "./board.js";
 
 // The key of the row "Ohne Story", and the id of the column of stories the
 // keys walk first.
@@ -107,6 +107,12 @@ export function sprintNavigate(nav, sel, dir) {
     if (next) return { col: to, key: next.key };
   }
   return { col: ci, key: from.key };
+}
+
+// The data with the story or task `key`'s fields set to those of `patch`.
+export function withSprintItem(data, key, patch) {
+  const set = (i) => (i.key === key ? { ...i, ...patch } : i);
+  return { ...withCard(data, key, patch), rows: data.rows.map((r) => (r.story?.key === key ? { ...r, story: set(r.story) } : r)) };
 }
 
 // The data with the item `key` in `state`; a task's column then counts as

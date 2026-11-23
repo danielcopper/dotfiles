@@ -4,7 +4,10 @@
 
 import { BoardError, errorText } from "../../shared.js";
 import { AZ_TIMEOUT, call } from "../../tools.js";
-import { AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azFailure, azStateArgs, checkStateResult, parseAreas, parseViewer } from "./common.js";
+import {
+  AZ_ME_ARGS, AZ_ME_TIMEOUT, TEAM_KEEP_MS, azAreasArgs, azAssignArgs, azFailure, azMembersArgs, azStateArgs, checkAzAssigned, checkStateResult, parseAreas,
+  parseMembers, parseViewer,
+} from "./common.js";
 import { azTypesArgs, parseAzureTypes, sprintView } from "./sprint.js";
 import { backlogView } from "./backlog.js";
 import { azureRelated } from "./related.js";
@@ -47,6 +50,10 @@ import { azureRelated } from "./related.js";
 // timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
 // asked again with each refresh, and the data says why (noViewer: the
 // source's words and the error).
+//
+// A team's members, whom the assignee picker offers (assign:
+// actions/assign.js says what it holds), are read once per team and kept
+// for the session; a read that fails is not kept.
 export function makeAzure(paths) {
   // An az call's output; a failed one throws what `failure` (azFailure by
   // default) makes of it.
@@ -118,12 +125,29 @@ export function makeAzure(paths) {
       az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
   };
   const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
+  const members = new Map();
   return {
     site: "Azure",
     noViewer,
     // A work item's description, children and linked pull requests
     // (related.js).
     related: azureRelated(az),
+    assign: {
+      refuse: (item) => (item.kind === "workitem" ? null : "Hier lässt sich niemand zuweisen"),
+      people(item, view) {
+        const c = view.context;
+        const key = teamKey(c);
+        if (!members.has(key)) {
+          const read = Promise.all([az(azMembersArgs(c)), whoAmI()]).then(([out, me]) => parseMembers(out, me));
+          members.set(key, read);
+          read.catch(() => members.get(key) === read && members.delete(key));
+        }
+        return members.get(key);
+      },
+      // Without the list, az still knows its own account: "me".
+      fallbackMe: () => ({ login: viewer, name: null, me: true }),
+      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true }), person),
+    },
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
       if (view.context?.kind === "team") views[view.layout]?.forget(view.context);

@@ -8,9 +8,10 @@
 // between them (Board.tabKey). A new dialog is a module here and its
 // entry in MODALS.
 
+import { assignModal } from "./assign.js";
 import { columnsModal } from "./columns.js";
 import { createModal } from "./create.js";
 import { startModal } from "./start.js";
 import { statusModal } from "./status.js";
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal };

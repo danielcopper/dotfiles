@@ -1,0 +1,31 @@
+{
+  "data": {
+    "viewer": {
+      "id": "U_sample1",
+      "login": "sample-user",
+      "name": "Sam Sample"
+    },
+    "repository": {
+      "assignableUsers": {
+        "totalCount": 3,
+        "nodes": [
+          {
+            "id": "U_sample1",
+            "login": "sample-user",
+            "name": "Sam Sample"
+          },
+          {
+            "id": "U_sample2",
+            "login": "robin-example",
+            "name": "Robin Example"
+          },
+          {
+            "id": "U_sample3",
+            "login": "kim-sample",
+            "name": null
+          }
+        ]
+      }
+    }
+  }
+}

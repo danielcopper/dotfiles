@@ -22,13 +22,13 @@ const ITEM_FIELDS = `
   fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
   content {
     __typename
-    ... on Issue { number title url issueType { name color } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login } }
+    ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } }
       parent { number } subIssuesSummary { total completed } }
-    ... on PullRequest { number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login } }
+    ... on PullRequest { id number title url headRefName repository { nameWithOwner } author { login }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
-    ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login } } }
+    ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
 
 // One GraphQL request for a board view: the project, its field's options and
@@ -73,9 +73,18 @@ export const labelColor = (color) => (/^[0-9a-f]{6}$/i.test(color ?? "") ? `#${c
 // the theme, tones.js hueTone).
 const labelColors = (labels) => Object.fromEntries((labels?.nodes ?? []).map((l) => [l.name, labelColor(l.color)]));
 
+// People as the board names them, in every source alike: by name where the
+// account has one, else by login; their logins apart (select.js isMine).
+const personName = (p) => p.name || p.login;
+const peopleOf = (nodes) => {
+  const people = (nodes ?? []).filter((p) => typeof p?.login === "string");
+  return { names: people.map(personName), logins: people.map((p) => p.login) };
+};
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
+  const assignees = peopleOf(c.assignees?.nodes);
   return {
     key: node.id,
     itemId: node.id,
@@ -88,7 +97,11 @@ function githubCard(node) {
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
     labelColors: labelColors(c.labels),
-    assignees: (c.assignees?.nodes ?? []).map((a) => a.login),
+    assignees: assignees.names,
+    assigneeLogins: assignees.logins,
+    // The issue's or pull request's own id, which an assignment names (the
+    // query asks no draft's).
+    contentId: c.id ?? null,
     author: c.author?.login ?? c.creator?.login ?? null,
     reviewers: reviewerLogins(c.reviewRequests),
     type: c.issueType?.name ?? null,
@@ -418,6 +431,72 @@ export function parseGithubRelated(json, item, errors = []) {
   };
 }
 
+// The people an issue's or pull request's repo can assign (GitHub's
+// assignableUsers: those with access to it, the first ASSIGNABLE), and who
+// gh is, as the assignee picker offers them.
+export const ASSIGNABLE = 100;
+export const ASSIGNABLE_QUERY = `query($owner: String!, $name: String!) {
+  viewer { id login name }
+  repository(owner: $owner, name: $name) { assignableUsers(first: ${ASSIGNABLE}) { totalCount nodes { id login name } } }
+}`;
+
+export function githubAssignableArgs(item) {
+  const [owner, name] = item.repo.split("/");
+  return ["api", "graphql", "-f", `query=${ASSIGNABLE_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`];
+}
+
+// A person of GitHub's answer as the picker offers one: { id, login, name }
+// (name: personName).
+const githubPerson = (p) => ({ id: p.id, login: p.login, name: personName(p) });
+
+// gh's answer for githubAssignableArgs (and its GraphQL errors) → { me (the
+// viewer, me: true; null where GitHub did not name it), people (the others,
+// by name), note (how many GitHub did not send, or null) }. A missing repo
+// is explained by the error at its path.
+export function parseAssignable(json, item, errors = []) {
+  const users = json?.data?.repository?.assignableUsers;
+  if (!Array.isArray(users?.nodes)) {
+    const e = errorAt(errors, ["repository"]);
+    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo} nicht`);
+  }
+  const viewer = json.data.viewer;
+  const me = viewer?.id && viewer.login ? { ...githubPerson(viewer), me: true } : null;
+  const sent = users.nodes.filter((p) => p?.id && p.login);
+  const people = sent.filter((p) => p.login !== me?.login).map(githubPerson).sort((a, b) => a.name.localeCompare(b.name));
+  const total = users.totalCount ?? sent.length;
+  return { me, people, note: total > users.nodes.length ? `erste ${users.nodes.length} von ${total}` : null };
+}
+
+// The mutation that replaces an item's assignees, by its kind: its field,
+// the node it answers with, and the name of the item's id in its input.
+const ASSIGN = { issue: ["updateIssue", "issue", "id"], pr: ["updatePullRequest", "pullRequest", "pullRequestId"] };
+const assignMutation = ([field, node, idName]) => `mutation($id: ID!, $assignees: [ID!]!) {
+  ${field}(input: { ${idName}: $id, assigneeIds: $assignees }) { ${node} { id assignees(first: 10) { nodes { login name } } } }
+}`;
+export const assignPath = (item) => [ASSIGN[item.kind][0]];
+
+// gh arguments that make `person` ({ id }) the only assignee of an issue or
+// pull request, or none for null (gh's `key[]` without a value is an empty
+// list).
+export function githubAssignArgs(item, person) {
+  return ["api", "graphql", "-f", `query=${assignMutation(ASSIGN[item.kind])}`, "-f", `id=${item.contentId}`, "-f", person ? `assignees[]=${person.id}` : "assignees[]"];
+}
+
+// The mutation's answer must name the item and, as its assignees, exactly
+// `person` (none for null); then → { names, logins } as it names them, else
+// it is open whether the change landed.
+export function checkAssigned(json, item, person) {
+  const [field, node] = ASSIGN[item.kind];
+  const done = json?.data?.[field]?.[node];
+  const nodes = done?.assignees?.nodes;
+  const got = peopleOf(nodes);
+  const want = person ? [person.login] : [];
+  if (done?.id !== item.contentId || !Array.isArray(nodes) || got.logins.join("\n") !== want.join("\n")) {
+    throw failure("GitHub hat die Zuweisung nicht bestätigt", { write: true, unclear: true });
+  }
+  return got;
+}
+
 // gh's network failures, as Go's net package and gh word them. NOT_SENT: the
 // request never reached GitHub (gh prints a failed DNS lookup as "error
 // connecting to <host>"; a failed dial, refused or timed out, never
@@ -483,9 +562,12 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
 // gives its hidden columns) and how a board writes a move; and the items
 // related to an issue, its sub-issues and linked pull requests, read with
-// its description (related.js says what `related` holds). gh runs by the
-// path `paths` (toolPaths) finds.
+// its description (related.js says what `related` holds); and an item's
+// assignment (assign: actions/assign.js says what it holds), whose people
+// are read once per repo and kept for the session (one that fails is not
+// kept). gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
+  const people = new Map();
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
@@ -494,6 +576,26 @@ export function makeGithub(paths) {
       async load(item) {
         const { json, errors } = await gh(paths, githubRelatedArgs(item));
         return parseGithubRelated(json, item, errors);
+      },
+    },
+    assign: {
+      refuse(item) {
+        if (item.kind === "draft") return "Entwurf ohne Repo: erst in ein Issue umwandeln";
+        if (!item.contentId || !ASSIGN[item.kind]) return "Auf diesen Eintrag hat gh keinen Zugriff";
+        return null;
+      },
+      people(item) {
+        if (!people.has(item.repo)) {
+          const read = gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors));
+          people.set(item.repo, read);
+          read.catch(() => people.get(item.repo) === read && people.delete(item.repo));
+        }
+        return people.get(item.repo);
+      },
+      // Without the list, GitHub names no one to assign but no one.
+      fallbackMe: () => null,
+      async write(view, item, person) {
+        return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item) })).json, item, person);
       },
     },
     views: {

@@ -53,6 +53,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3000",
         "author": {
          "login": "sample-contributor"
         },
@@ -98,6 +99,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3001",
         "author": {
          "login": "sample-contributor"
         },
@@ -135,6 +137,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3003",
         "author": {
          "login": "sample-contributor"
         },
@@ -174,6 +177,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3004",
         "author": {
          "login": "sample-contributor"
         },
@@ -213,6 +217,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3005",
         "author": {
          "login": "sample-contributor"
         },
@@ -250,6 +255,7 @@
        },
        "content": {
         "__typename": "Issue",
+        "id": "I_sample3007",
         "author": {
          "login": "sample-contributor"
         },

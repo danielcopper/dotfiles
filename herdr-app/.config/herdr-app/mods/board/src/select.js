@@ -3,12 +3,13 @@
 
 import { itemKey } from "./shared.js";
 
-// Cards whose text holds every word of the filter, case-insensitive.
+// Cards whose text holds every word of the filter, case-insensitive; their
+// assignees count by name and by login.
 export function matches(card, text) {
   const words = String(text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const hay = [card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
-    ...(card.labels ?? []), ...(card.assignees ?? [])].filter(Boolean).join("\n").toLowerCase();
+    ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])].filter(Boolean).join("\n").toLowerCase();
   return words.every((w) => hay.includes(w));
 }
 

@@ -12,11 +12,14 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
 import { epicLabel, itemLabel } from "../../shared.js";
-import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withHidden } from "../../kinds/board.js";
+import { applyMoves, canDrop, findCard, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
+import { unclearAssignLines } from "../../actions/assign.js";
 import { button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
+
+const findItem = (data, key) => findCard(data, key)?.card ?? null;
 
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
@@ -38,7 +41,7 @@ export const boardShape = {
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
   },
   render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
-  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["x", "Spalte ausblenden"], ["X", "Spalten"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
+  hints: [["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["x", "Spalte ausblenden"], ["X", "Spalten"], ["Enter", "Detail · Agent"], ["o", "öffnen"]],
   dirs: ["up", "down", "left", "right"],
   loads: true,
   keys(b, view, st, { k, ch, mod }, cx) {
@@ -63,7 +66,11 @@ export const boardShape = {
   },
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
-  settle: (b, view, due, data, cx) => tellOutcomes(b, unclearMoveLines(due, data), cx),
+  settle: (b, view, due, data, cx) =>
+    tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, findItem)], cx),
+  // A card by its key, and the data with its fields set (actions/assign.js).
+  find: (data, key) => findItem(data, key),
+  withItem: withCard,
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),

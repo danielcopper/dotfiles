@@ -15,8 +15,10 @@
 // detailWidth; a list has none), detailParts (its rows in the detail
 // panel), settle (b, view, due, data, cx: says how the unclear writes of
 // its items ended up), moveTo, toggleColumn, openStatusMenu, navigate (its
-// own keyboard movement in place of navigate's, select.js) and pickStatus
-// (what a pick in the status menu does in place of a move to that column).
+// own keyboard movement in place of navigate's, select.js), pickStatus
+// (what a pick in the status menu does in place of a move to that column),
+// and find and withItem (an item by its key, and the data with its fields
+// set: a shape that has them takes a, the assignee picker).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw

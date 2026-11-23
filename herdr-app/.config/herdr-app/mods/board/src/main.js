@@ -40,13 +40,15 @@
 // more for its children's titles and states where it has children
 // (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
-// fields), its Backlog two, one after the other (the
-// level's work items in their list by az rest, then one WIQL query for
-// their fields; one for an empty backlog), and one more for the project's
-// work item types (their colors) while neither view keeps them; either one
-// more while who az is stays unknown. What the Sprint and the Backlog read
-// once and keep, and
-// for how long, makeAzure says. A state change costs one az call, a
+// fields), its Backlog two, one after the other (the level's work items in
+// their list by az rest, then one WIQL query for their fields; one for an
+// empty backlog), and one more for the project's work item types (their
+// colors) while neither view keeps them; either one more while who az is
+// stays unknown. What the Sprint and the Backlog read once and keep, and
+// for how long, makeAzure says. An assignment costs one gh or az call, and
+// the assignee picker one more per repo or team the first time it opens
+// there (GitHub's assignable users with who gh is; the team's members, and
+// who az is while that is unknown). A state change costs one az call, a
 // Backlog's create one and a child's parent link one more; a create reads
 // the Backlog again, and one whose answer was unclear asks one WIQL query
 // more after that refresh; a create for a team whose default iteration
@@ -70,12 +72,13 @@
 // sources/ (GitHub; Azure in sources/azure/: common.js, sprint.js,
 // backlog.js, related.js, index.js), tools.js (running gh and az),
 // actions/ (starting a session, writing a change at once, moving a card,
-// changing a state, creating a work item), ui/helpers.js, ui/tones.js (the
-// tones of labels and types, the selected background, the tints),
-// ui/layer.js (the board layer), ui/related.js (the related items as
+// changing a state, creating a work item, assigning an item), ui/helpers.js,
+// ui/tones.js (the tones of labels and types, the selected background, the
+// tints), ui/layer.js (the board layer), ui/related.js (the related items as
 // drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
 // sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create) and this one, the Board, which looks the shape up.
+// columns, create, assign) and this one, the Board, which looks the shape
+// up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -124,6 +127,7 @@ export * from "./actions/write.js";
 export * from "./actions/move.js";
 export * from "./actions/state.js";
 export * from "./actions/create.js";
+export * from "./actions/assign.js";
 export * from "./sources/index.js";
 export * from "./ui/helpers.js";
 export * from "./ui/tones.js";
@@ -138,6 +142,7 @@ export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
 export * from "./ui/modals/create.js";
+export * from "./ui/modals/assign.js";
 export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 
@@ -1049,6 +1054,8 @@ export default class Board extends View {
       return done();
     }
     if (shape.keys(this, view, st, { k, ch, mod }, cx)) return done();
+    // a: the assignee picker, where the shape's items can be assigned.
+    if (k === "a" && !mod.shift && st.data && shape.withItem) return MODALS.assign.open(this, view, cx), done();
     // With nothing selected (loading, failed, empty, a placeholder) Enter
     // and o stay herdr's.
     const item = this.selected(view);

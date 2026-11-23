@@ -49,6 +49,11 @@ export function findCard(board, key) {
   return null;
 }
 
+// The data with the card `key`'s fields set to those of `patch`.
+export const withCard = (board, key, patch) => ({
+  ...board, columns: board.columns.map((c) => ({ ...c, cards: c.cards.map((card) => (card.key === key ? { ...card, ...patch } : card)) })),
+});
+
 // A new board with the card in another column; counts follow (a hidden
 // column's count, where it has one, is the server's plus what was moved in).
 // Unchanged when the card or column is unknown, or the card is there already.
