@@ -441,6 +441,82 @@ test("Z switches the right panel between its normal width and wide, and shows a 
   }
 });
 
+// A shifted letter as GPUI hands it to on_key_down: key "h", key_char "H".
+const shifted = (k) => ({ key: k.toLowerCase(), keystroke: `shift-${k.toLowerCase()}`, key_char: k, modifiers: { ...PLAIN, shift: true } });
+const RESIZE = [["H", "left"], ["J", "down"], ["K", "up"], ["L", "right"]];
+
+// A cx whose timer keeps each callback, so a test can let REPEAT_MS pass.
+function timedCx(cx) {
+  const timers = [];
+  cx.timer = { after: (ms, fn) => timers.push({ ms, fn }), every() {} };
+  return timers;
+}
+
+test("H, J, K and L resize the focused pane left, down, up and right and keep the leader open to repeat", async () => {
+  for (const [k, direction] of RESIZE) {
+    const { leader, cx, host } = await openLeader();
+    await pressRaw(leader, cx, shifted(k));
+    assert.deepEqual(host.runs, [["pane.resize", { direction }]], k);
+    assert.deepEqual(host.notes, [], k);
+    assert.deepEqual(host.closed, [], k);
+  }
+});
+
+test("H, J, K and L repeat as one kind of key: mixed in one repeat each resizes, h ends it, and a pause closes the leader", async () => {
+  const { leader, cx, host } = await openLeader();
+  const timers = timedCx(cx);
+  for (const [k] of RESIZE) await pressRaw(leader, cx, shifted(k));
+  await pressRaw(leader, cx, shifted("H"));
+  assert.deepEqual(host.runs.map(([name, args]) => [name, args.direction]), [
+    ["pane.resize", "left"], ["pane.resize", "down"], ["pane.resize", "up"], ["pane.resize", "right"], ["pane.resize", "left"],
+  ]);
+  assert.deepEqual(host.closed, []);
+  // Only the last press's pause closes the leader.
+  for (const t of timers.slice(0, -1)) t.fn(cx);
+  assert.deepEqual(host.closed, []);
+  timers.at(-1).fn(cx);
+  assert.deepEqual(host.closed, ["mod-leader"]);
+
+  const other = await openLeader();
+  await pressRaw(other.leader, other.cx, shifted("L"));
+  await pressRaw(other.leader, other.cx, key("h"));
+  assert.deepEqual(other.host.runs, [["pane.resize", { direction: "right" }]], "h ends a resize repeat and goes nowhere");
+  assert.deepEqual(other.host.closed, ["mod-leader"]);
+});
+
+test("H, J, K and L while the board layer shows the board run nothing, say nothing and close the leader; with the tab's content shown they resize", async () => {
+  for (const [k, direction] of RESIZE) {
+    for (const [what, layout, runs, closed] of [
+      ["the board shown", layerLayout("b"), [], ["mod-leader"]],
+      ["the personal layout's board shown", personal("board"), [], ["mod-leader"]],
+      ["the tab's content shown", layerLayout("tab"), [["pane.resize", { direction }]], []],
+    ]) {
+      const { leader, cx, host } = await openLeader({ layout });
+      await pressRaw(leader, cx, shifted(k));
+      assert.deepEqual(host.runs, runs, `${k}, ${what}`);
+      assert.deepEqual(host.notes, [], `${k}, ${what}`);
+      assert.deepEqual(host.closed, closed, `${k}, ${what}`);
+    }
+  }
+});
+
+test("the key list shows H, J, K and L under Panes as resize left, down, up and right", async () => {
+  const { leader, cx } = await openLeader();
+  leader.expanded = true;
+  const columns = [];
+  const walk = (el) => {
+    if (!Array.isArray(el?.calls)) return;
+    if (callsOf(el, "min_w").some(([w]) => w === 110)) columns.push(textsOf(el));
+    for (const c of el.calls) for (const a of c.slice(1).flat()) walk(a);
+  };
+  walk(leader.render(cx));
+  const panes = columns.find((texts) => texts[0] === "Panes");
+  assert.ok(panes, columns.map((t) => t[0]).join(" | "));
+  const at = panes.indexOf("H");
+  assert.ok(at > 0, panes.join(" | "));
+  assert.deepEqual(panes.slice(at, at + 8), ["H", "resize left", "J", "resize down", "K", "resize up", "L", "resize right"]);
+});
+
 test("a digit or a repeating key whose command fails says so in one toast naming the key", async () => {
   for (const [k, failing] of [["1", "tab.select"], ["h", "pane.go"]]) {
     const { leader, cx, host } = await openLeader({ failRun: failing });

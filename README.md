@@ -220,8 +220,10 @@ see below), the mods `mods/leader/` (its `f`
 opens a second level for files: `f f` and `f g`, the keys of nvim's
 `<leader>ff` and `<leader>fg`, open the file popup, `f e` and `f G` show the
 right panel on Files or Changes; `Z` switches that panel between its normal
-width and about two thirds of the space beside the sidebar; `ctrl-space
-ctrl-space <key>` is for a tmux in the focused terminal, see below),
+width and about two thirds of the space beside the sidebar; `H`, `J`, `K`
+and `L` move the focused pane's border, repeating like `h`, `j`, `k` and
+`l`, and do nothing while the board shows; `ctrl-space ctrl-space <key>`
+is for a tmux in the focused terminal, see below),
 `mods/focus-history/` (it remembers the previous place for the leader's
 `Tab`: a pane, or the board while the personal layout shows it),
 `mods/file-popup/` (a popup with the files of the focused pane's repo or

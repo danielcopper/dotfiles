@@ -2,14 +2,14 @@
 // (in the personal layout through focus-history, see init); the next key
 // runs one action. At first only a small badge shows that the
 // prefix is active; the full list of keys appears after HINT_MS, like
-// which-key in nvim, so a known key never shows it. Movement keys repeat like
-// tmux's `bind -r`: the overlay stays open for the same kind of key until
-// another key, Esc or a short pause ends it. A key that ends the repeat is
-// dropped, not passed to the terminal. A key can open a second level of keys,
-// like a which-key group in nvim; it closes the same way, and shows its list
-// at once when the first level's list is already up. A second ctrl-space
-// waits for one more key and gives it to the tmux in the focused terminal as
-// if typed after tmux's own prefix (see init).
+// which-key in nvim, so a known key never shows it. Movement and resize keys
+// repeat like tmux's `bind -r`: the overlay stays open for the same kind of
+// key until another key, Esc or a short pause ends it. A key that ends the
+// repeat is dropped, not passed to the terminal. A key can open a second
+// level of keys, like a which-key group in nvim; it closes the same way, and
+// shows its list at once when the first level's list is already up. A second
+// ctrl-space waits for one more key and gives it to the tmux in the focused
+// terminal as if typed after tmux's own prefix (see init).
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -517,6 +517,11 @@ const ACTIONS = [
   ["j", "go down", "Panes", "pane.go", { direction: "down" }, true],
   ["k", "go up", "Panes", "pane.go", { direction: "up" }, true],
   ["l", "go right", "Panes", "pane.go", { direction: "right" }, true],
+  // One command for all four, so they mix in one repeat (press).
+  ["H", "resize left", "Panes", "pane.resize", { direction: "left" }, true],
+  ["J", "resize down", "Panes", "pane.resize", { direction: "down" }, true],
+  ["K", "resize up", "Panes", "pane.resize", { direction: "up" }, true],
+  ["L", "resize right", "Panes", "pane.resize", { direction: "right" }, true],
   ["z", "zoom", "Panes", "pane.zoom", {}],
   ["x", "close pane", "Panes", "pane.close", {}],
   // Pressed as ctrl-space; init takes it.
@@ -796,6 +801,10 @@ export default class Leader extends View {
       cx.notify();
       return;
     }
+    // pane.resize fails while the board layer shows the board, since no pane
+    // is on screen then, and herdr says so in a toast; there H, J, K and L
+    // close the leader without running it, as a key without an action does.
+    if (command === "pane.resize" && boardLayer(layout())?.shown) return this.close();
     if (!repeats) {
       this.close();
       this.act(key, () => (typeof command === "function" ? command() : run(command, args)));
