@@ -15,11 +15,12 @@ import { cardType, epicLabel } from "../shared.js";
 // (CHIP_ALPHA, under text in the chip's own tone), a column head's
 // (HEAD_ALPHA, under its name and its muted count) and a selected card's or
 // row's (SELECTED_ALPHA, under its text and chips). Measured against the
-// copper themes with the surfaces herdr derives for them: that text stays at
+// copper themes' own colors (themes/copper-*.json): that text stays at
 // 4.5:1 or more on every ground the shapes draw it on, in copper-dark and
-// copper-light (board.test.mjs).
+// copper-light (board.test.mjs). HEAD_ALPHA is bound by the muted count on
+// copper-light's chrome: at "11" the weakest head, yellow, gives 4.54:1.
 export const CHIP_ALPHA = "1a";
-export const HEAD_ALPHA = "14";
+export const HEAD_ALPHA = "11";
 export const SELECTED_ALPHA = "14";
 
 // A theme color: #rrggbb, or #rrggbbaa (herdr's translucent surfaces); OPAQUE
@@ -47,8 +48,10 @@ export function layered(top, alpha, ground, fallback) {
 // tinted over the theme's background, opaque, so its chips read the same on
 // a column's chrome as on the board; the accent border marks it too
 // (selectedLook, helpers.js). Without an accent or a background to lay it
-// on, the theme's `selected`. That one would not do as the rule: it equals
-// `raised` in copper-dark, and a chip on it vanishes.
+// on, the theme's `selected`. That one would not do as the rule: herdr
+// derives it translucent for a theme that sets none, so a card would change
+// with the ground under it, and over a dark background it comes out about
+// as `raised`, where a plain chip (chip, helpers.js) vanishes.
 export const selectedBg = (t) => layered(t.accent, SELECTED_ALPHA, t.background, t.selected);
 
 // A column head's background: its `color` tinted over the `ground` the

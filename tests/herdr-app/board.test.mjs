@@ -6466,31 +6466,22 @@ const over = (top, ground) => {
 const ratio = (fg, ground) => Math.round(contrast(fg, ground) * 100) / 100;
 const OPAQUE = /^#[0-9a-f]{6}$/;
 
-// herdr's own derivation of the surfaces a theme file leaves out, for the
-// names the board draws on and canvas: herdr 0.1.16's resolve in
-// src/settings.rs, after copper-design v0.2.0's port
-// (copper_design/herdr.py, resolve, is_light and mix: `a` moved `w` toward
-// `b`), in 64-bit floats; the guard below pins its results.
-const herdrMix = (a, b, w) => `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - w) + parseInt(b.slice(i, i + 2), 16) * w).toString(16).padStart(2, "0")).join("")}`;
-function herdrSurfaces(bg) {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(bg.slice(i, i + 2), 16) / 255);
-  const light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
-  return light
-    ? { popover: bg, raised: herdrMix(bg, "#000000", 0.035), hover: "#0000000c", selected: "#00000012", border: "#00000017", input: "#00000026",
-      canvas: herdrMix(bg, "#e8e8e2", 0.2), chrome: herdrMix(bg, "#e8e8e2", 0.6) }
-    : { popover: herdrMix(bg, "#ffffff", 0.06), raised: herdrMix(bg, "#ffffff", 0.09), hover: "#ffffff0e", selected: "#ffffff17", border: "#ffffff18", input: "#ffffff24",
-      canvas: herdrMix(bg, "#000000", 0.16), chrome: herdrMix(bg, "#000000", 0.32) };
-}
+// A copper theme's file in themes/.
+const copperFile = (mode) => JSON.parse(readFileSync(resolve(modDir, `../../themes/copper-${mode}.json`), "utf8"));
 
-// A copper theme as theme() gives it: herdr's surfaces for its background,
-// then its file in themes/ over them: its colors (foreground among them),
-// background and ansi0..ansi15. The file's top-level foreground is the
+// A copper theme as theme() gives it, for the colors the tests below read:
+// its file's ansi0..ansi15 and background, and its colors (foreground among
+// them) over them. herdr's resolve (src/settings.rs, herdr 0.1.17) derives
+// the panel colors from the background first and lays a file's colors over
+// them, so a color the file sets is the file's. What it derives beyond them
+// (hover, ring, solid_foreground and the terminals' own colors) is left out
+// here: no test of colors reads it. The file's top-level foreground is the
 // terminals' (herdr's terminal_foreground), which the board does not draw
 // with.
 function copperTheme(mode) {
-  const file = JSON.parse(readFileSync(resolve(modDir, `../../themes/copper-${mode}.json`), "utf8"));
+  const file = copperFile(mode);
   const ansi = Object.fromEntries(file.ansi.map((c, i) => [`ansi${i}`, c]));
-  return { ...herdrSurfaces(file.background), ...file.colors, ...ansi, background: file.background };
+  return { ...ansi, background: file.background, ...file.colors };
 }
 const COPPER = ["dark", "light"];
 const colorsBoard = () => board.parseGithubBoard(json("github-board-colors.json"), githubView(), HIDDEN);
@@ -6499,19 +6490,24 @@ const chipsOf = (el, text) => (typeof el === "string" ? [] : [...(el.kids?.lengt
 const chipOf = (el, text) => chipsOf(el, text)[0] ?? null;
 const chipLook = (el) => [el.with.text_color[0], el.with.bg[0]];
 
-// What copper-design v0.2.0's resolve gives for the copper themes' files,
-// each name herdrSurfaces derives.
-const HERDR_SURFACES = {
-  dark: { popover: "#272531", raised: "#2e2c38", hover: "#ffffff0e", selected: "#ffffff17", border: "#ffffff18", input: "#ffffff24", canvas: "#15131e", chrome: "#111018" },
-  light: { popover: "#fffaf3", raised: "#f6f1ea", hover: "#0000000c", selected: "#00000012", border: "#00000017", input: "#00000026", canvas: "#faf6f0", chrome: "#f1efe9" },
-};
+// The colors a copper file's `colors` set that the tests of colors read,
+// beside its background and ansi colors.
+const COPPER_COLORS = ["foreground", "muted", "dim", "accent", "chrome", "selected", "border"];
 
-test("herdr's surfaces for the copper themes, as derived here, are every one copper-design's port of herdr's resolve gives", () => {
+test("the copper themes' files set every color the tests of colors read, opaque, so herdr derives none of them: background, foreground, muted, dim, accent, chrome, selected, border and ansi0..ansi15", () => {
   for (const mode of COPPER) {
+    const file = copperFile(mode);
     const t = copperTheme(mode);
-    const derived = herdrSurfaces(t.background);
-    assert.deepEqual(derived, HERDR_SURFACES[mode], mode);
-    assert.deepEqual(Object.fromEntries(Object.keys(derived).map((k) => [k, t[k]])), HERDR_SURFACES[mode], `${mode}: as the theme has them`);
+    assert.equal(file.ansi.length, 16, `${mode}: ansi colors`);
+    const own = {
+      background: file.background,
+      ...Object.fromEntries(COPPER_COLORS.map((name) => [name, file.colors[name]])),
+      ...Object.fromEntries(file.ansi.map((c, i) => [`ansi${i}`, c])),
+    };
+    for (const [name, color] of Object.entries(own)) {
+      assert.match(color ?? "none", OPAQUE, `${mode} ${name}: in the file`);
+      assert.equal(t[name], color, `${mode} ${name}: as the theme has it`);
+    }
   }
 });
 
