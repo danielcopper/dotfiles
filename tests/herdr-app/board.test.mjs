@@ -2477,10 +2477,12 @@ test("UI: a click on a hidden column's name shows it and keeps it shown when sto
   assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog"'), "the refresh asks for Done again");
 });
 
-test("UI: hidden columns are not drawn; the line above the columns names them, h/l skip them", async () => {
+test("UI: hidden columns are not drawn; the line below the columns names them, h/l skip them", async () => {
   const { b, cx, st } = await openBoard();
   const root = b.render();
   assert.deepEqual(texts(byId(root, "hidden-columns")), ["ausgeblendet:", "Backlog", "Done"]);
+  const around = chainTo(root, hasId("columns")).at(-2);
+  assert.deepEqual(around.kids.map((k) => k.with?.id?.[0]).filter((id) => ["columns", "hidden-columns"].includes(id)), ["columns", "hidden-columns"], "below the columns, beside them in one block");
   const drawn = texts(byId(root, "columns"));
   assert.deepEqual(["Ready", "In progress", "In review"].map((n) => drawn.includes(n)), [true, true, true]);
   assert.deepEqual(["Backlog", "Done"].map((n) => drawn.includes(n)), [false, false], "no stub");
@@ -2493,7 +2495,7 @@ test("UI: hidden columns are not drawn; the line above the columns names them, h
   assert.equal(byId(all.b.render(), "hidden-columns"), null, "nothing hidden: no line");
 });
 
-const ALL_HIDDEN = "Alle Spalten sind ausgeblendet: ein Name oben oder „Spalten…“ im Befehlsmenü (:) zeigt eine wieder";
+const ALL_HIDDEN = "Alle Spalten sind ausgeblendet: ein Name unten oder „Spalten…“ im Befehlsmenü (:) zeigt eine wieder";
 
 test("UI: with every column hidden the board says how to show one", async () => {
   const { b, cx, st } = await openBoard({ config: testConfig({ hide: ["Backlog", "Ready", "In progress", "In review", "Done"] }) });

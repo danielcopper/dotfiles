@@ -1,6 +1,6 @@
 // The board shape: a view's data as columns of cards, which a card moves
 // between (H/L, the status menu, a drag). A hidden column is not drawn: the
-// command menu's "Spalte ausblenden" hides the selected one, the line above
+// command menu's "Spalte ausblenden" hides the selected one, the line below
 // the columns names the hidden ones and a click on a name shows it again;
 // the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
@@ -134,19 +134,19 @@ function drawBoard(b, t, mono, view, st) {
   return v_flex()
     .flex_1()
     .min_h(0)
-    .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
     .child(
       cols.length
         ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
-        : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name oben oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
+        : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name unten oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
     )
+    .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
     .when(Boolean(st.data.limited), (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
         .child(`Nur die ersten ${st.data.limit ?? view.limit} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );
 }
 
-// The line above the columns that names the hidden ones; a click on a name
+// The line below the columns that names the hidden ones; a click on a name
 // shows that column again.
 function hiddenLine(b, t, view, st) {
   const hidden = st.data.columns.filter((c) => c.hidden);
@@ -156,7 +156,7 @@ function hiddenLine(b, t, view, st) {
     .flex_wrap()
     .gap(6)
     .px(16)
-    .pt(10)
+    .pb(10)
     .items_center()
     .text_size(12)
     .child(div().text_color(t.muted).child("ausgeblendet:"))
