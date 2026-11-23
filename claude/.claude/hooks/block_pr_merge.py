@@ -26,7 +26,22 @@ SUSPECT = re.compile(r"merge|complet|enqueue", re.IGNORECASE)
 # a request body, writes it to a file, or only reads it.
 HEREDOC = re.compile(r"(?<!<)<<-?\s*(['\"]?)\\?([\w.-]+)\1")
 RUNNER = re.compile(r"bash|sh|zsh|dash|ksh|fish|python[\d.]*|node|ruby|perl|ssh")
-LAUNCHERS = {"env", "sudo", "nohup", "exec", "command", "time"}
+# Programs that run the command after them, by the options of theirs that take a separate value.
+# env's -S takes the command itself as its value, so it is read as a flag.
+WRAPPERS = {
+    "env": {"-u", "-C", "--unset", "--chdir"},
+    "sudo": {"-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U"},
+    "nohup": set[str](),
+    "exec": {"-a"},
+    "command": set[str](),
+    "time": {"-f", "-o"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u"},
+    "stdbuf": {"-i", "-o", "-e"},
+    "setsid": set[str](),
+    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"},
+}
 SEPARATOR = re.compile(r"&&|\|\||[;&|\n()`]")  # ends a simple command
 STATEMENT = re.compile(r"&&|\|\||[;&\n]")  # ends a pipeline
 ASSIGNMENT = re.compile(r"\w+=\S*")
@@ -62,17 +77,23 @@ def tools(words: list[str]) -> set[str]:
 
 def command_word(words: list[str]) -> int:
     """Index of the command word of the simple command *words*: past assignments and the
-    launchers env, sudo, nohup, exec, command, time, `timeout <duration>` and `uv run`, with
-    their options; len(words) when there is none."""
+    wrappers in WRAPPERS and `uv run`, with their options and option values (and timeout's
+    duration); len(words) when there is none."""
     k = 0
     while k < len(words):
         name = os.path.basename(words[k])
-        if ASSIGNMENT.fullmatch(words[k]) or name in LAUNCHERS or words[k].startswith("-"):
+        if ASSIGNMENT.fullmatch(words[k]):
             k += 1
-        elif name == "timeout" or name == "uv" and words[k + 1 : k + 2] == ["run"]:
-            k += 2
-        else:
+            continue
+        if name == "uv" and words[k + 1 : k + 2] == ["run"]:
+            k += 1
+        elif name not in WRAPPERS:
             break
+        k += 1
+        while k < len(words) and words[k].startswith("-"):
+            k += 2 if words[k] in WRAPPERS.get(name, set()) else 1
+        if name == "timeout":
+            k += 1
     return k
 
 
@@ -106,16 +127,18 @@ def outside_quotes(line: str, end: int) -> bool:
 def heredoc_role(line: str, marker: re.Match[str]) -> tuple[str, list[str]]:
     """What the command receiving the heredoc opened by *marker* does with its body, judged by
     the command words of that command and of the pipeline stages after it: "run" it (a shell or
-    an interpreter), "send" it (a request tool), or "read" it, writing it to the files it names
-    with a `>`, `>>` or `tee`."""
+    an interpreter, or a wrapper whose command the hook cannot find), "send" it (a request tool),
+    or "read" it, writing it to the files it names with a `>`, `>>` or `tee`."""
     before = SEPARATOR.split(line[: marker.start()])[-1]
     after = STATEMENT.split(line[marker.end() :])[0]
     stages = [re.sub(r"['\"]", " ", stage).split() for stage in f"{before} {after}".split("|")]
-    names = {
-        os.path.basename(stage[command_word(stage)])
-        for stage in stages
-        if stage[command_word(stage) :]
-    }
+    names: set[str] = set()
+    for stage in stages:
+        k = command_word(stage)
+        if k < len(stage):
+            names.add(os.path.basename(stage[k]))
+        elif tools(stage) & WRAPPERS.keys():
+            return "run", []
     if any(RUNNER.fullmatch(name) for name in names):
         return "run", []
     if REQUEST_TOOLS & names:

@@ -46,9 +46,9 @@ USE = (
 GAP = r"\s+"
 REPO = rf"(?:(?:-R|--repo)[\s=]\S+{GAP})?"
 # What may stand before gh as a command word: an operator, a keyword, a wrapper, an assignment,
-# xargs with its options, or the quote that opens a `-c` or `eval` string.
+# xargs with its options, or the quote that opens a `-c` or `eval` string or a call's argument.
 PREFIX = (
-    r"(?:^|[;&|`\n]|(?<![\w$])\(|\$\(|(?:-c|eval)\s+['\"])\s*"
+    r"(?:^|[;&|`\n]|(?<![\w$])\(|\$\(|\(['\"]|(?:-c|eval)\s+['\"])\s*"
     r"(?:(?:\w+=\S*|env|sudo|nohup|command|exec|time|do|then|else|timeout\s+\S+"
     r"|xargs(?:\s+-\S+)*)\s+)*"
 )

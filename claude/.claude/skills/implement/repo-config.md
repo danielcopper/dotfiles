@@ -53,11 +53,13 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     pipeline stage after it runs a request tool is a body too, and so is a `<<<` here-string. A heredoc that
     `cat >`, `cat >>` or `tee` writes to a file stands in for that file, found by the word that names it (`$S/b.json`
     and `"$tmp"` too): sent, it is a body; run — as the command word, by `source` or `.`, or by a shell or an
-    interpreter, also after `env`, `VAR=`, `sudo`, `nohup`, `exec`, `timeout <duration>` or `uv run` — it is read
-    as commands. Any other file is read from disk as a regular file up to 1 MB, with `~` and `$HOME` expanded and a
-    relative path taken from the session's working directory only, not from a `cd` earlier in the command; a path
-    the hook cannot resolve or read adds nothing. A `<<` marker opens a heredoc only outside quotes and comments,
-    and only when its delimiter line comes.
+    interpreter — it is read as commands. The command word is found past `VAR=` assignments and the wrappers
+    `env`, `sudo`, `nohup`, `exec`, `command`, `time`, `timeout`, `nice`, `ionice`, `stdbuf`, `setsid`, `xargs`
+    and `uv run`, with their options and option values (env's `-S` string is read as the command); a heredoc fed
+    to a wrapper whose command the hook cannot find is read as commands. Any other file is read from disk as a
+    regular file up to 1 MB, with `~` and `$HOME` expanded and a relative path taken from the session's working
+    directory only, not from a `cd` earlier in the command; a path the hook cannot resolve or read adds nothing.
+    A `<<` marker opens a heredoc only outside quotes and comments, and only when its delimiter line comes.
 
     It lets through `git merge`, `merge-base` and `merge-tree`, paths and names with "merge", "completed" outside
     an Azure DevOps completion, `gh pr view`, `list`, `checks`, `create`, `edit` and `update-branch`, comments and
