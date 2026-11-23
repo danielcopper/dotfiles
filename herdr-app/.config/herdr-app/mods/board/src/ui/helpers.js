@@ -1,11 +1,11 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu, its keys and its
-// window, a length in the script's pixels, a detail section, a check's
-// color, a status pill, a column's color and head, a card's edge, the line
-// of its type, a selected card's or row's look, a card's chip in a tone,
-// for a label, for its type and for a session). Which tones and tints they
-// take: tones.js.
+// window, a row's name marked by the filter, a length in the script's
+// pixels, a detail section, a check's color, a status pill, a column's
+// color and head, a card's edge, the line of its type, a selected card's
+// or row's look, a card's chip in a tone, for a label, for its type and
+// for a session). Which tones and tints they take: tones.js.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
@@ -216,6 +216,24 @@ export function menuWheel(m, by, count) {
   const top = Math.max(0, Math.min(m.top + step, count - MENU_ROWS));
   m.wheel = top === m.top + step ? m.wheel - step * MENU_ROW_PX : 0;
   m.top = top;
+}
+
+// A row's name in a menu with a fuzzy filter (the command menu, the sprint
+// picker), the filter's letters in it (`at`, fuzzyRank) in the accent
+// color.
+export function markedName(t, name, at) {
+  const hits = new Set(at);
+  const runs = [];
+  Array.from(name).forEach((ch, i) => {
+    const hit = hits.has(i);
+    if (runs.length && runs.at(-1).hit === hit) runs.at(-1).text += ch;
+    else runs.push({ hit, text: ch });
+  });
+  return h_flex()
+    .flex_1()
+    .min_w(0)
+    .overflow_hidden()
+    .children(runs.map((r) => div().flex_none().text_color(r.hit ? t.accent : t.foreground).when(r.hit, (el) => el.font_semibold()).child(r.text)));
 }
 
 // A key in a menu with a filter (every key but Esc, which the Board

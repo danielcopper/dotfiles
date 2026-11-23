@@ -21,7 +21,10 @@ import { azurePullRequest, azureRelated } from "./related.js";
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
-// project and team, its current sprint and taskboard columns. The
+// project and team, its current sprint and taskboard columns. The team's
+// iterations, which the sprint picker lists, are read when it first opens
+// and kept while the board runs (sprintView; one that fails keeps nothing).
+// The
 // project's work item types, one entry for both views (typesOf), are kept
 // TEAM_KEEP_MS from their read (even where another read of the Sprint's
 // settings fails), or, where a Sprint's whole settings read brought them,
@@ -29,7 +32,8 @@ import { azurePullRequest, azureRelated } from "./related.js";
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
-// dropped, so that they are read again, by `r` on the Sprint (forget), by
+// dropped, so that they are read again, by `r` on the Sprint (forget, which
+// drops the team's iterations too), by
 // a task in a column the columns read do not know, and by a move or state
 // change Azure refuses.
 //

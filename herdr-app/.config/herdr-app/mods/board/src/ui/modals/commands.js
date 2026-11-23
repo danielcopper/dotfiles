@@ -15,9 +15,9 @@
 // (the first row drawn), wheel (the wheel's move left over) }.
 
 import { div } from "gpui-kit";
-import { h_flex, Input, InputState } from "gpui-base";
+import { Input, InputState } from "gpui-base";
 import { filterActions, menuActions } from "../../commands.js";
-import { fieldFrame, filterMenuKey, menu, menuWindow, wireTextField } from "../helpers.js";
+import { fieldFrame, filterMenuKey, markedName, menu, menuWindow, wireTextField } from "../helpers.js";
 
 // The entries the filter leaves (filterActions), best first, each group
 // (an action's group, not its heading's text) together after its best;
@@ -36,23 +36,6 @@ function runEntry(b, m, i, cx) {
   if (!entry) return;
   b.closeModal(cx);
   b.runAction(entry, cx);
-}
-
-// An entry's name, the filter's letters in it (its `at`) in the accent
-// color.
-function markedName(t, name, at) {
-  const hits = new Set(at);
-  const runs = [];
-  Array.from(name).forEach((ch, i) => {
-    const hit = hits.has(i);
-    if (runs.length && runs.at(-1).hit === hit) runs.at(-1).text += ch;
-    else runs.push({ hit, text: ch });
-  });
-  return h_flex()
-    .flex_1()
-    .min_w(0)
-    .overflow_hidden()
-    .children(runs.map((r) => div().flex_none().text_color(r.hit ? t.accent : t.foreground).when(r.hit, (el) => el.font_semibold()).child(r.text)));
 }
 
 export const commandsModal = {

@@ -373,9 +373,20 @@ herdr-app`. Which files of the package git tracks is set in the root
   work items of the types the taskboard's columns map. What it reads per
   refresh, the header of `mods/board/src/main.js` says, and makeAzure (in
   `mods/board/src/sources/azure/index.js`) what it keeps; `r` reads the team's
-  sprint, areas and columns again. A team's Backlog lists its requirement
-  level (its Stories, and Bugs where the team keeps them there) in backlog
-  order, one row each with id, type, title, state, sprint ("—" for none) and
+  sprint, areas and columns again. The command menu's "Sprint wählen…", or a
+  click on the sprint's name above the stories, opens a picker of the team's
+  sprints, past, current and future, in Azure's order, each with its dates;
+  the current one is marked "aktuell", and marked as the picker opens. It
+  filters and moves as the command menu does, and `Enter` or a click shows
+  the sprint picked; the team's sprints are read when it first opens and kept
+  while the board runs. A sprint other than the current one says "nicht
+  aktuell" beside its name, and the menu's "Aktueller Sprint" goes back. The
+  choice is the Sprint view's while the board runs and is stored nowhere, so
+  after a restart the Sprint shows the current sprint again. A refresh keeps
+  it; `r` reads the team's sprints again too, and where the team no longer
+  has the chosen one, the Sprint shows the current one and says so. A team's
+  Backlog lists its requirement level (its Stories, and Bugs where the team
+  keeps them there) in backlog order, one row each with id, type, title, state, sprint ("—" for none) and
   assignee. It needs `az login`: the level's work items come through
   `az rest`, which takes no PAT, and the Backlog says so when the login is
   missing. What it keeps and for how long, makeAzure says; `r` reads that again

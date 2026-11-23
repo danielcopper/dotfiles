@@ -9,9 +9,14 @@
 // actions/write.js). z (while the board has the keyboard), or a click on the
 // triangle in a story's row, folds its tasks away and back (toggleStoryFold;
 // kept per sprint in the store). Keys walk the stories, then each column's
-// tasks but the folded ones (sprintNav, withoutFolded). The data: { shape:
-// "sprint", meta: { iterationId, iteration, finish, typeStates, states,
-// typeColors, unplaced, unknownColumns }, columns: [{ id, name, color, hidden,
+// tasks but the folded ones (sprintNav, withoutFolded). The sprint picker
+// (ui/modals/sprints.js) shows another sprint of the team: the command
+// menu's "Sprint wählen…" and a click on the sprint's name in the head
+// open it (pickSprint), "Aktueller Sprint" goes back (showSprint); a sprint
+// that is not the current one says so in the head ("nicht aktuell"). The
+// data: { shape: "sprint", meta: { iterationId, iteration, finish, current,
+// gone, typeStates, states, typeColors, unplaced, unknownColumns },
+// columns: [{ id, name, color, hidden,
 // count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
 // noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js).
 // View fields it reads: id, source, layout (as writeAtOnce does).
@@ -31,7 +36,10 @@ import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { assigneeText, cardEdge, columnHead, selectedLook, sessionChip, shownOf, stateChip, store, typeLine, workItemDetail } from "../helpers.js";
+import { assigneeText, cardEdge, columnHead, selectedLook, sessionChip, shownOf, stateChip, store, toneChip, typeLine, workItemDetail } from "../helpers.js";
+import { NOTE_TONES } from "../tones.js";
+import { MODALS } from "../modals/index.js";
+import { showSprint } from "../modals/sprints.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -98,6 +106,10 @@ export const sprintShape = {
   received: (data, st) => applyMoves(data, st.moves),
   // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),
+  // The sprint picker, and the sprint `sprint` shown (null: the current
+  // one).
+  pickSprint: (b, view, cx) => MODALS.sprints.open(b, view, cx),
+  showSprint: (b, view, sprint, cx) => showSprint(b, view, sprint, cx),
   // The settled outcomes: a move's where its card stands, a state change's
   // which state its item has, an assignment's whom it has.
   settle: (b, view, due, data, cx) =>
@@ -126,10 +138,30 @@ export const sprintShape = {
   },
 };
 
-// "bis 27.11." for the sprint's last day (UTC, as Azure gives it), or "".
+// "bis 27.11." for the sprint's last day (UTC, as Azure gives it), or null.
 function sprintEnd(finish) {
   const at = new Date(finish ?? "");
-  return Number.isNaN(at.getTime()) ? "" : ` · bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
+  return Number.isNaN(at.getTime()) ? null : `bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
+}
+
+// The head's start, over the stories: the sprint's name, which a click
+// opens the sprint picker on; "nicht aktuell" where it is not the team's
+// current sprint; its last day and how many stories show.
+function sprintTitle(b, t, view, data, nav, stories) {
+  return h_flex()
+    .id("sprint-title")
+    .w(STORY_WIDTH)
+    .flex_none()
+    .flex_wrap()
+    .gap(6)
+    .items_center()
+    .text_size(12)
+    .text_color(t.muted)
+    .child(div().id("sprint-name").flex_none().cursor_pointer().hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => {
+      if (!b.modal) sprintShape.pickSprint(b, view, cx);
+    }).child(data.meta.iteration))
+    .when(data.meta.current === false, (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
+    .child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`));
 }
 
 // z: the selected story's tasks folded away, or back; on a task, its row's,
@@ -177,10 +209,7 @@ function drawSprint(b, t, mono, view, st) {
     .pt(10)
     .pb(6)
     .items_center()
-    .child(
-      div().w(STORY_WIDTH).flex_none().text_size(12).text_color(t.muted)
-        .child(`${data.meta.iteration}${sprintEnd(data.meta.finish)} · ${shownOf(nav[0].shown.length, stories.length)} Stories`),
-    )
+    .child(sprintTitle(b, t, view, data, nav, stories))
     .children(open.slice(1).map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";

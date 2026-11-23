@@ -232,7 +232,7 @@ export const ACTIONS = [
     run: (b, c, cx) => b.switchSource(nextSource(c).id, cx),
   },
   {
-    id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 23, bar: true,
+    id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 25, bar: true,
     when: (c) => Boolean(c.view) && hasViewSwitch(c.b.context()), takes: () => true,
     run: (b, c, cx) => b.nextTeamView(cx),
     hint: (c) => (hasViewSwitch(c.b.context()) ? viewSwitchHint(c.b.context()) : null),
@@ -348,20 +348,33 @@ export const ACTIONS = [
     when: (c) => has(c, "toggleColumn"),
     run: (b, c, cx) => b.openColumns(c.view, cx),
   },
+  // The sprint a Sprint view shows: the picker, and back to the current
+  // one where another shows (no key: the menu and a click on the sprint's
+  // name in the head open the picker).
   {
-    id: "mine", group: "board", name: (c) => (c.b.mine ? "Nur meine aus" : "Nur meine an"), key: "m", menu: 24, bar: true,
+    id: "sprint-pick", group: "view", name: "Sprint wählen…", key: null, menu: 23,
+    when: (c) => has(c, "pickSprint"),
+    run: (b, c, cx) => c.shape.pickSprint(b, c.view, cx),
+  },
+  {
+    id: "sprint-current", group: "view", name: "Aktueller Sprint", key: null, menu: 24,
+    when: (c) => has(c, "showSprint") && Boolean(c.st.sprint),
+    run: (b, c, cx) => c.shape.showSprint(b, c.view, null, cx),
+  },
+  {
+    id: "mine", group: "board", name: (c) => (c.b.mine ? "Nur meine aus" : "Nur meine an"), key: "m", menu: 26, bar: true,
     when: (c) => Boolean(c.b.source()), takes: () => true,
     run: (b, c, cx) => b.toggleMine(cx),
     hint: (c) => (c.b.source() ? "nur meine" : null),
   },
   {
-    id: "filter", group: "board", name: "Filter", key: "/", menu: 25, bar: true,
+    id: "filter", group: "board", name: "Filter", key: "/", menu: 27, bar: true,
     when: () => true,
     run: (b) => b.filterInput.focus(),
     hint: () => "Filter",
   },
   {
-    id: "reload", group: "board", name: "Neu laden", key: "r", menu: 26, bar: true,
+    id: "reload", group: "board", name: "Neu laden", key: "r", menu: 28, bar: true,
     when: () => true,
     run: (b, c, cx) => b.reload(cx),
     hint: () => "neu laden",

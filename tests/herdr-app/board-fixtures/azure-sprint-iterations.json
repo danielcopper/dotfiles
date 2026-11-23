@@ -1,0 +1,57 @@
+[
+  {
+    "attributes": {
+      "finishDate": "2026-10-30T00:00:00Z",
+      "startDate": "2026-10-19T00:00:00Z",
+      "timeFrame": "past"
+    },
+    "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b10",
+    "name": "Sprint 10",
+    "path": "Example Project\\Sprint 10",
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b10"
+  },
+  {
+    "attributes": {
+      "finishDate": "2026-11-13T00:00:00Z",
+      "startDate": "2026-11-02T00:00:00Z",
+      "timeFrame": "past"
+    },
+    "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b11",
+    "name": "Sprint 11",
+    "path": "Example Project\\Sprint 11",
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b11"
+  },
+  {
+    "attributes": {
+      "finishDate": "2026-11-27T00:00:00Z",
+      "startDate": "2026-11-16T00:00:00Z",
+      "timeFrame": "current"
+    },
+    "id": "7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23",
+    "name": "Sprint 12",
+    "path": "Example Project\\Sprint 12",
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23"
+  },
+  {
+    "attributes": {
+      "finishDate": "2026-12-11T00:00:00Z",
+      "startDate": "2026-11-30T00:00:00Z",
+      "timeFrame": "future"
+    },
+    "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b13",
+    "name": "Sprint 13",
+    "path": "Example Project\\Sprint 13",
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b13"
+  },
+  {
+    "attributes": {
+      "finishDate": null,
+      "startDate": null,
+      "timeFrame": "future"
+    },
+    "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b99",
+    "name": "Ideen",
+    "path": "Example Project\\Ideen",
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/work/teamsettings/iterations/2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b99"
+  }
+]

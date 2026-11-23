@@ -112,7 +112,7 @@ export const epicLabel = (item) =>
 // for `key`, else starts read() and keeps that; a read that fails is
 // dropped (where no newer one has taken its place), so the next get reads
 // again. forget(key, promise) drops `promise` where it is still the one
-// kept; clear() drops all.
+// kept; drop(key) whatever is kept for `key`; clear() drops all.
 export function readMemo() {
   const kept = new Map();
   const forget = (key, promise) => kept.get(key) === promise && kept.delete(key);
@@ -126,6 +126,7 @@ export function readMemo() {
       return kept.get(key);
     },
     forget,
+    drop: (key) => kept.delete(key),
     clear: () => kept.clear(),
   };
 }

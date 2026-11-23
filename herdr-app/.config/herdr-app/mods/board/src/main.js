@@ -44,7 +44,8 @@
 // children's and its parent's titles and states where it has either
 // (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
-// fields), its Backlog two, one after the other (the level's work items in
+// fields; for a sprint the sprint picker chose, by its id and path), its
+// Backlog two, one after the other (the level's work items in
 // their list by az rest, then one WIQL query for their fields; one for an
 // empty backlog), and one more for the project's work item types (their
 // colors) while neither view keeps them; either one more while who az is
@@ -52,17 +53,20 @@
 // how long, makeAzure says. An assignment costs one gh or az call, and the
 // assignee picker one more per repo or team the first time it opens there
 // (GitHub's assignable users with who gh is; the team's members, and who az
-// is while that is unknown). A state change costs one az call, a Backlog's
-// create one and a child's parent link one more; a create reads the Backlog
-// again, and one whose answer was unclear asks one WIQL query more after
-// that refresh; a create for a team whose default iteration follows the
-// current one reads the team's settings first, one call more. The PR tabs
-// read nothing yet. Finding gh and az costs one sh call now and then
-// (toolPaths says when). A view refreshes when its tab first shows, on `r`
-// (which first drops what its source keeps of it: its source's forget),
-// after a column is hidden or shown (the command menu's "Spalte ausblenden",
-// a name in the hidden line, the column menu), when it is shown again older
-// than refreshMinutes, and every refreshMinutes while it shows.
+// is while that is unknown). The sprint picker costs one az call (the
+// team's iterations) the first time it opens for a team, and a refresh of
+// a sprint it chose one where `r` dropped them. A state change costs one
+// az call, a Backlog's create one and a child's parent link one more; a
+// create reads the Backlog again, and one whose answer was unclear asks
+// one WIQL query more after that refresh; a create for a team whose
+// default iteration follows the current one reads the team's settings
+// first, one call more. The PR tabs read nothing yet. Finding gh and az
+// costs one sh call now and then (toolPaths says when). A view refreshes
+// when its tab first shows, on `r` (which first drops what its source
+// keeps of it: its source's forget), after a column is hidden or shown
+// (the command menu's "Spalte ausblenden", a name in the hidden line, the
+// column menu), when it is shown again older than refreshMinutes, and
+// every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -83,8 +87,8 @@
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
 // drawn), ui/shapes/ (how a view's data is drawn and worked: board, prs,
 // sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign, commands) and this one, the Board, which looks
-// the shape up.
+// columns, create, assign, commands, sprints) and this one, the Board,
+// which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -153,6 +157,7 @@ export * from "./ui/modals/columns.js";
 export * from "./ui/modals/create.js";
 export * from "./ui/modals/assign.js";
 export * from "./ui/modals/commands.js";
+export * from "./ui/modals/sprints.js";
 export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 
@@ -340,12 +345,14 @@ export default class Board extends View {
   // runs (how many refreshes have started), want (an item to choose once a
   // refresh has it: chooseWanted) and detail; related (the related items
   // readRelated read, by item key); folds (a Sprint's folded stories, as
-  // the store keeps them: readStoredFolds).
+  // the store keeps them: readStoredFolds); sprint (the sprint a Sprint
+  // view shows in place of the current one, as the sprint picker chose it,
+  // null for the current one; kept while the board runs, never stored).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
-      related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)),
+      related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), sprint: null,
     };
     return this.views[id];
   }
@@ -451,9 +458,15 @@ export default class Board extends View {
     st.related = keptRelated(st.related, open ? open.key : null, (this.panelIn(view)?.levels ?? []).map((l) => l.item.key));
     const started = st.tried;
     const run = ++st.runs;
+    const chosen = st.sprint;
     cx.spawn(async (cx) => {
       try {
-        const { data, warnings } = await loader.load(view, (v) => this.hiddenFor(v));
+        const { data, warnings, notice } = await loader.load(view, (v) => this.hiddenFor(v), chosen);
+        // A chosen sprint the source no longer has (data.meta.gone) is
+        // dropped, unless another was chosen while it read; the load says so
+        // (notice).
+        if (data.meta?.gone && st.sprint === chosen) st.sprint = null;
+        if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
         st.data = SHAPES[data.shape].received(data, st);
         st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
