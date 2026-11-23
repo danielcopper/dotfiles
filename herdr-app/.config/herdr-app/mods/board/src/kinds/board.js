@@ -20,13 +20,13 @@ export function hiddenColumns(view, stored) {
   return hidden;
 }
 
-// The stored toggles after hiding or showing a column: only what differs from
-// the view's defaults, so a later edit to hide takes effect. A column that
-// takes no drops ("Ohne Status") cannot be hidden: unchanged.
 // Whether a column can be hidden: one with a target (an option of the
 // view's field); the column without status is always shown.
 export const hideable = (column) => Boolean(column?.target);
 
+// The stored toggles after hiding or showing a column: only what differs from
+// the view's defaults, so a later edit to hide takes effect. A column that
+// cannot be hidden (hideable): unchanged.
 export function toggleHidden(view, stored, column) {
   if (!hideable(column)) return stored;
   const own = readStoredHidden(stored) ?? { hide: [], show: [] };

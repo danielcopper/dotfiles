@@ -9,10 +9,10 @@
 // shows MENU_ROWS rows (helpers.js: filterMenuKey, menuWindow). `:` opens it
 // (Board.openCommands) as b.modal = { kind: "commands", view (the view it
 // opened on, so that a reload of views.json that drops it, or makes it
-// another kind, closes it), entries (the actions as it opened), input (the filter's
-// InputState, made for this dialog), field and textField ("filter"),
-// inputFocused, filter, at (the marked row, -1 for none), top (the first
-// row drawn), wheel (the wheel's move left over) }.
+// another kind, closes it), entries (the actions as it opened), input (the
+// filter's InputState, made for this dialog), field and textField
+// ("filter"), inputFocused, filter, at (the marked row, -1 for none), top
+// (the first row drawn), wheel (the wheel's move left over) }.
 
 import { div } from "gpui-kit";
 import { h_flex, Input, InputState } from "gpui-base";

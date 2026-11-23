@@ -8528,7 +8528,7 @@ test("UI: the command menu says why where its action, on what it opened for, can
   assert.deepEqual([b.modal, b.notice?.text, host.open("gh").length], [null, "„Nach rechts verschieben“ geht hier nicht mehr", 0]);
 });
 
-test("the shapes lend the action table what it asks: a shape that moves says where (canMove), one that hides columns says which (canHide)", () => {
+test("the shapes lend the action table what it asks: a shape that moves says whether a card can move (canMove), one that hides columns which it can hide (canHide: a column with a target, not one without, nor none)", () => {
   for (const [name, shape] of Object.entries(board.SHAPES)) {
     if (shape.move) assert.equal(typeof shape.canMove, "function", `${name}: canMove`);
     if (shape.toggleColumn) assert.equal(typeof shape.canHide, "function", `${name}: canHide`);

@@ -685,13 +685,13 @@ export function hiddenColumns(view, stored) {
   return hidden;
 }
 
-// The stored toggles after hiding or showing a column: only what differs from
-// the view's defaults, so a later edit to hide takes effect. A column that
-// takes no drops ("Ohne Status") cannot be hidden: unchanged.
 // Whether a column can be hidden: one with a target (an option of the
 // view's field); the column without status is always shown.
 export const hideable = (column) => Boolean(column?.target);
 
+// The stored toggles after hiding or showing a column: only what differs from
+// the view's defaults, so a later edit to hide takes effect. A column that
+// cannot be hidden (hideable): unchanged.
 export function toggleHidden(view, stored, column) {
   if (!hideable(column)) return stored;
   const own = readStoredHidden(stored) ?? { hide: [], show: [] };
@@ -4405,7 +4405,7 @@ export const columnsModal = {
         div().size(9).flex_none().rounded(5).bg(columnColor(t, c)),
         div().flex_1().min_w(0).truncate().text_color(c.hidden ? t.muted : t.foreground).child(c.name),
         div().flex_none().text_size(11).text_color(t.dim).child(c.count === null ? "" : String(c.count)),
-        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!hideable(c) ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
+        div().w(80).flex_none().text_size(11).text_color(t.dim).child(!b.shape(m.view).canHide(c) ? "immer gezeigt" : c.hidden ? "ausgeblendet" : "gezeigt"),
       ]),
     });
   },
@@ -5032,10 +5032,10 @@ export const ACTIONS = [
 // shows MENU_ROWS rows (helpers.js: filterMenuKey, menuWindow). `:` opens it
 // (Board.openCommands) as b.modal = { kind: "commands", view (the view it
 // opened on, so that a reload of views.json that drops it, or makes it
-// another kind, closes it), entries (the actions as it opened), input (the filter's
-// InputState, made for this dialog), field and textField ("filter"),
-// inputFocused, filter, at (the marked row, -1 for none), top (the first
-// row drawn), wheel (the wheel's move left over) }.
+// another kind, closes it), entries (the actions as it opened), input (the
+// filter's InputState, made for this dialog), field and textField
+// ("filter"), inputFocused, filter, at (the marked row, -1 for none), top
+// (the first row drawn), wheel (the wheel's move left over) }.
 
 // The entries the filter leaves (filterActions), best first, each group
 // (an action's group, not its heading's text) together after its best;
@@ -7765,8 +7765,7 @@ export default class Board extends View {
 
   // The moment an action runs in as its key runs it, the step the keys
   // (key), the menu's opening (openCommands) and its actions (runAction)
-  // share: the board keeps its selection first (keepSelection). An action
-  // of the top bar (`bar`) runs on actionContext as it is.
+  // share: the board keeps its selection first (keepSelection).
   keptContext() {
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);

@@ -997,8 +997,7 @@ export default class Board extends View {
 
   // The moment an action runs in as its key runs it, the step the keys
   // (key), the menu's opening (openCommands) and its actions (runAction)
-  // share: the board keeps its selection first (keepSelection). An action
-  // of the top bar (`bar`) runs on actionContext as it is.
+  // share: the board keeps its selection first (keepSelection).
   keptContext() {
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);
