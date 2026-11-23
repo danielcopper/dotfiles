@@ -24,7 +24,11 @@
 // says why): its window measures its height, the content its own and each
 // row its own (on_size_change), the content stands shifted up by the
 // offset, the mouse wheel moves it, and a thin thumb at the right shows
-// where it is (no scrollbar to drag).
+// where it is (no scrollbar to drag). The shift is a relative position,
+// which moves the content without changing what it gives the layout: a
+// negative top margin would make the window, which takes its height from
+// the content, shorter by the offset, so that a content which shrinks
+// while scrolled (a refresh, a fold) would leave it short, down to none.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, TextView } from "gpui-base";
@@ -190,7 +194,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .px(FRAME.px)
     .py(FRAME.py)
     .gap(FRAME.gap)
-    .mt(offset ? -offset : 0)
+    .relative()
+    .top(offset ? -offset : 0)
     .children(relatedRows(item, entry).map((r, i) => measured(rowOf(r), rowId(r, i), (h) => ui.sizes.set(rowId(r, i), h))));
   const windowEl = measured(v_flex(), "related-window", (h) => (ui.viewport = h))
     .min_h(0)

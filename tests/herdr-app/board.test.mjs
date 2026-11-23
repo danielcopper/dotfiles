@@ -5518,8 +5518,9 @@ async function action(b, cx, name) {
 const readsOf = (host, number) => host.open("gh").filter((c) => isRelatedCall(c.args) && (number === undefined || c.args.includes(`number=${number}`)));
 // The details block laid out as herdr would report it: each row `rowH`
 // high (or as `heights` says by its id), the content as tall as they are
-// with its padding and gaps, the window `windowH` high (on_size_change on
-// each, with a cx of its own); its content's height.
+// with its padding and gaps, the window `windowH` high (or as
+// `windowH(content)` says; on_size_change on each, with a cx of its own);
+// its content's height.
 function layOut(b, cx, windowH, { rowH = 18, heights = {} } = {}) {
   const panel = detailPanel(b);
   const content = byId(panel, "related-lines");
@@ -5531,15 +5532,28 @@ function layOut(b, cx, windowH, { rowH = 18, heights = {} } = {}) {
     total += h + (i ? 6 : 0);
   });
   size(content, total);
-  size(byId(panel, "related-window"), windowH);
+  size(byId(panel, "related-window"), typeof windowH === "function" ? windowH(total) : windowH);
   return total;
 }
-// The block's offset, and the shift its content is drawn with.
+// The block's offset, and the shift its content is drawn with: a relative
+// top, no margin (layOutIn says why).
 const offsetOf = (b) => {
-  const drawn = byId(detailPanel(b), "related-lines").with.mt[0];
-  assert.equal(drawn, -b.relatedUi.offset || 0, "drawn as kept");
+  const content = byId(detailPanel(b), "related-lines");
+  assert.deepEqual([content.with.top?.[0], content.styles.includes("relative")], [-b.relatedUi.offset || 0, true], "drawn as kept");
+  assert.deepEqual([content.with.mt, content.with.mb], [undefined, undefined], "no margin");
   return b.relatedUi.offset;
 };
+// One frame of layOut with the window as tall as herdr's layout (taffy)
+// makes it, in a space `space` high, from what the board draws now: the
+// window takes its height from its content, at most the space; a flex item
+// gives its container its height plus its margins, and a relative top only
+// moves it (vendor/taffy/src/compute/flexbox.rs, hypothetical_outer_size
+// and main_relative_inset). The content's height.
+function layOutIn(b, cx, space, opts) {
+  const content = byId(detailPanel(b), "related-lines");
+  const margin = (name) => content.with[name]?.[0] ?? 0;
+  return layOut(b, cx, (total) => Math.max(0, Math.min(space, total + margin("mt") + margin("mb"))), opts);
+}
 
 test("an issue's related items are one GraphQL query: its first 50 sub-issues and its first 20 linked pull requests, merged and closed ones too, each with whether there are more", () => {
   const args = board.githubRelatedArgs(issueItem());
@@ -6834,6 +6848,36 @@ test("UI: a resize or a refresh that shrinks the block keeps its offset within i
   await press(b, cx, "j");
   assert.equal(st().sel.key, "PVTI_rec5");
   assert.equal(offsetOf(b), 0, "another item: the top");
+});
+
+test("UI: the details' window keeps the height of its space wherever the block is scrolled: at its end, after a refresh that shrinks the content and in a taller space", async () => {
+  const { b, cx, host } = await openRelated();
+  const shown = () => [b.relatedUi.viewport, offsetOf(b)];
+  assert.equal(layOutIn(b, cx, 100), 234);
+  await tab(b, cx);
+  for (let i = 0; i < 12; i++) {
+    await press(b, cx, "j");
+    layOutIn(b, cx, 100);
+  }
+  assert.deepEqual(shown(), [100, 122], "j to the last line: the window as tall as its space");
+  for (let i = 0; i < 3; i++) {
+    cx.call((own) => byId(detailPanel(b), "related-window").with.on_scroll_wheel[0]({ delta: { x: 0, y: -40 } }, own));
+    layOutIn(b, cx, 100);
+  }
+  assert.deepEqual(shown(), [100, 134], "the wheel to the end and past it: still");
+  layOutIn(b, cx, 200);
+  layOutIn(b, cx, 200);
+  assert.deepEqual(shown(), [200, 34], "a taller space: the window grows into it");
+  layOutIn(b, cx, 100);
+  await press(b, cx, "G", { char: "G" });
+  layOutIn(b, cx, 100);
+  assert.deepEqual(shown(), [100, 134], "the space as before, G: the end");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  await answerRelated(host, ok(relatedAnswer()));
+  assert.equal(layOutIn(b, cx, 100), 114);
+  layOutIn(b, cx, 100);
+  assert.deepEqual(shown(), [100, 14], "less content after the refresh: the window stays as tall, the offset within the content");
 });
 
 // ---- gg, G, Home and End ----
