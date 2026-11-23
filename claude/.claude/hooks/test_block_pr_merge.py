@@ -763,6 +763,11 @@ DENIED = [
     'gh api "$EP" --method POST --input b.json',
     "gh api repos/o/r/pulls/5/merge --method PUT --input b.json",
     "az rest --method patch --uri https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308?api-version=7.1 --body @b.json",
+    "curl -X PATCH -d @b.json 'https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308/threads/..?api-version=7.1'",
+    (
+        "az rest --method patch --uri 'https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308/threads/%2e%2e"
+        "?api-version=7.1' --body @b.json"
+    ),
     # the GraphQL merge queue
     (
         'gh api graphql -f query=\'mutation { enqueuePullRequest(input: {pullRequestId: "x"})'

@@ -915,6 +915,19 @@ def network_words(command: str, plain: str) -> list[str]:
     ]
 
 
+def on_merge_surface(target: str) -> bool:
+    """Whether a URL or an endpoint, percent-decoded, is on MERGE_SURFACE, or its path may
+    resolve to one: a `.` or `..` segment, `//` after the host, or a `;`."""
+    decoded = unquote(target).lower()
+    if MERGE_SURFACE.search(decoded):
+        return True
+    path = decoded.split("://", 1)[1] if "://" in decoded else decoded
+    if "://" in decoded:
+        path = path[path.find("/") :] if "/" in path else ""
+    path = re.split(r"[?#]", path, maxsplit=1)[0]
+    return "//" in path or ";" in path or any(part in (".", "..") for part in path.split("/"))
+
+
 def may_write_to_merge(words: list[str]) -> bool:
     """For the words of a curl or wget command that writes: whether the request may reach a
     merge surface - a config or input file that may name the URL (`-K`, `--config`, wget's `-i`
@@ -940,9 +953,7 @@ def may_write_to_merge(words: list[str]) -> bool:
     if not urls:
         return True
     return any(
-        url.startswith("@")
-        or any(c in url for c in "$`{[")
-        or MERGE_SURFACE.search(unquote(url).lower()) is not None
+        url.startswith("@") or any(c in url for c in "$`{[") or on_merge_surface(url)
         for url in urls
     )
 
@@ -966,7 +977,7 @@ def body_target_may_merge(texts: list[str]) -> bool:
             "$" in text
             or "`" in text
             or BRACE_EXPANSION.search(text) is not None
-            or MERGE_SURFACE.search(unquote(text).lower()) is not None
+            or on_merge_surface(text)
             for text in after
         )
     if "az" in names and "rest" in lower:
@@ -979,7 +990,7 @@ def body_target_may_merge(texts: list[str]) -> bool:
             ("://" not in uri and not uri.startswith("/"))  # no literal URL or path: unknown
             or "$" in uri
             or "`" in uri
-            or MERGE_SURFACE.search(unquote(uri)) is not None
+            or on_merge_surface(uri)
             for uri in uris
         )
     if DEVOPS_INVOKE.search(joined):

@@ -59,7 +59,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       only that command's words count, not other stages of a pipeline. Either counts only when the target may
       be a merge surface: an Azure `pullRequests/<id>` with nothing after the id (the pull request that
       completion PATCHes), a GitHub `/pulls/<n>/merge` or `/merges`, `graphql` (whose body is not read), a
-      target built at run time (`$`, a backtick, for curl also `{` or `[`) or written percent-encoded, or no
+      target built at run time (`$`, a backtick, for curl also `{` or `[`) or written percent-encoded, a path
+      with a `.` or `..` segment, `//` after the host or a `;` (it may resolve to the pull request), or no
       literal target at all (curl and wget without a `://` URL, `-K`/`--config`, wget's `-i`; `gh api` with no
       endpoint word; `az rest` without a URL or path; `az repos pr`). A write to a literal sub-resource — a
       pull request's threads, comments, reviews, reviewers, labels or statuses, or a GitHub pull request
