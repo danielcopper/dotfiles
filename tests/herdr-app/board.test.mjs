@@ -7047,7 +7047,7 @@ test("UI: a Sprint story's details read its related items: its description as HT
   await settle();
   assert.deepEqual([st().detail, host.open("az").length], [true, 0], "back on the story: kept, nothing read again");
   await tab(b, cx);
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   await press(b, cx, "o");
   assert.equal(cx.opened.at(-1), `${ORG}/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_git/6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c/pullrequest/57`, "the pull request's page");
 });
@@ -7770,7 +7770,7 @@ test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its windo
   assert.equal(offsetOf(b), 84);
   for (let i = 0; i < 3; i++) await press(b, cx, "u", { modifiers: { control: true } });
   assert.equal(offsetOf(b), 0, "not above the top");
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   await press(b, cx, "u", { modifiers: { control: true } });
   assert.equal(offsetOf(b), 84, "from the bottom G went to, which is within the content");
   await press(b, cx, "home");
@@ -7809,7 +7809,7 @@ test("UI: a resize or a refresh that shrinks the block keeps its offset within i
   const { b, cx, host, st } = await openRelated();
   layOut(b, cx, 100);
   await tab(b, cx);
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   assert.equal(offsetOf(b), 134);
   layOut(b, cx, 200);
   assert.equal(offsetOf(b), 34, "a taller window: the content's end at its bottom");
@@ -7822,7 +7822,7 @@ test("UI: a resize or a refresh that shrinks the block keeps its offset within i
   await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
   await answerRelated(host, ok(fixture("github-related.json")));
   layOut(b, cx, 100);
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   assert.equal(offsetOf(b), 134);
   await press(b, cx, "escape");
   await press(b, cx, "j");
@@ -7849,7 +7849,7 @@ test("UI: the details' window keeps the height of its space wherever the block i
   layOutIn(b, cx, 200);
   assert.deepEqual(shown(), [200, 34], "a taller space: the window grows into it");
   layOutIn(b, cx, 100);
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   layOutIn(b, cx, 100);
   assert.deepEqual(shown(), [100, 134], "the space as before, G: the end");
   await press(b, cx, "r");
@@ -7862,12 +7862,16 @@ test("UI: the details' window keeps the height of its space wherever the block i
 
 // ---- gg, G, Home and End ----
 
+// G as herdr sends it: g with Shift.
+const SHIFT_G = ["g", { char: "G", modifiers: { shift: true } }];
+
 test("gg, G, Home and End name an end; a first g waits for a second; with Control, Alt or the platform key they are no ends", () => {
   const none = {};
   assert.deepEqual(
-    [board.edgeKey("home", "", none, false), board.edgeKey("end", "", none, false), board.edgeKey("g", "G", { shift: true }, false), board.edgeKey("G", "G", none, false)],
-    ["top", "bottom", "bottom", "bottom"],
+    [board.edgeKey("home", "", none, false), board.edgeKey("end", "", none, false), board.edgeKey("g", "G", { shift: true }, false)],
+    ["top", "bottom", "bottom"],
   );
+  assert.deepEqual([board.edgeKey("g", "G", none, false), board.edgeKey("g", "G", none, true)], ["pending", "top"], "Caps Lock: g, then gg, no G");
   assert.deepEqual([board.edgeKey("g", "g", none, false), board.edgeKey("g", "g", none, true)], ["pending", "top"], "g, then gg");
   assert.deepEqual([board.edgeKey("g", "g", { shift: true }, true), board.edgeKey("j", "j", none, true)], ["bottom", null], "G after a g is G; another key is none");
   for (const mod of [{ control: true }, { alt: true }, { platform: true }]) {
@@ -7905,14 +7909,14 @@ test("UI: on a board gg and Home go to the first card of the selected column, G 
   await press(b, cx, "end", { modifiers: { control: true } });
   assert.equal(st().sel.key, "PVTI_rec2", "with Control End is not the board's");
   await press(b, cx, "l");
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   assert.deepEqual(st().sel, { col: 2, key: null }, "an empty column stays selected as such");
 });
 
 test("UI: gg, G, Home and End before a view's data came do nothing", async () => {
   const { b, cx, st } = await bootBoard();
   for (const k of ["home", "end"]) await press(b, cx, k);
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   await press(b, cx, "g");
   await press(b, cx, "g");
   assert.deepEqual([st().data, st().sel], [null, null]);
@@ -7944,7 +7948,7 @@ test("UI: in the Backlog and a PR list gg and G go to the first and last row; on
   await prs.host.answer("gh", ok(fixture("github-list.json")));
   const prRows = prs.b.navColumns(prs.b.view())[0].shown.map((r) => r.key);
   assert.ok(prRows.length > 2);
-  await press(prs.b, prs.cx, "G", { char: "G" });
+  await press(prs.b, prs.cx, ...SHIFT_G);
   assert.equal(prs.b.views.prs.sel.key, prRows.at(-1));
   await press(prs.b, prs.cx, "home");
   assert.equal(prs.b.views.prs.sel.key, prRows[0]);
@@ -7969,7 +7973,7 @@ test("UI: while the details panel has the keyboard gg and Home go to its top wit
   await tab(b, cx);
   assert.ok(hintKeys(b).includes("gg/G"), "the panel's hint");
   const content = layOut(b, cx, 60);
-  await press(b, cx, "G", { char: "G" });
+  await press(b, cx, ...SHIFT_G);
   assert.deepEqual([b.panel.line, offsetOf(b), st().sel.key], [4, content - 60, "PVTI_rec4"], "the last line, the block's bottom; the board's selection stays");
   await press(b, cx, "g");
   await press(b, cx, "g");
@@ -8464,4 +8468,18 @@ test("UI: the second Enter's action in the menu is named by what it does: a pull
   host.spaceList.push(sessionSpace);
   await press(b, cx, "enter");
   assert.deepEqual((await openMenu(b, cx))[0], ["Zur Sitzung", "Enter"]);
+});
+
+test("UI: with Caps Lock g stays g: a bare g whose character is G does not go to the bottom, and gg still goes to the top", async () => {
+  const { b, cx, st } = await openBoard();
+  await press(b, cx, "l");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec2");
+  const capsG = { char: "G" };
+  await press(b, cx, "g", capsG);
+  assert.equal(st().sel.key, "PVTI_rec2", "one g waits");
+  await press(b, cx, "g", capsG);
+  assert.equal(st().sel.key, "PVTI_rec1", "gg: the column's first");
+  await press(b, cx, ...SHIFT_G);
+  assert.equal(st().sel.key, "PVTI_rec3", "Shift: G, its last");
 });

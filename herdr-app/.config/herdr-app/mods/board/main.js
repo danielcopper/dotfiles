@@ -6955,12 +6955,13 @@ export const BOARD_KEYS = [
 ];
 
 // Which end gg, G, Home and End go to ("top", "bottom"), "pending" for a
-// first `g` (`g`: one came just before), null for any other key. No key of
-// the board or of keys.json is a bare g, G, Home or End.
+// first `g` (`g`: one came just before), null for any other key. G is g
+// with Shift, as keyName (commands.js) has it, so that Caps Lock changes
+// no key. No key of the board or of keys.json is a bare g, G, Home or End.
 export function edgeKey(k, ch, mod, g) {
   if (mod.control || mod.alt || mod.platform) return null;
   if (k === "home") return "top";
-  if (k === "end" || ch === "G" || (k === "g" && mod.shift)) return "bottom";
+  if (k === "end" || (k === "g" && mod.shift)) return "bottom";
   if (k !== "g") return null;
   return g ? "top" : "pending";
 }
