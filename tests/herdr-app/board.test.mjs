@@ -56,8 +56,9 @@
 //   boards iteration team list --timeframe current),
 //   azure-sprint-iterations.json (the same without --timeframe, the
 //   sprint picker's list: the extension's get_team_iterations and its
-//   TeamSettingsIteration, a past, the current and a future sprint, and
-//   one without dates), azure-sprint-areas.json (az boards area team list),
+//   TeamSettingsIteration, two past sprints, the current one, a future one
+//   and one without dates; in both, dates as az prints them, +00:00),
+//   azure-sprint-areas.json (az boards area team list),
 //   azure-sprint-columns.json (taskboardColumns), azure-sprint-types.json
 //   (workitemtypes; each type's color, which the REST reference only names,
 //   written as its states' colors are, six hex digits without #, with the
@@ -4153,7 +4154,7 @@ const sprintTeam = () => board.contextsOf(sampleConfig(), "azure")[0];
 // clock's now (Azure's finishDate is that day's start).
 function iterationAnswer(days = 3) {
   const list = json("azure-sprint-iteration.json");
-  list[0].attributes.finishDate = `${new Date(Date.now() + days * DAY).toISOString().slice(0, 10)}T00:00:00Z`;
+  list[0].attributes.finishDate = `${new Date(Date.now() + days * DAY).toISOString().slice(0, 10)}T00:00:00+00:00`;
   return JSON.stringify(list);
 }
 // The Sprint's az calls, told apart by their arguments.
@@ -4258,10 +4259,9 @@ test("the Sprint's one query asks for the fields of the work items in the sprint
 
 test("the Sprint's answers: the current sprint, the team's areas, the columns in their order, each work item's column, the work items, who az is", () => {
   assert.deepEqual(board.parseIteration(fixture("azure-sprint-iteration.json")),
-    { id: ITERATION_ID, name: "Sprint 12", path: "Example Project\\Sprint 12", finish: "2026-11-27T00:00:00Z" });
+    { id: ITERATION_ID, name: "Sprint 12", path: "Example Project\\Sprint 12", start: "2026-11-16T00:00:00+00:00", finish: "2026-11-27T00:00:00+00:00" });
   const past = { id: "old", name: "Sprint 11", path: "Example Project\\Sprint 11", attributes: { timeFrame: "past" } };
   assert.equal(board.parseIteration(JSON.stringify([past, ...json("azure-sprint-iteration.json")])).id, ITERATION_ID, "the current one");
-  assert.throws(() => board.parseIteration("[]"), /^Error: Das Team hat keinen laufenden Sprint$/);
   assert.throws(() => board.parseIteration("not json"), /az lieferte für den Sprint kein lesbares JSON/);
   assert.deepEqual(board.parseAreas(fixture("azure-sprint-areas.json")), {
     field: "System.AreaPath", values: [{ value: "Example Project\\Core", includeChildren: true }, { value: "Example Project\\Shared", includeChildren: false }],
@@ -4574,10 +4574,10 @@ test("UI: „nur meine“ keeps the stories and tasks assigned to the account az
 
 test("UI: a Sprint that cannot be read says why in its view; a failed read of its settings keeps nothing of the team's", async () => {
   const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found });
-  await host.answer("az", ok("[]"), AZ.iteration);
+  await host.answer("az", ok('[{"name": "Sprint 12"}]'), AZ.iteration);
   for (const k of ["areas", "columns", "types"]) await host.answer("az", ok(fixture(`azure-sprint-${k}.json`)), AZ[k]);
-  assert.equal(b.state(b.view().id).error, "Das Team hat keinen laufenden Sprint");
-  assert.ok(texts(b.render()).includes("Das Team hat keinen laufenden Sprint"));
+  assert.equal(b.state(b.view().id).error, "Azure nannte den laufenden Sprint ohne Id oder Pfad");
+  assert.ok(texts(b.render()).includes("Azure nannte den laufenden Sprint ohne Id oder Pfad"));
   await press(b, cx, "r");
   assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 0], "the team's settings are asked again; the project's types, read, are kept (typesOf)");
   await host.answer("az", azRefused("Before you can run Azure DevOps commands, you need to run the login command (az login if using AAD/MSA identity else az devops login if using PAT token) to setup credentials."), AZ.iteration);
@@ -4868,10 +4868,29 @@ const openIterations = (host) => host.open("az").filter((c) => isIterationsCall(
 // The team's iterations as the fixture has them, without those named in
 // `drop`.
 const iterationsAnswer = (drop = []) => ok(JSON.stringify(json("azure-sprint-iterations.json").filter((i) => !drop.includes(i.name))));
+// A day `days` days from the test clock's now, as Azure dates one.
+const dayFromNow = (days) => `${new Date(Date.now() + days * DAY).toISOString().slice(0, 10)}T00:00:00+00:00`;
+// The fixture's iterations dated around the test clock's now: Sprint 10
+// and 11 ended, 12 runs (to its last day in 3 days, as iterationAnswer's),
+// 13 starts in a week; `drop` as above.
+function datedIterations(drop = []) {
+  const days = { "Sprint 10": [-35, -24], "Sprint 11": [-21, -10], "Sprint 12": [-7, 3], "Sprint 13": [7, 18] };
+  const list = json("azure-sprint-iterations.json").filter((i) => !drop.includes(i.name));
+  for (const i of list) if (days[i.name]) Object.assign(i.attributes, { startDate: dayFromNow(days[i.name][0]), finishDate: dayFromNow(days[i.name][1]) });
+  return list;
+}
+// az's answer for the team's current iteration: the fixture's Sprint 13,
+// running until its last day `days` from now.
+function sprint13Current(days = 10) {
+  const it = json("azure-sprint-iterations.json")[3];
+  Object.assign(it.attributes, { startDate: dayFromNow(-1), finishDate: dayFromNow(days), timeFrame: "current" });
+  return JSON.stringify([it]);
+}
 // The rows the open sprint picker draws, each as its parts' texts (its
 // name whole, its chip, its dates).
 const sprintPickerRows = (b) =>
   (byId(b.render(), "sprints-rows")?.kids ?? []).filter((k) => k.with?.id?.[0]?.startsWith("sprint-")).map((row) => row.kids.map((k) => texts(k).join("")));
+const chipped = (b) => sprintPickerRows(b).filter((r) => r.includes("aktuell")).map((r) => r[0]);
 // Enter in the open picker's filter.
 const submitSprint = async (b, cx) => {
   cx.call((own) => b.modal.input.submit(own));
@@ -4890,13 +4909,27 @@ async function pickSprint(b, cx, host, name) {
   await answerRefresh(host, { me: false });
 }
 const sprintHead = (b) => texts(byId(b.render(), "sprint-head"));
+const menuNames = async (b, cx) => {
+  const names = (await openMenu(b, cx)).map(([name]) => name);
+  await press(b, cx, "escape");
+  return names;
+};
+// A Board on the Azure team's Sprint whose team has no sprint running.
+async function openNoSprint(options = {}) {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found, ...options });
+  await answerSettings(host, "[]");
+  await host.answer("az", ok(fixture("azure-sprint-account.json")), AZ.me);
+  cx.later.splice(0);
+  return { b, cx, host, view: b.view(), st: () => b.state(b.view().id) };
+}
 
-test("the sprint picker's call and rows: all the team's iterations in Azure's order, the current one marked, each with its dates; the filter narrows them by name", () => {
+test("the sprint picker's call and rows: all the team's iterations in Azure's order, each with its dates, none current by itself; the filter narrows them by name; the first marked", () => {
   assert.deepEqual(board.azIterationsArgs(sprintTeam()),
     ["boards", "iteration", "team", "list", "--org", ORG, "--detect", "false", "--project", "Example Project", "--team", "Example Team", "-o", "json"], "no --timeframe: past, current and future");
   const list = board.parseIterations(fixture("azure-sprint-iterations.json"));
-  assert.deepEqual(list.map((i) => [i.name, i.current]), [["Sprint 10", false], ["Sprint 11", false], ["Sprint 12", true], ["Sprint 13", false], ["Ideen", false]]);
-  assert.deepEqual(list[1], { id: SPRINT_11, name: "Sprint 11", path: "Example Project\\Sprint 11", start: "2026-11-02T00:00:00Z", finish: "2026-11-13T00:00:00Z", current: false });
+  assert.deepEqual(list.map((i) => i.name), ["Sprint 10", "Sprint 11", "Sprint 12", "Sprint 13", "Ideen"]);
+  assert.deepEqual(list[1], { id: SPRINT_11, name: "Sprint 11", path: "Example Project\\Sprint 11", start: "2026-11-02T00:00:00+00:00", finish: "2026-11-13T00:00:00+00:00" },
+    "no current of its own: the timeFrame of the moment it was read");
   assert.deepEqual([list[4].start, list[4].finish], [null, null]);
   const wrapped = { count: 2, value: json("azure-sprint-iterations.json").slice(0, 2) };
   assert.deepEqual(board.parseIterations(JSON.stringify(wrapped)), list.slice(0, 2), "REST's wrapper too");
@@ -4905,25 +4938,41 @@ test("the sprint picker's call and rows: all the team's iterations in Azure's or
   assert.throws(() => board.parseIterations('{"x": 1}'), /^Error: Azure lieferte keine Sprints des Teams$/);
   assert.throws(() => board.parseIterations("nope"), /az lieferte für die Sprints des Teams kein lesbares JSON/);
   assert.deepEqual(list.map((i) => board.sprintDates(i, 2026)), ["19.10.–30.10.", "2.11.–13.11.", "16.11.–27.11.", "30.11.–11.12.", "ohne Daten"]);
-  assert.equal(board.sprintDates({ start: "2025-12-29T00:00:00Z", finish: "2026-01-09T00:00:00Z" }, 2026), "29.12.2025–9.1.", "a year not this one is named");
+  assert.equal(board.sprintDates({ start: "2025-12-29T00:00:00+00:00", finish: "2026-01-09T00:00:00+00:00" }, 2026), "29.12.2025–9.1.", "a year before this one is named");
+  assert.equal(board.sprintDates({ start: "2026-12-28T00:00:00+00:00", finish: "2027-01-08T00:00:00+00:00" }, 2026), "28.12.–8.1.2027", "and one after it");
   assert.deepEqual([board.sprintDates({ start: "2026-11-02T00:00:00Z", finish: null }, 2026), board.sprintDates({ start: null, finish: "2026-11-13T00:00:00Z" }, 2026)],
-    ["ab 2.11.", "bis 13.11."]);
-  assert.deepEqual(board.sprintRows(list, "").map((r) => [r.name, r.at]), list.map((i) => [i.name, []]), "no filter: all, in Azure's order");
-  assert.deepEqual(board.sprintRows(list, "s11").map((r) => [r.name, r.at]), [["Sprint 11", [0, 7, 8]]]);
-  assert.deepEqual(board.sprintRows(list, "ide").map((r) => r.id), ["2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b99"]);
-  assert.deepEqual(board.sprintRows(null, ""), [], "none while they load");
-  assert.deepEqual([sprintData().meta.current, sprintData().meta.gone], [true, null], "the current sprint by default, none gone");
+    ["ab 2.11.", "bis 13.11."], "Z as well as +00:00");
+  assert.deepEqual(board.rankByName(list, "").map((r) => [r.name, r.at]), list.map((i) => [i.name, []]), "no filter: all, in Azure's order");
+  assert.deepEqual(board.rankByName(list, "s11").map((r) => [r.name, r.at]), [["Sprint 11", [0, 7, 8]]]);
+  assert.deepEqual(board.rankByName(list, "ide").map((r) => r.id), ["2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b99"]);
+  const now = Date.parse("2026-11-23T10:00:00Z");
+  const rows = list.map((i, n) => ({ ...i, current: n === 2 }));
+  assert.equal(board.startRow(rows, now), 2, "the current one");
+  const none = rows.map((r) => ({ ...r, current: false }));
+  assert.equal(board.startRow(none, now), 3, "else the next to start");
+  assert.equal(board.startRow(none, Date.parse("2026-12-20T00:00:00Z")), 3, "else the last that ended, its last day over");
+  assert.equal(board.startRow(none, Date.parse("2026-11-27T12:00:00Z")), 3, "a sprint on its last day has not ended: Sprint 13 starts next");
+  assert.equal(board.startRow(none.slice(0, 3), Date.parse("2026-11-27T12:00:00Z")), 1, "the one on its last day is no last ended");
+  assert.equal(board.startRow(none.slice(4), now), 0, "else the first");
+  assert.deepEqual([board.dayEnd(Date.parse("2026-11-23T10:00:00Z")), board.dayEnd(Date.parse("2026-11-23T00:00:00Z"))], [Date.parse("2026-11-24T00:00:00Z"), Date.parse("2026-11-24T00:00:00Z")]);
+  const data = sprintData();
+  assert.deepEqual([data.meta.current, data.meta.currentId, data.meta.gone], [true, ITERATION_ID, null], "the current sprint by default, none gone");
+  const empty = board.sprintBoard({ ...sprintParts(), iteration: null, current: false, currentId: null, items: [], places: new Map() });
+  assert.deepEqual([empty.meta.iterationId, empty.meta.iteration, empty.meta.finish, empty.meta.currentId, empty.rows, empty.total], [null, null, null, null, [], 0], "no sprint running");
+  assert.deepEqual(board.parseIteration("[]"), null, "no sprint running is no error");
+  assert.throws(() => board.parseIteration('[{"name": "x"}]'), /^Error: Azure nannte den laufenden Sprint ohne Id oder Pfad$/);
 });
 
 test("UI: „Sprint wählen…“ in the command menu opens the sprint picker: the team's iterations, read once while the board runs, the current one „aktuell“ and marked; the filter and ctrl-j/k, ctrl-n/p and the arrows move the mark; no key of its own", async () => {
   const { b, cx, host, view } = await openSprint();
   assert.deepEqual((await openMenu(b, cx)).find(([name]) => name === "Sprint wählen…"), ["Sprint wählen…", null], "no key");
-  assert.equal((await openMenu(b, cx)).some(([name]) => name === "Aktueller Sprint"), false, "the current sprint shows: no way back to offer");
   await press(b, cx, "escape");
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false, "the current sprint shows: no way back to offer");
   assert.equal(board.hintsOf(b.actionContext()).some(([, text]) => /wählen|aktuell/i.test(text)), false, "the hint line names no key for it");
   await runCommand(b, cx, "Sprint wählen…");
   assert.equal(b.modal?.kind, "sprints");
   assert.deepEqual(openIterations(host).map((c) => c.args), [board.azIterationsArgs(view.context)], "read when the picker opens");
+  assert.equal(openAz(host, "iteration").length, 0, "the current sprint is kept: not read again");
   assert.ok(texts(byId(b.render(), "sprints-menu")).includes("lädt …"));
   await host.answer("az", iterationsAnswer(), isIterationsCall);
   assert.ok(texts(byId(b.render(), "sprints-menu")).includes("Sprint · Example Team · ↑↓ Enter · Esc"));
@@ -4984,18 +5033,24 @@ test("UI: a picker whose iterations cannot be read says why, in the dialog and a
   assert.ok(texts(byId(b.render(), "sprints-menu")).includes("Das Team hat keine Sprints"));
 });
 
-test("UI: the sprint picker opens with the current sprint marked and in view in a long list; with no current sprint among them, the first is marked", async () => {
-  const { b, cx, host, view } = await openSprint();
-  const many = Array.from({ length: 15 }, (_, n) => ({ id: `it-${n}`, name: `Sprint ${n}`, path: `Example Project\\Sprint ${n}`, attributes: { timeFrame: n === 12 ? "current" : n < 12 ? "past" : "future" } }));
+test("UI: the sprint picker opens with the current sprint marked and in view in a long list; the wheel moves its window, a thumb and „↓ N weitere“ say there are more, a click picks a row", async () => {
+  const { b, cx, host, st, view } = await openSprint();
+  const many = Array.from({ length: 15 }, (_, n) => ({ id: n === 12 ? ITERATION_ID : `it-${n}`, name: `Sprint ${n}`, path: `Example Project\\Sprint ${n}`, attributes: {} }));
   await runCommand(b, cx, "Sprint wählen…");
   await host.answer("az", ok(JSON.stringify(many)), isIterationsCall);
   assert.deepEqual([b.modal.at, b.modal.top], [12, 3], "the window follows the mark");
-  assert.ok(sprintPickerRows(b).some((r) => r[0] === "Sprint 12" && r[1] === "aktuell"));
-  await press(b, cx, "escape");
-  b.loader(view).forget(view.context);
-  await runCommand(b, cx, "Sprint wählen…");
-  await host.answer("az", ok(JSON.stringify(many.filter((i) => i.name !== "Sprint 12"))), isIterationsCall);
-  assert.deepEqual([b.modal.at, b.modal.top], [0, 0]);
+  assert.deepEqual(chipped(b), ["Sprint 12"]);
+  assert.deepEqual(texts(byId(b.render(), "sprints-below")), ["↓ 2 weitere"]);
+  assert.ok(byId(b.render(), "sprints-thumb"), "a thumb at the rows' right");
+  const wheel = (y) => cx.call((own) => byId(b.render(), "sprints-rows").with.on_scroll_wheel[0]({ delta: { x: 0, y } }, own));
+  wheel(-2 * board.MENU_ROW_PX);
+  assert.deepEqual([b.modal.top, b.modal.at], [5, 12], "down two rows, the mark staying");
+  assert.equal(byId(b.render(), "sprints-below"), null, "nothing more below");
+  wheel(5 * board.MENU_ROW_PX);
+  assert.equal(b.modal.top, 0);
+  await click(b, cx, "sprint-1");
+  assert.deepEqual([b.modal, st().sprint], [null, { id: "it-1", name: "Sprint 1" }], "a click picks its row");
+  assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(view.context, "it-1")]);
 });
 
 test("UI: a past sprint picked shows its own work items, read by its id and path, the team's settings kept; the head names it „nicht aktuell“; „Aktueller Sprint“ and the current row go back; the sprint that shows reads nothing", async () => {
@@ -5005,7 +5060,7 @@ test("UI: a past sprint picked shows its own work items, read by its id and path
   await press(b, cx, "up");
   await submitSprint(b, cx);
   assert.equal(b.modal, null);
-  assert.deepEqual(st().sprint, { id: SPRINT_11, name: "Sprint 11", path: "Example Project\\Sprint 11", finish: "2026-11-13T00:00:00Z" });
+  assert.deepEqual(st().sprint, { id: SPRINT_11, name: "Sprint 11" });
   assert.deepEqual(openCounts(host, SETTINGS), [0, 0, 0, 0], "the team's settings are kept");
   assert.equal(openIterations(host).length, 0, "and its iterations");
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)]);
@@ -5013,19 +5068,16 @@ test("UI: a past sprint picked shows its own work items, read by its id and path
   await answerRefresh(host, { me: false });
   assert.deepEqual([st().data.meta.iterationId, st().data.meta.iteration, st().data.meta.current], [SPRINT_11, "Sprint 11", false]);
   let head = sprintHead(b);
-  assert.ok(head.includes("Sprint 11") && head.includes("nicht aktuell") && head.includes("· bis 13.11. · 2 Stories"), head.join("|"));
-  const entries = await openMenu(b, cx);
-  const names = entries.map(([name]) => name);
+  assert.ok(head.includes("Sprint 11") && head.includes("nicht aktuell") && head.includes(`· bis ${board.dayText("2026-11-13T00:00:00Z", new Date(Date.now()).getUTCFullYear())} · 2 Stories`), head.join("|"));
+  const names = await menuNames(b, cx);
   assert.deepEqual(names.slice(names.indexOf("Sprint wählen…"), names.indexOf("Sprint wählen…") + 3), ["Sprint wählen…", "Aktueller Sprint", "Ansicht wechseln: Backlog"]);
-  await press(b, cx, "escape");
   await runCommand(b, cx, "Aktueller Sprint");
   assert.equal(st().sprint, null);
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), ITERATION_ID)]);
   await answerRefresh(host, { me: false });
   head = sprintHead(b);
   assert.ok(head.includes("Sprint 12") && !head.includes("nicht aktuell"), head.join("|"));
-  assert.equal((await openMenu(b, cx)).some(([name]) => name === "Aktueller Sprint"), false);
-  await press(b, cx, "escape");
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false);
   await pickSprint(b, cx, host, "Sprint 13");
   assert.deepEqual([st().sprint.id, st().data.meta.iterationId, sprintHead(b).includes("nicht aktuell")], [SPRINT_13, SPRINT_13, true], "a future one too");
   await runCommand(b, cx, "Sprint wählen…");
@@ -5037,14 +5089,58 @@ test("UI: a past sprint picked shows its own work items, read by its id and path
   await runCommand(b, cx, "Sprint wählen…");
   await submitSprint(b, cx);
   assert.deepEqual([b.modal, host.open("az").length], [null, 0], "the sprint that shows: nothing read");
+  await pickSprint(b, cx, host, "Sprint 11");
+  await runCommand(b, cx, "Sprint wählen…");
+  b.modal.input.type("Sprint 13");
+  await submitSprint(b, cx);
+  await runCommand(b, cx, "Sprint wählen…");
+  b.modal.input.type("Sprint 11");
+  await submitSprint(b, cx);
+  assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_13)], "Sprint 11 shows, Sprint 13 is read");
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([st().sprint.id, openAz(host, "places").map((c) => c.args)], [SPRINT_11, [board.azTaskboardArgs(sprintTeam(), SPRINT_11)]],
+    "picked again while another was read, the one that showed is read next");
+  await answerRefresh(host, { me: false });
+  assert.equal(st().data.meta.iterationId, SPRINT_11);
 });
 
-test("UI: a refresh keeps the chosen sprint; r reads the team's iterations again and keeps it where the team still has it, else shows the current one and says so", async () => {
+test("UI: at a sprint's end the picker marks the team's new current sprint, not the kept list's; a chosen sprint that became current is no longer „nicht aktuell“, and the old one picked is", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await pickSprint(b, cx, host, "Sprint 13");
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), true);
+  advance(5 * DAY);
+  await runCommand(b, cx, "Sprint wählen…");
+  assert.deepEqual([openIterations(host).length, openAz(host, "iteration").length], [0, 1], "the list is kept, the current sprint it no longer keeps is read");
+  await host.answer("az", ok(sprint13Current()), AZ.iteration);
+  assert.deepEqual([chipped(b), b.modal.at], [["Sprint 13"], 3], "Sprint 13 is current now");
+  await press(b, cx, "escape");
+  await refreshSprint(b, cx);
+  await answerSettings(host, sprint13Current());
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([st().data.meta.iterationId, st().data.meta.current, st().data.meta.currentId], [SPRINT_13, true, SPRINT_13]);
+  assert.equal(sprintHead(b).includes("nicht aktuell"), false, "the chosen sprint is the current one now");
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false);
+  await pickSprint(b, cx, host, "Sprint 12");
+  assert.deepEqual([st().sprint, st().data.meta.iterationId, st().data.meta.current], [{ id: ITERATION_ID, name: "Sprint 12" }, ITERATION_ID, false], "the sprint that ended: a choice, not the current one");
+  assert.equal(sprintHead(b).includes("nicht aktuell"), true);
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), true);
+});
+
+test("UI: a refresh keeps the chosen sprint; r reads the team's iterations again and keeps it where the team still has it, else shows the current one and says so; a refused write keeps them", async () => {
   const { b, cx, host, st } = await openSprint();
   await pickSprint(b, cx, host, "Sprint 11");
   await refreshSprint(b, cx);
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)], "the timer's refresh keeps it");
   assert.equal(openIterations(host).length, 0, "with the iterations kept");
+  await answerRefresh(host, { me: false });
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZ.state);
+  await refreshSprint(b, cx);
+  assert.deepEqual([...openCounts(host, SETTINGS), openIterations(host).length], [1, 1, 1, 0, 0], "a refusal drops the team's settings, not its iterations");
+  await answerSettings(host);
+  assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)]);
   await answerRefresh(host, { me: false });
   await press(b, cx, "r");
   assert.deepEqual([...openCounts(host, SETTINGS), openIterations(host).length], [1, 1, 1, 0, 1], "r reads them again");
@@ -5061,11 +5157,58 @@ test("UI: a refresh keeps the chosen sprint; r reads the team's iterations again
   await host.answer("az", iterationsAnswer(["Sprint 11"]), isIterationsCall);
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), ITERATION_ID)], "gone: the current one");
   await answerRefresh(host, { me: false });
-  assert.deepEqual([st().sprint, st().data.meta.iterationId, st().data.meta.current, st().data.meta.gone], [null, ITERATION_ID, true, "Sprint 11"]);
+  assert.deepEqual([st().sprint, st().data.meta.iterationId, st().data.meta.current, st().data.meta.gone], [null, ITERATION_ID, true, { id: SPRINT_11, name: "Sprint 11" }]);
   assert.deepEqual(b.notice, { text: "Sprint 11 gibt es im Team nicht mehr: der aktuelle Sprint wird gezeigt", level: "warning" });
   assert.equal(sprintHead(b).includes("nicht aktuell"), false);
   await refreshSprint(b, cx);
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), ITERATION_ID)], "and stays there");
+});
+
+test("UI: a chosen sprint whose read fails says which one; picking it again reads it again", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await runCommand(b, cx, "Sprint wählen…");
+  await host.answer("az", iterationsAnswer(), isIterationsCall);
+  b.modal.input.type("Sprint 11");
+  await submitSprint(b, cx);
+  await host.answer("az", azRefused("TF400898: An Internal Error Occurred."), AZ.places);
+  await host.answer("az", ok(fixture("azure-sprint-items.json")), AZ.query);
+  assert.equal(st().error, "Sprint 11 ließ sich nicht lesen: Azure antwortete mit einem Fehler (az): TF400898: An Internal Error Occurred.");
+  assert.equal(st().data.meta.iterationId, ITERATION_ID, "the sprint before stays drawn");
+  await runCommand(b, cx, "Sprint wählen…");
+  b.modal.input.type("Sprint 11");
+  await submitSprint(b, cx);
+  assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)], "read again");
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([st().error, st().data.meta.iterationId], [null, SPRINT_11]);
+  await refreshSprint(b, cx);
+  await host.answer("az", { code: 1, stdout: "", stderr: "boom\n" }, AZ.places);
+  await host.answer("az", ok(fixture("azure-sprint-items.json")), AZ.query);
+  assert.equal(st().error, "Sprint 11 ließ sich nicht lesen: boom", "az's own words too");
+  await runCommand(b, cx, "Sprint wählen…");
+  b.modal.input.type("Sprint 11");
+  await submitSprint(b, cx);
+  assert.equal(openAz(host, "places").length, 1, "the sprint that shows, its last read failed: read again");
+});
+
+test("UI: folds in a chosen sprint last while the board runs and leave the current sprint's stored folds as they are", async () => {
+  const { b, cx, host, st, view } = await openSprint();
+  await click(b, cx, "story-AB#301");
+  await press(b, cx, "z");
+  const stored = () => JSON.parse(memory.get(`folded:${view.id}`));
+  assert.deepEqual(stored(), { sprint: ITERATION_ID, stories: ["AB#301"] });
+  await pickSprint(b, cx, host, "Sprint 11");
+  assert.deepEqual(texts(byId(b.render(), "fold-AB#301")), ["▾"], "the current sprint's folds are not another's");
+  await click(b, cx, "story-AB#302");
+  await press(b, cx, "z");
+  assert.deepEqual(texts(byId(b.render(), "fold-AB#302")), ["▸"]);
+  assert.deepEqual(stored(), { sprint: ITERATION_ID, stories: ["AB#301"] }, "the stored folds stay the current sprint's");
+  await runCommand(b, cx, "Aktueller Sprint");
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([texts(byId(b.render(), "fold-AB#301")), texts(byId(b.render(), "fold-AB#302"))], [["▸"], ["▾"]]);
+  await pickSprint(b, cx, host, "Sprint 11");
+  assert.deepEqual([texts(byId(b.render(), "fold-AB#301")), texts(byId(b.render(), "fold-AB#302"))], [["▾"], ["▸"]], "the chosen sprint's, while the board runs");
+  const again = await openSprint({ stored: Object.fromEntries([...memory].map(([k, v]) => [k, JSON.parse(v)])) });
+  assert.deepEqual([...again.st().chosenFolds], [], "not after a restart");
 });
 
 test("UI: a sprint picked while a refresh reads a sprint the team no longer has is kept and read next", async () => {
@@ -5080,7 +5223,7 @@ test("UI: a sprint picked while a refresh reads a sprint the team no longer has 
   await submitSprint(b, cx);
   assert.equal(st().sprint.id, SPRINT_13);
   await answerRefresh(host, { me: false });
-  assert.deepEqual([st().sprint?.id, st().data.meta.gone], [SPRINT_13, "Sprint 11"], "the new choice stays");
+  assert.deepEqual([st().sprint?.id, st().data.meta.gone?.id], [SPRINT_13, SPRINT_11], "the new choice stays");
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_13)], "and is read next");
   await answerRefresh(host, { me: false });
   assert.deepEqual([st().data.meta.iterationId, st().data.meta.gone], [SPRINT_13, null]);
@@ -5096,6 +5239,53 @@ test("UI: the chosen sprint lasts while the board runs: nothing of it is stored,
   assert.equal(again.st().sprint, null);
   assert.deepEqual(again.st().data.meta.iterationId, ITERATION_ID);
   assert.equal(sprintHead(again.b).includes("nicht aktuell"), false);
+});
+
+test("UI: with no sprint running the Sprint says „kein laufender Sprint“, reads no work items and draws no taskboard; the picker opens from the menu and the head, marks the next sprint, none „aktuell“; a past sprint picked shows; no „Aktueller Sprint“", async () => {
+  const { b, cx, host, st } = await openNoSprint();
+  assert.deepEqual([openAz(host, "places").length, openAz(host, "query").length, st().error], [0, 0, null], "no work items to read, no error");
+  assert.deepEqual([st().data.meta.iterationId, st().data.meta.current, st().data.meta.currentId], [null, false, null]);
+  let root = b.render();
+  assert.deepEqual(texts(byId(root, "sprint-head")), ["kein laufender Sprint"], "no column heads, no „nicht aktuell“");
+  assert.ok(texts(byId(root, "sprint-none"))[0].startsWith("Das Team hat gerade keinen laufenden Sprint."));
+  assert.equal(byId(root, "sprint-rows"), null, "no taskboard");
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false, "none to go back to");
+  await click(b, cx, "sprint-name");
+  assert.equal(b.modal?.kind, "sprints", "a click on the head opens the picker");
+  assert.equal(openAz(host, "iteration").length, 0, "that none runs is kept");
+  await host.answer("az", ok(JSON.stringify(datedIterations(["Sprint 12"]))), isIterationsCall);
+  assert.deepEqual([chipped(b), b.modal.at, sprintPickerRows(b)[b.modal.at][0]], [[], 2, "Sprint 13"], "none „aktuell“; the next to start marked");
+  await press(b, cx, "escape");
+  await runCommand(b, cx, "Sprint wählen…");
+  assert.equal(b.modal.at, 2, "from the menu too");
+  b.modal.input.type("Sprint 11");
+  await submitSprint(b, cx);
+  assert.deepEqual(st().sprint, { id: SPRINT_11, name: "Sprint 11" });
+  assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)]);
+  await answerRefresh(host, { me: false });
+  root = b.render();
+  assert.deepEqual([st().data.meta.iterationId, st().data.meta.current, drawnRows(root)], [SPRINT_11, false, ["row-none", "row-AB#301", "row-AB#302"]]);
+  assert.ok(sprintHead(b).includes("Sprint 11") && sprintHead(b).includes("nicht aktuell"));
+  assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false, "still none to go back to");
+  await press(b, cx, "r");
+  await answerSettings(host, "[]");
+  await host.answer("az", ok(JSON.stringify(datedIterations(["Sprint 11", "Sprint 12"]))), isIterationsCall);
+  assert.deepEqual([st().sprint, st().data.meta.iterationId, b.notice.text], [null, null, "Sprint 11 gibt es im Team nicht mehr: das Team hat keinen laufenden Sprint"], "gone, and none running");
+});
+
+test("UI: a board started with no sprint running opens the Sprint with that head; once a sprint starts, the first refresh on its first day shows it", async () => {
+  const { b, cx, host, st } = await openNoSprint();
+  assert.deepEqual([sprintHead(b), st().error], [["kein laufender Sprint"], null]);
+  await refreshSprint(b, cx);
+  assert.deepEqual([openAz(host, "iteration").length, host.open("az").length], [0, 0], "the same day: kept, nothing read");
+  const nextDay = board.dayEnd(Date.now());
+  advance(nextDay - Date.now() + 60000);
+  await refreshSprint(b, cx);
+  assert.deepEqual(openCounts(host, SETTINGS).slice(0, 3), [1, 1, 1], "the next day: asked again");
+  await answerSettings(host, iterationAnswer());
+  await answerRefresh(host, { me: false });
+  assert.deepEqual([st().data.meta.iterationId, st().data.meta.current], [ITERATION_ID, true]);
+  assert.ok(sprintHead(b).includes("Sprint 12") && !sprintHead(b).includes("nicht aktuell"));
 });
 
 test("a move counts as landed only where Azure's answer names the work item in its new column", () => {

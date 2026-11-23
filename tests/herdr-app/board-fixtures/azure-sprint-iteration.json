@@ -1,8 +1,8 @@
 [
   {
     "attributes": {
-      "finishDate": "2026-11-27T00:00:00Z",
-      "startDate": "2026-11-16T00:00:00Z",
+      "finishDate": "2026-11-27T00:00:00+00:00",
+      "startDate": "2026-11-16T00:00:00+00:00",
       "timeFrame": "current"
     },
     "id": "7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23",

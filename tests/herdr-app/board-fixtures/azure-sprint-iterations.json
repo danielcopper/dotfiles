@@ -1,8 +1,8 @@
 [
   {
     "attributes": {
-      "finishDate": "2026-10-30T00:00:00Z",
-      "startDate": "2026-10-19T00:00:00Z",
+      "finishDate": "2026-10-30T00:00:00+00:00",
+      "startDate": "2026-10-19T00:00:00+00:00",
       "timeFrame": "past"
     },
     "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b10",
@@ -12,8 +12,8 @@
   },
   {
     "attributes": {
-      "finishDate": "2026-11-13T00:00:00Z",
-      "startDate": "2026-11-02T00:00:00Z",
+      "finishDate": "2026-11-13T00:00:00+00:00",
+      "startDate": "2026-11-02T00:00:00+00:00",
       "timeFrame": "past"
     },
     "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b11",
@@ -23,8 +23,8 @@
   },
   {
     "attributes": {
-      "finishDate": "2026-11-27T00:00:00Z",
-      "startDate": "2026-11-16T00:00:00Z",
+      "finishDate": "2026-11-27T00:00:00+00:00",
+      "startDate": "2026-11-16T00:00:00+00:00",
       "timeFrame": "current"
     },
     "id": "7d1c8f0e-3b5a-4c2e-9f61-2a4b8c0d1e23",
@@ -34,8 +34,8 @@
   },
   {
     "attributes": {
-      "finishDate": "2026-12-11T00:00:00Z",
-      "startDate": "2026-11-30T00:00:00Z",
+      "finishDate": "2026-12-11T00:00:00+00:00",
+      "startDate": "2026-11-30T00:00:00+00:00",
       "timeFrame": "future"
     },
     "id": "2b7e4c90-5d1f-4a3b-8e62-0c9d7f1a2b13",

@@ -201,6 +201,11 @@ export function iterationUntil(finish, now) {
   return Number.isNaN(at) ? now + DAY_MS / 2 : at + DAY_MS;
 }
 
+// Until when the answer that a team has no current sprint stays kept: the
+// end of the day (UTC), when the next one may start (Azure's dates are the
+// starts of days).
+export const dayEnd = (now) => (Math.floor(now / DAY_MS) + 1) * DAY_MS;
+
 // How long a team's settings that change rarely stay kept (ms): its areas,
 // and the Backlog's settings (BACKLOG_KEEP_MS).
 export const TEAM_KEEP_MS = 4 * 3600000;

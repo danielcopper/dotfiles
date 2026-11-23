@@ -37,7 +37,6 @@ import { spaces } from "herdr";
 import { cardType, itemLabel, lineKey } from "./shared.js";
 import { hasViewSwitch, shownIndex, sourceAfter, sourcesOf, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
 import { linkedSession } from "./actions/start.js";
-import { fuzzyRank } from "./select.js";
 import { descriptionFolds } from "./ui/related.js";
 
 // What a key event names (an action's key), or null for one no action has:
@@ -130,10 +129,6 @@ export function menuActions(c) {
 // what its group does.
 export const aimOf = (a, c) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.aim?.(c) ?? [])]);
 export const groupAimOf = (a, c) => JSON.stringify(GROUPS[a.group].aim(c));
-
-// The menu's entries its filter leaves, best first (fuzzyRank), each with
-// `at`, where the filter's letters stand in its name.
-export const filterActions = (entries, query) => fuzzyRank(entries, query, (e) => e.name).map(({ entry, at }) => ({ ...entry, at }));
 
 // The hint line's entries now: [key, text], in the table's order.
 export function hintsOf(c) {
@@ -348,9 +343,9 @@ export const ACTIONS = [
     when: (c) => has(c, "toggleColumn"),
     run: (b, c, cx) => b.openColumns(c.view, cx),
   },
-  // The sprint a Sprint view shows: the picker, and back to the current
-  // one where another shows (no key: the menu and a click on the sprint's
-  // name in the head open the picker).
+  // The sprint a Sprint view shows: the sprint picker (no key; what else
+  // opens it, ui/modals/sprints.js says), and back to the current sprint
+  // where another shows and the team has one running.
   {
     id: "sprint-pick", group: "view", name: "Sprint wählen…", key: null, menu: 23,
     when: (c) => has(c, "pickSprint"),
@@ -358,7 +353,7 @@ export const ACTIONS = [
   },
   {
     id: "sprint-current", group: "view", name: "Aktueller Sprint", key: null, menu: 24,
-    when: (c) => has(c, "showSprint") && Boolean(c.st.sprint),
+    when: (c) => has(c, "showSprint") && c.st.data.meta.current === false && Boolean(c.st.data.meta.currentId),
     run: (b, c, cx) => c.shape.showSprint(b, c.view, null, cx),
   },
   {

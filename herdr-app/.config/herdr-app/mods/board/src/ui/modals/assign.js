@@ -5,27 +5,22 @@
 // filter that has the keyboard; up/down (or ctrl-j/k, ctrl-n/p) mark a row,
 // Enter or a click assigns it (actions/assign.js). Its window shows
 // MENU_ROWS rows, follows the mark, and the mouse wheel moves it
-// (helpers.js, menuWindow). Which row is marked when the rows come and after
-// each change of the filter: where the people were read and "Ich" is among
-// them, the first row the filter leaves that is no "niemand", and "niemand"
-// only where it is all that is left; else (the people could not be read, or
-// GitHub named no viewer) none, so that Enter assigns nothing until a row is
-// chosen. Board.openAssign opens it as b.modal = { kind: "assign", view, key,
-// label, input (the filter's InputState, made for this dialog), field and
-// textField ("filter"), inputFocused, filter, at (the marked row, -1 for
-// none), top (the first row drawn), wheel (the wheel's move left over:
-// menuWindow), list ({ me, people, note }, null while it loads), error }.
+// (helpers.js: openReadMenu, menuWindow). Which row is marked when the rows
+// come and after each change of the filter: where the people were read and
+// "Ich" is among them, the first row the filter leaves that is no "niemand",
+// and "niemand" only where it is all that is left; else (the people could
+// not be read, or GitHub named no viewer) none, so that Enter assigns
+// nothing until a row is chosen. Board.openAssign opens it as b.modal = {
+// kind: "assign", view, key, label, and openReadMenu's fields, list being {
+// me, people, note } }.
 // Where the people cannot be read, it says so in the dialog and as a toast,
 // and offers what its source can write without them.
 
 import { div } from "gpui-kit";
-import { Input, InputState } from "gpui-base";
-import { notify } from "herdr";
 import { itemLabel, report } from "../../shared.js";
 import { wordsMatch } from "../../select.js";
 import { assignAtOnce } from "../../actions/assign.js";
-import { fieldFrame, filterMenuKey, menu, menuWindow, wireTextField } from "../helpers.js";
-import { NOTE_TONES, toneColor } from "../tones.js";
+import { filterMenuKey, menu, menuNote, menuWindow, openReadMenu, readMenuHead } from "../helpers.js";
 
 // The rows the filter leaves: { text, sub, person } ("Ich" carries its
 // name as `sub`; a person their login), each word of the filter in its
@@ -68,29 +63,16 @@ export const assignModal = {
     const source = b.sources[item.source].assign;
     const why = source.refuse(item);
     if (why) return b.say(why, "info", cx);
-    const input = InputState.new({ placeholder: "Filter: Name oder Login" });
-    const m = { kind: "assign", view, key: item.key, label: itemLabel(item), input, field: "filter", filter: "", at: -1, top: 0, list: null, error: null };
-    wireTextField(b, m, input, "filter", (cx) => assignPick(b, m, m.at, cx));
-    input.on("change", (_e, cx) => {
-      m.filter = input.value();
-      m.at = startAt(m);
-      m.top = 0;
-      cx.notify();
-    });
-    b.modal = m;
-    input.focus();
-    cx.spawn(async (cx) => {
-      try {
-        m.list = await source.people(item, view);
-      } catch (e) {
-        m.error = `Wer zuweisbar ist, ließ sich nicht lesen: ${report(e)}`;
-        m.list = { me: source.fallbackMe(), people: [], note: null };
-        notify({ title: "Zuweisen: Personen nicht gelesen", body: m.error, level: "error" });
-      } finally {
-        m.at = startAt(m);
-        cx.notify();
-      }
-    });
+    const m = { kind: "assign", view, key: item.key, label: itemLabel(item) };
+    openReadMenu(b, m, {
+      placeholder: "Filter: Name oder Login",
+      count: (m) => rowsOf(m).length,
+      startAt,
+      pick: (i, cx) => assignPick(b, m, i, cx),
+      read: () => source.people(item, view),
+      failed: (e) => ({ error: `Wer zuweisbar ist, ließ sich nicht lesen: ${report(e)}`, list: { me: source.fallbackMe(), people: [], note: null } }),
+      title: "Zuweisen: Personen nicht gelesen",
+    }, cx);
   },
 
   // Every key but Esc (the Board's): filterMenuKey.
@@ -101,16 +83,12 @@ export const assignModal = {
     const rows = rowsOf(m);
     const { shown, ...win } = menuWindow(m, rows);
     const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
-    const line = (text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
     return menu(t, {
       id: "assign",
       rowId: "assign-row",
       width: 420,
       title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
-      head: [
-        fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
-        ...(m.error ? [line(m.error, toneColor(t, NOTE_TONES.error))] : []),
-      ],
+      head: readMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
         div().flex_none().text_color(r.person ? t.foreground : t.muted).child(r.text),
@@ -118,7 +96,7 @@ export const assignModal = {
       ]),
       ...win,
       pick: (i, cx) => assignPick(b, m, i, cx),
-      foot: [...(message ? [line(message, t.muted)] : []), ...(m.list?.note ? [line(`Personen: ${m.list.note}`, t.dim, 11)] : [])],
+      foot: [...(message ? [menuNote(t, message, t.muted)] : []), ...(m.list?.note ? [menuNote(t, `Personen: ${m.list.note}`, t.dim, 11)] : [])],
     });
   },
 };

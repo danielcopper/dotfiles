@@ -8,17 +8,15 @@
 // Enter shows the details; both write at once (actions/move.js,
 // actions/write.js). z (while the board has the keyboard), or a click on the
 // triangle in a story's row, folds its tasks away and back (toggleStoryFold;
-// kept per sprint in the store). Keys walk the stories, then each column's
-// tasks but the folded ones (sprintNav, withoutFolded). The sprint picker
-// (ui/modals/sprints.js) shows another sprint of the team: the command
-// menu's "Sprint wählen…" and a click on the sprint's name in the head
-// open it (pickSprint), "Aktueller Sprint" goes back (showSprint); a sprint
-// that is not the current one says so in the head ("nicht aktuell"). The
+// foldsOf says where that is kept). Keys walk the stories, then each column's
+// tasks but the folded ones (sprintNav, withoutFolded). Another sprint of the
+// team shows through the sprint picker (ui/modals/sprints.js says what opens
+// it; pickSprint, showSprint), and says so in the head ("nicht aktuell"). The
 // data: { shape: "sprint", meta: { iterationId, iteration, finish, current,
-// gone, typeStates, states, typeColors, unplaced, unknownColumns },
-// columns: [{ id, name, color, hidden,
-// count, target, types, mappings, cards }], rows: [{ key, story }], viewer,
-// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js).
+// gone, typeStates, states, typeColors, unplaced, unknownColumns }, columns:
+// [{ id, name, color, hidden, count, target, types, mappings, cards }], rows:
+// [{ key, story }], viewer, noViewer, total, limited, limit } (sprintBoard,
+// sources/azure/sprint.js).
 // View fields it reads: id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
@@ -27,7 +25,7 @@ import { spaces } from "herdr";
 import { cardLabel, itemLabel } from "../../shared.js";
 import { applyMoves, findCard, hasStep, stepTarget } from "../../kinds/board.js";
 import {
-  NO_STORY, findSprintItem, foldedStories, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories,
+  NO_STORY, dayText, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintItems, sprintNav, sprintNavigate, sprintStories,
   sprintWarnings, toggledFolds, withItemState, withSprintItem, withoutFolded,
 } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
@@ -39,7 +37,6 @@ import { stateColor } from "../../kinds/states.js";
 import { assigneeText, cardEdge, columnHead, selectedLook, sessionChip, shownOf, stateChip, store, toneChip, typeLine, workItemDetail } from "../helpers.js";
 import { NOTE_TONES } from "../tones.js";
 import { MODALS } from "../modals/index.js";
-import { showSprint } from "../modals/sprints.js";
 
 // How wide the stories' column is.
 const STORY_WIDTH = 260;
@@ -53,7 +50,7 @@ const sprintState = (b) => b.shapeState.sprint;
 // which say which rows show and what the column heads count: folding is no
 // filter.
 const openColumns = (b, st) => sprintNav(st.data, b.filterText, b.mine);
-const sprintColumns = (b, st) => withoutFolded(openColumns(b, st), foldedStories(st.folds, st.data));
+const sprintColumns = (b, st) => withoutFolded(openColumns(b, st), foldedStories(foldsOf(st, st.data), st.data));
 
 // An item's state as shown: a task's as its column maps it (shownState).
 const stateNow = (data, item) => shownState(item, isTask(item) ? findCard(data, item.key)?.column : null);
@@ -103,11 +100,16 @@ export const sprintShape = {
   canMove: (st, item, by) => hasStep(st.data, item.key, by),
   moveHint: "Task verschieben",
   fold: (b, view, st, cx) => foldKey(b, view, st, cx),
-  received: (data, st) => applyMoves(data, st.moves),
+  // A chosen sprint the source no longer has (meta.gone) is no longer
+  // chosen, unless another was chosen while it read.
+  received(data, st) {
+    if (data.meta.gone && st.sprint?.id === data.meta.gone.id) st.sprint = null;
+    return applyMoves(data, st.moves);
+  },
   // sprintWarnings.
   warnings: (view, data) => sprintWarnings(data),
-  // The sprint picker, and the sprint `sprint` shown (null: the current
-  // one).
+  // The sprint picker, and the sprint `sprint` shown ({ id, name }; null:
+  // the current one).
   pickSprint: (b, view, cx) => MODALS.sprints.open(b, view, cx),
   showSprint: (b, view, sprint, cx) => showSprint(b, view, sprint, cx),
   // The settled outcomes: a move's where its card stands, a state change's
@@ -138,16 +140,32 @@ export const sprintShape = {
   },
 };
 
-// "bis 27.11." for the sprint's last day (UTC, as Azure gives it), or null.
+// "bis 27.11." for the sprint's last day (dayText), or null.
 function sprintEnd(finish) {
-  const at = new Date(finish ?? "");
-  return Number.isNaN(at.getTime()) ? null : `bis ${at.getUTCDate()}.${at.getUTCMonth() + 1}.`;
+  const day = dayText(finish, new Date(Date.now()).getUTCFullYear());
+  return day ? `bis ${day}` : null;
+}
+
+// Shows the sprint `sprint` ({ id, name }; null: the current one) in the
+// Sprint view `view` while the board runs, and reads it; where that one
+// shows already, read without an error and no read under way, it reads
+// nothing.
+function showSprint(b, view, sprint, cx) {
+  const st = b.state(view.id);
+  const meta = st.data?.meta;
+  const shows = sprint ? meta?.iterationId === sprint.id : meta?.current === true;
+  st.sprint = sprint;
+  if (shows && !st.error && !st.loading) return;
+  b.refresh(view, cx);
 }
 
 // The head's start, over the stories: the sprint's name, which a click
 // opens the sprint picker on; "nicht aktuell" where it is not the team's
-// current sprint; its last day and how many stories show.
+// current sprint; its last day and how many stories show. Where the team
+// has no sprint running and none is chosen, "kein laufender Sprint" alone,
+// which a click opens the picker on too.
 function sprintTitle(b, t, view, data, nav, stories) {
+  const none = !data.meta.iterationId;
   return h_flex()
     .id("sprint-title")
     .w(STORY_WIDTH)
@@ -159,9 +177,9 @@ function sprintTitle(b, t, view, data, nav, stories) {
     .text_color(t.muted)
     .child(div().id("sprint-name").flex_none().cursor_pointer().hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => {
       if (!b.modal) sprintShape.pickSprint(b, view, cx);
-    }).child(data.meta.iteration))
-    .when(data.meta.current === false, (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
-    .child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`));
+    }).child(none ? "kein laufender Sprint" : data.meta.iteration))
+    .when(!none && data.meta.current === false, (el) => el.child(toneChip(t, "nicht aktuell", NOTE_TONES.warning).flex_none()))
+    .when(!none, (el) => el.child(div().flex_none().child(`· ${[sprintEnd(data.meta.finish), `${shownOf(nav[0].shown.length, stories.length)} Stories`].filter(Boolean).join(" · ")}`)));
 }
 
 // z: the selected story's tasks folded away, or back; on a task, its row's,
@@ -177,13 +195,15 @@ function foldKey(b, view, st, cx) {
 }
 
 // Folds the tasks of the story `key` away, or back, in the shown sprint,
-// and keeps that in the store per view and sprint (toggledFolds). A
+// and keeps that per view and sprint (toggledFolds): in the store for the
+// current sprint, for a chosen one while the board runs (foldsOf). A
 // selected task that is folded away hands the selection to its story where
 // that shows (no choice: reselect), else as after new data.
 function toggleStoryFold(b, view, key, cx) {
   const st = b.state(view.id);
-  st.folds = toggledFolds(st.folds, st.data, key);
-  store.set(`folded:${view.id}`, st.folds);
+  const folds = toggledFolds(foldsOf(st, st.data), st.data, key);
+  if (st.data.meta.current === false) st.chosenFolds.set(st.data.meta.iterationId, folds);
+  else store.set(`folded:${view.id}`, (st.folds = folds));
   const item = b.selected(view);
   const nav = sprintColumns(b, st);
   if (item && isTask(item) && item.row === key && nav[0].shown.some((s) => s.key === key)) b.reselect(view, { col: 0, key });
@@ -194,13 +214,14 @@ function toggleStoryFold(b, view, key, cx) {
 function drawSprint(b, t, mono, view, st) {
   const data = st.data;
   const open = openColumns(b, st);
-  const folded = foldedStories(st.folds, data);
+  const folded = foldedStories(foldsOf(st, data), data);
   const nav = withoutFolded(open, folded);
   const [, ...cols] = nav;
   const rows = shownRows(data, open);
   const counts = rowCounts(data, open);
   const stories = sprintStories(data);
   const allSpaces = spaces();
+  const none = !data.meta.iterationId;
   const head = h_flex()
     .id("sprint-head")
     .flex_none()
@@ -210,7 +231,12 @@ function drawSprint(b, t, mono, view, st) {
     .pb(6)
     .items_center()
     .child(sprintTitle(b, t, view, data, nav, stories))
-    .children(open.slice(1).map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0)));
+    .when(!none, (el) => el.children(open.slice(1).map((col) => columnHead(t, col, shownOf(col.shown.length, col.cards.length), t.background).flex_1().min_w(0))));
+  // No sprint running and none chosen: no taskboard, a note where its rows go.
+  if (none) {
+    const note = "Das Team hat gerade keinen laufenden Sprint. Einen anderen zeigt „Sprint wählen…“ im Befehlsmenü (:) oder ein Klick auf „kein laufender Sprint“.";
+    return v_flex().flex_1().min_h(0).child(head).child(div().id("sprint-none").p(20).text_color(t.muted).child(note));
+  }
   if (!rows.length) {
     const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));

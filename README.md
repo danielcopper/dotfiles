@@ -378,15 +378,20 @@ herdr-app`. Which files of the package git tracks is set in the root
   sprints, past, current and future, in Azure's order, each with its dates;
   the current one is marked "aktuell", and marked as the picker opens. It
   filters and moves as the command menu does, and `Enter` or a click shows
-  the sprint picked; the team's sprints are read when it first opens and kept
-  while the board runs. A sprint other than the current one says "nicht
+  the sprint picked. A sprint other than the current one says "nicht
   aktuell" beside its name, and the menu's "Aktueller Sprint" goes back. The
   choice is the Sprint view's while the board runs and is stored nowhere, so
   after a restart the Sprint shows the current sprint again. A refresh keeps
   it; `r` reads the team's sprints again too, and where the team no longer
-  has the chosen one, the Sprint shows the current one and says so. A team's
-  Backlog lists its requirement level (its Stories, and Bugs where the team
-  keeps them there) in backlog order, one row each with id, type, title, state, sprint ("—" for none) and
+  has the chosen one, the Sprint shows the current one and says so. Where the
+  team has no sprint running, the Sprint says "kein laufender Sprint" in place
+  of a sprint's name and draws no taskboard; the picker opens there the same
+  way, with no sprint marked "aktuell" (it marks the next sprint to start,
+  else the last one that ended), a sprint picked shows, and "Aktueller
+  Sprint" is not offered; the first refresh on the day a sprint starts shows
+  that sprint. A team's Backlog lists its requirement
+  level (its Stories, and Bugs where the team keeps them there) in backlog
+  order, one row each with id, type, title, state, sprint ("—" for none) and
   assignee. It needs `az login`: the level's work items come through
   `az rest`, which takes no PAT, and the Backlog says so when the login is
   missing. What it keeps and for how long, makeAzure says; `r` reads that again
@@ -443,7 +448,9 @@ herdr-app`. Which files of the package git tracks is set in the root
   anything; a fold that takes the selected task away selects its story, where
   that shows. A folded row says how many tasks it holds, the keys pass over
   them, and the board remembers the folded stories per sprint, after a restart
-  too (a new sprint starts unfolded). On a Backlog `j/k` move,
+  too (a new sprint starts unfolded); those of a sprint the picker chose only
+  while the board runs, and they leave the current sprint's as they are. On a
+  Backlog `j/k` move,
   `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
   iteration and sprint), `o` opens the item in the browser, and `n` creates a
   work item: a dialog asks for its type (the level's, Story first; with a Story

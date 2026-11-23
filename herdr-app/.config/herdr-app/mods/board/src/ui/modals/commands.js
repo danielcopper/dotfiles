@@ -16,14 +16,15 @@
 
 import { div } from "gpui-kit";
 import { Input, InputState } from "gpui-base";
-import { filterActions, menuActions } from "../../commands.js";
+import { menuActions } from "../../commands.js";
+import { rankByName } from "../../select.js";
 import { fieldFrame, filterMenuKey, markedName, menu, menuWindow, wireTextField } from "../helpers.js";
 
-// The entries the filter leaves (filterActions), best first, each group
+// The entries the filter leaves (rankByName), best first, each group
 // (an action's group, not its heading's text) together after its best;
 // with no filter, in the menu's order.
 export function shownCommands(entries, filter) {
-  const ranked = filterActions(entries, filter);
+  const ranked = rankByName(entries, filter);
   const groups = [...new Set(ranked.map((e) => e.group))];
   return groups.flatMap((group) => ranked.filter((e) => e.group === group));
 }

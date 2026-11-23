@@ -1,15 +1,16 @@
 // UI helpers: lasting settings, colors and machine names, whether the board
 // shows, and the pieces that the Board, its shapes and its modals draw
 // alike (a button, a backdrop for a dialog, a menu, its keys and its
-// window, a row's name marked by the filter, a length in the script's
-// pixels, a detail section, a check's color, a status pill, a column's
-// color and head, a card's edge, the line of its type, a selected card's
-// or row's look, a card's chip in a tone, for a label, for its type and
-// for a session). Which tones and tints they take: tones.js.
+// window, a menu whose rows a read brings, a row's name marked by the
+// filter, a length in the script's pixels, a detail section, a check's
+// color, a status pill, a column's color and head, a card's edge, the line
+// of its type, a selected card's or row's look, a card's chip in a tone,
+// for a label, for its type and for a session). Which tones and tints they
+// take: tones.js.
 
 import { div } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
-import { layout, panes, settings, spaces } from "herdr";
+import { h_flex, v_flex, Input, InputState } from "gpui-base";
+import { layout, notify, panes, settings, spaces } from "herdr";
 import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
@@ -108,13 +109,14 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
-// A menu over the board (the status, the column, the assignee and the
-// command menu): a panel `width` wide, `<id>-menu` on a backdrop
-// `<id>-backdrop`, with a title line, `head` (children under it, such as a
-// filter), its rows in `<id>-rows`: one per entry of `rows` (its own
-// children), each `<rowId>-<i>` and led by its digit (1–9) unless `digits`
-// is false, a heading `<id>-head-<i>` before a row where `heads` names one
-// (by the row's place in `rows`), then `foot` (children under them).
+// A menu over the board (the status, the column, the assignee, the
+// command and the sprint menu): a panel `width` wide, `<id>-menu` on a
+// backdrop `<id>-backdrop`, with a title line, `head` (children under it,
+// such as a filter), its rows in `<id>-rows`: one per entry of `rows` (its
+// own children), each `<rowId>-<i>` and led by its digit (1–9) unless
+// `digits` is false, a heading `<id>-head-<i>` before a row where `heads`
+// names one (by the row's place in `rows`), then `foot` (children under
+// them).
 // `rows` may be a window of a longer list of `count` rows whose first row
 // is `from`: `i` counts in the whole list; then a thin thumb
 // `<id>-thumb` at the rows' right shows where the window is, a line under
@@ -181,12 +183,12 @@ const MENU_ROWS = 10;
 // height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
-// The window of a menu with a filter (the assignee picker, the command
-// menu) over the rows of `list` the filter leaves: MENU_ROWS at once from
-// m.top, the marked row m.at (-1 for none). Its window follows the mark
-// where a key moves it (followMark); the wheel moves it alone (menuWheel).
-// menuWindow keeps both within the rows and gives the rows it shows
-// (`shown`) and what menu() takes for them.
+// The window of a menu with a filter (the assignee picker, the command menu,
+// the sprint picker) over the rows of `list` the filter leaves: MENU_ROWS at
+// once from m.top, the marked row m.at (-1 for none). Its window follows the
+// mark where a key moves it (followMark); the wheel moves it alone
+// (menuWheel). menuWindow keeps both within the rows and gives the rows it
+// shows (`shown`) and what menu() takes for them.
 export function menuWindow(m, list) {
   const count = list.length;
   m.at = Math.max(-1, Math.min(m.at, count - 1));
@@ -272,6 +274,51 @@ export function menuKey(e, cx, m, count, pick) {
   }
   cx.notify();
 }
+
+// A menu with a filter whose rows come from a read (the assignee picker,
+// the sprint picker): opens the dialog `m` ({ kind, view, … }) as
+// b.modal with its filter, an InputState with `placeholder` made for it
+// (m.input; field and textField "filter", inputFocused, filter; at, the
+// marked row; top and wheel, its window), and starts read(), whose rows
+// land in m.list (null until then). Enter in the filter picks the marked
+// row (pick(i, cx)); the rows' coming and each change of the filter mark
+// the row startAt(m) gives, the window following (followMark over
+// count(m) rows). A read that fails sets m.error and m.list as failed(e)
+// gives them ({ error, list }) and says so as a toast titled `title`.
+export function openReadMenu(b, m, { placeholder, count, startAt, pick, read, failed, title }, cx) {
+  const input = InputState.new({ placeholder });
+  Object.assign(m, { input, field: "filter", filter: "", at: -1, top: 0, wheel: 0, list: null, error: null });
+  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
+  input.on("change", (_e, cx) => {
+    m.filter = input.value();
+    m.at = startAt(m);
+    m.top = 0;
+    cx.notify();
+  });
+  b.modal = m;
+  input.focus();
+  cx.spawn(async (cx) => {
+    try {
+      m.list = await read();
+    } catch (e) {
+      ({ error: m.error, list: m.list } = failed(e));
+      notify({ title, body: m.error, level: "error" });
+    } finally {
+      m.at = startAt(m);
+      followMark(m, count(m));
+      cx.notify();
+    }
+  });
+  cx.notify();
+}
+
+// Such a menu's head: its filter, and the read's error where it failed;
+// and a line of text under its rows (menuNote).
+export const readMenuHead = (t, m) => [
+  fieldFrame(t, m, "filter", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
+  ...(m.error ? [menuNote(t, m.error, toneColor(t, NOTE_TONES.error))] : []),
+];
+export const menuNote = (t, text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
 
 // A dialog's text field, the InputState `input` for the dialog m's field
 // `field`: m.inputFocused follows its focus (Board.boardHasKeyboard), a

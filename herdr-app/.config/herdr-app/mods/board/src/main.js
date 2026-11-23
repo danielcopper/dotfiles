@@ -54,9 +54,11 @@
 // assignee picker one more per repo or team the first time it opens there
 // (GitHub's assignable users with who gh is; the team's members, and who az
 // is while that is unknown). The sprint picker costs one az call (the
-// team's iterations) the first time it opens for a team, and a refresh of
-// a sprint it chose one where `r` dropped them. A state change costs one
-// az call, a Backlog's create one and a child's parent link one more; a
+// team's iterations) the first time it opens for a team, one more for the
+// team's current sprint where the Sprint keeps none, and a refresh of a
+// sprint it chose one where `r` dropped them; with no sprint running, a
+// Sprint reads no work items. A state change costs one az call, a
+// Backlog's create one and a child's parent link one more; a
 // create reads the Backlog again, and one whose answer was unclear asks
 // one WIQL query more after that refresh; a create for a team whose
 // default iteration follows the current one reads the team's settings
@@ -74,8 +76,9 @@
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a
 // sprint's taskboard), kinds/backlog.js (a team's backlog), kinds/states.js
 // (a state's color), select.js (filter, "nur meine", selection, the
-// command menu's filter), commands.js (the action table, which the keys of
-// its actions, the hint line and the command menu read), related.js (the
+// filter of the command menu and the sprint picker), commands.js (the
+// action table, which the keys of its actions, the hint line and the
+// command menu read), related.js (the
 // items related to an item, read when its details open: what is kept,
 // their lines), description.js (a description as drawn, without anything
 // it could load), scroll.js (how the details scroll),
@@ -345,14 +348,16 @@ export default class Board extends View {
   // runs (how many refreshes have started), want (an item to choose once a
   // refresh has it: chooseWanted) and detail; related (the related items
   // readRelated read, by item key); folds (a Sprint's folded stories, as
-  // the store keeps them: readStoredFolds); sprint (the sprint a Sprint
-  // view shows in place of the current one, as the sprint picker chose it,
-  // null for the current one; kept while the board runs, never stored).
+  // the store keeps them: readStoredFolds) and chosenFolds (those in the
+  // sprints the sprint picker chose, by their id: foldsOf); sprint (the
+  // sprint a Sprint view shows in place of the current one, { id, name } as
+  // the sprint picker chose it, null for the current one; kept while the
+  // board runs, never stored).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
-      related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), sprint: null,
+      related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
     };
     return this.views[id];
   }
@@ -462,10 +467,7 @@ export default class Board extends View {
     cx.spawn(async (cx) => {
       try {
         const { data, warnings, notice } = await loader.load(view, (v) => this.hiddenFor(v), chosen);
-        // A chosen sprint the source no longer has (data.meta.gone) is
-        // dropped, unless another was chosen while it read; the load says so
-        // (notice).
-        if (data.meta?.gone && st.sprint === chosen) st.sprint = null;
+        // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
         st.data = SHAPES[data.shape].received(data, st);

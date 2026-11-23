@@ -13,7 +13,9 @@
 // keys and hints): move (b, view, st, by, cx: H/L) with canMove (st, item,
 // by: whether the item has a column that way) and moveHint, canHide (col:
 // whether a column can be hidden, beside toggleColumn), fold (b, view, st,
-// cx: z), create (b, view, cx: n) and enterHint (Enter's hint);
+// cx: z), create (b, view, cx: n), pickSprint (b, view, cx: the sprint
+// picker, ui/modals/sprints.js) with showSprint (b, view, sprint, cx: the
+// sprint it shows, null for the current one) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a
 // list has none), detailParts (its rows in the detail

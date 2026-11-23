@@ -23,19 +23,17 @@ import { azurePullRequest, azureRelated } from "./related.js";
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint and taskboard columns. The team's
 // iterations, which the sprint picker lists, are read when it first opens
-// and kept while the board runs (sprintView; one that fails keeps nothing).
-// The
-// project's work item types, one entry for both views (typesOf), are kept
-// TEAM_KEEP_MS from their read (even where another read of the Sprint's
-// settings fails), or, where a Sprint's whole settings read brought them,
-// until its sprint ends.
+// and kept while the board runs (one that fails keeps nothing); which of
+// them is current, the kept current sprint says. The project's work item
+// types, one entry for both views (typesOf), are kept TEAM_KEEP_MS from
+// their read (even where another read of the Sprint's settings fails), or,
+// where a Sprint's whole settings read brought them, until its sprint ends.
 // What is not kept is read at the same time. A refresh then reads the
 // taskboard's columns of the work items and the sprint's work items, also
 // at the same time. The team's kept settings (not the project's types) are
-// dropped, so that they are read again, by `r` on the Sprint (forget, which
-// drops the team's iterations too), by
+// dropped, so that they are read again, by `r` on the Sprint (forget), by
 // a task in a column the columns read do not know, and by a move or state
-// change Azure refuses.
+// change Azure refuses; its iterations only by `r`.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
 // for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the

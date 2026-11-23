@@ -11,11 +11,11 @@ export function wordsMatch(texts, filter) {
   return words.every((w) => hay.includes(w));
 }
 
-// The command menu's filter: { entry, at } for each entry of `list` whose
-// text (`textOf`) holds the letters of `query` in its order, `at` where
-// they stand in it (fuzzyMatch), best first. A tie keeps the shorter text
-// first, then the list's order. An empty query keeps the list as it is,
-// with no letters.
+// The filter of the command menu and the sprint picker (rankByName): {
+// entry, at } for each entry of `list` whose text (`textOf`) holds the
+// letters of `query` in its order, `at` where they stand in it
+// (fuzzyMatch), best first. A tie keeps the shorter text first, then the
+// list's order. An empty query keeps the list as it is, with no letters.
 export function fuzzyRank(list, query, textOf) {
   if (!String(query ?? "").trim()) return list.map((entry) => ({ entry, at: [] }));
   const scored = list.map((entry, n) => ({ entry, n, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
@@ -24,6 +24,11 @@ export function fuzzyRank(list, query, textOf) {
     .sort((x, y) => y.match.score - x.match.score || x.text.length - y.text.length || x.n - y.n)
     .map((s) => ({ entry: s.entry, at: s.match.at }));
 }
+
+// The entries of `list` the filter `query` leaves by their names, best
+// first (fuzzyRank), each with `at`, where its letters stand in the name:
+// the command menu's actions, the sprint picker's sprints.
+export const rankByName = (list, query) => fuzzyRank(list, query, (e) => e.name).map(({ entry, at }) => ({ ...entry, at }));
 
 // How the letters of `query` fit `text`, case-insensitive and spaces left
 // out ("nlv" fits "nach links verschieben"): { score, at (the index in the

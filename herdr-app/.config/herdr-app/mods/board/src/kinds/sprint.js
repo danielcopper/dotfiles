@@ -1,9 +1,10 @@
 // A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
 // whose story is not in the sprint), the items it holds, what shows and how the
-// keys walk it, a task's state as shown, a state change laid over the data, and
-// its warnings (sprintWarnings). The data is a board's (kinds/board.js: its
-// columns hold the tasks, so moves, their rollback and H/L work on it as on a
-// board) plus its rows; sprintBoard (sources/azure/sprint.js) builds it.
+// keys walk it, a task's state as shown, a state change laid over the data, its
+// warnings (sprintWarnings), which folds hold (foldsOf) and its dates as
+// written. The data is a board's (kinds/board.js: its columns hold the tasks, so
+// moves, their rollback and H/L work on it as on a board) plus its rows;
+// sprintBoard (sources/azure/sprint.js) builds it.
 
 import { navigate, shows } from "../select.js";
 import { findCard, shownColumns } from "./board.js";
@@ -78,6 +79,12 @@ export function readStoredFolds(v) {
 // sprint.
 export const foldedStories = (folds, data) => new Set(folds?.sprint === data.meta.iterationId ? folds.stories : []);
 
+// The folds that hold for the sprint `data` shows, of a Sprint view's state
+// `st`: the stored ones (st.folds) for the team's current sprint, and for
+// a sprint the sprint picker chose those of this session (st.chosenFolds,
+// by the sprint's id), which never replace the stored ones.
+export const foldsOf = (st, data) => (data.meta.current === false ? st.chosenFolds.get(data.meta.iterationId) ?? null : st.folds);
+
 // `folds` with the story `key` folded, or unfolded where it was, in the
 // sprint `data` shows; the folds of another sprint are dropped.
 export function toggledFolds(folds, data, key) {
@@ -138,3 +145,34 @@ export const withSprintItem = (data, key, patch) => mapSprintItem(data, key, (i)
 // The data with the item `key` in `state`; a task's column then counts as
 // read (shownState shows its own state).
 export const withItemState = (data, key, state) => mapSprintItem(data, key, (i) => ({ ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) }));
+
+// A day as the Sprint writes it, from Azure's date (the day's start, in
+// UTC): "16.11.", with its year where that is not `year`; null for none.
+export function dayText(date, year) {
+  const at = new Date(date ?? "");
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.getUTCDate()}.${at.getUTCMonth() + 1}.${at.getUTCFullYear() === year ? "" : at.getUTCFullYear()}`;
+}
+
+// An iteration's dates as the sprint picker's row says them, `year` the
+// year now: "16.11.–27.11.", "ab 16.11.", "bis 27.11.", or "ohne Daten".
+export function sprintDates(it, year) {
+  const [start, finish] = [dayText(it.start, year), dayText(it.finish, year)];
+  if (start && finish) return `${start}–${finish}`;
+  if (start) return `ab ${start}`;
+  return finish ? `bis ${finish}` : "ohne Daten";
+}
+
+// The row the sprint picker marks first among `rows` (in Azure's order,
+// each with current, start and finish): the team's current sprint; where
+// it has none, the next to start (the first that starts after `now`), else
+// the last that ended (its last day, as Azure dates it, over by `now`),
+// else the first.
+export function startRow(rows, now) {
+  const current = rows.findIndex((r) => r.current);
+  if (current >= 0) return current;
+  const next = rows.findIndex((r) => Date.parse(r.start ?? "") > now);
+  if (next >= 0) return next;
+  const ended = rows.map((r) => Date.parse(r.finish ?? "") + 86400000 <= now).lastIndexOf(true);
+  return Math.max(ended, 0);
+}
