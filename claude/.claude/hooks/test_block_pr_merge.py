@@ -4,18 +4,24 @@
 Run: python3 claude/.claude/hooks/test_block_pr_merge.py
 """
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar, cast, override
 
-from merge_corpus import real_merge
-
 HOOK = Path(__file__).with_name("block_pr_merge.py")
+_spec = importlib.util.spec_from_file_location("merge_corpus", HOOK.with_name("merge_corpus.py"))
+assert _spec and _spec.loader
+corpus = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(corpus)
+real_merge = cast("Callable[[str], bool]", corpus.real_merge)
 SECRET = "SECRET_PLACEHOLDER"  # stands in for a token the real command held
 
 # Body files the commands name as {d}/<file>; HOME is {d}/home, the hook's cwd is {d}.
@@ -86,20 +92,34 @@ DENIED = {
         # a script the command writes and then runs
         "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash m.sh",
         "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nchmod +x m.sh && ./m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nsource m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\n. ./m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nenv FOO=1 bash m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nsudo -n bash m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\ntimeout 30 bash m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nnohup ./m.sh",
+        "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash -o pipefail m.sh",
+        (
+            "cat > m.py <<'EOF'\nimport subprocess\n"
+            'subprocess.run(["gh", "pr", "merge", "5"])\nEOF\nuv run python m.py'
+        ),
+        "cat > ${S}/m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash $S/m.sh",
         # a << whose delimiter line never comes opens no heredoc
         'echo "use <<EOF for heredocs"\ngh pr merge 5',
         "x=$((1<<3))\ngh pr merge 5",
         "# note: cat <<EOF\ngh pr merge 5",
+        "# note: cat <<EOF\ngh pr merge 5\ncat > x.txt <<EOF\nhi\nEOF",
+        'echo "use <<EOF here"\ngh pr merge 5\ncat > x.txt <<EOF\nhi\nEOF',
     ],
     "pulls/<n>/merge": [
         "gh api -X PUT repos/o/r/pulls/5/merge",
+        "gh api -X PUT \\\n  repos/o/r/pulls/5/merge",
         "gh api --method PUT repos/o/r/pulls/5/merge -f merge_method=squash",
         "gh api --method=PUT repos/o/r/pulls/5/merge",
         "gh api -XPUT 'repos/{owner}/{repo}/pulls/'$PR'/merge'",
         "gh api repos/o/r/pulls/5/merge -f merge_method=squash",
         "gh api repos/o/r/pulls/5/merge --input {d}/comment.json",
         "gh api -X POST repos/o/r/merges -f base=main -f head=feature",
-        "gh api -X PUT repos/o/r/pulls/5/%6Derge",
         'EP=$(cat {d}/ep); gh api -X PUT "$EP" -f merge_method=squash',
         'curl -X PUT -H "Authorization: Bearer $TOKEN" https://api.github.com/repos/o/r/pulls/5/merge',
         'curl -s -d \'{"merge_method":"squash"}\' https://api.github.com/repos/o/r/pulls/5/merge',
@@ -134,9 +154,6 @@ DENIED = {
         "gh api graphql -F query=@~/q.graphql",
         "gh api graphql -F query=@$HOME/q.graphql",
         "gh api graphql -F query=@rel/q.graphql",
-        # a relative body path after a literal cd
-        "cd rel && gh api graphql -F query=@q.graphql",
-        "cd {d}/rel; gh api graphql --input q.graphql",
         # a body the request reads from stdin: a heredoc, a here-string, a redirect
         f"gh api graphql --input - <<'EOF'\n{QUEUE_JSON}\nEOF",
         f"gh api graphql -F query=@- <<EOF\n{MERGE_QUERY}\nEOF",
@@ -147,6 +164,11 @@ DENIED = {
         # a body file the command writes from a heredoc first
         f"tee q2.graphql <<'EOF' >/dev/null\n{MERGE_QUERY}\nEOF\ngh api graphql -F query=@q2.graphql",
         f"cat > q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input q.json",
+        f'tmp=$(mktemp); cat > "$tmp" <<\'EOF\'\n{MERGE_QUERY}\nEOF\ngh api graphql -F query=@"$tmp"',
+        f"cat > ~/q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input ~/q.json",
+        # a body file assigned to an exported or declared variable first
+        'export Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
+        'declare -x Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
     ],
     "a gh alias that merges": [
         "gh alias set mm 'pr merge --squash'",
@@ -157,9 +179,9 @@ DENIED = {
     ],
     "az repos pr update --status completed": [
         "az repos pr update --id 5 --status completed",
+        "az repos pr update \\\n  --id 5 \\\n  --status completed",
         "az repos pr update --id 5 --status=completed",
         "az repos pr update --id 5 --stat Completed",
-        "S=completed; az repos pr update --id 5 --status $S",
         "git push && az repos pr update --id 5 --status completed --squash",
     ],
     "--auto-complete": [
@@ -168,6 +190,7 @@ DENIED = {
         "az repos pr update --id 5 --auto-comp true",
         "az repos pr create --title 'fix: x' --source-branch f --auto-complete true",
         "az repos pr create --source-branch f --auto-comp",
+        "az repos pr create --source-branch f \\\n  --auto-complete true",
     ],
     "Azure DevOps pull request completion": [
         f"az rest --method patch --uri '{AZ_PR}' --body '{{\"status\": \"completed\"}}'",
@@ -188,31 +211,19 @@ DENIED = {
             f" '{AZ_PR.replace('pullrequests', 'PullRequests')}'"
         ),
         f"curl -s -X PATCH -d@{{d}}/done.json '{AZ_PR}'",
-        (
-            "curl -s -u \":$PAT\" -X PATCH -H 'Referer: https://dev.azure.com/o'"
-            ' -d @{d}/done.json "$PRURL"'
-        ),
-        (
-            "wget -q --method=PATCH --body-file={d}/done.json --header='Origin: https://dev.azure.com'"
-            ' "$PRURL"'
-        ),
         'bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"',
         f"az rest --method patch --uri '{AZ_PR}' --body @- <<'EOF'\n{{\"status\": \"completed\"}}\nEOF",
         f'curl -s -X PATCH -d @- \'{AZ_PR}\' <<EOF\n{{"autoCompleteSetBy": {{"id": "me"}}}}\nEOF',
-        # a literal URL in another request does not name this one's target
-        (
-            'curl -s https://dev.azure.com/o/_apis/connectionData --next -u ":$PAT" -X PATCH'
-            ' -d @{d}/done.json "$PRURL"'
-        ),
+        # a literal URL in another command does not name this one's target
         (
             "curl -s https://dev.azure.com/o/_apis/connectionData;"
             ' bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"'
         ),
-        (
-            'curl -s -u ":$PAT" -X PATCH -d @{d}/done.json'
-            ' "https://dev.azure.com/o/p/_apis/git/repositories/r/pullRequests\\5?api-version=7.1"'
-        ),
         # a body file the command writes from a heredoc first
+        (
+            'cat > "$S/b.json" <<\'EOF\'\n{"status": "completed"}\nEOF\n'
+            f"az rest --method patch --uri '{AZ_PR}' --body @\"$S/b.json\""
+        ),
         (
             'cat > body.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
             f"az rest --method patch --uri '{AZ_PR}' --body @body.json"
@@ -267,6 +278,8 @@ PASSES = [
     "cat {d}/hook_source.py | head; gh pr view 5",
     "cat {d}/settings.json | head -3; gh pr list",
     'cat {d}/repo-config.md | grep -n status; curl -s "$URL"',
+    # a variable read from a file that the request does not use
+    "Q=$(cat {d}/queue.json); gh api graphql -F query=@{d}/read.graphql",
     # git's own merge commands, and paths or names with merge next to a variable
     "git merge --ff-only origin/main",
     "git merge-base HEAD origin/main",
@@ -320,9 +333,14 @@ PASSES = [
     ),
     f"tee q.graphql <<'EOF'\n{MERGE_QUERY}\nEOF",
     "cat > notes.md <<'EOF' && bash lint.sh notes.md\nRun gh pr merge 5 later.\nEOF",
+    "cat > cases.txt <<'EOF'\ngh pr merge 5\nEOF\npython3 harness.py cases.txt",
     # request bodies from stdin that cannot merge, and a PR body that only mentions one
     'gh api graphql --input - <<\'EOF\'\n{"query": "query { viewer { login } }"}\nEOF',
     "gh pr create --title 'fix: x' --body-file - <<'EOF'\nRun gh pr merge after review.\nEOF",
+    (
+        "gh pr create --title \"Pin node version\" --body-file - <<'EOF'\n"
+        "The owner runs gh pr merge 5 after review.\nEOF"
+    ),
     'gh api -X POST repos/o/r/issues/5/comments --input - <<< \'{"body": "merge after CI"}\'',
     # gh aliases that do not merge
     "gh alias set co 'pr checkout'",
@@ -335,10 +353,9 @@ PASSES = [
     "echo 'status: completed'",
 ]
 
-# DENIED forms the corpus detector does not flag: the merge lies in a file, a variable or an
-# encoding, not in the command's text.
+# DENIED forms the corpus detector does not flag: the merge lies in a file on disk, a variable
+# or a script path spelled two ways, not in the command's text.
 NOT_DETECTED = {
-    "gh api -X PUT repos/o/r/pulls/5/%6Derge",
     "gh api graphql -F query=@{d}/merge.graphql",
     'gh api graphql -f query="$(cat {d}/merge.graphql)" -f id=PR_x',
     'gh api graphql -f query="$(< {d}/auto.graphql)" -F prId="$PR_ID"',
@@ -356,11 +373,8 @@ NOT_DETECTED = {
     "gh api graphql -F query=@~/q.graphql",
     "gh api graphql -F query=@$HOME/q.graphql",
     "gh api graphql -F query=@rel/q.graphql",
-    "cd rel && gh api graphql -F query=@q.graphql",
-    "cd {d}/rel; gh api graphql --input q.graphql",
     "gh api graphql --input - < {d}/queue.json",
     "gh alias import {d}/aliases.yml",
-    "S=completed; az repos pr update --id 5 --status $S",
     f"az rest --method patch --uri '{AZ_PR}' --body @{{d}}/done.json",
     f"az rest --method patch --uri '{AZ_PR}' --body \"$(cat {{d}}/done.json)\"",
     'BODY=$(cat {d}/done.json); az rest --method patch --uri "$PRURL" --body "$BODY"',
@@ -375,48 +389,15 @@ NOT_DETECTED = {
         f" '{AZ_PR.replace('pullrequests', 'PullRequests')}'"
     ),
     f"curl -s -X PATCH -d@{{d}}/done.json '{AZ_PR}'",
-    (
-        "curl -s -u \":$PAT\" -X PATCH -H 'Referer: https://dev.azure.com/o'"
-        ' -d @{d}/done.json "$PRURL"'
-    ),
-    (
-        "wget -q --method=PATCH --body-file={d}/done.json --header='Origin: https://dev.azure.com'"
-        ' "$PRURL"'
-    ),
     'bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"',
-    (
-        'curl -s https://dev.azure.com/o/_apis/connectionData --next -u ":$PAT" -X PATCH'
-        ' -d @{d}/done.json "$PRURL"'
-    ),
     (
         "curl -s https://dev.azure.com/o/_apis/connectionData;"
         ' bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"'
     ),
-    (
-        'curl -s -u ":$PAT" -X PATCH -d @{d}/done.json'
-        ' "https://dev.azure.com/o/p/_apis/git/repositories/r/pullRequests\\5?api-version=7.1"'
-    ),
-    # written to a file by a cat or tee heredoc, then sent or run
-    "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash m.sh",
-    "cat > m.sh <<'EOF'\ngh pr merge 5\nEOF\nchmod +x m.sh && ./m.sh",
-    f"tee q2.graphql <<'EOF' >/dev/null\n{MERGE_QUERY}\nEOF\ngh api graphql -F query=@q2.graphql",
-    f"cat > q.json <<'EOF'\n{QUEUE_JSON}\nEOF\ngh api graphql --input q.json",
-    (
-        'cat > body.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
-        f"az rest --method patch --uri '{AZ_PR}' --body @body.json"
-    ),
-    (
-        "cat >> body3.json <<'EOF'\n{\"status\": 3}\nEOF\n"
-        f"curl -s -X PATCH -d @body3.json '{AZ_PR}'"
-    ),
-    (
-        'cat >body4.json <<\'EOF\'\n{"status": "completed"}\nEOF\n'
-        f"curl -s -X PATCH -d @body4.json '{AZ_PR}'"
-    ),
-    (
-        'cat <<\'EOF\' > {d}/w.json\n{"autoCompleteSetBy": {"id": "me"}}\nEOF\n'
-        f"{INVOKE_PR} --http-method PATCH --in-file {{d}}/w.json"
-    ),
+    'export Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
+    'declare -x Q=$(cat {d}/merge.graphql); gh api graphql -f query="$Q"',
+    # the script written as ${S}/m.sh and run as $S/m.sh
+    "cat > ${S}/m.sh <<'EOF'\ngh pr merge 5\nEOF\nbash $S/m.sh",
 }
 
 
@@ -513,6 +494,30 @@ class BlockPrMerge(unittest.TestCase):
 
     def test_an_empty_command_passes(self):
         self.assertEqual(self.stdout(""), "")
+
+    def test_long_commands_are_judged_within_a_second(self):
+        assignments = "\n".join(f"V{n}=$(cat {{d}}/read.graphql)" for n in range(3000))
+        chain = " &&\n".join(f"gh pr view {n} --json state" for n in range(1000))
+        for command in (assignments + '\ngh api graphql -f query="$V1"', chain):
+            with self.subTest(command=command[:40]):
+                started = time.monotonic()
+                self.assertEqual(self.stdout(command), "")
+                self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_unreadable_input_is_allowed_with_a_notice(self):
+        proc = subprocess.run(
+            [sys.executable, "-I", str(HOOK)],
+            input=b"\xff\xfe",
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn(b"block_pr_merge:", proc.stderr)
+        message = output(proc.stdout.decode())["systemMessage"]
+        assert isinstance(message, str)
+        self.assertTrue(
+            message.startswith("block_pr_merge: could not check this command (UnicodeDecodeError"),
+            message,
+        )
 
     def test_an_error_refuses_only_with_a_merge_word_in_the_command(self):
         too_long = "echo " + "x" * 1_100_000

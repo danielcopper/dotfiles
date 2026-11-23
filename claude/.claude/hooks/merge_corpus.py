@@ -11,9 +11,10 @@ prints:
 - how many checks ended in an error, by type;
 - every command the detector calls a real merge that the hook lets through. None is the bar.
 With --show it also prints the refused commands and the errors, tokens masked and each cut to
---width characters. The detector reads only the command's text: a merge that lies in a body
-file, a variable or an encoding is the hook's to find. Reading the commands' body files is the
-hook's doing; this script writes nothing but stdout.
+--width characters. The detector reads only the command's text, heredoc bodies that cat, tee
+or git only read left out unless the file they write is sent or run later in the command: a
+merge that lies in a file on disk or a variable is the hook's to find. Reading the commands'
+body files is the hook's doing; this script writes nothing but stdout.
 
 Run: python3 claude/.claude/hooks/merge_corpus.py [--show] [--width N]
 """
@@ -27,14 +28,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from block_pr_merge import field, judge
+from block_pr_merge import UNCHECKED, field, judge
 
 # A heredoc body cat, tee or git only reads, unless the marker's line pipes it on.
 DATA_HEREDOC = re.compile(
     r"(?:^|[;&|(\n])\s*(?:cat|tee|git)\b[^\n;&|]*<<-?\s*(['\"]?)(\w+)\1[^\n|]*\n.*?\n\s*\2\s*(?:\n|$)",
     re.DOTALL,
 )
-GAP = r"(?:\s|\\\n)+"
+# The file a heredoc's marker line writes: after `>`, `>>` or `tee` and its options.
+WRITE_TARGET = re.compile(r"(?:>>?\s*|\btee\s+(?:-\S+\s+)*)([^\s<>|;&]+)")
+# What may stand before a written file where it is sent or run.
+USE = (
+    r"(?:@|--input[\s=]|--in-file[\s=]|--body-file[\s=]|(?<![\w./-])"
+    r"(?:(?:bash|sh|zsh|dash|ksh|python[\d.]*|node|ruby|perl|source|\.)"
+    r"(?:\s+(?:-[oO]\s+\S+|-\S+))*\s+(?:\./)?|\./))"
+)
+GAP = r"\s+"
 REPO = rf"(?:(?:-R|--repo)[\s=]\S+{GAP})?"
 # What may stand before gh as a command word: an operator, a keyword, a wrapper, an assignment,
 # xargs with its options, or the quote that opens a `-c` or `eval` string.
@@ -69,6 +78,7 @@ REAL_MERGE = re.compile(
                 rf"(?=[^\n;|&]*(?:{CURL_WRITE}|merge_method))"
             ),
             rf"\b(?:gh\s+api|curl|wget)\b[^\n]*graphql.*?{MUTATIONS}",
+            rf"{MUTATIONS}.*?\b(?:gh\s+api|curl|wget)\b[^\n]*graphql",
             (
                 rf"\bgh\s+alias\s+(?:set|import)\b.*?(?:(?<![\w-])pr(?![\w-])[^\n]*?"
                 rf"(?<![\w-])merge(?![\w-])|{MUTATIONS})"
@@ -80,6 +90,10 @@ REAL_MERGE = re.compile(
             (
                 rf"\b(?:az\s+rest|az\s+devops\s+invoke|curl|wget)\b(?=.*?{AZURE_TARGET})"
                 rf"(?=.*?{COMPLETION})"
+            ),
+            (
+                rf"{COMPLETION}.*?\b(?:az\s+rest|az\s+devops\s+invoke|curl|wget)\b"
+                rf"(?=.*?{AZURE_TARGET})"
             ),
         ]
     ),
@@ -96,9 +110,22 @@ MASKS = [
 ]
 
 
+def data_only(heredoc: re.Match[str]) -> str:
+    """The heredoc *heredoc* without its body, unless the file its marker line writes is sent
+    (`@file`, `--input`, `--in-file`, `--body-file`) or run (by a shell, an interpreter,
+    `source`, `.` or as `./file`) later in the command."""
+    header = heredoc[0][: heredoc[0].index("\n") + 1]
+    target = WRITE_TARGET.search(header)
+    if target:
+        name = re.escape(target[1].removeprefix("./"))
+        if re.search(rf"{USE}{name}(?![\w.-])", heredoc.string[heredoc.end() :]):
+            return heredoc[0]
+    return header
+
+
 def real_merge(command: str) -> bool:
     """Whether the detector finds an explicit merge form in the text of *command*."""
-    commands = DATA_HEREDOC.sub(lambda body: body[0][: body[0].index("\n") + 1], command)
+    commands = DATA_HEREDOC.sub(data_only, command.replace("\\\n", ""))
     return bool(REAL_MERGE.search(commands))
 
 
@@ -174,7 +201,7 @@ def main() -> int:
             errors[type(error).__name__].append(command)
         real = real_merge(command)
         if form:
-            refused[form.split(": ", 1)[0] if error else form].append((command, real))
+            refused[UNCHECKED if error is not None else form].append((command, real))
         elif real:
             missed.append(command)
     count = sum(len(found) for found in refused.values())
