@@ -60,19 +60,9 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     - holds a construct the shell expands at run time (a `$` or a backtick outside single quotes, a `{a,b}` or
       `{a..b}` brace or a `*`, `?` or `[` next to a letter outside any quotes) next to a merge mention — `merge` as
       a word as in the rule above, a completion (`status` or `-s` followed by `completed`, or `auto-complete`), or
-      `alias` followed later by `set` or `import` — anywhere in the text;
-    - holds such a construct in a simple command that runs `gh`, `az`, `curl` or `wget` (its command word, past
-      `NAME=value` assignments, the keywords `do`, `then`, `else`, `elif`, `if`, `while`, `until`, `!` and `{`, and
-      the wrappers `sudo`, `env`, `timeout`, `nice`, `nohup`, `command`, `exec`, `time`, `stdbuf`, `setsid`,
-      `ionice` and `doas` with the `NAME=value` assignments after them and timeout's duration), outside that
-      command's output-redirection targets; or as the command word of any simple command, or in a simple command
-      with a redirection before its command word, while the text names one of those tools. A simple command ends
-      at an unquoted `;`, `|`, `&`, newline, parenthesis or backtick, and a `$( )`, `<( )`, `>( )` or backtick
-      substitution is one of its own. When the text cannot be cut so (open quoting, an unclosed substitution),
-      names `gh`, `az`, `curl` or `wget` other than as an unquoted command word — as an argument, an assignment
-      value, in quotes — or holds a wrapper followed by an option (its argument may be the next word, and
-      `command -v` does not run the command), the rule reads the whole text instead: any such construct counts.
-      Both run-time rules leave out the parameters named below;
+      `alias` followed later by `set` or `import` — anywhere in the text, except the parameters named below. A
+      run-time construct next to `gh`, `az`, `curl` or `wget` alone does not count: the merge must be spelled to
+      be caught;
     - is nested too deep, too long or holds too many substitutions to check.
 
     The hook fails closed on itself too. Input that is no JSON object, has no `tool_input` object or no
@@ -81,7 +71,7 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     denied as "took too long to check". In both cases, split or simplify the command. Only an empty command
     passes unchecked.
 
-    The two run-time rules do not read the body of a heredoc with a quoted delimiter (`<<'D'`, `<<"D"`, `<<\D`,
+    The run-time rule does not read the body of a heredoc with a quoted delimiter (`<<'D'`, `<<"D"`, `<<\D`,
     also with `<<-`) fed to `cat`, `tee`, `python`, `python3`, or `git commit`, `tag` or `notes` without `-c`,
     when no word of that command is a shell word, at most an output redirection to a plain word follows the
     marker on its line, a line ends the body, and the marker stands outside quotes, comments, other heredoc
@@ -110,16 +100,16 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     `source` or `.`, or a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, `ash`, `fish`, `busybox sh`, as a word or
     a path's basename) as the command word of any simple command: after `|`, `|&`, `;`, `&`, a newline, a
     parenthesis or a backtick, past assignments, redirections other than a named or moved descriptor, keywords
-    such as `if`, `then`, `do`, `!` and `{`, after one of the wrappers named above or `coproc` (and a named
-    coproc's name before `{`) with or without options,
-    also after `2>&1` or `>&2`, in a process substitution,
-    or plainly (`bash s.sh`) — or to a command that runs a program from its arguments or data —
+    such as `if`, `then`, `do`, `!` and `{`, after a wrapper (`sudo`, `env`, `timeout`, `nice`, `nohup`,
+    `command`, `exec`, `time`, `stdbuf`, `setsid`, `ionice`, `doas`) or `coproc` (and a named coproc's name
+    before `{`) with or without options, also after `2>&1` or `>&2`, in a process substitution, or plainly
+    (`bash s.sh`) — or to a command that runs a program from its arguments or data —
     `trap`, `sort` with `--compress-program`, `find` with `-exec`, `-execdir`, `-ok` or `-okdir`, `xargs`,
     `parallel` — quoting no longer separates anything: the file, write and run-time rules then read the whole
     de-quoted text, next to any `gh`, `az`, `curl` or `wget` (every word decides the write rule; the words of
     the simple commands that name a tool pick its reason), and `$` and backticks count everywhere, no
-    parameter is spared and no heredoc body is left out. For the run-time rules, such a word counts only
-    outside the heredoc bodies they leave out. Other gh subcommands (issues, comments, reviews, releases, labels …)
+    parameter is spared and no heredoc body is left out. For the run-time rule, such a word counts only
+    outside the heredoc bodies it leaves out. Other gh subcommands (issues, comments, reviews, releases, labels …)
     may read their body from a file. False denials are accepted: a merge mentioned in a message next to one of
     those tools is denied like a call.
   - The `deny` list in `~/.claude/settings.json` matches the plain spellings of the merge commands as text — not
@@ -128,12 +118,12 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     commit messages.
 
   A renamed gh, another interpreter, a script file, a config file the command reads, a remote workflow that merges
-  when started (`gh workflow run …`), a gh extension, or a word the shell builds at run time from text that spells
-  neither `gh`, `az`, `curl` or `wget` nor a merge (such as `{g..g}h pr {m..m}erge`) stays out of both layers'
-  sight; this policy alone rules those out. Shell forms the hook's reading does not follow stay out of its sight
-  too, and this policy alone rules them out: a named file descriptor (`{fd}>&2`), a moved one (`3>&1-`), a named
-  `coproc` before a keyword, and an apostrophe inside a `#` comment, which hides the text up to the next
-  apostrophe from the run-time rules.
+  when started (`gh workflow run …`), a gh extension, or a merge word the shell builds at run time (such as
+  `gh pr $(printf mer)ge` or `gh api "$EP"` with a merge endpoint in `$EP`) stays out of both layers' sight; this
+  policy alone rules those out. Shell forms the hook's reading does not follow stay out of its sight too, and this
+  policy alone rules them out: a named file descriptor (`{fd}>&2`), a moved one (`3>&1-`), a named `coproc`
+  before a keyword, and an apostrophe inside a `#` comment, which hides the text up to the next apostrophe from
+  the run-time rule.
 
   Both layers are built against a session that follows this policy and would merge by mistake; against a command
   built to get past them they promise nothing. A review of the hook judges it by that: a bypass that a command

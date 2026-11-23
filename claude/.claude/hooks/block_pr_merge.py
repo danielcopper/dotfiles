@@ -180,15 +180,13 @@ GH_READ_ONLY = {
     "run": frozenset(["view", "list", "watch"]),
 }
 
-# Where the run-time rule finds the command word of a simple command (merge_policy).
+# How runs_a_shell() finds a command word, and where raw_commands() cuts simple commands.
 SEGMENT_OPS = set(";|&\n()`")
 WRAPPERS = frozenset(
     ["sudo", "env", "timeout", "nice", "nohup", "command", "exec", "time", "stdbuf", "setsid"]
     + ["ionice", "doas"]
 )
 KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
-DURATION = re.compile(r"\d+(\.\d+)?[smhd]?")
-WORD_END = SHELL_OPS | set(" \t\n")
 
 # Heredocs whose body the run-time rules do not read (merge_policy).
 DELIMITER = r"[A-Za-z_][\w-]*"
@@ -322,12 +320,6 @@ def runs_at_run_time(command: str, whole: bool = False) -> bool:
         or bool(BRACE_EXPANSION.search(outside))
         or bool(GLOB_NEXT_TO_LETTER.search(outside))
     )
-
-
-def built(word: str) -> bool:
-    """Whether a word, its quoting already removed, may be built at run time: any construct
-    runs_at_run_time() counts, wherever it stands in the word."""
-    return runs_at_run_time(word, whole=True)
 
 
 def mentions_merge(lower: str) -> bool:
@@ -740,116 +732,6 @@ def raw_commands(command: str) -> list[str] | None:
     return parts
 
 
-def word_end(raw: str, i: int) -> int:
-    """Where the shell word that starts at *i* of *raw* ends: at an unquoted blank, newline or
-    operator character; quotes and backslashes inside it are part of the word."""
-    quote = ""
-    while i < len(raw):
-        c = raw[i]
-        if quote:
-            if c == quote:
-                quote = ""
-            elif c == "\\" and quote == '"':
-                i += 1
-        elif c == "\\":
-            i += 1
-        elif c in "'\"":
-            quote = c
-        elif c in WORD_END:
-            return i
-        i += 1
-    return len(raw)
-
-
-def without_output_targets(raw: str) -> str:
-    """*raw*, one simple command, without its output redirections and their target words: an
-    unquoted `>`, `>>`, `>|`, `>&`, `&>` or `&>>` (not `<>`) and the word after it."""
-    out: list[str] = []
-    i = 0
-    while i < len(raw):
-        c = raw[i]
-        if (c == ">" and raw[i - 1 : i] != "<") or raw.startswith("&>", i):
-            i += 2 if c == "&" else 1
-            while i < len(raw) and raw[i] in ">|&":
-                i += 1
-            while i < len(raw) and raw[i] in " \t":
-                i += 1
-            i = word_end(raw, i)
-            out.append(" ")
-        elif c in WORD_END:
-            out.append(c)
-            i += 1
-        else:
-            end = word_end(raw, i)
-            out.append(raw[i:end])
-            i = end
-    return "".join(out)
-
-
-def command_word_index(words: list[Token]) -> int | None:
-    """Index of the word a simple command runs: past assignments, the keywords in KEYWORDS, and
-    the WRAPPERS with the assignments after them (and timeout's duration). The length of *words*
-    when only assignments stand there; None when a redirection comes first. ValueError when a
-    wrapper takes an option: its argument may be the next word, or the wrapper may not run the
-    command at all (`command -v`)."""
-    i = 0
-    while i < len(words):
-        word = words[i]
-        if word.op:
-            return None
-        if not word.quoted and (ASSIGNMENT.match(word.text) or word.text in KEYWORDS):
-            i += 1
-            continue
-        name = word.text.lower().rsplit("/", 1)[-1]
-        if name not in WRAPPERS:
-            return i
-        i += 1
-        while i < len(words) and not words[i].op and ASSIGNMENT.match(words[i].text):
-            i += 1
-        if i < len(words) and words[i].text.startswith("-"):
-            raise ValueError("a wrapper option")
-        if name == "timeout" and i < len(words) and DURATION.fullmatch(words[i].text):
-            i += 1
-    return len(words)
-
-
-def network_runtime_by_command(command: str) -> bool | None:
-    """Whether the run-time rule denies *command* next to gh, az, curl or wget, judged per
-    simple command: a simple command that runs one of them holds a run-time construct outside
-    its output-redirection targets, a simple command's command word is built at run time, or a
-    redirection before the command word stands next to a word built at run time - the last two
-    while the text names one of them. None when the text cannot be cut (open quoting, an
-    unclosed substitution) or names gh, az, curl or wget other than as an unquoted command word;
-    the caller then judges the whole text."""
-    parts = raw_commands(command)
-    if parts is None:
-        return None
-    named = NETWORK.search(stripped(command).lower()) is not None
-    hit = False
-    for raw in parts:
-        try:
-            words, _ = shell_tokens(raw)
-            at = command_word_index(words)
-        except ValueError:
-            return None
-        if not words:
-            continue
-        runs = False
-        for k, word in enumerate(words):
-            if word.op or not NETWORK.search(stripped(word.text).lower()):
-                continue
-            if k != at or word.quoted or word.text.lower().rsplit("/", 1)[-1] not in NETWORK_TOOLS:
-                return None
-            runs = True
-        if at is not None and at < len(words) and built(words[at].text) and named:
-            hit = True
-        if at is None and named and any(built(word.text) for word in words if not word.op):
-            hit = True
-        if runs and runs_at_run_time(without_output_targets(raw)):
-            hit = True
-    return hit
-
-
 def reads_data(text: str) -> bool:
     """Whether the simple command *text*, up to a heredoc marker, runs a command that does not
     read the heredoc as shell text: cat, tee, python or python3, or git commit, tag or notes
@@ -1075,9 +957,9 @@ def check(command: str) -> str | None:
         )
     if network and FEEDER.search(lower):
         return "feeds gh, az, curl or wget through xargs or parallel"
-    # The two run-time rules do not read data heredoc bodies, unless the text around them is
-    # re-read: then the whole text counts. Otherwise the spared parameters do not count either,
-    # and the rule next to gh, az, curl or wget is judged per simple command where it can be.
+    # The run-time rule next to a merge mention does not read data heredoc bodies, unless the
+    # text around them is re-read: then the whole text counts. Otherwise the spared parameters
+    # do not count either.
     runtime_text = without_data_heredocs(command)
     runtime_lower = stripped(runtime_text).lower()
     runtime_whole = rereads(runtime_lower) if runtime_text != command else reread
@@ -1085,13 +967,8 @@ def check(command: str) -> str | None:
         runtime_text, runtime_lower = command, lower
     else:
         runtime_text = without_spared_parameters(runtime_text)
-    runtime = runs_at_run_time(runtime_text, whole=runtime_whole)
-    if runtime and mentions_merge(runtime_lower):
+    if runs_at_run_time(runtime_text, whole=runtime_whole) and mentions_merge(runtime_lower):
         return "builds a word at run time next to a merge mention"
-    if NETWORK.search(runtime_lower):
-        by_command = None if runtime_whole else network_runtime_by_command(runtime_text)
-        if runtime if by_command is None else by_command:
-            return "builds a word at run time next to gh, az, curl or wget"
     if len(EVAL.findall(lower)) > MAX_EVALS:
         return "is nested too deep to check"
     if command.count("$(") + command.count("`") // 2 > MAX_SUBSTITUTIONS:
