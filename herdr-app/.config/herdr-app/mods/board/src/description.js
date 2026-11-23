@@ -34,8 +34,10 @@
 //   with, so Markdown reads it as text, and in code it looks unchanged. An
 //   http(s) URL in `<…>` stays, as an autolink or a link's or definition's
 //   destination (`<https://…>`, `[x](<https://…>)`, `[r]: <https://…>`):
-//   HTML has no tag of that name, so it can only be a link, or text; a `\`
-//   in it is written %5C (keptUrl). An inline image becomes a Markdown link
+//   HTML has no tag of that name, so it can only be a link, or text. Its
+//   `\`, `!`, `[`, `]`, `(`, `)` and backtick are percent-encoded
+//   (keptUrl), the same address to a server, so that nothing in it can be
+//   Markdown however the span is read. An inline image becomes a Markdown link
 //   "Bild: <alt>" to its http(s) URL (its text alone for another URL), and
 //   an <img> or <image> tag the same; a `![` that starts no inline image
 //   the scanner reads (an image by reference, or one longer than
@@ -43,17 +45,14 @@
 //   `![alt][ref]` is a link where `ref` is defined, and `![alt][]` and
 //   `![ref]` text. A label's `[`, `]`, `\` and `!` are escaped. Last, every
 //   `![` left (a `!` before one of those links, or two pieces of the text
-//   that meet) becomes `!`, a zero-width space and `[`: none is left that
-//   Markdown reads. Only an http(s) URL in `<…>` without a space keeps its
-//   `![` as written: Markdown reads it as an autolink wherever it stands, or
-//   as a destination, both of which it takes as written, not as Markdown,
-//   and it holds no `<` or `>` that could make a tag. Text in code changes
-//   the same way as any other.
+//   that meet) becomes `!`, a zero-width space and `[`: none is left. Text
+//   in code changes the same way as any other.
 //
 // Each step looks at the text once. A tag looks at most MAX_TAG characters
-// ahead, an image MAX_IMAGE, a URL in `<…>` up to the next `<`, and a
-// comment's end is one search; so a long hostile text costs little, and
-// the board makes it once per read (the Board's readRelated).
+// ahead, an image MAX_IMAGE, a URL in `<…>` up to the next `<`; a
+// comment's end is one search and whether a blank line lies before it one
+// binary search (blankLines); so a long hostile text costs little, and the
+// board makes it once per read (the Board's readRelated).
 
 const KEPT = new Set([
   "p", "br", "b", "strong", "i", "em", "u", "s", "del", "strike", "mark", "code", "a", "ul", "ol", "li",
@@ -200,8 +199,10 @@ function keptHtml(text) {
 const markdownLabel = (text) => text.replace(/[\\[\]!]/g, "\\$&").replace(/</g, `<${ZWSP}`);
 
 // An http(s) URL as the Markdown keeps it in `<…>`: a `\` in it, which
-// there would escape the next character, written %5C.
-const keptUrl = (url) => url.replace(/\\/g, "%5C");
+// there would escape the next character, and each character that could
+// start Markdown (`!`, `[`, `]`, `(`, `)`, backtick) percent-encoded.
+const URL_ESCAPES = { "\\": "%5C", "!": "%21", "[": "%5B", "]": "%5D", "(": "%28", ")": "%29", "`": "%60" };
+const keptUrl = (url) => url.replace(/[\\![\]()`]/g, (c) => URL_ESCAPES[c]);
 
 // An image as a Markdown link (see the header).
 function markdownImage(alt, src) {
@@ -261,13 +262,42 @@ function inlineImage(text, at) {
 }
 
 // The http(s) URL in `<…>` at `at`, written as the Markdown keeps it (see
-// the header): { text, end, verbatim (it holds no space: an autolink or a
-// destination wherever it stands) } or null. The search stops at the next
-// `<`, so no two of them read the same text.
+// the header): { text, end } or null. The search stops at the next `<`, so
+// no two of them read the same text.
 function webLink(text, at) {
   WEB_LINK.lastIndex = at;
   const m = WEB_LINK.exec(text);
-  return m ? { text: `<${keptUrl(m[1])}>`, end: at + m[0].length, verbatim: !/\s/.test(m[1]) } : null;
+  return m ? { text: `<${keptUrl(m[1])}>`, end: at + m[0].length } : null;
+}
+
+// The blank lines of a text: for each, where its line break before stands
+// and where the one after it ends, in order (both grow together).
+function blankLines(text) {
+  const starts = [];
+  const ends = [];
+  for (let p = text.indexOf("\n"); p >= 0;) {
+    const next = text.indexOf("\n", p + 1);
+    if (next < 0) break;
+    if (/^[ \t]*\r?$/.test(text.slice(p + 1, next))) {
+      starts.push(p);
+      ends.push(next + 1);
+    }
+    p = next;
+  }
+  return { starts, ends };
+}
+
+// Whether a blank line lies wholly within [from, to): the first one that
+// starts at or after `from` ends first, so it alone needs a look.
+function blankWithin(blanks, from, to) {
+  let lo = 0;
+  let hi = blanks.starts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (blanks.starts[mid] < from) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < blanks.starts.length && blanks.ends[lo] <= to;
 }
 
 // Where Markdown has code, as [start, end) spans in order: fenced blocks
@@ -349,6 +379,7 @@ function keptMarkdown(text) {
   const tagAt = tagReader(text);
   const commentEnd = commentReader(text);
   const code = codeRanges(text);
+  const blanks = blankLines(text);
   let c = 0;
   // Whether a position, growing from call to call, is in code.
   const inCode = (at) => {
@@ -357,49 +388,37 @@ function keptMarkdown(text) {
   };
   const marks = /<|!\[/g;
   const out = [];
-  // The spans of `out`'s text kept as written (webLink's verbatim ones).
-  const verbatim = [];
-  let length = 0;
-  const put = (piece, keep = false) => {
-    if (keep) verbatim.push([length, length + piece.length]);
-    out.push(piece);
-    length += piece.length;
-  };
   let from = 0;
   for (let m = marks.exec(text); m; m = marks.exec(text)) {
     const at = m.index;
-    put(text.slice(from, at));
+    out.push(text.slice(from, at));
     from = at + m[0].length;
     if (m[0] === "<") {
       let end = commentEnd(at);
-      if (end >= 0 && (inCode(at) || /\n[ \t]*\r?\n/.test(text.slice(at, end)))) end = -1;
+      if (end >= 0 && (inCode(at) || blankWithin(blanks, at, end))) end = -1;
       const link = end < 0 ? webLink(text, at) : null;
       const tag = end < 0 && !link ? tagAt(at) : null;
       if (end >= 0) from = end;
       else if (link) {
-        put(link.text, link.verbatim);
+        out.push(link.text);
         from = link.end;
       } else if (tag && !tag.close && IMAGES.has(tag.name)) {
         const attrs = attributesOf(tag.body);
-        put(markdownImage(attrs.alt, attrs.src ?? ""));
+        out.push(markdownImage(attrs.alt, attrs.src ?? ""));
         from = tag.end;
-      } else put(`<${ZWSP}`);
+      } else out.push(`<${ZWSP}`);
     } else {
       const image = inlineImage(text, at);
       if (image) {
-        put(markdownImage(image.alt, image.src));
+        out.push(markdownImage(image.alt, image.src));
         from = image.end;
-      } else if (text[from] === "]") put("[Bild");
-      else put("[Bild: ");
+      } else if (text[from] === "]") out.push("[Bild");
+      else out.push("[Bild: ");
     }
     marks.lastIndex = from;
   }
-  put(text.slice(from));
-  let v = 0;
-  return out.join("").replace(/!\[/g, (mark, at) => {
-    while (v < verbatim.length && verbatim[v][1] <= at) v++;
-    return v < verbatim.length && verbatim[v][0] <= at ? mark : `!${ZWSP}[`;
-  });
+  out.push(text.slice(from));
+  return out.join("").replace(/!\[/g, `!${ZWSP}[`);
 }
 
 // A description as the details hand it to TextView (format: "markdown" or

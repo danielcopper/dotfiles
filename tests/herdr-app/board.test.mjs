@@ -6059,7 +6059,8 @@ const HOSTILE = [
   '<img src="https://attacker.example/a.png alt=x>after', "<img\nsrc=https://attacker.example/b.png>", "<img\u0001src=c>", "<IMG/SRC=https://attacker.example/d.png/>",
   "<iMaGe src=e>", "<<img src=h>>", "<math><mi><img src=x></mi></math>", "<!-- <img src=x> -->", "<iframe src=x></iframe>", "<!--> <img src=y>",
   "![a](https://attacker.example/u.png)", "![b][r]", "![c][]", "![d]", "[![e](https://attacker.example/v.png)](w)", "!![f](x)", "!![f2](https://attacker.example/f.png)", "`![g](y)`", "\\![i](q)", "\\\\![j](r)",
-  "<https://attacker.example/l.png>", "[k](<https://attacker.example/k.png>)",
+  "<https://attacker.example/l.png>", "[k](<https://attacker.example/k.png>)", "\\<https://a/![m](https://attacker.example/m.png)>",
+  "a `<https://a/` ![n](https://attacker.example/n.png)>", "<https://a/\u0001![o](https://attacker.example/o.png)>",
 ].join("\n");
 // A refused image's label ending in `!` before a link: once joined, a `![`.
 const JOINS = [
@@ -6120,8 +6121,10 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
     "an http(s) URL in <…> stays, an autolink or a destination, its \\ as %5C; anything else in <…> is text");
   assert.equal(md(`<https://example.com/${"a".repeat(3000)}>`), `<https://example.com/${"a".repeat(3000)}>`, "however long");
   assert.equal(md("<!x --> y"), "<\u200b!x --> y", "no other <! is a comment");
-  assert.equal(md("<https://a/![b](c)> <https://a/ ![b](https://e/x.png)>"), "<https://a/![b](c)> <https://a/ !\u200b[b](https://e/x.png)>",
-    "one without a space as written, an autolink or a destination; one with a space is Markdown outside a link: its ![ goes");
+  assert.equal(md("<https://a/![b](c)> <https://a/ ![b](https://e/x.png)>"), "<https://a/%21%5Bb%5D%28c%29> <https://a/ %21%5Bb%5D%28https://e/x.png%29>",
+    "its ! [ ] ( ) percent-encoded, the same address, so nothing in it is Markdown however it is read");
+  assert.equal(md("\\<https://a/![b](https://e/x.png)>"), "\\<https://a/%21%5Bb%5D%28https://e/x.png%29>", "after a backslash, where it is no autolink");
+  assert.equal(md("a `<https://a/` ![b](https://e/x.png)>"), "a `<https://a/%60 %21%5Bb%5D%28https://e/x.png%29>", "across a code span, its backtick too");
   assert.equal(md("![a](https://e/x?a\\\\)"), "[Bild: a](<https://e/x?a%5C>)", "an image's URL with a \\ in its <…>: %5C");
   assert.equal(md("<mailto:a@example.com> <https://example.com/<b>"), "<\u200bmailto:a@example.com> <\u200bhttps://example.com/<\u200bb>", "another scheme, or a < inside: text");
   assert.equal(md("a <!-- hidden <img src=x> --> b <!--> c <!-- open"), "a  b  c <\u200b!-- open", "comments go; one not closed is text");
@@ -6131,6 +6134,8 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
   assert.equal(md("```html\n<!-- in a fence\n```\nafter --> prod"), "```html\n<\u200b!-- in a fence\n```\nafter --> prod", "nor in a fenced block");
   assert.equal(md("    <!-- indented\n\nlater --> x"), "    <\u200b!-- indented\n\nlater --> x", "nor in an indented one");
   assert.equal(md("a <!-- one\n\ntwo --> b"), "a <\u200b!-- one\n\ntwo --> b", "nor one across a blank line");
+  assert.deepEqual([md("a <!-- one\n \t\ntwo --> b"), md("x\n<!-- one\n\n--> y")], ["a <\u200b!-- one\n \t\ntwo --> b", "x\n<\u200b!-- one\n\n--> y"],
+    "a blank line of spaces, or one right after the comment's own line");
   assert.equal(md('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<\u200bpre>&lt;img src="https://attacker.example/x.png"&gt;<\u200b/pre>');
   assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no image, a link as written");
   assert.equal(md(`![x](https://example.com/i.png "${"t".repeat(1100)}")`), `[Bild: x](https://example.com/i.png "${"t".repeat(1100)}")`, "its title past MAX_IMAGE: no image, a link as written");
@@ -6165,7 +6170,7 @@ test("a hostile description's cost grows with its length, not faster: 64 KB take
     const n = kb * 1024;
     const fill = (piece) => piece.repeat(Math.ceil(n / piece.length)).slice(0, n);
     return [fill("!["), fill("<a"), `${fill("<b ")}>`, fill("![a]("), fill("<img src="), fill("<b title='"), `${fill("[")}](x)`, fill("<"), fill("![a](b ("), fill("![a](<b"),
-      fill("<!--"), fill("<https://x")];
+      fill("<!--"), fill("<https://x"), `${fill("<!--")}\n\n-->`];
   };
   // The fastest of three runs, in ms.
   const best = (body, format) => Math.min(...[0, 1, 2].map(() => {
