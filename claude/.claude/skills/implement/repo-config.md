@@ -37,37 +37,37 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       — holds `pr` followed by `merge`, or a GraphQL merge mutation (a later `gh <alias>` would not show the merge);
     - a write by gh, curl or wget — a method other than GET or HEAD, or a body (gh's `-f`, `-F`, `--input`; curl's
       `-d`, `--data…`, `--json`, `-F`, `-T`; wget's `--post-…`, `--body-…`) — toward a GitHub `pulls/<n>/merge` or
-      `repos/<o>/<r>/merges` endpoint (also percent-encoded), or with a `merge_method` field; a GET on
-      `pulls/<n>/merge` passes;
+      `repos/<o>/<r>/merges` endpoint, or with a `merge_method` field; a GET on `pulls/<n>/merge` passes;
     - the GraphQL mutation `mergePullRequest`, `enablePullRequestAutoMerge` or `enqueuePullRequest`, in the text or
-      in a body, in a command that runs gh, curl or wget;
-    - `az repos pr update` with `--status completed` (an option prefix such as `--stat` too, and a variable when the
-      text spells `completed`), and `az repos pr update` or `create` with `--auto-complete` set to anything but
-      `false` or `0`;
+      in a body, in a command in which gh, curl or wget stands as a word;
+    - `az repos pr update` with `--status completed` (an option prefix such as `--stat` too), and `az repos pr
+      update` or `create` with `--auto-complete` set to anything but `false` or `0`;
     - a body holding `"status": "completed"` (or `3`) or `autoCompleteSetBy`, sent by `az rest`, `az devops invoke`,
       curl or wget toward an Azure DevOps pull request itself (`pullrequests/<id>`, any case, or devops invoke's
-      `--resource pullRequests`) or toward a target the request does not spell out (a URL in a variable; a URL in a
-      header or in another request does not name it).
+      `--resource pullRequests`) or by a simple command that spells no target (a URL in a variable).
 
     A body is the request's own text, the files after `@`, `key=@`, `--input`, `--in-file`, `--body-file`,
     `--post-file`, `--upload-file` and jq's `--rawfile`/`--slurpfile`, and the files `cat` or `<` feeds a request
-    tool: in a `$( )` within its pipeline or assigned to a variable it uses, through a pipe into it, or as its
-    stdin. A heredoc whose receiving command or pipe runs a request tool is a body too, and so is a `<<<`
-    here-string. A file is read as a regular file up to 1 MB, with `~` and `$HOME` expanded and a relative path
-    taken from the session's working directory and from each literal `cd` target in the command; a path the hook
-    cannot resolve or read adds nothing. A heredoc that `cat >`, `cat >>` or `tee` writes to a file stands in for
-    that file: sent, it is a body; run (`bash m.sh`, `./m.sh`), it is read as commands. A `<<` whose delimiter line
-    never comes opens no heredoc.
+    tool: in a `$( )` within its pipeline or assigned to a variable it uses (also after `export`, `local`,
+    `readonly` or `declare`), through a pipe into it, or as its stdin. A heredoc whose receiving command or a
+    pipeline stage after it runs a request tool is a body too, and so is a `<<<` here-string. A heredoc that
+    `cat >`, `cat >>` or `tee` writes to a file stands in for that file, found by the word that names it (`$S/b.json`
+    and `"$tmp"` too): sent, it is a body; run — as the command word, by `source` or `.`, or by a shell or an
+    interpreter, also after `env`, `VAR=`, `sudo`, `nohup`, `exec`, `timeout <duration>` or `uv run` — it is read
+    as commands. Any other file is read from disk as a regular file up to 1 MB, with `~` and `$HOME` expanded and a
+    relative path taken from the session's working directory only, not from a `cd` earlier in the command; a path
+    the hook cannot resolve or read adds nothing. A `<<` marker opens a heredoc only outside quotes and comments,
+    and only when its delimiter line comes.
 
     It lets through `git merge`, `merge-base` and `merge-tree`, paths and names with "merge", "completed" outside
     an Azure DevOps completion, `gh pr view`, `list`, `checks`, `create`, `edit` and `update-branch`, comments and
     reviews, and a heredoc body fed to a command that only reads it (`cat`, `tee`, `git commit -F -`). A heredoc
-    whose receiving command or pipe runs a shell or an interpreter (`bash`, `sh`, `python`, `node`, `ruby`, `perl`,
-    `ssh`) is read as commands; one a request tool receives is checked only as a body, so a PR body from
-    `--body-file -` that names `gh pr merge` passes, while one that names a GraphQL merge mutation is refused. A
-    command form spelled as text — a `grep` pattern, a string in a Python heredoc, a commit message with `-m` — is
-    refused like a call; a GraphQL mutation name or a completion body counts only in a command that runs a request
-    tool. Each refusal names the form it found.
+    whose receiving command, or a pipeline stage after it, has a shell or an interpreter (`bash`, `sh`, `python`,
+    `node`, `ruby`, `perl`, `ssh`) as its command word is read as commands; one a request tool receives is checked
+    only as a body, so a PR body from `--body-file -` that names `gh pr merge` passes, while one that names a
+    GraphQL merge mutation is refused. A command form spelled as text — a `grep` pattern, a string in a Python
+    heredoc, a commit message with `-m` — is refused like a call; a GraphQL mutation name or a completion body
+    counts only where a request tool stands as a word in the command. Each refusal names the form it found.
 
     An error inside the hook, and a command over 1,000,000 characters, refuse the call only when the command holds
     `merge`, `complet` or `enqueue`, naming the error; otherwise the call goes through, and the hook says so in a
@@ -79,12 +79,15 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     commit messages.
 
   Out of both layers' sight, and ruled out by this policy alone: a verb or endpoint the shell builds at run time
-  (`gh pr $(printf mer)ge`), a shell variable as the verb or the endpoint (`gh pr "$V"`, `gh api -X PUT "$EP"`), a
-  script run from a file whose text is not in the command, Python or Node HTTP clients, a gh alias defined before
-  or elsewhere, gh extensions, and a remote workflow that merges when started (`gh workflow run …`). A bypass that a
-  command written without intent to evade could hit is a finding against the hook; one that only a command built
-  to get past it reaches is an accepted gap. `hooks/merge_corpus.py` is the local acceptance run over the
-  transcripts; its docstring says what it counts.
+  (`gh pr $(printf mer)ge`), a shell variable as the verb, the endpoint or the status (`gh pr "$V"`,
+  `gh api -X PUT "$EP"`, `--status $S`), a script run from a file whose text is not in the command, Python or Node
+  HTTP clients, a gh alias defined before or elsewhere, gh extensions, and a remote workflow that merges when
+  started (`gh workflow run …`). Spellings only a deliberate trick would choose are out of scope too: a
+  percent-encoded endpoint (`pulls/5/%6Derge`), a backslash for the slash in an Azure DevOps URL, a second request
+  after curl's `--next`, and a literal URL in a header next to a target from a variable. A bypass that a command
+  written without intent to evade could hit is a finding against the hook; one that only a command built to get
+  past it reaches is an accepted gap. `claude/.claude/hooks/merge_corpus.py` in the dotfiles repo (not stowed) is
+  the local acceptance run over the transcripts; its docstring says what it counts.
 - **`green_definition`** — every required CI check passes; where the repo runs SonarCloud, its quality gate passes with
   0 unresolved issues the PR introduced.
 - **`public_text_drafts: always`** — every public text is drafted for the owner's approval before posting. Two

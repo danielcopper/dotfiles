@@ -161,7 +161,7 @@ Three homes, laid out in `skills/implement/repo-config.md`: the global defaults 
     ├── lint_published_markdown.py  # Publish guard: no issue reference in a list item
     ├── block_commit_on_main.py   # Commit guard: worktree branches only
     ├── block_pr_merge.py         # Merge guard: the owner merges every PR
-    ├── merge_corpus.py           # Merge guard's acceptance run over the local transcripts
+    ├── merge_corpus.py           # Merge guard's acceptance run over the transcripts (repo only, not stowed)
     ├── block_plugin_code_reviewer.py  # Agent guard: route retired plugin reviewers to own agents
     ├── pre_tool_use.py           # Security guard (fail-closed)
     ├── post_tool_use.py          # Error detection
