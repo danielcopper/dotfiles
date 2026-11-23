@@ -1468,8 +1468,8 @@ export default class Board extends View {
       );
   }
 
-  // "nur meine": when on, marked as a chosen tab is, on the theme's
-  // `selected` with the accent border; not as a primary button (solid),
+  // "nur meine": when on, on the theme's `selected` as a chosen tab is,
+  // with the accent border of its own; not as a primary button (solid),
   // which it is not. Its text and weight stay, so its size never changes.
   mineToggle(t) {
     return div()

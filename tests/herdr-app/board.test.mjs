@@ -3786,7 +3786,7 @@ test("UI: clicks on the source toggle, a tab and „nur meine“ do what their k
   assert.deepEqual([b.mine, b.source().id, b.context().id], [true, "github", "github:other"], "the dialog keeps them");
 });
 
-test("UI: „nur meine“ on is marked as the chosen tab is, on the theme's selected with the accent border, not as a primary button; its text, weight and padding stay, so its size never changes", async () => {
+test("UI: „nur meine“ on stands on the theme's selected as the chosen tab does, with the accent border of its own, not as a primary button; its text, weight and padding stay, so its size never changes", async () => {
   const { b, cx, host } = await openBoard();
   host.theme = () => ({
     selected: "#selected", accent: "#accent", border: "#border", chrome: "#chrome", foreground: "#foreground", muted: "#muted",
