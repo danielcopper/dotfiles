@@ -188,7 +188,7 @@ WRAPPERS = frozenset(
 )
 KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
 
-# Heredocs whose body the run-time rules do not read (merge_policy).
+# Heredocs whose body the run-time rule does not read (merge_policy).
 DELIMITER = r"[A-Za-z_][\w-]*"
 HEREDOC = re.compile(
     rf"<<(-?)[ \t]*(?:'({DELIMITER})'|\"({DELIMITER})\"|\\({DELIMITER})|({DELIMITER}))"
@@ -781,7 +781,7 @@ def after_blanks(command: str, i: int) -> str:
 
 
 def data_heredoc_bodies(command: str) -> list[tuple[int, int]]:
-    """Spans of the heredoc bodies the run-time rules do not read: a quoted delimiter
+    """Spans of the heredoc bodies the run-time rule does not read: a quoted delimiter
     (`<<'D'`, `<<"D"`, `<<\\D`, also with `<<-`), a marker outside quotes, comments, groups and
     substitutions, fed to a command reads_data() accepts, with at most an output redirection to a
     plain word after the marker on its line, and a line that ends the body. No span at all when
@@ -916,7 +916,10 @@ def check(command: str) -> str | None:
     body_tool = BODY_TOOL.search(lower) is not None or body_subcommand(lower, command.lower())
     if PR_MERGE.search(lower):
         return "mentions a PR merge"
-    if gh and (pr := PR_WORD.search(lower)) and MERGE_WORD.search(lower, pr.end()):
+    reread = rereads(lower)
+    # words a feeder supplies or a re-reading shell joins may stand in either order
+    fed = reread or FEEDER.search(lower) is not None
+    if gh and (pr := PR_WORD.search(lower)) and MERGE_WORD.search(lower, 0 if fed else pr.end()):
         return "mentions a PR merge"
     if unknown_merge_subcommand(lower):
         return "runs a gh or az subcommand it does not know, spelled with merge"
@@ -926,7 +929,6 @@ def check(command: str) -> str | None:
         AZ_COMPLETE.search(lower) or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower)
     ):
         return "completes an Azure DevOps pull request"
-    reread = rereads(lower)
     write_words = False  # re-read text holds curl's writing options outside a tool's command
     whole = reread  # a shell reads the text again: judge the whole de-quoted text
     body = None

@@ -38,7 +38,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     quotes no `$`, backtick or backslash, and no second `gh`, `az`, `curl` or `wget`. Any other command is denied
     when its text
     - mentions a PR merge (`pr merge`, a `pulls/<n>/merge` or `/merges` path, the GraphQL merge, auto-merge or
-      merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge`), or runs `gh` or `az`
+      merge-queue mutation, or with `gh` the word `pr` followed later by the word `merge` — in either order when
+      `xargs` or `parallel` stands in the text or a shell reads it again), or runs `gh` or `az`
       with a word that can be the subcommand — past the options, also right after one, where it may be the
       option's value (`gh -R o/merge-tool pr view` is refused) — that is no known subcommand and holds `merge`
       anywhere (`automerge`, `pr_merge`), or runs `gh extension exec` with an extension so named;
@@ -61,7 +62,8 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       a word as in the rule above, a completion (`status` or `-s` followed by `completed`, or `auto-complete`), or
       `alias` followed later by `set` or `import` — anywhere in the text, except the parameters named below. A
       run-time construct next to `gh`, `az`, `curl` or `wget` alone does not count, nor do words that `xargs` or
-      `parallel` supplies to one of them: the merge must be spelled to be caught;
+      `parallel` supplies to one of them: the merge must be spelled to be caught. A spelled merge word still
+      counts then, before `pr` as well as after it;
     - is nested too deep, too long or holds too many substitutions to check.
 
     The hook fails closed on itself too. Input that is no JSON object, has no `tool_input` object or no

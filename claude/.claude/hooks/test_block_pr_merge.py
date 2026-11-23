@@ -704,6 +704,12 @@ DENIED = [
     "$X repos pr update --id 4 --autocomplete true",
     # a merge spelled next to variables still counts
     "seq 1 3 | xargs -I{} gh pr merge {}",
+    # a merge word fed through xargs or parallel counts before pr too
+    "echo merge 5 | xargs gh pr",
+    "printf '%s\\n' merge | xargs -I{} gh pr {} 5",
+    "echo merge | xargs gh pr 5",
+    "echo merge | parallel gh pr {} 5",
+    "echo merge --squash 5 | xargs gh pr",
     'curl -X PUT -u ":$PAT" "$B/pullRequests/5/merge"',
     "az repos pr update --id $ID --status completed",
     "gh pr merge $N",
