@@ -101,13 +101,15 @@ from typing import cast
 # The shared reader sits beside this file in the repository. Resolved, so the
 # live symlink in ~/.claude/hooks finds it without a link of its own.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "utils"))
-from published_text import publishing_sources  # noqa: E402
+from published_text import publishing_sources
 
 QUOTE_RE = re.compile(r"^(?:[ ]{0,3}>[ ]?)+")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 # Blocks that end a list when they start unindented, even without a blank line.
-LIST_ENDING_RE = re.compile(r"^(?:#{1,6}(?:\s|$)|>|`{3,}|~{3,}|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)")
+LIST_ENDING_RE = re.compile(
+    r"^(?:#{1,6}(?:\s|$)|>|`{3,}|~{3,}|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)"
+)
 DEFINITION_RE = re.compile(r"^\s{0,3}\[([^\]]+)\]:\s*\S")
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 # Lines a definition may follow directly: a thematic break, spaced or not, and
@@ -246,7 +248,11 @@ def list_lines(text: str) -> list[tuple[str, list[str]]]:
     lines = [line[len(prefix) :] for line, prefix in zip(quoted, prefixes)]
     marks = fences(lines)
     definition_lines = definitions(lines, marks)
-    defined = {label(match.group(1)) for index in definition_lines if (match := DEFINITION_RE.match(lines[index]))}
+    defined = {
+        label(match.group(1))
+        for index in definition_lines
+        if (match := DEFINITION_RE.match(lines[index]))
+    }
     offending: list[tuple[str, list[str]]] = []
     in_list = after_blank = nested = False
     depth = 0
@@ -332,7 +338,10 @@ def main() -> int:
     try:
         reason = lint_block(command, cwd)
     except Exception as error:  # noqa: BLE001 - a guard that crashes must not block the call
-        print(f"lint_published_markdown: letting the call through after an error: {error!r}", file=sys.stderr)
+        print(
+            f"lint_published_markdown: letting the call through after an error: {error!r}",
+            file=sys.stderr,
+        )
         return 0
     if reason:
         print(reason, file=sys.stderr)

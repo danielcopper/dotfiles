@@ -34,7 +34,12 @@ DECISION = "- D8: read the stamp through one helper (#974)"
 def run_hook_raw(payload: str) -> subprocess.CompletedProcess[str]:
     """The hook as the harness runs it, fed `payload` on stdin."""
     return subprocess.run(
-        [sys.executable, str(_HOOK)], input=payload, capture_output=True, text=True, check=False, timeout=15
+        [sys.executable, str(_HOOK)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
     )
 
 
@@ -98,21 +103,30 @@ class WhatRendersLarge(unittest.TestCase):
 
     def test_a_line_s_references_are_named_in_line_order(self):
         line = f"- a #1, then GH-2, then <{URL}> and danielcopper/romm-tender#3"
-        self.assertEqual(lint.list_lines(line)[0][1], ["#1", "GH-2", f"<{URL}>", "danielcopper/romm-tender#3"])
+        self.assertEqual(
+            lint.list_lines(line)[0][1], ["#1", "GH-2", f"<{URL}>", "danielcopper/romm-tender#3"]
+        )
 
     def test_a_bracketed_reference_without_its_definition(self):
         self.assertTrue(refused("- a [#974] b"))
         self.assertTrue(refused("- a [#974] b\n\n[#975]: " + URL))
 
     def test_a_collapsed_or_full_reference_link_without_its_definition(self):
-        for text in ("- a [#974][] b", "- a [#974][label] b", "- a [#974][label] b\n\n[other]: " + URL):
+        for text in (
+            "- a [#974][] b",
+            "- a [#974][label] b",
+            "- a [#974][label] b\n\n[other]: " + URL,
+        ):
             with self.subTest(text=text):
                 self.assertTrue(refused(text))
 
     def test_a_definition_straight_below_a_list_or_paragraph_line_defines_nothing(self):
         # It continues the line above: the item, its [#974] and the URL all render large.
         below_item = f"- D1 ([#974])\n[#974]: {URL}"
-        self.assertEqual(lint.list_lines(below_item), [("- D1 ([#974])", ["#974"]), (f"[#974]: {URL}", ["#974", URL])])
+        self.assertEqual(
+            lint.list_lines(below_item),
+            [("- D1 ([#974])", ["#974"]), (f"[#974]: {URL}", ["#974", URL])],
+        )
         self.assertTrue(refused(f"Para\n[#974]: {URL}\n\n- D1 ([#974])"))
         self.assertTrue(refused(f"- a [#974][label] b\n[label]: {URL}"))
 
@@ -130,7 +144,13 @@ class WhatRendersLarge(unittest.TestCase):
                 self.assertTrue(refused(text))
 
     def test_a_list_inside_a_quote(self):
-        for text in ("> - a #974", "> 1. a #974", "> > - a #974", ">- a #974", "> - a\n>   continued #974"):
+        for text in (
+            "> - a #974",
+            "> 1. a #974",
+            "> > - a #974",
+            ">- a #974",
+            "> - a\n>   continued #974",
+        ):
             with self.subTest(text=text):
                 self.assertTrue(refused(text))
 
@@ -176,7 +196,14 @@ class WhatStaysSmall(unittest.TestCase):
     """Shapes measured as a plain link or no link at all: a guard that refuses them gets turned off."""
 
     def test_a_reference_with_a_word_character_beside_it(self):
-        for text in ("- a#974 b", "- a _#974 b", "- a #974x b", "- a #974_ b", "- a xGH-974 b", "- a GH-974x b"):
+        for text in (
+            "- a#974 b",
+            "- a _#974 b",
+            "- a #974x b",
+            "- a #974_ b",
+            "- a xGH-974 b",
+            "- a GH-974x b",
+        ):
             with self.subTest(text=text):
                 self.assertFalse(refused(text))
 
@@ -208,7 +235,15 @@ class WhatStaysSmall(unittest.TestCase):
                 self.assertFalse(refused(text))
 
     def test_a_definition_after_a_thematic_break_or_an_html_comment(self):
-        for between in ("\n---", "\n\n---", "\n\n***", "\n\n___", "\n\n* * *", "\n\n<!-- refs -->", "\n<!-- refs -->"):
+        for between in (
+            "\n---",
+            "\n\n---",
+            "\n\n***",
+            "\n\n___",
+            "\n\n* * *",
+            "\n\n<!-- refs -->",
+            "\n<!-- refs -->",
+        ):
             text = f"- D1 ([#974]){between}\n[#974]: {URL}"
             with self.subTest(text=text):
                 self.assertFalse(refused(text))
@@ -362,13 +397,22 @@ class WhereTheTextIsRead(unittest.TestCase):
         self.assertIn("after a blank line at the end of the text, the definition line", stderr)
 
     def test_input_of_the_wrong_shape_is_let_through_quietly(self):
-        for payload in ("[]", '"text"', "3", '{"tool_input": []}', '{"tool_input": {"command": 5}}', "not json"):
+        for payload in (
+            "[]",
+            '"text"',
+            "3",
+            '{"tool_input": []}',
+            '{"tool_input": {"command": 5}}',
+            "not json",
+        ):
             with self.subTest(payload=payload):
                 result = run_hook_raw(payload)
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
 
     def test_an_error_inside_the_hook_lets_the_call_through(self):
-        payload = json.dumps({"tool_input": {"command": "gh pr create --body " + shlex.quote(DECISION)}, "cwd": "/"})
+        payload = json.dumps(
+            {"tool_input": {"command": "gh pr create --body " + shlex.quote(DECISION)}, "cwd": "/"}
+        )
         with (
             mock.patch.object(lint, "publishing_sources", side_effect=RuntimeError("boom")),
             mock.patch.object(sys, "stdin", io.StringIO(payload)),
