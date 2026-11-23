@@ -36,6 +36,8 @@ BODIES = {
     "title.json": '{"title": "fix: merge the two lists"}',
     "home/q.graphql": MERGE_QUERY,
     "rel/q.graphql": MERGE_QUERY,
+    "aliases.yml": "mm: pr merge --squash\n",
+    "other-aliases.yml": "co: pr checkout\n",
 }
 
 AZ_PR = "https://dev.azure.com/o/p/_apis/git/repositories/r/pullrequests/5?api-version=7.1"
@@ -117,6 +119,20 @@ DENIED = {
         "gh api graphql -F query=@~/q.graphql",
         "gh api graphql -F query=@$HOME/q.graphql",
         "gh api graphql -F query=@rel/q.graphql",
+        # a body the request reads from stdin: a heredoc, a here-string, a redirect
+        f'gh api graphql --input - <<\'EOF\'\n{{"query": "{MERGE_QUERY.replace('"', '\\\\"')}"}}\nEOF',
+        f"gh api graphql -F query=@- <<EOF\n{MERGE_QUERY}\nEOF",
+        f"cat <<'EOF' | gh api graphql -F query=@-\n{MERGE_QUERY}\nEOF",
+        f"curl -s -X POST -d @- https://api.github.com/graphql <<'EOF'\n{MERGE_QUERY}\nEOF",
+        f"gh api graphql -F query=@- <<< '{MERGE_QUERY}'",
+        "gh api graphql --input - < {d}/queue.json",
+    ],
+    "a gh alias that merges": [
+        "gh alias set mm 'pr merge --squash'",
+        "gh alias set mm 'pr -R o/r merge'",
+        "gh alias set --clobber am 'api graphql -f query=mutation{enablePullRequestAutoMerge}'",
+        "gh alias import {d}/aliases.yml",
+        "gh alias import - <<'EOF'\nmm: pr merge --squash\nEOF",
     ],
     "az repos pr update": [
         "az repos pr update --id 5 --status completed",
@@ -161,6 +177,8 @@ DENIED = {
             ' "$PRURL"'
         ),
         'bash -c "curl -s -X PATCH -d \\"\\$(cat {d}/done.json)\\" \\$PRURL"',
+        f"az rest --method patch --uri '{AZ_PR}' --body @- <<'EOF'\n{{\"status\": \"completed\"}}\nEOF",
+        f'curl -s -X PATCH -d @- \'{AZ_PR}\' <<EOF\n{{"autoCompleteSetBy": {{"id": "me"}}}}\nEOF',
         # a literal URL in another request does not name this one's target
         (
             'curl -s https://dev.azure.com/o/_apis/connectionData --next -u ":$PAT" -X PATCH'
@@ -256,6 +274,15 @@ PASSES = [
         "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge\nEOF"
     ),
     f"tee q.graphql <<'EOF'\n{MERGE_QUERY}\nEOF",
+    # request bodies from stdin that cannot merge, and a PR body that only mentions one
+    'gh api graphql --input - <<\'EOF\'\n{"query": "query { viewer { login } }"}\nEOF',
+    "gh pr create --title 'fix: x' --body-file - <<'EOF'\nRun gh pr merge after review.\nEOF",
+    'gh api -X POST repos/o/r/issues/5/comments --input - <<< \'{"body": "merge after CI"}\'',
+    # gh aliases that do not merge
+    "gh alias set co 'pr checkout'",
+    "gh alias set prs 'pr list --search merged'",
+    "gh alias list",
+    "gh alias import {d}/other-aliases.yml",
     # mentions without a request tool
     "grep -rn mergePullRequest claude/.claude/hooks",
     "az boards work-item update --id 5 --discussion 'needs the mergePullRequest scope'",

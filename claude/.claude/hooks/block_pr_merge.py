@@ -45,6 +45,7 @@ COMPLETION = re.compile(
     r"status\"?\s*:\s*\"?(?:completed|3)(?!\w)|autoCompleteSetBy", re.IGNORECASE
 )
 PR_ITSELF = re.compile(r"pullrequests(?:/[^/\s?]+)?(?=[?\s]|$)", re.IGNORECASE)
+ALIAS_MERGE = re.compile(r"(?<![\w-])pr(?![\w-]).*?(?<![\w-])merge(?![\w-])", re.DOTALL)
 FILE_OPTION = re.compile(r"--(?:input|in-f[\w-]*|body-file|post-file|upload-file)")
 
 
@@ -52,30 +53,36 @@ def name(word: str) -> str:
     return word.rsplit("/", 1)[-1]
 
 
-def runs_body(line: str, marker: re.Match[str]) -> bool:
-    """Whether the command that receives the heredoc opened by *marker* runs its body."""
+def heredoc_role(line: str, marker: re.Match[str]) -> str:
+    """What the command receiving the heredoc opened by *marker* does with its body: "run" it
+    (a shell or an interpreter), "send" it (gh, az, curl or wget, as a request body), or
+    "read" it as data."""
     before = SEPARATOR.split(line[: marker.start()])[-1]
     after = re.split(r"&&|\|\||[;&]", line[marker.end() :])[0]
-    words = re.sub(r"['\"]", " ", f"{before} {after}").split()
-    return any(RUNNER.fullmatch(name(word)) for word in words)
+    names = [name(word) for word in re.sub(r"['\"]", " ", f"{before} {after}").split()]
+    if any(RUNNER.fullmatch(word) for word in names):
+        return "run"
+    return "send" if (REQUEST_TOOLS | {"az"}) & set(names) else "read"
 
 
-def normalise(command: str) -> str:
-    """*command* with backslash-newlines joined, data heredoc bodies dropped, quotes,
-    backslashes and the commas and brackets of a list removed."""
+def normalise(command: str) -> tuple[str, str]:
+    """*command* with backslash-newlines joined, heredoc bodies dropped unless a shell or an
+    interpreter runs them, quotes, backslashes and the commas and brackets of a list removed;
+    and the bodies of the heredocs a request tool receives."""
     kept: list[str] = []
-    pending: list[tuple[str, bool]] = []  # (delimiter, body runs) of the heredocs opened
+    sent: list[str] = []
+    pending: list[tuple[str, str]] = []  # (delimiter, role) of the heredocs opened
     for line in command.replace("\\\n", "").split("\n"):
         if pending:
             if line.strip() == pending[0][0]:
                 _ = pending.pop(0)
-            elif pending[0][1]:
-                kept.append(line)
+            elif pending[0][1] != "read":
+                (kept if pending[0][1] == "run" else sent).append(line)
             continue
         kept.append(line)
-        pending += [(m[2], runs_body(line, m)) for m in HEREDOC.finditer(line)]
+        pending += [(m[2], heredoc_role(line, m)) for m in HEREDOC.finditer(line)]
     text = "\n".join(kept).replace("$'", "'").replace('$"', '"')
-    return re.sub(r"[,\[\]]", " ", re.sub(r"['\"\\]", "", text))
+    return re.sub(r"[,\[\]]", " ", re.sub(r"['\"\\]", "", text)), "\n".join(sent)
 
 
 def next_word_is(words: list[str], start: int, wanted: str) -> int | None:
@@ -128,6 +135,19 @@ def az_pr_update(words: list[str], text: str) -> str | None:
         ):
             return "az repos pr update --auto-complete"
     return None
+
+
+def alias_merges(words: list[str], sent: str, cwd: str | None) -> bool:
+    """Whether *words* define a gh alias whose expansion holds `pr … merge` or a merge mutation;
+    for `alias import`, the expansion is the file it names or the heredoc it receives."""
+    start = subcommand(words, "gh", ["alias"])
+    if start is None or start >= len(words) or words[start] not in ("set", "import"):
+        return False
+    rest = words[start + 1 :]
+    expansion = " ".join(rest)
+    if words[start] == "import":
+        expansion += "\n" + "\n".join([sent] + [read_body(word, cwd) for word in rest])
+    return bool(ALIAS_MERGE.search(expansion) or MUTATION.search(expansion))
 
 
 def writes(words: list[str]) -> bool:
@@ -210,13 +230,15 @@ def check(command: str, cwd: str | None = None) -> str | None:
     """The merge form *command* holds, or None."""
     if len(command) > MAX_SIZE:
         raise ValueError("the command is past the size cap")
-    text = normalise(command)
+    text, sent = normalise(command)
     segments = [segment.split() for segment in SEPARATOR.split(text)]
     words = [word for segment in segments for word in segment]
     names = {name(word) for word in words}
     for segment in segments:
         if subcommand(segment, "gh", ["pr", "merge"]) is not None:
             return "gh pr merge"
+        if alias_merges(segment, sent, cwd):
+            return "a gh alias that merges"
         found = az_pr_update(segment, text)
         if found:
             return found
@@ -225,7 +247,7 @@ def check(command: str, cwd: str | None = None) -> str | None:
     if not names & (REQUEST_TOOLS | {"az"}):
         return None
     paths = [path for segment in segments for path in body_paths(segment)]
-    bodies = "\n".join([text] + [read_body(path, cwd) for path in paths])
+    bodies = "\n".join([text, sent] + [read_body(path, cwd) for path in paths])
     mutation = MUTATION.search(bodies)
     if mutation and names & REQUEST_TOOLS:
         return f"the GraphQL mutation {mutation[0]}"
@@ -256,6 +278,8 @@ def main() -> int:
         cwd = field(data, "cwd")
         form = check(command, cwd if isinstance(cwd, str) else None) if command else None
     except Exception as error:  # noqa: BLE001 - judged by its merge words instead
+        # By design the hook fails open on its own error unless the input holds a merge word:
+        # it guards against a session's accident, not against an attacker provoking an error.
         print(f"block_pr_merge: {error!r}", file=sys.stderr)
         form = "a command the hook could not check" if SUSPECT.search(raw) else None
     if form:
