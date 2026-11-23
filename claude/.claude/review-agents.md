@@ -53,6 +53,9 @@ verify and reports Critical or Important breakage in the lines the fix wrote; an
 `### Noticed` and is routed like any finding. `reviewer` always runs and verifies every finding `architecture-reviewer`
 and `prose-reviewer` did not raise; those two run only for their own findings; specialists do not run.
 
+When a fix round's findings are mostly new cases rather than defects in what the change set out to do, the lead stops
+the loop early: every open finding goes on the user's list with the lead's recommendation, as after round 5.
+
 After round 5 the loop stops: every open finding goes on the user's list with the lead's recommendation. One the user
 rules fix now gets one fix dispatch and one verify-only pass by `reviewer` alone; whatever that leaves open goes back on
 the list, and no round follows.
@@ -72,8 +75,10 @@ and it is fixed as recommended, without asking the user; fix rounds run without 
 
 - **On the change** (Critical, Important or Minor) → the implementer and the next fix round (after the cap, the user's
   list). It goes on the user's list instead when its fix changes behaviour or touches a decision recorded in the issue,
-  or when the lead recommends deferring or dropping it, with the reason; one that does not hold at its artifact, or
-  cannot be confirmed, is listed marked "not confirmed".
+  or when the lead recommends deferring or dropping it, with the reason. A finding about a case the spec leaves out —
+  what the change is not for, or its Out of scope — is no defect of the change: it goes on the user's list in the
+  defer-or-drop group, recommended as a later issue or as an accepted gap, and reaches a fix round only when the user
+  rules it in. One that does not hold at its artifact, or cannot be confirmed, is listed marked "not confirmed".
 - **By-catch** (tagged `pre-existing`, or listed by the implementer) goes by its class, as
   [`agents/implementer.md`](agents/implementer.md), "## Scope", defines small:
   - **Small** → fixed in this change as its own commit; the PR body names it in one sentence.

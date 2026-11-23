@@ -17,7 +17,13 @@ The lead writes `~/Memory/<repo>/brief-<N>.md` before dispatching — paste noth
 In a convention repo the issue is the spec (`## Wanted`, `## Decisions`, `## Done when`, `## Out of scope`, and the
 epic's `## Decisions`), so the brief holds nothing else and a decision never lives in the brief. An issue with an open
 question or without `## Decisions` is not dispatched. In any other repo the brief adds **Goal** (two or three
-sentences), **Done criteria**, **In scope** and **Out of scope**.
+sentences, naming what the change is for and what it is not for — "against a mistake, not against an attacker"),
+**Done criteria**, **In scope** and **Out of scope**. In a convention repo the issue's `## Wanted` names what the change
+is not for.
+
+A change to a guard — a hook, a filter, a permission or deny rule, a lint — has among its Done criteria (in a
+convention repo its `## Done when`) a count of the false denials the change causes on real recent work (session
+transcripts, CI logs), beside the gaps it closes.
 
 ## Implementer dispatch
 

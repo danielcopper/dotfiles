@@ -68,7 +68,7 @@ before each round: it routes the findings, including the check of each one at it
 and their cap. The user's list goes to the user when the loop ends, and the run goes on while it waits; a ruling to
 fix is dispatched as `review-agents.md` says.
 
-*Done when:* every finding sent to the implementer is addressed or, after the round cap, on the user's list, and that
+*Done when:* every finding sent to the implementer is addressed or, after the round cap or an early stop, on the user's list, and that
 list is with the user.
 
 ## 7. Gate evidence, once
