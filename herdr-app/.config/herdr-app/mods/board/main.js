@@ -2703,7 +2703,7 @@ const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
 // way to them (the owner's, the project's, the items' own), else the
 // page's first; null for none.
 function pageError(errors) {
-  const onTheWay = errors.filter((e) => Array.isArray(e.path) && e.path.length <= ITEMS_PATH.length && e.path.every((p, i) => p === ITEMS_PATH[i]));
+  const onTheWay = errors.filter((e) => Array.isArray(e.path) && e.path.every((p, i) => p === ITEMS_PATH[i]));
   return onTheWay.sort((a, b) => b.path.length - a.path.length)[0] ?? errors[0] ?? null;
 }
 
@@ -4946,8 +4946,9 @@ export const columnsModal = {
 //
 // A move by a page or end key glides: the content and the thumb carry
 // herdr's transition of `top` at every draw (motionOf), GLIDE while the
-// block stands where such a key put it (`glideTo`: the offset and the
-// heights then), else a zero duration. gpui-kit keeps a transition's
+// block stands where such a key put it (`glideTo`: the heights it was
+// measured at then; every other mover drops it, and only a change of the
+// heights could move the offset besides), else a zero duration. gpui-kit keeps a transition's
 // value per element and property, adopting the first one it sees, and
 // eases toward a changed target with the duration given in that draw; a
 // zero duration takes the target at once (gpui-kit's base/src/motion.rs,
@@ -4966,13 +4967,13 @@ export const GLIDE = { duration: 120, easing: "ease-out" };
 // where a page or end key put it, else 0, which moves it at once.
 export function motionOf(ui) {
   const to = ui.glideTo;
-  return to && to.offset === ui.offset && to.content === ui.content && to.viewport === ui.viewport ? GLIDE : 0;
+  return to && to.content === ui.content && to.viewport === ui.viewport ? GLIDE : 0;
 }
 
 // The block at `offset`, put there by a page or end key.
 function glideTo(ui, offset) {
   ui.offset = offset;
-  ui.glideTo = { offset, content: ui.content, viewport: ui.viewport };
+  ui.glideTo = { content: ui.content, viewport: ui.viewport };
 }
 
 // The block at `offset`, at once.

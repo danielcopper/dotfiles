@@ -98,7 +98,7 @@ const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
 // way to them (the owner's, the project's, the items' own), else the
 // page's first; null for none.
 function pageError(errors) {
-  const onTheWay = errors.filter((e) => Array.isArray(e.path) && e.path.length <= ITEMS_PATH.length && e.path.every((p, i) => p === ITEMS_PATH[i]));
+  const onTheWay = errors.filter((e) => Array.isArray(e.path) && e.path.every((p, i) => p === ITEMS_PATH[i]));
   return onTheWay.sort((a, b) => b.path.length - a.path.length)[0] ?? errors[0] ?? null;
 }
 

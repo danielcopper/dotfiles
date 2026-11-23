@@ -765,6 +765,8 @@ test("a board's pages add up: each item once, the last page's pageInfo; the next
     { message: "Projekt „Sample“: project gone" }, "the deepest error on the way to the items");
   assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["viewer"], "elsewhere")]),
     { message: "Projekt „Sample“: an item" }, "none on the way: the page's first");
+  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["repositoryOwner", "projectV2"], "project gone")]),
+    { message: "Projekt „Sample“: project gone" }, "an item's error lies past the items, not on the way to them");
 });
 
 test("validateConfig: a board's limit is the most items it reads, 1000 by default and at most; a list's at most 100, 50 by default", () => {
