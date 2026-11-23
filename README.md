@@ -452,28 +452,29 @@ herdr-app`. Which files of the package git tracks is set in the root
   head and selected tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
-  tables; its HTML shows as text, its comments not at all; "keine
-  Beschreibung" where it has none), then list its sub-issues ("UNTERAUFGABEN
-  · 7/11", the count the card shows; the first 50, with "erste 50 von N"
-  where it has more) and the pull requests linked to it by a closing keyword
-  or by hand in its Development sidebar, open, merged or closed ("VERKNÜPFTE
-  PRS", where it has any), each with its key, title and state, a closed or
-  merged one dimmed, a draft marked, and how many GitHub sent without
-  access. The details of an Azure work item, on the Sprint and on the
-  Backlog, show the same: its description formatted from its HTML, keeping
-  only plain formatting tags (`mods/board/src/description.js` lists them and
-  says why; any other tag goes and its text stays, a `<pre>` shows as code
-  that wraps), its children ("UNTERAUFGABEN", each with its state, a done
-  one dimmed, and how many the query did not find) and the pull requests
-  linked to it, each by its id only ("!57 Pull Request"): reading a pull
-  request's title and state would cost an az call each. A description's
-  images are never loaded: herdr's TextView would fetch them from wherever
-  the text points. A Markdown image `![alt](url)`, and an `<img>` tag in
-  Markdown or HTML, show as a link "Bild: alt" to an http or https URL (the
-  text alone for any other). An image by reference shows as a link "Bild:
-  alt" where it names its reference and that is defined (`![alt][ref]`),
-  else as text (`![alt][]`, `![ref]`). A link opens in the browser, http
-  and https only.
+  tables; its HTML shows as text, its comments not at all, but for an inline
+  one that spans an empty line or one that starts in code, which shows as
+  text; "keine Beschreibung" where it has none), then list its sub-issues
+  ("UNTERAUFGABEN · 7/11", the count the card shows; the first 50, with
+  "erste 50 von N" where it has more) and the pull requests linked to it by
+  a closing keyword or by hand in its Development sidebar, open, merged or
+  closed ("VERKNÜPFTE PRS", where it has any), each with its key, title and
+  state, a closed or merged one dimmed, a draft marked, and how many GitHub
+  sent without access. The details of an Azure work item, on the Sprint and
+  on the Backlog, show the same: its description formatted from its HTML,
+  keeping only plain formatting tags (`mods/board/src/description.js` lists
+  them and says why; any other tag goes and its text stays, a `<pre>` shows
+  as code that wraps), its children ("UNTERAUFGABEN", each with its state,
+  a done one dimmed, and how many the query did not find) and the pull
+  requests linked to it, each by its id only ("!57 Pull Request"): reading
+  a pull request's title and state would cost an az call each. A
+  description's images are never loaded: herdr's TextView would fetch them
+  from wherever the text points. A Markdown image `![alt](url)`, and an
+  `<img>` tag in Markdown or HTML, show as a link "Bild: alt" to an http or
+  https URL (the text alone for any other). An image by reference shows as
+  a link "Bild: alt" where it names its reference and that is defined
+  (`![alt][ref]`), else as text (`![alt][]`, `![ref]`). A link opens in the
+  browser, http and https only.
   A description taller than about 12 lines shows folded to that height with
   "… mehr (e)"; `e` or a click unfolds it and folds it again. What reading
   them costs and what a refresh keeps of them, the header of

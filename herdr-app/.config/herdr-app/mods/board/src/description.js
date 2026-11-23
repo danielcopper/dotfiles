@@ -28,16 +28,21 @@
 //   of the element around it (the content of a <script>, <style> or
 //   <textarea> too, which so never stands in one); any other `<` (none of a
 //   tag, or a tag left open or longer than MAX_TAG) is written `&lt;`.
-// - Markdown keeps no HTML: a comment outside code (codeRanges) that
-//   crosses no blank line goes, and every other `<` but that of an http(s)
-//   URL in `<…>` gets a zero-width space after it, which no HTML tag starts
-//   with, so Markdown reads it as text, and in code it looks unchanged. An
-//   http(s) URL in `<…>` stays, as an autolink or a link's or definition's
-//   destination (`<https://…>`, `[x](<https://…>)`, `[r]: <https://…>`):
-//   HTML has no tag of that name, so it can only be a link, or text. Its
-//   `\`, `!`, `[`, `]`, `(`, `)` and backtick are percent-encoded
-//   (keptUrl), the same address to a server, so that nothing in it can be
-//   Markdown however the span is read. An inline image becomes a Markdown link
+// - Markdown keeps no HTML. A comment outside code (codeRanges) goes as
+//   CommonMark reads it: one that starts a line (at most 3 spaces in) is an
+//   HTML block to its `-->`, across blank lines; one anywhere else goes
+//   only where it crosses no blank line; one not closed stays. Every other
+//   `<` but that of an http(s) URL in `<…>` gets a zero-width space after
+//   it, which no HTML tag starts with, so Markdown reads it as text, and in
+//   code it looks unchanged. An http(s) URL in `<…>` stays, as an autolink
+//   or a link's or definition's destination (`<https://…>`,
+//   `[x](<https://…>)`, `[r]: <https://…>`): HTML has no tag of that name,
+//   so it can only be a link, or text. It is written as the WHATWG parser
+//   reads it (webUrl), and its `\`, `!`, `[`, `]`, `(`, `)` and backtick
+//   are encoded in path, query and fragment (keptUrl), so no link, image or
+//   code span can start in it however the span is read; its host stays as
+//   it is (an IPv6 one keeps its brackets). An inline image becomes a
+//   Markdown link
 //   "Bild: <alt>" to its http(s) URL (its text alone for another URL), and
 //   an <img> or <image> tag the same; a `![` that starts no inline image
 //   the scanner reads (an image by reference, or one longer than
@@ -50,9 +55,9 @@
 //
 // Each step looks at the text once. A tag looks at most MAX_TAG characters
 // ahead, an image MAX_IMAGE, a URL in `<…>` up to the next `<`; a
-// comment's end is one search and whether a blank line lies before it one
-// binary search (blankLines); so a long hostile text costs little, and the
-// board makes it once per read (the Board's readRelated).
+// comment's end is one search, and whether a blank line lies within it one
+// binary search (blankWithin); so a long hostile text costs little, and
+// the board makes it once per read (the Board's readRelated).
 
 const KEPT = new Set([
   "p", "br", "b", "strong", "i", "em", "u", "s", "del", "strike", "mark", "code", "a", "ul", "ol", "li",
@@ -198,17 +203,27 @@ function keptHtml(text) {
 // escaped, each `<` followed by a zero-width space.
 const markdownLabel = (text) => text.replace(/[\\[\]!]/g, "\\$&").replace(/</g, `<${ZWSP}`);
 
-// An http(s) URL as the Markdown keeps it in `<…>`: a `\` in it, which
-// there would escape the next character, and each character that could
-// start Markdown (`!`, `[`, `]`, `(`, `)`, backtick) percent-encoded.
+// An http(s) URL as the Markdown keeps it in `<…>` (see the header): as
+// the WHATWG parser writes it (webUrl), a `\` left in it, which there would
+// escape the next character, and each character that could start Markdown
+// (`!`, `[`, `]`, `(`, `)`, backtick) percent-encoded outside its host;
+// null for no http(s) URL.
 const URL_ESCAPES = { "\\": "%5C", "!": "%21", "[": "%5B", "]": "%5D", "(": "%28", ")": "%29", "`": "%60" };
-const keptUrl = (url) => url.replace(/[\\![\]()`]/g, (c) => URL_ESCAPES[c]);
+const urlText = (text) => text.replace(/[\\![\]()`]/g, (c) => URL_ESCAPES[c]);
+export function keptUrl(text) {
+  const href = webUrl(text);
+  if (!href) return null;
+  const url = new URL(href);
+  const user = url.username ? `${url.username}${url.password ? `:${url.password}` : ""}@` : "";
+  const head = `${url.protocol}//${user}${url.host}`;
+  return `${url.protocol}//${urlText(user)}${url.host}${urlText(href.slice(head.length))}`;
+}
 
 // An image as a Markdown link (see the header).
 function markdownImage(alt, src) {
-  const url = webUrl(src);
+  const url = keptUrl(src);
   const label = markdownLabel(imageLabel(alt));
-  return url ? `[${label}](<${keptUrl(url)}>)` : label;
+  return url ? `[${label}](<${url}>)` : label;
 }
 
 // The inline image `![alt](destination "title")` starting at `at`, read as
@@ -262,12 +277,14 @@ function inlineImage(text, at) {
 }
 
 // The http(s) URL in `<…>` at `at`, written as the Markdown keeps it (see
-// the header): { text, end } or null. The search stops at the next `<`, so
-// no two of them read the same text.
+// the header): { text, end } or null, also where the parser takes it for no
+// URL. The search stops at the next `<`, so no two of them read the same
+// text.
 function webLink(text, at) {
   WEB_LINK.lastIndex = at;
   const m = WEB_LINK.exec(text);
-  return m ? { text: `<${keptUrl(m[1])}>`, end: at + m[0].length } : null;
+  const url = m ? keptUrl(m[1]) : null;
+  return url ? { text: `<${url}>`, end: at + m[0].length } : null;
 }
 
 // The blank lines of a text: for each, where its line break before stands
@@ -386,6 +403,17 @@ function keptMarkdown(text) {
     while (c < code.length && code[c][1] <= at) c++;
     return c < code.length && code[c][0] <= at;
   };
+  let line = 0;
+  let lineEnd = text.indexOf("\n");
+  // Whether a position, growing from call to call, starts its line after
+  // at most 3 spaces, where a comment starts an HTML block.
+  const startsLine = (at) => {
+    while (lineEnd >= 0 && lineEnd < at) {
+      line = lineEnd + 1;
+      lineEnd = text.indexOf("\n", line);
+    }
+    return at - line <= 3 && /^ *$/.test(text.slice(line, at));
+  };
   const marks = /<|!\[/g;
   const out = [];
   let from = 0;
@@ -395,7 +423,7 @@ function keptMarkdown(text) {
     from = at + m[0].length;
     if (m[0] === "<") {
       let end = commentEnd(at);
-      if (end >= 0 && (inCode(at) || blankWithin(blanks, at, end))) end = -1;
+      if (end >= 0 && (inCode(at) || (!startsLine(at) && blankWithin(blanks, at, end)))) end = -1;
       const link = end < 0 ? webLink(text, at) : null;
       const tag = end < 0 && !link ? tagAt(at) : null;
       if (end >= 0) from = end;

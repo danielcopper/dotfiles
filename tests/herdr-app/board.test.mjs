@@ -6117,25 +6117,39 @@ test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images
   assert.equal(md('a <img width="300" alt="chart" src="https://example.com/b.png"> b'), "a [Bild: chart](<https://example.com/b.png>) b", "an <img>, as GitHub writes a pasted one");
   assert.equal(md("<b>x</b> <details> a<br>b <img src=x> <a href=https://example.com/>"), "<\u200bb>x<\u200b/b> <\u200bdetails> a<\u200bbr>b Bild <\u200ba href=https://example.com/>", "other HTML: text");
   assert.equal(md("<https://example.com/a\\b> <HTTP://example.com/up> [x](<https://example.com/a b>) [y](< https://example.com>)\n\n[r]: <https://example.com/r>"),
-    "<https://example.com/a%5Cb> <HTTP://example.com/up> [x](<https://example.com/a b>) [y](<\u200b https://example.com>)\n\n[r]: <https://example.com/r>",
-    "an http(s) URL in <…> stays, an autolink or a destination, its \\ as %5C; anything else in <…> is text");
+    "<https://example.com/a/b> <http://example.com/up> [x](<https://example.com/a%20b>) [y](<\u200b https://example.com>)\n\n[r]: <https://example.com/r>",
+    "an http(s) URL in <…> stays, an autolink or a destination, as the URL parser writes it (a \\ as /); anything else in <…> is text");
   assert.equal(md(`<https://example.com/${"a".repeat(3000)}>`), `<https://example.com/${"a".repeat(3000)}>`, "however long");
   assert.equal(md("<!x --> y"), "<\u200b!x --> y", "no other <! is a comment");
-  assert.equal(md("<https://a/![b](c)> <https://a/ ![b](https://e/x.png)>"), "<https://a/%21%5Bb%5D%28c%29> <https://a/ %21%5Bb%5D%28https://e/x.png%29>",
-    "its ! [ ] ( ) percent-encoded, the same address, so nothing in it is Markdown however it is read");
+  assert.equal(md("<https://a/![b](c)> <https://a/ ![b](https://e/x.png)>"), "<https://a/%21%5Bb%5D%28c%29> <https://a/%20%21%5Bb%5D%28https://e/x.png%29>",
+    "its ! [ ] ( ) encoded in path, query and fragment, so no link, image or code span can start in it however the span is read");
+  assert.equal(md("<https://[::1]:8080/a(b)?q=[c]#!d> <https://u:p!@example.com/x>"), "<https://[::1]:8080/a%28b%29?q=%5Bc%5D#%21d> <https://u:p%21@example.com/x>",
+    "an IPv6 host keeps its brackets; the user's part is encoded too");
+  const tricky = "<https://evil.example\\@good.example/>";
+  assert.equal(md(tricky), "<https://evil.example/@good.example/>", "a \\ read as the URL parser reads it, a /");
+  assert.equal(new URL(md(tricky).slice(1, -1)).host, new URL(board.webUrl(tricky.slice(1, -1))).host, "the host the browser would go to");
+  assert.equal(md("<https://en.wikipedia.org/wiki/A_(b)>"), "<https://en.wikipedia.org/wiki/A_%28b%29>");
+  assert.equal(board.keptUrl("https://e/a(b)"), "https://e/a%28b%29");
+  assert.deepEqual([board.keptUrl("javascript:alert(1)"), board.keptUrl("https://%zz")], [null, null], "no http(s) URL: none");
   assert.equal(md("\\<https://a/![b](https://e/x.png)>"), "\\<https://a/%21%5Bb%5D%28https://e/x.png%29>", "after a backslash, where it is no autolink");
-  assert.equal(md("a `<https://a/` ![b](https://e/x.png)>"), "a `<https://a/%60 %21%5Bb%5D%28https://e/x.png%29>", "across a code span, its backtick too");
+  assert.equal(md("a `<https://a/` ![b](https://e/x.png)>"), "a `<https://a/%60%20%21%5Bb%5D%28https://e/x.png%29>", "across a code span, its backtick too");
+  assert.equal(md("a <https://%zz> b"), "a <\u200bhttps://%zz> b", "one the URL parser takes for none: text");
   assert.equal(md("![a](https://e/x?a\\\\)"), "[Bild: a](<https://e/x?a%5C>)", "an image's URL with a \\ in its <…>: %5C");
   assert.equal(md("<mailto:a@example.com> <https://example.com/<b>"), "<\u200bmailto:a@example.com> <\u200bhttps://example.com/<\u200bb>", "another scheme, or a < inside: text");
   assert.equal(md("a <!-- hidden <img src=x> --> b <!--> c <!-- open"), "a  b  c <\u200b!-- open", "comments go; one not closed is text");
   assert.equal(md("<!-- Describe the change -->\n## Summary\n\nText"), "\n## Summary\n\nText", "a template's comment goes");
+  assert.equal(md("<!--\nPlease describe the change.\n\nThanks!\n-->\n## Summary"), "\n## Summary", "one that starts a line is an HTML block: across blank lines");
+  assert.deepEqual([md("   <!-- a\n\nb -->c"), md("    x\n\n<!-- a\n\nb -->c"), md("<!-- not closed\n\nx")], ["   c", "    x\n\nc", "<\u200b!-- not closed\n\nx"],
+    "at most 3 spaces in, after code too; one not closed stays");
+  assert.equal(md("para\n    <!-- a\n\nb --> c"), "para\n    <\u200b!-- a\n\nb --> c", "4 spaces in, where a paragraph goes on, is no block");
   assert.equal(md("`x`<!-- c -->y"), "`x`y", "one right after a code span goes too");
   assert.equal(md("Use `<!--` to start a comment.\n\nAnd so on --> prod"), "Use `<\u200b!--` to start a comment.\n\nAnd so on --> prod", "not one that starts in a code span");
   assert.equal(md("```html\n<!-- in a fence\n```\nafter --> prod"), "```html\n<\u200b!-- in a fence\n```\nafter --> prod", "nor in a fenced block");
   assert.equal(md("    <!-- indented\n\nlater --> x"), "    <\u200b!-- indented\n\nlater --> x", "nor in an indented one");
   assert.equal(md("a <!-- one\n\ntwo --> b"), "a <\u200b!-- one\n\ntwo --> b", "nor one across a blank line");
-  assert.deepEqual([md("a <!-- one\n \t\ntwo --> b"), md("x\n<!-- one\n\n--> y")], ["a <\u200b!-- one\n \t\ntwo --> b", "x\n<\u200b!-- one\n\n--> y"],
-    "a blank line of spaces, or one right after the comment's own line");
+  assert.deepEqual([md("a <!-- one\n \t\ntwo --> b"), md("x\ny <!-- one\n\n--> z"), md("    <!-- a\n\nb --> c")],
+    ["a <\u200b!-- one\n \t\ntwo --> b", "x\ny <\u200b!-- one\n\n--> z", "    <\u200b!-- a\n\nb --> c"],
+    "a blank line of spaces, or one right after the comment's own line; 4 spaces in is code");
   assert.equal(md('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<\u200bpre>&lt;img src="https://attacker.example/x.png"&gt;<\u200b/pre>');
   assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no image, a link as written");
   assert.equal(md(`![x](https://example.com/i.png "${"t".repeat(1100)}")`), `[Bild: x](https://example.com/i.png "${"t".repeat(1100)}")`, "its title past MAX_IMAGE: no image, a link as written");
