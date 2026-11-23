@@ -432,6 +432,34 @@ PASSES = [
     "echo 'gh pr $(printf mer)ge 1' | xargs bash",
     "cat <<'EOF' | xargs -0 sh\ngh pr view \"$N\"\nEOF",
     "seq 1 3 | xargs -I{} az boards work-item show --id {} -o json",
+    # a write or a body from a file to a literal endpoint that cannot merge: a pull request's
+    # threads, comments, reviews and the like, or a GitHub pull request itself
+    (
+        'curl -s -u ":$AZURE_DEVOPS_EXT_PAT" -H "Content-Type: application/json"'
+        ' --data @reply-856114.json "https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator'
+        '/pullRequests/88308/threads/856114/comments?api-version=7.1"'
+    ),
+    (
+        "az devops invoke --area git --resource pullRequestThreadComments --route-parameters"
+        " project=VC repositoryId=r pullRequestId=88308 threadId=856114 --http-method POST"
+        " --in-file reply.json --api-version 7.1"
+    ),
+    (
+        'curl -s -u ":$AZURE_DEVOPS_EXT_PAT" -X POST -d @thread.json'
+        ' "https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308/threads?api-version=7.1"'
+    ),
+    "gh api repos/o/r/pulls/2820/reviews --method POST --input review.json",
+    "gh api repos/o/r/issues/5/comments -F body=@c.md",
+    (
+        "az rest --method post --uri https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308/threads?api-version=7.1"
+        " --body @thread.json"
+    ),
+    "curl -d @body.json https://api.github.com/repos/o/r/pulls/12",
+    "curl -sT body.json https://api.github.com/repos/o/r/pulls/12",
+    "curl -d@m.json https://api.github.com/repos/o/r/pulls/3",
+    "wget --post-file=m.json https://api.github.com/repos/o/r/pulls/3",
+    "gh api repos/o/r/pulls/3 --body-file=m.json",
+    "wget --method=PATCH https://api.github.com/repos/o/r/pulls/1",
 ]
 
 DENIED = [
@@ -513,8 +541,6 @@ DENIED = [
     "parallel 'gh pr merge {}' ::: 3",
     "gh -R $X merge 3",
     "gh --repo {o/r,pr} merge 3",
-    "curl -d @body.json https://api.github.com/repos/o/r/pulls/12",
-    "curl -sT body.json https://api.github.com/repos/o/r/pulls/12",
     # a read-only gh form next to another command
     "curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge gh pr view 1",
     "wget --method=PUT https://api.github.com/repos/o/r/pulls/12/merge gh pr list",
@@ -544,10 +570,7 @@ DENIED = [
     "git -c alias.x='!gh pr merge 3' x",
     # a request body from a file, a backslash inside quotes
     'az rest --method patch --uri u --body \'{"status":"comp\\leted"}\'',
-    "curl -d@m.json https://api.github.com/repos/o/r/pulls/3",
     "curl -K cfg",
-    "wget --post-file=m.json https://api.github.com/repos/o/r/pulls/3",
-    "gh api repos/o/r/pulls/3 --body-file=m.json",
     "az devops invoke --area git --resource pullRequests --in-file m.json",
     # a command word built at run time or renamed
     "{gh,} pr merge 3",
@@ -607,7 +630,6 @@ DENIED = [
     "cat q | curl -d @- https://api.github.com/graphql",
     "curl -s -X POST https://api.github.com/graphql",
     "curl --json @q.json https://api.github.com/graphql",
-    "wget --method=PATCH https://api.github.com/repos/o/r/pulls/1",
     "echo hi | bash -c 'curl -sd @q.json https://api.github.com/graphql'",
     # a shell that reads its text again: the file and write rules read inside its quotes
     "bash -c 'gh api -X PUT repos/o/r/pulls/1/$(printf %s mer ge)'",
@@ -731,6 +753,16 @@ DENIED = [
         "az devops invoke --area git --resource pullRequests --route-parameters project=VC"
         " repositoryId=r pullRequestId=5 --http-method patch --api-version 7.1 # status completed"
     ),
+    # a write or a body from a file toward a merge surface, a URL built at run time or none
+    'curl -s -u ":$PAT" -X PATCH https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308 --data @b.json',
+    'curl -X PATCH "https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308?api-version=7.1" -d @b.json',
+    "curl -X POST -d @b.json https://api.github.com/repos/o/r/pulls/5/merge",
+    "curl -X POST https://api.github.com/graphql -d @q.json",
+    'curl -X POST -d @b.json "$B/pullRequests/5/threads"',
+    "curl -X POST -d @b.json https://x/pulls/1/merg%65",
+    'gh api "$EP" --method POST --input b.json',
+    "gh api repos/o/r/pulls/5/merge --method PUT --input b.json",
+    "az rest --method patch --uri https://dev.azure.com/l-p-a/VC/_apis/git/repositories/otc-ai-orchestrator/pullRequests/88308?api-version=7.1 --body @b.json",
     # the GraphQL merge queue
     (
         'gh api graphql -f query=\'mutation { enqueuePullRequest(input: {pullRequestId: "x"})'
@@ -786,7 +818,7 @@ REASONS = {
     "gh pr merge 3": "mentions a PR merge",
     "gh alias set m x": "defines a gh alias",
     "az repos pr update --id 4 --status completed": "completes an Azure DevOps pull request",
-    "curl -d @m.json https://example.com/x": "sends a writing request with curl or wget",
+    "curl -d @m.json https://api.github.com/graphql": "sends a writing request with curl or wget",
     "gh api graphql --input q.json": "reads a request from a file",
     "curl https://example.com/merge-queue": (
         "mentions a merge next to curl, wget, gh api, az rest, az devops invoke or az repos pr"

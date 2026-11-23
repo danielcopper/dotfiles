@@ -11,6 +11,7 @@ import re
 import signal
 import sys
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 MAX_LENGTH = 100_000
 DEADLINE = 5.0  # seconds a check may take before the hook denies
@@ -124,6 +125,12 @@ ALIAS_VERB = re.compile(r"\b(set|import)\b")
 # as autoCompleteSetBy. COMPLETION below is the run-time rule's narrower reading.
 AZ_COMPLETE = re.compile(r"\b(?:completed\b|auto-?complete)")
 DEVOPS_INVOKE = re.compile(r"\bdevops\s+invoke\b")
+# Where a write can merge or complete a pull request: an Azure pull request itself (nothing after
+# its id, which completion PATCHes), a GitHub merge endpoint, or GraphQL, whose body is not read.
+MERGE_SURFACE = re.compile(
+    r"pullrequests/\d+/?(?:$|[?#])|/pulls/[^/\s?#]+/merge|/merges(?![\w-])|graphql"
+)
+INVOKE_RESOURCE = re.compile(r"--resource(?:=|\s+)(\S+)")
 # az devops invoke's method; without one it reads (GET)
 HTTP_METHOD = re.compile(r"--http-method(?:=|\s+)(\S+)")
 FILE_LONG_FLAGS = re.compile(r"--input|--upload-file|--config|--post-file|--body-file|--in-file")
@@ -480,16 +487,20 @@ def reads_or_writes_body(command: str, depth: int = 0) -> str | None:
     for words in simple_commands(tokens):
         texts = [token.text for token in words if not token.op]
         names = [text.lower().rsplit("/", 1)[-1] for text in texts]
-        if (set(names) & {"curl", "wget"}) and writes_with_curl(texts):
-            return "sends a writing request with curl or wget"
+        if (
+            (set(names) & {"curl", "wget"})
+            and writes_with_curl(texts)
+            and may_write_to_merge(texts)
+        ):
+            return "sends a writing request with curl or wget that may reach a merge"
         if gh_az_body_tokens(words):
             joined = " ".join(texts)
             if (
                 FILE_LONG_FLAGS.search(joined.lower())
                 or any(FILE_REFERENCE.search(text) for text in texts)
                 or FILE_SHORT_FLAGS.search(joined)
-            ):
-                return "reads a request from a file"
+            ) and body_target_may_merge(texts):
+                return "reads a request from a file that may reach a merge"
     for part in quoted_parts:
         try:
             found = reads_or_writes_body(part, depth + 1)
@@ -904,6 +915,95 @@ def network_words(command: str, plain: str) -> list[str]:
     ]
 
 
+def may_write_to_merge(words: list[str]) -> bool:
+    """For the words of a curl or wget command that writes: whether the request may reach a
+    merge surface - a config or input file that may name the URL (`-K`, `--config`, wget's `-i`
+    or `--input-file`), a `--url @file`, no literal URL (`://`) at all, a URL with `$`, a
+    backtick, `{` or `[` (built by the shell or by curl's own globbing), or a URL on
+    MERGE_SURFACE. A write to a literal sub-resource of a pull request passes."""
+    wget = any(word.lower().rsplit("/", 1)[-1] == "wget" for word in words)
+    urls: list[str] = []
+    for i, word in enumerate(words):
+        following = words[i + 1] if i + 1 < len(words) else ""
+        if word.startswith("--"):
+            name, equals, value = word.partition("=")
+            if name in ("--config", "--input-file"):
+                return True
+            if name == "--url":
+                urls.append(value if equals else following)
+        elif word.startswith("-"):
+            letters = re.split(r"[^A-Za-z0-9#:]", word[1:], maxsplit=1)[0]
+            if "K" in letters or (wget and "i" in letters):
+                return True
+        if "://" in word:
+            urls.append(word)
+    if not urls:
+        return True
+    return any(
+        url.startswith("@")
+        or any(c in url for c in "$`{[")
+        or MERGE_SURFACE.search(unquote(url).lower()) is not None
+        for url in urls
+    )
+
+
+def body_target_may_merge(texts: list[str]) -> bool:
+    """For the words of a gh or az command that reads its request body from a file: whether the
+    target may be a merge surface. gh api: a word after `api` built at run time (`$`, a backtick,
+    a brace expansion), one on MERGE_SURFACE, or none that looks like an endpoint (a `/`
+    or graphql). az rest: no `--uri`/`--url`/`-u` holding a URL or a path, or one built at run
+    time or on the surface.
+    az devops invoke: invoke_reaches_pr(). az repos pr, or anything else: the pull request
+    itself or unknown, so yes."""
+    lower = [text.lower() for text in texts]
+    names = [text.rsplit("/", 1)[-1] for text in lower]
+    joined = " ".join(lower)
+    if "gh" in names and "api" in lower:
+        after = [text for text in texts[lower.index("api") + 1 :] if not text.startswith("-")]
+        if not any("/" in text or "graphql" in text.lower() for text in after):
+            return True
+        return any(
+            "$" in text
+            or "`" in text
+            or BRACE_EXPANSION.search(text) is not None
+            or MERGE_SURFACE.search(unquote(text).lower()) is not None
+            for text in after
+        )
+    if "az" in names and "rest" in lower:
+        uris = []
+        for i, text in enumerate(lower):
+            name, equals, value = text.partition("=")
+            if name in ("--uri", "--url", "-u"):
+                uris.append(value if equals else (lower[i + 1] if i + 1 < len(lower) else ""))
+        return not uris or any(
+            ("://" not in uri and not uri.startswith("/"))  # no literal URL or path: unknown
+            or "$" in uri
+            or "`" in uri
+            or MERGE_SURFACE.search(unquote(uri)) is not None
+            for uri in uris
+        )
+    if DEVOPS_INVOKE.search(joined):
+        return invoke_reaches_pr(joined)
+    return True
+
+
+def invoke_reaches_pr(lower: str) -> bool:
+    """Whether az devops invoke's `--resource` may be a pull request itself or its completion:
+    `pullRequests`, a pull-request name holding `complet` or `merge`, a name built at run time,
+    or no `--resource` at all. Threads, comments, reviewers, labels and statuses are none of
+    these."""
+    resources = INVOKE_RESOURCE.findall(lower)
+    if not resources:
+        return True
+    return any(
+        resource == "pullrequests"
+        or "$" in resource
+        or "`" in resource
+        or ("pullrequest" in resource and ("complet" in resource or "merge" in resource))
+        for resource in resources
+    )
+
+
 def invoke_writes(lower: str) -> bool:
     """Whether the de-quoted, lowercased text sends `az devops invoke` a writing request: an
     `--http-method` other than GET, or an `--in-file` body."""
@@ -935,7 +1035,12 @@ def check(command: str) -> str | None:
         return "defines a gh alias"
     if az and (
         AZ_COMPLETE.search(lower)
-        or (DEVOPS_INVOKE.search(lower) and "pullrequest" in lower and invoke_writes(lower))
+        or (
+            DEVOPS_INVOKE.search(lower)
+            and "pullrequest" in lower
+            and invoke_writes(lower)
+            and invoke_reaches_pr(lower)
+        )
     ):
         return "completes an Azure DevOps pull request"
     write_words = False  # re-read text holds curl's writing options outside a tool's command
@@ -951,11 +1056,11 @@ def check(command: str) -> str | None:
         near = network if reread else body_tool
         if near and (FILE_FLAGS.search(lower) or FILE_SHORT_FLAGS.search(plain)):
             body = "reads a request from a file"
-        elif near and writes_with_curl(plain.split()):
+        elif near and writes_with_curl(plain.split()) and may_write_to_merge(plain.split()):
             # every word decides; when only another command's option reads like curl's, such as
             # find's -execdir, a later rule may name the reason, and the end of check denies
             if writes_with_curl(network_words(command, plain)):
-                body = "sends a writing request with curl or wget"
+                body = "sends a writing request with curl or wget that may reach a merge"
             else:
                 write_words = True
         else:
@@ -983,7 +1088,7 @@ def check(command: str) -> str | None:
     if command.count("$(") + command.count("`") // 2 > MAX_SUBSTITUTIONS:
         return "holds too many substitutions to check"
     if write_words:
-        return "sends a writing request with curl or wget"
+        return "sends a writing request with curl or wget that may reach a merge"
     return None
 
 

@@ -45,8 +45,10 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       anywhere (`automerge`, `pr_merge`), or runs `gh extension exec` with an extension so named;
     - defines a gh alias (`alias` with `set` or `import`, next to `gh`), or completes an Azure DevOps pull request
       (`az` with `completed` or `auto-complete`, also as the start of a name such as `autoCompleteSetBy`, or
-      `devops invoke` writing to a pull-request resource: an `--http-method` other than GET, or `--in-file`;
-      without a method it reads and passes);
+      `devops invoke` writing — an `--http-method` other than GET, or `--in-file`; without a method it reads
+      and passes — to `--resource pullRequests` itself, a pull-request resource named for completion or
+      merge, a resource built at run time, or no named resource; threads, comments, reviewers, labels and
+      statuses pass);
     - holds a simple command — up to the next unquoted `|`, `;`, `&&`, `||`, `&` or newline, with every quoted
       string also read as a command — that runs `gh api`, `az rest`, `az devops invoke` or `az repos pr` (the
       subcommand right after the tool's options, with no quoted word or redirection before it) and reads a request
@@ -54,7 +56,15 @@ Each holds in every repo unless its profile departs from it under `defaults`.
       `--input`, `--upload-file`, `--config`, `--post-file`, `--body-file`, `--in-file`, `-T`, `-K` or `-i`
       option), or that runs `curl` or `wget` with a writing request (a method other than GET or HEAD, `-d`,
       `--data…`, `--json`, `-F`, `--form`, `-T`, `--upload-file`, `-K`, `--config`, `--post-…`, `--body-…`);
-      only that command's words count, not other stages of a pipeline;
+      only that command's words count, not other stages of a pipeline. Either counts only when the target may
+      be a merge surface: an Azure `pullRequests/<id>` with nothing after the id (the pull request that
+      completion PATCHes), a GitHub `/pulls/<n>/merge` or `/merges`, `graphql` (whose body is not read), a
+      target built at run time (`$`, a backtick, for curl also `{` or `[`) or written percent-encoded, or no
+      literal target at all (curl and wget without a `://` URL, `-K`/`--config`, wget's `-i`; `gh api` with no
+      endpoint word; `az rest` without a URL or path; `az repos pr`). A write to a literal sub-resource — a
+      pull request's threads, comments, reviews, reviewers, labels or statuses, or a GitHub pull request
+      itself — passes, also with its body from a file. In re-read or open-quoted text the file rule reads the
+      whole text and keeps no such exception;
     - mentions `merge` as a word anywhere next to `curl`, `wget`, `gh api`, `az rest`, `az devops invoke` or
       `az repos pr` — not `merged`, `merges`, `merger`, `merge_…`, `merge-base` or `merge-tree`; `mergeBranch` and
       `merge-upstream` count. This rule reads the merge word only, no completion or alias;
