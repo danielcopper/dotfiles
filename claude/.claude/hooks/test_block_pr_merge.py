@@ -60,25 +60,41 @@ AZ_THREAD = (
 INVOKE_PR = "az devops invoke --area git --resource pullRequests --route-parameters pullRequestId=5"
 
 
-def written_then(body: str, then: str) -> str:
-    """A command that writes *body* to m.sh with a heredoc, then runs *then*."""
-    return f"cat > m.sh <<'EOF'\n{body}\nEOF\n{then}"
+def written_then(body: str, then: str, name: str = "m.sh") -> str:
+    """A command that writes *body* to the file *name* with a heredoc, then runs *then*."""
+    return f"cat > {name} <<'EOF'\n{body}\nEOF\n{then}"
 
 
 # Ways to feed the written m.sh to a shell or interpreter that runs its stdin.
 STDIN_FORMS = [
     "bash < m.sh",
     "bash <m.sh",
+    "bash 0< m.sh",
+    "bash < m.sh > out.log 2>&1",
+    "bash < m.sh 2>/dev/null",
     "sh -s < m.sh",
     "sh -s -- a b < m.sh",
+    # held by the older rule too: every argument of a wrapper counts as run
     "sudo -n bash < m.sh",
     "python3 - < m.sh",
+    "python3 - x < m.sh",
     "ssh host < m.sh",
     "ssh -i key -p 22 host < m.sh",
+    "ssh -P tag host < m.sh",
     "cat m.sh | bash",
     "cat m.sh | sh -s",
     "cat m.sh | tr -d x | bash",
     "< m.sh tr -d x | bash",
+    # the command a wrapper runs, past its options, their values and the words before it
+    "cat m.sh | sudo bash",
+    "cat m.sh | sudo -u x bash",
+    "cat m.sh | env FOO=1 bash",
+    "cat m.sh | timeout -s KILL 60 bash",
+    "cat m.sh | nice -n 5 bash",
+    "cat m.sh | sudo timeout 5 bash",
+    "cat m.sh | mise x node@20 -- node",
+    "cat m.sh | docker exec -i c bash",
+    "cat m.sh | kubectl exec -i p -- bash",
 ]
 STDIN_RUNS = [written_then("gh pr merge 5", form) for form in STDIN_FORMS]
 
@@ -429,13 +445,20 @@ PASSES = [
     "cat > cases.txt <<'EOF'\ngh pr merge 5\nEOF\npython3 harness.py cases.txt",
     # a written script without a merge, fed through stdin
     *(written_then("gh pr view 5", form) for form in STDIN_FORMS),
-    # a written file fed through stdin to a runner that has a script of its own
+    # a written file fed through stdin to a runner that has a script of its own, to a command
+    # that is no runner, or on a descriptor other than stdin
     written_then("gh pr merge 5", "python3 harness.py < m.sh"),
+    written_then("gh pr merge 5", "python3 -s harness.py < m.sh"),
     written_then("gh pr merge 5", "cat m.sh | python3 harness.py"),
     written_then("gh pr merge 5", "bash lint.sh < m.sh"),
     written_then("gh pr merge 5", "bash -c 'wc -l' < m.sh"),
     written_then("gh pr merge 5", "ssh host wc -l < m.sh"),
     written_then("gh pr merge 5", "cat m.sh | wc -l"),
+    written_then("gh pr merge 5", "bash 3< m.sh"),
+    # behind a wrapper only the command it runs counts, not a runner's name as an argument
+    written_then("gh pr merge 5", "cat m.sh | timeout 5 grep bash"),
+    written_then("gh pr merge 5", "cat m.sh | nice -n 5 grep python"),
+    written_then("gh pr merge 5", "cat notes.md | xargs grep -l python", "notes.md"),
     # gh pr create and edit inside a chain
     "git push -u origin HEAD && gh pr create --title 'fix: x' --body-file body.md",
     "gh pr edit 5 --title 'fix: y' && gh pr view 5",
@@ -458,8 +481,9 @@ PASSES = [
     "echo 'status: completed'",
 ]
 
-# DENIED forms the corpus detector does not flag: the merge lies in a file on disk, a variable
-# or a script path spelled two ways, not in the command's text.
+# DENIED forms the corpus detector does not flag: the merge lies in a file on disk, a variable,
+# a script path spelled two ways or a heredoc body the detector drops as data, not in the
+# command's text.
 NOT_DETECTED = {
     "gh api graphql -F query=@{d}/merge.graphql",
     'gh api graphql -f query="$(cat {d}/merge.graphql)" -f id=PR_x',

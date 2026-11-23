@@ -53,10 +53,45 @@ WRAPPER_PAIRS = {
     ("docker", "exec"),
     ("kubectl", "exec"),
 }
+# To find the command a wrapper runs: the wrapper's options that take the next word as value,
+# and how many words it takes before that command (timeout's duration, flock's lock file, the
+# container or pod; -1: mise's tools, up to `--`).
+WRAPPED: dict[str, tuple[set[str], int]] = {
+    "env": ({"-u", "--unset", "-C", "--chdir"}, 0),
+    "sudo": (
+        {"-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-h", "--host"}
+        | {"-p", "--prompt", "-R", "--chroot", "-r", "--role", "-t", "--type", "-T", "-U"},
+        0,
+    ),
+    "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),
+    "nice": ({"-n", "--adjustment"}, 0),
+    "ionice": ({"-c", "--class", "-n", "--classdata"}, 0),
+    "stdbuf": ({"-i", "-o", "-e", "--input", "--output", "--error"}, 0),
+    "xargs": (
+        {"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "--max-args", "-P"}
+        | {"--max-procs", "-s", "--max-chars", "--process-slot-var"},
+        0,
+    ),
+    "flock": ({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}, 1),
+    "watch": ({"-n", "--interval"}, 0),
+    "time": ({"-f", "--format", "-o", "--output"}, 0),
+    "exec": ({"-a"}, 0),
+    "uv run": (
+        {"--with", "-w", "--with-editable", "--with-requirements", "--python", "-p", "--project"}
+        | {"--directory", "--package", "--extra", "--group", "--env-file", "--index"},
+        0,
+    ),
+    "mise exec": (set(), -1),
+    "mise x": (set(), -1),
+    "docker exec": ({"-e", "--env", "--env-file", "-u", "--user", "-w", "--workdir"}, 1),
+    "kubectl exec": ({"-c", "--container", "-n", "--namespace", "--context"}, 1),
+}
 RESERVED = {"!", "{", "if", "then", "elif", "else", "do", "while", "until"}
-SHELL_VALUES = ("-o", "-O", "+o", "+O")  # a shell's options that take the next word as value
-# ssh's options that take the next word as value; the word after them is the host.
-SSH_VALUES = tuple(f"-{flag}" for flag in "BbcDEeFIiJLlmOopQRSWw")
+# The only options of a runner known to take the next word as value: a shell's and ssh's.
+SHELL_VALUES = ("-o", "-O", "+o", "+O")
+SSH_VALUES = tuple(f"-{flag}" for flag in "BbcDEeFIiJLlmOoPpQRSWw")
+# A redirection word: its file descriptor, its operator and the file when attached to it.
+REDIRECT = re.compile(r"(\d*)([<>]+[&|-]?)(.*)")
 # A cat heredoc inside the `$( )` that is a shell's -c argument: `bash -c "$(cat <<X`.
 SHELL_C_CAT = re.compile(
     rf"(?:^|[\s;&|(])(?:\S*/)?{SHELLS}\s+(?:-\w+\s+)*-\w*c\w*\s+[\"']?\$\(\s*cat\s*$"
@@ -335,19 +370,34 @@ def has_request(text: str) -> bool:
 
 
 def stdin_paths(words: list[str], cat: bool) -> list[str]:
-    """The files a `< path` among *words* feeds, and with *cat* the files `cat` prints."""
+    """The files a `< path` (or `0<`) among *words* feeds, and with *cat* the files `cat`
+    prints."""
     paths: list[str] = []
     for k, word in enumerate(words):
-        if word == "<" and k + 1 < len(words):
-            paths.append(words[k + 1])
-        elif word.startswith("<") and not word.startswith("<<") and len(word) > 1:
-            paths.append(word[1:])
+        redirect = REDIRECT.fullmatch(word)
+        if redirect and redirect[1] in ("", "0") and redirect[2] == "<":
+            paths += [redirect[3]] if redirect[3] else words[k + 1 : k + 2]
         elif cat and os.path.basename(word) == "cat":
             for arg in words[k + 1 :]:
                 if re.search(r"[<>|]", arg):
                     break
                 if not arg.startswith("-"):
                     paths.append(arg)
+    return paths
+
+
+def pipeline_feeds(text: str, receives: Callable[[list[str]], bool]) -> list[str]:
+    """The files `cat` or `<` feeds, in *text*, a command *receives* accepts: with `<` into it,
+    or from an earlier stage of its pipeline. Read once per pipeline, from its last stage."""
+    paths: list[str] = []
+    for statement in STATEMENT.split(text):
+        later = False  # whether a later stage of the pipeline receives
+        for stage in reversed(statement.split("|")):
+            words = re.sub(r"[()`]", " ", stage).split()
+            here = receives(words)
+            if later or here:
+                paths += stdin_paths(words, cat=later)
+            later = later or here
     return paths
 
 
@@ -367,11 +417,7 @@ def fed_paths(text: str) -> list[str]:
             assigned = found[1] and ASSIGNMENT_PREFIX.fullmatch(statement[: found.start()])
             if has_request(flat) or (assigned and found[1] in used):
                 paths += stdin_paths(found[2].split(), cat=True)
-        stages = flat.split("|")
-        for i, stage in enumerate(stages):
-            later = any(has_request(other) for other in stages[i + 1 :])
-            if later or has_request(stage):
-                paths += stdin_paths(stage.split(), cat=later)
+        paths += pipeline_feeds(flat, lambda words: bool(REQUEST_TOOLS & tools(words)))
     return paths
 
 
@@ -396,70 +442,75 @@ def read_body(path: str, cwd: str | None, written: dict[str, str]) -> str:
 
 
 def without_redirects(words: list[str]) -> list[str]:
-    """*words* without their redirections: `<`, `>` or `>>` with the word after it, and a word
-    that starts with one (`<path`, `2>/dev/null`, a heredoc marker)."""
+    """*words* without their redirections: an operator word with the file after it, and a word
+    that holds its file (`<path`, `2>/dev/null`, a heredoc marker)."""
     kept: list[str] = []
     target = False
     for word in words:
+        redirect = REDIRECT.fullmatch(word)
         if target:
             target = False
-        elif re.fullmatch(r"\d*(?:<{1,3}|>>?)", word):
-            target = True
-        elif not re.match(r"\d*[<>]", word):
+        elif redirect:
+            target = not redirect[3]
+        else:
             kept.append(word)
     return kept
 
 
+def wrapped(words: list[str], k: int) -> int:
+    """Index of the command word the wrapper at index *k* of *words* runs, len(words) when there
+    is none: past the wrapper's options and the values WRAPPED names, env's assignments, and the
+    words it takes before the command."""
+    span = wrapper_at(words, k)
+    name = " ".join([os.path.basename(words[k]), *words[k + 1 : k + span]])
+    values, left = WRAPPED.get(name, (set[str](), 0))
+    i, options = k + span, True
+    while i < len(words):
+        word = words[i]
+        if options and word == "--":
+            options, left = False, max(left, 0)
+        elif options and word.startswith("-") and len(word) > 1:
+            i += 1 if word in values else 0
+        elif not (name == "env" and ASSIGNMENT.fullmatch(word)):
+            if not left:
+                return i
+            left -= 1
+        i += 1
+    return i
+
+
+def script_index(words: list[str], r: int) -> int:
+    """Index of the script argument of the shell or interpreter at index *r* of *words*: the
+    first word past its options, past the host for ssh. Only a shell's -o and -O and ssh's
+    options are known to take the next word as value."""
+    name = os.path.basename(words[r])
+    first = skip_options(words, r + 1, SSH_VALUES if name == "ssh" else SHELL_VALUES)
+    return first + 1 if name == "ssh" else first
+
+
 def runs_stdin(words: list[str]) -> bool:
     """Whether the simple command *words* runs a shell or an interpreter that reads its script
-    from stdin: the command word, or the first one behind a wrapper, with no script argument past
-    its options, or given `-`; a shell given -s; ssh with nothing past the host."""
+    from stdin: as the command word, or as the command a wrapper runs, with no script argument
+    (script_index), given `-`, a shell given -s, or ssh with nothing past the host."""
     words = without_redirects(words)
     k = command_word(words)
-    span = wrapper_at(words, k)
-    if span:
-        runners = (
-            r for r in range(k + span, len(words)) if RUNNER.fullmatch(os.path.basename(words[r]))
-        )
-        k = next(runners, len(words))
+    while k < len(words) and wrapper_at(words, k):
+        k = wrapped(words, k)
     name = os.path.basename(words[k]) if k < len(words) else ""
     if not RUNNER.fullmatch(name):
         return False
-    first = skip_options(words, k + 1, SSH_VALUES if name == "ssh" else SHELL_VALUES)
-    options = words[k + 1 : first]
-    if name == "ssh":
-        first += 1
+    first = script_index(words, k)
+    options = [word for word in words[k + 1 : first] if word.startswith("-")]
     shell_s = re.fullmatch(SHELLS, name) and any(re.fullmatch(r"-\w*s\w*", o) for o in options)
     return first >= len(words) or "-" in options or bool(shell_s)
 
 
-def stdin_scripts(text: str) -> list[str]:
-    """The files *text* feeds to a command that runs its stdin (runs_stdin): with `<`, or with
-    `cat` or `<` in an earlier stage of its pipeline."""
-    paths: list[str] = []
-    for statement in STATEMENT.split(text):
-        stages = [
-            [command.split() for command in SEPARATOR.split(stage) if command.strip()]
-            for stage in statement.split("|")
-        ]
-        for i, commands in enumerate(stages):
-            paths += [
-                path
-                for words in commands
-                if runs_stdin(words)
-                for path in stdin_paths(words, cat=False)
-            ]
-            if commands and any(later and runs_stdin(later[0]) for later in stages[i + 1 :]):
-                paths += stdin_paths(commands[-1], cat=True)
-    return paths
-
-
 def run_scripts(text: str) -> set[str]:
     """The script words *text* may run, to be looked up among the files the command writes: the
-    command word, the file `source` or `.` reads, every argument of a wrapper, the first argument
-    after any shell or interpreter word (past its options and the values of -o and -O), and the
-    files fed to a shell or an interpreter that runs its stdin (stdin_scripts)."""
-    scripts = {literal(path) for path in stdin_scripts(text)}
+    command word, the file `source` or `.` reads, every argument of a wrapper, the script
+    argument of any shell or interpreter word (script_index), and the files `cat` or `<` feeds a
+    shell or an interpreter that runs its stdin (runs_stdin)."""
+    scripts = {literal(path) for path in pipeline_feeds(text, runs_stdin)}
     for words in simple_commands(text):
         k = command_word(words)
         if k >= len(words):
@@ -471,7 +522,7 @@ def run_scripts(text: str) -> set[str]:
             k = skip_options(words, k + 1)
         for r, word in enumerate(words):
             if RUNNER.fullmatch(os.path.basename(word)):
-                first = skip_options(words, r + 1, SHELL_VALUES)
+                first = script_index(words, r)
                 scripts.update(literal(arg) for arg in words[first : first + 1])
         if k < len(words):
             scripts.add(literal(words[k]))

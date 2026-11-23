@@ -55,13 +55,17 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     that names it, quotes deleted (`$S/b.json`, `"$tmp"`, `"$D"/b.json`, `$HOME/x` as `~/x`): sent, it is a body;
     run, it is read as commands, and the files it writes in turn count as bodies, beside what the command wrote to
     them before. A written file counts as run when it is the command word, the
-    file `source` or `.` reads, any argument of a wrapper, or the first argument after a shell or interpreter word,
-    and when it reaches through stdin a shell or interpreter that reads its script from there: fed with `<`
-    (`bash < m.sh`), or by `cat` or `<` in an earlier stage of the pipeline (`cat m.sh | bash`). That runner is the
-    command word or the first one behind a wrapper, and it takes its script from stdin when no script argument
-    follows its options, when it is given `-`, as a shell given `-s`, or as ssh with nothing past the host; one
-    with a script of its own (`python3 check.py < cases.txt`, `bash -c '…' < f`, `ssh host cmd < f`) only reads
-    the file as data. A script on disk that the command does not write is not read as commands, however it is run.
+    file `source` or `.` reads, any argument of a wrapper, or the script argument of a shell or interpreter word —
+    the first word past its options, past the host for ssh; only a shell's `-o` and `-O` and ssh's options are
+    known to take a value. It counts as run too when it reaches through stdin a shell or interpreter that reads its
+    script from there: fed with `<` or `0<` (`bash < m.sh`), or by `cat` or `<` in an earlier stage of the
+    pipeline (`cat m.sh | bash`). That runner is the command word or the command a wrapper runs — past the
+    wrapper's options, the values of those known to take one, `env`'s assignments, the duration of `timeout`, the
+    lock file of `flock`, the container or pod of `docker exec` or `kubectl exec`, and the tools of `mise` up to
+    `--` — and it takes its script from stdin when it has no script argument, when it is given `-`, as a shell
+    given `-s`, or as ssh with nothing past the host. One with a script of its own
+    (`python3 check.py < cases.txt`, `bash -c '…' < f`, `ssh host cmd < f`) only reads the file as data, and so
+    does a command that is no runner (`cat m.sh | timeout 5 grep bash`).
     The command word is found past `VAR=` assignments and the reserved words `!`, `{`, `if`, `then`, `elif`,
     `else`, `do`, `while` and `until`. The wrappers are known by name, without their options: `env`, `sudo`,
     `nohup`, `exec`, `command`, `time`, `timeout`, `nice`, `ionice`, `stdbuf`, `setsid`, `xargs`, `flock`,
