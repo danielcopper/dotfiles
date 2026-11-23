@@ -4258,26 +4258,31 @@ test("H/L step a task to the next column that maps its type; a moved task shows 
   assert.equal(board.shownState(read, { mappings: { Task: "To Do" } }), "Done", "not moved since it was read: its own state");
 });
 
-test("the Sprint's keys walk the stories, then each column in row order; h/l land on the same row's item, else the next one below, else the last", () => {
+test("the Sprint's keys walk the stories, then each column in row order; h/l stay in the row, past empty cells to the row's next item, and move nothing where the row has none", () => {
   const data = sprintData();
   const nav = board.sprintNav(data, "", false);
   assert.deepEqual(nav.map((c) => c.name), ["Story", "To Do", "In Progress", "In PR/Work done", "Done"]);
   assert.deepEqual(nav.map((c) => c.shown.map((i) => i.number)), [[301, 302], [331, 311], [332, 312], [313], [321]]);
-  const go = (col, key, dir, columns = nav) => board.sprintNavigate(columns, { col, key }, dir, data.rows);
+  const go = (col, key, dir, columns = nav) => board.sprintNavigate(columns, { col, key }, dir);
   assert.deepEqual(go(0, "AB#301", "right"), { col: 1, key: "AB#311" });
   assert.deepEqual(go(1, "AB#311", "right"), { col: 2, key: "AB#312" });
-  assert.deepEqual(go(3, "AB#313", "right"), { col: 4, key: "AB#321" }, "the next row below");
-  assert.deepEqual(go(0, "AB#302", "right"), { col: 1, key: "AB#311" }, "none below: the last");
+  assert.deepEqual(go(3, "AB#313", "right"), { col: 3, key: "AB#313" }, "the row has nothing further right: nothing moves, not down to the next row");
+  assert.deepEqual(go(0, "AB#302", "right"), { col: 4, key: "AB#321" }, "right past the row's empty cells");
+  assert.deepEqual(go(4, "AB#321", "left"), { col: 0, key: "AB#302" }, "left past them, onto the row's story");
   assert.deepEqual(go(2, "AB#332", "left"), { col: 1, key: "AB#331" });
+  assert.deepEqual(go(1, "AB#331", "left"), { col: 1, key: "AB#331" }, "„Ohne Story“ has no story: nothing moves");
   assert.deepEqual(go(0, "AB#302", "left"), { col: 0, key: "AB#302" }, "at the edge it stays");
+  assert.deepEqual(go(4, "AB#321", "right"), { col: 4, key: "AB#321" }, "at the other edge too");
   const item = (key, row) => ({ key, row });
-  const synthetic = [{ shown: [item("a", "r0")] }, { shown: [item("b", "r1"), item("c", "r2")] }];
-  assert.deepEqual(board.sprintNavigate(synthetic, { col: 0, key: "a" }, "right", [{ key: "r0" }, { key: "r1" }, { key: "r2" }]), { col: 1, key: "b" },
-    "the first one below, not the last");
+  const synthetic = [{ shown: [item("a", "r0")] }, { shown: [item("b", "r1"), item("c", "r0")] }, { shown: [item("d", "r0")] }];
+  assert.deepEqual(board.sprintNavigate(synthetic, { col: 0, key: "a" }, "right"), { col: 1, key: "c" }, "the row's item, not the column's first");
+  assert.deepEqual(board.sprintNavigate(synthetic, { col: 1, key: "b" }, "right"), { col: 1, key: "b" }, "none in the row: nothing moves");
+  assert.deepEqual(board.sprintNavigate(synthetic, { col: 2, key: "d" }, "left"), { col: 1, key: "c" }, "the nearest column that has one");
+  assert.deepEqual(board.sprintNavigate(synthetic, { col: 1, key: null }, "right"), { col: 2, key: "d" }, "with no item selected, as navigate");
   assert.deepEqual(go(1, "AB#331", "down"), { col: 1, key: "AB#311" });
   const mine = board.sprintNav(data, "", true);
   assert.deepEqual(mine.map((c) => c.shown.map((i) => i.number)), [[301], [331, 311], [], [313], []]);
-  assert.deepEqual(go(1, "AB#311", "right", mine), { col: 2, key: null }, "an empty column is selected as such");
+  assert.deepEqual(go(1, "AB#311", "right", mine), { col: 3, key: "AB#313" }, "an empty column is passed over");
   assert.deepEqual(board.shownRows(data, mine).map((r) => r.key), ["none", "AB#301"]);
   const changed = board.withItemState(data, "AB#302", "In Dev Test");
   assert.deepEqual([changed.rows[2].story.state, data.rows[2].story.state], ["In Dev Test", "To Do"], "a new data, the old one kept");

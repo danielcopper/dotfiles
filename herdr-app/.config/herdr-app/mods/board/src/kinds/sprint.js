@@ -67,21 +67,23 @@ export function sprintWarnings(data) {
   ];
 }
 
-// Keyboard movement over sprintNav's columns: j/k as everywhere (navigate);
-// h/l to the next column, onto the item of the same row there, else the
-// first one below it, else the last; an empty column is selected as such.
-export function sprintNavigate(nav, sel, dir, rows) {
+// Keyboard movement over sprintNav's columns: j/k as everywhere (navigate),
+// the only keys that change the row; h/l stay in the selected item's row,
+// onto that row's item in the next column in their direction that has one
+// (the stories' column holds the row's story), past the empty cells; where
+// none has one, nothing moves. With no item selected (an empty column) h/l
+// move as navigate does.
+export function sprintNavigate(nav, sel, dir) {
   if (dir === "up" || dir === "down" || !nav.length) return navigate(nav, sel, dir);
   const ci = Math.min(Math.max(sel?.col ?? 0, 0), nav.length - 1);
   const from = nav[ci].shown.find((i) => i.key === sel?.key);
-  const to = Math.min(Math.max(ci + (dir === "left" ? -1 : 1), 0), nav.length - 1);
-  if (!from || to === ci) return navigate(nav, sel, dir);
-  const list = nav[to].shown;
-  if (!list.length) return { col: to, key: null };
-  const order = new Map(rows.map((r, i) => [r.key, i]));
-  const at = order.get(rowOf(from));
-  const next = list.find((i) => rowOf(i) === rowOf(from)) ?? list.find((i) => order.get(rowOf(i)) > at) ?? list.at(-1);
-  return { col: to, key: next.key };
+  if (!from) return navigate(nav, sel, dir);
+  const step = dir === "left" ? -1 : 1;
+  for (let to = ci + step; to >= 0 && to < nav.length; to += step) {
+    const next = nav[to].shown.find((i) => rowOf(i) === rowOf(from));
+    if (next) return { col: to, key: next.key };
+  }
+  return { col: ci, key: from.key };
 }
 
 // The data with the item `key` in `state`; a task's column then counts as

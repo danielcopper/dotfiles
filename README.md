@@ -397,11 +397,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   and Backlog, `m` turns "nur meine" on and off (the toggle, the tabs, the
   switch and "nur meine" take clicks too), `/` filters, `r` refreshes (the shown
   view also refreshes every few minutes while the board shows), `Esc` closes. On
-  a Sprint `h/l j/k` move over the stories and then each column, staying in the
-  row where they can, `H/L` move a task to the next column its type has (through
-  the taskboard's own column, not the state, since two columns may map to one
-  state; az takes the request from a file under
-  `~/.cache/herdr-app/board/`), `s` sets a story's or task's state from its
+  a Sprint `j/k` move within a column (the stories' or a taskboard column) and
+  `h/l` stay in the row: they go to the row's item in the next column that has
+  one, past empty cells, and move nothing where no column further on has one;
+  `H/L` move a task to the next column its type has (through the taskboard's
+  own column, not the state, since two columns may map to one state; az takes
+  the request from a file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's state from its
   type's states, a click selects, and `Enter` shows the details (parent, state,
   assignee, column, area and iteration). On a Backlog `j/k` move, `s` sets the
   state, `Enter` shows the details (parent, state, assignee, area, iteration

@@ -51,7 +51,7 @@ export const sprintShape = {
     const at = item ? shownRows(st.data, sprintColumns(b, st)).findIndex((r) => r.key === rowOf(item)) : -1;
     if (at >= 0) sprintState(b).scroll.scroll_to_item(at);
   },
-  navigate: (b, view, st, dir) => sprintNavigate(sprintColumns(b, st), st.sel, dir, st.data.rows),
+  navigate: (b, view, st, dir) => sprintNavigate(sprintColumns(b, st), st.sel, dir),
   items: (data) => sprintItems(data),
   count(b, data) {
     const items = sprintItems(data);
