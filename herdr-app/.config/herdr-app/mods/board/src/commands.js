@@ -272,7 +272,9 @@ export const ACTIONS = [
     run: (b, c, cx) => b.open(c.item, cx),
     hint: (c) => (walks(c) && !c.drilled ? "öffnen" : null),
   },
-  { id: "tab-hint", hint: (c) => (c.related ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
+  // On a pull request's level, which reads no related items, the panel
+  // still has the keyboard.
+  { id: "tab-hint", hint: (c) => (c.related || c.panel ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
   { id: "lines-hint", hint: (c) => (c.panel ? "Zeilen" : null), hintKey: "j/k" },
   { id: "page-hint", hint: (c) => (c.panel ? "halbe Seite" : null), hintKey: "ctrl-d/u" },
   { id: "panel-edge-hint", hint: (c) => (c.panel ? "oben/unten" : null), hintKey: "gg/G" },

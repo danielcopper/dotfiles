@@ -540,7 +540,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   the mouse wheel scrolls them, and a thin mark at the right shows where they
   are. `Enter` shows a line's item in the panel, a level down: a parent's,
   a sub-issue's or a child's description, its own related items and its
-  state (a pull request's line opens in the browser). The panel's top names
+  state; a pull request as the PR list's details show one (its author,
+  review, draft mark, assignees and, on GitHub, its checks), with its
+  state, read by one more gh call, on Azure by `az repos pr show` (its
+  reviewers' votes as the review). The panel's top names
   the way down (`tender#914 › #2217`, on Azure the numbers alone); there
   `j/k` walk that item's lines, `Enter` goes further down, to any depth, and
   `Esc` goes back up a level, to the line it came from, marked and scrolled

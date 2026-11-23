@@ -451,6 +451,54 @@ export function parseGithubRelated(json, item, errors = []) {
   };
 }
 
+// One GraphQL request for a pull request the details panel goes down to
+// (related.js, pullRequest): by its repo and number, the fields the PR
+// list reads for a row (PR_FIELDS), and its state, which the list, of open
+// pull requests only, does not need.
+export const PULL_REQUEST_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id number title url state isDraft headRefName reviewDecision
+      author { login }
+      assignees(first: 10) { nodes { login name } }
+      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
+        checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
+    }
+  }
+}`;
+
+export function githubPullRequestArgs(item) {
+  const [owner, name] = item.repo.split("/");
+  return ["api", "graphql", "-f", `query=${PULL_REQUEST_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
+}
+
+// gh's answer for githubPullRequestArgs (and the GraphQL errors that came
+// with its data) → the pull request's details (related.js, pullRequest),
+// as parseGithubList makes a row's, with its state as a line has it. A
+// missing pull request is explained by the error at its path.
+export function parseGithubPullRequest(json, item, errors = []) {
+  const pr = json?.data?.repository?.pullRequest;
+  if (!pr) {
+    const e = errorAt(errors, ["repository"]);
+    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
+  }
+  const state = RELATED_STATES[pr.state] ?? { state: String(pr.state ?? "?").toLowerCase(), color: "muted", done: false };
+  return {
+    title: pr.title ?? item.title,
+    url: pr.url ?? item.url,
+    ...state,
+    draft: pr.isDraft === true,
+    author: pr.author?.login ?? "?",
+    review: reviewLabel(pr.reviewDecision, pr.isDraft),
+    checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null),
+    branch: pr.headRefName ?? null,
+    ...assigneesOf(pr.assignees?.nodes),
+    reviewers: reviewerLogins(pr.reviewRequests),
+    contentId: pr.id ?? null,
+  };
+}
+
 // The people an issue's or pull request's repo can assign (GitHub's
 // assignableUsers: those with access to it, the first ASSIGNABLE), and who
 // gh is, as the assignee picker offers them.
@@ -582,7 +630,8 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
 // gives its hidden columns) and how a board writes a move; and the items
 // related to an issue, its sub-issues and linked pull requests, read with
-// its description (related.js says what `related` holds); and an item's
+// its description (related.js says what `related` holds), and a pull
+// request's details (pullRequest, the same); and an item's
 // assignment (assign: actions/assign.js says what it holds), whose people
 // are read once per repo and kept while the board runs (one that fails is
 // not kept). gh runs by the path `paths` (toolPaths) finds.
@@ -596,6 +645,13 @@ export function makeGithub(paths) {
       async load(item) {
         const { json, errors } = await gh(paths, githubRelatedArgs(item));
         return parseGithubRelated(json, item, errors);
+      },
+    },
+    pullRequest: {
+      reads: (item) => item.kind === "pr" && Number.isInteger(item.number) && item.repo.includes("/"),
+      async load(item) {
+        const { json, errors } = await gh(paths, githubPullRequestArgs(item));
+        return parseGithubPullRequest(json, item, errors);
       },
     },
     assign: {

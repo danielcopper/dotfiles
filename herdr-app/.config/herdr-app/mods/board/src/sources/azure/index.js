@@ -10,12 +10,13 @@ import {
 } from "./common.js";
 import { azTypesArgs, parseAzureTypes, sprintView } from "./sprint.js";
 import { backlogView } from "./backlog.js";
-import { azureRelated } from "./related.js";
+import { azurePullRequest, azureRelated } from "./related.js";
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, per layout of an Azure view how it
-// loads and writes, and a work item's related items (related: its
-// description, children and linked pull requests, related.js). az runs by
+// loads and writes, a work item's related items (related: its
+// description, parent, children and linked pull requests, related.js) and
+// a pull request's details (pullRequest, the same). az runs by
 // the path `paths` (toolPaths) finds.
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
@@ -150,6 +151,7 @@ export function makeAzure(paths) {
     // A work item's description, children and linked pull requests
     // (related.js).
     related: azureRelated(az),
+    pullRequest: azurePullRequest(az),
     assign: {
       refuse: (item) => (item.kind === "workitem" ? null : "Hier lässt sich niemand zuweisen"),
       // The team's members, kept (parseMemberList); who az is is asked

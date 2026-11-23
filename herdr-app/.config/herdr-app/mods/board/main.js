@@ -37,7 +37,8 @@
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
 // keeps of them keptRelated says); an item the details panel went down to
-// (Enter on a line, related.js) costs the same when it shows, and on `r`
+// (Enter on a line, related.js) costs the same when it shows, a pull
+// request one gh or az call for its details (az repos pr show), and on `r`
 // each level's again, so that a level whose item is no longer among the
 // lines of the one above can go. An Azure work item's related items (its
 // description, children and linked pull requests) cost the same, one az
@@ -2099,7 +2100,12 @@ export function backlogView(s) {
 // query); a pull request's link carries
 // none either, and reading them would cost a call per pull request (az
 // repos pr show), so a pull request's line names its id only, with its
-// page.
+// page. The details panel reads a pull request it goes down to with that
+// call (azurePullRequest): `az repos pr show --id <n>` (the extension's
+// show_pull_request, dev/repos/pull_request.py: GitClient.get_pull_request,
+// REST's GitPullRequest) answers its title, status, isDraft, createdBy,
+// sourceRefName and reviewers, each with a vote; no checks (Azure's
+// policies would cost another call).
 
 // The work item with its links.
 export const azRelatedArgs = (c, id) => ["boards", "work-item", "show", ...azOrg(c.org), "--id", String(id), "--expand", "relations", "-o", "json"];
@@ -2197,6 +2203,53 @@ export async function loadAzureRelated(az, c, item) {
   };
 }
 
+// A pull request by its id.
+export const azPullRequestArgs = (c, id) => ["repos", "pr", "show", ...azOrg(c.org), "--id", String(id), "-o", "json"];
+
+// A pull request's status as a line shows it (as GitHub's states are):
+// its label, its chip's theme color, and whether it is done.
+const PULL_REQUEST_STATES = {
+  active: { state: "offen", color: "ansi2", done: false },
+  completed: { state: "gemerged", color: "ansi5", done: true },
+  abandoned: { state: "geschlossen", color: "muted", done: true },
+};
+
+// The reviewers' votes as a review label, as GitHub's review decision is
+// one (reviewLabel): a draft "Entwurf"; else Azure's own votes, the
+// strongest first: -10 "abgelehnt", -5 "wartet auf Autor", 10 or 5
+// "freigegeben"; none (no vote yet, or no reviewer) says nothing.
+export function azureReview(reviewers, draft) {
+  if (draft) return "Entwurf";
+  const votes = (Array.isArray(reviewers) ? reviewers : []).map((r) => r?.vote);
+  if (votes.includes(-10)) return "abgelehnt";
+  if (votes.includes(-5)) return "wartet auf Autor";
+  return votes.some((v) => v >= 5) ? "freigegeben" : "";
+}
+
+// az's answer for azPullRequestArgs → the pull request's details
+// (related.js, pullRequest): its title, state, draft mark, author, review
+// and source branch.
+export function parseAzurePullRequest(stdout) {
+  const json = azJson(stdout, "den Pull Request");
+  if (!isObject(json) || !Number.isInteger(json.pullRequestId)) throw new BoardError("Azure lieferte keinen Pull Request");
+  const state = PULL_REQUEST_STATES[json.status] ?? { state: String(json.status ?? "?"), color: "muted", done: false };
+  return {
+    ...(typeof json.title === "string" ? { title: json.title } : {}),
+    ...state,
+    draft: json.isDraft === true,
+    author: json.createdBy?.displayName ?? null,
+    review: azureReview(json.reviewers, json.isDraft === true),
+    branch: String(json.sourceRefName ?? "").replace(/^refs\/heads\//, "") || null,
+  };
+}
+
+// The Azure source's `pullRequest` (related.js): a pull request with an
+// id, read in the view's organisation.
+export const azurePullRequest = (az) => ({
+  reads: (item) => item.kind === "pr" && Number.isInteger(item.number),
+  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number))),
+});
+
 // The Azure source's `related` (related.js): a work item with an id has
 // some to read.
 export const azureRelated = (az) => ({
@@ -2212,8 +2265,9 @@ export const azureRelated = (az) => ({
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items, per layout of an Azure view how it
-// loads and writes, and a work item's related items (related: its
-// description, children and linked pull requests, related.js). az runs by
+// loads and writes, a work item's related items (related: its
+// description, parent, children and linked pull requests, related.js) and
+// a pull request's details (pullRequest, the same). az runs by
 // the path `paths` (toolPaths) finds.
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
@@ -2348,6 +2402,7 @@ export function makeAzure(paths) {
     // A work item's description, children and linked pull requests
     // (related.js).
     related: azureRelated(az),
+    pullRequest: azurePullRequest(az),
     assign: {
       refuse: (item) => (item.kind === "workitem" ? null : "Hier lässt sich niemand zuweisen"),
       // The team's members, kept (parseMemberList); who az is is asked
@@ -2821,6 +2876,54 @@ export function parseGithubRelated(json, item, errors = []) {
   };
 }
 
+// One GraphQL request for a pull request the details panel goes down to
+// (related.js, pullRequest): by its repo and number, the fields the PR
+// list reads for a row (PR_FIELDS), and its state, which the list, of open
+// pull requests only, does not need.
+export const PULL_REQUEST_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id number title url state isDraft headRefName reviewDecision
+      author { login }
+      assignees(first: 10) { nodes { login name } }
+      reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
+        checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
+    }
+  }
+}`;
+
+export function githubPullRequestArgs(item) {
+  const [owner, name] = item.repo.split("/");
+  return ["api", "graphql", "-f", `query=${PULL_REQUEST_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-F", `number=${item.number}`];
+}
+
+// gh's answer for githubPullRequestArgs (and the GraphQL errors that came
+// with its data) → the pull request's details (related.js, pullRequest),
+// as parseGithubList makes a row's, with its state as a line has it. A
+// missing pull request is explained by the error at its path.
+export function parseGithubPullRequest(json, item, errors = []) {
+  const pr = json?.data?.repository?.pullRequest;
+  if (!pr) {
+    const e = errorAt(errors, ["repository"]);
+    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
+  }
+  const state = RELATED_STATES[pr.state] ?? { state: String(pr.state ?? "?").toLowerCase(), color: "muted", done: false };
+  return {
+    title: pr.title ?? item.title,
+    url: pr.url ?? item.url,
+    ...state,
+    draft: pr.isDraft === true,
+    author: pr.author?.login ?? "?",
+    review: reviewLabel(pr.reviewDecision, pr.isDraft),
+    checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null),
+    branch: pr.headRefName ?? null,
+    ...assigneesOf(pr.assignees?.nodes),
+    reviewers: reviewerLogins(pr.reviewRequests),
+    contentId: pr.id ?? null,
+  };
+}
+
 // The people an issue's or pull request's repo can assign (GitHub's
 // assignableUsers: those with access to it, the first ASSIGNABLE), and who
 // gh is, as the assignee picker offers them.
@@ -2952,7 +3055,8 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // login, and per layout of a GitHub view how it loads (`hiddenFor(view)`
 // gives its hidden columns) and how a board writes a move; and the items
 // related to an issue, its sub-issues and linked pull requests, read with
-// its description (related.js says what `related` holds); and an item's
+// its description (related.js says what `related` holds), and a pull
+// request's details (pullRequest, the same); and an item's
 // assignment (assign: actions/assign.js says what it holds), whose people
 // are read once per repo and kept while the board runs (one that fails is
 // not kept). gh runs by the path `paths` (toolPaths) finds.
@@ -2966,6 +3070,13 @@ export function makeGithub(paths) {
       async load(item) {
         const { json, errors } = await gh(paths, githubRelatedArgs(item));
         return parseGithubRelated(json, item, errors);
+      },
+    },
+    pullRequest: {
+      reads: (item) => item.kind === "pr" && Number.isInteger(item.number) && item.repo.includes("/"),
+      async load(item) {
+        const { json, errors } = await gh(paths, githubPullRequestArgs(item));
+        return parseGithubPullRequest(json, item, errors);
       },
     },
     assign: {
@@ -3045,6 +3156,13 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // color and whether it is done coming from the view's states when drawn }.
 // warnings: what the source said besides, one line each. retry: a part
 // failed that is to be read again after the next refresh.
+//
+// A source whose pull requests the details panel can go down to gives
+// `pullRequest: { reads(item), load(item, view) }` the same way: load
+// reads the pull request's details as the PR list has a row's (title,
+// state, color, done, draft, author, review, branch; on GitHub its checks
+// and assignees too), which the panel shows as the PR list's details do;
+// the Board keeps them as { pr } beside the related items.
 
 // What a view keeps of its related items after a refresh starts: only
 // those of the item whose details show (`openKey`, null when none) and of
@@ -4713,11 +4831,19 @@ function description(b, t, item, r) {
 // The detail panel's rows of an item the panel went down to (a line's
 // item: it has no card, so no shape lends it rows): its state as a chip,
 // in its own color where its source names one (GitHub), else its state's
-// in the view's data (Azure), as its line has it.
-export function levelParts(b, t, view, item) {
+// in the view's data (Azure), as its line has it. A pull request's
+// (`entry` its read: { data: { pr }, error }) add what the PR list's
+// details show beside the header: its checks where its source reads them
+// (GitHub), and while they load or after a failure, a note.
+export function levelParts(b, t, view, item, entry) {
   const data = b.state(view.id).data;
   const color = item.color ?? (data ? stateColor(data, item.state) : "muted");
-  return { chips: [chip(t, item.state ?? "ohne Status", t.background, toneColor(t, color))] };
+  const chips = [chip(t, item.state ?? "ohne Status", t.background, toneColor(t, color))];
+  if (item.kind !== "pr") return { chips };
+  const note = (text, level) => div().id("level-note").px(18).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES[level])).child(text);
+  if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note("lädt …", "info")] };
+  const checks = entry.data.pr.checks;
+  return { chips, sections: checks ? [detailSection(t, "CHECKS", div().text_color(checkColor(t, checks.state)).child(checks.text))] : [] };
 }
 
 // The block of the related items of `item` (relatedRows) in `view`, the
@@ -5053,7 +5179,9 @@ export const ACTIONS = [
     run: (b, c, cx) => b.open(c.item, cx),
     hint: (c) => (walks(c) && !c.drilled ? "öffnen" : null),
   },
-  { id: "tab-hint", hint: (c) => (c.related ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
+  // On a pull request's level, which reads no related items, the panel
+  // still has the keyboard.
+  { id: "tab-hint", hint: (c) => (c.related || c.panel ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
   { id: "lines-hint", hint: (c) => (c.panel ? "Zeilen" : null), hintKey: "j/k" },
   { id: "page-hint", hint: (c) => (c.panel ? "halbe Seite" : null), hintKey: "ctrl-d/u" },
   { id: "panel-edge-hint", hint: (c) => (c.panel ? "oben/unten" : null), hintKey: "gg/G" },
@@ -7415,6 +7543,12 @@ export default class Board extends View {
     return Boolean(item && this.sources[item.source]?.related?.reads(item));
   }
 
+  // Whether the item is a pull request whose details its source reads for
+  // the panel to go down to (its pullRequest.reads, related.js).
+  readsPullRequest(item) {
+    return Boolean(item && this.sources[item.source]?.pullRequest?.reads(item));
+  }
+
   // The item whose details show in the shown view, or null.
   shownDetailsItem() {
     const view = this.view();
@@ -7433,9 +7567,13 @@ export default class Board extends View {
   }
 
   // The item the details panel shows in `view`: the deepest level it went
-  // down to, else the item whose details show; null for none.
+  // down to (a pull request with its details laid over its line, once
+  // read), else the item whose details show; null for none.
   levelItem(view) {
-    return this.levelsOf(view).at(-1)?.item ?? this.shownDetailsItemIn(view);
+    const level = this.levelsOf(view).at(-1)?.item;
+    if (!level) return this.shownDetailsItemIn(view);
+    const pr = this.relatedOf(view, level)?.data?.pr;
+    return pr ? { ...level, ...pr } : level;
   }
 
   // What the view keeps of the item's related items, the entry relatedRows
@@ -7454,21 +7592,27 @@ export default class Board extends View {
     const view = this.view();
     const item = this.shownDetailsItem();
     if (!item || this.state(view.id).loading) return;
-    for (const one of [item, ...this.levelsOf(view).map((l) => l.item)]) this.readRelatedOf(view, one, cx);
+    this.readRelatedOf(view, item, false, cx);
+    for (const level of this.levelsOf(view)) this.readRelatedOf(view, level.item, true, cx);
   }
 
   // Reads the related items of `item` in `view` (readRelated), where its
-  // source has some to read and the view keeps none; once they came, the
-  // levels below it are checked (checkLevels).
-  readRelatedOf(view, item, cx) {
+  // source has some to read and the view keeps none, or, where it is a
+  // `level` the panel went down to, a pull request's details (its source's
+  // pullRequest, kept as { pr } under its key the same way; the selected
+  // pull request's details are the view's own); once they came, the levels
+  // below it are checked (checkLevels).
+  readRelatedOf(view, item, level, cx) {
     const st = this.state(view.id);
-    if (!this.readsRelated(item) || st.related.has(item.key)) return;
+    const related = this.readsRelated(item);
+    if (!(related || (level && this.readsPullRequest(item))) || st.related.has(item.key)) return;
     const entry = { data: null, error: null, shown: null };
     st.related.set(item.key, entry);
-    const source = this.sources[item.source].related;
+    const source = this.sources[item.source];
     cx.spawn(async (cx) => {
       try {
-        const data = await source.load(item, view);
+        if (!related) return void (entry.data = { pr: await source.pullRequest.load(item, view) });
+        const data = await source.related.load(item, view);
         // The description as drawn, once per read (description.js).
         entry.shown = shownDescription(data.description, data.format);
         entry.data = data;
@@ -7523,10 +7667,10 @@ export default class Board extends View {
   }
 
   // The lines of the related items that show in `view` (relatedLines), of
-  // the level the panel shows.
+  // the level the panel shows; none on a pull request's.
   linesOf(view) {
     const item = this.levelItem(view);
-    return relatedLines(item ? this.relatedOf(view, item)?.data : null);
+    return relatedLines(this.readsRelated(item) ? this.relatedOf(view, item)?.data : null);
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
@@ -7560,16 +7704,17 @@ export default class Board extends View {
 
   // Enter on a line (commands.js, line-details): its item's details in the
   // panel, a level down, where its source reads related items for it
-  // (readsRelated; read as the selected item's are: readRelated); the
-  // board's selection stays. The level keeps what the level above showed
-  // (its selected line, its scroll with the heights it was measured at,
-  // and its unfolded description), for Esc to bring back (levelUp). A line whose item has none to read opens in
-  // the browser.
+  // (readsRelated) or, for a pull request, its details (readsPullRequest;
+  // either read as the selected item's are: readRelated); the board's
+  // selection stays. The level keeps what the level above showed (its
+  // selected line, its scroll with the heights it was measured at, and its
+  // unfolded description), for Esc to bring back (levelUp). A line whose
+  // item has none to read opens in the browser.
   drillLine(view, line, cx) {
     const panel = this.panelOf(view);
     if (!panel) return;
     const item = { ...line, key: lineKey(line) };
-    if (!this.readsRelated(item)) return this.open(line, cx);
+    if (!this.readsRelated(item) && !this.readsPullRequest(item)) return this.open(line, cx);
     const ui = this.relatedUi;
     const back = { line: panel.line, offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes, unfolded: ui.unfolded };
     panel.levels.push({ item, back });
@@ -8374,10 +8519,10 @@ export default class Board extends View {
     // Marked while it has the keyboard (Tab).
     const panel = this.panelOf(view);
     const levels = panel?.levels ?? [];
-    const item = levels.at(-1)?.item ?? root;
+    const item = levels.length ? this.levelItem(view) : root;
     const session = linkedSession(item, spaces());
     // The shape's own rows: chips beside the author, sections, buttons.
-    const parts = (levels.length ? levelParts(this, t, view, item) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
+    const parts = (levels.length ? levelParts(this, t, view, item, this.relatedOf(view, item)) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
     const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";

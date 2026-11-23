@@ -32,6 +32,13 @@
 // color and whether it is done coming from the view's states when drawn }.
 // warnings: what the source said besides, one line each. retry: a part
 // failed that is to be read again after the next refresh.
+//
+// A source whose pull requests the details panel can go down to gives
+// `pullRequest: { reads(item), load(item, view) }` the same way: load
+// reads the pull request's details as the PR list has a row's (title,
+// state, color, done, draft, author, review, branch; on GitHub its checks
+// and assignees too), which the panel shows as the PR list's details do;
+// the Board keeps them as { pr } beside the related items.
 
 import { cardLabel } from "./shared.js";
 

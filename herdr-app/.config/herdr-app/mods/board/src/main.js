@@ -35,7 +35,8 @@
 // more when its details open, again on `r` while they are open, and again
 // after a refresh where their last read failed (readRelated; what a refresh
 // keeps of them keptRelated says); an item the details panel went down to
-// (Enter on a line, related.js) costs the same when it shows, and on `r`
+// (Enter on a line, related.js) costs the same when it shows, a pull
+// request one gh or az call for its details (az repos pr show), and on `r`
 // each level's again, so that a level whose item is no longer among the
 // lines of the one above can go. An Azure work item's related items (its
 // description, children and linked pull requests) cost the same, one az
@@ -531,6 +532,12 @@ export default class Board extends View {
     return Boolean(item && this.sources[item.source]?.related?.reads(item));
   }
 
+  // Whether the item is a pull request whose details its source reads for
+  // the panel to go down to (its pullRequest.reads, related.js).
+  readsPullRequest(item) {
+    return Boolean(item && this.sources[item.source]?.pullRequest?.reads(item));
+  }
+
   // The item whose details show in the shown view, or null.
   shownDetailsItem() {
     const view = this.view();
@@ -549,9 +556,13 @@ export default class Board extends View {
   }
 
   // The item the details panel shows in `view`: the deepest level it went
-  // down to, else the item whose details show; null for none.
+  // down to (a pull request with its details laid over its line, once
+  // read), else the item whose details show; null for none.
   levelItem(view) {
-    return this.levelsOf(view).at(-1)?.item ?? this.shownDetailsItemIn(view);
+    const level = this.levelsOf(view).at(-1)?.item;
+    if (!level) return this.shownDetailsItemIn(view);
+    const pr = this.relatedOf(view, level)?.data?.pr;
+    return pr ? { ...level, ...pr } : level;
   }
 
   // What the view keeps of the item's related items, the entry relatedRows
@@ -570,21 +581,27 @@ export default class Board extends View {
     const view = this.view();
     const item = this.shownDetailsItem();
     if (!item || this.state(view.id).loading) return;
-    for (const one of [item, ...this.levelsOf(view).map((l) => l.item)]) this.readRelatedOf(view, one, cx);
+    this.readRelatedOf(view, item, false, cx);
+    for (const level of this.levelsOf(view)) this.readRelatedOf(view, level.item, true, cx);
   }
 
   // Reads the related items of `item` in `view` (readRelated), where its
-  // source has some to read and the view keeps none; once they came, the
-  // levels below it are checked (checkLevels).
-  readRelatedOf(view, item, cx) {
+  // source has some to read and the view keeps none, or, where it is a
+  // `level` the panel went down to, a pull request's details (its source's
+  // pullRequest, kept as { pr } under its key the same way; the selected
+  // pull request's details are the view's own); once they came, the levels
+  // below it are checked (checkLevels).
+  readRelatedOf(view, item, level, cx) {
     const st = this.state(view.id);
-    if (!this.readsRelated(item) || st.related.has(item.key)) return;
+    const related = this.readsRelated(item);
+    if (!(related || (level && this.readsPullRequest(item))) || st.related.has(item.key)) return;
     const entry = { data: null, error: null, shown: null };
     st.related.set(item.key, entry);
-    const source = this.sources[item.source].related;
+    const source = this.sources[item.source];
     cx.spawn(async (cx) => {
       try {
-        const data = await source.load(item, view);
+        if (!related) return void (entry.data = { pr: await source.pullRequest.load(item, view) });
+        const data = await source.related.load(item, view);
         // The description as drawn, once per read (description.js).
         entry.shown = shownDescription(data.description, data.format);
         entry.data = data;
@@ -639,10 +656,10 @@ export default class Board extends View {
   }
 
   // The lines of the related items that show in `view` (relatedLines), of
-  // the level the panel shows.
+  // the level the panel shows; none on a pull request's.
   linesOf(view) {
     const item = this.levelItem(view);
-    return relatedLines(item ? this.relatedOf(view, item)?.data : null);
+    return relatedLines(this.readsRelated(item) ? this.relatedOf(view, item)?.data : null);
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
@@ -676,16 +693,17 @@ export default class Board extends View {
 
   // Enter on a line (commands.js, line-details): its item's details in the
   // panel, a level down, where its source reads related items for it
-  // (readsRelated; read as the selected item's are: readRelated); the
-  // board's selection stays. The level keeps what the level above showed
-  // (its selected line, its scroll with the heights it was measured at,
-  // and its unfolded description), for Esc to bring back (levelUp). A line whose item has none to read opens in
-  // the browser.
+  // (readsRelated) or, for a pull request, its details (readsPullRequest;
+  // either read as the selected item's are: readRelated); the board's
+  // selection stays. The level keeps what the level above showed (its
+  // selected line, its scroll with the heights it was measured at, and its
+  // unfolded description), for Esc to bring back (levelUp). A line whose
+  // item has none to read opens in the browser.
   drillLine(view, line, cx) {
     const panel = this.panelOf(view);
     if (!panel) return;
     const item = { ...line, key: lineKey(line) };
-    if (!this.readsRelated(item)) return this.open(line, cx);
+    if (!this.readsRelated(item) && !this.readsPullRequest(item)) return this.open(line, cx);
     const ui = this.relatedUi;
     const back = { line: panel.line, offset: ui.offset, viewport: ui.viewport, content: ui.content, sizes: ui.sizes, unfolded: ui.unfolded };
     panel.levels.push({ item, back });
@@ -1490,10 +1508,10 @@ export default class Board extends View {
     // Marked while it has the keyboard (Tab).
     const panel = this.panelOf(view);
     const levels = panel?.levels ?? [];
-    const item = levels.at(-1)?.item ?? root;
+    const item = levels.length ? this.levelItem(view) : root;
     const session = linkedSession(item, spaces());
     // The shape's own rows: chips beside the author, sections, buttons.
-    const parts = (levels.length ? levelParts(this, t, view, item) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
+    const parts = (levels.length ? levelParts(this, t, view, item, this.relatedOf(view, item)) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
     const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";

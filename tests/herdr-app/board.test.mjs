@@ -81,7 +81,12 @@
 //   --expand relations: a description in HTML with an image, children, a
 //   parent, a pull request, a branch and a related link) and
 //   azure-related-children.json (az boards query for the children, one of
-//   them not found).
+//   them not found);
+// - written from the azure-devops extension's az repos pr show
+//   (show_pull_request, the vendored SDK's GitPullRequest and
+//   IdentityRefWithVote), with made-up names, not recorded:
+//   azure-pr-show.json (an active pull request, one approving reviewer and
+//   a team without a vote).
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -7024,13 +7029,118 @@ test("UI: the command menu runs a level's action only on that level: after a ref
   assert.deepEqual([b.modal, b.notice?.text, cx.opened], [null, "Die Details von tender#3010 sind nicht mehr offen", undefined]);
 });
 
-test("UI: Enter on a pull request's line opens it in the browser: the panel goes down into issues and work items only", async () => {
+// gh's answer for a pull request the panel goes down to (written from
+// GitHub's GraphQL reference, PullRequest, as the PR list's rows are).
+function pullRequestAnswer({ state = "OPEN", draft = true, decision = null } = {}) {
+  const pullRequest = {
+    id: "PR_sample3020", number: 3020, title: "feat(api): page through long lists", url: "https://github.com/example/tender/pull/3020", state, isDraft: draft,
+    headRefName: "feat/3004-pages", reviewDecision: decision, author: { login: "alex-sample" }, assignees: { nodes: [{ login: "robin-example", name: "Robin Example" }] },
+    reviewRequests: { nodes: [{ requestedReviewer: { login: "robin-example" } }] },
+    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS", contexts: { checkRunCountsByState: [{ state: "SUCCESS", count: 2 }], statusContextCountsByState: [] } } } }] },
+  };
+  return JSON.stringify({ data: { repository: { pullRequest } } });
+}
+const isPullRequestCall = (args) => args.some((a) => String(a).includes("pullRequest(number"));
+
+test("a pull request the panel goes down to is one GraphQL query by repo and number for what the PR list shows of it, and its state", () => {
+  const pr = { source: "github", kind: "pr", repo: "example/tender", repoShort: "tender", number: 3020, title: "line title", url: "u" };
+  const args = board.githubPullRequestArgs(pr);
+  assert.deepEqual(args.slice(4), ["-f", "owner=example", "-f", "name=tender", "-F", "number=3020"]);
+  const query = args[3].replace(/\s+/g, " ");
+  assert.match(query, /repository\(owner: \$owner, name: \$name\) \{ pullRequest\(number: \$number\) \{ id number title url state isDraft headRefName reviewDecision author \{ login \}/);
+  assert.match(query, /statusCheckRollup/);
+  const d = board.parseGithubPullRequest(JSON.parse(pullRequestAnswer()), pr);
+  assert.deepEqual([d.title, d.state, d.color, d.done, d.draft, d.author, d.review, d.branch, d.checks.text, d.assignees, d.assigneeLogins, d.reviewers, d.contentId], [
+    "feat(api): page through long lists", "offen", "ansi2", false, true, "alex-sample", "Entwurf", "feat/3004-pages", "2 bestanden", ["Robin Example"], ["robin-example"], ["robin-example"], "PR_sample3020",
+  ]);
+  const merged = board.parseGithubPullRequest(JSON.parse(pullRequestAnswer({ state: "MERGED", draft: false, decision: "APPROVED" })), pr);
+  assert.deepEqual([merged.state, merged.done, merged.review], ["gemerged", true, "freigegeben"]);
+  assert.throws(() => board.parseGithubPullRequest({ data: { repository: { pullRequest: null } } }, pr), /^Error: GitHub kennt example\/tender#3020 nicht$/);
+  const errors = [{ type: "NOT_FOUND", path: ["repository", "pullRequest"], message: "Could not resolve to a PullRequest\nmore" }];
+  assert.throws(() => board.parseGithubPullRequest({ data: { repository: null } }, pr, errors), /^Error: GitHub: Could not resolve to a PullRequest$/);
+  const { reads } = board.makeGithub(null).pullRequest;
+  assert.deepEqual([reads(pr), reads({ ...pr, kind: "issue" }), reads({ ...pr, repo: "" }), reads({ ...pr, number: null })], [true, false, false, false]);
+});
+
+test("UI: Enter on a pull request's line shows it a level down as the PR list's details do: its author, review, assignee, checks and state, read by repo and number; Enter starts its review, o opens it", async () => {
+  const { b, cx, st, host } = await openRelated();
+  await tab(b, cx);
+  for (let i = 0; i < 4; i++) await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual([levelsNow(b), topText(b), cx.opened, st().sel.key], [[[3020], null], "tender#3004 › #3020", undefined, "PVTI_rec4"]);
+  const calls = host.open("gh").filter((c) => isPullRequestCall(c.args));
+  assert.equal(calls.length, 1, "one read");
+  assert.ok(calls[0].args.includes("number=3020"));
+  assert.deepEqual(texts(byId(detailPanel(b), "level-note")), ["lädt …"]);
+  await host.answer("gh", ok(pullRequestAnswer()), isPullRequestCall);
+  const all = texts(detailPanel(b));
+  for (const text of ["von alex-sample · Entwurf", "zugewiesen: Robin Example", "CHECKS", "2 bestanden", "offen"]) assert.ok(all.includes(text), text);
+  assert.equal(byId(detailPanel(b), "related-lines"), null, "no description and no related items, as in the PR list");
+  assert.deepEqual(hintKeys(b).filter((k) => k === "Tab"), ["Tab"], "Tab still names the way back");
+  await press(b, cx, "j");
+  assert.deepEqual(levelsNow(b), [[3020], null], "no lines to walk");
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, ["https://github.com/example/tender/pull/3020"]);
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, b.modal.item.kind, board.itemLabel(b.modal.item)], ["start", "pr", "tender#3020"], "its review");
+  await press(b, cx, "escape");
+  await press(b, cx, "escape");
+  assert.deepEqual(levelsNow(b), [[], 3], "back on its line");
+  await press(b, cx, "enter");
+  assert.equal(host.open("gh").length, 0, "its details kept while the way down holds it");
+});
+
+test("UI: a pull request's read that fails says why in the panel; a pull request's own details, in the PR list, read nothing", async () => {
   const { b, cx, host } = await openRelated();
   await tab(b, cx);
   for (let i = 0; i < 4; i++) await press(b, cx, "j");
   await press(b, cx, "enter");
-  assert.deepEqual([levelsNow(b), cx.opened, host.open("gh").length], [[[], 3], ["https://github.com/example/tender/pull/3020"], 0]);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "GraphQL: Could not resolve to a PullRequest with the number of 3020. (repository.pullRequest)" }, isPullRequestCall);
+  assert.deepEqual(texts(byId(detailPanel(b), "level-note")), ["GraphQL: Could not resolve to a PullRequest with the number of 3020. (repository.pullRequest)"]);
+  const list = await openBoard();
+  await press(list.b, list.cx, "2");
+  await list.host.answer("gh", ok(fixture("github-list.json")));
+  await press(list.b, list.cx, "enter");
+  assert.equal(list.host.open("gh").length, 0);
 });
+
+test("an Azure pull request the panel goes down to is az repos pr show by its id: its title, status, draft, author, branch and the reviewers' votes as a review", () => {
+  const c = sprintTeam();
+  assert.deepEqual(board.azPullRequestArgs(c, 57), ["repos", "pr", "show", "--org", ORG, "--detect", "false", "--id", "57", "-o", "json"]);
+  const d = board.parseAzurePullRequest(fixture("azure-pr-show.json"));
+  assert.deepEqual(d, { title: "Import the sample catalogue", state: "offen", color: "ansi2", done: false, draft: false, author: "Alex Sample", review: "freigegeben", branch: "feature/sample-import" });
+  const as = (patch) => board.parseAzurePullRequest(JSON.stringify({ ...json("azure-pr-show.json"), ...patch }));
+  assert.deepEqual([as({ status: "completed" }), as({ status: "abandoned" }), as({ status: "odd" })].map((x) => [x.state, x.color, x.done]),
+    [["gemerged", "ansi5", true], ["geschlossen", "muted", true], ["odd", "muted", false]]);
+  assert.deepEqual(["Entwurf", ""].map((_, i) => as(i ? { reviewers: [] } : { isDraft: true }).review), ["Entwurf", ""]);
+  const votes = (list) => board.azureReview(list.map((vote) => ({ vote })), false);
+  assert.deepEqual([votes([10, -10]), votes([-5, -10]), votes([5, -5]), votes([5, 0]), votes([10]), votes([0]), votes([])],
+    ["abgelehnt", "abgelehnt", "wartet auf Autor", "freigegeben", "freigegeben", "", ""]);
+  assert.equal(board.azureReview(null, false), "");
+  assert.equal(as({ sourceRefName: null }).branch, null);
+  assert.throws(() => board.parseAzurePullRequest("{}"), /^Error: Azure lieferte keinen Pull Request$/);
+  const { reads } = board.makeAzure(null).pullRequest;
+  assert.deepEqual([reads({ source: "azure", kind: "pr", number: 57 }), reads({ source: "azure", kind: "workitem", number: 57 }), reads({ source: "azure", kind: "pr", number: null })], [true, false, false]);
+});
+
+test("UI: Enter on an Azure work item's pull request line shows it a level down: read with az repos pr show, its title, author, review, state and branch, no checks", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await tab(b, cx);
+  await press(b, cx, ...SHIFT_G);
+  await press(b, cx, "enter");
+  assert.deepEqual([levelsNow(b), topText(b), st().sel.key], [[[57], null], "301 › !57", "AB#301"]);
+  const shows = host.open("az").filter((c) => c.args[0] === "repos");
+  assert.deepEqual(shows.map((c) => c.args), [board.azPullRequestArgs(b.view().context, 57)]);
+  await host.answer("az", ok(fixture("azure-pr-show.json")), (a) => a[0] === "repos");
+  const all = texts(detailPanel(b));
+  for (const text of ["Import the sample catalogue", "von Alex Sample · freigegeben", "offen"]) assert.ok(all.includes(text), text);
+  assert.equal(all.includes("CHECKS"), false, "no checks on Azure");
+  assert.deepEqual([b.actionContext().details.branch, b.actionContext().details.kind], ["feature/sample-import", "pr"], "the item its keys act on: its details laid over its line");
+});
+
 
 // Every tag name a shown HTML description holds, and the `<` in a shown
 // Markdown one that could start HTML (none but its links' destinations).
