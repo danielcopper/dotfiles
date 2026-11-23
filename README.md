@@ -237,7 +237,7 @@ stack of the shown tab and the board; its right panel has no maximum width)
 and the themes: `themes/copper-light.json` and `themes/copper-dark.json`,
 which `settings.json` picks by the system's light or dark mode, plus
 `themes/catppuccin-mocha.json`. The copper pair is copied unchanged from the
-copper-design release `v0.3.0` (`ports/herdr/`); on a new release, copy both
+copper-design release `v0.4.0` (`ports/herdr/`); on a new release, copy both
 files from its tag and update the tag here.
 Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its comment on
