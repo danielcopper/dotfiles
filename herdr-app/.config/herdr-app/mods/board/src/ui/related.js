@@ -1,8 +1,10 @@
 // The detail panel's sections of an item's related items (related.js): its
 // description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
 // Markdown or HTML as its source writes it, without anything it could load:
-// description.js; "keine Beschreibung" where it has none), its sub-issues
-// (an Azure work item's children), then, where it has any or the source
+// description.js; "keine Beschreibung" where it has none), its parent
+// ("ÜBERGEORDNET", where it has one or the source could not send it), its
+// sub-issues (an Azure work item's children), then, where it has any or
+// the source
 // could not send them, the pull requests linked to it; one line each with
 // its key, title and state (a done one dimmed, a draft marked), and below
 // a section how many it has that cannot be read. While they load the
@@ -109,6 +111,11 @@ export function relatedRows(item, entry) {
     if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", level: "info" });
     if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, level: "info" });
   };
+  const parents = data.parents;
+  if (parents.lines.length || parents.error || parents.hidden) {
+    rows.push({ kind: "head", text: "ÜBERGEORDNET" });
+    body(parents, false);
+  }
   rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
   body(data.subIssues, true);
   const prs = data.prs;

@@ -499,18 +499,19 @@ herdr-app`. Which files of the package git tracks is set in the root
   tables; its HTML shows as text, its comments not at all, but for one not
   closed, one that starts in code, or one that spans an empty line without
   starting a line, which shows as text; "keine Beschreibung" where it has
-  none), then list its sub-issues
-  ("UNTERAUFGABEN · 7/11", the count the card shows; the first 50, with
-  "erste 50 von N" where it has more) and the pull requests linked to it by
-  a closing keyword or by hand in its Development sidebar, open, merged or
-  closed ("VERKNÜPFTE PRS", where it has any), each with its key, title and
-  state, a closed or merged one dimmed, a draft marked, and how many GitHub
-  sent without access. The details of an Azure work item, on the Sprint and
+  none), then its parent ("ÜBERGEORDNET", where it has one), its
+  sub-issues ("UNTERAUFGABEN · 7/11", the count the card shows; the first
+  50, with "erste 50 von N" where it has more) and the pull requests linked
+  to it by a closing keyword or by hand in its Development sidebar, open,
+  merged or closed ("VERKNÜPFTE PRS", where it has any), each with its key,
+  title and state, a closed or merged one dimmed, a draft marked, and how
+  many GitHub sent without access. The details of an Azure work item, on the Sprint and
   on the Backlog, show the same: its description formatted from its HTML,
   keeping only plain formatting tags (`mods/board/src/description.js` lists
   them and says why; any other tag goes and its text stays, a `<pre>` shows
-  as code that wraps), its children ("UNTERAUFGABEN", each with its state,
-  a done one dimmed, and how many the query did not find) and the pull
+  as code that wraps), its parent ("ÜBERGEORDNET") and its children
+  ("UNTERAUFGABEN", each with its state, a done one dimmed, and how many
+  the query did not find; one query reads both) and the pull
   requests linked to it, each by its id only ("!57 Pull Request"): reading
   a pull request's title and state would cost an az call each. A
   description's images are never loaded: herdr's TextView would fetch them
@@ -537,8 +538,8 @@ herdr-app`. Which files of the package git tracks is set in the root
   its bottom on its last line. The board scrolls the details itself (herdr
   gives a mod no scroll position to set), so they have no scrollbar to drag:
   the mouse wheel scrolls them, and a thin mark at the right shows where they
-  are. `Enter` shows a line's item in the panel, a level down: a
-  sub-issue's, a child's, its description, its own related items and its
+  are. `Enter` shows a line's item in the panel, a level down: a parent's,
+  a sub-issue's or a child's description, its own related items and its
   state (a pull request's line opens in the browser). The panel's top names
   the way down (`tender#914 › #2217`, on Azure the numbers alone); there
   `j/k` walk that item's lines, `Enter` goes further down, to any depth, and

@@ -107,6 +107,8 @@ export const AREA_PATH = `${SYSTEM}AreaPath`;
 // A work item's description (HTML), and the link to a child.
 export const DESCRIPTION = `${SYSTEM}Description`;
 export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
+// The link from a work item to its parent.
+export const PARENT_LINK = `${SYSTEM}LinkTypes.Hierarchy-Reverse`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
 // The fields read of each work item.

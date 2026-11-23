@@ -40,8 +40,8 @@
 // lines of the one above can go. An Azure work item's related items (its
 // description, children and linked pull requests) cost the same, one az
 // call (az boards work-item show --expand relations), and one WIQL query
-// more for its children's titles and states where it has children
-// (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// more for its children's and its parent's titles and states where it has
+// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the level's work items in
 // their list by az rest, then one WIQL query for their fields; one for an

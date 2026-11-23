@@ -344,11 +344,14 @@ export const LINKED_PRS = 20;
 // the issue's description: `body` ("Identifies the body of the issue"), the
 // text as it was written, in Markdown, which the details draw formatted;
 // `bodyText` is the body "rendered to text", and how that keeps line breaks
-// the reference does not say.
+// the reference does not say. It reads the issue's parent too (`parent`,
+// the issue it is a sub-issue of; null for none), for its line in the
+// details.
 export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       body
+      parent { number title state url repository { nameWithOwner } }
       subIssues(first: ${SUB_ISSUES}) {
         totalCount pageInfo { hasNextPage } nodes { number title state url repository { nameWithOwner } }
       }
@@ -390,7 +393,9 @@ function relatedLine(node, kind) {
 }
 
 // Where each section's connection stands in the answer.
-const RELATED_PATHS = { subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"] };
+const RELATED_PATHS = {
+  parent: ["repository", "issue", "parent"], subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"],
+};
 
 // A connection of the answer as a section (related.js), and the error it
 // shows (`shown`, null for none). One GitHub did not send, or whose nodes
@@ -409,8 +414,19 @@ function relatedSection(conn, kind, path, errors) {
   return { section, shown: null };
 }
 
+// The issue's parent as a section of one line, or of none where it has
+// none; where GitHub sent none for an error at its path, that error, which
+// it shows (`shown`).
+function parentSection(issue, errors) {
+  const node = issue.parent;
+  if (Number.isInteger(node?.number)) return { section: { count: 1, sent: 1, cut: false, hidden: 0, error: null, lines: [relatedLine(node, "issue")] }, shown: null };
+  const shown = errorAt(errors, RELATED_PATHS.parent);
+  const error = shown ? `GitHub: ${firstLine(shown.message)}` : null;
+  return { section: { count: shown ? 1 : 0, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
+}
+
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { description, subIssues, prs, warnings } (related.js). A
+// its data) → { description, parents, subIssues, prs, warnings } (related.js). A
 // missing issue is explained by the error at its path. An error is a
 // section's own only where the section shows it, in place of what GitHub
 // did not send; all others are warnings (a node GitHub sent as null counts
@@ -421,12 +437,14 @@ export function parseGithubRelated(json, item, errors = []) {
     const e = errorAt(errors, ["repository"]);
     throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
   }
+  const parents = parentSection(issue, errors);
   const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors);
   const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors);
-  const shown = [subIssues.shown, prs.shown];
+  const shown = [parents.shown, subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
     format: "markdown",
+    parents: parents.section,
     subIssues: subIssues.section,
     prs: prs.section,
     warnings: errors.filter((e) => !shown.includes(e)).map((e) => firstLine(e.message)).filter(Boolean),

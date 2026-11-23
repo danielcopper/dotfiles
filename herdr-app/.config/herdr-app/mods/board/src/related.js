@@ -1,6 +1,7 @@
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's sub-issues and the pull requests linked to it,
-// on Azure a work item's children and linked pull requests; the same read
+// open (on GitHub an issue's parent, its sub-issues and the pull requests
+// linked to it, on Azure a work item's parent, its children and linked
+// pull requests; the same read
 // brings the item's description beside them), what of them a view keeps
 // (keptRelated), the lines the details panel walks when it has the
 // keyboard, and the heads of their sections. The description as drawn is
@@ -17,9 +18,10 @@
 // A source that has related items gives `related: { reads(item), load(item,
 // view) }`: reads tells whether the item has any to read (no call); load
 // reads them (view: the view the item shows in) into { description,
-// format, subIssues, prs, warnings, retry }. description is the item's own
+// format, parents, subIssues, prs, warnings, retry }. description is the item's own
 // text as the source has it ("" for none), format how it is written:
-// "markdown" (the default) or "html". Each of subIssues and prs is a
+// "markdown" (the default) or "html". Each of parents (the item's parent,
+// one line at most), subIssues and prs is a
 // section { count (how many the source has; null when it did not send the
 // section), sent (how many it sent), cut (it has more than it sent), hidden
 // (how many it has that cannot be read), hiddenAs (what the details say of
@@ -62,8 +64,8 @@ export function pathLabel(root, levels) {
 }
 
 // The lines of read related items (`data`, or null while none are read),
-// the sub-issues first, then the linked pull requests.
-export const relatedLines = (data) => (data ? [...data.subIssues.lines, ...data.prs.lines] : []);
+// the parent first, then the sub-issues, then the linked pull requests.
+export const relatedLines = (data) => (data ? [...data.parents.lines, ...data.subIssues.lines, ...data.prs.lines] : []);
 
 // The line one step `dir` (+1 down, -1 up) from `line` (an index, or null
 // for none) over `count` lines: down from none to the first, up from the

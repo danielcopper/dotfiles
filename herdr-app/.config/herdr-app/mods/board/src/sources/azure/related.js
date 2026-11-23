@@ -1,5 +1,6 @@
 // An Azure work item's related items (related.js says what they hold): its
-// description, its children and the pull requests linked to it, read when
+// description, its parent, its children and the pull requests linked to
+// it, read when
 // its details open (azureRelated, which makeAzure gives as its `related`).
 //
 // `az boards work-item show --id <n> --expand relations` (the extension's
@@ -7,22 +8,24 @@
 // Work Items - Get Work Item with $expand=relations) answers the work item
 // with all its fields, System.Description among them where it has one
 // (HTML, as Azure keeps it), and its links as REST names them: a child
-// "System.LinkTypes.Hierarchy-Forward" with the child's URL, a pull request
+// "System.LinkTypes.Hierarchy-Forward" with the child's URL, its parent
+// "System.LinkTypes.Hierarchy-Reverse" with the parent's, a pull request
 // an "ArtifactLink" named "Pull Request" whose URL (which alone tells it
 // from another artifact, a branch or a commit) is
 // vstfs:///Git/PullRequestId/<project id>%2F<repo id>%2F<pull request id>
 // (how az repos pr work-item add writes one, dev/repos/pull_request.py).
 // (`az boards work-item relation show` would name the links in words, at
-// the cost of one more call for the link types.) A child's link carries no
-// title or state, so where the item has children one WIQL query by their
-// ids reads them (idsWiql, as the Backlog reads its items; az boards query
-// takes flat queries only, no link query); a pull request's link carries
+// the cost of one more call for the link types.) A child's or the parent's
+// link carries no title or state, so where the item has children or a
+// parent one WIQL query by their ids reads them (idsWiql, as the Backlog
+// reads its items; az boards query takes flat queries only, no link
+// query); a pull request's link carries
 // none either, and reading them would cost a call per pull request (az
 // repos pr show), so a pull request's line names its id only, with its
 // page.
 
 import { BoardError, isObject, report } from "../../shared.js";
-import { CHILD_LINK, DESCRIPTION, azJson, azOrg, azQueryArgs, idsWiql, parseWorkItems } from "./common.js";
+import { CHILD_LINK, DESCRIPTION, PARENT_LINK, azJson, azOrg, azQueryArgs, idsWiql, parseWorkItems } from "./common.js";
 
 // The work item with its links.
 export const azRelatedArgs = (c, id) => ["boards", "work-item", "show", ...azOrg(c.org), "--id", String(id), "--expand", "relations", "-o", "json"];
@@ -38,8 +41,9 @@ export function pullRequestOf(url) {
 }
 
 // az's answer for azRelatedArgs → { description (HTML, "" for none),
-// children: [ids], prs: [{ project, repo, number }] }, each once, in the
-// order of the links.
+// parent (its id, null for none; the first where it names more), children:
+// [ids], prs: [{ project, repo, number }] }, each once, in the order of
+// the links.
 export function parseRelatedItem(stdout) {
   const json = azJson(stdout, "das Work Item");
   if (!isObject(json) || !Number.isInteger(json.id)) throw new BoardError("Azure lieferte kein Work Item");
@@ -47,17 +51,20 @@ export function parseRelatedItem(stdout) {
   const relations = Array.isArray(json.relations) ? json.relations : [];
   const children = [];
   const prs = [];
+  let parent = null;
   for (const r of relations) {
     if (r?.rel === CHILD_LINK) {
       const id = linkedId(r.url);
       if (id && !children.includes(id)) children.push(id);
+    } else if (r?.rel === PARENT_LINK) {
+      parent ??= linkedId(r.url) || null;
     } else {
       // An artifact link is a pull request by its URL alone.
       const pr = pullRequestOf(r?.url);
       if (pr && !prs.some((p) => p.number === pr.number)) prs.push(pr);
     }
   }
-  return { description: typeof description === "string" ? description : "", children, prs };
+  return { description: typeof description === "string" ? description : "", parent, children, prs };
 }
 
 // The children's query answer → their lines (related.js; a work item as
@@ -82,24 +89,33 @@ const section = (count, lines, error = null) => ({
 });
 
 // The related items of the work item `item` in the team context `c`
-// (related.js): one az call, and one query more where it has children. A
-// failed query shows its reason in the children's place and marks the
-// read to be repeated after the next refresh (retry). `az(args)` runs az.
+// (related.js): one az call, and one query more where it has children or
+// a parent. A failed query shows its reason in the children's place and
+// the parent's and marks the read to be repeated after the next refresh
+// (retry). `az(args)` runs az.
 export async function loadAzureRelated(az, c, item) {
   const read = parseRelatedItem(await az(azRelatedArgs(c, item.number)));
+  const parentIds = read.parent === null ? [] : [read.parent];
+  const ids = [...read.children, ...parentIds];
   let children = section(read.children.length, []);
+  let parents = section(parentIds.length, []);
   let retry = false;
-  if (read.children.length) {
+  if (ids.length) {
     try {
-      children = section(read.children.length, parseChildren(await az(azQueryArgs(c, idsWiql(read.children))), read.children, c));
+      const out = await az(azQueryArgs(c, idsWiql(ids)));
+      children = section(read.children.length, parseChildren(out, read.children, c));
+      parents = section(parentIds.length, parseChildren(out, parentIds, c));
     } catch (e) {
-      children = section(read.children.length, [], report(e));
+      const why = report(e);
+      children = section(read.children.length, [], read.children.length ? why : null);
+      parents = section(parentIds.length, [], parentIds.length ? why : null);
       retry = true;
     }
   }
   return {
     description: read.description,
     format: "html",
+    parents,
     subIssues: children,
     prs: section(read.prs.length, read.prs.map((pr) => pullRequestLine(c, pr))),
     warnings: [],

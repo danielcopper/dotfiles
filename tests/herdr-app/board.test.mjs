@@ -6227,7 +6227,8 @@ test("an issue's related items are one GraphQL query: its first 50 sub-issues an
   assert.match(query, /subIssues\(first: 50\) \{ totalCount pageInfo \{ hasNextPage \} nodes \{ number title state url repository \{ nameWithOwner \} \} \}/);
   assert.match(query, /closedByPullRequestsReferences\(first: 20, includeClosedPrs: true\) \{ totalCount pageInfo \{ hasNextPage \} nodes \{ number title state isDraft url repository \{ nameWithOwner \} \} \}/);
   assert.doesNotMatch(query, /subIssuesSummary/, "how many are done is the item's own (its sub)");
-  assert.match(query, /issue\(number: \$number\) \{ body subIssues\(/, "the description read in the same query");
+  assert.match(query, /issue\(number: \$number\) \{ body parent \{ number title state url repository \{ nameWithOwner \} \} subIssues\(/,
+    "the description and the parent read in the same query");
 });
 
 test("an issue's related items: lines with key, state label, color, done and draft; counts, the cut by GitHub's page, nodes without access", () => {
@@ -6717,6 +6718,96 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   await answerRelated(host, ok(fixture("github-related.json")));
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
+});
+
+// An issue's parent as GitHub's related query sends it.
+const parentNode = (number = 3000, repo = "example/tender") => ({ number, title: `parent ${number}`, state: "OPEN", url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo } });
+
+test("an issue's parent is a section of one line before its sub-issues; none for none; an error at its path is the section's, not a warning", () => {
+  const answer = json("github-related.json");
+  answer.data.repository.issue.parent = parentNode(3000);
+  const d = board.parseGithubRelated(answer, issueItem());
+  assert.deepEqual(d.parents.lines.map((l) => [board.itemLabel(l), l.kind, l.state, l.title, l.url]),
+    [["tender#3000", "issue", "offen", "parent 3000", "https://github.com/example/tender/issues/3000"]]);
+  assert.deepEqual([d.parents.count, d.parents.error, d.parents.hidden], [1, null, 0]);
+  assert.deepEqual(board.relatedLines(d).map((l) => l.number), [3000, 3001, 3010, 12, 3020, 3015], "the parent first");
+  const none = board.parseGithubRelated(json("github-related.json"), issueItem());
+  assert.deepEqual([none.parents.count, none.parents.lines, none.parents.error], [0, [], null]);
+  answer.data.repository.issue.parent = null;
+  const errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "parent"], message: "Resource not accessible\nmore" }];
+  const hidden = board.parseGithubRelated(answer, issueItem(), errors);
+  assert.deepEqual([hidden.parents.lines, hidden.parents.error, hidden.warnings], [[], "GitHub: Resource not accessible", []]);
+});
+
+test("an Azure work item's parent is read in the children's query, or in one of its own where it has no children; a failed query shows in both sections and is read again", async () => {
+  const c = sprintTeam();
+  const calls = [];
+  const az = (answers) => async (args) => {
+    calls.push(args);
+    const out = answers.shift();
+    if (out instanceof Error) throw out;
+    return out;
+  };
+  const parentItem = { id: 290, fields: { "System.Title": "Sample epic", "System.WorkItemType": "Epic", "System.State": "Active" } };
+  const withParent = JSON.stringify([...json("azure-related-children.json"), parentItem]);
+  let d = await board.loadAzureRelated(az([fixture("azure-related-item.json"), withParent]), c, { number: 301 });
+  assert.deepEqual(calls[1], board.azQueryArgs(c, board.idsWiql([312, 311, 399, 290])));
+  assert.deepEqual(d.parents.lines.map((l) => [board.itemLabel(l), l.title, l.state]), [["AB#290", "Sample epic", "Active"]]);
+  assert.deepEqual(d.subIssues.lines.map((l) => l.number), [312, 311]);
+  assert.deepEqual(board.relatedLines(d).map((l) => l.number), [290, 312, 311, 57]);
+  const only = JSON.parse(fixture("azure-related-item.json"));
+  only.relations = only.relations.filter((r) => !/Forward$/.test(r.rel));
+  calls.length = 0;
+  d = await board.loadAzureRelated(az([JSON.stringify(only), JSON.stringify([parentItem])]), c, { number: 301 });
+  assert.deepEqual([calls.length, calls[1], d.parents.lines.length, d.subIssues.count], [2, board.azQueryArgs(c, board.idsWiql([290])), 1, 0], "a parent alone: one query");
+  calls.length = 0;
+  d = await board.loadAzureRelated(az([JSON.stringify(only), "[]"]), c, { number: 301 });
+  assert.deepEqual([d.parents.lines, d.parents.hidden, d.parents.hiddenAs], [[], 1, "nicht gefunden"], "a parent the query does not find");
+  d = await board.loadAzureRelated(az([fixture("azure-related-item.json"), new board.BoardError("offline")]), c, { number: 301 });
+  assert.deepEqual([d.parents.error, d.subIssues.error, d.retry], ["offline", "offline", true]);
+  d = await board.loadAzureRelated(az([JSON.stringify(only), new board.BoardError("offline")]), c, { number: 301 });
+  assert.deepEqual([d.parents.error, d.subIssues.error], ["offline", null], "no children: no error in their place");
+  const bare = JSON.parse(fixture("azure-related-item.json"));
+  bare.relations = [];
+  calls.length = 0;
+  d = await board.loadAzureRelated(az([JSON.stringify(bare)]), c, { number: 301 });
+  assert.deepEqual([calls.length, d.parents.count], [1, 0], "neither: no query");
+});
+
+test("UI: the details show an issue's parent under „ÜBERGEORDNET“ before its sub-issues, as its first line; Enter goes down into it", async () => {
+  const { b, cx, st, host } = await openBoard();
+  await press(b, cx, "enter");
+  const answer = json("github-related.json");
+  answer.data.repository.issue.parent = parentNode(2900);
+  await answerRelated(host, ok(JSON.stringify(answer)));
+  const all = relatedTexts(b);
+  assert.deepEqual(all.slice(all.indexOf("ÜBERGEORDNET"), all.findIndex((t) => t.startsWith("UNTERAUFGABEN"))), ["ÜBERGEORDNET", "tender#2900", "parent 2900", "offen"]);
+  assert.ok(all.indexOf("ÜBERGEORDNET") > all.indexOf("BESCHREIBUNG"), "after the description");
+  await tab(b, cx);
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual([levelsNow(b), topText(b), st().sel.key], [[[2900], null], "tender#3004 › #2900", "PVTI_rec4"]);
+  assert.equal(readsOf(host, 2900).length, 1);
+  const none = await openRelated();
+  assert.equal(relatedTexts(none.b).includes("ÜBERGEORDNET"), false, "none without a parent");
+});
+
+test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read with its children; one the query does not find is counted", async () => {
+  const { b, cx, host } = await openSprint();
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  const all = relatedTexts(b);
+  assert.deepEqual(all.slice(all.indexOf("ÜBERGEORDNET"), all.indexOf("UNTERAUFGABEN")), ["ÜBERGEORDNET", "1 nicht gefunden"]);
+  const again = await openSprint();
+  await press(again.b, again.cx, "enter");
+  await again.host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await again.host.answer("az", ok(JSON.stringify([...json("azure-related-children.json"), { id: 290, fields: { "System.Title": "Sample epic", "System.State": "Active" } }])), AZ.query);
+  assert.deepEqual(drawnLines(again.b)[0], ["AB#290", "Sample epic", "Active"]);
+  await tab(again.b, again.cx);
+  await press(again.b, again.cx, "j");
+  await press(again.b, again.cx, "enter");
+  assert.deepEqual([levelsNow(again.b), topText(again.b)], [[[290], null], "301 › 290"]);
 });
 
 // ---- Going down into a related item in the details panel ----
@@ -7210,9 +7301,10 @@ test("an Azure work item's related items: one az call for the item with its link
   const read = board.parseRelatedItem(fixture("azure-related-item.json"));
   assert.match(read.description, /^<div><h2>Goal<\/h2>/);
   assert.deepEqual(read.children, [312, 311, 399], "the children, in the links' order; parent, related and branch links left out");
+  assert.equal(read.parent, 290, "the parent by its own link");
   assert.deepEqual(read.prs, [{ project: "0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88", repo: "6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c", number: 57 }]);
   const bare = board.parseRelatedItem(JSON.stringify({ id: 5, fields: {}, relations: null }));
-  assert.deepEqual(bare, { description: "", children: [], prs: [] }, "no description, no links");
+  assert.deepEqual(bare, { description: "", parent: null, children: [], prs: [] }, "no description, no links");
   assert.equal(board.parseRelatedItem(JSON.stringify({ id: 5, fields: { "System.Description": { text: "x" } } })).description, "", "a description that is no text: none");
   const twice = JSON.parse(fixture("azure-related-item.json"));
   twice.relations.push(twice.relations[0], twice.relations[3], { rel: "System.LinkTypes.Hierarchy-Forward", url: "https://dev.azure.com/x/_apis/wit/workItems/abc" });
@@ -7243,7 +7335,7 @@ test("UI: a Sprint story's details read its related items: its description as HT
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN", "lädt …"]);
   await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
   assert.equal(childrenQuery(host).length, 1, "then one query for the children");
-  assert.ok(childrenQuery(host)[0].args.includes(board.idsWiql([312, 311, 399])));
+  assert.ok(childrenQuery(host)[0].args.includes(board.idsWiql([312, 311, 399, 290])), "the parent in the same query");
   await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
   assert.equal(host.open("az").length, 0);
   const view = textViewOf(b);

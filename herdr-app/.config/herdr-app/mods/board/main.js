@@ -42,8 +42,8 @@
 // lines of the one above can go. An Azure work item's related items (its
 // description, children and linked pull requests) cost the same, one az
 // call (az boards work-item show --expand relations), and one WIQL query
-// more for its children's titles and states where it has children
-// (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// more for its children's and its parent's titles and states where it has
+// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their
 // fields), its Backlog two, one after the other (the level's work items in
 // their list by az rest, then one WIQL query for their fields; one for an
@@ -1395,6 +1395,8 @@ export const AREA_PATH = `${SYSTEM}AreaPath`;
 // A work item's description (HTML), and the link to a child.
 export const DESCRIPTION = `${SYSTEM}Description`;
 export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
+// The link from a work item to its parent.
+export const PARENT_LINK = `${SYSTEM}LinkTypes.Hierarchy-Reverse`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
 // The fields read of each work item.
@@ -2074,7 +2076,8 @@ export function backlogView(s) {
 // ==== src/sources/azure/related.js ====
 
 // An Azure work item's related items (related.js says what they hold): its
-// description, its children and the pull requests linked to it, read when
+// description, its parent, its children and the pull requests linked to
+// it, read when
 // its details open (azureRelated, which makeAzure gives as its `related`).
 //
 // `az boards work-item show --id <n> --expand relations` (the extension's
@@ -2082,16 +2085,18 @@ export function backlogView(s) {
 // Work Items - Get Work Item with $expand=relations) answers the work item
 // with all its fields, System.Description among them where it has one
 // (HTML, as Azure keeps it), and its links as REST names them: a child
-// "System.LinkTypes.Hierarchy-Forward" with the child's URL, a pull request
+// "System.LinkTypes.Hierarchy-Forward" with the child's URL, its parent
+// "System.LinkTypes.Hierarchy-Reverse" with the parent's, a pull request
 // an "ArtifactLink" named "Pull Request" whose URL (which alone tells it
 // from another artifact, a branch or a commit) is
 // vstfs:///Git/PullRequestId/<project id>%2F<repo id>%2F<pull request id>
 // (how az repos pr work-item add writes one, dev/repos/pull_request.py).
 // (`az boards work-item relation show` would name the links in words, at
-// the cost of one more call for the link types.) A child's link carries no
-// title or state, so where the item has children one WIQL query by their
-// ids reads them (idsWiql, as the Backlog reads its items; az boards query
-// takes flat queries only, no link query); a pull request's link carries
+// the cost of one more call for the link types.) A child's or the parent's
+// link carries no title or state, so where the item has children or a
+// parent one WIQL query by their ids reads them (idsWiql, as the Backlog
+// reads its items; az boards query takes flat queries only, no link
+// query); a pull request's link carries
 // none either, and reading them would cost a call per pull request (az
 // repos pr show), so a pull request's line names its id only, with its
 // page.
@@ -2110,8 +2115,9 @@ export function pullRequestOf(url) {
 }
 
 // az's answer for azRelatedArgs → { description (HTML, "" for none),
-// children: [ids], prs: [{ project, repo, number }] }, each once, in the
-// order of the links.
+// parent (its id, null for none; the first where it names more), children:
+// [ids], prs: [{ project, repo, number }] }, each once, in the order of
+// the links.
 export function parseRelatedItem(stdout) {
   const json = azJson(stdout, "das Work Item");
   if (!isObject(json) || !Number.isInteger(json.id)) throw new BoardError("Azure lieferte kein Work Item");
@@ -2119,17 +2125,20 @@ export function parseRelatedItem(stdout) {
   const relations = Array.isArray(json.relations) ? json.relations : [];
   const children = [];
   const prs = [];
+  let parent = null;
   for (const r of relations) {
     if (r?.rel === CHILD_LINK) {
       const id = linkedId(r.url);
       if (id && !children.includes(id)) children.push(id);
+    } else if (r?.rel === PARENT_LINK) {
+      parent ??= linkedId(r.url) || null;
     } else {
       // An artifact link is a pull request by its URL alone.
       const pr = pullRequestOf(r?.url);
       if (pr && !prs.some((p) => p.number === pr.number)) prs.push(pr);
     }
   }
-  return { description: typeof description === "string" ? description : "", children, prs };
+  return { description: typeof description === "string" ? description : "", parent, children, prs };
 }
 
 // The children's query answer → their lines (related.js; a work item as
@@ -2154,24 +2163,33 @@ const section = (count, lines, error = null) => ({
 });
 
 // The related items of the work item `item` in the team context `c`
-// (related.js): one az call, and one query more where it has children. A
-// failed query shows its reason in the children's place and marks the
-// read to be repeated after the next refresh (retry). `az(args)` runs az.
+// (related.js): one az call, and one query more where it has children or
+// a parent. A failed query shows its reason in the children's place and
+// the parent's and marks the read to be repeated after the next refresh
+// (retry). `az(args)` runs az.
 export async function loadAzureRelated(az, c, item) {
   const read = parseRelatedItem(await az(azRelatedArgs(c, item.number)));
+  const parentIds = read.parent === null ? [] : [read.parent];
+  const ids = [...read.children, ...parentIds];
   let children = section(read.children.length, []);
+  let parents = section(parentIds.length, []);
   let retry = false;
-  if (read.children.length) {
+  if (ids.length) {
     try {
-      children = section(read.children.length, parseChildren(await az(azQueryArgs(c, idsWiql(read.children))), read.children, c));
+      const out = await az(azQueryArgs(c, idsWiql(ids)));
+      children = section(read.children.length, parseChildren(out, read.children, c));
+      parents = section(parentIds.length, parseChildren(out, parentIds, c));
     } catch (e) {
-      children = section(read.children.length, [], report(e));
+      const why = report(e);
+      children = section(read.children.length, [], read.children.length ? why : null);
+      parents = section(parentIds.length, [], parentIds.length ? why : null);
       retry = true;
     }
   }
   return {
     description: read.description,
     format: "html",
+    parents,
     subIssues: children,
     prs: section(read.prs.length, read.prs.map((pr) => pullRequestLine(c, pr))),
     warnings: [],
@@ -2696,11 +2714,14 @@ export const LINKED_PRS = 20;
 // the issue's description: `body` ("Identifies the body of the issue"), the
 // text as it was written, in Markdown, which the details draw formatted;
 // `bodyText` is the body "rendered to text", and how that keeps line breaks
-// the reference does not say.
+// the reference does not say. It reads the issue's parent too (`parent`,
+// the issue it is a sub-issue of; null for none), for its line in the
+// details.
 export const RELATED_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       body
+      parent { number title state url repository { nameWithOwner } }
       subIssues(first: ${SUB_ISSUES}) {
         totalCount pageInfo { hasNextPage } nodes { number title state url repository { nameWithOwner } }
       }
@@ -2742,7 +2763,9 @@ function relatedLine(node, kind) {
 }
 
 // Where each section's connection stands in the answer.
-const RELATED_PATHS = { subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"] };
+const RELATED_PATHS = {
+  parent: ["repository", "issue", "parent"], subIssues: ["repository", "issue", "subIssues"], prs: ["repository", "issue", "closedByPullRequestsReferences"],
+};
 
 // A connection of the answer as a section (related.js), and the error it
 // shows (`shown`, null for none). One GitHub did not send, or whose nodes
@@ -2761,8 +2784,19 @@ function relatedSection(conn, kind, path, errors) {
   return { section, shown: null };
 }
 
+// The issue's parent as a section of one line, or of none where it has
+// none; where GitHub sent none for an error at its path, that error, which
+// it shows (`shown`).
+function parentSection(issue, errors) {
+  const node = issue.parent;
+  if (Number.isInteger(node?.number)) return { section: { count: 1, sent: 1, cut: false, hidden: 0, error: null, lines: [relatedLine(node, "issue")] }, shown: null };
+  const shown = errorAt(errors, RELATED_PATHS.parent);
+  const error = shown ? `GitHub: ${firstLine(shown.message)}` : null;
+  return { section: { count: shown ? 1 : 0, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
+}
+
 // gh's answer for githubRelatedArgs (and the GraphQL errors that came with
-// its data) → { description, subIssues, prs, warnings } (related.js). A
+// its data) → { description, parents, subIssues, prs, warnings } (related.js). A
 // missing issue is explained by the error at its path. An error is a
 // section's own only where the section shows it, in place of what GitHub
 // did not send; all others are warnings (a node GitHub sent as null counts
@@ -2773,12 +2807,14 @@ export function parseGithubRelated(json, item, errors = []) {
     const e = errorAt(errors, ["repository"]);
     throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
   }
+  const parents = parentSection(issue, errors);
   const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors);
   const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors);
-  const shown = [subIssues.shown, prs.shown];
+  const shown = [parents.shown, subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
     format: "markdown",
+    parents: parents.section,
     subIssues: subIssues.section,
     prs: prs.section,
     warnings: errors.filter((e) => !shown.includes(e)).map((e) => firstLine(e.message)).filter(Boolean),
@@ -2976,8 +3012,9 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // ==== src/related.js ====
 
 // The items related to an item, which the board reads when its details
-// open (on GitHub an issue's sub-issues and the pull requests linked to it,
-// on Azure a work item's children and linked pull requests; the same read
+// open (on GitHub an issue's parent, its sub-issues and the pull requests
+// linked to it, on Azure a work item's parent, its children and linked
+// pull requests; the same read
 // brings the item's description beside them), what of them a view keeps
 // (keptRelated), the lines the details panel walks when it has the
 // keyboard, and the heads of their sections. The description as drawn is
@@ -2994,9 +3031,10 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // A source that has related items gives `related: { reads(item), load(item,
 // view) }`: reads tells whether the item has any to read (no call); load
 // reads them (view: the view the item shows in) into { description,
-// format, subIssues, prs, warnings, retry }. description is the item's own
+// format, parents, subIssues, prs, warnings, retry }. description is the item's own
 // text as the source has it ("" for none), format how it is written:
-// "markdown" (the default) or "html". Each of subIssues and prs is a
+// "markdown" (the default) or "html". Each of parents (the item's parent,
+// one line at most), subIssues and prs is a
 // section { count (how many the source has; null when it did not send the
 // section), sent (how many it sent), cut (it has more than it sent), hidden
 // (how many it has that cannot be read), hiddenAs (what the details say of
@@ -3037,8 +3075,8 @@ export function pathLabel(root, levels) {
 }
 
 // The lines of read related items (`data`, or null while none are read),
-// the sub-issues first, then the linked pull requests.
-export const relatedLines = (data) => (data ? [...data.subIssues.lines, ...data.prs.lines] : []);
+// the parent first, then the sub-issues, then the linked pull requests.
+export const relatedLines = (data) => (data ? [...data.parents.lines, ...data.subIssues.lines, ...data.prs.lines] : []);
 
 // The line one step `dir` (+1 down, -1 up) from `line` (an index, or null
 // for none) over `count` lines: down from none to the first, up from the
@@ -4524,8 +4562,10 @@ export const revealSpan = (ui, span) => (ui.offset = revealOffset(ui, span.top, 
 // The detail panel's sections of an item's related items (related.js): its
 // description ("BESCHREIBUNG", drawn formatted by herdr's TextView, as
 // Markdown or HTML as its source writes it, without anything it could load:
-// description.js; "keine Beschreibung" where it has none), its sub-issues
-// (an Azure work item's children), then, where it has any or the source
+// description.js; "keine Beschreibung" where it has none), its parent
+// ("ÜBERGEORDNET", where it has one or the source could not send it), its
+// sub-issues (an Azure work item's children), then, where it has any or
+// the source
 // could not send them, the pull requests linked to it; one line each with
 // its key, title and state (a done one dimmed, a draft marked), and below
 // a section how many it has that cannot be read. While they load the
@@ -4623,6 +4663,11 @@ export function relatedRows(item, entry) {
     if (none && !section.error && !section.lines.length && !section.hidden) rows.push({ kind: "note", text: "keine", level: "info" });
     if (section.hidden) rows.push({ kind: "note", text: `${section.hidden} ${section.hiddenAs ?? "ohne Zugriff"}`, level: "info" });
   };
+  const parents = data.parents;
+  if (parents.lines.length || parents.error || parents.hidden) {
+    rows.push({ kind: "head", text: "ÜBERGEORDNET" });
+    body(parents, false);
+  }
   rows.push({ kind: "head", text: subIssuesHead(item, data.subIssues) });
   body(data.subIssues, true);
   const prs = data.prs;
