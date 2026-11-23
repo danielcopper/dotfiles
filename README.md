@@ -431,7 +431,11 @@ herdr-app`. Which files of the package git tracks is set in the root
   Switching the source (also a click on its name in the top bar), hiding the
   selected column and the column menu have no key and run from the menu. A
   letter key is the same with Caps Lock, and Shift makes it another key (`S` is
-  no `s`). The hint line names the keys of what shows, and `:`; the keys of the
+  no `s`). The hint line names the keys of what shows, and `:`, each key once:
+  while the details panel has the keyboard its keys, and the board's keys
+  that still act there. It leaves out what its place already says: the moves
+  (`h/j/k/l`, `ctrl-d/u`, `gg/G`), `z` ("… mehr (z)" under a description)
+  and `/` (in the filter field). The keys of the
   board's actions, the hint line and the menu read one action table,
   `mods/board/src/commands.js`, so each runs the same code. On a Sprint `j/k`
   move within a column (the stories' or a taskboard column) and `h/l` stay in

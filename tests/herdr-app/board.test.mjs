@@ -3338,10 +3338,10 @@ test("UI: an Azure team tab shows its Sprint or its Backlog, and v switches them
   const shown = () => texts(b.render());
   const layout = () => b.view().layout;
   assert.ok(shown().includes("az ist nicht installiert"), "the Sprint reads with az, which is not found here");
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "v", "h/l j/k", "gg/G", "H/L", "s", "a", "z", "Enter", "o", "m", "/", "r", ":", "Esc"], "the Sprint's keys");
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "v", "H/L", "s", "a", "Enter", "o", "m", "r", ":", "Esc"], "the Sprint's keys");
   await press(b, cx, "v");
   assert.deepEqual([layout(), shown().includes("az ist nicht installiert")], ["backlog", true], "the Backlog reads with az too");
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "v", "j/k", "gg/G", "n", "s", "a", "Enter", "o", "m", "/", "r", ":", "Esc"], "the Backlog's keys");
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "v", "n", "s", "a", "Enter", "o", "m", "r", ":", "Esc"], "the Backlog's keys");
   await press(b, cx, "v");
   assert.equal(layout(), "sprint");
   await click(b, cx, "team-view-backlog");
@@ -3349,7 +3349,7 @@ test("UI: an Azure team tab shows its Sprint or its Backlog, and v switches them
   await press(b, cx, "2");
   assert.ok(shown().includes("PR-Ansicht folgt"));
   assert.equal(byId(b.render(), "team-view"), null, "no view switch on the PRs tab");
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "m", "/", "r", ":", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "m", "r", ":", "Esc"]);
   await press(b, cx, "v");
   assert.ok(shown().includes("PR-Ansicht folgt"), "v does nothing there");
   await press(b, cx, "1");
@@ -3364,7 +3364,7 @@ test("UI: a team with one view shows it without a switch; a config with one sour
   const { b, cx } = await bootBoard({ config: JSON.stringify(config), stored: {} });
   assert.equal(b.view().layout, "backlog");
   assert.equal(byId(b.render(), "team-view"), null);
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "j/k", "gg/G", "n", "s", "a", "Enter", "o", "m", "/", "r", ":", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "n", "s", "a", "Enter", "o", "m", "r", ":", "Esc"]);
   const entries = await openMenu(b, cx);
   assert.equal(entries.some(([name]) => name.startsWith("Quelle wechseln") || name.startsWith("Ansicht wechseln")), false);
   await press(b, cx, "escape");
@@ -3470,10 +3470,10 @@ test("UI: the shown GitHub view refreshes every refreshMinutes while the board s
 
 test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async () => {
   const { b, cx, host } = await openBoard();
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "h/l j/k", "gg/G", "H/L", "s", "a", "Enter", "o", "m", "/", "r", ":", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "H/L", "s", "a", "Enter", "o", "m", "r", ":", "Esc"]);
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "j/k", "gg/G", "Enter", "o", "m", "/", "r", ":", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "Enter", "o", "m", "r", ":", "Esc"]);
 });
 
 // Fires the left button's `event` ("on_mouse_down" or "on_mouse_up") on the
@@ -7069,7 +7069,7 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   assert.ok(b.panelOf(b.view()), "the panel has the keyboard");
   assert.equal(cx.stopped, stopped + 1, "the action stops the key");
   assert.equal(detailPanel(b).with.border_color[0], "#accent", "and shows it");
-  assert.deepEqual([hintOf("Tab"), hint("j/k"), hintOf("Esc")], [["Board"], true, ["zurück"]], "Tab names where it goes");
+  assert.deepEqual([hintOf("Tab"), hint("j/k"), hintOf("Esc")], [["Board"], false, ["zurück"]], "Tab names where it goes; j/k, a move, has no hint");
   const marked = () => [0, 1, 2, 3, 4].filter((i) => byId(detailPanel(b), `related-line-${i}`).styles.includes("bg"));
   assert.deepEqual(marked(), [], "no line yet");
   // Nine rows of 18 pixels: the first line's ends at 102, the second's at 126.
@@ -7871,7 +7871,7 @@ test("UI: Esc back up marks the line it came from where a re-read moved it, and 
 test("UI: the hint line on a level: with no line marked Enter and o are the level's item's, with one the line's; a pull request's level names no lines", async () => {
   const { b, cx, host } = await onLevel();
   const hint = (key) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === key).map((t) => t[1]);
-  assert.deepEqual([hint("Enter"), hint("o"), hint("j/k")], [["Agent"], ["öffnen"], ["Zeilen"]]);
+  assert.deepEqual([hint("Enter"), hint("o"), hint("j/k")], [["Agent"], ["öffnen"], []]);
   await press(b, cx, "j");
   assert.deepEqual([hint("Enter"), hint("o")], [["Zeile zeigen"], ["Zeile öffnen"]]);
   await press(b, cx, "escape");
@@ -8152,12 +8152,11 @@ test("UI: a description taller than 12 lines shows folded to their height with �
   assert.equal(cx.stopped, stopped, "z is not taken");
   sizeDescription(b, cx, 500);
   assert.deepEqual([foldBox(b).with.max_h[0], foldBox(b).styles.includes("overflow_hidden"), texts(byId(detailPanel(b), "description-fold"))], [216, true, ["… mehr (z)"]]);
-  const hintOf = (name) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === name).map((t) => t[1]);
-  assert.deepEqual(hintOf("z"), ["mehr"]);
+  assert.equal(hintKeys(b).includes("z"), false, "the switch names z; the hint line does not");
   await press(b, cx, "z");
-  assert.deepEqual([foldBox(b).styles.includes("max_h"), texts(byId(detailPanel(b), "description-fold")), hintOf("z")], [false, ["weniger (z)"], ["weniger"]], "unfolded");
+  assert.deepEqual([foldBox(b).styles.includes("max_h"), texts(byId(detailPanel(b), "description-fold"))], [false, ["weniger (z)"]], "unfolded");
   await tab(b, cx);
-  assert.deepEqual(hintOf("z"), ["weniger"], "the panel's hint");
+  assert.equal(hintKeys(b).includes("z"), false, "nor in the panel");
   await press(b, cx, "z");
   assert.equal(foldBox(b).with.max_h[0], 216, "folded again, from the panel");
   await click(b, cx, "description-fold");
@@ -8951,14 +8950,14 @@ test("the details block's offset stays within its content; a span comes into vie
   assert.deepEqual([board.rowSpan([18, 40, 18], 0, 6, 12), board.rowSpan([18, 40, 18], 2, 6, 12)], [{ top: 12, height: 18 }, { top: 82, height: 18 }]);
 });
 
-test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its window, clamped at both ends; without the panel's keyboard they do nothing; the hint names them", async () => {
+test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its window, clamped at both ends; without the panel's keyboard they do nothing; the hint line leaves them out", async () => {
   const { b, cx } = await openRelated();
   const content = layOut(b, cx, 100);
   assert.equal(content, 234);
   await press(b, cx, "d", { modifiers: { control: true } });
   assert.equal(offsetOf(b), 0, "the board has the keyboard: nothing");
   await tab(b, cx);
-  assert.ok(hintKeys(b).includes("ctrl-d/u"));
+  assert.equal(hintKeys(b).includes("ctrl-d/u"), false);
   const stopped = cx.stopped;
   await press(b, cx, "d", { modifiers: { control: true } });
   assert.deepEqual([offsetOf(b), cx.stopped], [50, stopped + 1]);
@@ -9167,10 +9166,10 @@ test("UI: in the Backlog and a PR list gg and G go to the first and last row; on
   assert.deepEqual(sprint.st().sel, { col: 1, key: "AB#331" });
 });
 
-test("UI: while the details panel has the keyboard gg and Home go to its top with no line selected, G and End to its bottom on its last line; the hint names them", async () => {
+test("UI: while the details panel has the keyboard gg and Home go to its top with no line selected, G and End to its bottom on its last line; the hint line leaves them out", async () => {
   const { b, cx, st, host } = await openRelated();
   await tab(b, cx);
-  assert.ok(hintKeys(b).includes("gg/G"), "the panel's hint");
+  assert.equal(hintKeys(b).includes("gg/G"), false, "no hint for the panel's edges");
   const content = layOut(b, cx, 60);
   await press(b, cx, ...SHIFT_G);
   assert.deepEqual([b.panel.line, offsetOf(b), st().sel.key], [4, content - 60, "PVTI_rec4"], "the last line, the block's bottom; the board's selection stays");
@@ -9537,7 +9536,7 @@ test("UI: q, x, X and e are no keys any more, and Shift+S, N and O are no s, n a
   }
 });
 
-test("UI: on a Sprint z folds the selected story while the board has the keyboard and the description while the details panel has it; the hints and the menu say which", async () => {
+test("UI: on a Sprint z folds the selected story while the board has the keyboard and the description while the details panel has it; the menu says which, the hint line names no z", async () => {
   const { b, cx, host, st } = await openSprint();
   await press(b, cx, "enter");
   await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
@@ -9545,7 +9544,7 @@ test("UI: on a Sprint z folds the selected story while the board has the keyboar
   sizeDescription(b, cx, 500);
   const hintOf = (name) => b.render().kids.at(-1).kids.map((h) => texts(h)).filter((t) => t[0] === name).map((t) => t[1]);
   const folds = (entries) => entries.filter(([name]) => /^(Story|Beschreibung)/.test(name));
-  assert.deepEqual(hintOf("z"), ["Story zuklappen"]);
+  assert.deepEqual(hintOf("z"), []);
   assert.deepEqual(texts(byId(detailPanel(b), "description-fold")), ["… mehr"], "z is the story's here: the switch names no key");
   assert.deepEqual(folds(await openMenu(b, cx)), [["Story zu-/aufklappen", "z"], ["Beschreibung mehr", null]]);
   await press(b, cx, "escape");
@@ -9555,7 +9554,7 @@ test("UI: on a Sprint z folds the selected story while the board has the keyboar
   await press(b, cx, "z");
   assert.equal(byId(b.render(), "folded-AB#301"), null);
   await tab(b, cx);
-  assert.deepEqual(hintOf("z"), ["mehr"]);
+  assert.deepEqual(hintOf("z"), []);
   assert.deepEqual(folds(await openMenu(b, cx)), [["Story zu-/aufklappen", null], ["Beschreibung mehr", "z"]]);
   await press(b, cx, "escape");
   await press(b, cx, "z");
@@ -9655,17 +9654,25 @@ test("the action table's couplings: a listed action has a name, a group, when an
   assert.ok(["status", "fold-description", "line-board", "columns", "team-view"].every((id) => ran.includes(id)), "and each can run with it");
 });
 
-test("UI: the hint line while the details panel has the keyboard: each key and what it does, in the table's order", async () => {
+test("UI: the hint line while the details panel has the keyboard: each key once and what it does, in the table's order; no moves, z or /", async () => {
   const { b, cx } = await openRelated();
   sizeDescription(b, cx, 500);
+  const pairs = () => b.render().kids.at(-1).kids.map((h) => texts(h));
+  assert.deepEqual(pairs(), [
+    ["1 2 3 [ ]", "Tab"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["Enter", "Detail · Agent"], ["o", "öffnen"],
+    ["Tab", "Details"], ["m", "nur meine"], ["r", "neu laden"], [":", "Befehle"], ["Esc", "schließen"],
+  ], "the board has the keyboard");
   await tab(b, cx);
-  const pairs = b.render().kids.at(-1).kids.map((h) => texts(h));
-  assert.deepEqual(pairs, [
-    ["1 2 3 [ ]", "Tab"], ["h/l j/k", "bewegen"], ["gg/G", "erste/letzte"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"],
-    ["Enter", "Detail · Agent"], ["o", "öffnen"], ["Tab", "Board"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"],
-    ["z", "mehr"], ["Enter", "Zeile zeigen"], ["o", "Zeile öffnen"], ["m", "nur meine"], ["/", "Filter"], ["r", "neu laden"], [":", "Befehle"],
-    ["Esc", "zurück"],
-  ]);
+  assert.deepEqual(pairs(), [
+    ["1 2 3 [ ]", "Tab"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["Enter", "Detail · Agent"], ["o", "öffnen"],
+    ["Tab", "Board"], ["m", "nur meine"], ["r", "neu laden"], [":", "Befehle"], ["Esc", "zurück"],
+  ], "the panel with no line selected: Enter and o act on the board's item, and say so");
+  await press(b, cx, "j");
+  assert.equal(b.panel.line, 0);
+  assert.deepEqual(pairs(), [
+    ["1 2 3 [ ]", "Tab"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["Tab", "Board"],
+    ["Enter", "Zeile zeigen"], ["o", "Zeile öffnen"], ["m", "nur meine"], ["r", "neu laden"], [":", "Befehle"], ["Esc", "zurück"],
+  ], "a line selected: the panel's Enter and o, once");
 });
 
 test("UI: the second Enter's action in the menu is named by what it does: a pull request's review, an item's session", async () => {
