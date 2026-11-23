@@ -92,7 +92,8 @@
       "Bash(*gh alias set*)",
       "Bash(*gh alias import*)",
       "Bash(*az repos pr update*--status*completed*)",
-      "Bash(*az repos pr update*--auto-complete*)"
+      "Bash(*az repos pr update*--auto-complete*)",
+      "Bash(*az repos pr create*--auto-complete*)"
     ],
     "defaultMode": "auto"
   },
