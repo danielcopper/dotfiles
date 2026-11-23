@@ -5885,7 +5885,7 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
     const line = b.render().kids.at(-1);
     return line.kids.map((h) => texts(h)).filter((t) => t[0] === name).map((t) => t[1]);
   };
-  assert.deepEqual([hintOf("Tab"), hint("j/k"), hintOf("Esc")], [["Zeilen"], false, ["schließen"]], "the hint names Tab");
+  assert.deepEqual([hintOf("Tab"), hint("j/k"), hintOf("Esc")], [["Details"], false, ["schließen"]], "the hint names Tab");
   assert.equal(detailPanel(b).with.border_color[0], "#border");
   assert.equal(takesTab(b), true, "the root takes Tab");
   const stopped = cx.stopped;
@@ -5893,7 +5893,7 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   assert.ok(b.panelOf(b.view()), "the panel has the keyboard");
   assert.equal(cx.stopped, stopped + 1, "the action stops the key");
   assert.equal(detailPanel(b).with.border_color[0], "#accent", "and shows it");
-  assert.deepEqual([hint("j/k"), hintOf("Esc")], [true, ["zurück"]]);
+  assert.deepEqual([hintOf("Tab"), hint("j/k"), hintOf("Esc")], [["Board"], true, ["zurück"]], "Tab names where it goes");
   const marked = () => [0, 1, 2, 3, 4].filter((i) => byId(detailPanel(b), `related-line-${i}`).styles.includes("bg"));
   assert.deepEqual(marked(), [], "no line yet");
   // Nine rows of 18 pixels: the first line's ends at 102, the second's at 126.

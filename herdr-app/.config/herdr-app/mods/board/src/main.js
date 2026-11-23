@@ -1412,8 +1412,8 @@ export default class Board extends View {
     if (!this.readsRelated(item)) return [];
     const ui = this.relatedUi;
     const fold = descriptionFolds(ui, item) ? [["e", ui.unfolded === item.key ? "weniger" : "mehr"]] : [];
-    if (!this.panelOf(view)) return [["Tab", "Zeilen"], ...fold];
-    return [["Tab", "zurück"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
+    if (!this.panelOf(view)) return [["Tab", "Details"], ...fold];
+    return [["Tab", "Board"], ["j/k", "Zeilen"], ["ctrl-d/u", "halbe Seite"], ["gg/G", "oben/unten"], ...fold, ["Enter", "Zeile auf dem Board"], ["o", "Zeile öffnen"]];
   }
 
   // The keys of what shows: the top bar's (a team's v), those of the shown
