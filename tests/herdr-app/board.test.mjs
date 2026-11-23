@@ -4856,7 +4856,7 @@ test("the Backlog's answers: its levels, the requirement level and the one below
   assert.equal(board.parseBacklogConfig(JSON.stringify(scrum)).orderField, null, "no field name, no order field");
   assert.deepEqual(config.typeStates.Bug, ["New", "Committed", "Done", "Removed"]);
   assert.deepEqual(config.states.map((s) => s.category), ["Proposed", "Proposed", "InProgress", "InProgress", "InProgress", "InProgress", "Resolved", "Completed", "Removed"]);
-  assert.deepEqual(config.states.find((s) => s.name === "In UAT"), { id: "In UAT", name: "In UAT", category: "Resolved", color: "ansi5" });
+  assert.deepEqual(config.states.find((s) => s.name === "In UAT"), { id: "In UAT", name: "In UAT", category: "Resolved", color: "ansi5", done: false });
   assert.deepEqual(board.parseTeamSettings(fixture("azure-backlog-settings.json")),
     { defaultIteration: "Example Project\\Sprint 12", backlogIteration: "Example Project", follows: null });
   assert.deepEqual(board.parseTeamSettings("{}"), { defaultIteration: null, backlogIteration: null, follows: null });
@@ -5481,6 +5481,11 @@ const descriptionTexts = (b) => {
 const drawnLines = (b) =>
   byId(detailPanel(b), "related-lines").kids.filter((k) => /^related-line-/.test(k.with.id?.[0] ?? "")).map((k) => texts(k));
 const answerRelated = (host, result) => host.answer("gh", result, isRelatedCall);
+// r, and the view's answer: the open related items are read after it.
+async function reloadBoard(b, cx, host) {
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+}
 // An answer for the related items: `n` sub-issues of `count` (more to page
 // through: `more`), pull requests as `prs` (nodes) of `prCount`.
 function relatedAnswer({ n = 0, count = n, more = false, prs = [], prCount = prs.length } = {}) {
@@ -5698,6 +5703,24 @@ test("UI: related items are read where the shown item changes: a click, the keys
   assert.equal(readsOf(host, 3007).length, 1, "the next look of a shown board");
 });
 
+test("UI: details opened while a refresh of the view runs read their related items once it ended, also where it failed", async () => {
+  const { b, cx, host } = await openBoard();
+  cx.call((own) => b.refresh(b.view(), own));
+  await settle();
+  await press(b, cx, "enter");
+  await cx.look();
+  assert.equal(readsOf(host).length, 0, "not while the refresh runs");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  assert.equal(readsOf(host, 3004).length, 1, "once it ended");
+  await press(b, cx, "escape");
+  await press(b, cx, "j");
+  cx.call((own) => b.refresh(b.view(), own));
+  await settle();
+  await press(b, cx, "enter");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "gh: HTTP 502: Bad Gateway\n" }, isBoardCall);
+  assert.equal(readsOf(host, 3005).length, 1, "after a failed refresh too");
+});
+
 test("UI: a refresh keeps the open related items and reads nothing for them; another item's are read again after it; r reads the open ones again", async () => {
   const { b, cx, host, st } = await openRelated();
   await press(b, cx, "j");
@@ -5718,7 +5741,9 @@ test("UI: a refresh keeps the open related items and reads nothing for them; ano
   assert.equal(readsOf(host, 3005).length, 1, "the other one is read again");
   await answerRelated(host, ok(relatedAnswer({ n: 1 })));
   await press(b, cx, "r");
-  assert.deepEqual(host.open("gh").map((c) => (isRelatedCall(c.args) ? "related" : isBoardCall(c.args) ? "board" : "?")).sort(), ["board", "related"], "r: the view and the open related items");
+  assert.deepEqual(host.open("gh").map((c) => (isRelatedCall(c.args) ? "related" : isBoardCall(c.args) ? "board" : "?")), ["board"], "r: the view first");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  assert.equal(readsOf(host).length, 1, "then the open related items, once it is read");
   assert.equal(sectionTexts(b).at(-1), "lädt …");
   await answerRelated(host, ok(relatedAnswer({ n: 2 })));
   assert.equal(drawnLines(b).length, 2);
@@ -5739,8 +5764,8 @@ test("UI: related items that fail to read say the first line of gh's reason, the
   assert.equal(readsOf(host, 3004).length, 1, "the next refresh reads them again");
   await answerRelated(host, { code: 1, stdout: fixture("github-related-not-found.json"), stderr: "gh: Could not resolve to an Issue with the number of 3004.\n" });
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Could not resolve to an Issue with the number of 3004."]);
-  await press(b, cx, "r");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
+  await reloadBoard(b, cx, host);
   const [older, newer] = readsOf(host);
   assert.ok(older && newer, "each r reads them again");
   newer.done = true;
@@ -5759,10 +5784,10 @@ test("UI: more than GitHub sends: the first it sent of how many there are; none:
   assert.equal(sectionTexts(b)[0], "UNTERAUFGABEN · 11/11 · erste 50 von 60");
   assert.equal(drawnLines(b).length, 50);
   assert.ok(!sectionTexts(b).some((s) => s.startsWith("VERKNÜPFTE")));
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   await answerRelated(host, ok(relatedAnswer()));
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "keine"]);
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   const many = JSON.parse(relatedAnswer({ prs: [prNode(1), prNode(2)], prCount: 25 }));
   many.data.repository.issue.closedByPullRequestsReferences.pageInfo.hasNextPage = true;
   await answerRelated(host, ok(JSON.stringify(many)));
@@ -5789,24 +5814,24 @@ test("UI: a node GitHub sent as null is counted as without access; a section it 
   ]);
   const tone = (text) => chainTo(byId(detailPanel(b), "related-lines"), (el) => el.kids?.[0] === text)?.at(-1)?.with.text_color[0];
   assert.deepEqual([tone("GitHub: Pull requests are hidden"), tone("Something else went wrong"), tone("1 ohne Zugriff")], ["#red", "#yellow", "#grey"], "an error red, a warning yellow");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   const hidden = JSON.parse(relatedAnswer({ count: 1 }));
   hidden.data.repository.issue.subIssues.nodes = [null];
   await answerRelated(host, ok(JSON.stringify(hidden)));
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "1 ohne Zugriff"], "not „keine“");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   const unsent = JSON.parse(relatedAnswer());
   unsent.data.repository.issue.subIssues = null;
   unsent.errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "subIssues"], message: "Sub-issues are hidden" }];
   await answerRelated(host, { code: 1, stdout: JSON.stringify(unsent), stderr: "gh: Sub-issues are hidden\n" });
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Sub-issues are hidden"], "the error in their place, not „keine“");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   const nodeless = JSON.parse(relatedAnswer());
   nodeless.data.repository.issue.subIssues = { totalCount: 3, pageInfo: { hasNextPage: false }, nodes: null };
   nodeless.errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "subIssues", "nodes"], message: "Sub-issues are hidden" }];
   await answerRelated(host, { code: 1, stdout: JSON.stringify(nodeless), stderr: "gh: Sub-issues are hidden\n" });
   assert.deepEqual(sectionTexts(b), ["UNTERAUFGABEN · 11/11", "GitHub: Sub-issues are hidden"], "nodes not sent: the same");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   const prsHidden = JSON.parse(relatedAnswer({ prCount: 1 }));
   prsHidden.data.repository.issue.closedByPullRequestsReferences.nodes = [null];
   await answerRelated(host, ok(JSON.stringify(prsHidden)));
@@ -6005,7 +6030,7 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   const { b, cx, host } = await openRelated();
   await tab(b, cx);
   await press(b, cx, "j");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   await press(b, cx, "enter");
   await press(b, cx, "o");
   assert.deepEqual([b.modal, cx.opened, b.panelOf(b.view())?.line], [null, undefined, 0]);
@@ -6016,10 +6041,12 @@ test("UI: Enter and o on a line that r took away until the related items come ag
 
 // Every tag name a shown HTML description holds, and the `<` in a shown
 // Markdown one that could start HTML (none but its links' destinations).
-const tagNames = (html) => [...html.matchAll(/<\/?([A-Za-z][A-Za-z0-9]*)/g)].map((m) => m[1].toLowerCase());
+const tagNames = (html) => [...html.matchAll(/<\/?([A-Za-z][A-Za-z0-9:-]*)/g)].map((m) => m[1].toLowerCase());
 const KEPT_TAGS = new Set(["p", "br", "b", "strong", "i", "em", "u", "s", "del", "strike", "mark", "code", "a", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6",
   "blockquote", "table", "thead", "tbody", "tr", "th", "td", "hr", "div", "span", "sub", "sup"]);
-const htmlStarts = (md) => [...md.matchAll(/<[A-Za-z/!?]/g)].filter((m) => !md.startsWith("](<http", m.index - 2));
+// The `<` in shown Markdown that could start HTML: all but those of an
+// http(s) URL in <…> (an autolink or a destination).
+const htmlStarts = (md) => [...md.matchAll(/<[A-Za-z/!?]/g)].filter((m) => !/^<https?:\/\//i.test(md.slice(m.index, m.index + 9)));
 // Inputs that tried to get an image or raw HTML past the description's
 // step, in both formats.
 const HOSTILE = [
@@ -6030,11 +6057,17 @@ const HOSTILE = [
   '<svg><image href="https://attacker.example/x.png"/></svg>',
   '<pre>&#60;img src="https://attacker.example/x.png"&#62;</pre>', '<pre>&#x3c;img src=x&#x3E;</pre>', '<xmp><img src=x></xmp>',
   '<img src="https://attacker.example/a.png alt=x>after', "<img\nsrc=https://attacker.example/b.png>", "<img\u0001src=c>", "<IMG/SRC=https://attacker.example/d.png/>",
-  "<iMaGe src=e>", "<<img src=h>>", "<math><mi><img src=x></mi></math>", "<!-- <img src=x> -->", "<iframe src=x></iframe>",
+  "<iMaGe src=e>", "<<img src=h>>", "<math><mi><img src=x></mi></math>", "<!-- <img src=x> -->", "<iframe src=x></iframe>", "<!--> <img src=y>",
   "![a](https://attacker.example/u.png)", "![b][r]", "![c][]", "![d]", "[![e](https://attacker.example/v.png)](w)", "!![f](x)", "!![f2](https://attacker.example/f.png)", "`![g](y)`", "\\![i](q)", "\\\\![j](r)",
+  "<https://attacker.example/l.png>", "[k](<https://attacker.example/k.png>)",
 ].join("\n");
+// A refused image's label ending in `!` before a link: once joined, a `![`.
+const JOINS = [
+  "![x!]()[a](https://attacker.example/x.png)", "![x!](javascript:1)[a](https://attacker.example/x.png)", "![x&#33;](rel.png)[a](https://attacker.example/x.png)",
+  '<img alt="x!" src="nope">[a](https://attacker.example/x.png)', '<img alt="x&#33;">[a](https://attacker.example/x.png)', '<img alt="x\\!">[a](https://attacker.example/x.png)',
+];
 
-test("an HTML description keeps only its allowed tags, written anew without attributes but an a's http(s) href; images become links; every other < is text", () => {
+test("an HTML description keeps only plain formatting tags, written anew without attributes but an a's http(s) href; images become links; comments and other tags go, their text stays", () => {
   const html = (text) => board.shownDescription(text, "html");
   assert.equal(html("<div><h2>Goal</h2><p>Read the <b>sample</b> file.</p><ul><li>one</li></ul></div>"), "<div><h2>Goal</h2><p>Read the <b>sample</b> file.</p><ul><li>one</li></ul></div>");
   assert.equal(html('<p class="x" style="color: red" onclick="y()">t</p><BR/>'), "<p>t</p><br>", "attributes dropped, names in lower case");
@@ -6044,37 +6077,56 @@ test("an HTML description keeps only its allowed tags, written anew without attr
   assert.equal(html('<img src="data:image/png;base64,AAAA" alt="dot"><img alt="no source"><image src="https://example.com/e.png">'), 'Bild: dotBild: no source<a href="https://example.com/e.png">Bild</a>',
     "no http(s) src: its text");
   assert.equal(html('<img src="https://example.com/1.png" SRC="https://example.com/2.png" alt="a &amp; b" alt=c>'), '<a href="https://example.com/1.png">Bild: a &amp; b</a>', "the first of an attribute, entities read");
+  assert.equal(html("<img alt='say \"hi\"'>"), "Bild: say &quot;hi&quot;", "a `\"` written as an entity");
   assert.equal(html('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<p><code>&lt;img src="https://attacker.example/x.png"&gt;</code></p>', "a pre as code, its text as written");
-  assert.equal(html('<textarea>&lt;img src=x&gt;</textarea><script>a</script>'), "&lt;textarea>&lt;img src=x&gt;&lt;/textarea>&lt;script>a&lt;/script>");
-  assert.equal(html('<svg><image href="https://attacker.example/x.png"/></svg>'), "&lt;svg>Bild&lt;/svg>");
-  assert.equal(html('<b title="x>y">bold</b><!-- c --><unknown>u</unknown>'), '<b>y">bold</b>&lt;!-- c -->&lt;unknown>u&lt;/unknown>', "a tag ends at its first >; a comment and an unknown tag are text");
+  assert.equal(html('<div><textarea>&lt;img src=x&gt;</textarea><script>a()</script><style>b{}</style></div>'), "<div>&lt;img src=x&gt;a()b{}</div>",
+    "a raw-text element goes, its text stays in the one around it");
+  assert.equal(html('<svg><image href="https://attacker.example/x.png"/></svg>'), "Bild");
+  assert.equal(html('<font face="Calibri" color="red">x</font><o:p></o:p><small>s</small><dl><dt>d</dt></dl><input value="v"><col>'), "xsd",
+    "tags off the list (Word's, Outlook's, a form's) go, their text stays");
+  assert.equal(html('<b title="x>y">bold</b>a<!-- c <img src=x> -->b<!-->c<!---->d'), '<b>y">bold</b>abcd', "a tag ends at its first >; comments go");
+  assert.equal(html("a <!-- not closed <b>"), "a &lt;!-- not closed <b>", "a comment not closed is text");
+  assert.equal(html("<!DOCTYPE html><![CDATA[x]]>y -->z"), "&lt;!DOCTYPE html>&lt;![CDATA[x]]>y -->z", "no other <! is a comment");
   assert.equal(html(`<b ${"x".repeat(3000)}>t`), `&lt;b ${"x".repeat(3000)}>t`, "a tag longer than MAX_TAG is text");
   assert.equal(html("<b"), "&lt;b", "a tag left open");
-  assert.equal(html("<p-x>t</p-x><img\u0001src=c>"), "&lt;p-x>t&lt;/p-x>&lt;img\u0001src=c>", "a name that goes on past an allowed one is another tag");
+  assert.equal(html("<p-x>t</p-x><img-x src=https://example.com/a.png>u<img\u0001src=c>"), "tu&lt;img\u0001src=c>", "a name that goes on past an allowed one is another tag");
   assert.equal(html('<img alt="&#65;&#x42; &lt;C&gt; &#0;" src="https://example.com/a.png">'), '<a href="https://example.com/a.png">Bild: AB &lt;C&gt; &amp;#0;</a>', "the alt's entities read, then written as text");
   assert.deepEqual([html(""), html("  \n "), html(null)], [null, null, null], "blank: none");
   const out = html(HOSTILE);
   assert.deepEqual([...new Set(tagNames(out))].filter((n) => !KEPT_TAGS.has(n)), [], "no other tag survives");
-  assert.doesNotMatch(out, /<(?:img|image|pre|textarea|script|style|svg|math|xmp|iframe)\b/i);
+  assert.doesNotMatch(out, /<!--/, "no comment");
 });
 
-test("a Markdown description keeps no HTML; its images, inline and as <img>, become Markdown links to their http(s) URL; one by reference plain or a link; no image form survives", () => {
+test("a Markdown description keeps no HTML but http(s) URLs in <…>; its images, inline and as <img>, become Markdown links to their http(s) URL; one by reference plain or a link; no image form survives", () => {
   const md = (text) => board.shownDescription(text, "markdown");
   assert.equal(md("Rolls it out.\r\n\r\n## Steps\n- one\n- **two** `code`"), "Rolls it out.\r\n\r\n## Steps\n- one\n- **two** `code`", "the rest as written");
-  assert.equal(md('see ![the shot](https://example.com/a.png "title") here'), "see \u200b[Bild: the shot](<https://example.com/a.png>) here");
-  assert.equal(md("![](<https://example.com/a b.png>)"), "\u200b[Bild](<https://example.com/a%20b.png>)", "no alt; a destination in <>");
+  assert.equal(md('see ![the shot](https://example.com/a.png "title") here'), "see [Bild: the shot](<https://example.com/a.png>) here");
+  assert.equal(md("![](<https://example.com/a b.png>)"), "[Bild](<https://example.com/a%20b.png>)", "no alt; a destination in <>");
   assert.equal(md("![x](javascript:alert(1)) ![y](data:image/png;base64,AA)"), "Bild: x Bild: y", "no http(s) URL: its text");
-  assert.equal(md("![a [b] \\\\ <i>](https://example.com/x.png)"), "\u200b[Bild: a \\[b\\] \\\\ <\u200bi>](<https://example.com/x.png>)", "the label's [ ] \\ escaped, its < no HTML");
+  assert.equal(md("![a [b] \\\\ ! <i>](https://example.com/x.png)"), "[Bild: a \\[b\\] \\\\ \\! <\u200bi>](<https://example.com/x.png>)", "the label's [ ] \\ ! escaped, its < no HTML");
   assert.equal(md("![logo][l] ![alt][] ![ref] ![][r]\n\n[l]: https://example.com/l.png"),
-    "\u200b[Bild: logo][l] \u200b[Bild: alt][] \u200b[Bild: ref] \u200b[Bild][r]\n\n[l]: https://example.com/l.png", "by reference: a link where the reference is defined, else text");
-  assert.equal(md("[![badge](https://example.com/b.svg)](https://example.com)"), "[\u200b[Bild: badge](<https://example.com/b.svg>)](https://example.com)", "inside a link's text");
+    "[Bild: logo][l] [Bild: alt][] [Bild: ref] [Bild][r]\n\n[l]: https://example.com/l.png", "by reference: a link where the reference is defined, else text");
+  assert.equal(md("[![badge](https://example.com/b.svg)](https://example.com)"), "[[Bild: badge](<https://example.com/b.svg>)](https://example.com)", "inside a link's text");
   assert.equal(md("!![f](x) \\\\![g](y) !![h](https://example.com/h.png)"), "!Bild: f \\\\Bild: g !\u200b[Bild: h](<https://example.com/h.png>)", "a ! or a backslash before one makes no new image");
-  assert.equal(md('a <img width="300" alt="chart" src="https://example.com/b.png"> b'), "a \u200b[Bild: chart](<https://example.com/b.png>) b", "an <img>, as GitHub writes a pasted one");
-  assert.equal(md("<b>x</b> <details> a<br>b <https://example.com>"), "<\u200bb>x<\u200b/b> <\u200bdetails> a<\u200bbr>b <\u200bhttps://example.com>", "other HTML and autolinks: text");
+  for (const join of JOINS) {
+    const out = md(join);
+    assert.doesNotMatch(out, /!\[/, `${join} → ${out}`);
+  }
+  assert.equal(md(JOINS[0]), "Bild: x\\!\u200b[a](https://attacker.example/x.png)", "a refused image's `!` escaped, and no `![` left anyway");
+  assert.equal(md('a <img width="300" alt="chart" src="https://example.com/b.png"> b'), "a [Bild: chart](<https://example.com/b.png>) b", "an <img>, as GitHub writes a pasted one");
+  assert.equal(md("<b>x</b> <details> a<br>b <img src=x> <a href=https://example.com/>"), "<\u200bb>x<\u200b/b> <\u200bdetails> a<\u200bbr>b Bild <\u200ba href=https://example.com/>", "other HTML: text");
+  assert.equal(md("<https://example.com/a\\b> <HTTP://example.com/up> [x](<https://example.com/a b>) [y](< https://example.com>)\n\n[r]: <https://example.com/r>"),
+    "<https://example.com/a%5Cb> <HTTP://example.com/up> [x](<https://example.com/a b>) [y](<\u200b https://example.com>)\n\n[r]: <https://example.com/r>",
+    "an http(s) URL in <…> stays, an autolink or a destination, its \\ as %5C; anything else in <…> is text");
+  assert.equal(md(`<https://example.com/${"a".repeat(3000)}>`), `<https://example.com/${"a".repeat(3000)}>`, "however long");
+  assert.equal(md("<!x --> y"), "<\u200b!x --> y", "no other <! is a comment");
+  assert.equal(md("<mailto:a@example.com> <https://example.com/<b>"), "<\u200bmailto:a@example.com> <\u200bhttps://example.com/<\u200bb>", "another scheme, or a < inside: text");
+  assert.equal(md("a <!-- hidden <img src=x> --> b <!--> c <!-- open"), "a  b  c <\u200b!-- open", "comments go; one not closed is text");
   assert.equal(md('<pre>&lt;img src="https://attacker.example/x.png"&gt;</pre>'), '<\u200bpre>&lt;img src="https://attacker.example/x.png"&gt;<\u200b/pre>');
-  assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "\u200b[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no link");
+  assert.equal(md("![x](https://example.com/" + "a".repeat(1100) + ")"), "[Bild: x](https://example.com/" + "a".repeat(1100) + ")", "an image longer than MAX_IMAGE: no link");
+  assert.equal(md(`![x](https://example.com/i.png "${"t".repeat(1100)}")`), `[Bild: x](https://example.com/i.png "${"t".repeat(1100)}")`, "its title past MAX_IMAGE: no link");
   assert.equal(md("</img> <img>"), "<\u200b/img> Bild", "an <img> closed: text; one without src: its label");
-  const link = "\u200b[Bild: a](<https://example.com/i.png>)";
+  const link = "[Bild: a](<https://example.com/i.png>)";
   assert.deepEqual(
     ["![a](https://example.com/i.png)", "![a]x https://example.com/i.png)", "![a](<https://example.com/i.png\n)", '![a](https://example.com/i.png "t"x',
       "![a\n\nb](https://example.com/i.png)", `![${"[".repeat(33)}a${"]".repeat(33)}](https://example.com/i.png)`, `![a](https://example.com/${"(".repeat(33)}i${")".repeat(33)})`]
@@ -6088,14 +6140,24 @@ test("a Markdown description keeps no HTML; its images, inline and as <img>, bec
   assert.doesNotMatch(out, /!\[/, "no `![` left");
 });
 
-test("a 64 KB hostile description takes little time in either format", () => {
-  const bodies = ["![".repeat(32768), "<a".repeat(32768), `${"<b ".repeat(21000)}>`, "![a](".repeat(13107), "<img src=".repeat(7281), "<b title='".repeat(6553), `${"[".repeat(32000)}](x)`, "<".repeat(65536)];
-  for (const body of bodies) {
+test("a hostile description's cost grows with its length, not faster: 64 KB takes at most about six times what 16 KB takes, in either format", () => {
+  const hostile = (kb) => {
+    const n = kb * 1024;
+    const fill = (piece) => piece.repeat(Math.ceil(n / piece.length)).slice(0, n);
+    return [fill("!["), fill("<a"), `${fill("<b ")}>`, fill("![a]("), fill("<img src="), fill("<b title='"), `${fill("[")}](x)`, fill("<"), fill("![a](b ("), fill("![a](<b"),
+      fill("<!--"), fill("<https://x")];
+  };
+  // The fastest of three runs, in ms.
+  const best = (body, format) => Math.min(...[0, 1, 2].map(() => {
+    const start = performance.now();
+    board.shownDescription(body, format);
+    return performance.now() - start;
+  }));
+  const [small, large] = [hostile(16), hostile(64)];
+  for (const [i, body] of large.entries()) {
     for (const format of ["markdown", "html"]) {
-      const start = performance.now();
-      board.shownDescription(body, format);
-      const took = performance.now() - start;
-      assert.ok(took < 250, `${body.slice(0, 12)}… as ${format}: ${Math.round(took)} ms`);
+      const [t16, t64] = [best(small[i], format), best(body, format)];
+      assert.ok(t64 < 6 * t16 + 5, `${body.slice(0, 10)}… as ${format}: ${t16.toFixed(1)} ms at 16 KB, ${t64.toFixed(1)} ms at 64 KB`);
     }
   }
 });
@@ -6115,10 +6177,10 @@ test("UI: the details draw the description with TextView, Markdown for an issue'
   assert.doesNotMatch(view.source, /!\[|<img/i, "no image");
   assert.ok(relatedTexts(b).indexOf("BESCHREIBUNG") < relatedTexts(b).findIndex((t) => t.startsWith("UNTERAUFGABEN")), "above the sub-issues, in the same scrolled block");
   assert.equal(byId(detailPanel(b), "related-lines").kids.findIndex((k) => Boolean(chainTo(k, (el) => el.kind === "textview"))), 1, "one row, after the head");
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   await answerRelated(host, ok(relatedAnswer()));
   assert.deepEqual([descriptionTexts(b), textViewOf(b)], [["BESCHREIBUNG", "keine Beschreibung"], null]);
-  await press(b, cx, "r");
+  await reloadBoard(b, cx, host);
   await answerRelated(host, { code: 1, stdout: "", stderr: "gh: GraphQL: Something broke\n" });
   assert.deepEqual(descriptionTexts(b), ["BESCHREIBUNG", "GraphQL: Something broke"]);
 });
@@ -6270,7 +6332,8 @@ test("UI: an Azure related read that fails says why; a children query that fails
   await answerRefresh(host, { me: false });
   assert.equal(azureRelatedOf(host).length, 1, "a failed children query: read again after the next refresh");
   await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
-  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await host.answer("az", ok(JSON.stringify([...json("azure-related-children.json"), { id: 399, fields: { "System.Title": "No state yet" } }])), AZ.query);
+  assert.deepEqual(drawnLines(b)[2], ["AB#399", "No state yet", "ohne Status"], "a child without a state");
   await refreshSprint(b, cx);
   await answerRefresh(host, { me: false });
   assert.equal(azureRelatedOf(host).length, 0, "once it is read, kept over a refresh");

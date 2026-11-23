@@ -7,16 +7,18 @@
 
 import { BoardError, failure, isObject, itemKey } from "../../shared.js";
 
-// Theme colors and column order for Azure's state categories.
+// Theme colors and column order for Azure's state categories, and the
+// categories whose states count as done (a done related item is dimmed).
 export const CATEGORIES = ["Proposed", "InProgress", "Resolved", "Completed", "Removed"];
 const CATEGORY_COLORS = { Proposed: "muted", InProgress: "ansi4", Resolved: "ansi5", Completed: "ansi2", Removed: "dim" };
+const DONE_CATEGORIES = new Set(["Completed", "Removed"]);
 
-// States named with their categories → [{ id, name, category, color }],
-// each name once (its first category), in category order.
+// States named with their categories → [{ id, name, category, color, done
+// }], each name once (its first category), in category order.
 export function categoryStates(pairs) {
   const states = new Map();
   for (const [name, category] of pairs) {
-    if (!states.has(name)) states.set(name, { id: name, name, category, color: CATEGORY_COLORS[category] ?? "muted" });
+    if (!states.has(name)) states.set(name, { id: name, name, category, color: CATEGORY_COLORS[category] ?? "muted", done: DONE_CATEGORIES.has(category) });
   }
   const order = (s) => (CATEGORIES.indexOf(s.category) + 1 || CATEGORIES.length + 1);
   return [...states.values()].sort((a, b) => order(a) - order(b));

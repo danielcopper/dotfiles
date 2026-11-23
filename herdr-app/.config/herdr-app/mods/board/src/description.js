@@ -16,30 +16,38 @@
 // <style> decoded, as it stands (html5minify/mod.rs, preserve_whitespace
 // and contains_code): an entity-spelt `&lt;img …&gt;` in them comes out as
 // a tag, which the second parse builds into an image. So a list of what may
-// stay, not of what must go:
+// stay, not of what must go; HTML comments go in both formats, as they do on
+// GitHub and Azure:
 //
-// - HTML keeps only the tags of KEPT, each written anew without attributes
-//   but an `a`'s http(s) href; none of them is one whose text html5minify
-//   writes as it stands, nor one HTML's parser reads as raw text. A <pre>
-//   becomes <p><code> (its text then wraps as any other). An <img> or
-//   <image> becomes a link "Bild: <alt>" to its http(s) src, or that text
-//   alone. Any other `<` (another tag, a comment, a tag left open or longer
-//   than MAX_TAG) is written `&lt;`, shown as text.
-// - Markdown keeps no HTML at all: every `<` gets a zero-width space after
-//   it, which no HTML tag, comment or autolink starts with, so Markdown
-//   reads it as text, and in code it looks unchanged. An inline image
-//   becomes a Markdown link "Bild: <alt>" to its http(s) URL (its text
-//   alone for another URL), and an <img> or <image> tag the same; a `![`
-//   that starts no inline image the scanner reads (an image by reference,
-//   or one longer than MAX_IMAGE) becomes `[Bild: `, so that
+// - HTML keeps only the plain formatting tags of KEPT, each written anew
+//   without attributes but an `a`'s http(s) href; none of them is one whose
+//   text html5minify writes as it stands, nor one HTML's parser reads as raw
+//   text. A <pre> becomes <p><code> (its text then wraps as any other). An
+//   <img> or <image> becomes a link "Bild: <alt>" to its http(s) src, or
+//   that text alone. Any other tag is dropped and its text kept, as text
+//   of the element around it (the content of a <script>, <style> or
+//   <textarea> too, which so never stands in one); any other `<` (none of a
+//   tag, or a tag left open or longer than MAX_TAG) is written `&lt;`.
+// - Markdown keeps no HTML: every `<` gets a zero-width space after it,
+//   which no HTML tag starts with, so Markdown reads it as text, and in code
+//   it looks unchanged. An http(s) URL in `<…>` stays, as an autolink or a
+//   link's or definition's destination (`<https://…>`, `[x](<https://…>)`,
+//   `[r]: <https://…>`): HTML has no tag of that name, so it can only be a
+//   link, or text; a `\` in it is written %5C. An inline image becomes a
+//   Markdown link "Bild: <alt>" to its http(s) URL (its text alone for
+//   another URL), and an <img> or <image> tag the same; a `![` that starts
+//   no inline image the scanner reads (an image by reference, or one longer
+//   than MAX_IMAGE) becomes `[Bild: ` (`![]` `[Bild`), so that
 //   `![alt][ref]` is a link where `ref` is defined, and `![alt][]` and
-//   `![ref]` plain text. Each link and each `[Bild: ` comes after a
-//   zero-width space, so that a `!` before it (`!![x](u)`) does not make
-//   it an image again; no `![` is left. Text in code changes the same way.
+//   `![ref]` text. A label's `[`, `]`, `\` and `!` are escaped. Last, every
+//   `![` left (a `!` before one of those links, or two pieces of the text
+//   that meet) becomes `!`, a zero-width space and `[`: none is left. Text
+//   in code changes the same way.
 //
-// Each step looks at the text once, and a tag or an image at most
-// MAX_TAG or MAX_IMAGE characters ahead, so a long hostile text costs
-// little; the board makes it once per read (the Board's readRelated).
+// Each step looks at the text once, and a tag, a comment's end, a URL in
+// `<…>` or an image at most MAX_TAG characters, a search, up to the next `<`
+// or MAX_IMAGE characters ahead, so a long hostile text costs little; the board makes it once per read (the
+// Board's readRelated).
 
 const KEPT = new Set([
   "p", "br", "b", "strong", "i", "em", "u", "s", "del", "strike", "mark", "code", "a", "ul", "ol", "li",
@@ -49,11 +57,13 @@ const IMAGES = new Set(["img", "image"]);
 export const MAX_TAG = 2048;
 export const MAX_IMAGE = 1024;
 // How deep the brackets of an image's alt and the parentheses of its
-// destination may nest (cmark's limit for the latter).
+// destination may nest (the latter markdown-rs's limit,
+// RESOURCE_DESTINATION_BALANCE_MAX in its util/constant.rs).
 const MAX_PARENS = 32;
 const ZWSP = "\u200b";
 const ATTRIBUTE = /(?:^|[\s/])([a-z][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
-const TAG_START = /<(\/?)([A-Za-z][A-Za-z0-9]*)/y;
+const TAG_START = /<(\/?)([A-Za-z][A-Za-z0-9:-]*)/y;
+const WEB_LINK = /<(https?:\/\/[^<>\n\r]*)>/iy;
 const NAMED = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
 
 // A text with its entities read (&amp; &lt; &gt; &quot; &apos;, &#n;,
@@ -66,9 +76,8 @@ function decoded(text) {
   });
 }
 
-// A text as HTML writes it, as text or in a quoted attribute whose value
-// has no `"` (an http(s) URL as webUrl writes it).
-const htmlText = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// A text as HTML writes it, as text or in a quoted attribute.
+const htmlText = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // An http(s) URL as the WHATWG URL parser writes it (which percent-encodes
 // spaces, `<`, `>` and `"`), or null for anything else.
@@ -96,16 +105,32 @@ function readTag(text, at, nextGt) {
   return { close: m[1] === "/", name: m[2].toLowerCase(), body: text.slice(from, end), end: end + 1 };
 }
 
-// The next `>` at or after a position, for positions that only grow: each
-// search starts where the last one ended, so all of them read the text once.
-function tagReader(text) {
-  let gt = -2;
-  const nextGt = (p) => {
-    if (gt === -1) return -1;
-    if (gt < p) gt = text.indexOf(">", p);
-    return gt;
+// The next `what` at or after a position, for positions that only grow:
+// each search starts where the last one ended, so all of them read the text
+// once; -1 for none.
+function finder(text, what) {
+  let found = -2;
+  return (p) => {
+    if (found === -1) return -1;
+    if (found < p) found = text.indexOf(what, p);
+    return found;
   };
+}
+
+// The tag at a position (readTag), and the end of the comment starting
+// there (after its `-->`, which may follow its `<!` at once: `<!-->`), or
+// -1 where none starts there or it is not closed.
+function tagReader(text) {
+  const nextGt = finder(text, ">");
   return (at) => readTag(text, at, nextGt);
+}
+function commentReader(text) {
+  const nextEnd = finder(text, "-->");
+  return (at) => {
+    if (!text.startsWith("<!--", at)) return -1;
+    const end = nextEnd(at + 2);
+    return end < 0 ? -1 : end + 3;
+  };
 }
 
 // A tag's attributes by name, in lower case, each its first value, read.
@@ -143,13 +168,16 @@ function htmlTag(tag) {
 // HTML as the details hand it on (see the header).
 function keptHtml(text) {
   const tagAt = tagReader(text);
+  const commentEnd = commentReader(text);
   const out = [];
   let from = 0;
   for (let at = text.indexOf("<"); at >= 0; at = text.indexOf("<", from)) {
     out.push(text.slice(from, at));
-    const tag = tagAt(at);
-    if (tag && (KEPT.has(tag.name) || IMAGES.has(tag.name) || tag.name === "pre")) {
-      out.push(htmlTag(tag));
+    const end = commentEnd(at);
+    const tag = end < 0 ? tagAt(at) : null;
+    if (end >= 0) from = end;
+    else if (tag) {
+      if (KEPT.has(tag.name) || IMAGES.has(tag.name) || tag.name === "pre") out.push(htmlTag(tag));
       from = tag.end;
     } else {
       out.push("&lt;");
@@ -160,16 +188,15 @@ function keptHtml(text) {
   return out.join("");
 }
 
-// A text as Markdown shows it in a link's label: its `\`, `[` and `]`
+// A text as Markdown shows it in a link's label: its `\`, `[`, `]` and `!`
 // escaped, each `<` followed by a zero-width space.
-const markdownLabel = (text) => text.replace(/[\\[\]]/g, "\\$&").replace(/</g, `<${ZWSP}`);
+const markdownLabel = (text) => text.replace(/[\\[\]!]/g, "\\$&").replace(/</g, `<${ZWSP}`);
 
-// An image as a Markdown link (see the header), after a zero-width space,
-// so that a `!` before it does not make it an image again.
+// An image as a Markdown link (see the header).
 function markdownImage(alt, src) {
   const url = webUrl(src);
   const label = markdownLabel(imageLabel(alt));
-  return url ? `${ZWSP}[${label}](<${url}>)` : label;
+  return url ? `[${label}](<${url}>)` : label;
 }
 
 // The inline image `![alt](destination "title")` starting at `at`, read as
@@ -222,9 +249,19 @@ function inlineImage(text, at) {
   return { alt: decoded(alt.replace(/\\(.)/g, "$1")), src: decoded(src.replace(/\\(.)/g, "$1")), end: i + 1 };
 }
 
+// The http(s) URL in `<…>` at `at`, written as the Markdown keeps it (see
+// the header): { text, end } or null. The search stops at the next `<`, so
+// no two of them read the same text.
+function webLink(text, at) {
+  WEB_LINK.lastIndex = at;
+  const m = WEB_LINK.exec(text);
+  return m ? { text: `<${m[1].replace(/\\/g, "%5C")}>`, end: at + m[0].length } : null;
+}
+
 // Markdown as the details hand it on (see the header).
 function keptMarkdown(text) {
   const tagAt = tagReader(text);
+  const commentEnd = commentReader(text);
   const marks = /<|!\[/g;
   const out = [];
   let from = 0;
@@ -233,8 +270,14 @@ function keptMarkdown(text) {
     out.push(text.slice(from, at));
     from = at + m[0].length;
     if (m[0] === "<") {
-      const tag = tagAt(at);
-      if (tag && !tag.close && IMAGES.has(tag.name)) {
+      const end = commentEnd(at);
+      const link = end < 0 ? webLink(text, at) : null;
+      const tag = end < 0 && !link ? tagAt(at) : null;
+      if (end >= 0) from = end;
+      else if (link) {
+        out.push(link.text);
+        from = link.end;
+      } else if (tag && !tag.close && IMAGES.has(tag.name)) {
         const attrs = attributesOf(tag.body);
         out.push(markdownImage(attrs.alt, attrs.src ?? ""));
         from = tag.end;
@@ -244,13 +287,13 @@ function keptMarkdown(text) {
       if (image) {
         out.push(markdownImage(image.alt, image.src));
         from = image.end;
-      } else if (text[from] === "]") out.push(`${ZWSP}[Bild`);
-      else out.push(`${ZWSP}[Bild: `);
+      } else if (text[from] === "]") out.push("[Bild");
+      else out.push("[Bild: ");
     }
     marks.lastIndex = from;
   }
   out.push(text.slice(from));
-  return out.join("");
+  return out.join("").replace(/!\[/g, `!${ZWSP}[`);
 }
 
 // A description as the details hand it to TextView (format: "markdown" or

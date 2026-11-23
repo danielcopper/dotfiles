@@ -439,9 +439,6 @@ export default class Board extends View {
         st.at = Date.now();
         this.keepSelection(view);
         this.chooseWanted(view, run, cx);
-        // Related items of the open details whose read failed were not kept
-        // (keptRelated): they are read again now.
-        this.readRelated(cx);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
         st.error = report(e);
@@ -454,6 +451,10 @@ export default class Board extends View {
         // The follow-up refresh reads the view from the config as it is now.
         const fresh = this.viewById(view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
+        // Related items that waited for the refresh, or whose read failed
+        // or wants a retry and so was not kept (keptRelated), are read now;
+        // after a follow-up refresh, once it ended.
+        this.readRelated(cx);
         cx.notify();
       }
     });
@@ -513,20 +514,22 @@ export default class Board extends View {
     return view && this.state(view.id).detail ? this.selected(view) : null;
   }
 
-  // What the view keeps of the item's related items: { data, error } (both
-  // null while they load), or null before they are read.
+  // What the view keeps of the item's related items, the entry relatedRows
+  // (ui/related.js) draws from, or null before they are read.
   relatedOf(view, item) {
     return this.state(view.id).related.get(item.key) ?? null;
   }
 
   // Reads the related items of the item whose details show in the shown
   // view, where its source has some to read and the view keeps none
-  // (keptRelated says what a refresh keeps): one call (main.js, Calls).
+  // (keptRelated says what a refresh keeps): one call, two for an Azure
+  // work item with children (Calls, above). While a refresh of the view
+  // runs it waits: the refresh reads them once it ended (refresh).
   readRelated(cx) {
     const view = this.view();
     const item = this.shownDetailsItem();
     const st = view ? this.state(view.id) : null;
-    if (!this.readsRelated(item) || st.related.has(item.key)) return;
+    if (!this.readsRelated(item) || st.loading || st.related.has(item.key)) return;
     const entry = { data: null, error: null, shown: null };
     st.related.set(item.key, entry);
     const source = this.sources[item.source].related;

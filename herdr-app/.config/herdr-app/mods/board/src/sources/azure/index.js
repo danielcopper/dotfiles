@@ -10,8 +10,10 @@ import { backlogView } from "./backlog.js";
 import { azureRelated } from "./related.js";
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
-// meine" cannot tell one's own items, and per layout of an Azure view how
-// it loads and writes. az runs by the path `paths` (toolPaths) finds.
+// meine" cannot tell one's own items, per layout of an Azure view how it
+// loads and writes, and a work item's related items (related: its
+// description, children and linked pull requests, related.js). az runs by
+// the path `paths` (toolPaths) finds.
 //
 // What the Sprint keeps, each read once and kept until the sprint ends
 // (iterationUntil; one that fails keeps nothing): per team, by organisation,
