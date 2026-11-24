@@ -6521,34 +6521,13 @@ function cycleType(m, by, cx) {
 
 // ==== src/ui/modals/open-in.js ====
 
-// The start dialog's space picker ("Öffnen in"): where the session opens,
-// as a menu like the assignee picker's (helpers.js menu, without digits:
-// typing goes to the filter). Its rows are "Neuer Space …" and the spaces
-// of the machine the dialog has chosen, in herdr's order, narrowed by
-// their names (rankByName). Without a filter the dialog's current choice
-// is marked, under a filter the first row it leaves. Enter or a click
-// takes the row and goes back to the dialog, on the new space's name for
-// "Neuer Space …"; Esc goes back without a choice (Board.closeModal, by
-// m.back). Enter or a click on "Öffnen in" opens it as b.modal = { kind:
-// "openIn", view, back (the start dialog), and openFilterMenu's fields }.
+// The start dialog's space picker ("Öffnen in"), a menu without digits:
+// typing goes to the filter. Esc goes back to the dialog it was opened from
+// (m.back, Board.closeModal).
 
 // Not a text: a space's id, herdr's text, can never equal it.
 export const NEW_SPACE = Symbol("new space");
 export const NEW_SPACE_LABEL = "Neuer Space …";
-
-// Where the start dialog `m` opens the session, from the spaces herdr
-// knows now: { on, layout (the machine's, machines()), readable, here (its
-// spaces where readable), space (null for a new space) }. A chosen space
-// that is gone, and no choice since the machine changed (m.target null),
-// fall back to preselectedSpace.
-export function openIn(m) {
-  const on = m.machines[m.machine];
-  const layout = machines().find((x) => (x.name ?? null) === (on ?? null))?.layout ?? (on ? "unavailable" : "ready");
-  const readable = layout === "ready";
-  const here = readable ? spacesOn(spaces(), on) : [];
-  const space = m.target === NEW_SPACE ? null : here.find((s) => s.id === m.target) ?? preselectedSpace(here, m.spaceName);
-  return { on, layout, readable, here, space };
-}
 
 export function spacesNote({ on, layout }) {
   const why = layout === "loading" ? "noch nicht gelesen" : "nicht lesbar";
@@ -6556,32 +6535,29 @@ export function spacesNote({ on, layout }) {
 }
 
 function openInRows(m) {
-  const rows = [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...openIn(m.back).here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
+  const rows = [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...m.where().here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
   return rankByName(rows, m.filter);
 }
 
 function openInStartAt(m) {
   const rows = openInRows(m);
   if (m.filter) return rows.length ? 0 : -1;
-  const chosen = openIn(m.back).space?.id ?? NEW_SPACE;
+  const chosen = m.where().space?.id ?? NEW_SPACE;
   return Math.max(0, rows.findIndex((r) => r.id === chosen));
 }
 
 function pickOpenIn(b, m, i, cx) {
   const row = openInRows(m)[i];
   if (!row) return;
-  const start = m.back;
-  start.target = row.id;
-  start.field = row.id === NEW_SPACE ? "name" : "open";
-  start.error = null;
-  b.modal = start;
+  b.modal = m.back;
+  m.choose(row);
   b.takeKeyboard();
   cx.notify();
 }
 
 export const openInModal = {
-  open(b, start, cx) {
-    const m = { kind: "openIn", view: start.view, back: start };
+  open(b, back, { where, choose }, cx) {
+    const m = { kind: "openIn", view: back.view, back, where, choose };
     openFilterMenu(b, m, {
       placeholder: "Filter: Name des Space",
       count: (m) => openInRows(m).length,
@@ -6595,14 +6571,14 @@ export const openInModal = {
 
   render(b, t) {
     const m = b.modal;
-    const target = openIn(m.back);
+    const where = m.where();
     const rows = openInRows(m);
     const { shown, ...win } = menuWindow(m, rows);
     return menu(t, {
       id: "open-in",
       rowId: "open-in-row",
       width: 440,
-      title: `Öffnen in · ${machineName(target.on)}`,
+      title: `Öffnen in · ${machineName(where.on)}`,
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
@@ -6613,7 +6589,7 @@ export const openInModal = {
       pick: (i, cx) => pickOpenIn(b, m, i, cx),
       foot: [
         ...(rows.length ? [] : [menuNote(t, "Kein Space passt zum Filter", t.muted)]),
-        ...(target.readable ? [] : [menuNote(t, spacesNote(target), t.muted)]),
+        ...(where.readable ? [] : [menuNote(t, spacesNote(where), t.muted)]),
       ],
     });
   },
@@ -6712,7 +6688,8 @@ export const sprintsModal = {
 // input (the message's InputState) and nameInput (the new space's name),
 // made for this dialog, field, inputs, inputFocused, agents, agent,
 // agentsError, machines, machine, machineNote, agentNote, notes, spaceName
-// (spaceNameFor), target (null, NEW_SPACE or a space's id: openIn), busy,
+// (spaceNameFor), target (null, NEW_SPACE or the chosen space's id and
+// name: whereToOpen), renamed (the new space's name was typed), busy,
 // error }.
 
 const CHECKOUT_TIMEOUT = 30000;
@@ -6720,7 +6697,7 @@ const CHECKOUT_TIMEOUT = 30000;
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
 const FIELDS = ["message", "agent", "machine", "open"];
-const fieldsOf = (m) => (openIn(m).space ? FIELDS : [...FIELDS, "name"]);
+const fieldsOf = (m) => (whereToOpen(m).newSpace ? [...FIELDS, "name"] : FIELDS);
 // The start dialog `m` counts as open while its space picker is over it.
 const stillOpen = (b, m) => b.modal === m || b.modal?.back === m;
 
@@ -6748,10 +6725,14 @@ export const startModal = {
     nameInput.set_value(spaceName);
     const m = {
       kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, busy: null, error: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, busy: null, error: null,
     };
     wireTextField(b, m, input, "message", (cx) => startModal.start(b, cx));
     wireTextField(b, m, nameInput, "name", (cx) => startModal.start(b, cx));
+    nameInput.on("change", () => {
+      m.target = NEW_SPACE;
+      m.renamed = true;
+    });
     b.modal = m;
     input.focus();
     loadAgents(b, cx);
@@ -6770,9 +6751,10 @@ export const startModal = {
     if (m?.kind !== "start" || m.busy) return;
     const agent = m.agents[m.agent];
     if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
-    const { on, space } = openIn(m);
+    const { on, space, gone, unread, newSpace } = whereToOpen(m);
+    if (gone || unread) return void cx.notify();
     const spaceName = m.nameInput.value().trim();
-    if (!space && !spaceName) return void ((m.error = "Der neue Space braucht einen Namen"), cx.notify());
+    if (newSpace && !spaceName) return void ((m.error = "Der neue Space braucht einen Namen"), cx.notify());
     const task = m.input.value().trim();
     const name = sessionName(m.item);
     m.busy = "Sitzung wird geöffnet …";
@@ -6784,7 +6766,12 @@ export const startModal = {
         if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
         const folder = lastLine(r.stdout);
         if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
-        if (space && !spaces().some((s) => s.id === space.id)) throw new BoardError(`Den Space „${space.name}“ ${onMachine(on)} gibt es nicht mehr`);
+        if (space && !spaces().some((s) => s.id === space.id)) {
+          // Its dialog says so for a space chosen there (goneNote, unreadNote).
+          if (m.target && stillOpen(b, m)) return;
+          if (layoutOf(on) !== "ready") throw new BoardError(uncheckedNote(on, space));
+          throw new BoardError(`Den Space „${space.name}“ ${onMachine(on)} gibt es nicht mehr`);
+        }
         run(...startCommand({ on, folder, argv: agent.run, task, name, space: space?.id, spaceName }));
         if (stillOpen(b, m)) {
           b.modal = null;
@@ -6846,8 +6833,8 @@ export const startModal = {
             .child(div().text_color(t.dim).child(mark))),
         );
     const agent = m.agents[m.agent];
-    const target = openIn(m);
-    const notes = [...m.notes, ...(target.readable ? [] : [spacesNote(target)])];
+    const where = whereToOpen(m);
+    const notes = [...m.notes, ...(where.readable ? [] : [spacesNote(where)]), ...(where.gone ? [goneNote(where)] : []), ...(where.unread ? [unreadNote(where)] : [])];
     const hint = m.field === "open" ? "Tab wechselt das Feld · ↵ wählt den Space" : "Tab wechselt das Feld · ◂ ▸ wählt";
     return backdrop(
       t,
@@ -6881,9 +6868,9 @@ export const startModal = {
                 .gap(12)
                 .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
                 .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen in", target.space ? target.space.name : NEW_SPACE_LABEL, "▾", (cx) => pickSpace(b, cx))),
+                .child(choice("open", "Öffnen in", (where.space ?? where.gone ?? where.unread)?.name ?? NEW_SPACE_LABEL, "▾", (cx) => pickSpace(b, cx))),
             )
-            .when(!target.space, (el) => el.child(
+            .when(where.newSpace, (el) => el.child(
               v_flex()
                 .gap(6)
                 .child(label("Name des neuen Space"))
@@ -6947,14 +6934,43 @@ function cycle(b, field, by, cx) {
   if (field === "machine") {
     m.machine = (m.machine + by + m.machines.length) % m.machines.length;
     m.machineNote = null;
-    m.target = null;
+    m.target = m.target === NEW_SPACE && m.renamed ? NEW_SPACE : null;
     loadAgents(b, cx);
   }
   cx.notify();
 }
 
+const layoutOf = (on) => machines().find((x) => (x.name ?? null) === (on ?? null))?.layout ?? (on ? "unavailable" : "ready");
+
+// Without a choice preselectedSpace decides, but not while the dialog is on
+// the new space's name: spaces herdr reads meanwhile must not take that
+// field away.
+function whereToOpen(m) {
+  const on = m.machines[m.machine];
+  const layout = layoutOf(on);
+  const readable = layout === "ready";
+  const here = readable ? spacesOn(spaces(), on) : [];
+  const offer = { on, layout, readable, here };
+  const chosen = m.target ?? (m.field === "name" ? NEW_SPACE : null);
+  if (chosen === NEW_SPACE) return { ...offer, space: null, gone: null, unread: null, newSpace: true };
+  const space = chosen ? here.find((s) => s.id === chosen.id) ?? null : preselectedSpace(here, m.spaceName);
+  const missing = chosen && !space ? chosen : null;
+  return { ...offer, space, gone: readable ? missing : null, unread: readable ? null : missing, newSpace: !space && !missing };
+}
+
+const goneNote = ({ on, gone }) => `Den Space „${gone.name}“ ${onMachine(on)} gibt es nicht mehr; bitte neu wählen`;
+const unreadNote = ({ on, unread }) => `Den Space „${unread.name}“ ${onMachine(on)} kann das Board erst prüfen, wenn es die Spaces dort gelesen hat; warten oder neu wählen`;
+const uncheckedNote = (on, space) => `Den Space „${space.name}“ ${onMachine(on)} konnte das Board nicht prüfen; die Spaces dort waren nicht gelesen`;
+
+function chooseSpace(m, row) {
+  m.target = row.id === NEW_SPACE ? NEW_SPACE : { id: row.id, name: row.name };
+  m.field = row.id === NEW_SPACE ? "name" : "open";
+  m.error = null;
+}
+
 function pickSpace(b, cx) {
-  if (!b.modal.busy) openInModal.open(b, b.modal, cx);
+  const m = b.modal;
+  if (!m.busy) openInModal.open(b, m, { where: () => whereToOpen(m), choose: (row) => chooseSpace(m, row) }, cx);
 }
 
 const tabsNamed = (name) => new Set(spaces().flatMap((s) => s.tabs.filter((t) => t.name === name).map((t) => t.id)));

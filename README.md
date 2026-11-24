@@ -735,21 +735,24 @@ by that run. Which files of the package git tracks is set in the root
   repo's name (for a work item the checkout's last folder). Preselected is the
   space of that name, ignoring case, else the space I am in, else that machine's
   first; "Neuer Space …" only where the machine has none. Another machine in
-  "Rechner" chooses anew among its spaces, and one whose spaces herdr has not
-  read says so and offers only a new space. `Esc` in the picker goes back to the
-  dialog. In the start dialog and the create dialog `Tab` and shift-`Tab` move
-  between the fields, from the message or title too: the board binds them in its
-  own key context, as the leader does (the comment above `BOARD_KEYS` in
-  `mods/board/src/main.js`). The tab is named after the item
-  (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
-  finds it again. A status change shows at once and is written to GitHub or
-  Azure; a refusal moves the card back (or sets the state back) with the error,
-  and a write without a clear answer refreshes the board and then says where the
-  card is, or which state the work item has. A state set on Azure
-  refreshes the Sprint either way, since which column it puts a task in is
-  Azure's to say. Who an item is assigned to shows the same way on both
-  sources, by name (on GitHub the login where the account has no name): on a
-  card and a story after its state or chips, in the Backlog's "Zugewiesen"
+  "Rechner" chooses anew among its spaces, unless a new space with a name I
+  typed is chosen; a machine whose spaces herdr has not read says so and offers
+  only a new space. A chosen space that closes while the dialog is open is said
+  there, and the dialog starts nothing until I choose again; for one chosen on a
+  machine whose spaces herdr is reading (again), it starts nothing until they
+  are read. `Esc` in the picker goes back to the dialog. In the start dialog and
+  the create dialog `Tab` and shift-`Tab` move between the fields, from the
+  message or title too: the board binds them in its own key context, as the
+  leader does (the comment above `BOARD_KEYS` in `mods/board/src/main.js`). The
+  tab is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
+  item), which is how the board finds it again. A status change shows at once
+  and is written to GitHub or Azure; a refusal moves the card back (or sets the
+  state back) with the error, and a write without a clear answer refreshes the
+  board and then says where the card is, or which state the work item has. A
+  state set on Azure refreshes the Sprint either way, since which column it puts
+  a task in is Azure's to say. Who an item is assigned to shows the same way on
+  both sources, by name (on GitHub the login where the account has no name): on
+  a card and a story after its state or chips, in the Backlog's "Zugewiesen"
   column and in the details ("zugewiesen: …"); the filter finds it by name
   and by login. `a` on a GitHub card, a Sprint's story or task or a Backlog's
   row opens a picker: "Ich", "niemand", then the people of the item's repo
