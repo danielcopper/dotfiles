@@ -134,8 +134,7 @@ function paletteOf(t) {
 // (copperTint), a column's chrome and the Sprint's background, so a head
 // looks the same on either. A drop target keeps its ground and the accent
 // border marks it: its `selected` would match a selected card. The mark
-// takes copper's orange, which no section may take (SECTION_TONES) and no
-// check state has.
+// takes copper's orange (SECTION_TONES leaves it out).
 function copperPalette(t) {
   return {
     hues: Object.entries(ANSI_COPPER).map(([tone, color]) => [tone, copperKey(color, "text")]),
@@ -165,11 +164,12 @@ function copperPalette(t) {
 // it stands on, opaque, so a column that changes its own ground (a drop
 // target) leaves the head as it is; without an opaque ground, the
 // translucent tint; without a color, `raised`. A drop target takes the
-// theme's `selected`. The mark takes the theme's foreground: each of its
-// six hues is a section's tone or a check state's (yellow, pending, too),
-// and a bright variant matches its plain one (catppuccin-mocha's ansi11 is
-// its ansi3) or reads below 4.5:1 (HUE_TONES); the mark's dot and weight
-// set it apart.
+// theme's `selected`. The mark takes the theme's foreground, as no hue is
+// left for it: each of the six is a section's tone or a check state's, and
+// its bright yellow, orange's slot, is its yellow (catppuccin-mocha), stands
+// next to it (copper-dark without copper's colors) or reads below 4.5:1
+// (copper-light without them, HUE_TONES); the mark's dot and weight set it
+// apart.
 function tintedPalette(t) {
   const text = (tone) => t[tone] ?? t.muted;
   return {

@@ -1179,6 +1179,7 @@ test("what the list could not read whole on someone else's pull request is unrea
   assert.deepEqual(reasonsWith(301, beyond), [[], false, [UNREAD.moreReviews]], "the viewer's review may be one of those it did not send");
   assert.deepEqual(reasonsWith(301, (pr) => (pr.latestReviews.totalCount = 21)), [[], true, []], "found among those it sent: nothing unread");
   assert.deepEqual(reasonsWith(101, beyond), [["Review angefragt"], false, [UNREAD.moreReviews]], "a reason still shows");
+  assert.deepEqual(reasonsWith(106, (pr) => (pr.latestReviews.totalCount = 21)), [["Review angefragt"], false, []], "the viewer's latest, dismissed, is known: nothing unread");
   assert.equal(UNREAD.moreThreads, "mehr als 50 Review-Threads");
   assert.equal(UNREAD.moreReviews, "mehr als 20 Reviews");
 });
@@ -1197,7 +1198,24 @@ test("on one's own pull request the viewer has to act on changes requested, thre
   assert.deepEqual(reasonsWith(203, (pr) => (pr.reviewThreads = null)), [[], false, [UNREAD.threads]], "no threads read");
   assert.deepEqual(reasonsWith(201, threads([{ isResolved: false, comments: { nodes: [] } }], 1)), [["bereit zum Mergen"], false, []], "a thread without comments waits on no one");
   assert.deepEqual(reasonsWith(201, threads(open(1), 1)), [["1 offener Thread"], false, []], "an open thread: not ready");
-  assert.deepEqual(reasonsWith(201, () => {}, [{ path: ["s1", "nodes", 1, "commits"], message: "Checks are hidden" }]), [[], false, ["Checks are hidden"]], "an error at its path: not ready");
+  assert.deepEqual(reasonsWith(201, () => {}, [{ path: ["s1", "nodes", 1, "mergeable"], message: "Mergeable is hidden" }]), [[], false, ["Mergeable is hidden"]], "an error at its path: not ready");
+  const lost = [{ path: ["s1", "nodes", 1, "commits", "nodes", 0, "commit", "statusCheckRollup"], message: "Checks are hidden" }];
+  const noRollup = (pr) => (pr.commits.nodes[0].commit.statusCheckRollup = null);
+  assert.deepEqual(reasonsWith(201, noRollup, lost), [[], false, ["Checks are hidden"]], "checks lost to an error are not none");
+  const lostRow = (errors) => {
+    const data = json("github-list-attention.json");
+    noRollup(attentionPr(data, 201));
+    return attentionList(data, shippedListView(), errors).sections[1].rows.find((r) => r.number === 201).checks;
+  };
+  assert.deepEqual([lostRow(lost).state, lostRow(lost).short, lostRow(lost).text], ["unread", "?", "Checks nicht gelesen"]);
+  assert.deepEqual([lostRow([]).state, lostRow([]).short], ["none", "—"], "without an error: no checks");
+  assert.deepEqual([lostRow([{ path: ["s1", "nodes", 1, "latestReviews"], message: "x" }]).state], ["none"], "an error elsewhere: its checks stand");
+  assert.equal(board.checksSummary({ state: "SUCCESS", contexts: { checkRunCountsByState: [{ state: "SUCCESS", count: 1 }] } }, true).state, "passed", "a rollup that came is read");
+  const level = JSON.parse(pullRequestAnswer());
+  level.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup = null;
+  const item = { repo: "example/tender", number: 3020 };
+  assert.equal(board.parseGithubPullRequest(level, item, [{ path: ["repository", "pullRequest", "commits"], message: "x" }]).checks.short, "?", "a pull request a level down too");
+  assert.equal(board.parseGithubPullRequest(level, item, [{ path: ["repository", "pullRequest", "assignees"], message: "x" }]).checks.short, "—");
   for (const [why, change] of [
     ["no review decision, as in a repo that asks for none", (pr) => (pr.reviewDecision = null)],
     ["no checks", (pr) => (pr.commits.nodes[0].commit.statusCheckRollup = null)],
@@ -1224,7 +1242,7 @@ test("on one's own pull request the viewer has to act on changes requested, thre
   }), [["bereit zum Mergen"], false, []], "one's own: neither its reviews nor its head commit are needed");
 });
 
-test("without the viewer's login no row asks anything of anyone, nothing is unread, and the rows keep GitHub's order", () => {
+test("without the viewer's login no row asks anything of anyone, only a row's errors are unread, and the rows keep GitHub's order", () => {
   const data = json("github-list-attention.json");
   delete data.data.viewer;
   attentionPr(data, 202).author = null;
@@ -1233,8 +1251,25 @@ test("without the viewer's login no row asks anything of anyone, nothing is unre
   const errors = [{ path: ["s2", "nodes", 0, "latestReviews"], message: "Reviews are hidden" }];
   assert.deepEqual(attentionList(data, shippedListView(), errors).sections.map((s) => s.rows.map((r) => [r.number, r.attention.length, r.waiting, r.unread.length])), [
     [[103, 0, false, 0], [101, 0, false, 0], [102, 0, false, 0], [104, 0, false, 0], [105, 0, false, 0], [106, 0, false, 0]],
-    [[203, 0, false, 0], [201, 0, false, 0], [202, 0, false, 0]], [[301, 0, false, 0], [302, 0, false, 0], [303, 0, false, 0]],
-  ]);
+    [[203, 0, false, 0], [201, 0, false, 0], [202, 0, false, 0]], [[301, 0, false, 1], [302, 0, false, 0], [303, 0, false, 0]],
+  ], "301's error stays with its row; its missing threads tell nothing without the viewer");
+  assert.deepEqual(attentionList(data, shippedListView(), errors).warnings, [], "and is no warning");
+});
+
+test("a pull request a search that asks for one's review found is asked for it, whichever section holds it; a duplicate's errors stay warnings", () => {
+  const data = json("github-list-attention.json");
+  const team = attentionPr(data, 105);
+  // Geprüft first: 105 is found by it and, after it, by Zu prüfen.
+  const view = { ...shippedListView(), sections: [2, 0, 1].map((i) => shippedListView().sections[i]) };
+  const answer = { data: { viewer: data.data.viewer, s0: { issueCount: 4, nodes: [team, ...data.data.s2.nodes.slice(0, 3)] }, s1: data.data.s0, s2: data.data.s1 } };
+  const errors = [{ path: ["s1", "nodes", 4, "latestReviews"], message: "A duplicate's error" }];
+  const list = board.parseGithubList(answer, view, errors);
+  const row = list.sections[0].rows.find((r) => r.number === 105);
+  assert.deepEqual([row.attention, row.waiting, row.unread], [[], false, []], "asked by a team after sample-user's comment: not waiting");
+  assert.equal(list.sections[1].rows.some((r) => r.number === 105), false, "held by Geprüft only");
+  assert.deepEqual(list.warnings, ["A duplicate's error"]);
+  assert.equal(board.parseGithubList({ data: { viewer: data.data.viewer, s0: { issueCount: 1, nodes: [team] } } }, { sections: [view.sections[0]] }).sections[0].rows[0].waiting, true,
+    "where no search asks: waiting on its author");
 });
 
 test("a pull request GitHub sent as null for an error at its path is not read, with that error, not a result that is no pull request; the errors a row or a section holds are no warnings of the list", () => {
@@ -9276,7 +9311,7 @@ test("UI: in a copper theme each PR list section's head sits on a band of its to
     const at = shown.indexOf("DU BIST DRAN");
     assert.deepEqual(shown.slice(at, at + 5), ["DU BIST DRAN", "Änderungen gewünscht", "2 offene Threads", "Checks rot", "Konflikt"], mode);
     assert.ok(shown.includes("CHECKS"), "and its checks after them");
-    assert.equal(shown.includes("NICHT GANZ GELESEN"), false, "all of it read");
+    assert.equal(byId(detailPanel(b), "unread-note"), null, "all of it read");
     assert.equal(rowStripe(b.render(), 202), t.accent, "a selected row's stripe is the accent");
     await click(b, cx, "row-PR_sample301");
     await click(b, cx, "row-PR_sample301");
@@ -9284,23 +9319,37 @@ test("UI: in a copper theme each PR list section's head sits on a band of its to
   }
 });
 
-test("UI: a pull request the list could not read whole says so in its row where it names no reason, and its details list what is missing, the error at its path among it; the list's banner has no line for that error", async () => {
+test("UI: a pull request the list could not read whole says so in its row: \"? nicht ganz gelesen\" where it names no reason, \"· ?\" after its reasons, \"?\" for checks lost to an error; its details list what is missing as warnings after its checks; the list shows no warning for those errors, but one for an error of a search", async () => {
   const t = copperTheme("dark");
   const data = json("github-list-attention.json");
   data.data.s2.nodes[0].latestReviews = null;
-  data.errors = [{ path: ["s2", "nodes", 0, "latestReviews"], message: "Reviews are hidden" }];
+  data.data.s0.nodes[1].latestReviews.totalCount = 21;
+  data.data.s1.nodes[1].commits.nodes[0].commit.statusCheckRollup = null;
+  data.errors = [
+    { path: ["s2", "nodes", 0, "latestReviews"], message: "Reviews are hidden" },
+    { path: ["s1", "nodes", 1, "commits", "nodes", 0, "commit", "statusCheckRollup"], message: "Checks are hidden" },
+    { path: ["s0"], message: "Search is slow" },
+  ];
   const { b, cx } = await openAttention(t, attentionConfig(), JSON.stringify(data));
   const root = b.render();
   assert.equal(rowCell(root, 301, "? nicht ganz gelesen").with.text_color[0], t.muted);
   assert.equal(rowCell(root, 301, "wartet auf Autor"), null);
-  assert.equal(texts(root).includes("Reviews are hidden"), false, "not a warning of the list");
+  assert.ok(rowCell(root, 101, "● Review angefragt · ?"), "a reason, and something unread");
+  assert.ok(rowCell(root, 201, "?"), "checks lost to an error");
+  assert.equal(rowCell(root, 201, "● bereit zum Mergen"), null);
+  assert.equal(texts(root).includes("Reviews are hidden") || texts(root).includes("Checks are hidden"), false, "no warning of the list");
+  assert.ok(texts(root).includes("Search is slow"), "an error of a search is one");
   await click(b, cx, "row-PR_sample301");
   await click(b, cx, "row-PR_sample301");
-  const shown = texts(detailPanel(b));
-  const at = shown.indexOf("NICHT GANZ GELESEN");
-  assert.deepEqual(shown.slice(at, at + 3), ["NICHT GANZ GELESEN", "Reviews are hidden", board.UNREAD.reviews]);
+  const panel = detailPanel(b);
+  const shown = texts(panel);
+  const at = shown.indexOf("CHECKS");
+  assert.ok(at >= 0);
+  assert.deepEqual(shown.slice(at + 2, at + 4), ["Reviews are hidden", board.UNREAD.reviews], "after the checks");
+  const notes = chainTo(panel, (el) => el.with.id?.[0] === "unread-note");
+  assert.equal(notes.at(-1).with.text_color[0], t["copper-yellow-text"], "a warning, as a pull request a level down shows one");
+  assert.equal(notes.at(-1).with.px[0], 18);
 });
-
 test("UI: a PR list section's tone from views.json; on a theme without copper's colors its band is the tone's color laid over the background at HEAD_ALPHA, its stripe and text the theme's color, and the mark the theme's foreground", async () => {
   for (const [name, t] of Object.entries(TINTED())) {
     const { b } = await openAttention(t, attentionConfig("yellow"));
@@ -9320,7 +9369,8 @@ test("UI: a PR list section's tone from views.json; on a theme without copper's 
 });
 
 test("the mark shares its color with no section tone and no check state, and its text reads at 4.5:1 or more on a row and a selected one; a PR list section's name and count read at 4.5:1 or more on its band and its stripe stands at 3:1 or more from the background, for every tone a section takes, in copper-dark and copper-light with and without copper's colors and in catppuccin-mocha", () => {
-  const themes = { "copper-dark": copperTheme("dark"), "copper-light": copperTheme("light"), ...TINTED() };
+  const themes = { "copper-dark": copperTheme("dark"), "copper-light": copperTheme("light"), ...Object.fromEntries(Object.entries(TINTED()).map(([k, t]) => [`tinted ${k}`, t])) };
+  assert.equal(Object.keys(themes).length, 5);
   const ratios = {};
   const stripes = {};
   for (const [name, t] of Object.entries(themes)) {
@@ -9340,7 +9390,7 @@ test("the mark shares its color with no section tone and no check state, and its
   assert.deepEqual(below(stripes, 3), [], shownRatios(stripes));
 });
 
-test("copper's hues have one home: each section tone and orange is drawn in its copper color's text color in a copper theme", () => {
+test("COPPER_HUES names each ANSI slot by the copper color it is drawn in, in copper-dark and copper-light, and SECTION_TONES is it without orange", () => {
   for (const mode of COPPER) {
     const t = copperTheme(mode);
     for (const [name, tone] of Object.entries(board.COPPER_HUES)) assert.equal(board.toneColor(t, tone), t[`copper-${name}-text`], `${mode} ${name}`);

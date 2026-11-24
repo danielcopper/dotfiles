@@ -512,13 +512,15 @@ herdr-app`. Which files of the package git tracks is set in the root
   all it needs (an error at the pull request, a part GitHub did not send, more
   than 50 threads, more than 20 reviews without mine among them), nothing says
   "wartet auf Autor" or "bereit zum Mergen": the row says "? nicht ganz
-  gelesen" where it names no reason, a count of my threads gets a "+" ("3+
-  offene Threads"), and the details list what is missing under "NICHT GANZ
-  GELESEN". A pull request GitHub sent as nothing for an error is counted
-  under the list ("1 Treffer in „Meine“ nicht gelesen: …"). The shipped
-  `views.json` has three sections: "Zu prüfen" (review asked of me), "Meine"
-  (opened by me) and "Geprüft" (open pull requests I reviewed and did not
-  open, `reviewed-by:@me -author:@me`): GitHub drops a review request once the
+  gelesen" where it names no reason and adds "· ?" after its reasons where it
+  names some, checks GitHub sent an error for show "?", and the details list
+  what is missing as warnings after the checks. Where it has more than 50
+  threads, a count of my threads gets a "+" ("3+ offene Threads"). A pull
+  request GitHub sent as nothing for an error is named among the list's notes
+  above it ("1 Treffer in „Meine“ nicht gelesen: …"). The shipped `views.json`
+  has three sections: "Zu prüfen" (review asked of me), "Meine" (opened by me)
+  and "Geprüft" (open pull requests I reviewed and did not open,
+  `reviewed-by:@me -author:@me`): GitHub drops a review request once the
   review is given, so without it a reviewed pull request would leave the list.
   A pull request that asks my review again shows in "Zu prüfen", the first
   section that finds it. A `views.json` of my own without that search keeps

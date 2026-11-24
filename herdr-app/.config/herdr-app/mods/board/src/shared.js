@@ -96,9 +96,8 @@ export const otherLook = (state) => ({ state: String(state ?? "?").toLowerCase()
 export const DRAFT_REVIEW = "Entwurf";
 
 // copper's hues by its names, each as the theme name the board draws it in
-// (ui/tones.js takes those to copper's colors; orange is ansi11, which only
-// a GitHub color named ORANGE and the mark on a pull request the viewer has
-// to act on take).
+// (ui/tones.js takes those to copper's colors and says who takes orange's
+// ansi11).
 export const COPPER_HUES = { red: "ansi1", green: "ansi2", yellow: "ansi3", blue: "ansi4", violet: "ansi5", teal: "ansi6", orange: "ansi11" };
 
 // The tones a PR list's section may take (views.json, a section's "tone"):

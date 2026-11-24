@@ -1,15 +1,13 @@
 // The prs shape: a list of pull requests in sections, walked as one column.
-// The data: { shape: "prs", sections: [{ name, color, count, fetched,
-// limited, skipped, notRead, rows }], viewer } (parseGithubList); a row's
-// author, draft mark and checks show where it has them, and whether the
-// viewer has to act on it (its attention, waiting and unread). Each section
+// Its data is parseGithubList's; a row's author, draft mark and checks show
+// where it has them, and whether the viewer has to act on it. Each section
 // is drawn in its color, a theme name: its head on a band of it, each row
 // with a stripe of it at its left. View fields it reads: id.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, cardLabel } from "../../shared.js";
-import { checkColor, checksSection, detailSection, selectedLook, shownOf } from "../helpers.js";
+import { checkColor, checksSection, detailNote, detailSection, selectedLook, shownOf } from "../helpers.js";
 import { headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
@@ -41,30 +39,33 @@ export const prsShape = {
       ...(s.notRead?.length ? [`${s.notRead.length} Treffer in „${s.name}“ nicht gelesen: ${s.notRead[0]}`] : []),
     ]),
   // The detail panel's rows of a pull request: why the viewer has to act on
-  // it, what of it could not be read, and its checks, where it has them.
+  // it, its checks, where it has them, and what of it could not be read, a
+  // warning each, as a pull request a level down shows its own (levelParts,
+  // ui/related.js).
   detailParts(b, t, view, item) {
     const sections = [];
-    const line = (color) => (text) => div().text_color(color).child(text);
-    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map(line(markColor(t)))));
-    if (item.unread?.length) sections.push(detailSection(t, "NICHT GANZ GELESEN", ...item.unread.map(line(t.muted))));
+    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(markColor(t)).child(reason))));
     if (item.checks) sections.push(checksSection(t, item.checks));
+    sections.push(...(item.unread ?? []).map((text) => detailNote(t, "unread-note", text, "warning")));
     return sections.length ? { sections } : {};
   },
 };
 
 // A row's cell that says whether the viewer has to act on its pull
-// request: a mark and the reasons ("● Review angefragt"); where it names
-// none but could not read all ("? nicht ganz gelesen"); "wartet auf Autor"
-// on someone else's one reviewed that asks nothing yet; else nothing.
-// Every row keeps it, so the cells after it line up.
+// request: a mark and the reasons ("● Review angefragt"), with "· ?" after
+// them where it could not read all; where it names none but could not read
+// all, "? nicht ganz gelesen"; "wartet auf Autor" on someone else's one
+// reviewed that asks nothing yet; else nothing. Every row keeps it, so the
+// cells after it line up.
 function attentionCell(t, r) {
   const cell = div().w(200).flex_none().truncate().text_size(12);
-  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${r.attention.join(" · ")}`);
+  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${[...r.attention, ...(r.unread?.length ? ["?"] : [])].join(" · ")}`);
   return cell.text_color(t.muted).child(r.unread?.length ? "? nicht ganz gelesen" : r.waiting ? "wartet auf Autor" : "");
 }
 
 // A section's count: the rows it holds (each pull request once, in its first
-// section; results that are no pull request left out), "<shown>/<held>"
+// section; results that are no pull request, and those GitHub sent as null
+// for an error, left out), "<shown>/<held>"
 // while the filter or "nur meine" hides some; a section GitHub cut adds how
 // many it sent of how many it found.
 export function sectionCount(section, shown) {

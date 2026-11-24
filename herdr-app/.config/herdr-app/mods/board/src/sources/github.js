@@ -196,8 +196,11 @@ function githubCard(node) {
 
 // The GraphQL error whose path starts with `path`, or null.
 export function errorAt(errors, path) {
-  return (errors ?? []).find((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p)) ?? null;
+  return errorsAt(errors, path)[0] ?? null;
 }
+
+// Every GraphQL error whose path starts with `path`.
+export const errorsAt = (errors, path) => (errors ?? []).filter((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p));
 
 // gh's answer for githubBoardArgs (and the GraphQL errors that came with its
 // data) → a board:
@@ -329,8 +332,10 @@ const PR_FIELDS = `
     }
   }`;
 
-// A pull request as PR_ROW_FIELDS reads it → the fields of its row.
-function prRow(pr) {
+// A pull request as PR_ROW_FIELDS reads it → the fields of its row;
+// `lost`: whether GitHub sent an error at its commits, where its checks
+// stand (checksSummary).
+function prRow(pr, lost = false) {
   const repo = pr.repository.nameWithOwner;
   return {
     number: pr.number,
@@ -341,7 +346,7 @@ function prRow(pr) {
     author: pr.author?.login ?? "?",
     draft: pr.isDraft,
     review: reviewLabel(pr.reviewDecision, pr.isDraft),
-    checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null),
+    checks: checksSummary(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null, lost),
     updatedAt: pr.updatedAt,
     createdAt: pr.createdAt,
     branch: pr.headRefName,
@@ -372,7 +377,8 @@ export const UNREAD = {
 // waiting, unread }. attention: the reasons, as the row names them; none
 // where the viewer has nothing to do, or is unknown. unread: what of it the
 // list could not read whole, so that no reason, nor "nothing to do", can be
-// told for sure: those errors' first lines and UNREAD's parts. On one's own
+// told for sure: those errors' first lines (also where the viewer is
+// unknown) and UNREAD's parts. On one's own
 // pull request the reasons are changes requested; unresolved review threads
 // whose last comment is someone else's; failing checks; a merge conflict;
 // or, where none of these is and all of it was read, "bereit zum Mergen":
@@ -387,8 +393,8 @@ export const UNREAD = {
 // nothing of one and does not ask for one's review again ("wartet auf
 // Autor"). Comments as such are no reason.
 function prAttention(pr, row, viewer, asked, errors) {
-  if (!viewer) return { attention: [], waiting: false, unread: [] };
   const unread = errors.map((e) => firstLine(e.message)).filter(Boolean);
+  if (!viewer) return { attention: [], waiting: false, unread };
   const threads = pr.reviewThreads;
   const nodes = Array.isArray(threads?.nodes) ? threads.nodes : null;
   if (!nodes || nodes.some((t) => !Array.isArray(t?.comments?.nodes))) unread.push(UNREAD.threads);
@@ -410,9 +416,10 @@ function prAttention(pr, row, viewer, asked, errors) {
   }
   const reviews = Array.isArray(pr.latestReviews?.nodes) ? pr.latestReviews : null;
   if (!reviews) unread.push(UNREAD.reviews);
-  const review = (reviews?.nodes ?? []).find((r) => r?.author?.login === viewer && r.state !== "DISMISSED") ?? null;
-  // The viewer's review may be one GitHub did not send.
-  if (reviews && !review && (reviews.totalCount ?? 0) > reviews.nodes.length) unread.push(UNREAD.moreReviews);
+  const latest = (reviews?.nodes ?? []).find((r) => r?.author?.login === viewer) ?? null;
+  const review = latest?.state === "DISMISSED" ? null : latest;
+  // The viewer's latest review may be one GitHub did not send.
+  if (reviews && !latest && (reviews.totalCount ?? 0) > reviews.nodes.length) unread.push(UNREAD.moreReviews);
   const head = pr.commits?.nodes?.[0]?.commit?.oid ?? null;
   if (review && !head) unread.push(UNREAD.head);
   const requested = asked || row.reviewers.includes(viewer);
@@ -438,8 +445,12 @@ const CHECK_KIND = {
   SKIPPED: "skipped", NEUTRAL: "skipped", STALE: "skipped",
 };
 
-export function checksSummary(rollup) {
+// A pull request's checks from its head commit's statusCheckRollup: their
+// counts, state, short and long text. Without a rollup it has none, but
+// where GitHub sent an error for it (`lost`) they are unread: "?".
+export function checksSummary(rollup, lost = false) {
   const n = { passed: 0, failed: 0, pending: 0, skipped: 0 };
+  if (!rollup && lost) return { ...n, state: "unread", short: "?", text: "Checks nicht gelesen" };
   const contexts = rollup?.contexts;
   for (const { state, count } of [...(contexts?.checkRunCountsByState ?? []), ...(contexts?.statusContextCountsByState ?? [])]) {
     const kind = CHECK_KIND[state];
@@ -469,18 +480,19 @@ function setsMe(query, names) {
   return words.some((w, i) => me.test(w) && words[i - 1]?.toUpperCase() !== "NOT");
 }
 
+// The qualifiers by which a search asks for one's review.
+const ASKING = ["review-requested", "user-review-requested"];
+
 // Whether a search holds only one's own pull requests, as "nur meine" counts
-// them: it has author, assignee, review-requested or user-review-requested
-// set to @me, not negated. A review asked of a team one is in shows only in
-// such a search; the answer names no person for it.
+// them: it has author, assignee or one of ASKING set to @me, not negated.
 // involves, mentions, commenter, reviewed-by and the like do not count.
-export const ownSearch = (query) => setsMe(query, ["author", "assignee", "review-requested", "user-review-requested"]);
+export const ownSearch = (query) => setsMe(query, ["author", "assignee", ...ASKING]);
 
 // Whether every pull request a search finds asks for one's review, or a
-// team's one is in: it sets review-requested or user-review-requested to
-// @me, not negated (prAttention's asked, where the answer names no person
-// for a team's request).
-export const askingSearch = (query) => setsMe(query, ["review-requested", "user-review-requested"]);
+// team's one is in: it sets one of ASKING to @me, not negated
+// (prAttention's asked). A review asked of a team shows only in such a
+// search; the answer names no person for it.
+export const askingSearch = (query) => setsMe(query, ASKING);
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
 // data) → { shape: "prs", sections: [{ name, color, count, fetched,
@@ -491,17 +503,21 @@ export const askingSearch = (query) => setsMe(query, ["review-requested", "user-
 // that is no pull request is counted in skipped; one GitHub sent as null
 // for an error at its path is not read, and that error's first line is in
 // notRead. A row carries whether the viewer has to act (prAttention), with
-// the errors at its path. A section's rows on which the viewer has to act
-// come first, in GitHub's order, then the others in theirs. A search
-// missing from the answer is explained by the error at its alias.
+// the errors at its path; it is asked for one's review where any search
+// that asks for it (askingSearch) found it, not only the one that holds it.
+// A duplicate's errors stay warnings: its row is another node's. A
+// section's rows on which the viewer has to act come first, in GitHub's
+// order, then the others in theirs. A search missing from the answer is
+// explained by the error at its alias.
 // warnings: the first lines of the errors neither a row nor notRead holds.
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
   const viewer = json?.data?.viewer?.login ?? null;
   const shown = new Set();
+  const nodesOf = (i) => (Array.isArray(json?.data?.[`s${i}`]?.nodes) ? json.data[`s${i}`].nodes : []);
+  const asking = new Set(view.sections.flatMap((s, i) => (askingSearch(s.query) ? nodesOf(i) : [])).map((pr) => pr?.id).filter(Boolean));
   const sections = view.sections.map((s, i) => {
     const own = ownSearch(s.query);
-    const asked = askingSearch(s.query);
     const found = json?.data?.[`s${i}`];
     if (!Array.isArray(found?.nodes)) {
       const e = errorAt(errors, [`s${i}`]);
@@ -511,17 +527,19 @@ export function parseGithubList(json, view, errors = []) {
     const notRead = [];
     let skipped = 0;
     found.nodes.forEach((pr, j) => {
-      const at = errors.filter((e) => Array.isArray(e.path) && e.path[0] === `s${i}` && e.path[1] === "nodes" && e.path[2] === j);
-      at.forEach((e) => shown.add(e));
+      const path = [`s${i}`, "nodes", j];
+      const at = errorsAt(errors, path);
       if (!pr?.id) {
+        at.forEach((e) => shown.add(e));
         if (at.length) notRead.push(firstLine(at[0].message));
         else skipped++;
         return;
       }
       if (seen.has(pr.id)) return;
       seen.add(pr.id);
-      const row = prRow(pr);
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asked, at), ownByQuery: own });
+      at.forEach((e) => shown.add(e));
+      const row = prRow(pr, Boolean(errorAt(at, [...path, "commits"])));
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at), ownByQuery: own });
     });
     // Array's sort keeps the order of rows it ranks alike.
     rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
@@ -681,13 +699,14 @@ export function githubPullRequestArgs(item) {
 
 // gh's answer for githubPullRequestArgs (and the GraphQL errors that came
 // with its data) → the pull request's details (related.js, pullRequest):
-// its row (prRow), its state as a line has it, and the errors that came
-// with it as warnings (a part GitHub did not send, such as its checks). A
-// missing pull request is explained by the error at its path.
+// its row (prRow; its checks unread where an error is at its commits), its
+// state as a line has it, and the errors that came with it as warnings (a
+// part GitHub did not send, such as its checks). A missing pull request is
+// explained by the error at its path.
 export function parseGithubPullRequest(json, item, errors = []) {
   const pr = json?.data?.repository?.pullRequest;
   if (!pr) throw notFound(errors, item);
-  return { ...prRow(pr), ...lookOf(pr.state), warnings: errors.map((e) => firstLine(e.message)).filter(Boolean) };
+  return { ...prRow(pr, Boolean(errorAt(errors, ["repository", "pullRequest", "commits"]))), ...lookOf(pr.state), warnings: errors.map((e) => firstLine(e.message)).filter(Boolean) };
 }
 
 // The people an issue's or pull request's repo can assign (GitHub's

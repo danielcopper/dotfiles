@@ -17,10 +17,8 @@
 //     Projects filter such as "assignee:@me"); its columns are the options
 //     of that single-select field. A list has sections [{ name, query,
 //     tone? }], one GitHub search for pull requests each; tone is one of
-//     copper's hues but orange (the mark's), "red", "green", "yellow",
-//     "blue", "violet" or "teal" (SECTION_TONES), and without one a section
-//     takes the next of blue, violet, teal, green, yellow and red
-//     (SECTION_TONE_ORDER) by its place that no other section sets. A view
+//     SECTION_TONES (shared.js), and without one a section takes the next
+//     of SECTION_TONE_ORDER by its place that no other section sets. A view
 //     may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
