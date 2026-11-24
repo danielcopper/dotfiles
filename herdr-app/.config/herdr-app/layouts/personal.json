@@ -94,7 +94,7 @@
               "id": "tabs",
               "type": "block",
               "content": {
-                "mod": "tabs"
+                "mod": "board-tabs"
               },
               "size": {
                 "weight": 1

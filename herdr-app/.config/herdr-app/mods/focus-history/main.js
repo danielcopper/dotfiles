@@ -52,14 +52,12 @@ function place(layer) {
 // The board layer's shape, a part of the leader's layer block (a mod here
 // is one main.js: README, "herdr app"; board.test.mjs checks that the
 // copies match).
-// ---- layer shape: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
+// ---- layer shape: the same in leader/main.js, board-button/main.js, board-tabs/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // The board layer (README, "herdr app") is a stack in the layout with a
 // block that shows the board mod with props { layer: true } and a block
 // that shows the shown tab. It is found by that shape, so its ids live in
 // the layout alone.
 
-// The first node of a layout tree, depth first, that `test` accepts, or
-// null.
 function findNode(node, test) {
   if (!node || typeof node !== "object") return null;
   if (test(node)) return node;

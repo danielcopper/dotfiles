@@ -1,12 +1,6 @@
-// A square button at the start of the tab row that shows the board
-// (mods/board/), as the leader's `b` does. layouts/personal.json puts it in a
-// block of its own left of the tabs block, which moves the window like the
-// tab bar. It is drawn like the tab bar (mods/tabs/, Herdr's): its background
-// and bottom border, and a square button like its window buttons (minimize,
-// maximize, close), in the muted colour and with the 14 px icon of its Files
-// and Changes buttons. Where the layout has a board layer, the button is the
-// board's tab, highlighted while the board shows; README, "herdr app", says
-// how the board shows and what brings the tab's content back.
+// Drawn to match the tab bar beside it (mods/board-tabs/): its background,
+// bottom border and window buttons. README, "herdr app", says how the board
+// shows and what brings the tab's content back.
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
@@ -14,16 +8,15 @@ import { focused, layout, notify, panes, run, shared, theme } from "herdr";
 
 // ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
-// that the copies match.) Its layer shape is in focus-history/main.js too.
+// that the copies match.) Its layer shape is in focus-history/main.js and
+// board-tabs/main.js too.
 
-// ---- layer shape: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
+// ---- layer shape: the same in leader/main.js, board-button/main.js, board-tabs/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // The board layer (README, "herdr app") is a stack in the layout with a
 // block that shows the board mod with props { layer: true } and a block
 // that shows the shown tab. It is found by that shape, so its ids live in
 // the layout alone.
 
-// The first node of a layout tree, depth first, that `test` accepts, or
-// null.
 function findNode(node, test) {
   if (!node || typeof node !== "object") return null;
   if (test(node)) return node;
@@ -166,9 +159,8 @@ export default class BoardButton extends View {
           .items_center()
           .justify_center()
           .rounded(6)
-          // The tab row keeps highlighting the last pane tab while the board
-          // shows (herdr's tabs mod reads only the tab's own active flag), so
-          // the button carries the "board is shown" mark itself: the accent.
+          // While the board shows, the tab row marks no tab
+          // (mods/board-tabs/) and the button carries the mark: the accent.
           .text_color(shown ? t.accent_foreground : t.muted)
           .when(shown, (el) => el.bg(t.accent))
           .hover((s) => (shown ? s : s.bg(t.hover).text_color(t.foreground)))

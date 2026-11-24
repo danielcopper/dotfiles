@@ -229,11 +229,13 @@ is for a tmux in the focused terminal, see below),
 `mods/file-popup/` (a popup with the files of the focused pane's repo or
 folder, or with the repo's changed files, that opens the picked one in nvim
 in a new pane on the right), `mods/board/` (the board
-the leader's `b` shows, see below) and `mods/board-button/` (a button at the
-start of the tab row that does the same), the layout `layouts/personal.json`
+the leader's `b` shows, see below), `mods/board-button/` (a button at the
+start of the tab row that does the same) and `mods/board-tabs/` (the tab
+bar, a copy of herdr's, see below), the layout `layouts/personal.json`
 (herdr's `main`, cloned, plus an empty block that keeps focus-history
-running, the board button's block left of the tabs, and the work area as a
-stack of the shown tab and the board; its right panel has no maximum width)
+running, the board button's block left of the tab bar, the tab bar's block
+on `board-tabs` in place of herdr's `tabs`, and the work area as a stack of
+the shown tab and the board; its right panel has no maximum width)
 and the themes: `themes/copper-light.json` and `themes/copper-dark.json`,
 which `settings.json` picks by the system's light or dark mode, plus
 `themes/catppuccin-mocha.json`. The copper pair is copied unchanged from the
@@ -288,13 +290,32 @@ by that run. Which files of the package git tracks is set in the root
   one from another mod's folder. So `mods/file-popup/` keeps its listers in
   `main.js` rather than in a `./list.js`, and `mods/board-button/` keeps its
   own marked copies of the leader's board layer block and board toggle; the
-  board's `src/ui/layer.js` holds the layer block too, and
+  board's `src/ui/layer.js` holds the layer block too,
   `mods/focus-history/` the part of it that finds the layer and a copy of
-  the leader's place block (the place the focus is in, for `Tab`). An icon is no module:
+  the leader's place block (the place the focus is in, for `Tab`), and
+  `mods/board-tabs/` that part too. An icon is no module:
   `mods/board-button/board.svg` draws through its link. The board is
   written as modules in `mods/board/src/` and built into its `main.js` by
   `mise run herdr-board-build`; the header of `mods/board/build.mjs` says
   how and why.
+- **The tab bar (`mods/board-tabs/`) is a copy of herdr's tabs mod.**
+  herdr's marks the shown tab as shown also while the board layer shows the
+  board in its place, and no setting changes that; its shipped mods are
+  read-only, written anew on every start. So the personal layout shows this
+  copy: herdr's `main.js` with a few lines that mark no tab while the board
+  shows, else the same, in a layout without a board layer too. Its icons
+  are herdr's own files in herdr's mod folders. `upstream/main.js` is the
+  herdr file it is based on, `cloned_from` in its `mod.json` that file's
+  herdr version. At every start the copy compares herdr's current
+  `~/.config/herdr-app/mods/tabs/main.js` with `upstream/main.js` and, when
+  they differ or one of them is missing, says so in a notice; a read that
+  fails says so in herdr's log alone. To port: `diff upstream/main.js
+  ~/.config/herdr-app/mods/tabs/main.js` in the copy's folder shows herdr's
+  change; copy herdr's file over `upstream/main.js`, set `cloned_from`'s
+  version to herdr's, make the same change in `main.js` and run `mise run
+  herdr-board-test`, whose test lists the lines in which `main.js` differs
+  from `upstream/main.js` beside its two marked blocks, so it fails where a
+  board line no longer fits. The notice is gone at the next start.
 - **herdr's `run` answers ok for a command it does not know,** so a mod
   that runs a misspelt one fails without a word. `mise run herdr-app-check`
   checks the commands this package's mods and `keys.json` use against the
@@ -356,8 +377,9 @@ by that run. Which files of the package git tracks is set in the root
   content back, while a press that turns into a drag (a divider, a tab) keeps
   the board; a herdr before 0.1.18 brings the content back on the press. The
   pane gets the keyboard only if the board still has it then, otherwise what was
-  pressed keeps it. herdr's tab bar keeps highlighting the last shown tab while
-  the board shows. The board layer is found by its shape, not by ids. Without
+  pressed keeps it. While the board shows, the tab bar marks no tab as the
+  shown one (`mods/board-tabs/`, above). The board layer is found by its
+  shape, not by ids. Without
   one, the button and `b` show the board's "Board" tab or open one, except in
   the personal layout, where they say the layer is missing. A Board tab left
   open from before is best closed there: when the layer hides the board, that

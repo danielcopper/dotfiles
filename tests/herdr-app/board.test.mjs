@@ -1,10 +1,11 @@
 // Tests for the herdr board mod (herdr-app/.config/herdr-app/mods/board/main.js,
 // built from its modules in src/ by build.mjs): the build, the mod's data
 // functions, and a few UI paths driven through the Board class with a fake
-// herdr; also the board button (mods/board-button/) and its place in
-// layouts/personal.json. They import the built main.js, the file herdr
-// loads. Run with `mise run herdr-board-test` (README, "herdr app"), or from
-// the repo root with `node --test tests/herdr-app/board.test.mjs`.
+// herdr; also the board button (mods/board-button/), the tab bar
+// (mods/board-tabs/) and their place in layouts/personal.json. They import
+// the built main.js, the file herdr loads. Run with `mise run
+// herdr-board-test` (README, "herdr app"), or from the repo root with `node
+// --test tests/herdr-app/board.test.mjs`.
 //
 // The mod imports "gpui-kit", "gpui-base" and "herdr", which only herdr
 // provides. A resolve/load hook hands node a stand-in for each that exports
@@ -4576,16 +4577,18 @@ async function boardButton({ tree = () => null } = {}) {
   return { host, view, cx, render, press };
 }
 
-test("the leader, the board button and the board hold the same board layer block, focus-history its layer shape, the leader and the button the same toggle, the leader and focus-history the same place", () => {
+test("the leader, the board button and the board hold the same board layer block, focus-history and the tab bar its layer shape, the leader and the button the same toggle, the leader and focus-history the same place", () => {
   const history = resolve(modDir, "../focus-history/main.js");
+  const tabs = resolve(modDir, "../board-tabs/main.js");
   const files = [join(buttonDir, "main.js"), resolve(modDir, "../leader/main.js"), join(modDir, "src/ui/layer.js")];
   const layer = markedCopy(files[0], "layer");
   assert.ok(layer?.includes("function boardLayer(root) {") && layer.includes("function leaveLayer(options) {"), "the button has the layer block");
   for (const file of files.slice(1)) assert.equal(markedCopy(file, "layer"), layer, file);
   const shape = markedCopy(files[0], "layer shape");
   assert.ok(shape?.includes("function boardLayer(root) {") && !shape.includes("function showTab("), "the button's layer block has the layer shape");
-  for (const file of [...files.slice(1), history]) assert.equal(markedCopy(file, "layer shape"), shape, file);
+  for (const file of [...files.slice(1), history, tabs]) assert.equal(markedCopy(file, "layer shape"), shape, file);
   assert.equal(markedCopy(history, "layer"), null, "focus-history has the layer shape alone");
+  assert.equal(markedCopy(tabs, "layer"), null, "the tab bar has the layer shape alone");
   const toggle = markedCopy(files[0], "board");
   assert.ok(toggle?.includes("function toggleBoard() {") && toggle.includes("function openBoard() {"), "the button has the board block");
   assert.equal(markedCopy(files[1], "board"), toggle, "the leader's");
@@ -4712,7 +4715,7 @@ test("UI: a press on the board button whose switch throws says so", async () => 
   assert.deepEqual(host.notes.map((n) => [n.title, n.body, n.level]), [["Board button failed", "panes broke", "error"]]);
 });
 
-test("UI: the board button is on the accent while the board layer shows the board, since the tab row keeps its tab marked, and plain otherwise", async () => {
+test("UI: the board button is on the accent while the board layer shows the board, as the tab row then marks no tab, and plain otherwise", async () => {
   let tree = () => layerLayout("main");
   const { render } = await boardButton({ tree: () => tree() });
   const look = () => {
@@ -4759,7 +4762,7 @@ test("the personal layout puts the board button left of the tabs, in a row as hi
   assert.deepEqual([row.type, row.size, row.resizable], ["row", { px: 42 }, false]);
   assert.deepEqual(row.children.map((c) => [c.id, c.content?.mod, c.size, c.window_drag]), [
     ["board-button", "board-button", { px: 36 }, true],
-    ["tabs", "tabs", { weight: 1 }, true],
+    ["tabs", "board-tabs", { weight: 1 }, true],
   ], "both move the window, as the tab bar did");
   assert.equal(findById(layout, "work").children[0], row, "first in the work column");
 });
@@ -4773,6 +4776,215 @@ test("the personal layout's work area is the board layer: a stack of the shown t
   assert.equal(stack.active, tab.id, "the tab's content shows first");
   assert.deepEqual([tab.type, tab.content.tab, boardBlock.type, boardBlock.content], ["block", "active", "block", { mod: "board", props: { layer: true } }]);
   assert.equal(stack.children.length, 2);
+});
+
+// ---- The tab bar (mods/board-tabs/) ----
+
+const tabsDir = resolve(modDir, "../board-tabs");
+const tabsBase = join(tabsDir, "upstream/main.js");
+// The two files the tab bar compares at start: herdr's tabs mod and its base.
+const SHIPPED_TABS = "/fake-home/mods/tabs/main.js";
+const TABS_BASE = "/fake-home/mods/board-tabs/upstream/main.js";
+const TABS_THEME = { ...THEME, raised: "#raised", dim: "#dim", working: "#working", blocked: "#blocked", done: "#done" };
+// The tab bar's module, fresh as at the next start: herdr runs module code
+// once per source version, shared by every copy.
+let tabsImports = 0;
+const tabsModule = async (file = join(tabsDir, "main.js")) => (await import(`${pathToFileURL(file).href}?start=${++tabsImports}`)).default;
+
+// A fake host on which herdr's tabs mod is the tab bar's base.
+function tabsHost() {
+  const host = fakeHost();
+  const base = readFileSync(tabsBase, "utf8");
+  host.files = { [SHIPPED_TABS]: base, [TABS_BASE]: base };
+  return host;
+}
+
+// A tab bar of `Tabs` on `host`, whose layout() is `tree()` and whose shown
+// space has the tabs t1 and t2, t2 the shown one; render() draws it.
+async function tabBar({ Tabs, tree = () => null, host = tabsHost() } = {}) {
+  Tabs ??= await tabsModule();
+  host.layout = () => tree();
+  host.theme = () => TABS_THEME;
+  host.window = () => null;
+  host.image = (path) => element("image").path(path);
+  host.panes = () => [];
+  host.spaceList = [{ id: "s1", name: "x", active: true, tabs: [{ id: "t1", name: "one", named: true, active: false }, { id: "t2", name: "two", named: true, active: true }] }];
+  globalThis.__boardHost = host;
+  const view = new Tabs();
+  const cx = fakeCx();
+  view.init({}, cx);
+  await settle();
+  return { host, view, render: () => view.render(cx) };
+}
+
+// A drawing as data: each element's kind, calls (a function as "fn", a
+// scroll handle as "scroll") and children.
+const drawn = (el) => (typeof el === "string" ? el : {
+  kind: el.kind,
+  calls: el.calls.map(([name, ...args]) => [name, ...args.map((a) => (typeof a === "function" ? "fn" : a?.scroll_to_item ? "scroll" : a))]),
+  kids: el.kids.map(drawn),
+});
+
+// How the tab bar draws a tab: its border, background and text colour, and
+// whether it has a close button.
+const tabLook = (bar, id) => {
+  const el = byId(bar, `tab-${id}`);
+  return [el.with.border_color[0], el.with.bg[0], el.with.text_color[0], Boolean(byId(el, `close-${id}`))];
+};
+const MARKED = ["#border", "#raised", "#fg", true];
+const PLAIN = ["#chrome", "#chrome", "#muted", false];
+
+test("UI: the tab bar marks no tab as the shown one while the board layer shows the board, and marks it again when the tab's content shows", async () => {
+  let active = "main";
+  const { render } = await tabBar({ tree: () => layerLayout(active) });
+  const looks = () => [tabLook(render(), "t1"), tabLook(render(), "t2")];
+  assert.deepEqual(looks(), [PLAIN, MARKED], "the tab's content shows");
+  active = "board";
+  assert.deepEqual(looks(), [PLAIN, PLAIN], "the board shows");
+  active = "main";
+  assert.deepEqual(looks(), [PLAIN, MARKED], "the tab's content again");
+});
+
+test("UI: the tab bar draws as herdr's tabs mod does in a layout without a board layer and while the layer shows the tab's content", async () => {
+  const herdrs = await tabsModule(tabsBase);
+  const withoutLayer = () => {
+    const tree = layerLayout("main");
+    const stack = findById(tree, "work-stack");
+    stack.children = stack.children.filter((c) => c.id !== "board");
+    return tree;
+  };
+  for (const [name, tree] of [["no layout", () => null], ["no board layer", withoutLayer], ["the tab's content", () => layerLayout("main")]]) {
+    const copy = await tabBar({ tree });
+    const theirs = await tabBar({ Tabs: herdrs, tree });
+    assert.deepEqual(drawn(copy.render()), drawn(theirs.render()), name);
+  }
+  const copy = await tabBar({ tree: () => layerLayout("board") });
+  const theirs = await tabBar({ Tabs: herdrs, tree: () => layerLayout("board") });
+  assert.notDeepEqual(drawn(copy.render()), drawn(theirs.render()), "the board shows");
+});
+
+// The lines of `a` and `b` that differ, in order, as ["-", line of a] and
+// ["+", line of b], from their longest common run of lines.
+function lineDiff(a, b) {
+  const common = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) common[i][j] = a[i] === b[j] ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1]);
+  }
+  const out = [];
+  let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) i++, j++;
+    else if (i < a.length && (j === b.length || common[i + 1][j] >= common[i][j + 1])) out.push(["-", a[i++]]);
+    else out.push(["+", b[j++]]);
+  }
+  return out;
+}
+
+// What the tab bar changes in herdr's tabs mod besides its marked blocks
+// (upstream, layer shape): a port applies these to herdr's new main.js.
+const BOARD_LINES = [
+  ["-", 'import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";'],
+  ["+", 'import { appHome, checking, notify, readTextFile, spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";'],
+  ["-", "  init() {"],
+  ["+", "  init(_props, cx) {"],
+  ["+", "    compareWithHerdr(cx);"],
+  ["+", "    const boardShown = Boolean(boardLayer(layout())?.shown);"],
+  ["+", "      const marked = c.active && !boardShown;"],
+  ["-", "        .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)"],
+  ["+", "        .border(1).border_color(marked ? t.border : t.chrome).bg(marked ? t.raised : t.chrome).text_color(marked ? t.foreground : t.muted)"],
+  ["-", "        .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down(\"left\", stop).on_click((_e, cx) => { cx.stop_propagation(); run(\"tab.close\", { id: c.id }); }).child(svg(\"mods/pane/close.svg\").size(12))));"],
+  ["+", "        .when(marked, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down(\"left\", stop).on_click((_e, cx) => { cx.stop_propagation(); run(\"tab.close\", { id: c.id }); }).child(svg(\"mods/pane/close.svg\").size(12))));"],
+];
+
+test("the tab bar is herdr's tabs mod as upstream/main.js holds it, with the board lines and its two marked blocks alone, and its mod.json names herdr's tabs mod and a version as what it is cloned from", () => {
+  const copy = readFileSync(join(tabsDir, "main.js"), "utf8");
+  const blocks = ["upstream", "layer shape"].map((name) => markedCopy(join(tabsDir, "main.js"), name));
+  assert.ok(blocks.every(Boolean), "the upstream and layer shape blocks");
+  const rest = blocks.reduce((text, block) => text.replace(`${block}// ---- end ${block.match(/^\/\/ ---- ([^:]+):/)[1]} ----\n\n`, ""), copy);
+  assert.equal(rest.match(/^\/\/ ---- /gm), null, "no other marked block");
+  assert.deepEqual(lineDiff(readFileSync(tabsBase, "utf8").split("\n"), rest.split("\n")), BOARD_LINES);
+  const { name, version } = JSON.parse(readFileSync(join(tabsDir, "mod.json"), "utf8")).cloned_from;
+  assert.equal(name, "tabs");
+  assert.ok(typeof version === "string" && version.trim() !== "", `a version: ${version}`);
+});
+
+const UPSTREAM_NOTICE = [["herdr hat seinen Tab-Mod geändert", "Die eigene Kopie (mods/board-tabs) nachziehen: README, „herdr app“.", "warning"]];
+const notices = (host) => host.notes.map((n) => [n.title, n.body, n.level]);
+
+// console.warn's lines while `fn` runs.
+async function warnLines(fn) {
+  const lines = [];
+  const warn = console.warn;
+  console.warn = (...args) => lines.push(args.join(" "));
+  try {
+    await fn();
+  } finally {
+    console.warn = warn;
+  }
+  return lines;
+}
+
+test("UI: at start the tab bar says in German when herdr's tabs mod is no longer its base, once a start, and nothing while it is", async () => {
+  const base = readFileSync(tabsBase, "utf8");
+  const host = tabsHost();
+  await tabBar({ host });
+  assert.deepEqual(host.notes, [], "herdr's is the base");
+  const Tabs = await tabsModule();
+  const changed = fakeHost();
+  changed.files = { [SHIPPED_TABS]: `${base}// herdr's next version\n`, [TABS_BASE]: base };
+  await tabBar({ Tabs, host: changed });
+  assert.deepEqual(notices(changed), UPSTREAM_NOTICE, "herdr's changed");
+  await tabBar({ Tabs, host: changed });
+  assert.deepEqual(notices(changed), UPSTREAM_NOTICE, "a second window of the same start");
+  const next = fakeHost();
+  next.files = changed.files;
+  await tabBar({ host: next });
+  assert.deepEqual(notices(next), UPSTREAM_NOTICE, "the next start");
+});
+
+const SHIPPED_MISSING = ["herdr hat keinen Tab-Mod mehr unter mods/tabs", "Die eigene Kopie (mods/board-tabs) prüfen: README, „herdr app“.", "warning"];
+const BASE_MISSING = ["Der eigenen Kopie (mods/board-tabs) fehlt ihre Basis", "Ohne upstream/main.js vergleicht sie herdrs Tab-Mod nicht: README, „herdr app“.", "warning"];
+
+test("UI: at start the tab bar says in German when herdr's tabs mod or its own base is missing, and writes no warning to the log", async () => {
+  const base = readFileSync(tabsBase, "utf8");
+  for (const [name, files, said] of [
+    ["herdr's missing", { [TABS_BASE]: base }, [SHIPPED_MISSING]],
+    ["the base missing", { [SHIPPED_TABS]: `${base}// next\n` }, [BASE_MISSING]],
+    ["both missing", {}, [SHIPPED_MISSING, BASE_MISSING]],
+  ]) {
+    const host = fakeHost();
+    host.files = files;
+    const lines = await warnLines(() => tabBar({ host }));
+    assert.deepEqual([lines, notices(host)], [[], said], name);
+  }
+});
+
+test("UI: a read the tab bar's comparison with herdr's tabs mod cannot make says so in herdr's log as a warning and shows no notice for it", async () => {
+  const base = readFileSync(tabsBase, "utf8");
+  for (const [name, files, fails, line, said] of [
+    ["herdr's failed", { [TABS_BASE]: base }, SHIPPED_TABS, "board-tabs: cannot compare with herdr's tabs mod: tabs/main.js: read broke", []],
+    ["the base failed", { [SHIPPED_TABS]: `${base}// next\n` }, TABS_BASE, "board-tabs: cannot compare with herdr's tabs mod: board-tabs/upstream/main.js: read broke", []],
+    ["herdr's failed, the base missing", {}, SHIPPED_TABS, "board-tabs: cannot compare with herdr's tabs mod: tabs/main.js: read broke", [BASE_MISSING]],
+  ]) {
+    const host = fakeHost();
+    host.files = files;
+    const read = host.readTextFile;
+    host.readTextFile = async (path) => {
+      if (path === fails) throw new Error("read broke");
+      return read(path);
+    };
+    const lines = await warnLines(() => tabBar({ host }));
+    assert.deepEqual([lines, notices(host)], [[line], said], name);
+  }
+});
+
+test("UI: under herdr-app check the tab bar compares nothing", async () => {
+  const host = fakeHost();
+  const reads = [];
+  host.readTextFile = async (path) => (reads.push(path), null);
+  host.checking = () => true;
+  const lines = await warnLines(() => tabBar({ host }));
+  assert.deepEqual([reads, lines, host.notes], [[], [], []]);
 });
 
 // ---- Azure: the Sprint view ----

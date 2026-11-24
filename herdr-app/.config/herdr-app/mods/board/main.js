@@ -3986,16 +3986,15 @@ export const prsHead = (section) => `VERKNÜPFTE PRS${section.count === null ? "
 
 // ---- layer: the same in leader/main.js, board-button/main.js and board/src/ui/layer.js ----
 // (a mod here is one main.js: README, "herdr app"; board.test.mjs checks
-// that the copies match.) Its layer shape is in focus-history/main.js too.
+// that the copies match.) Its layer shape is in focus-history/main.js and
+// board-tabs/main.js too.
 
-// ---- layer shape: the same in leader/main.js, board-button/main.js, focus-history/main.js and board/src/ui/layer.js ----
+// ---- layer shape: the same in leader/main.js, board-button/main.js, board-tabs/main.js, focus-history/main.js and board/src/ui/layer.js ----
 // The board layer (README, "herdr app") is a stack in the layout with a
 // block that shows the board mod with props { layer: true } and a block
 // that shows the shown tab. It is found by that shape, so its ids live in
 // the layout alone.
 
-// The first node of a layout tree, depth first, that `test` accepts, or
-// null.
 function findNode(node, test) {
   if (!node || typeof node !== "object") return null;
   if (test(node)) return node;

@@ -20,9 +20,9 @@
 !/herdr-app/.config/herdr-app/mods/file-popup/
 !/herdr-app/.config/herdr-app/mods/board/
 !/herdr-app/.config/herdr-app/mods/board-button/
-/herdr-app/.config/herdr-app/mods/*/gpui-kit.d.ts
-# herdr-app check writes its types into the board's src/ too.
-/herdr-app/.config/herdr-app/mods/board/src/**/gpui-kit.d.ts
+!/herdr-app/.config/herdr-app/mods/board-tabs/
+# herdr-app check writes its types into a mod's subfolders too.
+/herdr-app/.config/herdr-app/mods/**/gpui-kit.d.ts
 /herdr-app/.config/herdr-app/mods/*/jsconfig.json
 /herdr-app/.config/herdr-app/mods/*/.*
 !/herdr-app/.config/herdr-app/themes/
