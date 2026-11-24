@@ -1052,8 +1052,7 @@ export default class Board extends View {
 
   // A selection the board sets by itself, which is no choice (clickItem).
   // Where it lands on another item, the choice lapses and open details
-  // close, so that they never show an item unasked, and the item is scrolled
-  // into view.
+  // close, so that they never show an item unasked.
   reselect(view, sel) {
     const st = this.state(view.id);
     const other = sel.key !== st.sel?.key;
@@ -1064,9 +1063,9 @@ export default class Board extends View {
     this.scrollToSelection(view);
   }
 
-  // The item the person chose (what counts as a choice: clickItem): selected,
-  // kept as chosen and scrolled into view; open details follow it, and its
-  // related items are read (readRelated).
+  // The item the person chose (what counts as a choice: clickItem): selected
+  // and kept as chosen; open details follow it, and its related items are
+  // read (readRelated).
   choose(view, sel, cx) {
     const st = this.state(view.id);
     st.sel = sel;
@@ -1075,7 +1074,9 @@ export default class Board extends View {
     this.readRelated(cx);
   }
 
+  // Only the shown view: the views of a shape share its scroll handles.
   scrollToSelection(view) {
+    if (this.view()?.id !== view.id) return;
     const sel = this.state(view.id).sel;
     const row = this.navColumns(view)[sel.col]?.shown.findIndex((c) => c.key === sel.key) ?? -1;
     if (row >= 0) this.shape(view).scrollTo(this, view, sel, row);

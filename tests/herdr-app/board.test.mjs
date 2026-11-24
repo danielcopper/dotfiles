@@ -12074,6 +12074,23 @@ test("UI: the prefetch waits while a write runs, a dialog is busy or the board d
   assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true]);
 });
 
+test("UI: a view read or restored in the background scrolls none of the shown view's lists: its own first selection is set, no column of the shown board and not the PR list's rows scroll", async () => {
+  const list = board.parseGithubList(json("github-list.json"), testView("prs"));
+  const { b, cx, host } = await bootBoard({ raw: { "board:data:prs": savedFor("prs", list, Date.now() - 20 * MIN) } });
+  await host.answer("gh", ok(fixture("github-board.json")));
+  b.render();
+  for (const c of b.navColumns(b.view())) Object.assign(board.keptOf(b, c.id).scroll, { y: 150, width: 300, height: 200, content: 2000 });
+  host.scrolled.splice(0);
+  await cx.fire();
+  assert.ok(b.state("prs").sel?.key, "the PR list's saved state, its first row selected");
+  await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
+  assert.ok(b.state("other").sel?.key, "the other board read, its first card selected");
+  await cx.fire();
+  await host.answer("gh", ok(fixture("github-list.json")), isListCall);
+  assert.equal(b.state("prs").saved, false, "the PR list read");
+  assert.deepEqual(host.scrolled, [], "no list scrolled");
+});
+
 test("UI: each tab shows the age of what it draws: two saved tabs their own, a prefetched one its read's, and a new board the saved ones'", async () => {
   const { b, cx, host } = await bootBoard({ raw: {
     "board:data:mine": savedFor("mine", savedBoard(), Date.now() - 10 * MIN), "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), Date.now() - 20 * MIN),
