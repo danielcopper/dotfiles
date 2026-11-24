@@ -4039,6 +4039,7 @@ function remembered(t, palette) {
   const hueAt = new Map(palette.hues.map(([tone, name]) => [tone, oklch(t[name])?.h]));
   return {
     ...palette,
+    named: once(palette.named),
     text: once(palette.text),
     chip: once(palette.chip),
     head: once(palette.head, (tone, ground) => `${tone} ${ground}`),
