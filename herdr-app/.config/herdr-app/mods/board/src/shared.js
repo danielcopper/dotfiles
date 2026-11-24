@@ -44,7 +44,7 @@ export const boardLog = { write: (line) => console.log(line) };
 
 // An error's message for the UI; an unexpected one is logged with its stack.
 export function report(e) {
-  if (!(e instanceof BoardError)) console.log(e?.stack ?? String(e));
+  if (!(e instanceof BoardError)) boardLog.write(e?.stack ?? String(e));
   return errorText(e);
 }
 

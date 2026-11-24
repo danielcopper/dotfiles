@@ -2469,8 +2469,9 @@ test("UI: the board's focus command gives the keyboard to a copy that shows, not
   }
 });
 
-test("UI: a throw while the board handles a command, or in its timers, is said once while it repeats and ends neither", async () => {
+test("UI: a throw while the board handles a command, or in its timers, goes to herdr's log with its stack each time, is said once while it repeats and ends neither", async () => {
   memory.clear();
+  logged.length = 0;
   const host = fakeHost({ shown: true });
   const commands = ["focus", "focus", "focus"];
   host.nextCommand = () => (commands.length ? Promise.resolve(commands.shift()) : new Promise(() => {}));
@@ -2484,6 +2485,7 @@ test("UI: a throw while the board handles a command, or in its timers, is said o
   await settle();
   assert.equal(commands.length, 0, "every command was taken");
   assert.deepEqual(host.notes.map((n) => [n.title, /focus broke/.test(n.body)]), [["Board: Befehl fehlgeschlagen", true]], "said once");
+  assert.equal(logged.filter((l) => /^Error: focus broke\n {4}at /.test(l)).length, 3, "logged each time, with its stack");
   host.layout = () => {
     throw new Error("layout broke");
   };
@@ -2504,6 +2506,14 @@ test("UI: a throw while the board handles a command, or in its timers, is said o
   await cx.tick();
   await cx.tick();
   assert.equal(host.notes.filter((n) => n.title === "Board: Neuladen fehlgeschlagen").length, 1, "the refresh timer too");
+});
+
+test("report: an unexpected error goes to herdr's log with its stack and shows as unexpected; a BoardError shows as it is, unlogged", () => {
+  logged.length = 0;
+  const e = new Error("kaputt");
+  assert.deepEqual([board.report(e), board.report(new board.BoardError("offline"))], ["Unerwarteter Fehler: kaputt", "offline"]);
+  // A run another test left may log its call line here too.
+  assert.deepEqual(logged.filter((l) => !l.startsWith("board: ")), [e.stack]);
 });
 
 test("UI: herdr's props() say which copy is the layer's; the props init got stand in only where it gives none", async () => {
