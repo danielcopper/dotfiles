@@ -11042,7 +11042,7 @@ function drawCost(b, host) {
   return cost;
 }
 
-test("UI: a full draw of a board of 300 cards (labels, types, priorities, milestones, parents, sub-issues up to 45) in columns whose lists herdr laid out 900 pixels high converts at most 100 colors to OKLCH and makes at most 1500 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
+test("UI: a full draw of a board of 300 cards (labels, types, priorities, milestones, parents, sub-issues up to 45) in columns whose lists herdr laid out 900 pixels high converts 6 to 100 colors to OKLCH and makes 300 to 1500 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
   const { b, host } = await openBoard({ answer: largeBoardAnswer(300) });
   assert.equal(b.views.mine.data.columns.filter((c) => !c.hidden).reduce((n, c) => n + c.cards.length, 0), 300);
   for (const ci of [0, 1, 2]) Object.assign(handleOf(b, ci), { width: 300, height: 900 });
@@ -11050,10 +11050,20 @@ test("UI: a full draw of a board of 300 cards (labels, types, priorities, milest
     host.theme = () => ({ ...t });
     for (const draw of [1, 2]) {
       const cost = drawCost(b, host);
-      assert.ok(cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
-      assert.ok(cost.elements <= 1500, `${name}, draw ${draw}: ${cost.elements} elements`);
+      assert.ok(cost.conversions >= 6 && cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
+      assert.ok(cost.elements >= 300 && cost.elements <= 1500, `${name}, draw ${draw}: ${cost.elements} elements`);
     }
   }
+});
+
+test("memo answers each key once, by the first argument without a key; without a key a function whose length (its parameters before the first with a default or a rest) is above one is refused", () => {
+  let calls = 0;
+  const twice = board.memo((x) => (calls++, x * 2));
+  assert.deepEqual([twice(2), twice(2), twice(3), calls], [4, 4, 6, 2]);
+  assert.throws(() => board.memo((a, b) => a + b), /memo: .* of 2 arguments needs a key/);
+  assert.doesNotThrow(() => board.memo((a, b = 1) => a + b), "a length of 1");
+  const sum = board.memo((a, b) => (calls++, a + b), (a, b) => `${a} ${b}`);
+  assert.deepEqual([sum(1, 2), sum(1, 3), sum(1, 2), calls], [3, 4, 3, 4]);
 });
 
 // ---- A long column: only the cards about its window drawn whole ----
@@ -11424,7 +11434,6 @@ test("UI: each draw takes its colors from the theme it draws in, after a switch 
     host.theme = () => ({ ...t });
     const text = (tone) => (copper ? t[`copper-${copperName(tone)}-text`] : t[tone] ?? t.muted);
     const chipBgs = (tone) => (copper ? [3, 4].map((step) => t[`copper-${copperName(tone)}-${step}`]) : [`${text(tone).slice(0, 7)}1a`]);
-    // Without copper's colors: the nearest of the theme's hues by OKLCH hue.
     const lch = (hex) => {
       const [, a, b2] = oklab(`#${hex.replace("#", "")}`);
       return { c: Math.hypot(a, b2), h: ((Math.atan2(b2, a) * 180) / Math.PI + 360) % 360 };

@@ -641,7 +641,7 @@ export function startSettings(config, view, repo) {
 // "nur meine", and keyboard movement over columns (a list is one column).
 
 // Whether `texts` (falsy ones left out) hold every word of `filter`
-// between them, case-insensitive; an empty filter matches anything.
+// between them, case-insensitive.
 export function wordsMatch(texts, filter) {
   const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
@@ -1424,7 +1424,8 @@ const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
 
 // An item's session: a tab or space whose name starts with its key, the most
 // urgent first; failing that, on GitHub a space on its branch (a pull
-// request's head branch, or `<type>/<number>-…` in a folder of its repo).
+// request's head branch, or one with a part that starts with `<number>-` or
+// whose last part is `<number>`, in a folder of its repo).
 // → { space, tab (null for a space), status, label } or null.
 export function linkedSession(item, allSpaces) {
   const key = itemKey(item);
@@ -4018,7 +4019,8 @@ function copperTint(t, tone, grounds) {
 // `selected`, a selected card's or row's background; `chip(tone)` and
 // `head(tone, ground)`, a chip's and a column head's background;
 // `drop(ground)`, a drop target column's background, where `ground` is its
-// own; `mark`, the color of the mark on a pull request the viewer has to
+// own; `hueTone(hex)`, the tone of a color from outside the theme (hueTone);
+// `mark`, the color of the mark on a pull request the viewer has to
 // act on, a PR list's, which no section tone and no check state shares.
 const palettes = new WeakMap();
 function paletteOf(t) {
@@ -4030,25 +4032,29 @@ function paletteOf(t) {
   return palette;
 }
 
+// `fn` answering each `key(...args)` once; without a key, by the first
+// argument, refused where fn.length is above one (fn.length counts no
+// parameter from the first with a default or a rest on).
+export function memo(fn, key) {
+  if (!key && fn.length > 1) throw new Error(`memo: ${fn.name || "a function"} of ${fn.length} arguments needs a key`);
+  const kept = new Map();
+  return (...args) => {
+    const k = key ? key(...args) : args[0];
+    if (!kept.has(k)) kept.set(k, fn(...args));
+    return kept.get(k);
+  };
+}
+
 // herdr's theme() gives a new object on each call, so this lasts one render.
 function remembered(t, palette) {
-  const once = (fn, key = (x) => x) => {
-    const seen = new Map();
-    return (...args) => {
-      const k = key(...args);
-      if (!seen.has(k)) seen.set(k, fn(...args));
-      return seen.get(k);
-    };
-  };
   const hueAt = new Map(palette.hues.map(([tone, name]) => [tone, oklch(t[name])?.h]));
   return {
     ...palette,
-    named: once(palette.named),
-    text: once(palette.text),
-    chip: once(palette.chip),
-    head: once(palette.head, (tone, ground) => `${tone} ${ground}`),
-    hueAt,
-    hueTone: once((hex) => nearestHue(palette, hueAt, hex)),
+    named: memo(palette.named),
+    text: memo(palette.text),
+    chip: memo(palette.chip),
+    head: memo(palette.head, (tone, ground) => `${tone} ${ground}`),
+    hueTone: memo((hex) => nearestHue(palette, hueAt, hex)),
   };
 }
 
@@ -4183,7 +4189,6 @@ function apart(one, other) {
 // that is no color, or a theme without those colors gives "muted".
 export const hueTone = (t, hex) => paletteOf(t).hueTone(hex);
 
-// hueTone for a palette whose hues' OKLCH hues `hueAt` holds by tone.
 function nearestHue({ hues, borders }, hueAt, hex) {
   const own = oklch(hex);
   if (!own || own.c < GREY_CHROMA) return "muted";

@@ -4,7 +4,7 @@
 import { itemKey, sameItem } from "./shared.js";
 
 // Whether `texts` (falsy ones left out) hold every word of `filter`
-// between them, case-insensitive; an empty filter matches anything.
+// between them, case-insensitive.
 export function wordsMatch(texts, filter) {
   const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;

@@ -17,7 +17,8 @@ const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
 
 // An item's session: a tab or space whose name starts with its key, the most
 // urgent first; failing that, on GitHub a space on its branch (a pull
-// request's head branch, or `<type>/<number>-…` in a folder of its repo).
+// request's head branch, or one with a part that starts with `<number>-` or
+// whose last part is `<number>`, in a folder of its repo).
 // → { space, tab (null for a space), status, label } or null.
 export function linkedSession(item, allSpaces) {
   const key = itemKey(item);
