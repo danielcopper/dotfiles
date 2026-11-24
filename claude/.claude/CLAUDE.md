@@ -10,7 +10,8 @@
 - **Task list:** keep one once there is more than one task. Every open point is a task (a decision, a question, a finding, a follow-up), kept current: done when done, description updated when a decision lands. Ask open points one at a time — a message ends with exactly one question.
 - **Glossary and ADRs:** where a repo has `GLOSSARY.md` (or `GLOSSARY-MAP.md`) or `docs/adr/`, read them before designing or naming, use the glossary's terms, and say so out loud when a plan contradicts an ADR. A new ADR only when a decision is hard to reverse, surprising without context and a real trade-off.
 - **Git:** Conventional Commits (`type(scope): description`, lowercase, imperative). Stage files by name, never `git add .` unless the repo's CLAUDE.md allows it.
-- **Published text** (commits, PRs, issues, code comments) states results, decisions and reasons — never how the work was produced, and no AI or Claude attribution.
+- **Code comments:** as few as possible. Write code that needs none; a comment states only what the code cannot show — a constraint, an outside-world fact, a road not taken — in one line, never what the code does, where it came from, the task it serves or why the change is right (that goes in the commit). No docstring that restates names, parameters or types. Where you touch code, remove comments that fail this, as part of the change. Like published text, never how the work was produced and no AI attribution. A repo's own comment or docstring rule wins.
+- **Published text** (commits, PRs, issues) states results, decisions and reasons — never how the work was produced, and no AI or Claude attribution.
 - **Line endings:** new files LF. In my own repos everything is LF (convert stray CRLF in a file you touch); in others keep what is there, never bulk-convert.
 
 ## Memory

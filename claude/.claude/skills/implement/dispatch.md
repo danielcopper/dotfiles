@@ -42,7 +42,7 @@ are not "addressed", and a verify-only pass's `### Noticed` items (the post-cap 
 |---|---|
 | `DONE` | Proceed to review |
 | `DONE_WITH_CONCERNS` | Concerns that touch correctness or scope go to the user before review; others go to the reviewer as named risks |
-| `BLOCKED` / `NEEDS_CONTEXT` | Take the specifics to the user; a decision goes into the issue (convention repo) or the brief; then re-dispatch |
+| `BLOCKED` / `NEEDS_CONTEXT` | Take the specifics to the user; a decision goes into the issue (convention repo) or the brief; then resume it with the answer |
 
 A question an agent asks mid-run goes to the user verbatim; the lead answers only what the issue or the repo's facts
 already answer.
@@ -65,6 +65,8 @@ The lead checks only a finding's facts, as `review-agents.md`, "Routing the find
 
 ## Fix dispatch
 
-When the routing in `review-agents.md` sends findings to the implementer, re-dispatch it with the same brief, the saved
-report and review files, and the findings to fix, ending the prompt as above. It fixes and reports; then the delta is
+When the routing in `review-agents.md` sends findings to the implementer, spawn a fresh `implementer` — never resume
+the previous one, whose context grows with every round and whose prompt cache has usually expired by then — with the same brief, the saved
+report and review files, and the findings to fix, ending the prompt as above; those files are its memory of the
+earlier rounds. It fixes and reports; then the delta is
 reviewed as a fix round, or after the round cap as the single verify-only pass.

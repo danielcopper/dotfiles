@@ -18,7 +18,7 @@ When the dispatch names a PR body file, that body is what you review: its inputs
 
 ## The yardstick
 
-Use the repo's own comment rule — read it yourself at `<head>` (its `CLAUDE.md` files, `.claude/rules/`, contributing docs) and its `GLOSSARY.md` terms. Without one: a comment holds only an outside-world fact, a road not taken, or a constraint the code can't express; history goes to the commit; each fact has one home. Always: no AI attribution, nothing about how the work was produced, comments in English.
+Use the repo's own comment rule — read it yourself at `<head>` (its `CLAUDE.md` files, `.claude/rules/`, contributing docs) and its `GLOSSARY.md` terms. Without one: a comment holds only an outside-world fact, a road not taken, or a constraint the code can't express, in one line; history goes to the commit; each fact has one home. Comments should become fewer over time: in a first review, every comment or docstring in the touched units that fails the comment rule in force (the repo's, else this one; without a repo rule a docstring that restates names, parameters or types fails it) is a **not needed** finding with its removal. Always: no AI attribution, nothing about how the work was produced, comments in English.
 
 ## How
 
