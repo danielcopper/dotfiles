@@ -53,40 +53,6 @@ WRAPPER_PAIRS = {
     ("docker", "exec"),
     ("kubectl", "exec"),
 }
-# To find the command a wrapper runs: the wrapper's options that take the next word as value,
-# and how many words it takes before that command (timeout's duration, flock's lock file, the
-# container or pod; -1: mise's tools, up to `--`). Any other option leaves the command word
-# unknown (see wrapped).
-WRAPPED: dict[str, tuple[set[str], int]] = {
-    "env": ({"-u", "--unset", "-C", "--chdir"}, 0),
-    "sudo": (
-        {"-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir", "-h", "--host"}
-        | {"-p", "--prompt", "-R", "--chroot", "-r", "--role", "-t", "--type", "-T", "-U"},
-        0,
-    ),
-    "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),
-    "nice": ({"-n", "--adjustment"}, 0),
-    "ionice": ({"-c", "--class", "-n", "--classdata"}, 0),
-    "stdbuf": ({"-i", "-o", "-e", "--input", "--output", "--error"}, 0),
-    "xargs": (
-        {"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "--max-args", "-P"}
-        | {"--max-procs", "-s", "--max-chars", "--process-slot-var"},
-        0,
-    ),
-    "flock": ({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}, 1),
-    "watch": ({"-n", "--interval"}, 0),
-    "time": ({"-f", "--format", "-o", "--output"}, 0),
-    "exec": ({"-a"}, 0),
-    "uv run": (
-        {"--with", "-w", "--with-editable", "--with-requirements", "--python", "-p", "--project"}
-        | {"--directory", "--package", "--extra", "--group", "--env-file", "--index"},
-        0,
-    ),
-    "mise exec": (set(), -1),
-    "mise x": (set(), -1),
-    "docker exec": ({"-e", "--env", "--env-file", "-u", "--user", "-w", "--workdir"}, 1),
-    "kubectl exec": ({"-c", "--container", "-n", "--namespace", "--context"}, 1),
-}
 RESERVED = {"!", "{", "if", "then", "elif", "else", "do", "while", "until"}
 # The only options of a runner known to take the next word as value: a shell's and ssh's.
 SHELL_VALUES = ("-o", "-O", "+o", "+O")
@@ -458,53 +424,6 @@ def without_redirects(words: list[str]) -> list[str]:
     return kept
 
 
-def option_span(word: str, values: set[str]) -> int | None:
-    """How many words the wrapper option *word* spans: 2 when it takes the next word as value
-    (an option in *values*, or a short-option cluster whose last letter is one), 1 when its
-    value is attached (`--signal=KILL`, `-n1`); None when the wrapper is not known to take it."""
-    if word in values:
-        return 2
-    if word.partition("=")[0] in values:
-        return 1
-    if not word.startswith("--"):
-        if word[:2] in values:
-            return 1
-        if f"-{word[-1]}" in values:
-            return 2
-    return None
-
-
-def wrapped(words: list[str], k: int) -> int:
-    """Index of the command word the wrapper at index *k* of *words* runs, len(words) when there
-    is none: past the wrapper's options and the values WRAPPED names, the assignments of env and
-    sudo, and the words it takes before the command. At an option WRAPPED does not know for the
-    wrapper the command word cannot be told; the first runner-named word after it counts then."""
-    span = wrapper_at(words, k)
-    name = " ".join([os.path.basename(words[k]), *words[k + 1 : k + span]])
-    values, left = WRAPPED.get(name, (set[str](), 0))
-    i, options = k + span, True
-    while i < len(words):
-        word = words[i]
-        if options and word == "--":
-            options, left = False, max(left, 0)
-        elif options and word.startswith("-") and len(word) > 1:
-            taken = option_span(word, values)
-            if taken is None:
-                runners = (
-                    r
-                    for r in range(k + span, len(words))
-                    if RUNNER.fullmatch(os.path.basename(words[r]))
-                )
-                return next(runners, len(words))
-            i += taken - 1
-        elif not (name in ("env", "sudo") and ASSIGNMENT.fullmatch(word)):
-            if not left:
-                return i
-            left -= 1
-        i += 1
-    return i
-
-
 def script_index(words: list[str], r: int) -> int:
     """Index of the script argument of the shell or interpreter at index *r* of *words*: the
     first word past its options, past the host for ssh. Only a shell's -o and -O and ssh's
@@ -516,12 +435,16 @@ def script_index(words: list[str], r: int) -> int:
 
 def runs_stdin(words: list[str]) -> bool:
     """Whether the simple command *words* runs a shell or an interpreter that reads its script
-    from stdin: as the command word, or as the command a wrapper runs, with no script argument
+    from stdin: the command word, or the first one behind a wrapper, with no script argument
     (script_index), given `-`, a shell given -s, or ssh with nothing past the host."""
     words = without_redirects(words)
     k = command_word(words)
-    while k < len(words) and wrapper_at(words, k):
-        k = wrapped(words, k)
+    span = wrapper_at(words, k)
+    if span:
+        runners = (
+            r for r in range(k + span, len(words)) if RUNNER.fullmatch(os.path.basename(words[r]))
+        )
+        k = next(runners, len(words))
     name = os.path.basename(words[k]) if k < len(words) else ""
     if not RUNNER.fullmatch(name):
         return False

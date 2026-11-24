@@ -59,15 +59,15 @@ Each holds in every repo unless its profile departs from it under `defaults`.
     the first word past its options, past the host for ssh; only a shell's `-o` and `-O` and ssh's options are
     known to take a value. It counts as run too when it reaches through stdin a shell or interpreter that reads its
     script from there: fed with `<` or `0<` (`bash < m.sh`), or by `cat` or `<` in an earlier stage of the
-    pipeline (`cat m.sh | bash`). That runner is the command word or the command a wrapper runs — past the
-    wrapper's options known to the hook and their values (also after a short-option cluster that ends in one, as
-    in `sudo -iu root`), the assignments of `env` and `sudo`, the duration of `timeout`, the lock file of `flock`,
-    the container or pod of `docker exec` or `kubectl exec`, and the tools of `mise` up to `--`. At any other
-    option of the wrapper its command word cannot be told, and the first shell or interpreter word after the
-    wrapper counts instead. The runner takes its script from stdin when it has no script argument, when it is
-    given `-`, as a shell given `-s`, or as ssh with nothing past the host. One with a script of its own
-    (`python3 check.py < cases.txt`, `bash -c '…' < f`, `ssh host cmd < f`) only reads the file as data, and so
-    does a command that is no runner (`cat m.sh | timeout 5 grep bash`).
+    pipeline (`cat m.sh | bash`). That runner is the command word, or behind a wrapper the first shell or
+    interpreter word after it, whatever stands before that word (`sudo -iu root bash`). It takes its script from
+    stdin when it has no script argument, when it is given `-`, as a shell given `-s`, or as ssh with nothing past
+    the host. One with a script of its own (`python3 check.py < cases.txt`, `bash -c '…' < f`, `ssh host cmd < f`)
+    only reads the file as data, and so does a command that is no runner (`cat m.sh | wc -l`). Behind a wrapper,
+    a runner's name among the arguments counts as well, so a written file piped to a command that is no runner is
+    read as a script when a wrapper stands before it (`cat m.sh | timeout 5 grep bash`,
+    `cat notes.md | xargs grep -l python`): refused only when the same command writes that file with a merge in
+    it, an accepted false refusal.
     The command word is found past `VAR=` assignments and the reserved words `!`, `{`, `if`, `then`, `elif`,
     `else`, `do`, `while` and `until`. The wrappers are known by name, without their options: `env`, `sudo`,
     `nohup`, `exec`, `command`, `time`, `timeout`, `nice`, `ionice`, `stdbuf`, `setsid`, `xargs`, `flock`,

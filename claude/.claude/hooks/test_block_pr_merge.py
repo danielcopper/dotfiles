@@ -60,9 +60,9 @@ AZ_THREAD = (
 INVOKE_PR = "az devops invoke --area git --resource pullRequests --route-parameters pullRequestId=5"
 
 
-def written_then(body: str, then: str, name: str = "m.sh") -> str:
-    """A command that writes *body* to the file *name* with a heredoc, then runs *then*."""
-    return f"cat > {name} <<'EOF'\n{body}\nEOF\n{then}"
+def written_then(body: str, then: str) -> str:
+    """A command that writes *body* to m.sh with a heredoc, then runs *then*."""
+    return f"cat > m.sh <<'EOF'\n{body}\nEOF\n{then}"
 
 
 # Ways to feed the written m.sh to a shell or interpreter that runs its stdin.
@@ -85,7 +85,7 @@ STDIN_FORMS = [
     "cat m.sh | sh -s",
     "cat m.sh | tr -d x | bash",
     "< m.sh tr -d x | bash",
-    # the command a wrapper runs, past its options, their values and the words before it
+    # behind a wrapper the first shell or interpreter word counts, whatever stands before it
     "cat m.sh | sudo bash",
     "cat m.sh | sudo -u x bash",
     "cat m.sh | env FOO=1 bash",
@@ -98,8 +98,8 @@ STDIN_FORMS = [
     "cat m.sh | sudo -iu root bash",
     "cat m.sh | sudo -Hu root bash",
     "cat m.sh | sudo -iu root bash -s",
+    "cat m.sh | sudo -iuroot bash",
     "cat m.sh | sudo FOO=1 bash",
-    # an option the hook does not know for the wrapper: the first runner after it counts
     "cat m.sh | uv run --index-url u python -",
     "cat m.sh | kubectl exec -i --kubeconfig k p -- bash",
 ]
@@ -462,12 +462,6 @@ PASSES = [
     written_then("gh pr merge 5", "ssh host wc -l < m.sh"),
     written_then("gh pr merge 5", "cat m.sh | wc -l"),
     written_then("gh pr merge 5", "bash 3< m.sh"),
-    # behind a wrapper only the command it runs counts, not a runner's name as an argument
-    written_then("gh pr merge 5", "cat m.sh | timeout 5 grep bash"),
-    written_then("gh pr merge 5", "cat m.sh | nice -n 5 grep python"),
-    written_then("gh pr merge 5", "cat notes.md | xargs grep -l python", "notes.md"),
-    written_then("gh pr merge 5", "cat notes.md | xargs -n1 grep -l python", "notes.md"),
-    written_then("gh pr merge 5", "cat notes.md | xargs -rn 1 grep -l python", "notes.md"),
     # gh pr create and edit inside a chain
     "git push -u origin HEAD && gh pr create --title 'fix: x' --body-file body.md",
     "gh pr edit 5 --title 'fix: y' && gh pr view 5",
