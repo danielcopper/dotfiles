@@ -108,9 +108,8 @@ function pageError(errors) {
 // added, each item once (one that moved between two reads may come
 // twice), and that page's pageInfo, which says whether more follow. A page
 // without its items is explained by GitHub's error (pageError). One that
-// says more follow but adds no item or names the same cursor again means
-// GitHub's paging is stuck: the calls left would read nothing new, so it
-// fails.
+// says more follow but adds no item or names the same cursor again is taken
+// for GitHub's paging stuck, and fails.
 export function addBoardPage(json, page, errors = []) {
   const project = json.data.repositoryOwner.projectV2;
   const items = project.items;

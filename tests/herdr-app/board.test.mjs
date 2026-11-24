@@ -734,6 +734,7 @@ test("a board's next page is one query of its items after the cursor: the same f
   assert.deepEqual(next, { after: "c0", read: 0 }, "an empty first page that says more follow");
   const after = board.githubBoardPageArgs(githubView(), HIDDEN, next.after, next.read);
   assert.match(after[3], /items\(first: 100, after: \$after, query/, "its next page reads from the cursor it declares");
+  assert.match(after[3], /^query=query\([^)]*, \$after: String!\)/, "and declares it");
   assert.ok(after.includes("after=c0"));
 });
 
@@ -9186,7 +9187,7 @@ test("UI: where a page or end key put the details block, a change of its heights
   assert.deepEqual([offsetOf(b), glidesOf(b)], [34, STILL], "taller content, the offset kept: its thumb moves at once");
 });
 
-test("UI: Esc from a level back up brings the scroll of the level above back at once, also where a page or end key put it", async () => {
+test("UI: the way back up from a level (Esc, or a re-read that takes its line away) brings the scroll of the level above back at once, also where a page or end key put it", async () => {
   const { b, cx, host } = await openRelated();
   layOut(b, cx, 100);
   await tab(b, cx);
