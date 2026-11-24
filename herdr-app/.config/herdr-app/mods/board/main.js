@@ -5369,8 +5369,8 @@ export const columnsModal = {
 
 // ==== src/scroll.js ====
 
-// How the details block scrolls: the one home of its offset. herdr gives a
-// script no scroll offset of a scroll area (a ScrollHandle only reveals a
+// How the details block scrolls: the one home of its offset. A script
+// cannot set a scroll area's offset (a ScrollHandle reads it and reveals a
 // child, with the smallest scroll needed), so the board scrolls the block
 // itself: it keeps the offset in the related items' state (`ui`:
 // ui/related.js, relatedState) with the heights of the window and the
