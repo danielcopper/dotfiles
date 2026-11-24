@@ -94,6 +94,9 @@ export const CLICK_SLOP = 8;
 
 export const inPlace = (from, to) => !from || !to || Math.hypot(to.x - from.x, to.y - from.y) <= CLICK_SLOP;
 
+// herdr before 0.1.18 has no on_window_mouse_up.
+export const observesReleases = (el) => typeof el.on_window_mouse_up === "function";
+
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
 export const shownOf = (shown, total) => (shown < total ? `${shown}/${total}` : String(total));

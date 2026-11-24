@@ -4484,6 +4484,9 @@ export const CLICK_SLOP = 8;
 
 export const inPlace = (from, to) => !from || !to || Math.hypot(to.x - from.x, to.y - from.y) <= CLICK_SLOP;
 
+// herdr before 0.1.18 has no on_window_mouse_up.
+export const observesReleases = (el) => typeof el.on_window_mouse_up === "function";
+
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
 export const shownOf = (shown, total) => (shown < total ? `${shown}/${total}` : String(total));
@@ -8519,6 +8522,8 @@ export const PREFETCH_GAP_MS = 1500;
 export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
 // From the application root (gpui-kit's svg).
 export const REFRESH_ICON = "mods/board/refresh.svg";
+// on_mouse_down_out fires for each of them.
+const OUTSIDE_BUTTONS = ["left", "right", "middle", "back", "forward"];
 // How often a copy looks whether it shows (watchShown). herdr draws, and so
 // renders, only a copy that shows, again on a change of its live data (spaces
 // and tabs, the focus, shared state); a change of the layout alone is not
@@ -8606,6 +8611,7 @@ export default class Board extends View {
     this.modal = null; // a dialog: { kind, … }, its kind a key of MODALS
     this.notice = null; // { text, level }
     this.drag = null; // { key, from, at }: `at` where it was pressed
+    this.pressedOut = null; // { button, at }: a press outside the layer's board (pressOutside)
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
@@ -8648,7 +8654,11 @@ export default class Board extends View {
       for (;;) {
         const command = await nextCommand();
         this.guarded("Befehl", () => {
-          if (command === "focus" && boardShown(this.isLayer())) this.takeKeyboard();
+          if (command !== "focus") return;
+          // board.focus may show again a board that missed the release of an
+          // older press.
+          this.pressedOut = null;
+          if (boardShown(this.isLayer())) this.takeKeyboard();
         });
         cx.notify();
       }
@@ -9569,13 +9579,25 @@ export default class Board extends View {
     }
   }
 
-  // A press outside the layer's shown board shows the tab's content again
-  // (README, "herdr app"). On the shown tab it is the only sign: herdr tells
-  // a mod of no click on a tab. The board button's press arrives here too, and
-  // the button switches on it by itself; so the switch waits until after
-  // the press, when it also shows whether the press took the keyboard.
-  pressOutside(cx) {
-    if (!this.shownAsLayer()) return;
+  // A click outside the layer's shown board leaves it (README, "herdr
+  // app"): herdr tells a mod of no click on a tab, and on_window_mouse_up
+  // sees a release wherever herdr handles it.
+  pressOutside(e) {
+    if (this.shownAsLayer()) this.pressedOut = { button: e.button, at: e.position };
+  }
+
+  releaseOutside(e, cx) {
+    const pressed = this.pressedOut;
+    this.pressedOut = null;
+    if (pressed?.button === e.button && inPlace(pressed.at, e.position)) this.leaveAfter(cx);
+  }
+
+  leaveOnPress(cx) {
+    if (this.shownAsLayer()) this.leaveAfter(cx);
+  }
+
+  // After the event, which may have taken the keyboard.
+  leaveAfter(cx) {
     cx.timer.after(0, () => this.guarded("Klick", () => layers.leaveLayer({ keyboard: this.boardHasKeyboard() })));
   }
 
@@ -9591,6 +9613,7 @@ export default class Board extends View {
     this.wasShown = shown;
     if (!shown) {
       this.seen = null;
+      this.pressedOut = null;
       this.followBandsWhile(false, cx);
       return;
     }
@@ -9794,6 +9817,7 @@ export default class Board extends View {
     const st = view ? this.state(view.id) : null;
     const item = st?.detail && view ? this.selected(view) : null;
     let out = v_flex().id("board").track_focus(this.handle);
+    const releases = observesReleases(out);
     if (this.takesTab()) {
       out = out.key_context(BOARD_KEY_CONTEXT);
       for (const k of BOARD_KEYS) out = out.on_action(k.action, (_e, cx) => this.tabKey(k.back, cx));
@@ -9805,7 +9829,7 @@ export default class Board extends View {
       .text_color(t.foreground)
       .text_size(13)
       .on_key_down((e, cx) => this.key(e, cx))
-      .on_mouse_down_out((_e, cx) => this.pressOutside(cx))
+      .on_mouse_down_out(releases ? (e) => this.pressOutside(e) : (_e, cx) => this.leaveOnPress(cx))
       .on_mouse_down("left", () => {
         if (!this.filtering && !this.modal) this.handle.focus();
       })
@@ -9814,6 +9838,7 @@ export default class Board extends View {
         if (!hovered) this.endDrag(cx);
       })
       .child(this.toolbar(t, view, st));
+    if (releases) for (const button of OUTSIDE_BUTTONS) out = out.on_window_mouse_up(button, (e, cx) => this.releaseOutside(e, cx));
     if (this.notice || this.configErrors.length) out = out.child(this.banner(t));
     out = out
       .child(

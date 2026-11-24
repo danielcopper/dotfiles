@@ -131,9 +131,9 @@ function openBoard() {
 
 // A press on the button, whichever mouse button: it switches at once, on
 // the press. It starts no window drag, and a failure says so in a toast.
-// The shown board takes any press outside it, this one too, as one that
-// shows the tab's content after the press (mods/board/, pressOutside); a
-// switch on the release would undo that.
+// On a herdr before 0.1.18 the shown board leaves on any press outside it,
+// this one too (mods/board/, leaveOnPress); a switch on the release would
+// undo that.
 function press(_e, cx) {
   cx.stop_propagation();
   try {

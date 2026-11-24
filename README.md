@@ -351,9 +351,11 @@ by that run. Which files of the package git tracks is set in the root
   close (details, a notice, the filter), on `Enter` to an item's session, and
   when the focus moves to another space, tab or pane, for example to the agent
   the board just started; a new program in the same pane keeps the board. Any
-  press outside the board but the button's (the tab bar, the sidebar, the right
-  panel; any mouse button) brings the tab's content back; the pane gets the
-  keyboard only if the board still has it after the press, otherwise what was
+  click outside the board but the button's (the tab bar, the sidebar, the right
+  panel; any mouse button), pressed and released within 8 px, brings the tab's
+  content back, while a press that turns into a drag (a divider, a tab) keeps
+  the board; a herdr before 0.1.18 brings the content back on the press. The
+  pane gets the keyboard only if the board still has it then, otherwise what was
   pressed keeps it. herdr's tab bar keeps highlighting the last shown tab while
   the board shows. The board layer is found by its shape, not by ids. Without
   one, the button and `b` show the board's "Board" tab or open one, except in

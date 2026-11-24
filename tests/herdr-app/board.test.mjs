@@ -1983,11 +1983,13 @@ const advance = (ms) => (clockOffset += ms);
 // An element of the fake gpui: it records the styling calls by name (each
 // one's last arguments in `with`, every call in `calls`) and keeps its
 // children; when(cond, fn) applies fn when cond holds, map(fn) applies fn.
-function element(kind) {
+// The methods named in `lacks` it does not have.
+function element(kind, lacks = []) {
   const el = { kind, styles: [], with: {}, calls: [], kids: [] };
   const proxy = new Proxy(el, {
     get(target, p) {
       if (p in target) return target[p];
+      if (lacks.includes(p)) return undefined;
       return (...args) => {
         if (p === "child") target.kids.push(args[0]);
         else if (p === "children") target.kids.push(...args[0]);
@@ -2023,10 +2025,13 @@ function textView(format, id, text) {
 // layout() is `tree` (the shown layout; none by default), focused() is
 // `focus`, props() is `copyProps` (the copy's own props, as herdr gives
 // them: `props`), and shared() reads `sharedValues`; a test may change each.
-// focusCalls counts the calls of a focus handle's focus().
+// focusCalls counts the calls of a focus handle's focus(). command(name)
+// hands the copy a command (board.<name>).
 const found = (tool) => `/opt/fake/bin/${tool}`;
-function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false } = {}) {
+function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false, oldMouse = false } = {}) {
   const calls = [];
+  const lacked = oldMouse ? ["on_window_mouse_up"] : [];
+  const waiting = [];
   const host = {
     calls,
     asked: [],
@@ -2066,7 +2071,13 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
     appHome: () => "/fake-home",
     home: () => "/home/sample",
     checking: () => false,
-    nextCommand: () => new Promise(() => {}),
+    nextCommand: () => new Promise((resolve) => waiting.push(resolve)),
+    command: async (name) => {
+      await settle();
+      assert.ok(waiting.length, `nobody waits for ${name}`);
+      waiting.shift()(name);
+      await settle();
+    },
     notify: (n) => host.notes.push(n),
     run: (name, args) => host.runs.push([name, args]),
     panes: () => (shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []),
@@ -2124,9 +2135,10 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
         content_size: () => ({ width: handle.width, height: Math.max(handle.content, handle.height) }),
       });
     },
-    div: () => element("div"),
-    h_flex: () => element("h_flex"),
-    v_flex: () => element("v_flex"),
+    // herdr before 0.1.18 (`oldMouse`) has no on_window_mouse_up.
+    div: () => element("div", lacked),
+    h_flex: () => element("h_flex", lacked),
+    v_flex: () => element("v_flex", lacked),
     "Input.new": () => element("input"),
     // A TextView: its format, id and text, the text as its one child.
     "TextView.markdown": (id, text) => textView("markdown", id, text),
@@ -2681,8 +2693,8 @@ test("UI: Esc closes the details, then the notice, then clears the filter, and t
   assert.deepEqual(inTab.host.runs, [], "a Board tab's board stays");
 });
 
-test("UI: a press outside the shown layer's board shows the tab's content after the press, any button; the pane gets the keyboard if the board still has it then", async () => {
-  const { b, cx, host } = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board") });
+test("UI: on a herdr without on_window_mouse_up, a press outside the shown layer's board shows the tab's content after the press, any button; the pane gets the keyboard if the board still has it then", async () => {
+  const { b, cx, host } = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board"), oldMouse: true });
   const root = byId(b.render(cx), "board");
   await cx.fire();
   const [outside] = root.with.on_mouse_down_out;
@@ -2724,10 +2736,94 @@ test("UI: a press outside the shown layer's board shows the tab's content after 
   root.with.on_mouse_down[1]({ button: "left" }, cx);
   await cx.fire();
   assert.deepEqual(host.runs.splice(0), [], "a press inside");
-  const inTab = await openBoard({ tree: layerLayout("main") });
+  const inTab = await openBoard({ tree: layerLayout("main"), oldMouse: true });
   byId(inTab.b.render(inTab.cx), "board").with.on_mouse_down_out[0]({ button: "left", position: { x: 150, y: 300 } }, inTab.cx);
   await inTab.cx.fire();
   assert.deepEqual(inTab.host.runs, [], "a Board tab's board");
+});
+
+// The board's handlers of a press outside it and of a release anywhere in
+// the window, by button, as the board draws it now.
+function outsideHandlers(b, cx) {
+  const root = byId(b.render(cx), "board");
+  const releases = Object.fromEntries(root.calls.filter(([name]) => name === "on_window_mouse_up").map(([, button, fn]) => [button, fn]));
+  return { press: root.with.on_mouse_down_out[0], releases };
+}
+
+test("UI: a click outside the shown layer's board, pressed and released within 8 px, shows the tab's content after the release, any button; a press that turns into a drag keeps the board", async () => {
+  const { b, cx, host } = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board") });
+  const { press, releases } = outsideHandlers(b, cx);
+  await cx.fire();
+  assert.deepEqual(Object.keys(releases), ["left", "right", "middle", "back", "forward"]);
+  const at = (x, y = 300) => ({ x, y });
+  const click = (button, from, to) => {
+    press({ button, click_count: 1, ...(from && { position: from }) }, cx);
+    releases[button]({ button, click_count: 1, ...(to && { position: to }) }, cx);
+  };
+  for (const button of Object.keys(releases)) {
+    press({ button, click_count: 1, position: at(150) }, cx);
+    await cx.fire();
+    assert.deepEqual(host.runs, [], `not on a ${button} press`);
+    releases[button]({ button, click_count: 1, position: at(158) }, cx);
+    assert.deepEqual(host.runs, [], "nor during its release");
+    await cx.fire();
+    assert.deepEqual(host.runs.splice(0), SHOW_TAB, `after a ${button} release 8 px away, the board having the keyboard`);
+  }
+  click("left", at(150), at(150, 292));
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "8 px up");
+  click("left", at(150), at(260));
+  click("left", at(150), at(156, 306));
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "a drag keeps the board: 110 px across, then 6 px each way");
+  click("left", null, at(400));
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "a press without a position counts as not moved");
+  click("left", at(150), null);
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), SHOW_TAB, "and so does a release without one");
+  releases.left({ button: "left", click_count: 1, position: at(150) }, cx);
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "a release whose press was taken by a release before");
+  press({ button: "left", click_count: 1, position: at(150) }, cx);
+  releases.right({ button: "right", click_count: 1, position: at(150) }, cx);
+  releases.left({ button: "left", click_count: 1, position: at(150) }, cx);
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "a release of another button takes the press too");
+  click("left", at(150), at(150));
+  b.handle.held = false;
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [SHOW_TAB[0]], "the click took the keyboard (Files, Changes, the leader's popup): it keeps it");
+  b.handle.focus();
+  press({ button: "left", click_count: 1, position: at(150) }, cx);
+  // herdr runs what the press queued before the board button's layout.select.
+  await cx.fire();
+  host.tree = layerLayout("main");
+  host.tree = layerLayout("board");
+  await host.command("focus");
+  outsideHandlers(b, cx).releases.left({ button: "left", click_count: 2, position: at(150) }, cx);
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "the board button pressed twice before a look, the hidden board not told the first release: the second keeps the board shown again");
+  press({ button: "left", click_count: 1, position: at(150) }, cx);
+  host.tree = layerLayout("main");
+  await cx.look();
+  host.tree = layerLayout("board");
+  await cx.look();
+  releases.left({ button: "left", click_count: 1, position: at(150) }, cx);
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "a press from before the board hid");
+  press({ button: "left", click_count: 1, position: at(150) }, cx);
+  host.tree = layerLayout("main");
+  releases.left({ button: "left", click_count: 1, position: at(150) }, cx);
+  await cx.fire();
+  assert.deepEqual(host.runs.splice(0), [], "a release before herdr draws the board hidden: the board button's press already showed the tab");
+  const inTab = await openBoard({ tree: layerLayout("main") });
+  const tab = outsideHandlers(inTab.b, inTab.cx);
+  tab.press({ button: "left", click_count: 1, position: at(150) }, inTab.cx);
+  inTab.host.tree = layerLayout("board");
+  tab.releases.left({ button: "left", click_count: 1, position: at(150) }, inTab.cx);
+  await inTab.cx.fire();
+  assert.deepEqual(inTab.host.runs, [], "a Board tab's board, its release before herdr draws it hidden: the board button's press showed the layer's");
 });
 
 // The layer's shown board on the fake host; render() draws it, after()
