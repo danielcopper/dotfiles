@@ -3,10 +3,11 @@
 // view as makeAzure uses it (sprintView).
 
 import { home, readTextFile, writeTextFile } from "herdr";
-import { BoardError, failure, firstLine, readMemo } from "../../shared.js";
+import { BoardError, errorText, failure, firstLine, readMemo } from "../../shared.js";
 import { NO_STORY } from "../../kinds/sprint.js";
 import {
-  AREA_PATH, AZ_QUERY_LIMIT, WORK_ITEM_FIELDS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, dayEnd, iterationUntil, jsonOrNull, parseWorkItems, wiqlText,
+  AREA_PATH, AZ_QUERY_LIMIT, TEAM_KEEP_MS, WORK_ITEM_FIELDS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, dayEnd, idsWiql, iterationUntil, jsonOrNull,
+  parseWorkItems, wiqlText,
 } from "./common.js";
 
 // The Sprint view's calls for a team context `c` ({ org, project, team }):
@@ -207,6 +208,30 @@ export function checkTaskboardMove(stdout, card, column) {
   }
 }
 
+export const PARENTS_UNREAD = "Titel der übergeordneten Work Items nicht gelesen";
+const parentsKey = (s, c) => `parents\n${s.teamKey(c)}`;
+
+// One query by id for the parents outside the sprint: az boards query reads no linked item (sources/azure/related.js).
+export async function parentTitles(s, c, items) {
+  const key = parentsKey(s, c);
+  const held = s.keptValue(key);
+  const titles = new Map(held?.value ?? []);
+  const own = new Map(items.map((i) => [i.number, i.title]));
+  const missing = [...new Set(items.map((i) => i.parent).filter((id) => Number.isInteger(id) && !own.has(id) && !titles.has(id)))];
+  let warning = null;
+  if (missing.length) {
+    try {
+      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing))), c).map((i) => [i.number, i.title]));
+      for (const id of missing) titles.set(id, found.get(id) ?? null);
+      s.keep(key, titles, held?.until ?? Date.now() + TEAM_KEEP_MS);
+    } catch (e) {
+      warning = `${PARENTS_UNREAD}: ${errorText(e)}`;
+    }
+  }
+  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
+  return { items: items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i)), warning };
+}
+
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
 // makeAzure, which says what is kept and for how long): what it keeps per
 // team and project (settingsOf; the team's areas are the source's,
@@ -216,7 +241,7 @@ export function checkTaskboardMove(stdout, card, column) {
 // never names a sprint current that has ended), and what a refused write
 // or a task in a column the columns read do not know drops (forgetSettings:
 // the team's sprint, areas and columns, not the project's types); `r`
-// drops the team's iterations too (forget).
+// drops the team's iterations and its parent titles too (forget).
 //
 // load(view, hiddenFor, chosen) shows the sprint `chosen` ({ id, name };
 // null: the current one), looked up by its id among the team's
@@ -269,19 +294,19 @@ export function sprintView(s) {
       : [null, null];
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
-    const data = sprintBoard({
-      ...kept, iteration, currentId, gone,
-      items: items === null ? [] : parseWorkItems(items, c), places: places === null ? new Map() : parseTaskboard(places), viewer: await me,
-    });
+    const placed = places === null ? new Map() : parseTaskboard(places);
+    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c));
+    const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled.items, places: placed, viewer: await me });
     s.noViewerOf(data);
     if (data.meta.unknownColumns) forgetSettings(c);
     const instead = currentId ? "der aktuelle Sprint wird gezeigt" : "das Team hat keinen laufenden Sprint";
-    return { data, warnings: kept.types.warnings, notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
+    return { data, warnings: [...kept.types.warnings, ...(titled.warning ? [titled.warning] : [])], notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
   }
   return {
     forget: (c) => {
       forgetSettings(c);
       iterations.drop(s.teamKey(c));
+      s.drop(parentsKey(s, c));
     },
     async iterations(view) {
       const c = view.context;

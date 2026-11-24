@@ -37,6 +37,14 @@
 //   palette, and made-up titles, not recorded: github-board-colors.json
 //   (labels with colors, one without, issue types with colors, and Epics
 //   by their "[Epic]" title);
+// - written from GitHub's GraphQL reference
+//   (ProjectV2ItemFieldSingleSelectValue's name and color, Milestone's
+//   title, Issue's parent and subIssuesSummary), with made-up names, not
+//   recorded:
+//   github-board-cards.json (items with and without a priority in three of
+//   GitHub's colors, a milestone, a parent in their repo and in another,
+//   sub-issues up to 30 and beyond, an item with none of them, one with an
+//   assignee alone and a pull request with a milestone);
 // - written from GitHub's GraphQL reference (Issue's subIssues and
 //   closedByPullRequestsReferences), with made-up names, not recorded:
 //   github-related.json (an issue's sub-issues and linked pull requests)
@@ -76,8 +84,9 @@
 //   values of Azure's Agile process),
 //   azure-sprint-taskboard.json (taskboardWorkItems, with
 //   one work item the query does not find), azure-sprint-items.json (az
-//   boards query) and azure-sprint-account.json (az account show --query
-//   user);
+//   boards query), azure-sprint-account.json (az account show --query
+//   user) and azure-sprint-parents.json (az boards query for the titles of
+//   the work items' parents outside the sprint, by their ids);
 // - written the same way for the Backlog's calls (the REST reference at
 //   api-version 7.1 and the extension's vendored SDK models), with made-up
 //   names, not recorded: azure-backlog-levels.json (backlogs),
@@ -632,7 +641,7 @@ test("columns come from the project's field options, in order, with theme colors
   const b = githubBoard();
   assert.deepEqual(names(b), ["Backlog", "Ready", "In progress", "In review", "Done"]);
   assert.deepEqual(b.columns.map((c) => c.color), ["ansi2", "ansi4", "ansi3", "ansi5", "ansi11"]);
-  assert.deepEqual(b.meta, { projectId: "PVT_sample", fieldId: "PVTSSF_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7" });
+  assert.deepEqual(b.meta, { projectId: "PVT_sample", fieldId: "PVTSSF_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7", lacksPriorityField: true });
 });
 
 test("a board and a list carry the login gh read them as, null when GitHub did not say", () => {
@@ -4628,6 +4637,8 @@ const AZ = {
   types: (a) => a.includes("workitemtypes"),
   places: (a) => a.includes("taskboardWorkItems") && !a.includes("PATCH"),
   query: (a) => a[0] === "boards" && a[1] === "query",
+  // The query for the titles of the items' parents outside the sprint.
+  parents: (a) => a[0] === "boards" && a[1] === "query" && a.some((x) => String(x).includes("[System.Id] IN (")),
   me: (a) => a[0] === "account",
   move: (a) => a.includes("PATCH"),
   state: (a) => a[1] === "work-item",
@@ -4660,10 +4671,12 @@ async function refreshSprint(b, cx) {
   await settle();
 }
 // One refresh's answers; `me`: the account's answer (true: the fixture's,
-// false: none is asked).
-async function answerRefresh(host, { me = true, items = fixture("azure-sprint-items.json"), places = fixture("azure-sprint-taskboard.json") } = {}) {
+// false: none is asked); `parents`: the answer for the parents' titles,
+// where the Sprint asks for them.
+async function answerRefresh(host, { me = true, items = fixture("azure-sprint-items.json"), places = fixture("azure-sprint-taskboard.json"), parents = ok(fixture("azure-sprint-parents.json")) } = {}) {
   await host.answer("az", ok(places), AZ.places);
   await host.answer("az", ok(items), AZ.query);
+  if (openAz(host, "parents").length) await host.answer("az", parents, AZ.parents);
   if (me) await host.answer("az", me === true ? ok(fixture("azure-sprint-account.json")) : me, AZ.me);
 }
 // A Board on the Azure team's Sprint, read from the fixtures (az found).
@@ -4711,7 +4724,8 @@ test("the Sprint's az calls name the organisation without detection and the team
 
 test("the Sprint's one query asks for the fields of the work items in the sprint's path and the team's areas, below one where the team includes them", () => {
   const wiql = board.sprintWiql(board.parseIteration(iterationAnswer()), board.parseAreas(fixture("azure-sprint-areas.json")));
-  assert.equal(wiql, "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.AssignedTo], [System.Parent], [System.AreaPath], [System.IterationPath] " +
+  assert.equal(wiql, "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.AssignedTo], [System.Parent], [System.AreaPath], [System.IterationPath], " +
+    "[Microsoft.VSTS.Common.Priority] " +
     "FROM WorkItems WHERE [System.IterationPath] = 'Example Project\\Sprint 12' AND ([System.AreaPath] UNDER 'Example Project\\Core' OR [System.AreaPath] = 'Example Project\\Shared') " +
     "ORDER BY [System.Id]");
   const quoted = board.sprintWiql({ path: "P\\Sprint 'x'" }, { field: "System.AreaPath", values: [{ value: "P\\O'Neil", includeChildren: true }] });
@@ -4745,8 +4759,9 @@ test("the Sprint's answers: the current sprint, the team's areas, the columns in
   assert.equal(items.length, 8);
   assert.deepEqual(items[0], {
     key: "AB#301", source: "azure", kind: "workitem", number: 301, title: "Import the sample catalogue", type: "User Story", state: "In Progress",
-    assignees: ["Alex Sample"], assigneeLogins: ["alex.sample@example.com"], parent: null, area: "Example Project\\Core", iteration: "Example Project\\Sprint 12",
-    url: "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/301", labels: [], sub: null, branch: null,
+    assignees: ["Alex Sample"], assigneeLogins: ["alex.sample@example.com"], parent: null, parentTitle: null, area: "Example Project\\Core",
+    iteration: "Example Project\\Sprint 12", priority: null, url: "https://dev.azure.com/example-org/Example%20Project/_workitems/edit/301", labels: [], sub: null,
+    branch: null,
   });
   assert.equal(items[2].parent, 301);
   assert.deepEqual([items[1].assignees, items[1].assigneeLogins], [[], []], "no one assigned");
@@ -5992,7 +6007,7 @@ test("the Backlog's az calls: levels and configuration by az devops invoke at 7.
   assert.deepEqual(board.azParentArgs(c, 451, 301), ["boards", "work-item", "relation", "add", ...org, "--id", "451", "--relation-type", "parent", "--target-id", "301", "-o", "json"]);
   assert.equal(board.idsWiql([302, 401], ["Microsoft.VSTS.Common.StackRank"]),
     "SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.AssignedTo], [System.Parent], [System.AreaPath], [System.IterationPath], " +
-    "[Microsoft.VSTS.Common.StackRank] FROM WorkItems WHERE [System.Id] IN (302, 401) ORDER BY [System.Id]");
+    "[Microsoft.VSTS.Common.Priority], [Microsoft.VSTS.Common.StackRank] FROM WorkItems WHERE [System.Id] IN (302, 401) ORDER BY [System.Id]");
   assert.doesNotMatch(board.idsWiql([1]), /StackRank|\[null\]/, "no order field, none asked for");
 });
 
@@ -10539,6 +10554,405 @@ test("UI: an action of the top bar leaves the shown view's selection as it is, b
     }
     assert.deepEqual([b.context().id, st().sel.key, st().detail], ["github:prs", "PVTI_rec4", true], how);
   }
+});
+
+// ---- Cards: one line per topic (priority, milestone, parent, progress) ----
+
+// GitHub's named colors, as a Projects option's color takes a tone
+// (GITHUB_COLORS in sources/github.js).
+const GITHUB_TONES = { GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5" };
+
+const cardsBoard = () => board.parseGithubBoard(json("github-board-cards.json"), githubView(), HIDDEN);
+const cardOf = (data, n) => data.columns.flatMap((c) => c.cards).find((c) => c.number === n);
+// The lines of the card or story `id` under `root`, in order: a card's
+// body's children (its first child is its edge), a story's own, without
+// its type's line.
+function cardLines(root, id) {
+  const el = byId(root, id);
+  const body = id.startsWith("story-") ? el : el.kids[1];
+  return body.kids.filter((k) => typeof k !== "string" && k.with.id?.[0] !== "type-line");
+}
+// A card's line by its id ("card-meta", "card-chips", "card-progress"), or
+// null where it has none.
+const cardLine = (root, id, name) => byId(byId(root, id), name);
+// The texts of a line's children, each child's in one string.
+const lineParts = (line) => line.kids.map((k) => texts(k).join(""));
+// A progress bar's segments as "on" or "rest" (by their color), or, for a
+// continuous bar, its done part's width.
+function barOf(t, line) {
+  const bar = byId(line, "progress-bar");
+  const on = board.toneColor(t, board.PROGRESS_TONE);
+  if (bar.kind === "div") return { width: bar.kids[0].with.w[0], rest: bar.with.bg[0], on: bar.kids[0].with.bg[0] };
+  return bar.kids.map((k) => (k.with.bg[0] === on ? "on" : k.with.bg[0] === t.border ? "rest" : k.with.bg[0]));
+}
+
+test("a board's query reads each item's priority by the field views.json names (project.priorityField, „Priority“ by default), the milestone of an issue and a pull request, and an issue's parent with its title and repo; so do its later pages", () => {
+  const args = board.githubBoardArgs(githubView(), HIDDEN);
+  const doc = args.find((a) => a.startsWith("query="));
+  assert.ok(args.includes("priority=Priority"), "the default field name");
+  assert.match(doc, /\$priority: String!/);
+  assert.match(doc, /priority: fieldValueByName\(name: \$priority\) \{ \.\.\. on ProjectV2ItemFieldSingleSelectValue \{ name color \} \}/);
+  assert.equal(doc.match(/milestone \{ title \}/g).length, 2, "of issues and pull requests");
+  assert.match(doc, /parent \{ number title repository \{ nameWithOwner \} \}/);
+  const page = board.githubBoardPageArgs(githubView(), HIDDEN, "cursor", 100);
+  assert.ok(page.includes("priority=Priority") && page.find((a) => a.startsWith("query=")).includes("priority: fieldValueByName(name: $priority)"), "a later page");
+  const viewWith = (project) => {
+    const read = board.validateConfig({ sources: { github: { views: [{ id: "a", name: "A", layout: "board", project: { owner: "o", number: 1, ...project } }] } } });
+    return { ...read, errors: read.errors.filter((e) => e.startsWith("GitHub-Ansicht")) };
+  };
+  const own = viewWith({ priorityField: "Prio" });
+  assert.deepEqual([own.errors, own.config.github.views[0].project.priorityField], [[], "Prio"]);
+  assert.ok(board.githubBoardArgs(own.config.github.views[0], new Set()).includes("priority=Prio"), "views.json's field name");
+  assert.equal(viewWith({}).config.github.views[0].project.priorityField, "Priority");
+  for (const bad of [5, "", "  ", null]) {
+    assert.deepEqual(viewWith({ priorityField: bad }).errors, ["GitHub-Ansicht 1 („A“): „project.priorityField“ muss Text sein"], String(bad));
+  }
+  assert.deepEqual(viewWith({ field: 5, priorityField: 5 }).errors, ["„project.field“ muss Text sein", "„project.priorityField“ muss Text sein"].map((e) => `GitHub-Ansicht 1 („A“): ${e}`));
+});
+
+test("a board's first page asks whether the project has the priority field as a single-select field; a field views.json names that it lacks is a warning of the board, the default one none, nor one GitHub's error at it already explains", () => {
+  const first = board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query="));
+  assert.match(first, /priorityField: field\(name: \$priority\) \{ \.\.\. on ProjectV2SingleSelectField \{ id \} \}/);
+  assert.doesNotMatch(board.githubBoardPageArgs(githubView(), HIDDEN, "cursor", 100).find((a) => a.startsWith("query=")), /priorityField:/, "a later page does not");
+  const given = (priorityField) => board.validateConfig({ sources: { github: { views: [{ id: "a", name: "A", layout: "board", project: { owner: "o", number: 1, ...(priorityField ? { priorityField } : {}) } }] } } }).config.github.views[0];
+  assert.deepEqual([given(null).project.priorityGiven, given("Prio").project.priorityGiven, given("Priority").project.priorityGiven], [false, true, true]);
+  const answer = (def) => {
+    const a = json("github-board-cards.json");
+    if (def !== undefined) a.data.repositoryOwner.projectV2.priorityField = def;
+    return a;
+  };
+  const warnings = (view, a, errors) => board.SHAPES.board.warnings(view, board.parseGithubBoard(a, view, new Set(), errors));
+  const warning = "Projekt „Sample“ hat kein Auswahlfeld „Prio“ (project.priorityField): die Karten zeigen keine Priorität";
+  for (const def of [undefined, null, {}]) {
+    assert.deepEqual(warnings(given("Prio"), answer(def)), [warning], `named, ${JSON.stringify(def)}`);
+    assert.deepEqual(warnings(given(null), answer(def)), [], `the default, ${JSON.stringify(def)}`);
+  }
+  assert.deepEqual(warnings(given("Prio"), answer({ id: "PVTSSF_prio" })), [], "the project has it");
+  const at = (path) => [{ message: "Something went wrong", path }];
+  assert.deepEqual(warnings(given("Prio"), answer(null), at(["repositoryOwner", "projectV2", "priorityField"])), [], "GitHub's error at the field");
+  assert.deepEqual(warnings(given("Prio"), answer(null), at(["repositoryOwner", "projectV2", "items", "nodes", 0])), [warning], "an error elsewhere");
+});
+
+test("UI: a board whose views.json names a priority field the project lacks says so above its columns; with the default name it says nothing, and where GitHub's error at the field explains it, only that", async () => {
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[0].project.priorityField = "Prio";
+  const named = await openBoard({ config: JSON.stringify(config), answer: fixture("github-board-cards.json") });
+  const warning = "Projekt „Sample“ hat kein Auswahlfeld „Prio“ (project.priorityField): die Karten zeigen keine Priorität";
+  assert.deepEqual(named.st().warnings, [warning]);
+  assert.ok(texts(named.b.render()).includes(warning));
+  assert.ok(named.host.calls[0].args.includes("priority=Prio"));
+  const plain = await openBoard({ answer: fixture("github-board-cards.json") });
+  assert.deepEqual(plain.st().warnings, []);
+  const failed = json("github-board-cards.json");
+  failed.data.repositoryOwner.projectV2.priorityField = null;
+  failed.errors = [{ message: "Something went wrong", path: ["repositoryOwner", "projectV2", "priorityField"] }];
+  const unread = await openBoard({ config: JSON.stringify(config), answer: JSON.stringify(failed) });
+  assert.deepEqual(unread.st().warnings, ["Something went wrong"], "GitHub's own error, no second word on it");
+});
+
+test("a GitHub card carries its priority as its option's name and its color's tone (GitHub's named colors as a status's), its milestone, and its parent's title and repo; none of them where GitHub sends none", () => {
+  const data = cardsBoard();
+  const epic = cardOf(data, 2217);
+  assert.deepEqual([epic.priority, epic.milestone, epic.parent, epic.parentTitle, epic.parentRepo],
+    [{ name: "P1", tone: "ansi11" }, "v1", 1735, "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver", "example/tender"]);
+  assert.deepEqual([cardOf(data, 2301).priority, cardOf(data, 2301).parentRepo], [{ name: "P0", tone: "ansi1" }, "example/atlas"]);
+  const plain = cardOf(data, 1467);
+  assert.deepEqual([plain.priority, plain.milestone, plain.parent, plain.parentTitle, plain.parentRepo], [null, null, null, null, null]);
+  assert.deepEqual([cardOf(data, 2310).kind, cardOf(data, 2310).milestone], ["pr", "v2"], "a pull request's milestone");
+  const tones = { ...GITHUB_TONES, TEAL: "muted" };
+  const withPriority = (value) => {
+    const answer = json("github-board-cards.json");
+    answer.data.repositoryOwner.projectV2.items.nodes[0].priority = value;
+    return cardOf(board.parseGithubBoard(answer, githubView(), HIDDEN), 2217).priority;
+  };
+  for (const [color, tone] of Object.entries(tones)) assert.deepEqual(withPriority({ name: "Hoch", color }), { name: "Hoch", tone }, color);
+  for (const value of [null, {}, { name: "", color: "RED" }, { color: "RED" }]) assert.equal(withPriority(value), null, JSON.stringify(value));
+});
+
+test("an Azure work item's priority: 1 red, 2 orange, 3 and 4 muted, each as „P<n>“; none without a whole number; every query of work items asks for it", () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map(board.azPriority), [
+    { name: "P1", tone: "ansi1" }, { name: "P2", tone: "ansi11" }, { name: "P3", tone: "muted" }, { name: "P4", tone: "muted" }, { name: "P5", tone: "muted" },
+  ]);
+  assert.deepEqual([undefined, null, "1", 1.5].map(board.azPriority), [null, null, null, null]);
+  const answer = json("azure-sprint-items.json");
+  answer[0].fields["Microsoft.VSTS.Common.Priority"] = 2;
+  const [first, second] = board.parseWorkItems(JSON.stringify(answer), sprintTeam());
+  assert.deepEqual([first.priority, second.priority], [{ name: "P2", tone: "ansi11" }, null]);
+  assert.equal(board.PRIORITY, "Microsoft.VSTS.Common.Priority");
+  assert.ok(board.WORK_ITEM_FIELDS.includes(board.PRIORITY));
+  assert.match(board.idsWiql([1]), /\[Microsoft\.VSTS\.Common\.Priority\]/);
+});
+
+test("a card's parent: „Teil von #n“ and its title in its own repo, the other repo's name before the number where it lives there, an Azure work item's number alone; the number alone without a title; none without a parent", () => {
+  const data = cardsBoard();
+  assert.equal(board.partOfText(cardOf(data, 2195)), "Teil von #2217 [Epic] Emulator sources and direct launch");
+  assert.equal(board.partOfText(cardOf(data, 2301)), "Teil von atlas#12 Resolver answers for every emulator");
+  assert.equal(board.partOfText({ ...cardOf(data, 2195), parentTitle: null }), "Teil von #2217");
+  assert.equal(board.partOfText({ ...cardOf(data, 2195), parentRepo: null }), "Teil von #2217 [Epic] Emulator sources and direct launch", "a repo not known: its own");
+  assert.equal(board.partOfText(cardOf(data, 1467)), null);
+  assert.equal(board.partOfText({ source: "azure", kind: "workitem", parent: 290, parentTitle: "Sample feature" }), "Teil von 290 Sample feature");
+  assert.equal(board.partOfText({ source: "azure", kind: "workitem", parent: 290, parentTitle: null }), "Teil von 290");
+  assert.equal(board.partOfText({ source: "azure", kind: "workitem", parent: null }), null);
+});
+
+test("a story's progress: its row's tasks in every column, whatever the filter shows, and how many of them are done by the state their column shows; none for a story without tasks", () => {
+  const data = sprintData();
+  assert.deepEqual([board.storyProgress(data, "AB#301"), board.storyProgress(data, "AB#302")], [{ total: 3, done: 0 }, { total: 1, done: 1 }]);
+  const moved = board.moveCard(data, "AB#312", columnId(data, "Done"));
+  assert.deepEqual(board.storyProgress(moved, "AB#301"), { total: 3, done: 1 }, "a task moved to Done counts as its column shows it");
+  assert.deepEqual(board.storyProgress(board.withItemState(data, "AB#311", "Removed"), "AB#301"), { total: 3, done: 1 }, "Removed is done, as for a related item");
+  assert.equal(board.storyProgress(data, "AB#999"), null);
+});
+
+// The source's shared parts parentTitles takes, with what it keeps in
+// `kept` and the az calls it made in `asked`; `answer` is what az prints
+// (an Error: az fails).
+function parentParts(answer) {
+  const parts = { kept: new Map(), asked: [], answer };
+  Object.assign(parts, {
+    teamKey: (c) => `${c.org}\n${c.project}\n${c.team}`,
+    // As the source's: an entry past its time is none.
+    keptValue: (k) => {
+      const entry = parts.kept.get(k);
+      return entry && Date.now() < entry.until ? entry : null;
+    },
+    keep: (k, value, until) => parts.kept.set(k, { value, until }),
+    az: async (args) => {
+      parts.asked.push(args);
+      if (parts.answer instanceof Error) throw parts.answer;
+      return parts.answer;
+    },
+  });
+  return parts;
+}
+// The fixture's sprint items, the story 301 under the Feature 290.
+function itemsUnder290() {
+  const answer = json("azure-sprint-items.json");
+  answer[0].fields["System.Parent"] = 290;
+  return JSON.stringify(answer);
+}
+
+test("the Sprint's parent titles: one query by id for the parents neither in the sprint nor kept, kept per team; a parent in the sprint gives its own; one the query does not find is kept without a title; a failure keeps nothing, leaves the titles out and is a warning", async () => {
+  const c = sprintTeam();
+  // 332 shares 331's parent 299, outside the sprint.
+  const answer = JSON.parse(itemsUnder290());
+  answer.find((wi) => wi.id === 332).fields["System.Parent"] = 299;
+  const items = board.parseWorkItems(JSON.stringify(answer), c);
+  const s = parentParts(fixture("azure-sprint-parents.json"));
+  const before = Date.now();
+  const first = await board.parentTitles(s, c, items);
+  const after = Date.now();
+  assert.deepEqual(s.asked, [board.azQueryArgs(c, board.idsWiql([290, 299]))], "one query, each parent outside the sprint once");
+  const title = (r, n) => r.items.find((i) => i.number === n).parentTitle;
+  assert.deepEqual([title(first, 301), title(first, 311), title(first, 321), title(first, 331), title(first, 332), title(first, 302), first.warning],
+    [null, "Import the sample catalogue", "Export the weekly report", "Clean up the old exports", "Clean up the old exports", null, null]);
+  const [entry] = s.kept.values();
+  const { until } = entry;
+  assert.ok(until >= before + board.TEAM_KEEP_MS && until <= after + board.TEAM_KEEP_MS, `kept for TEAM_KEEP_MS: ${until - before}`);
+  assert.deepEqual([...entry.value], [[290, null], [299, "Clean up the old exports"]], "290 not found: kept without a title");
+  const again = await board.parentTitles(s, c, items);
+  assert.deepEqual([s.asked.length, title(again, 331)], [1, "Clean up the old exports"], "kept: no second query");
+  s.answer = JSON.stringify([{ id: 298, fields: { "System.Id": 298, "System.Title": "Another feature" } }]);
+  advance(60000);
+  const more = await board.parentTitles(s, c, [...items, { ...items[0], key: "AB#340", number: 340, parent: 298 }]);
+  advance(-60000);
+  assert.deepEqual([s.asked.length, s.asked[1], title(more, 340)], [2, board.azQueryArgs(c, board.idsWiql([298])), "Another feature"], "a new parent: asked alone");
+  const [later] = s.kept.values();
+  assert.deepEqual([later.until, [...later.value.keys()]], [until, [290, 299, 298]], "added, kept until the first read's time");
+  const fresh = parentParts(new board.BoardError("Azure nicht erreichbar (az): x"));
+  const failed = await board.parentTitles(fresh, c, items);
+  assert.deepEqual([title(failed, 331), title(failed, 311), failed.warning, fresh.kept.size],
+    [null, "Import the sample catalogue", `${board.PARENTS_UNREAD}: Azure nicht erreichbar (az): x`, 0]);
+  fresh.answer = fixture("azure-sprint-parents.json");
+  await board.parentTitles(fresh, c, items);
+  assert.equal(fresh.asked.length, 2, "asked again after a failure");
+  const none = parentParts("");
+  await board.parentTitles(none, c, items.filter((i) => [302, 321].includes(i.number)));
+  assert.deepEqual(none.asked, [], "every parent in the sprint: no query");
+});
+
+test("UI: the Sprint asks for its parents' titles after its work items, then keeps them: a refresh asks none, r again; a failure is a warning and the cards name their parents' numbers alone", async () => {
+  const { b, cx, host, st } = await openSprint();
+  const queries = () => host.calls.filter((c) => AZ.parents(c.args));
+  assert.deepEqual(queries().map((c) => c.args), [board.azQueryArgs(sprintTeam(), board.idsWiql([299]))]);
+  assert.equal(board.findSprintItem(st().data, "AB#331").parentTitle, "Clean up the old exports");
+  await refreshSprint(b, cx);
+  await answerRefresh(host, { me: false });
+  assert.equal(queries().length, 1, "a refresh asks none");
+  await press(b, cx, "r");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false, parents: azRefused("Operation returned a 403 status code.") });
+  assert.equal(queries().length, 2, "r asks again");
+  assert.deepEqual(st().warnings, [`${board.PARENTS_UNREAD}: Operation returned a 403 status code.`]);
+  assert.equal(board.findSprintItem(st().data, "AB#331").parentTitle, null);
+  assert.deepEqual(lineParts(cardLine(b.render(), "card-AB#331", "card-meta")), ["Teil von 299"]);
+});
+
+test("UI: a GitHub card's lines: its key with its priority at the right; its title; its milestone as a muted chip and its parent, cut short; its type and labels; its progress with a bar and the share done, then its session, „speichert …“ and its assignees, which end the chips' line where it has no progress; a card without them as compact as before", async () => {
+  const { b, cx, host } = await openBoard({ answer: fixture("github-board-cards.json") });
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  host.spaceList = [...host.spaceList,
+    { id: "s7", name: "w", folder: "/r/tender", machine: null, branch: "main", active: false, status: "working", tabs: [{ id: "t7", name: "tender#2217 sources", status: "working" }] },
+    { id: "s8", name: "v", folder: "/r/tender", machine: null, branch: "main", active: false, status: "idle", tabs: [{ id: "t8", name: "tender#1467 metadata", status: "idle" }] },
+    { id: "s9", name: "u", folder: "/r/tender", machine: null, branch: "main", active: false, status: "idle", tabs: [{ id: "t9", name: "tender#2304 steps", status: "idle" }] }];
+  let root = b.render();
+  const look = (tone) => [board.toneColor(t, tone), board.chipBg(t, tone)];
+  // #2217: every line.
+  const epic = "card-PVTI_card1";
+  const lines = cardLines(root, epic);
+  assert.deepEqual(lines.map((l) => l.with.id?.[0] ?? null), [null, null, "card-meta", "card-chips", "card-progress"]);
+  assert.deepEqual(lineParts(lines[0]), ["tender#2217", "", "P1"], "the key, then the priority at the right");
+  assert.equal(lines[0].kids[1].styles.includes("flex_1"), true, "pushed to the right");
+  assert.deepEqual(chipLook(byId(lines[0], "priority")), look("ansi11"), "P1's option is ORANGE");
+  assert.deepEqual(chipLook(byId(lines[0], "priority")), [t["copper-orange-text"], t["copper-orange-3"]]);
+  assert.deepEqual(lineParts(lines[2]), ["v1", "Teil von #1735 [Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver"]);
+  assert.deepEqual(chipLook(byId(lines[2], "milestone")), look("muted"), "a grey chip");
+  const parent = byId(lines[2], "parent");
+  assert.deepEqual(["flex_1", "min_w", "truncate"].map((s) => parent.styles.includes(s)), [true, true, true], "cut short with …");
+  assert.deepEqual([parent.with.min_w[0], parent.with.text_color[0], parent.with.text_size[0]], [0, t.muted, 11]);
+  assert.equal(byId(lines[2], "milestone").styles.includes("flex_none"), true, "the milestone keeps its width");
+  assert.deepEqual(lineParts(lines[3]), ["Epicenhancementarea:architecture"], "type and labels; nothing at the right");
+  assert.deepEqual(lineParts(lines[4]), ["14 / 25", "", "56 %", "arbeitet", "sample-user"], "the count, the bar, the share, the session, the assignee");
+  assert.deepEqual(barOf(t, lines[4]), [...Array(14).fill("on"), ...Array(11).fill("rest")], "a segment per sub-issue, the done ones green");
+  assert.equal(board.toneColor(t, board.PROGRESS_TONE), t["copper-green-text"]);
+  // #2195: no priority; 9 of 11 is 81 %, rounded down.
+  const sub = "card-PVTI_card2";
+  assert.deepEqual(lineParts(cardLines(root, sub)[0]), ["tender#2195"], "no priority: the key alone, as before");
+  assert.deepEqual(lineParts(cardLine(root, sub, "card-meta")), ["v1", "Teil von #2217 [Epic] Emulator sources and direct launch"]);
+  assert.deepEqual(lineParts(cardLine(root, sub, "card-progress")).filter((p) => p.includes("/") || p.includes("%")), ["9 / 11", "81 %"]);
+  // #1467: no milestone, parent or progress: the assignee ends the chips' line.
+  const compact = cardLines(root, "card-PVTI_card3");
+  assert.deepEqual(compact.map((l) => l.with.id?.[0] ?? null), [null, null, "card-chips"], "three lines, as before");
+  assert.deepEqual(lineParts(compact[2]), ["enhancementarea:ui", "bereit", "sample-user"], "the chips, then the session and the assignee at the right");
+  assert.deepEqual(["flex_1", "min_w", "flex_wrap"].map((s) => compact[2].kids[0].styles.includes(s)), [true, true, true], "the chips wrap and leave the end to the rest");
+  // #2301: P0 red, a parent in another repo, 10 of 31 as one bar.
+  const wide = "card-PVTI_card4";
+  assert.deepEqual(chipLook(byId(byId(root, wide), "priority")), look("ansi1"));
+  assert.deepEqual(lineParts(cardLine(root, wide, "card-meta")), ["Teil von atlas#12 Resolver answers for every emulator"], "no milestone: the parent alone");
+  assert.deepEqual(barOf(t, cardLine(root, wide, "card-progress")), { width: "32.26%", rest: t.border, on: t["copper-green-text"] }, "above 30: one continuous bar");
+  assert.deepEqual(lineParts(cardLine(root, wide, "card-progress")).slice(0, 3), ["10 / 31", "", "32 %"]);
+  // #2302: P2 muted, 29 of 30: still a segment each, 96 %.
+  const thirty = "card-PVTI_card5";
+  assert.deepEqual(chipLook(byId(byId(root, thirty), "priority")), look("muted"));
+  assert.deepEqual(barOf(t, cardLine(root, thirty, "card-progress")), [...Array(29).fill("on"), "rest"], "30: a segment each");
+  assert.equal(lineParts(cardLine(root, thirty, "card-progress"))[2], "96 %");
+  assert.equal(cardLine(root, thirty, "card-chips"), null, "no labels, no type: no chips' line; the assignee ends the progress line");
+  // #2303: nothing but its key and title.
+  assert.deepEqual(cardLines(root, "card-PVTI_card6").map((l) => texts(l).join("")), ["tender#2303", "docs: name the sample folders"]);
+  // #2304: no chips, no progress, an assignee and a session: they end a chips' line of their own.
+  const bare = "card-PVTI_card8";
+  assert.deepEqual(cardLines(root, bare).map((l) => l.with.id?.[0] ?? null), [null, null, "card-chips"]);
+  assert.deepEqual(lineParts(cardLine(root, bare, "card-chips")), ["", "bereit", "sample-user"], "no chips at the left, the end at the right");
+  // A pull request's milestone, no parent.
+  assert.deepEqual(lineParts(cardLine(root, "card-PVTI_card7", "card-meta")), ["v2"]);
+  assert.equal(texts(root).some((s) => /◔|undefined|null/.test(s)), false, "no old count, nothing undefined");
+  // „speichert …“ while a move is written: before the assignee, on the card's last line.
+  await press(b, cx, "l", shiftL);
+  root = b.render();
+  assert.deepEqual(lineParts(cardLine(root, "card-PVTI_card3", "card-chips")), ["enhancementarea:ui", "bereit", "speichert …", "sample-user"]);
+  assert.equal(texts(cardLines(root, "card-PVTI_card3")[0]).includes("speichert …"), false, "not beside the key");
+  await host.answer("gh", ok(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_card3" } } } })));
+  await clickCard(b, cx, "PVTI_card1");
+  await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
+  assert.deepEqual(lineParts(cardLine(b.render(), "card-PVTI_card1", "card-progress")).slice(3), ["arbeitet", "speichert …", "sample-user"], "on the progress line");
+  await clickCard(b, cx, "PVTI_card8");
+  await press(b, cx, "l", shiftL);
+  assert.deepEqual(lineParts(cardLine(b.render(), bare, "card-chips")), ["", "bereit", "speichert …", "sample-user"], "on a chips' line without chips");
+});
+
+// The Sprint's items with priorities, the story 301 under the Feature 290,
+// and a story 303 without tasks; and the parents' titles for them.
+function prioritySprintItems() {
+  const answer = JSON.parse(itemsUnder290());
+  const set = { 301: 3, 312: 1, 311: 2, 332: 4 };
+  for (const wi of answer) if (set[wi.id]) wi.fields["Microsoft.VSTS.Common.Priority"] = set[wi.id];
+  const story = structuredClone(answer[0]);
+  story.id = 303;
+  Object.assign(story.fields, { "System.Id": 303, "System.Title": "Plan the next import", "System.State": "New", "System.Parent": undefined });
+  return JSON.stringify([...answer, story]);
+}
+const parentsWith290 = () => ok(JSON.stringify([...json("azure-sprint-parents.json"), { id: 290, fields: { "System.Id": 290, "System.Title": "Sample feature with a long name that will not fit" } }]));
+
+test("UI: the Sprint's story and task in a card's lines: the priority at the right of the key; a story's parent, and a task's only in „Ohne Story“; a story's tasks' progress, which its assignee ends, or its state's line where it has none; a task's state, which its session, „speichert …“ and assignee end", async () => {
+  const { b, cx, host, st } = await openSprint({ items: prioritySprintItems(), parents: parentsWith290() });
+  const t = copperTheme("light");
+  host.theme = () => t;
+  host.spaceList = [...host.spaceList, { id: "s9", name: "z", folder: "/r/x", machine: null, branch: "main", active: false, status: null,
+    tabs: [{ id: "t9", name: "AB#312 Write the importer tests", status: "working" }] }];
+  let root = b.render();
+  const look = (tone) => [board.toneColor(t, tone), board.chipBg(t, tone)];
+  // The story 301: P3, a parent outside the sprint, three tasks none done.
+  const story = cardLines(root, "story-AB#301");
+  assert.deepEqual(story.map((l) => l.with.id?.[0] ?? null), [null, null, "card-meta", "card-chips", "card-progress"]);
+  assert.deepEqual(lineParts(story[0]), ["▾", "301", "User Story", "", "P3"]);
+  assert.deepEqual(chipLook(byId(story[0], "priority")), look("muted"));
+  assert.deepEqual(lineParts(story[2]), ["Teil von 290 Sample feature with a long name that will not fit"]);
+  assert.ok(byId(story[2], "parent").styles.includes("truncate"));
+  assert.deepEqual(lineParts(story[3]), ["In Progress"], "its state alone: the assignee ends its progress");
+  assert.deepEqual(lineParts(story[4]), ["0 / 3", "", "0 %", "Alex Sample"]);
+  assert.deepEqual(barOf(t, story[4]), ["rest", "rest", "rest"]);
+  // The story 302: no parent, its one task done.
+  const done = cardLines(root, "story-AB#302");
+  assert.deepEqual(done.map((l) => l.with.id?.[0] ?? null), [null, null, "card-chips", "card-progress"]);
+  assert.deepEqual([lineParts(done[0]), lineParts(done[3]).slice(0, 3), barOf(t, done[3])], [["▾", "302", "User Story"], ["1 / 1", "", "100 %"], ["on"]]);
+  assert.equal(board.toneColor(t, board.PROGRESS_TONE), t["copper-green-text"]);
+  // The story 303 without tasks: its assignee ends its state's line.
+  const lone = cardLines(root, "story-AB#303");
+  assert.deepEqual(lone.map((l) => l.with.id?.[0] ?? null), [null, null, "card-chips"]);
+  assert.deepEqual(lineParts(lone[2]), ["New", "Alex Sample"]);
+  // A task in its story's row: P1, no parent line; its session and assignee end its state's line.
+  const task = cardLines(root, "card-AB#312");
+  assert.deepEqual(task.map((l) => l.with.id?.[0] ?? null), [null, null, "card-chips"]);
+  assert.deepEqual(lineParts(task[0]), ["312", "", "P1"]);
+  assert.deepEqual(chipLook(byId(task[0], "priority")), look("ansi1"));
+  assert.deepEqual(chipLook(byId(byId(root, "card-AB#311"), "priority")), [t["copper-orange-text"], t["copper-orange-3"]], "Azure's 2 in copper's orange");
+  assert.deepEqual(lineParts(task[2]), ["In Progress", "arbeitet", "Robin Example"]);
+  // A task in „Ohne Story“ names its parent; one without a parent has none.
+  assert.deepEqual(lineParts(cardLine(root, "card-AB#331", "card-meta")), ["Teil von 299 Clean up the old exports"]);
+  assert.equal(cardLine(root, "card-AB#332", "card-meta"), null);
+  assert.deepEqual(chipLook(byId(byId(root, "card-AB#332"), "priority")), look("muted"), "4 muted");
+  assert.equal(byId(byId(root, "card-AB#313"), "priority"), null, "no priority: none");
+  // „speichert …“ while a state is written: before the assignee, on the last line.
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "s");
+  await press(b, cx, "3");
+  root = b.render();
+  assert.deepEqual(lineParts(cardLine(root, "card-AB#312", "card-chips")), ["Done", "arbeitet", "speichert …", "Robin Example"]);
+  assert.deepEqual(lineParts(cardLine(root, "story-AB#301", "card-progress")), ["1 / 3", "", "33 %", "Alex Sample"], "its story counts it done");
+  await host.answer("az", ok(JSON.stringify({ id: 312, fields: { "System.State": "Done" } })), AZ.state);
+  await answerRefresh(host, { me: false, items: prioritySprintItems() });
+  await click(b, cx, "story-AB#301");
+  await press(b, cx, "s");
+  await press(b, cx, "1");
+  assert.deepEqual(lineParts(cardLine(b.render(), "story-AB#301", "card-progress")).slice(3), ["speichert …", "Alex Sample"]);
+  assert.equal(st().pending["AB#301"], true);
+});
+
+test("the new lines' text and chips read at 4.5:1 or more on a card and a selected one (the priority in each tone it takes, the milestone on their tints, the parent and the progress' numbers), and the progress bar's done part stands at 3:1 or more from a card, a selected one and the bar's rest, in copper-dark and copper-light with and without copper's colors and in catppuccin-mocha, but for a muted chip on a selected card in catppuccin-mocha", () => {
+  globalThis.__boardHost = fakeHost();
+  const themes = { "copper-dark": copperTheme("dark"), "copper-light": copperTheme("light"), ...Object.fromEntries(Object.entries(TINTED()).map(([k, t]) => [`tinted ${k}`, t])) };
+  assert.equal(Object.keys(themes).length, 5);
+  const tones = [...new Set(["ansi1", "ansi11", "muted", ...Object.values(GITHUB_TONES)])];
+  const ratios = {};
+  const bars = {};
+  for (const [name, t] of Object.entries(themes)) {
+    const grounds = [t.background, board.selectedBg(t)];
+    const onChip = ([fg, bg]) => grounds.map((g) => contrast(fg, over(bg, g)));
+    for (const tone of tones) ratios[`${name} priority ${tone}`] = onChip(chipLook(board.priorityChip(t, { priority: { name: "P1", tone } })));
+    const meta = board.cardMeta(t, { milestone: "v1" }, "Teil von #1");
+    ratios[`${name} milestone`] = onChip(chipLook(byId(meta, "milestone")));
+    ratios[`${name} parent`] = grounds.map((g) => contrast(byId(meta, "parent").with.text_color[0], g));
+    const progress = board.progressLine(t, { done: 1, total: 2 }, []);
+    ratios[`${name} progress numbers`] = [progress.kids[0], progress.kids[2]].flatMap((n) => grounds.map((g) => contrast(n.with.text_color[0], g)));
+    const on = board.toneColor(t, board.PROGRESS_TONE);
+    assert.equal(barOf(t, progress)[0], "on", `${name}: the done part in PROGRESS_TONE`);
+    bars[`${name} done part`] = [...grounds, over(t.border, t.background)].map((g) => contrast(on, g));
+  }
+  // catppuccin-mocha's derived muted on its tint over a selected card: the
+  // case the chips' own test names (4.31:1).
+  assert.deepEqual(below(ratios, 4.5), [["tinted catppuccin-mocha priority muted", [5.04, 4.31]], ["tinted catppuccin-mocha milestone", [5.04, 4.31]]], shownRatios(ratios));
+  assert.deepEqual(below(bars, 3), [], shownRatios(bars));
 });
 
 test("UI: no dialog's head names the keys that move its mark, only Enter and Esc: the status menu's and the assignee picker's (the column, command and sprint menus' tests name theirs)", async () => {

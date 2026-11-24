@@ -39,7 +39,7 @@
 // panel shows as the PR list's details do; the Board keeps them as { pr }
 // beside the related items.
 
-import { cardLabel } from "./shared.js";
+import { cardLabel, relativeLabel } from "./shared.js";
 
 // What a view keeps of its related items after a refresh starts: only
 // those of the item whose details show (`openKey`, null when none) and of
@@ -56,14 +56,8 @@ export function keptRelated(related, openKey, deeper = []) {
 }
 
 // The way the panel went down from `root` (the board's selected item) to
-// the items `levels`, as its top shows it: "tender#914 › #2217". A GitHub
-// item in the root's repo is named by its number ("#2217"), one in
-// another by its label; an Azure work item by its number alone, as a card
-// names it (cardLabel).
-export function pathLabel(root, levels) {
-  const label = (i) => (i.source === "github" && i.repo === root.repo ? `#${i.number}` : cardLabel(i));
-  return [cardLabel(root), ...levels.map(label)].join(" › ");
-}
+// the items `levels`, as its top shows it: "tender#914 › #2217".
+export const pathLabel = (root, levels) => [cardLabel(root), ...levels.map((i) => relativeLabel(root, i))].join(" › ");
 
 // The sections of read related items, in the order of their lines: the
 // parent first, then the sub-issues, then the linked pull requests.

@@ -1,0 +1,17 @@
+[
+  {
+    "fields": {
+      "System.Id": 299,
+      "System.Title": "Clean up the old exports",
+      "System.WorkItemType": "User Story",
+      "System.State": "Active",
+      "System.AreaPath": "Example Project\\Core",
+      "System.IterationPath": "Example Project\\Sprint 11",
+      "Microsoft.VSTS.Common.Priority": 2
+    },
+    "id": 299,
+    "relations": null,
+    "rev": 4,
+    "url": "https://dev.azure.com/example-org/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_apis/wit/workItems/299"
+  }
+]

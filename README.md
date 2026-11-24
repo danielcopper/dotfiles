@@ -531,6 +531,27 @@ herdr-app`. Which files of the package git tracks is set in the root
   list's request costs about 8 of GitHub's 5000 points an hour per section
   with 50 pull requests, the one for more threads about one per two pull
   requests; the header of `mods/board/src/main.js` says how.
+  A card, on a GitHub board and on the Sprint's taskboard, shows one line per
+  topic, each only where it has something, so a card without them stays as
+  compact as before: its key with its priority at the right ("P1": on GitHub the
+  option of the project's single-select field "Priority", or the one
+  `project.priorityField` in `views.json` names, in that option's color; on
+  Azure the work item's priority, 1 red, 2 orange, 3 and 4 grey), its title, its
+  milestone as a grey chip and its parent ("Teil von #1735 [Epic] …", cut short
+  with "…" where it does not fit; the repo's name before the number only where
+  the parent lives in another repo; on Azure its id and title), its type and
+  labels (or a work item's state), and its progress: "14 / 25", a bar of one
+  segment per sub-issue (one continuous bar above 30), its done part green, and
+  "56 %", rounded down. Its session, "speichert …" while a change of it is
+  written, and its assignees end its progress line, or its chips' line where it
+  has no progress. On the Sprint a story's progress counts the tasks in its row,
+  done by the state their column shows, and a task names its parent only in
+  "Ohne Story" (its story's row names it otherwise); the Sprint reads the titles
+  of parents outside it in one query more and keeps them for four hours (`r`
+  reads them again). The board's query reads priority, milestone and parent at
+  no extra cost; the header's "Calls:" says why. Where `project.priorityField`
+  names a field the project does not have as a single-select field, a warning
+  above the columns says so; the default "Priority" may be missing without one.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,
@@ -566,10 +587,10 @@ herdr-app`. Which files of the package git tracks is set in the root
   copper's blue step for it, and a column a card is dragged over keeps its
   ground, marked by the accent border. A theme without those colors
   (catppuccin-mocha) draws in its red, green, yellow, blue, violet and teal,
-  an issue type's orange as yellow, the mark on a pull request in its
-  foreground, with its colors at a low alpha under chips and heads, a selected
-  card or row on a tint of the accent, so its chips stay readable, and a
-  column a card is dragged over on the theme's `selected`.
+  an issue type's or a priority's orange as yellow, the mark on a pull
+  request in its foreground, with its colors at a low alpha under chips and
+  heads, a selected card or row on a tint of the accent, so its chips stay
+  readable, and a column a card is dragged over on the theme's `selected`.
   `mods/board/src/ui/tones.js` holds the label and type colors, which theme
   takes which colors, the selected background and how strong the tints are.
   The details of a GitHub issue show its description formatted, as GitHub

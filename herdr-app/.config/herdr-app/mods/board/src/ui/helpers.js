@@ -15,7 +15,7 @@ import { MOD, cardType } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
-import { NOTE_TONES, chipBg, headBg, hueTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
+import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 import { stateColor } from "../kinds/states.js";
 
 // Settings that last across reloads: the shown source ("source"), each
@@ -502,3 +502,57 @@ export function typeChip(t, item) {
 
 // A card's chip for its session (linkedSession): what its agent does.
 export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);
+
+export function priorityChip(t, item) {
+  if (!item.priority) return null;
+  return toneChip(t, item.priority.name, namedTone(t, item.priority.tone)).id("priority").flex_none();
+}
+
+// `kids`: the key, on a story its fold and type too.
+export function cardHead(t, kids, item) {
+  const priority = priorityChip(t, item);
+  return h_flex().gap(6).items_center().children(kids).when(Boolean(priority), (el) => el.child(div().flex_1()).child(priority));
+}
+
+// `parent`: partOfText, or null where the card names none.
+export function cardMeta(t, item, parent) {
+  if (!item.milestone && !parent) return null;
+  return h_flex()
+    .id("card-meta")
+    .gap(8)
+    .items_center()
+    .min_w(0)
+    .when(Boolean(item.milestone), (el) => el.child(toneChip(t, item.milestone, "muted").id("milestone").flex_none()))
+    .when(Boolean(parent), (el) => el.child(div().id("parent").flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(parent)));
+}
+
+// `pending`: a write of the card is under way.
+export const cardEnd = (t, item, session, pending) => [
+  ...(session ? [sessionChip(t, session).flex_none()] : []),
+  ...(pending ? [div().flex_none().text_size(11).text_color(t.dim).child("speichert …")] : []),
+  ...(item.assignees.length ? [assigneeText(t, item).min_w(0).truncate()] : []),
+];
+
+export function cardFoot(t, chips, progress, end) {
+  const bar = progressLine(t, progress, end);
+  return [chipLine(chips, bar ? [] : end), bar].filter(Boolean);
+}
+
+function chipLine(chips, end) {
+  if (!chips.length && !end.length) return null;
+  return h_flex().id("card-chips").gap(5).items_center().child(h_flex().flex_1().min_w(0).gap(5).flex_wrap().items_center().children(chips)).children(end);
+}
+
+export const PROGRESS_SEGMENTS = 30;
+export const PROGRESS_TONE = "ansi2";
+
+export function progressLine(t, progress, end) {
+  if (!progress?.total) return null;
+  const { done, total } = progress;
+  const on = toneColor(t, PROGRESS_TONE);
+  const bar = total <= PROGRESS_SEGMENTS
+    ? h_flex().id("progress-bar").flex_1().min_w(40).gap(2).children(Array.from({ length: total }, (_, i) => div().flex_1().h(6).rounded(1).bg(i < done ? on : t.border)))
+    : div().id("progress-bar").flex_1().min_w(40).h(6).rounded(1).bg(t.border).child(div().h(6).w(`${((100 * done) / total).toFixed(2)}%`).rounded(1).bg(on));
+  const number = (text) => div().flex_none().text_size(11).text_color(t.muted).child(text);
+  return h_flex().id("card-progress").gap(8).items_center().child(number(`${done} / ${total}`)).child(bar).child(number(`${Math.floor((100 * done) / total)} %`)).children(end);
+}

@@ -13,9 +13,12 @@
 //   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
 //     names], limit? (a board: the most items it reads, 1000; a list: per
 //     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
-//     board has project { owner, number, field? ("Status") } and filter? (a
-//     Projects filter such as "assignee:@me"); its columns are the options
-//     of that single-select field. A list has sections [{ name, query,
+//     board has project { owner, number, field? ("Status"), priorityField?
+//     ("Priority") } and filter? (a Projects filter such as "assignee:@me");
+//     its columns are the options of that single-select field, a card's
+//     priority its option of the single-select field priorityField names
+//     (none where the project has no such field; one views.json names that
+//     the project lacks is a warning). A list has sections [{ name, query,
 //     tone? }], one GitHub search for pull requests each; tone is one of
 //     SECTION_TONES (shared.js), and without one a section takes the next
 //     of SECTION_TONE_ORDER by its place that no other section sets. A view
@@ -36,54 +39,58 @@
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
-// its limit take: ten for the 1000 by default; a list view one, and one more
-// per THREAD_IDS (100) pull requests in it with more than FIRST_THREADS (10)
-// review threads. GitHub prices a request by its connections, each counted
-// as full: the list's per section one search, then per pull request of its
-// limit (50 by default) its assignees, review requests, last commit (and
-// that one's checks), latest reviews (LATEST_REVIEWS, 20) and review
-// threads, and per thread (FIRST_THREADS) its comments, so with the defaults
-// 1 + 50 * 6 + 50 * 10 = 801 requests a section, about 8 points (a hundred
-// requests each) of GitHub's 5000 an hour, 24 for the shipped three
-// sections; the follow-up (githubThreadsArgs) 51 per such pull request
-// (REVIEW_THREADS threads and their comments), about one point for two. An
-// issue's related items (its description, parent, sub-issues and linked pull
-// requests) cost one more when its details open, again on `r` while they are
-// open, and again after a refresh where their last read failed (readRelated;
-// what a refresh keeps of them keptRelated says); an item the details panel
-// went down to (Enter on a line, related.js) costs the same when it shows, a
-// pull request one gh or az call for its details (az repos pr show), and on
-// `r` each level's again, so that a level whose item is no longer among the
-// lines of the one above can go. An Azure work item's related items (its
-// description, parent, children and linked pull requests) cost the same, one
-// az call (az boards work-item show --expand relations), and one WIQL query
-// more for its children's and its parent's titles and states where it has
-// either (sources/azure/related.js). An Azure team's Sprint two az calls
-// (the taskboard's column of each work item, and one WIQL query for their
-// fields; for a sprint the sprint picker chose, by its id and path; none
-// while the team has no sprint running and none is chosen), its Backlog two,
-// one after the other (the level's work items in their list by az rest, then
-// one WIQL query for their fields; one for an empty backlog), and one more
-// for the project's work item types (their colors) while neither view keeps
-// them; either one more while who az is stays unknown. What the Sprint and
-// the Backlog read once and keep, and for how long, makeAzure says. An
-// assignment costs one gh or az call, and the assignee picker one more per
-// repo or team the first time it opens there (GitHub's assignable users with
-// who gh is; the team's members, and who az is while that is unknown). The
-// sprint picker costs one az call (the team's iterations) the first time it
-// opens for a team, one more for the team's current sprint where the Sprint
-// keeps none, and a refresh of a sprint it chose one where `r` dropped them.
-// A state change costs one az call, a Backlog's create one and a child's
-// parent link one more; a create reads the Backlog again, and one whose
-// answer was unclear asks one WIQL query more after that refresh; a create
-// for a team whose default iteration follows the current one reads the
-// team's settings first, one call more. The PR tabs read nothing yet.
-// Finding gh and az costs one sh call now and then (toolPaths says when). A
-// view refreshes when its tab first shows, on `r` (which first drops what
-// its source keeps of it: its source's forget), after a column is hidden or
-// shown (the command menu's "Spalte ausblenden", a name in the hidden line,
-// the column menu), when it is shown again older than refreshMinutes, and
-// every refreshMinutes while it shows.
+// its limit take: ten for the 1000 by default (each item's priority,
+// milestone and parent, with its title and repo, and the first page's look
+// at the priority field add no connection and so no points; see below); a
+// list view one, and one more per THREAD_IDS (100) pull requests in it with
+// more than FIRST_THREADS (10) review threads. GitHub prices a request by
+// its connections, each counted as full: the list's per section one search,
+// then per pull request of its limit (50 by default) its assignees, review
+// requests, last commit (and that one's checks), latest reviews
+// (LATEST_REVIEWS, 20) and review threads, and per thread (FIRST_THREADS)
+// its comments, so with the defaults 1 + 50 * 6 + 50 * 10 = 801 requests a
+// section, about 8 points (a hundred requests each) of GitHub's 5000 an
+// hour, 24 for the shipped three sections; the follow-up (githubThreadsArgs)
+// 51 per such pull request (REVIEW_THREADS threads and their comments),
+// about one point for two. An issue's related items (its description,
+// parent, sub-issues and linked pull requests) cost one more when its
+// details open, again on `r` while they are open, and again after a refresh
+// where their last read failed (readRelated; what a refresh keeps of them
+// keptRelated says); an item the details panel went down to (Enter on a
+// line, related.js) costs the same when it shows, a pull request one gh or
+// az call for its details (az repos pr show), and on `r` each level's again,
+// so that a level whose item is no longer among the lines of the one above
+// can go. An Azure work item's related items (its description, parent,
+// children and linked pull requests) cost the same, one az call (az boards
+// work-item show --expand relations), and one WIQL query more for its
+// children's and its parent's titles and states where it has either
+// (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// taskboard's column of each work item, and one WIQL query for their fields;
+// for a sprint the sprint picker chose, by its id and path; none while the
+// team has no sprint running and none is chosen) and one WIQL query more
+// where its items have parents outside the sprint that it does not keep yet
+// (parentTitles), its Backlog two, one after the other (the level's work
+// items in their list by az rest, then one WIQL query for their fields; one
+// for an empty backlog), and one more for the project's work item types
+// (their colors) while neither view keeps them; either one more while who az
+// is stays unknown. What the Sprint and the Backlog read once and keep, and
+// for how long, makeAzure says. An assignment costs one gh or az call, and
+// the assignee picker one more per repo or team the first time it opens there
+// (GitHub's assignable users with who gh is; the team's members, and who az
+// is while that is unknown). The sprint picker costs one az call (the team's
+// iterations) the first time it opens for a team, one more for the team's
+// current sprint where the Sprint keeps none, and a refresh of a sprint it
+// chose one where `r` dropped them. A state change costs one az call, a
+// Backlog's create one and a child's parent link one more; a create reads the
+// Backlog again, and one whose answer was unclear asks one WIQL query more
+// after that refresh; a create for a team whose default iteration follows the
+// current one reads the team's settings first, one call more. The PR tabs
+// read nothing yet. Finding gh and az costs one sh call now and then
+// (toolPaths says when). A view refreshes when its tab first shows, on `r`
+// (which first drops what its source keeps of it: its source's forget), after
+// a column is hidden or shown (the command menu's "Spalte ausblenden", a name
+// in the hidden line, the column menu), when it is shown again older than
+// refreshMinutes, and every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's

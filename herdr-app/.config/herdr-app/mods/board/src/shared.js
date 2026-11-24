@@ -111,6 +111,15 @@ export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", 
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
 
+export const relativeLabel = (root, item) => (item.source === "github" && item.repo === root.repo ? `#${item.number}` : cardLabel(item));
+
+export function partOfText(item) {
+  if (!Number.isInteger(item.parent)) return null;
+  const repo = item.parentRepo ?? item.repo;
+  const parent = { source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo?.split("/").pop() };
+  return ["Teil von", relativeLabel(item, parent), item.parentTitle].filter(Boolean).join(" ");
+}
+
 // An item that is an Epic by its title alone: "[Epic] …", the convention of
 // a project without issue types.
 const EPIC_TITLE = /^\[epic\]/i;

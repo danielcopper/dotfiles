@@ -1,23 +1,21 @@
 // The sprint shape: a team's sprint (its current one, or one the sprint picker
-// chose) as a taskboard. One row per story
-// (its id, title and own state at the left), its tasks as cards in the team's
-// taskboard columns, each with its own state, assignee and id and the chip of
-// its session where it has one; tasks whose story is not in the sprint stand in
-// the row "Ohne Story". H/L move a task to the next column (through the
-// taskboard's own column, not the state: two columns may map to one state), s
-// changes a story's or a task's state from its type's states (the status menu),
-// Enter shows the details; both write at once (actions/move.js,
-// actions/write.js). z (while the board has the keyboard), or a click on the
-// triangle in a story's row, folds its tasks away and back (toggleStoryFold;
-// foldsOf says where that is kept). Keys walk the stories, then each column's
-// tasks but the folded ones (sprintNav, withoutFolded). Another sprint of the
-// team shows through the sprint picker (ui/modals/sprints.js says what opens
-// it; pickSprint, showSprint), and says so in the head ("nicht aktuell");
-// with no sprint running and none chosen the head says that, and no taskboard
-// shows (sprintIs tells the three apart). The data: { shape: "sprint", meta:
-// { iterationId, iteration, finish (all three null where no sprint runs and
-// none is chosen), currentId (the team's current sprint's, null with none
-// running), gone ({ id, name } of a
+// chose) as a taskboard. One row per story (storyCell at the left), its tasks
+// as cards in the team's taskboard columns (drawTask); tasks whose story is
+// not in the sprint stand in the row "Ohne Story". H/L move a task to the next
+// column (through the taskboard's own column, not the state: two columns may
+// map to one state), s changes a story's or a task's state from its type's
+// states (the status menu), Enter shows the details; both write at once
+// (actions/move.js, actions/write.js). z (while the board has the keyboard),
+// or a click on the triangle in a story's row, folds its tasks away and back
+// (toggleStoryFold; foldsOf says where that is kept). Keys walk the stories,
+// then each column's tasks but the folded ones (sprintNav, withoutFolded).
+// Another sprint of the team shows through the sprint picker
+// (ui/modals/sprints.js says what opens it; pickSprint, showSprint), and says
+// so in the head ("nicht aktuell"); with no sprint running and none chosen the
+// head says that, and no taskboard shows (sprintIs tells the three apart). The
+// data: { shape: "sprint", meta: { iterationId, iteration, finish (all three
+// null where no sprint runs and none is chosen), currentId (the team's
+// current sprint's, null with none running), gone ({ id, name } of a
 // chosen sprint the team no longer has, or null), typeStates, states,
 // typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
 // hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
@@ -28,11 +26,11 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { cardLabel, itemLabel } from "../../shared.js";
+import { cardLabel, itemLabel, partOfText } from "../../shared.js";
 import { applyMoves, findCard, hasStep, stepTarget } from "../../kinds/board.js";
 import {
   NO_STORY, dayText, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintIs, sprintItems, sprintNav, sprintNavigate, sprintStories,
-  sprintWarnings, toggledFolds, withItemState, withSprintItem, withoutFolded,
+  sprintWarnings, storyProgress, toggledFolds, withItemState, withSprintItem, withoutFolded,
 } from "../../kinds/sprint.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
@@ -40,7 +38,9 @@ import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
 import { stateColor } from "../../kinds/states.js";
-import { assigneeText, cardEdge, columnHead, selectedLook, sessionChip, shownOf, stateChip, store, toneChip, typeLine, workItemDetail } from "../helpers.js";
+import {
+  cardEdge, cardEnd, cardFoot, cardHead, cardMeta, columnHead, selectedLook, shownOf, stateChip, store, toneChip, typeLine, workItemDetail,
+} from "../helpers.js";
 import { NOTE_TONES } from "../tones.js";
 import { MODALS } from "../modals/index.js";
 
@@ -279,12 +279,7 @@ function foldedCell(t, r, { shown, total }) {
   return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
 }
 
-// A row's story at the left: its triangle where its row holds tasks (▾, ▸
-// folded; a click folds or unfolds them and chooses nothing), its key and
-// type, title, state and assignee, and a line across its top in its type's
-// color (typeLine); one the filter or "nur meine" hides (it shows for its
-// tasks) is dimmed and takes no click but on its triangle. The row "Ohne
-// Story" names itself.
+// A story the filter or "nur meine" hides still shows for its tasks, dimmed.
 function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
@@ -292,6 +287,22 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
   const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
+  const end = cardEnd(t, story, null, Boolean(st.pending[story.key]));
+  const meta = cardMeta(t, story, partOfText(story));
+  const fold = counts.get(story.key)?.total
+    ? [div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        if (!b.modal) toggleStoryFold(b, view, story.key, cx);
+      })
+      .child(folded.has(story.key) ? "▸" : "▾")]
+    : [];
+  const head = [
+    ...fold,
+    div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)),
+    ...(story.type ? [div().text_size(11).text_color(t.dim).child(story.type)] : []),
+  ];
   return cell
     .id(`story-${story.key}`)
     .relative()
@@ -303,31 +314,19 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
-    .child(h_flex().gap(6).items_center()
-      .when(Boolean(counts.get(story.key)?.total), (el) => el.child(div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
-        .hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          if (!b.modal) toggleStoryFold(b, view, story.key, cx);
-        })
-        .child(folded.has(story.key) ? "▸" : "▾")))
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
-      .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
-      .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+    .child(cardHead(t, head, story))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
-    .child(h_flex().gap(5).flex_wrap().items_center()
-      .child(stateChip(t, st.data, story.state).flex_none())
-      .when(story.assignees.length > 0, (el) => el.child(assigneeText(t, story))))
+    .when(Boolean(meta), (el) => el.child(meta))
+    .children(cardFoot(t, [stateChip(t, st.data, story.state).flex_none()], storyProgress(st.data, story.key), end))
     .when(Boolean(line), (el) => el.child(line));
 }
 
-// A task's card: its left edge in its column's color, its key, title, own
-// state, assignee and session, and a line across its top in its type's
-// color (typeLine); a click selects it (clickItem).
 function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
-  const session = linkedSession(card, allSpaces);
   const line = typeLine(t, card, st.data.meta.typeColors?.[card.type], 6);
+  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  // In its story's row the row names the parent.
+  const meta = cardMeta(t, card, card.row === NO_STORY ? partOfText(card) : null);
   return h_flex()
     .id(`card-${card.key}`)
     .relative()
@@ -347,13 +346,9 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     })
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(5)
-      .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
-        .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+      .child(cardHead(t, [div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card))], card))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
-      .child(h_flex().gap(5).flex_wrap().items_center()
-        .child(stateChip(t, st.data, shownState(card, col)).flex_none())
-        .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
-        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
+      .when(Boolean(meta), (el) => el.child(meta))
+      .children(cardFoot(t, [stateChip(t, st.data, shownState(card, col)).flex_none()], null, end)))
     .when(Boolean(line), (el) => el.child(line));
 }

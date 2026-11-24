@@ -1,0 +1,410 @@
+{
+  "data": {
+    "viewer": {
+      "login": "sample-user"
+    },
+    "repositoryOwner": {
+      "projectV2": {
+        "id": "PVT_sample",
+        "title": "Sample",
+        "url": "https://github.com/users/sample-user/projects/7",
+        "field": {
+          "id": "PVTSSF_sample",
+          "name": "Status",
+          "options": [
+            {
+              "id": "opt-backlog",
+              "name": "Backlog",
+              "color": "GREEN"
+            },
+            {
+              "id": "opt-ready",
+              "name": "Ready",
+              "color": "BLUE"
+            },
+            {
+              "id": "opt-in-progress",
+              "name": "In progress",
+              "color": "YELLOW"
+            },
+            {
+              "id": "opt-done",
+              "name": "Done",
+              "color": "PURPLE"
+            }
+          ]
+        },
+        "items": {
+          "totalCount": 8,
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnY"
+          },
+          "nodes": [
+            {
+              "id": "PVTI_card1",
+              "fieldValueByName": {
+                "optionId": "opt-in-progress",
+                "name": "In progress"
+              },
+              "priority": {
+                "name": "P1",
+                "color": "ORANGE"
+              },
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample2217",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 2217,
+                "title": "[Epic] Emulator sources and direct launch",
+                "url": "https://github.com/example/tender/issues/2217",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "enhancement",
+                      "color": "a2eeef"
+                    },
+                    {
+                      "name": "area:architecture",
+                      "color": "5319e7"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "sample-user"
+                    }
+                  ]
+                },
+                "milestone": {
+                  "title": "v1"
+                },
+                "parent": {
+                  "number": 1735,
+                  "title": "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver",
+                  "repository": {
+                    "nameWithOwner": "example/tender"
+                  }
+                },
+                "subIssuesSummary": {
+                  "total": 25,
+                  "completed": 14
+                }
+              }
+            },
+            {
+              "id": "PVTI_card2",
+              "fieldValueByName": {
+                "optionId": "opt-in-progress",
+                "name": "In progress"
+              },
+              "priority": null,
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample2195",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 2195,
+                "title": "refactor(atlas): take each catalogue entry and each file's launchability as the resolver states them",
+                "url": "https://github.com/example/tender/issues/2195",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "area:architecture",
+                      "color": "5319e7"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "sample-user"
+                    }
+                  ]
+                },
+                "milestone": {
+                  "title": "v1"
+                },
+                "parent": {
+                  "number": 2217,
+                  "title": "[Epic] Emulator sources and direct launch",
+                  "repository": {
+                    "nameWithOwner": "example/tender"
+                  }
+                },
+                "subIssuesSummary": {
+                  "total": 11,
+                  "completed": 9
+                }
+              }
+            },
+            {
+              "id": "PVTI_card3",
+              "fieldValueByName": {
+                "optionId": "opt-ready",
+                "name": "Ready"
+              },
+              "priority": null,
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample1467",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 1467,
+                "title": "fix(ui): align game-info metadata rows with what RomM actually provides",
+                "url": "https://github.com/example/tender/issues/1467",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "enhancement",
+                      "color": "a2eeef"
+                    },
+                    {
+                      "name": "area:ui",
+                      "color": "e99695"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "sample-user"
+                    }
+                  ]
+                },
+                "milestone": null,
+                "parent": null,
+                "subIssuesSummary": {
+                  "total": 0,
+                  "completed": 0
+                }
+              }
+            },
+            {
+              "id": "PVTI_card4",
+              "fieldValueByName": {
+                "optionId": "opt-ready",
+                "name": "Ready"
+              },
+              "priority": {
+                "name": "P0",
+                "color": "RED"
+              },
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample2301",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 2301,
+                "title": "feat(launch): read the resolver's answer for every file",
+                "url": "https://github.com/example/tender/issues/2301",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "enhancement",
+                      "color": "a2eeef"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "sample-user"
+                    }
+                  ]
+                },
+                "milestone": null,
+                "parent": {
+                  "number": 12,
+                  "title": "Resolver answers for every emulator",
+                  "repository": {
+                    "nameWithOwner": "example/atlas"
+                  }
+                },
+                "subIssuesSummary": {
+                  "total": 31,
+                  "completed": 10
+                }
+              }
+            },
+            {
+              "id": "PVTI_card5",
+              "fieldValueByName": {
+                "optionId": "opt-ready",
+                "name": "Ready"
+              },
+              "priority": {
+                "name": "P2",
+                "color": "GRAY"
+              },
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample2302",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 2302,
+                "title": "chore: sort the sample catalogue",
+                "url": "https://github.com/example/tender/issues/2302",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": []
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "sample-user"
+                    }
+                  ]
+                },
+                "milestone": null,
+                "parent": null,
+                "subIssuesSummary": {
+                  "total": 30,
+                  "completed": 29
+                }
+              }
+            },
+            {
+              "id": "PVTI_card6",
+              "fieldValueByName": {
+                "optionId": "opt-ready",
+                "name": "Ready"
+              },
+              "priority": null,
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample2303",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 2303,
+                "title": "docs: name the sample folders",
+                "url": "https://github.com/example/tender/issues/2303",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": []
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "milestone": null,
+                "parent": null,
+                "subIssuesSummary": {
+                  "total": 0,
+                  "completed": 0
+                }
+              }
+            },
+            {
+              "id": "PVTI_card7",
+              "fieldValueByName": {
+                "optionId": "opt-ready",
+                "name": "Ready"
+              },
+              "priority": null,
+              "content": {
+                "__typename": "PullRequest",
+                "id": "PR_sample2310",
+                "author": {
+                  "login": "sample-user"
+                },
+                "number": 2310,
+                "title": "feat(launch): retry once",
+                "url": "https://github.com/example/tender/pull/2310",
+                "headRefName": "feat/2310-retry",
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": []
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "milestone": {
+                  "title": "v2"
+                },
+                "reviewRequests": {
+                  "nodes": []
+                }
+              }
+            },
+            {
+              "id": "PVTI_card8",
+              "fieldValueByName": {
+                "optionId": "opt-ready",
+                "name": "Ready"
+              },
+              "priority": null,
+              "content": {
+                "__typename": "Issue",
+                "id": "I_sample2304",
+                "author": {
+                  "login": "sample-contributor"
+                },
+                "number": 2304,
+                "title": "docs: name the import steps",
+                "url": "https://github.com/example/tender/issues/2304",
+                "issueType": null,
+                "repository": {
+                  "nameWithOwner": "example/tender"
+                },
+                "labels": {
+                  "nodes": []
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "sample-user"
+                    }
+                  ]
+                },
+                "milestone": null,
+                "parent": null,
+                "subIssuesSummary": {
+                  "total": 0,
+                  "completed": 0
+                }
+              }
+            }
+          ]
+        },
+        "h0": {
+          "totalCount": 0
+        },
+        "h1": {
+          "totalCount": 0
+        }
+      }
+    }
+  }
+}

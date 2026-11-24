@@ -15,9 +15,12 @@
 //   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
 //     names], limit? (a board: the most items it reads, 1000; a list: per
 //     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
-//     board has project { owner, number, field? ("Status") } and filter? (a
-//     Projects filter such as "assignee:@me"); its columns are the options
-//     of that single-select field. A list has sections [{ name, query,
+//     board has project { owner, number, field? ("Status"), priorityField?
+//     ("Priority") } and filter? (a Projects filter such as "assignee:@me");
+//     its columns are the options of that single-select field, a card's
+//     priority its option of the single-select field priorityField names
+//     (none where the project has no such field; one views.json names that
+//     the project lacks is a warning). A list has sections [{ name, query,
 //     tone? }], one GitHub search for pull requests each; tone is one of
 //     SECTION_TONES (shared.js), and without one a section takes the next
 //     of SECTION_TONE_ORDER by its place that no other section sets. A view
@@ -38,54 +41,58 @@
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
-// its limit take: ten for the 1000 by default; a list view one, and one more
-// per THREAD_IDS (100) pull requests in it with more than FIRST_THREADS (10)
-// review threads. GitHub prices a request by its connections, each counted
-// as full: the list's per section one search, then per pull request of its
-// limit (50 by default) its assignees, review requests, last commit (and
-// that one's checks), latest reviews (LATEST_REVIEWS, 20) and review
-// threads, and per thread (FIRST_THREADS) its comments, so with the defaults
-// 1 + 50 * 6 + 50 * 10 = 801 requests a section, about 8 points (a hundred
-// requests each) of GitHub's 5000 an hour, 24 for the shipped three
-// sections; the follow-up (githubThreadsArgs) 51 per such pull request
-// (REVIEW_THREADS threads and their comments), about one point for two. An
-// issue's related items (its description, parent, sub-issues and linked pull
-// requests) cost one more when its details open, again on `r` while they are
-// open, and again after a refresh where their last read failed (readRelated;
-// what a refresh keeps of them keptRelated says); an item the details panel
-// went down to (Enter on a line, related.js) costs the same when it shows, a
-// pull request one gh or az call for its details (az repos pr show), and on
-// `r` each level's again, so that a level whose item is no longer among the
-// lines of the one above can go. An Azure work item's related items (its
-// description, parent, children and linked pull requests) cost the same, one
-// az call (az boards work-item show --expand relations), and one WIQL query
-// more for its children's and its parent's titles and states where it has
-// either (sources/azure/related.js). An Azure team's Sprint two az calls
-// (the taskboard's column of each work item, and one WIQL query for their
-// fields; for a sprint the sprint picker chose, by its id and path; none
-// while the team has no sprint running and none is chosen), its Backlog two,
-// one after the other (the level's work items in their list by az rest, then
-// one WIQL query for their fields; one for an empty backlog), and one more
-// for the project's work item types (their colors) while neither view keeps
-// them; either one more while who az is stays unknown. What the Sprint and
-// the Backlog read once and keep, and for how long, makeAzure says. An
-// assignment costs one gh or az call, and the assignee picker one more per
-// repo or team the first time it opens there (GitHub's assignable users with
-// who gh is; the team's members, and who az is while that is unknown). The
-// sprint picker costs one az call (the team's iterations) the first time it
-// opens for a team, one more for the team's current sprint where the Sprint
-// keeps none, and a refresh of a sprint it chose one where `r` dropped them.
-// A state change costs one az call, a Backlog's create one and a child's
-// parent link one more; a create reads the Backlog again, and one whose
-// answer was unclear asks one WIQL query more after that refresh; a create
-// for a team whose default iteration follows the current one reads the
-// team's settings first, one call more. The PR tabs read nothing yet.
-// Finding gh and az costs one sh call now and then (toolPaths says when). A
-// view refreshes when its tab first shows, on `r` (which first drops what
-// its source keeps of it: its source's forget), after a column is hidden or
-// shown (the command menu's "Spalte ausblenden", a name in the hidden line,
-// the column menu), when it is shown again older than refreshMinutes, and
-// every refreshMinutes while it shows.
+// its limit take: ten for the 1000 by default (each item's priority,
+// milestone and parent, with its title and repo, and the first page's look
+// at the priority field add no connection and so no points; see below); a
+// list view one, and one more per THREAD_IDS (100) pull requests in it with
+// more than FIRST_THREADS (10) review threads. GitHub prices a request by
+// its connections, each counted as full: the list's per section one search,
+// then per pull request of its limit (50 by default) its assignees, review
+// requests, last commit (and that one's checks), latest reviews
+// (LATEST_REVIEWS, 20) and review threads, and per thread (FIRST_THREADS)
+// its comments, so with the defaults 1 + 50 * 6 + 50 * 10 = 801 requests a
+// section, about 8 points (a hundred requests each) of GitHub's 5000 an
+// hour, 24 for the shipped three sections; the follow-up (githubThreadsArgs)
+// 51 per such pull request (REVIEW_THREADS threads and their comments),
+// about one point for two. An issue's related items (its description,
+// parent, sub-issues and linked pull requests) cost one more when its
+// details open, again on `r` while they are open, and again after a refresh
+// where their last read failed (readRelated; what a refresh keeps of them
+// keptRelated says); an item the details panel went down to (Enter on a
+// line, related.js) costs the same when it shows, a pull request one gh or
+// az call for its details (az repos pr show), and on `r` each level's again,
+// so that a level whose item is no longer among the lines of the one above
+// can go. An Azure work item's related items (its description, parent,
+// children and linked pull requests) cost the same, one az call (az boards
+// work-item show --expand relations), and one WIQL query more for its
+// children's and its parent's titles and states where it has either
+// (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// taskboard's column of each work item, and one WIQL query for their fields;
+// for a sprint the sprint picker chose, by its id and path; none while the
+// team has no sprint running and none is chosen) and one WIQL query more
+// where its items have parents outside the sprint that it does not keep yet
+// (parentTitles), its Backlog two, one after the other (the level's work
+// items in their list by az rest, then one WIQL query for their fields; one
+// for an empty backlog), and one more for the project's work item types
+// (their colors) while neither view keeps them; either one more while who az
+// is stays unknown. What the Sprint and the Backlog read once and keep, and
+// for how long, makeAzure says. An assignment costs one gh or az call, and
+// the assignee picker one more per repo or team the first time it opens there
+// (GitHub's assignable users with who gh is; the team's members, and who az
+// is while that is unknown). The sprint picker costs one az call (the team's
+// iterations) the first time it opens for a team, one more for the team's
+// current sprint where the Sprint keeps none, and a refresh of a sprint it
+// chose one where `r` dropped them. A state change costs one az call, a
+// Backlog's create one and a child's parent link one more; a create reads the
+// Backlog again, and one whose answer was unclear asks one WIQL query more
+// after that refresh; a create for a team whose default iteration follows the
+// current one reads the team's settings first, one call more. The PR tabs
+// read nothing yet. Finding gh and az costs one sh call now and then
+// (toolPaths says when). A view refreshes when its tab first shows, on `r`
+// (which first drops what its source keeps of it: its source's forget), after
+// a column is hidden or shown (the command menu's "Spalte ausblenden", a name
+// in the hidden line, the column menu), when it is shown again older than
+// refreshMinutes, and every refreshMinutes while it shows.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -227,6 +234,15 @@ export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", 
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
+
+export const relativeLabel = (root, item) => (item.source === "github" && item.repo === root.repo ? `#${item.number}` : cardLabel(item));
+
+export function partOfText(item) {
+  if (!Number.isInteger(item.parent)) return null;
+  const repo = item.parentRepo ?? item.repo;
+  const parent = { source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo?.split("/").pop() };
+  return ["Teil von", relativeLabel(item, parent), item.parentTitle].filter(Boolean).join(" ");
+}
 
 // An item that is an Epic by its title alone: "[Epic] …", the convention of
 // a project without issue types.
@@ -390,11 +406,17 @@ const VIEW_KINDS = {
       const out = [];
       if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
         out.push("„project“ braucht „owner“ (Text) und „number“ (ganze Zahl)");
-      } else if (p.field !== undefined && !isText(p.field)) out.push("„project.field“ muss Text sein");
+      } else {
+        out.push(...["field", "priorityField"].filter((k) => p[k] !== undefined && !isText(p[k])).map((k) => `„project.${k}“ muss Text sein`));
+      }
       return [...out, ...textProblems(v, ["filter"])];
     },
     defaults: (v) => ({
-      project: { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" },
+      project: {
+        owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status", priorityField: v.project.priorityField ?? "Priority",
+        // A project may lack the default one: only a named one it lacks is told.
+        priorityGiven: v.project.priorityField !== undefined,
+      },
       filter: v.filter ?? "",
       limit: v.limit ?? BOARD_LIMIT,
     }),
@@ -913,6 +935,17 @@ export function shownColumns(board, filter, mine = false) {
   return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }
 
+// ==== src/kinds/states.js ====
+
+// A work item's state as the board shows it: its theme color, and whether
+// it counts as done.
+
+// The theme color of a state, and whether it is done, by its category
+// (data.meta.states: categoryStates, from parseAzureTypes and
+// parseBacklogConfig).
+export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
+export const stateDone = (data, name) => data.meta.states.find((s) => s.name === name)?.done === true;
+
 // ==== src/kinds/sprint.js ====
 
 // A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
@@ -980,6 +1013,12 @@ export function rowCounts(data, nav) {
 
 // The tasks of the row `key`, in every column.
 export const rowTasks = (data, key) => data.columns.flatMap((c) => c.cards.filter((t) => t.row === key));
+
+// Whatever the filter shows; done by the state the task's column shows.
+export function storyProgress(data, key) {
+  const states = data.columns.flatMap((c) => c.cards.filter((t) => t.row === key).map((t) => shownState(t, c)));
+  return states.length ? { total: states.length, done: states.filter((s) => stateDone(data, s)).length } : null;
+}
 
 // Which stories a Sprint view has folded, as the store keeps it
 // ("folded:<view>": { sprint: the iteration's id, stories: [story keys] });
@@ -1537,10 +1576,7 @@ export const AZ_ME_TIMEOUT = 15000;
 // A text in a WIQL query: in single quotes, a quote in it doubled.
 export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 
-// The fields read here are all System. ones. The field names that would
-// stand alone in quotes are built from SYSTEM: the command check
-// (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
-// for a herdr command.
+// Built from SYSTEM: the command check (tests/herdr-app/check-commands.py) takes System.Id in quotes for a command.
 const SYSTEM = "System.";
 export const AREA_PATH = `${SYSTEM}AreaPath`;
 // A work item's description (HTML), and the link to a child.
@@ -1550,8 +1586,11 @@ export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
 export const PARENT_LINK = `${SYSTEM}LinkTypes.Hierarchy-Reverse`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
+// 1 (the highest) to 4, where the work item's type has one.
+export const PRIORITY = "Microsoft.VSTS.Common.Priority";
+
 // The fields read of each work item.
-export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+export const WORK_ITEM_FIELDS = [...["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f), PRIORITY];
 
 // One WIQL query for the fields of the work items `ids` (WORK_ITEM_FIELDS
 // and `extraFields`), in the order of their ids.
@@ -1615,16 +1654,23 @@ export function azPerson(who) {
   return { name: personName({ name: who.displayName, login: who.uniqueName }), login: who.uniqueName?.toLowerCase() ?? null };
 }
 
+const PRIORITY_TONES = { 1: "ansi1", 2: "ansi11" };
+
+export function azPriority(value) {
+  return Number.isInteger(value) ? { name: `P${value}`, tone: PRIORITY_TONES[value] ?? "muted" } : null;
+}
+
 // A work item of az boards query's answer as the board shows it, keyed as
 // itemKey names it; with an `orderField`, its value there as `order` (a
-// number, else null).
+// number, else null). az's answer holds no parent's title: the Sprint reads
+// it (parentTitles).
 export function azWorkItem(wi, c, orderField = null) {
   const f = (name) => fieldOf(wi, name) ?? null;
   const who = azPerson(f("AssignedTo"));
   const item = {
     source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
     state: f("State"), assignees: who.name ? [who.name] : [], assigneeLogins: who.login ? [who.login] : [],
-    parent: f("Parent"), area: f("AreaPath"), iteration: f("IterationPath"),
+    parent: f("Parent"), parentTitle: null, area: f("AreaPath"), iteration: f("IterationPath"), priority: azPriority(wi.fields?.[PRIORITY]),
     url: workItemUrl(c, wi.id), labels: [], sub: null, branch: null,
     ...(orderField ? { order: typeof wi.fields?.[orderField] === "number" ? wi.fields[orderField] : null } : {}),
   };
@@ -1925,6 +1971,30 @@ export function checkTaskboardMove(stdout, card, column) {
   }
 }
 
+export const PARENTS_UNREAD = "Titel der übergeordneten Work Items nicht gelesen";
+const parentsKey = (s, c) => `parents\n${s.teamKey(c)}`;
+
+// One query by id for the parents outside the sprint: az boards query reads no linked item (sources/azure/related.js).
+export async function parentTitles(s, c, items) {
+  const key = parentsKey(s, c);
+  const held = s.keptValue(key);
+  const titles = new Map(held?.value ?? []);
+  const own = new Map(items.map((i) => [i.number, i.title]));
+  const missing = [...new Set(items.map((i) => i.parent).filter((id) => Number.isInteger(id) && !own.has(id) && !titles.has(id)))];
+  let warning = null;
+  if (missing.length) {
+    try {
+      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing))), c).map((i) => [i.number, i.title]));
+      for (const id of missing) titles.set(id, found.get(id) ?? null);
+      s.keep(key, titles, held?.until ?? Date.now() + TEAM_KEEP_MS);
+    } catch (e) {
+      warning = `${PARENTS_UNREAD}: ${errorText(e)}`;
+    }
+  }
+  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
+  return { items: items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i)), warning };
+}
+
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
 // makeAzure, which says what is kept and for how long): what it keeps per
 // team and project (settingsOf; the team's areas are the source's,
@@ -1934,7 +2004,7 @@ export function checkTaskboardMove(stdout, card, column) {
 // never names a sprint current that has ended), and what a refused write
 // or a task in a column the columns read do not know drops (forgetSettings:
 // the team's sprint, areas and columns, not the project's types); `r`
-// drops the team's iterations too (forget).
+// drops the team's iterations and its parent titles too (forget).
 //
 // load(view, hiddenFor, chosen) shows the sprint `chosen` ({ id, name };
 // null: the current one), looked up by its id among the team's
@@ -1987,19 +2057,19 @@ export function sprintView(s) {
       : [null, null];
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
-    const data = sprintBoard({
-      ...kept, iteration, currentId, gone,
-      items: items === null ? [] : parseWorkItems(items, c), places: places === null ? new Map() : parseTaskboard(places), viewer: await me,
-    });
+    const placed = places === null ? new Map() : parseTaskboard(places);
+    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c));
+    const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled.items, places: placed, viewer: await me });
     s.noViewerOf(data);
     if (data.meta.unknownColumns) forgetSettings(c);
     const instead = currentId ? "der aktuelle Sprint wird gezeigt" : "das Team hat keinen laufenden Sprint";
-    return { data, warnings: kept.types.warnings, notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
+    return { data, warnings: [...kept.types.warnings, ...(titled.warning ? [titled.warning] : [])], notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
   }
   return {
     forget: (c) => {
       forgetSettings(c);
       iterations.drop(s.teamKey(c));
+      s.drop(parentsKey(s, c));
     },
     async iterations(view) {
       const c = view.context;
@@ -2495,18 +2565,21 @@ export const azureRelated = (az) => ({
 // (iterationUntil), or, where the team has no sprint running, until that day
 // ends (dayEnd; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint (or that none runs) and taskboard
-// columns. The team's iterations, which the sprint picker lists, are read
-// when it first opens and kept while the board runs (one that fails keeps
-// nothing); which of them is current, the kept current sprint says. The
-// project's work item types, one entry for both views (typesOf), are kept
-// TEAM_KEEP_MS from their read (even where another read of the Sprint's
+// columns. The titles of its items' parents outside the sprint are read
+// after its work items, only for those not kept yet, and kept TEAM_KEEP_MS
+// (parentTitles). The team's iterations, which the sprint picker lists, are
+// read when it first opens and kept while the board runs (one that fails
+// keeps nothing); which of them is current, the kept current sprint says.
+// The project's work item types, one entry for both views (typesOf), are
+// kept TEAM_KEEP_MS from their read (even where another read of the Sprint's
 // settings fails), or, where a Sprint's whole settings read brought them, as
 // long as the Sprint's settings. What is not kept is read at the same time.
 // A refresh then reads the taskboard's columns of the work items and the
 // sprint's work items, also at the same time. The team's kept settings (not
 // the project's types) are dropped, so that they are read again, by `r` on
 // the Sprint (forget), by a task in a column the columns read do not know,
-// and by a move or state change Azure refuses; its iterations only by `r`.
+// and by a move or state change Azure refuses; its iterations and parent
+// titles only by `r`.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
 // for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the
@@ -2669,13 +2742,14 @@ const quoted = (value) => `"${value.replace(/"/g, "")}"`;
 const ITEM_FIELDS = `
   id
   fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
+  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { name color } }
   content {
     __typename
     ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } }
-      parent { number } subIssuesSummary { total completed } }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
+      parent { number title repository { nameWithOwner } } subIssuesSummary { total completed } }
     ... on PullRequest { id number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
@@ -2701,7 +2775,7 @@ function itemsSelection(view, read, paged) {
 
 // A board's query: its variables after the ones every page has, what it
 // reads besides the project (`head`), and what it reads of the project.
-const boardQuery = (vars, head, project) => `query($login: String!, $number: Int!, $field: String!, $filter: String!${vars}) {
+const boardQuery = (vars, head, project) => `query($login: String!, $number: Int!, $field: String!, $priority: String!, $filter: String!${vars}) {
 ${head}  repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -2711,18 +2785,15 @@ ${head}  repositoryOwner(login: $login) {
   }
 }`;
 
-// gh's arguments for the board query `doc`: the project, its field and the
-// filter of its shown items.
 function boardArgs(view, hidden, doc) {
-  const { owner, number, field } = view.project;
-  return ["api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`, "-f", `filter=${boardFilter(view, hidden)}`];
+  const { owner, number, field, priorityField } = view.project;
+  return [
+    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`, "-f", `priority=${priorityField}`,
+    "-f", `filter=${boardFilter(view, hidden)}`,
+  ];
 }
 
-// One GraphQL request for a board view: the project, its field's options and
-// the first page of the items of the shown columns, plus one count per
-// hidden column (`h0`, `h1`, … aliases, first: 0) for the column menu, and
-// the login gh runs as (for "nur meine"). The pages after it come by
-// githubBoardPageArgs.
+// The hidden columns' counts (first: 0) are for the column menu.
 export function githubBoardArgs(view, hidden) {
   const names = [...hidden];
   const key = fieldKey(view.project.field);
@@ -2730,6 +2801,7 @@ export function githubBoardArgs(view, hidden) {
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
   const doc = boardQuery(vars, "  viewer { login }\n", `id title url
         field(name: $field) { ... on ProjectV2SingleSelectField { id name options { id name color } } }
+        priorityField: field(name: $priority) { ... on ProjectV2SingleSelectField { id } }
         ${itemsSelection(view, 0, false)}${counts}`);
   return [...boardArgs(view, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(view, `${key}:${quoted(n)}`)}`])];
 }
@@ -2743,6 +2815,7 @@ export function githubBoardPageArgs(view, hidden, after, read) {
 
 // Where a board's items stand in its answers.
 const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
+const PRIORITY_FIELD_PATH = ["repositoryOwner", "projectV2", "priorityField"];
 
 // The error that explains a page without its items: the deepest one on the
 // way to them (the owner's, the project's, the items' own), else the
@@ -2813,6 +2886,11 @@ const assigneesOf = (nodes) => {
   return { assignees: names, assigneeLogins: logins };
 };
 
+function githubPriority(value) {
+  if (typeof value?.name !== "string" || !value.name) return null;
+  return { name: value.name, tone: GITHUB_COLORS[value.color] ?? "muted" };
+}
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
@@ -2837,6 +2915,10 @@ function githubCard(node) {
     type: c.issueType?.name ?? null,
     typeColor: GITHUB_COLORS[c.issueType?.color] ?? null,
     parent: c.parent?.number ?? null,
+    parentTitle: c.parent?.title ?? null,
+    parentRepo: c.parent?.repository?.nameWithOwner ?? null,
+    milestone: c.milestone?.title ?? null,
+    priority: githubPriority(node.priority),
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
     branch: c.headRefName ?? null,
     column: node.fieldValueByName?.optionId ?? NO_STATUS,
@@ -2851,17 +2933,6 @@ export function errorAt(errors, path) {
 // Every GraphQL error whose path starts with `path`.
 export const errorsAt = (errors, path) => (errors ?? []).filter((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p));
 
-// gh's answer for githubBoardArgs (and the GraphQL errors that came with its
-// data) → a board:
-// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer, read }
-// (viewer: the login gh runs as, null when GitHub did not say; limited:
-// whether GitHub has more than the answer holds; read: how many items it
-// holds).
-// A hidden column's cards are only those moved there since the last refresh;
-// its count is the server's plus those. Items without a status, or in an
-// option the field no longer has, go to "Ohne Status", which takes no drops.
-// A missing owner, project, field or item list is explained by the error at
-// its path.
 export function parseGithubBoard(json, view, hidden, errors = []) {
   const { owner, number, field: fieldName } = view.project;
   const ownerNode = json?.data?.repositoryOwner;
@@ -2909,7 +2980,13 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
   }
   return {
     shape: "board",
-    meta: { projectId: project.id, fieldId: field.id, title: project.title, url: project.url },
+    meta: {
+      projectId: project.id,
+      fieldId: field.id,
+      title: project.title,
+      url: project.url,
+      lacksPriorityField: !project.priorityField?.id && !errorAt(errors, PRIORITY_FIELD_PATH),
+    },
     columns,
     total: project.items.totalCount,
     limited: project.items.pageInfo.hasNextPage,
@@ -3699,14 +3776,8 @@ export function keptRelated(related, openKey, deeper = []) {
 }
 
 // The way the panel went down from `root` (the board's selected item) to
-// the items `levels`, as its top shows it: "tender#914 › #2217". A GitHub
-// item in the root's repo is named by its number ("#2217"), one in
-// another by its label; an Azure work item by its number alone, as a card
-// names it (cardLabel).
-export function pathLabel(root, levels) {
-  const label = (i) => (i.source === "github" && i.repo === root.repo ? `#${i.number}` : cardLabel(i));
-  return [cardLabel(root), ...levels.map(label)].join(" › ");
-}
+// the items `levels`, as its top shows it: "tender#914 › #2217".
+export const pathLabel = (root, levels) => [cardLabel(root), ...levels.map((i) => relativeLabel(root, i))].join(" › ");
 
 // The sections of read related items, in the order of their lines: the
 // parent first, then the sub-issues, then the linked pull requests.
@@ -4016,6 +4087,8 @@ export const headBg = (t, tone, ground) => paletteOf(t).head(tone, ground);
 export const dropBg = (t, ground) => paletteOf(t).drop(ground);
 export const markColor = (t) => paletteOf(t).mark;
 
+export const namedTone = (t, name) => paletteOf(t).named(name);
+
 // The tone of a note's level, which toneColor draws every note the board
 // shows in: an error, a warning, a success, information.
 export const NOTE_TONES = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
@@ -4126,17 +4199,6 @@ export function typeTone(t, item) {
   const label = epicLabel(item);
   return label ? hueTone(t, item.labelColors?.[label]) : "muted";
 }
-
-// ==== src/kinds/states.js ====
-
-// A work item's state as the board shows it: its theme color, and whether
-// it counts as done.
-
-// The theme color of a state, and whether it is done, by its category
-// (data.meta.states: categoryStates, from parseAzureTypes and
-// parseBacklogConfig).
-export const stateColor = (data, name) => data.meta.states.find((s) => s.name === name)?.color ?? "muted";
-export const stateDone = (data, name) => data.meta.states.find((s) => s.name === name)?.done === true;
 
 // ==== src/ui/helpers.js ====
 
@@ -4634,6 +4696,60 @@ export function typeChip(t, item) {
 
 // A card's chip for its session (linkedSession): what its agent does.
 export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);
+
+export function priorityChip(t, item) {
+  if (!item.priority) return null;
+  return toneChip(t, item.priority.name, namedTone(t, item.priority.tone)).id("priority").flex_none();
+}
+
+// `kids`: the key, on a story its fold and type too.
+export function cardHead(t, kids, item) {
+  const priority = priorityChip(t, item);
+  return h_flex().gap(6).items_center().children(kids).when(Boolean(priority), (el) => el.child(div().flex_1()).child(priority));
+}
+
+// `parent`: partOfText, or null where the card names none.
+export function cardMeta(t, item, parent) {
+  if (!item.milestone && !parent) return null;
+  return h_flex()
+    .id("card-meta")
+    .gap(8)
+    .items_center()
+    .min_w(0)
+    .when(Boolean(item.milestone), (el) => el.child(toneChip(t, item.milestone, "muted").id("milestone").flex_none()))
+    .when(Boolean(parent), (el) => el.child(div().id("parent").flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(parent)));
+}
+
+// `pending`: a write of the card is under way.
+export const cardEnd = (t, item, session, pending) => [
+  ...(session ? [sessionChip(t, session).flex_none()] : []),
+  ...(pending ? [div().flex_none().text_size(11).text_color(t.dim).child("speichert …")] : []),
+  ...(item.assignees.length ? [assigneeText(t, item).min_w(0).truncate()] : []),
+];
+
+export function cardFoot(t, chips, progress, end) {
+  const bar = progressLine(t, progress, end);
+  return [chipLine(chips, bar ? [] : end), bar].filter(Boolean);
+}
+
+function chipLine(chips, end) {
+  if (!chips.length && !end.length) return null;
+  return h_flex().id("card-chips").gap(5).items_center().child(h_flex().flex_1().min_w(0).gap(5).flex_wrap().items_center().children(chips)).children(end);
+}
+
+export const PROGRESS_SEGMENTS = 30;
+export const PROGRESS_TONE = "ansi2";
+
+export function progressLine(t, progress, end) {
+  if (!progress?.total) return null;
+  const { done, total } = progress;
+  const on = toneColor(t, PROGRESS_TONE);
+  const bar = total <= PROGRESS_SEGMENTS
+    ? h_flex().id("progress-bar").flex_1().min_w(40).gap(2).children(Array.from({ length: total }, (_, i) => div().flex_1().h(6).rounded(1).bg(i < done ? on : t.border)))
+    : div().id("progress-bar").flex_1().min_w(40).h(6).rounded(1).bg(t.border).child(div().h(6).w(`${((100 * done) / total).toFixed(2)}%`).rounded(1).bg(on));
+  const number = (text) => div().flex_none().text_size(11).text_color(t.muted).child(text);
+  return h_flex().id("card-progress").gap(8).items_center().child(number(`${done} / ${total}`)).child(bar).child(number(`${Math.floor((100 * done) / total)} %`)).children(end);
+}
 
 // ==== src/kinds/backlog.js ====
 
@@ -6761,8 +6877,8 @@ export function unclearMoveLines(due, data) {
 // the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
 // count, target, cards }], total, limited, viewer, read }
-// (parseGithubBoard). View fields it reads: id, source, layout and hide (the
-// columns hidden by default).
+// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
+// columns hidden by default) and project.priorityField.
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
@@ -6798,7 +6914,12 @@ export const boardShape = {
   canMove: (st, item, by) => hasStep(st.data, item.key, by),
   canHide: hideable,
   received: (data, st) => applyMoves(data, st.moves),
-  warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
+  warnings: (view, data) => [
+    ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
+    ...(view.project.priorityGiven && data.meta.lacksPriorityField
+      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ (project.priorityField): die Karten zeigen keine Priorität`]
+      : []),
+  ],
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
   assign: BOARD_ASSIGN,
@@ -6922,18 +7043,15 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-// A card in its column `col`: its left edge in the column's color, its key,
-// its title, and a line of its type and labels as chips (not the label an
-// Epic by its title takes its type's color from: epicLabel), its
-// sub-issues' count, its assignees and its session's chip; an issue type
-// with a color draws a line across its top in that color too (typeLine).
 function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
-  const session = linkedSession(card, allSpaces);
   const type = typeChip(t, card);
   const labels = card.labels.filter((l) => l !== epicLabel(card));
   const line = typeLine(t, card, null, 6);
+  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  const chips = [...(type ? [type] : []), ...labels.slice(0, 3).map((l) => labelChip(t, card, l)), ...(labels.length > 3 ? [chip(t, `+${labels.length - 3}`)] : [])];
+  const meta = cardMeta(t, card, partOfText(card));
   return h_flex()
     .id(`card-${card.key}`)
     .relative()
@@ -6969,26 +7087,10 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
     })
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(6)
-      .child(
-        h_flex()
-          .gap(6)
-          .items_center()
-          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
-          .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
-      )
+      .child(cardHead(t, [div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card))], card))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
-      .child(
-        h_flex()
-          .gap(5)
-          .flex_wrap()
-          .items_center()
-          .when(Boolean(type), (el) => el.child(type))
-          .children(labels.slice(0, 3).map((l) => labelChip(t, card, l)))
-          .when(labels.length > 3, (el) => el.child(chip(t, `+${labels.length - 3}`)))
-          .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
-          .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
-          .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
-      ))
+      .when(Boolean(meta), (el) => el.child(meta))
+      .children(cardFoot(t, chips, card.sub, end)))
     .when(Boolean(line), (el) => el.child(line));
 }
 
@@ -7165,25 +7267,23 @@ function scrollToRow(b, view, key) {
 // ==== src/ui/shapes/sprint.js ====
 
 // The sprint shape: a team's sprint (its current one, or one the sprint picker
-// chose) as a taskboard. One row per story
-// (its id, title and own state at the left), its tasks as cards in the team's
-// taskboard columns, each with its own state, assignee and id and the chip of
-// its session where it has one; tasks whose story is not in the sprint stand in
-// the row "Ohne Story". H/L move a task to the next column (through the
-// taskboard's own column, not the state: two columns may map to one state), s
-// changes a story's or a task's state from its type's states (the status menu),
-// Enter shows the details; both write at once (actions/move.js,
-// actions/write.js). z (while the board has the keyboard), or a click on the
-// triangle in a story's row, folds its tasks away and back (toggleStoryFold;
-// foldsOf says where that is kept). Keys walk the stories, then each column's
-// tasks but the folded ones (sprintNav, withoutFolded). Another sprint of the
-// team shows through the sprint picker (ui/modals/sprints.js says what opens
-// it; pickSprint, showSprint), and says so in the head ("nicht aktuell");
-// with no sprint running and none chosen the head says that, and no taskboard
-// shows (sprintIs tells the three apart). The data: { shape: "sprint", meta:
-// { iterationId, iteration, finish (all three null where no sprint runs and
-// none is chosen), currentId (the team's current sprint's, null with none
-// running), gone ({ id, name } of a
+// chose) as a taskboard. One row per story (storyCell at the left), its tasks
+// as cards in the team's taskboard columns (drawTask); tasks whose story is
+// not in the sprint stand in the row "Ohne Story". H/L move a task to the next
+// column (through the taskboard's own column, not the state: two columns may
+// map to one state), s changes a story's or a task's state from its type's
+// states (the status menu), Enter shows the details; both write at once
+// (actions/move.js, actions/write.js). z (while the board has the keyboard),
+// or a click on the triangle in a story's row, folds its tasks away and back
+// (toggleStoryFold; foldsOf says where that is kept). Keys walk the stories,
+// then each column's tasks but the folded ones (sprintNav, withoutFolded).
+// Another sprint of the team shows through the sprint picker
+// (ui/modals/sprints.js says what opens it; pickSprint, showSprint), and says
+// so in the head ("nicht aktuell"); with no sprint running and none chosen the
+// head says that, and no taskboard shows (sprintIs tells the three apart). The
+// data: { shape: "sprint", meta: { iterationId, iteration, finish (all three
+// null where no sprint runs and none is chosen), currentId (the team's
+// current sprint's, null with none running), gone ({ id, name } of a
 // chosen sprint the team no longer has, or null), typeStates, states,
 // typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
 // hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
@@ -7426,12 +7526,7 @@ function foldedCell(t, r, { shown, total }) {
   return div().id(`folded-${r.key}`).flex_1().min_w(0).py(6).text_size(12).text_color(t.muted).child(`${shownOf(shown, total)} ${total === 1 ? "Task" : "Tasks"}`);
 }
 
-// A row's story at the left: its triangle where its row holds tasks (▾, ▸
-// folded; a click folds or unfolds them and chooses nothing), its key and
-// type, title, state and assignee, and a line across its top in its type's
-// color (typeLine); one the filter or "nur meine" hides (it shows for its
-// tasks) is dimmed and takes no click but on its triangle. The row "Ohne
-// Story" names itself.
+// A story the filter or "nur meine" hides still shows for its tasks, dimmed.
 function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
   const cell = v_flex().w(STORY_WIDTH).flex_none().gap(4);
   if (!r.story) return cell.child(div().text_size(12.5).font_semibold().text_color(t.muted).child("Ohne Story"));
@@ -7439,6 +7534,22 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
   const shown = nav[0].shown.includes(story);
   const selected = st.sel?.key === story.key;
   const line = typeLine(t, story, st.data.meta.typeColors?.[story.type], 6);
+  const end = cardEnd(t, story, null, Boolean(st.pending[story.key]));
+  const meta = cardMeta(t, story, partOfText(story));
+  const fold = counts.get(story.key)?.total
+    ? [div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        if (!b.modal) toggleStoryFold(b, view, story.key, cx);
+      })
+      .child(folded.has(story.key) ? "▸" : "▾")]
+    : [];
+  const head = [
+    ...fold,
+    div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)),
+    ...(story.type ? [div().text_size(11).text_color(t.dim).child(story.type)] : []),
+  ];
   return cell
     .id(`story-${story.key}`)
     .relative()
@@ -7450,31 +7561,19 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     .when(shown, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => {
       if (!b.modal) b.clickItem(view, { col: 0, key: story.key }, cx);
     }))
-    .child(h_flex().gap(6).items_center()
-      .when(Boolean(counts.get(story.key)?.total), (el) => el.child(div().id(`fold-${story.key}`).flex_none().w(12).text_size(11).text_color(t.muted).cursor_pointer()
-        .hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          if (!b.modal) toggleStoryFold(b, view, story.key, cx);
-        })
-        .child(folded.has(story.key) ? "▸" : "▾")))
-      .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)))
-      .when(Boolean(story.type), (el) => el.child(div().text_size(11).text_color(t.dim).child(story.type)))
-      .when(Boolean(st.pending[story.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+    .child(cardHead(t, head, story))
     .child(div().text_size(12.5).line_height("17px").child(story.title))
-    .child(h_flex().gap(5).flex_wrap().items_center()
-      .child(stateChip(t, st.data, story.state).flex_none())
-      .when(story.assignees.length > 0, (el) => el.child(assigneeText(t, story))))
+    .when(Boolean(meta), (el) => el.child(meta))
+    .children(cardFoot(t, [stateChip(t, st.data, story.state).flex_none()], storyProgress(st.data, story.key), end))
     .when(Boolean(line), (el) => el.child(line));
 }
 
-// A task's card: its left edge in its column's color, its key, title, own
-// state, assignee and session, and a line across its top in its type's
-// color (typeLine); a click selects it (clickItem).
 function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
   const selected = st.sel?.key === card.key;
-  const session = linkedSession(card, allSpaces);
   const line = typeLine(t, card, st.data.meta.typeColors?.[card.type], 6);
+  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  // In its story's row the row names the parent.
+  const meta = cardMeta(t, card, card.row === NO_STORY ? partOfText(card) : null);
   return h_flex()
     .id(`card-${card.key}`)
     .relative()
@@ -7494,14 +7593,10 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
     })
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(5)
-      .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
-        .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))))
+      .child(cardHead(t, [div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card))], card))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
-      .child(h_flex().gap(5).flex_wrap().items_center()
-        .child(stateChip(t, st.data, shownState(card, col)).flex_none())
-        .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
-        .when(Boolean(session), (el) => el.child(sessionChip(t, session)))))
+      .when(Boolean(meta), (el) => el.child(meta))
+      .children(cardFoot(t, [stateChip(t, st.data, shownState(card, col)).flex_none()], null, end)))
     .when(Boolean(line), (el) => el.child(line));
 }
 

@@ -9,6 +9,7 @@
 import { lastDayOver } from "../shared.js";
 import { navigate, shows } from "../select.js";
 import { findCard, shownColumns } from "./board.js";
+import { stateDone } from "./states.js";
 
 // The key of the row "Ohne Story", and the id of the column of stories the
 // keys walk first.
@@ -67,6 +68,12 @@ export function rowCounts(data, nav) {
 
 // The tasks of the row `key`, in every column.
 export const rowTasks = (data, key) => data.columns.flatMap((c) => c.cards.filter((t) => t.row === key));
+
+// Whatever the filter shows; done by the state the task's column shows.
+export function storyProgress(data, key) {
+  const states = data.columns.flatMap((c) => c.cards.filter((t) => t.row === key).map((t) => shownState(t, c)));
+  return states.length ? { total: states.length, done: states.filter((s) => stateDone(data, s)).length } : null;
+}
 
 // Which stories a Sprint view has folded, as the store keeps it
 // ("folded:<view>": { sprint: the iteration's id, stories: [story keys] });

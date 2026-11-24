@@ -20,13 +20,14 @@ const quoted = (value) => `"${value.replace(/"/g, "")}"`;
 const ITEM_FIELDS = `
   id
   fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
+  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { name color } }
   content {
     __typename
     ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } }
-      parent { number } subIssuesSummary { total completed } }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
+      parent { number title repository { nameWithOwner } } subIssuesSummary { total completed } }
     ... on PullRequest { id number title url headRefName repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
@@ -52,7 +53,7 @@ function itemsSelection(view, read, paged) {
 
 // A board's query: its variables after the ones every page has, what it
 // reads besides the project (`head`), and what it reads of the project.
-const boardQuery = (vars, head, project) => `query($login: String!, $number: Int!, $field: String!, $filter: String!${vars}) {
+const boardQuery = (vars, head, project) => `query($login: String!, $number: Int!, $field: String!, $priority: String!, $filter: String!${vars}) {
 ${head}  repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -62,18 +63,15 @@ ${head}  repositoryOwner(login: $login) {
   }
 }`;
 
-// gh's arguments for the board query `doc`: the project, its field and the
-// filter of its shown items.
 function boardArgs(view, hidden, doc) {
-  const { owner, number, field } = view.project;
-  return ["api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`, "-f", `filter=${boardFilter(view, hidden)}`];
+  const { owner, number, field, priorityField } = view.project;
+  return [
+    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`, "-f", `priority=${priorityField}`,
+    "-f", `filter=${boardFilter(view, hidden)}`,
+  ];
 }
 
-// One GraphQL request for a board view: the project, its field's options and
-// the first page of the items of the shown columns, plus one count per
-// hidden column (`h0`, `h1`, … aliases, first: 0) for the column menu, and
-// the login gh runs as (for "nur meine"). The pages after it come by
-// githubBoardPageArgs.
+// The hidden columns' counts (first: 0) are for the column menu.
 export function githubBoardArgs(view, hidden) {
   const names = [...hidden];
   const key = fieldKey(view.project.field);
@@ -81,6 +79,7 @@ export function githubBoardArgs(view, hidden) {
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
   const doc = boardQuery(vars, "  viewer { login }\n", `id title url
         field(name: $field) { ... on ProjectV2SingleSelectField { id name options { id name color } } }
+        priorityField: field(name: $priority) { ... on ProjectV2SingleSelectField { id } }
         ${itemsSelection(view, 0, false)}${counts}`);
   return [...boardArgs(view, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(view, `${key}:${quoted(n)}`)}`])];
 }
@@ -94,6 +93,7 @@ export function githubBoardPageArgs(view, hidden, after, read) {
 
 // Where a board's items stand in its answers.
 const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
+const PRIORITY_FIELD_PATH = ["repositoryOwner", "projectV2", "priorityField"];
 
 // The error that explains a page without its items: the deepest one on the
 // way to them (the owner's, the project's, the items' own), else the
@@ -164,6 +164,11 @@ const assigneesOf = (nodes) => {
   return { assignees: names, assigneeLogins: logins };
 };
 
+function githubPriority(value) {
+  if (typeof value?.name !== "string" || !value.name) return null;
+  return { name: value.name, tone: GITHUB_COLORS[value.color] ?? "muted" };
+}
+
 function githubCard(node) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
@@ -188,6 +193,10 @@ function githubCard(node) {
     type: c.issueType?.name ?? null,
     typeColor: GITHUB_COLORS[c.issueType?.color] ?? null,
     parent: c.parent?.number ?? null,
+    parentTitle: c.parent?.title ?? null,
+    parentRepo: c.parent?.repository?.nameWithOwner ?? null,
+    milestone: c.milestone?.title ?? null,
+    priority: githubPriority(node.priority),
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
     branch: c.headRefName ?? null,
     column: node.fieldValueByName?.optionId ?? NO_STATUS,
@@ -202,17 +211,6 @@ export function errorAt(errors, path) {
 // Every GraphQL error whose path starts with `path`.
 export const errorsAt = (errors, path) => (errors ?? []).filter((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p));
 
-// gh's answer for githubBoardArgs (and the GraphQL errors that came with its
-// data) → a board:
-// { shape: "board", meta, columns: [{ id, name, color, hidden, count, target, cards }], total, limited, viewer, read }
-// (viewer: the login gh runs as, null when GitHub did not say; limited:
-// whether GitHub has more than the answer holds; read: how many items it
-// holds).
-// A hidden column's cards are only those moved there since the last refresh;
-// its count is the server's plus those. Items without a status, or in an
-// option the field no longer has, go to "Ohne Status", which takes no drops.
-// A missing owner, project, field or item list is explained by the error at
-// its path.
 export function parseGithubBoard(json, view, hidden, errors = []) {
   const { owner, number, field: fieldName } = view.project;
   const ownerNode = json?.data?.repositoryOwner;
@@ -260,7 +258,13 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
   }
   return {
     shape: "board",
-    meta: { projectId: project.id, fieldId: field.id, title: project.title, url: project.url },
+    meta: {
+      projectId: project.id,
+      fieldId: field.id,
+      title: project.title,
+      url: project.url,
+      lacksPriorityField: !project.priorityField?.id && !errorAt(errors, PRIORITY_FIELD_PATH),
+    },
     columns,
     total: project.items.totalCount,
     limited: project.items.pageInfo.hasNextPage,

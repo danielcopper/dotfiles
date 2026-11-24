@@ -5,19 +5,21 @@
 // the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
 // count, target, cards }], total, limited, viewer, read }
-// (parseGithubBoard). View fields it reads: id, source, layout and hide (the
-// columns hidden by default).
+// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
+// columns hidden by default) and project.priorityField.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { cardLabel, epicLabel } from "../../shared.js";
+import { cardLabel, epicLabel, partOfText } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hasStep, hideable, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
-import { assigneeText, button, cardEdge, chip, columnHead, labelChip, selectedLook, sessionChip, shownOf, statusPill, store, typeChip, typeLine } from "../helpers.js";
+import {
+  button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, labelChip, selectedLook, shownOf, statusPill, store, typeChip, typeLine,
+} from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
@@ -54,7 +56,12 @@ export const boardShape = {
   canMove: (st, item, by) => hasStep(st.data, item.key, by),
   canHide: hideable,
   received: (data, st) => applyMoves(data, st.moves),
-  warnings: (view, data) => unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
+  warnings: (view, data) => [
+    ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
+    ...(view.project.priorityGiven && data.meta.lacksPriorityField
+      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ (project.priorityField): die Karten zeigen keine Priorität`]
+      : []),
+  ],
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
   assign: BOARD_ASSIGN,
@@ -178,18 +185,15 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-// A card in its column `col`: its left edge in the column's color, its key,
-// its title, and a line of its type and labels as chips (not the label an
-// Epic by its title takes its type's color from: epicLabel), its
-// sub-issues' count, its assignees and its session's chip; an issue type
-// with a color draws a line across its top in that color too (typeLine).
 function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
-  const session = linkedSession(card, allSpaces);
   const type = typeChip(t, card);
   const labels = card.labels.filter((l) => l !== epicLabel(card));
   const line = typeLine(t, card, null, 6);
+  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  const chips = [...(type ? [type] : []), ...labels.slice(0, 3).map((l) => labelChip(t, card, l)), ...(labels.length > 3 ? [chip(t, `+${labels.length - 3}`)] : [])];
+  const meta = cardMeta(t, card, partOfText(card));
   return h_flex()
     .id(`card-${card.key}`)
     .relative()
@@ -225,26 +229,10 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
     })
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(6)
-      .child(
-        h_flex()
-          .gap(6)
-          .items_center()
-          .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card)))
-          .when(Boolean(st.pending[card.key]), (el) => el.child(div().text_size(11).text_color(t.dim).child("speichert …"))),
-      )
+      .child(cardHead(t, [div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card))], card))
       .child(div().text_size(12.5).line_height("17px").child(card.title))
-      .child(
-        h_flex()
-          .gap(5)
-          .flex_wrap()
-          .items_center()
-          .when(Boolean(type), (el) => el.child(type))
-          .children(labels.slice(0, 3).map((l) => labelChip(t, card, l)))
-          .when(labels.length > 3, (el) => el.child(chip(t, `+${labels.length - 3}`)))
-          .when(Boolean(card.sub), (el) => el.child(div().text_size(11).text_color(t.muted).child(`◔ ${card.sub?.done}/${card.sub?.total}`)))
-          .when(card.assignees.length > 0, (el) => el.child(assigneeText(t, card)))
-          .when(Boolean(session), (el) => el.child(sessionChip(t, session))),
-      ))
+      .when(Boolean(meta), (el) => el.child(meta))
+      .children(cardFoot(t, chips, card.sub, end)))
     .when(Boolean(line), (el) => el.child(line));
 }
 

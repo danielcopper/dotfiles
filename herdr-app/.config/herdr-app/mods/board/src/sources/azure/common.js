@@ -98,10 +98,7 @@ export const AZ_ME_TIMEOUT = 15000;
 // A text in a WIQL query: in single quotes, a quote in it doubled.
 export const wiqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
 
-// The fields read here are all System. ones. The field names that would
-// stand alone in quotes are built from SYSTEM: the command check
-// (tests/herdr-app/check-commands.py) takes a quoted word, dot and word
-// for a herdr command.
+// Built from SYSTEM: the command check (tests/herdr-app/check-commands.py) takes System.Id in quotes for a command.
 const SYSTEM = "System.";
 export const AREA_PATH = `${SYSTEM}AreaPath`;
 // A work item's description (HTML), and the link to a child.
@@ -111,8 +108,11 @@ export const CHILD_LINK = `${SYSTEM}LinkTypes.Hierarchy-Forward`;
 export const PARENT_LINK = `${SYSTEM}LinkTypes.Hierarchy-Reverse`;
 const fieldOf = (wi, name) => wi.fields?.[SYSTEM + name];
 
+// 1 (the highest) to 4, where the work item's type has one.
+export const PRIORITY = "Microsoft.VSTS.Common.Priority";
+
 // The fields read of each work item.
-export const WORK_ITEM_FIELDS = ["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f);
+export const WORK_ITEM_FIELDS = [...["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f), PRIORITY];
 
 // One WIQL query for the fields of the work items `ids` (WORK_ITEM_FIELDS
 // and `extraFields`), in the order of their ids.
@@ -176,16 +176,23 @@ export function azPerson(who) {
   return { name: personName({ name: who.displayName, login: who.uniqueName }), login: who.uniqueName?.toLowerCase() ?? null };
 }
 
+const PRIORITY_TONES = { 1: "ansi1", 2: "ansi11" };
+
+export function azPriority(value) {
+  return Number.isInteger(value) ? { name: `P${value}`, tone: PRIORITY_TONES[value] ?? "muted" } : null;
+}
+
 // A work item of az boards query's answer as the board shows it, keyed as
 // itemKey names it; with an `orderField`, its value there as `order` (a
-// number, else null).
+// number, else null). az's answer holds no parent's title: the Sprint reads
+// it (parentTitles).
 export function azWorkItem(wi, c, orderField = null) {
   const f = (name) => fieldOf(wi, name) ?? null;
   const who = azPerson(f("AssignedTo"));
   const item = {
     source: "azure", kind: "workitem", number: wi.id, title: f("Title") ?? "", type: f("WorkItemType"),
     state: f("State"), assignees: who.name ? [who.name] : [], assigneeLogins: who.login ? [who.login] : [],
-    parent: f("Parent"), area: f("AreaPath"), iteration: f("IterationPath"),
+    parent: f("Parent"), parentTitle: null, area: f("AreaPath"), iteration: f("IterationPath"), priority: azPriority(wi.fields?.[PRIORITY]),
     url: workItemUrl(c, wi.id), labels: [], sub: null, branch: null,
     ...(orderField ? { order: typeof wi.fields?.[orderField] === "number" ? wi.fields[orderField] : null } : {}),
   };

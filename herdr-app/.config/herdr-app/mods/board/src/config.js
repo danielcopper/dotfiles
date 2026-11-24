@@ -69,11 +69,17 @@ const VIEW_KINDS = {
       const out = [];
       if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
         out.push("„project“ braucht „owner“ (Text) und „number“ (ganze Zahl)");
-      } else if (p.field !== undefined && !isText(p.field)) out.push("„project.field“ muss Text sein");
+      } else {
+        out.push(...["field", "priorityField"].filter((k) => p[k] !== undefined && !isText(p[k])).map((k) => `„project.${k}“ muss Text sein`));
+      }
       return [...out, ...textProblems(v, ["filter"])];
     },
     defaults: (v) => ({
-      project: { owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status" },
+      project: {
+        owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status", priorityField: v.project.priorityField ?? "Priority",
+        // A project may lack the default one: only a named one it lacks is told.
+        priorityGiven: v.project.priorityField !== undefined,
+      },
       filter: v.filter ?? "",
       limit: v.limit ?? BOARD_LIMIT,
     }),

@@ -195,6 +195,8 @@ export const headBg = (t, tone, ground) => paletteOf(t).head(tone, ground);
 export const dropBg = (t, ground) => paletteOf(t).drop(ground);
 export const markColor = (t) => paletteOf(t).mark;
 
+export const namedTone = (t, name) => paletteOf(t).named(name);
+
 // The tone of a note's level, which toneColor draws every note the board
 // shows in: an error, a warning, a success, information.
 export const NOTE_TONES = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
