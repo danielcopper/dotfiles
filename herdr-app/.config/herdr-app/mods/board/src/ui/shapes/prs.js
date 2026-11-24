@@ -1,12 +1,16 @@
 // The prs shape: a list of pull requests in sections, walked as one column.
-// The data: { shape: "prs", sections: [{ name, count, fetched, limited,
-// skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
-// and checks show where it has them. View fields it reads: id.
+// The data: { shape: "prs", sections: [{ name, color, count, fetched,
+// limited, skipped, rows }], viewer } (parseGithubList); a row's author,
+// draft mark and checks show where it has them, and whether the viewer has
+// to act on it (its attention and waiting). Each section is drawn in its
+// color's tone (namedTone): its head on a band of that tone, each row with
+// a stripe of it at its left. View fields it reads: id.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, cardLabel } from "../../shared.js";
-import { checkColor, checksSection, selectedLook, shownOf } from "../helpers.js";
+import { checkColor, checksSection, detailSection, selectedLook, shownOf } from "../helpers.js";
+import { ATTENTION_TONE, headBg, namedTone, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -32,9 +36,28 @@ export const prsShape = {
   enterHint: "Detail · Review",
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
-  // The detail panel's rows of a pull request: its checks, where it has them.
-  detailParts: (b, t, view, item) => (item.checks ? { sections: [checksSection(t, item.checks)] } : {}),
+  // The detail panel's rows of a pull request: why the viewer has to act on
+  // it, and its checks, where it has them.
+  detailParts(b, t, view, item) {
+    const sections = [];
+    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(attentionColor(t)).child(reason))));
+    if (item.checks) sections.push(checksSection(t, item.checks));
+    return sections.length ? { sections } : {};
+  },
 };
+
+// The color of the mark on a pull request the viewer has to act on.
+const attentionColor = (t) => toneColor(t, namedTone(t, ATTENTION_TONE));
+
+// A row's cell that says whether the viewer has to act on its pull
+// request: a mark and the reasons ("● Review angefragt"), "wartet auf
+// Autor" on someone else's one reviewed that asks nothing yet, else
+// nothing; every row keeps it, so the cells after it line up.
+function attentionCell(t, r) {
+  const cell = div().w(200).flex_none().truncate().text_size(12);
+  if (r.attention?.length) return cell.font_semibold().text_color(attentionColor(t)).child(`● ${r.attention.join(" · ")}`);
+  return cell.text_color(t.muted).child(r.waiting ? "wartet auf Autor" : "");
+}
 
 // A section's count: the rows it holds (each pull request once, in its first
 // section; results that are no pull request left out), "<shown>/<held>"
@@ -48,7 +71,7 @@ export function sectionCount(section, shown) {
 
 function drawPrs(b, t, mono, view, st) {
   const now = Date.now();
-  const row = (r) => {
+  const row = (r, tone) => {
     const selected = st.sel?.key === r.key;
     return h_flex()
       .id(`row-${r.key}`)
@@ -58,7 +81,8 @@ function drawPrs(b, t, mono, view, st) {
       .py(8)
       .items_center()
       .border_l(2)
-      .map(selectedLook(t, selected, t.background))
+      // Its section's stripe, the accent while it is selected.
+      .map(selectedLook(t, selected, toneColor(t, tone)))
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
@@ -67,6 +91,7 @@ function drawPrs(b, t, mono, view, st) {
       })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
+      .child(attentionCell(t, r))
       .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
       // Every row keeps the draft cell, so the columns after it line up.
       .child(div().w(60).flex_none().text_size(12).text_color(t.muted).child(r.draft ? "Entwurf" : ""))
@@ -74,10 +99,14 @@ function drawPrs(b, t, mono, view, st) {
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
   };
   const children = [];
-  for (const s of st.data.sections) {
+  for (const [i, s] of st.data.sections.entries()) {
     const rows = s.rows.filter((r) => b.visible(r, st.data));
-    children.push(div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted).child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`));
-    children.push(...rows.map(row));
+    const tone = namedTone(t, s.color);
+    children.push(
+      div().id(`section-${i}`).flex_none().mt(8).px(20).py(3).bg(headBg(t, tone, t.background)).text_size(11).font_semibold().text_color(toneColor(t, tone))
+        .child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`),
+    );
+    children.push(...rows.map((r) => row(r, tone)));
   }
   return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
 }

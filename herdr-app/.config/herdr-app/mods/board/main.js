@@ -17,9 +17,12 @@
 //     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
 //     board has project { owner, number, field? ("Status") } and filter? (a
 //     Projects filter such as "assignee:@me"); its columns are the options
-//     of that single-select field. A list has sections [{ name, query }],
-//     one GitHub search for pull requests each. A view may still say
-//     source: "github".
+//     of that single-select field. A list has sections [{ name, query,
+//     tone? }], one GitHub search for pull requests each; tone is one of
+//     copper's hue names, "red", "orange", "yellow", "green", "teal",
+//     "blue" or "violet", and without one a section takes one by its place
+//     (blue, violet, teal, then the others: SECTION_TONE_ORDER). A view
+//     may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
 //   in; ~ is that machine's home), message (the first message for issues and
@@ -36,7 +39,14 @@
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
-// its limit take: ten for the 1000 by default; a list view one. An issue's
+// its limit take: ten for the 1000 by default; a list view one, which
+// GitHub prices by its connections, each counted as full: per section one
+// search, then per pull request of its limit (50 by default) its assignees,
+// review requests, last commit (and that one's checks), latest reviews and
+// review threads, and per thread (REVIEW_THREADS, 50) its comments, so with
+// the defaults 1 + 50 * 6 + 50 * 50 = 2801 requests a section, about 28
+// points (a hundred requests each) of GitHub's 5000 an hour, 84 for the
+// shipped three sections; the threads' comments are 2500 of them. An issue's
 // related items (its description, parent, sub-issues and linked pull
 // requests) cost one more when its details open, again on `r` while they are
 // open, and again after a refresh where their last read failed (readRelated;
@@ -200,6 +210,17 @@ export const otherLook = (state) => ({ state: String(state ?? "?").toLowerCase()
 // yet.
 export const DRAFT_REVIEW = "Entwurf";
 
+// The tones a PR list's section may take (views.json, a section's "tone"),
+// by copper's names for its hues, each as the theme name the board draws it
+// in (ui/tones.js takes those to copper's colors), and the order in which
+// sections without one take them, by their place in the view.
+export const SECTION_TONES = { red: "ansi1", orange: "ansi11", yellow: "ansi3", green: "ansi2", teal: "ansi6", blue: "ansi4", violet: "ansi5" };
+export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", "orange", "red"];
+
+// The theme name of the section at `index` with the tone `tone` (none: the
+// one SECTION_TONE_ORDER gives its place).
+export const sectionColor = (tone, index) => SECTION_TONES[tone ?? SECTION_TONE_ORDER[index % SECTION_TONE_ORDER.length]];
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
@@ -336,6 +357,9 @@ const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"]
 // pages (PAGE).
 const BOARD_LIMIT = 10 * PAGE;
 
+// The tones a list's section may take, as an error names them.
+const TONE_NAMES = Object.keys(SECTION_TONES).map((n) => `"${n}"`).join(", ").replace(/, ([^,]+)$/, " oder $1");
+
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
 // kinds/index.js, says how it shows): its own keys, what is wrong with them,
 // its fields with their defaults filled in, and the largest `limit` it takes:
@@ -363,11 +387,15 @@ const VIEW_KINDS = {
   "github list": {
     keys: ["sections"],
     maxLimit: PAGE,
-    problems: (v) =>
-      Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query))
-        ? []
-        : ["„sections“ braucht Einträge mit „name“ und „query“"],
-    defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query })), limit: v.limit ?? 50 }),
+    problems(v) {
+      if (!(Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query)))) {
+        return ["„sections“ braucht Einträge mit „name“ und „query“"];
+      }
+      return v.sections.filter((s) => s.tone !== undefined && !Object.hasOwn(SECTION_TONES, s.tone)).map((s) => `Abschnitt „${s.name}“: „tone“ ist ${TONE_NAMES}`);
+    },
+    // A section's tone stays unset where views.json sets none: its place
+    // gives it one (sectionColor).
+    defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query, ...(s.tone === undefined ? {} : { tone: s.tone }) })), limit: v.limit ?? 50 }),
   },
 };
 
@@ -2896,27 +2924,48 @@ export function checkMoveResult(json, card) {
   }
 }
 
+// How many review threads of a pull request a row reads, and of each how
+// many comments, the last ones (prAttention).
+export const REVIEW_THREADS = 50;
+export const THREAD_COMMENTS = 10;
+
 // A pull request's fields as a row of a PR list shows it (prRow), which
-// the details panel shows of a pull request it goes down to too.
+// the details panel shows of a pull request it goes down to too (with its
+// head commit's oid, which the commits' block holds for PR_ATTENTION_FIELDS).
 const PR_ROW_FIELDS = `
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
       assignees(first: 10) { nodes { login name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
+      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 0) {
         checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }`;
+
+// What a PR list reads of a pull request besides its row's fields, to tell
+// whether the viewer has to act on it (prAttention): whether it merges
+// without conflict, each person's latest review that is not pending
+// (latestReviews) with the commit it was given on, and its first
+// REVIEW_THREADS review threads, how many it has, and of each whether it is
+// resolved and who wrote its last THREAD_COMMENTS comments. The details
+// panel's pull request a level down does without them.
+const PR_ATTENTION_FIELDS = `
+      mergeable
+      latestReviews(first: 20) { nodes { author { login } commit { oid } } }
+      reviewThreads(first: ${REVIEW_THREADS}) { totalCount nodes { isResolved comments(last: ${THREAD_COMMENTS}) { nodes { author { login } } } } }`;
 
 const PR_FIELDS = `
   issueCount
   nodes {
-    ... on PullRequest {${PR_ROW_FIELDS}
+    ... on PullRequest {${PR_ATTENTION_FIELDS}${PR_ROW_FIELDS}
     }
   }`;
 
-// A pull request as PR_ROW_FIELDS reads it → the fields of its row.
-function prRow(pr) {
+// A pull request as PR_ROW_FIELDS reads it (a PR list's with
+// PR_ATTENTION_FIELDS), for the `viewer` (the login gh runs as; null:
+// unknown) → the fields of its row, with whether the viewer has to act
+// (prAttention).
+function prRow(pr, viewer = null) {
   const repo = pr.repository.nameWithOwner;
-  return {
+  const row = {
     number: pr.number,
     repo,
     repoShort: repo.split("/").pop(),
@@ -2933,6 +2982,50 @@ function prRow(pr) {
     ...assigneesOf(pr.assignees?.nodes),
     reviewers: reviewerLogins(pr.reviewRequests),
   };
+  return { ...row, ...prAttention(pr, row, viewer) };
+}
+
+// The words for an own pull request's open threads: `n` read, `more` where
+// GitHub has threads it did not send (REVIEW_THREADS), which may be open too.
+const threadsText = (n, more) => (n === 1 && !more ? "1 offener Thread" : `${n}${more ? "+" : ""} offene Threads`);
+
+// Whether the `viewer` has to act on the pull request `pr` (its `row`
+// read): { attention, waiting }. attention: the reasons, as the row names
+// them, none where the viewer has nothing to do, or is unknown. On one's own
+// pull request: changes requested; unresolved review threads whose last
+// comment is someone else's; failing checks; a merge conflict; or, where
+// none of these is, it is approved, its checks passed and it merges without
+// conflict, and is no draft (an unknown mergeability is no "without"). On
+// someone else's: one's review is requested and one has given none; one's
+// latest review was given on another commit than the head (whether asked
+// again or not); an unresolved thread one took part in (among its last
+// THREAD_COMMENTS comments) whose last comment is someone else's. waiting:
+// someone else's pull request one reviewed, that asks nothing of one and
+// does not ask for one's review again ("wartet auf Autor"). Comments as such
+// are no reason.
+function prAttention(pr, row, viewer) {
+  if (!viewer) return { attention: [], waiting: false };
+  const threads = pr.reviewThreads;
+  const open = (threads?.nodes ?? []).filter((t) => t && !t.isResolved).map((t) => (t.comments?.nodes ?? []).map((c) => c?.author?.login ?? null));
+  const answered = (authors) => authors.length > 0 && authors.at(-1) !== viewer;
+  if (pr.author?.login === viewer) {
+    const reasons = [];
+    const waitingThreads = open.filter(answered).length;
+    if (pr.reviewDecision === "CHANGES_REQUESTED") reasons.push("Änderungen gewünscht");
+    if (waitingThreads) reasons.push(threadsText(waitingThreads, (threads?.totalCount ?? 0) > threads.nodes.length));
+    if (row.checks.state === "failed") reasons.push("Checks rot");
+    if (pr.mergeable === "CONFLICTING") reasons.push("Konflikt");
+    if (!reasons.length && !pr.isDraft && pr.reviewDecision === "APPROVED" && row.checks.state === "passed" && pr.mergeable === "MERGEABLE") reasons.push("bereit zum Mergen");
+    return { attention: reasons, waiting: false };
+  }
+  const review = (pr.latestReviews?.nodes ?? []).find((r) => r?.author?.login === viewer) ?? null;
+  const head = pr.commits?.nodes?.[0]?.commit?.oid ?? null;
+  const asked = row.reviewers.includes(viewer);
+  const reasons = [];
+  if (asked && !review) reasons.push("Review angefragt");
+  if (review && head && review.commit?.oid !== head) reasons.push("neue Commits seit deinem Review");
+  if (open.some((authors) => authors.includes(viewer) && answered(authors))) reasons.push("Antwort erwartet");
+  return { attention: reasons, waiting: Boolean(review) && !asked && !reasons.length };
 }
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
@@ -2985,12 +3078,16 @@ export function ownSearch(query) {
 }
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
+// data) → { shape: "prs", sections: [{ name, color, count, fetched, limited, skipped, rows }], viewer }
+// (color: the section's tone as a theme name, sectionColor).
 // A pull request found by two sections shows in the first only; a result
-// that is no pull request is counted in skipped. A search missing from the
-// answer is explained by the error at its alias.
+// that is no pull request is counted in skipped. A section's rows on which
+// the viewer has to act (prAttention) come first, in GitHub's order, then
+// the others in theirs. A search missing from the answer is explained by
+// the error at its alias.
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
+  const viewer = json?.data?.viewer?.login ?? null;
   const sections = view.sections.map((s, i) => {
     const own = ownSearch(s.query);
     const found = json?.data?.[`s${i}`];
@@ -3007,13 +3104,17 @@ export function parseGithubList(json, view, errors = []) {
       }
       if (seen.has(pr.id)) continue;
       seen.add(pr.id);
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...prRow(pr), ownByQuery: own });
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...prRow(pr, viewer), ownByQuery: own });
     }
+    // Array's sort keeps the order of rows it ranks alike.
+    rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
     // count: how many GitHub found; fetched: how many it sent; rows: those
     // held, each pull request once (in its first section), no other result.
-    return { name: s.name, count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length, skipped, rows };
+    return {
+      name: s.name, color: sectionColor(s.tone, i), count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length, skipped, rows,
+    };
   });
-  return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
+  return { shape: "prs", sections, viewer };
 }
 
 // How many sub-issues and linked pull requests an issue's related items
@@ -3741,6 +3842,17 @@ export const dropBg = (t, ground) => paletteOf(t).drop(ground);
 // The tone of a note's level, which toneColor draws every note the board
 // shows in: an error, a warning, a success, information.
 export const NOTE_TONES = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
+
+// The tone of a named color a source or views.json gives (a GitHub issue
+// type's, a PR list section's) in the theme `t`: as it is in a copper
+// theme, its plain variant in any other (chipTone), so orange (ansi11)
+// takes copper's orange there and the theme's yellow here.
+export const namedTone = (t, name) => paletteOf(t).named(name);
+
+// The tone of the mark on a pull request the viewer has to act on, in a
+// PR list (namedTone): orange, which none of a list's default section tones
+// is, nor a check's state.
+export const ATTENTION_TONE = "ansi11";
 
 // The tones a label can take on a theme without copper's colors: the
 // theme's red, green, yellow, blue, violet and teal. Not their bright
@@ -6757,9 +6869,12 @@ export const placeholderShape = {
 // ==== src/ui/shapes/prs.js ====
 
 // The prs shape: a list of pull requests in sections, walked as one column.
-// The data: { shape: "prs", sections: [{ name, count, fetched, limited,
-// skipped, rows }], viewer } (parseGithubList); a row's author, draft mark
-// and checks show where it has them. View fields it reads: id.
+// The data: { shape: "prs", sections: [{ name, color, count, fetched,
+// limited, skipped, rows }], viewer } (parseGithubList); a row's author,
+// draft mark and checks show where it has them, and whether the viewer has
+// to act on it (its attention and waiting). Each section is drawn in its
+// color's tone (namedTone): its head on a band of that tone, each row with
+// a stripe of it at its left. View fields it reads: id.
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -6785,9 +6900,28 @@ export const prsShape = {
   enterHint: "Detail · Review",
   received: (data) => data,
   warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
-  // The detail panel's rows of a pull request: its checks, where it has them.
-  detailParts: (b, t, view, item) => (item.checks ? { sections: [checksSection(t, item.checks)] } : {}),
+  // The detail panel's rows of a pull request: why the viewer has to act on
+  // it, and its checks, where it has them.
+  detailParts(b, t, view, item) {
+    const sections = [];
+    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(attentionColor(t)).child(reason))));
+    if (item.checks) sections.push(checksSection(t, item.checks));
+    return sections.length ? { sections } : {};
+  },
 };
+
+// The color of the mark on a pull request the viewer has to act on.
+const attentionColor = (t) => toneColor(t, namedTone(t, ATTENTION_TONE));
+
+// A row's cell that says whether the viewer has to act on its pull
+// request: a mark and the reasons ("● Review angefragt"), "wartet auf
+// Autor" on someone else's one reviewed that asks nothing yet, else
+// nothing; every row keeps it, so the cells after it line up.
+function attentionCell(t, r) {
+  const cell = div().w(200).flex_none().truncate().text_size(12);
+  if (r.attention?.length) return cell.font_semibold().text_color(attentionColor(t)).child(`● ${r.attention.join(" · ")}`);
+  return cell.text_color(t.muted).child(r.waiting ? "wartet auf Autor" : "");
+}
 
 // A section's count: the rows it holds (each pull request once, in its first
 // section; results that are no pull request left out), "<shown>/<held>"
@@ -6801,7 +6935,7 @@ export function sectionCount(section, shown) {
 
 function drawPrs(b, t, mono, view, st) {
   const now = Date.now();
-  const row = (r) => {
+  const row = (r, tone) => {
     const selected = st.sel?.key === r.key;
     return h_flex()
       .id(`row-${r.key}`)
@@ -6811,7 +6945,8 @@ function drawPrs(b, t, mono, view, st) {
       .py(8)
       .items_center()
       .border_l(2)
-      .map(selectedLook(t, selected, t.background))
+      // Its section's stripe, the accent while it is selected.
+      .map(selectedLook(t, selected, toneColor(t, tone)))
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => {
@@ -6820,6 +6955,7 @@ function drawPrs(b, t, mono, view, st) {
       })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
+      .child(attentionCell(t, r))
       .when(Boolean(r.author), (el) => el.child(div().w(120).flex_none().truncate().text_size(12).text_color(t.muted).child(r.author)))
       // Every row keeps the draft cell, so the columns after it line up.
       .child(div().w(60).flex_none().text_size(12).text_color(t.muted).child(r.draft ? "Entwurf" : ""))
@@ -6827,10 +6963,14 @@ function drawPrs(b, t, mono, view, st) {
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
   };
   const children = [];
-  for (const s of st.data.sections) {
+  for (const [i, s] of st.data.sections.entries()) {
     const rows = s.rows.filter((r) => b.visible(r, st.data));
-    children.push(div().flex_none().px(20).pt(12).pb(4).text_size(11).text_color(t.muted).child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`));
-    children.push(...rows.map(row));
+    const tone = namedTone(t, s.color);
+    children.push(
+      div().id(`section-${i}`).flex_none().mt(8).px(20).py(3).bg(headBg(t, tone, t.background)).text_size(11).font_semibold().text_color(toneColor(t, tone))
+        .child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`),
+    );
+    children.push(...rows.map((r) => row(r, tone)));
   }
   return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
 }

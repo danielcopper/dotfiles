@@ -1,7 +1,7 @@
 // views.json: reading it, what is wrong with it, and the start settings for
 // an item.
 
-import { CONFIG_NAME, PAGE, isObject, isText, textList } from "./shared.js";
+import { CONFIG_NAME, PAGE, SECTION_TONES, isObject, isText, textList } from "./shared.js";
 import { viewDefaults, viewKind } from "./kinds/index.js";
 
 export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
@@ -39,6 +39,9 @@ const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"]
 // pages (PAGE).
 const BOARD_LIMIT = 10 * PAGE;
 
+// The tones a list's section may take, as an error names them.
+const TONE_NAMES = Object.keys(SECTION_TONES).map((n) => `"${n}"`).join(", ").replace(/, ([^,]+)$/, " oder $1");
+
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
 // kinds/index.js, says how it shows): its own keys, what is wrong with them,
 // its fields with their defaults filled in, and the largest `limit` it takes:
@@ -66,11 +69,15 @@ const VIEW_KINDS = {
   "github list": {
     keys: ["sections"],
     maxLimit: PAGE,
-    problems: (v) =>
-      Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query))
-        ? []
-        : ["„sections“ braucht Einträge mit „name“ und „query“"],
-    defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query })), limit: v.limit ?? 50 }),
+    problems(v) {
+      if (!(Array.isArray(v.sections) && v.sections.length && v.sections.every((s) => isObject(s) && isText(s.name) && isText(s.query)))) {
+        return ["„sections“ braucht Einträge mit „name“ und „query“"];
+      }
+      return v.sections.filter((s) => s.tone !== undefined && !Object.hasOwn(SECTION_TONES, s.tone)).map((s) => `Abschnitt „${s.name}“: „tone“ ist ${TONE_NAMES}`);
+    },
+    // A section's tone stays unset where views.json sets none: its place
+    // gives it one (sectionColor).
+    defaults: (v) => ({ sections: v.sections.map((s) => ({ name: s.name, query: s.query, ...(s.tone === undefined ? {} : { tone: s.tone }) })), limit: v.limit ?? 50 }),
   },
 };
 

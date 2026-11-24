@@ -37,8 +37,9 @@
           "source": "github",
           "layout": "list",
           "sections": [
-            { "name": "Zu prüfen", "query": "is:pr is:open archived:false review-requested:@me" },
-            { "name": "Meine", "query": "is:pr is:open archived:false author:@me" }
+            { "name": "Zu prüfen", "query": "is:pr is:open archived:false review-requested:@me", "tone": "blue" },
+            { "name": "Meine", "query": "is:pr is:open archived:false author:@me", "tone": "violet" },
+            { "name": "Geprüft", "query": "is:pr is:open archived:false reviewed-by:@me -author:@me", "tone": "teal" }
           ]
         }
       ]

@@ -186,6 +186,17 @@ export const dropBg = (t, ground) => paletteOf(t).drop(ground);
 // shows in: an error, a warning, a success, information.
 export const NOTE_TONES = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
 
+// The tone of a named color a source or views.json gives (a GitHub issue
+// type's, a PR list section's) in the theme `t`: as it is in a copper
+// theme, its plain variant in any other (chipTone), so orange (ansi11)
+// takes copper's orange there and the theme's yellow here.
+export const namedTone = (t, name) => paletteOf(t).named(name);
+
+// The tone of the mark on a pull request the viewer has to act on, in a
+// PR list (namedTone): orange, which none of a list's default section tones
+// is, nor a check's state.
+export const ATTENTION_TONE = "ansi11";
+
 // The tones a label can take on a theme without copper's colors: the
 // theme's red, green, yellow, blue, violet and teal. Not their bright
 // variants (ansi9 to ansi14): in copper-light without copper's colors each

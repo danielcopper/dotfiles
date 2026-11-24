@@ -2,7 +2,7 @@
 // parsing, the status mutation, what gh's answers and failures mean, and the
 // source as the board uses it (makeGithub).
 
-import { CONFIG_NAME, BoardError, DRAFT_REVIEW, PAGE, STATE_LOOKS, failure, firstLine, otherLook, personName, readMemo } from "../shared.js";
+import { CONFIG_NAME, BoardError, DRAFT_REVIEW, PAGE, STATE_LOOKS, failure, firstLine, otherLook, personName, readMemo, sectionColor } from "../shared.js";
 import { GH_TIMEOUT, call } from "../tools.js";
 
 // Theme colors for GitHub's named colors: a Projects v2 option's and an
@@ -291,27 +291,48 @@ export function checkMoveResult(json, card) {
   }
 }
 
+// How many review threads of a pull request a row reads, and of each how
+// many comments, the last ones (prAttention).
+export const REVIEW_THREADS = 50;
+export const THREAD_COMMENTS = 10;
+
 // A pull request's fields as a row of a PR list shows it (prRow), which
-// the details panel shows of a pull request it goes down to too.
+// the details panel shows of a pull request it goes down to too (with its
+// head commit's oid, which the commits' block holds for PR_ATTENTION_FIELDS).
 const PR_ROW_FIELDS = `
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
       assignees(first: 10) { nodes { login name } }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) {
+      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 0) {
         checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }`;
+
+// What a PR list reads of a pull request besides its row's fields, to tell
+// whether the viewer has to act on it (prAttention): whether it merges
+// without conflict, each person's latest review that is not pending
+// (latestReviews) with the commit it was given on, and its first
+// REVIEW_THREADS review threads, how many it has, and of each whether it is
+// resolved and who wrote its last THREAD_COMMENTS comments. The details
+// panel's pull request a level down does without them.
+const PR_ATTENTION_FIELDS = `
+      mergeable
+      latestReviews(first: 20) { nodes { author { login } commit { oid } } }
+      reviewThreads(first: ${REVIEW_THREADS}) { totalCount nodes { isResolved comments(last: ${THREAD_COMMENTS}) { nodes { author { login } } } } }`;
 
 const PR_FIELDS = `
   issueCount
   nodes {
-    ... on PullRequest {${PR_ROW_FIELDS}
+    ... on PullRequest {${PR_ATTENTION_FIELDS}${PR_ROW_FIELDS}
     }
   }`;
 
-// A pull request as PR_ROW_FIELDS reads it → the fields of its row.
-function prRow(pr) {
+// A pull request as PR_ROW_FIELDS reads it (a PR list's with
+// PR_ATTENTION_FIELDS), for the `viewer` (the login gh runs as; null:
+// unknown) → the fields of its row, with whether the viewer has to act
+// (prAttention).
+function prRow(pr, viewer = null) {
   const repo = pr.repository.nameWithOwner;
-  return {
+  const row = {
     number: pr.number,
     repo,
     repoShort: repo.split("/").pop(),
@@ -328,6 +349,50 @@ function prRow(pr) {
     ...assigneesOf(pr.assignees?.nodes),
     reviewers: reviewerLogins(pr.reviewRequests),
   };
+  return { ...row, ...prAttention(pr, row, viewer) };
+}
+
+// The words for an own pull request's open threads: `n` read, `more` where
+// GitHub has threads it did not send (REVIEW_THREADS), which may be open too.
+const threadsText = (n, more) => (n === 1 && !more ? "1 offener Thread" : `${n}${more ? "+" : ""} offene Threads`);
+
+// Whether the `viewer` has to act on the pull request `pr` (its `row`
+// read): { attention, waiting }. attention: the reasons, as the row names
+// them, none where the viewer has nothing to do, or is unknown. On one's own
+// pull request: changes requested; unresolved review threads whose last
+// comment is someone else's; failing checks; a merge conflict; or, where
+// none of these is, it is approved, its checks passed and it merges without
+// conflict, and is no draft (an unknown mergeability is no "without"). On
+// someone else's: one's review is requested and one has given none; one's
+// latest review was given on another commit than the head (whether asked
+// again or not); an unresolved thread one took part in (among its last
+// THREAD_COMMENTS comments) whose last comment is someone else's. waiting:
+// someone else's pull request one reviewed, that asks nothing of one and
+// does not ask for one's review again ("wartet auf Autor"). Comments as such
+// are no reason.
+function prAttention(pr, row, viewer) {
+  if (!viewer) return { attention: [], waiting: false };
+  const threads = pr.reviewThreads;
+  const open = (threads?.nodes ?? []).filter((t) => t && !t.isResolved).map((t) => (t.comments?.nodes ?? []).map((c) => c?.author?.login ?? null));
+  const answered = (authors) => authors.length > 0 && authors.at(-1) !== viewer;
+  if (pr.author?.login === viewer) {
+    const reasons = [];
+    const waitingThreads = open.filter(answered).length;
+    if (pr.reviewDecision === "CHANGES_REQUESTED") reasons.push("Änderungen gewünscht");
+    if (waitingThreads) reasons.push(threadsText(waitingThreads, (threads?.totalCount ?? 0) > threads.nodes.length));
+    if (row.checks.state === "failed") reasons.push("Checks rot");
+    if (pr.mergeable === "CONFLICTING") reasons.push("Konflikt");
+    if (!reasons.length && !pr.isDraft && pr.reviewDecision === "APPROVED" && row.checks.state === "passed" && pr.mergeable === "MERGEABLE") reasons.push("bereit zum Mergen");
+    return { attention: reasons, waiting: false };
+  }
+  const review = (pr.latestReviews?.nodes ?? []).find((r) => r?.author?.login === viewer) ?? null;
+  const head = pr.commits?.nodes?.[0]?.commit?.oid ?? null;
+  const asked = row.reviewers.includes(viewer);
+  const reasons = [];
+  if (asked && !review) reasons.push("Review angefragt");
+  if (review && head && review.commit?.oid !== head) reasons.push("neue Commits seit deinem Review");
+  if (open.some((authors) => authors.includes(viewer) && answered(authors))) reasons.push("Antwort erwartet");
+  return { attention: reasons, waiting: Boolean(review) && !asked && !reasons.length };
 }
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
@@ -380,12 +445,16 @@ export function ownSearch(query) {
 }
 
 // gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, count, fetched, limited, skipped, rows }], viewer }.
+// data) → { shape: "prs", sections: [{ name, color, count, fetched, limited, skipped, rows }], viewer }
+// (color: the section's tone as a theme name, sectionColor).
 // A pull request found by two sections shows in the first only; a result
-// that is no pull request is counted in skipped. A search missing from the
-// answer is explained by the error at its alias.
+// that is no pull request is counted in skipped. A section's rows on which
+// the viewer has to act (prAttention) come first, in GitHub's order, then
+// the others in theirs. A search missing from the answer is explained by
+// the error at its alias.
 export function parseGithubList(json, view, errors = []) {
   const seen = new Set();
+  const viewer = json?.data?.viewer?.login ?? null;
   const sections = view.sections.map((s, i) => {
     const own = ownSearch(s.query);
     const found = json?.data?.[`s${i}`];
@@ -402,13 +471,17 @@ export function parseGithubList(json, view, errors = []) {
       }
       if (seen.has(pr.id)) continue;
       seen.add(pr.id);
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...prRow(pr), ownByQuery: own });
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...prRow(pr, viewer), ownByQuery: own });
     }
+    // Array's sort keeps the order of rows it ranks alike.
+    rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
     // count: how many GitHub found; fetched: how many it sent; rows: those
     // held, each pull request once (in its first section), no other result.
-    return { name: s.name, count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length, skipped, rows };
+    return {
+      name: s.name, color: sectionColor(s.tone, i), count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length, skipped, rows,
+    };
   });
-  return { shape: "prs", sections, viewer: json?.data?.viewer?.login ?? null };
+  return { shape: "prs", sections, viewer };
 }
 
 // How many sub-issues and linked pull requests an issue's related items

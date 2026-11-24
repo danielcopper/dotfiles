@@ -42,6 +42,13 @@
 //   github-related.json (an issue's sub-issues and linked pull requests)
 //   and github-related-not-found.json (an issue GitHub does not find; the
 //   error in the shape of the other NOT_FOUND answers);
+// - written from GitHub's GraphQL reference (PullRequest's mergeable,
+//   latestReviews, reviewThreads and its commits' oid, PullRequestReview's
+//   author and commit, PullRequestReviewThread's isResolved and comments),
+//   with made-up names, not recorded: github-list-attention.json (the
+//   shipped PR view's three searches, for sample-user: pull requests asking
+//   for its review, its own, and ones it reviewed, one of them found by two
+//   searches; each reason the list names, and rows that name none);
 // - written from GitHub's GraphQL reference (Repository's assignableUsers,
 //   Query's viewer), with made-up names, not recorded:
 //   github-assignable.json (one person without a name);
@@ -1059,14 +1066,15 @@ test("the PR list is one GraphQL request with one search per section", () => {
 
 test("PR sections hold their rows once, with checks, review state and branch", () => {
   const list = board.parseGithubList(json("github-list.json"), listView());
-  assert.deepEqual(list.sections.map((s) => [s.name, s.count, s.rows.map((r) => r.number)]), [["Review", 1, [2820]], ["Mine", 4, [1921, 808, 77]]]);
+  assert.deepEqual(list.sections.map((s) => [s.name, s.count, s.rows.map((r) => r.number)]), [["Review", 1, [2820]], ["Mine", 4, [77, 1921, 808]]],
+    "sample-user's 77, with changes requested, first: sample-user has to act on it");
   assert.deepEqual(list.sections.flatMap((s) => s.rows.map((r) => [r.number, r.assigneeLogins, r.reviewers])), [
-    [2820, [], ["sample-user"]], [1921, [], []], [808, ["sample-user"], []], [77, [], []],
+    [2820, [], ["sample-user"]], [77, [], []], [1921, [], []], [808, ["sample-user"], []],
   ], "a team's review request names no one");
   const [review] = list.sections[0].rows;
   assert.deepEqual([review.repoShort, review.author, review.review, review.branch, review.checks.short, review.checks.text],
     ["tender", "sample-contributor", "noch kein Review", "pr/summary-card", "✓ 15", "15 bestanden · 3 übersprungen"]);
-  const [release, draft, failing] = list.sections[1].rows;
+  const [failing, release, draft] = list.sections[1].rows;
   assert.deepEqual([release.review, release.checks.state, release.checks.short], ["", "pending", "◷ 2"]);
   assert.deepEqual([draft.review, draft.checks.state, draft.checks.text], ["Entwurf", "none", "keine Checks"]);
   assert.deepEqual([failing.review, failing.checks.state, failing.checks.text], ["Änderungen gewünscht", "failed", "3 bestanden · 2 fehlgeschlagen"]);
@@ -1084,6 +1092,131 @@ test("a section missing from GitHub's answer is an error, explained by the error
   assert.throws(() => board.parseGithubList({ data: { s0: { issueCount: 0, nodes: [] } } }, listView()), /Die Suche „is:pr author:@me“ fehlt in GitHubs Antwort/);
   assert.throws(() => board.parseGithubList({ data: { s0: { issueCount: 0, nodes: [] }, s1: null } }, listView(), [{ path: ["s1"], message: "Invalid search query" }]),
     { message: "Die Suche „is:pr author:@me“: Invalid search query" });
+});
+
+// ---- PR list: whether the viewer has to act ----
+
+// The PR view of the shipped views.json, its three sections.
+const shippedListView = () => board.readConfig(shippedConfig()).config.github.views.find((v) => v.layout === "list");
+// github-list-attention.json as the shipped PR view reads it, and the rows
+// of its sections by number.
+const attentionList = (data = json("github-list-attention.json"), view = shippedListView()) => board.parseGithubList(data, view);
+const attentionOf = (list) => list.sections.map((s) => s.rows.map((r) => [r.number, r.attention, r.waiting]));
+// The answer's pull request `number`, to change before it is read.
+const attentionPr = (data, number) => ["s0", "s1", "s2"].flatMap((s) => data.data[s].nodes).find((n) => n.number === number);
+// The reasons of the row `number` in an answer changed by `change`.
+function reasonsWith(number, change) {
+  const data = json("github-list-attention.json");
+  change(attentionPr(data, number), data);
+  const row = attentionList(data).sections.flatMap((s) => s.rows).find((r) => r.number === number);
+  return [row.attention, row.waiting];
+}
+
+test("the PR list reads what tells whether the viewer has to act: mergeable, each person's latest review with its commit, the head commit, the first 50 review threads with their last 10 comments' authors; a pull request a level down does without them", () => {
+  const doc = board.githubListArgs(shippedListView()).find((a) => a.startsWith("query=")).replace(/\s+/g, " ");
+  assert.match(doc, / mergeable latestReviews\(first: 20\) \{ nodes \{ author \{ login \} commit \{ oid \} \} \} /);
+  assert.match(doc, /reviewThreads\(first: 50\) \{ totalCount nodes \{ isResolved comments\(last: 10\) \{ nodes \{ author \{ login \} \} \} \} \}/);
+  assert.match(doc, /commits\(last: 1\) \{ nodes \{ commit \{ oid statusCheckRollup/);
+  assert.deepEqual([board.REVIEW_THREADS, board.THREAD_COMMENTS], [50, 10]);
+  assert.equal((doc.match(/reviewThreads\(/g) ?? []).length, 3, "in each of the three searches");
+  const level = board.githubPullRequestArgs({ repo: "example/tender", number: 1 })[3];
+  assert.doesNotMatch(level, /mergeable|latestReviews|reviewThreads/);
+});
+
+test("on someone else's pull request the viewer has to act where their review is asked and they gave none, where their latest review was on another commit than the head, asked again or not, and where a thread they took part in ends with someone else's comment; one they reviewed that asks nothing waits on its author, but not one that asks their review again", () => {
+  const [review, , reviewed] = attentionOf(attentionList());
+  assert.deepEqual(review, [
+    [101, ["Review angefragt"], false], [102, ["neue Commits seit deinem Review"], false], [103, [], false],
+  ], "103 asks again with nothing new: no reason, and not waiting either");
+  assert.deepEqual(reviewed, [
+    [302, ["neue Commits seit deinem Review"], false], [303, ["Antwort erwartet"], false], [301, [], true],
+  ], "301: a thread of its own unanswered, and one without sample-user, ask nothing of sample-user");
+  assert.deepEqual(reasonsWith(301, (pr) => (pr.latestReviews.nodes[0].commit = null)), [["neue Commits seit deinem Review"], false], "a review whose commit GitHub does not name");
+  assert.deepEqual(reasonsWith(302, (pr) => (pr.commits.nodes = [])), [[], true], "no head commit: no new commits to tell");
+  assert.deepEqual(reasonsWith(301, (pr) => pr.reviewThreads.nodes.push({ isResolved: false, comments: { nodes: [{ author: { login: "sample-user" } }, { author: null }] } })),
+    [["Antwort erwartet"], false], "a last comment whose author is gone is someone else's");
+  assert.deepEqual(reasonsWith(303, (pr) => (pr.reviewThreads.nodes[0].isResolved = true)), [[], true], "a resolved thread asks nothing");
+  assert.deepEqual(reasonsWith(101, (pr) => (pr.reviewRequests.nodes = [])), [[], false], "neither asked nor reviewed: nothing");
+  assert.deepEqual(reasonsWith(301, (pr) => (pr.author = null)), [[], true], "an author who is gone is not sample-user");
+  assert.deepEqual(reasonsWith(101, (pr) => {
+    pr.latestReviews.nodes.push({ author: { login: "sample-user" }, commit: { oid: pr.commits.nodes[0].commit.oid } });
+    pr.reviewThreads.nodes.push({ isResolved: false, comments: { nodes: [{ author: { login: "sample-user" } }, { author: { login: "sample-reviewer" } }] } });
+  }), [["Antwort erwartet"], false], "asked again after a review of the head: only the thread");
+  assert.deepEqual(reasonsWith(102, (pr) => pr.reviewThreads.nodes.push({ isResolved: false, comments: { nodes: [{ author: { login: "sample-user" } }, { author: { login: "sample-contributor" } }] } })),
+    [["neue Commits seit deinem Review", "Antwort erwartet"], false], "every reason, in order");
+});
+
+test("on one's own pull request the viewer has to act on changes requested, threads whose last comment is someone else's (50+ where GitHub has more than it sent), failing checks and a conflict; with none of them it is ready to merge where it is approved, green, merges cleanly and is no draft", () => {
+  const [, mine] = attentionOf(attentionList());
+  assert.deepEqual(mine, [
+    [201, ["bereit zum Mergen"], false], [202, ["Änderungen gewünscht", "2 offene Threads", "Checks rot", "Konflikt"], false], [203, [], false],
+  ]);
+  const open = (n) => Array.from({ length: n }, () => ({ isResolved: false, comments: { nodes: [{ author: { login: "sample-reviewer" } }] } }));
+  const threads = (nodes, total) => (pr) => (pr.reviewThreads = { totalCount: total, nodes });
+  assert.deepEqual(reasonsWith(203, threads(open(1), 1)), [["1 offener Thread"], false]);
+  assert.deepEqual(reasonsWith(203, threads(open(50), 70)), [["50+ offene Threads"], false], "threads GitHub did not send may be open too");
+  assert.deepEqual(reasonsWith(203, threads(open(1), 70)), [["1+ offene Threads"], false]);
+  assert.deepEqual(reasonsWith(203, threads([], 70)), [[], false], "none open of those it sent: no reason");
+  assert.deepEqual(reasonsWith(203, (pr) => (pr.reviewThreads = null)), [[], false], "no threads read");
+  assert.deepEqual(reasonsWith(201, threads(open(1), 1)), [["1 offener Thread"], false], "an open thread: not ready");
+  for (const [why, change] of [
+    ["a draft", (pr) => (pr.isDraft = true)],
+    ["mergeability still being calculated", (pr) => (pr.mergeable = "UNKNOWN")],
+    ["checks still running", (pr) => (pr.commits.nodes[0].commit.statusCheckRollup.contexts.checkRunCountsByState.push({ state: "IN_PROGRESS", count: 1 }))],
+    ["no checks", (pr) => (pr.commits.nodes[0].commit.statusCheckRollup = null)],
+    ["no review decision", (pr) => (pr.reviewDecision = null)],
+    ["a review still required", (pr) => (pr.reviewDecision = "REVIEW_REQUIRED")],
+  ]) assert.deepEqual(reasonsWith(201, change), [[], false], why);
+  for (const [reason, change] of [
+    ["Änderungen gewünscht", (pr) => (pr.reviewDecision = "CHANGES_REQUESTED")],
+    ["Checks rot", (pr) => pr.commits.nodes[0].commit.statusCheckRollup.contexts.checkRunCountsByState.push({ state: "FAILURE", count: 1 })],
+    ["Konflikt", (pr) => (pr.mergeable = "CONFLICTING")],
+  ]) assert.deepEqual(reasonsWith(201, change), [[reason], false], reason);
+  assert.deepEqual(reasonsWith(201, (pr) => pr.latestReviews.nodes.push({ author: { login: "sample-user" }, commit: { oid: "old" } })), [["bereit zum Mergen"], false],
+    "one's own review of one's own pull request is no reviewer's reason");
+});
+
+test("without the viewer's login no row asks anything of anyone, and the rows keep GitHub's order", () => {
+  const data = json("github-list-attention.json");
+  delete data.data.viewer;
+  assert.deepEqual(attentionOf(attentionList(data)).map((s) => s.map(([n, a, w]) => [n, a.length, w])), [
+    [[103, 0, false], [101, 0, false], [102, 0, false]], [[203, 0, false], [201, 0, false], [202, 0, false]], [[301, 0, false], [302, 0, false], [303, 0, false]],
+  ]);
+});
+
+test("a section's rows the viewer has to act on come first, each part in GitHub's order; a pull request two searches find stays in the first, so a review still asked for leaves it out of Geprüft", () => {
+  const list = attentionList();
+  assert.deepEqual(list.sections.map((s) => [s.name, s.rows.map((r) => r.number)]), [
+    ["Zu prüfen", [101, 102, 103]], ["Meine", [201, 202, 203]], ["Geprüft", [302, 303, 301]],
+  ]);
+  const data = json("github-list-attention.json");
+  data.data.s0.nodes.reverse();
+  assert.deepEqual(attentionList(data).sections[0].rows.map((r) => r.number), [102, 101, 103], "two rows to act on keep their order");
+});
+
+test("the shipped views.json's PR view searches what one is asked to review, one's own, and the open pull requests one reviewed and did not open, in blue, violet and teal", () => {
+  const view = shippedListView();
+  assert.deepEqual(view.sections.map((s) => [s.name, s.tone]), [["Zu prüfen", "blue"], ["Meine", "violet"], ["Geprüft", "teal"]]);
+  assert.match(view.sections[2].query, /^is:pr is:open archived:false reviewed-by:@me -author:@me$/);
+  assert.deepEqual(attentionList().sections.map((s) => s.color), ["ansi4", "ansi5", "ansi6"]);
+});
+
+test("a list section takes the tone views.json gives it, by copper's hue names, else one by its place: blue, violet, teal, then the others; any other tone is named as an error", () => {
+  const list = (sections) => board.validateConfig({ sources: { github: { views: [{ id: "l", name: "L", layout: "list", sections }] } } });
+  const s = (name, tone) => ({ name, query: "is:pr", ...(tone === undefined ? {} : { tone }) });
+  const { config, errors } = list([s("A"), s("B", "orange"), s("C"), s("D", "red")]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(config.github.views[0].sections.map((x) => x.tone), [undefined, "orange", undefined, "red"], "none where views.json sets none");
+  const answer = { data: Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((i) => [`s${i}`, { issueCount: 0, nodes: [] }])) };
+  assert.deepEqual(board.parseGithubList(answer, config.github.views[0]).sections.map((x) => x.color), ["ansi4", "ansi11", "ansi6", "ansi1"]);
+  const eight = { sections: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => s(`S${i}`)) };
+  assert.deepEqual(board.parseGithubList(answer, eight).sections.map((x) => x.color), ["ansi4", "ansi5", "ansi6", "ansi2", "ansi3", "ansi11", "ansi1", "ansi4"], "the eighth starts again");
+  assert.deepEqual(board.SECTION_TONE_ORDER.map((n) => board.SECTION_TONES[n]), ["ansi4", "ansi5", "ansi6", "ansi2", "ansi3", "ansi11", "ansi1"]);
+  assert.deepEqual(board.parseGithubList(json("github-list.json"), listView()).sections.map((x) => x.color), ["ansi4", "ansi5"], "the test views set none");
+  const bad = list([s("A", "Blue"), s("B", 4), s("C", "constructor"), s("D", "teal")]);
+  const why = '„tone“ ist "red", "orange", "yellow", "green", "teal", "blue" oder "violet"';
+  assert.deepEqual(bad.errors.slice(0, 3), ["A", "B", "C"].map((n) => `GitHub-Ansicht 1 („L“): Abschnitt „${n}“: ${why}`));
+  assert.equal(bad.config, null, "the view is left out");
 });
 
 // ---- Tools that cannot run ----
@@ -3840,13 +3973,13 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   assert.ok(cards().includes(board.findCard(st().data, st().sel.key).card.number), "the selection leaves the card no longer shown");
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-list.json")));
-  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 808, 77],
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 77, 808],
     "the list: from a search of one's own, assigned, opened by sample-user; not the bot's own 1921");
   assert.ok(texts(b.render()).includes("REVIEW · 1"), "the review section, a search of one's own, keeps its row");
   assert.ok(texts(b.render()).includes("MINE · 2/3"), "and says what is hidden");
   assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3/4", "so does the tab");
   await press(b, cx, "m");
-  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 77, 1921, 808]);
 });
 
 test("a search of one's own is one with author, assignee or (user-)review-requested set to @me, not negated", () => {
@@ -3886,7 +4019,7 @@ test("„nur meine“ counts a search of one's own whole, and a pull request on 
   assert.deepEqual(list.sections.map((s) => s.rows.map((r) => r.ownByQuery)), [[true], [true, true, true]], "review-requested:@me, author:@me");
   const other = { ...listView(), sections: [{ name: "A", query: "is:pr repo:example/tender" }, { name: "B", query: "is:pr repo:example/atlas" }] };
   const rows = board.parseGithubList(json("github-list.json"), other).sections.flatMap((s) => s.rows);
-  assert.deepEqual(rows.map((r) => [r.number, r.ownByQuery, board.isMine(r, "sample-user")]), [[2820, false, true], [1921, false, false], [808, false, true], [77, false, true]]);
+  assert.deepEqual(rows.map((r) => [r.number, r.ownByQuery, board.isMine(r, "sample-user")]), [[2820, false, true], [77, false, true], [1921, false, false], [808, false, true]]);
   assert.deepEqual(rows.find((r) => r.number === 808).reviewers, [], "a reviewer that is gone names no one");
   assert.equal(board.isMine({ ownByQuery: true }, null), true, "also without the viewer's login");
   const cases = casesBoard();
@@ -4022,8 +4155,8 @@ test("UI: a prs row draws without checks or author; a draft mark is its own cell
   const row = st.data.sections[0].rows[0];
   st.data.sections[0].rows[0] = { ...row, checks: null, author: null, draft: true };
   const cells = byId(b.render(), `row-${row.key}`).kids.map((k) => texts(k).join(""));
-  assert.equal(cells.length, 4, "label, title, draft mark, age");
-  assert.deepEqual(cells.slice(0, 3), ["tender#2820", "build(ui): draw the summary card", "Entwurf"]);
+  assert.equal(cells.length, 5, "label, title, whether sample-user has to act, draft mark, age");
+  assert.deepEqual(cells.slice(0, 4), ["tender#2820", "build(ui): draw the summary card", "● Review angefragt", "Entwurf"]);
   // Rows with and without the mark keep their cells in line.
   const widths = (r) => byId(b.render(), `row-${r.key}`).kids.map((k) => k.with.w?.[0] ?? null);
   const [plain, draft] = [st.data.sections[1].rows[0], st.data.sections[1].rows.find((r) => r.draft)];
@@ -8997,13 +9130,108 @@ test("UI: a selected row of the Backlog and of a PR list, and a marked line of t
   const [first, second] = prs.b.navColumns(prs.b.view())[0].shown;
   await click(prs.b, prs.cx, `row-${first.key}`);
   assert.deepEqual(look(byId(prs.b.render(), `row-${first.key}`)), [board.selectedBg(t), t.accent]);
-  assert.deepEqual(look(byId(prs.b.render(), `row-${second.key}`)), ["none", t.background]);
+  assert.deepEqual(look(byId(prs.b.render(), `row-${second.key}`)), ["none", t["copper-violet-text"]], "the others with their section's stripe");
   const related = await openRelated();
   related.host.theme = () => t;
   await action(related.b, related.cx, "board_tab");
   await press(related.b, related.cx, "j");
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-0")), [board.selectedBg(t), t.accent]);
   assert.deepEqual(look(byId(detailPanel(related.b), "related-line-1")), ["none", t.chrome]);
+});
+
+// ---- PR list: sections in their tones, the mark on what asks something ----
+
+// testConfig with the shipped PR view's sections, the third one's tone
+// `third` (none: views.json's teal).
+function attentionConfig(third = undefined) {
+  const config = JSON.parse(testConfig());
+  const sections = JSON.parse(shippedConfig()).sources.github.views.find((v) => v.layout === "list").sections;
+  config.sources.github.views[1].sections = sections.map((s, i) => (i === 2 && third ? { ...s, tone: third } : s));
+  return JSON.stringify(config);
+}
+// The PR tab of a board on `config`, read from github-list-attention.json
+// and drawn in the theme `t`.
+async function openAttention(t, config = attentionConfig()) {
+  const opened = await openBoard({ config });
+  opened.host.theme = () => t;
+  await press(opened.b, opened.cx, "2");
+  await opened.host.answer("gh", ok(fixture("github-list-attention.json")));
+  return opened;
+}
+// A section's head: [its background, its text's color, its text].
+const sectionHead = (root, i) => {
+  const head = byId(root, `section-${i}`);
+  return [head.with.bg[0], head.with.text_color[0], texts(head).join("")];
+};
+// The element holding the text `text` in the row of the pull request `n`.
+const rowCell = (root, n, text) => pathTo(byId(root, `row-PR_sample${n}`), (s) => s === text)?.at(-1) ?? null;
+const rowStripe = (root, n) => byId(root, `row-PR_sample${n}`).with.border_color[0];
+
+test("UI: in a copper theme each PR list section's head sits on a band of its tone's step (3, or 4 where 3 stands too close), its name and count in the tone's text color; each row has a stripe in it; a pull request that asks something of the viewer is marked in copper's orange with its reasons, a reviewed one waits on its author; the details say why", async () => {
+  for (const mode of COPPER) {
+    const t = copperTheme(mode);
+    const { b, cx } = await openAttention(t);
+    const root = b.render();
+    const colors = ["blue", "violet", "teal"];
+    colors.forEach((color, i) => {
+      const [bg, fg] = sectionHead(root, i);
+      assert.equal(bg, board.headBg(t, `ansi${4 + i}`, t.background), `${mode} ${color}: as a column's head on the background`);
+      assert.ok([t[`copper-${color}-3`], t[`copper-${color}-4`]].includes(bg), `${mode} ${color}: a copper step`);
+      assert.equal(fg, t[`copper-${color}-text`], `${mode} ${color}`);
+    });
+    assert.deepEqual([0, 1, 2].map((i) => sectionHead(root, i)[2]), ["ZU PRÜFEN · 3", "MEINE · 3", "GEPRÜFT · 3"]);
+    assert.deepEqual([102, 103, 202, 301].map((n) => rowStripe(root, n)), ["blue", "blue", "violet", "teal"].map((c) => t[`copper-${c}-text`]), mode);
+    const mark = rowCell(root, 202, "● Änderungen gewünscht · 2 offene Threads · Checks rot · Konflikt");
+    assert.ok(mark, `${mode}: every reason in the row`);
+    assert.equal(mark.with.text_color[0], t["copper-orange-text"], mode);
+    assert.ok(mark.styles.includes("truncate") && mark.with.w[0] === 200, "a cell of its own width, cut where it is longer");
+    assert.equal(rowCell(root, 301, "wartet auf Autor").with.text_color[0], t.muted, mode);
+    assert.equal(texts(byId(root, "row-PR_sample103")).some((s) => s.startsWith("●") || s === "wartet auf Autor"), false, `${mode}: asked again with nothing new`);
+    await click(b, cx, "row-PR_sample202");
+    await click(b, cx, "row-PR_sample202");
+    const shown = texts(detailPanel(b));
+    const at = shown.indexOf("DU BIST DRAN");
+    assert.deepEqual(shown.slice(at, at + 5), ["DU BIST DRAN", "Änderungen gewünscht", "2 offene Threads", "Checks rot", "Konflikt"], mode);
+    assert.ok(shown.includes("CHECKS"), "and its checks after them");
+    assert.equal(rowStripe(b.render(), 202), t.accent, "a selected row's stripe is the accent");
+    await click(b, cx, "row-PR_sample301");
+    await click(b, cx, "row-PR_sample301");
+    assert.equal(texts(detailPanel(b)).includes("DU BIST DRAN"), false, "nothing to do: no such section");
+  }
+});
+
+test("UI: a PR list section's tone from views.json; on a theme without copper's colors its band is the tone's color laid over the background at HEAD_ALPHA, its stripe and text the theme's color, orange the theme's yellow, as the mark", async () => {
+  const t = catppuccinTheme();
+  const { b } = await openAttention(t, attentionConfig("orange"));
+  const root = b.render();
+  ["ansi4", "ansi5", "ansi3"].forEach((tone, i) => {
+    const [bg, fg] = sectionHead(root, i);
+    assert.deepEqual([bg, fg], [over(`${t[tone]}${board.HEAD_ALPHA}`, t.background), t[tone]], `${i}: ${tone}`);
+  });
+  assert.equal(b.views.prs.data.sections[2].color, "ansi11", "views.json's orange");
+  assert.deepEqual([102, 201, 302].map((n) => rowStripe(root, n)), [t.ansi4, t.ansi5, t.ansi3], "the first row, selected, has the accent");
+  assert.equal(rowCell(root, 101, "● Review angefragt").with.text_color[0], t.ansi3);
+  const copper = copperTheme("dark");
+  const inCopper = await openAttention(copper, attentionConfig("orange"));
+  assert.equal(sectionHead(inCopper.b.render(), 2)[1], copper["copper-orange-text"], "copper's orange in a copper theme");
+});
+
+test("a PR list section's name and count read at 4.5:1 or more on its band, for every tone a section takes; the mark's text on a row and on a selected one too, and a section's stripe stands at 3:1 or more from the background, in copper-dark and copper-light with and without copper's colors and in catppuccin-mocha", () => {
+  const themes = { "copper-dark": copperTheme("dark"), "copper-light": copperTheme("light"), ...TINTED() };
+  const ratios = {};
+  const stripes = {};
+  for (const [name, t] of Object.entries(themes)) {
+    for (const [hue, color] of Object.entries(board.SECTION_TONES)) {
+      const tone = board.namedTone(t, color);
+      const band = board.headBg(t, tone, t.background);
+      ratios[`${name} ${hue} head`] = [contrast(board.toneColor(t, tone), band)];
+      stripes[`${name} ${hue} stripe`] = [contrast(board.toneColor(t, tone), t.background)];
+    }
+    const mark = board.toneColor(t, board.namedTone(t, board.ATTENTION_TONE));
+    ratios[`${name} mark`] = [contrast(mark, t.background), contrast(mark, board.selectedBg(t))];
+  }
+  assert.deepEqual(below(ratios, 4.5), [], shownRatios(ratios));
+  assert.deepEqual(below(stripes, 3), [], shownRatios(stripes));
 });
 
 // The thin line across the top of a card or row in its type's color, or

@@ -95,6 +95,17 @@ export const otherLook = (state) => ({ state: String(state ?? "?").toLowerCase()
 // yet.
 export const DRAFT_REVIEW = "Entwurf";
 
+// The tones a PR list's section may take (views.json, a section's "tone"),
+// by copper's names for its hues, each as the theme name the board draws it
+// in (ui/tones.js takes those to copper's colors), and the order in which
+// sections without one take them, by their place in the view.
+export const SECTION_TONES = { red: "ansi1", orange: "ansi11", yellow: "ansi3", green: "ansi2", teal: "ansi6", blue: "ansi4", violet: "ansi5" };
+export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", "orange", "red"];
+
+// The theme name of the section at `index` with the tone `tone` (none: the
+// one SECTION_TONE_ORDER gives its place).
+export const sectionColor = (tone, index) => SECTION_TONES[tone ?? SECTION_TONE_ORDER[index % SECTION_TONE_ORDER.length]];
+
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".
 export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
