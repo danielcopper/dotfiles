@@ -3,6 +3,8 @@
 // the view as makeAzure uses it (backlogView).
 
 import { BoardError, errorText, failure, isObject } from "../../shared.js";
+import { NO_LIVE } from "../../loading.js";
+import { what } from "../../tools.js";
 import { AZ_QUERY_LIMIT, TEAM_KEEP_MS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, idsWiql, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
 
 // The Backlog view's calls for a team context `c`: the team's backlog
@@ -58,9 +60,13 @@ export function parseBacklogLevels(stdout) {
 // level below it, whose types (Tasks) may be created under one of its
 // items: the team's task level, else the configuration's.
 export function backlogLevels(levels, config) {
+  return { level: requirementLevel(levels), childLevel: levels.find((l) => l.type === "task") ?? config.taskLevel ?? null };
+}
+
+export function requirementLevel(levels) {
   const level = levels.find((l) => l.type === "requirement");
   if (!level) throw new BoardError("Das Team hat keine Backlog-Ebene für Anforderungen (Stories)");
-  return { level, childLevel: levels.find((l) => l.type === "task") ?? config.taskLevel ?? null };
+  return level;
 }
 
 // A field's reference name, as a WIQL query may name it; anything else is
@@ -207,20 +213,19 @@ export function createdWiql({ project, type, title, child = false }) {
 // writes, and what `r` or a refused write drops (forget).
 export function backlogView(s) {
   const key = (c) => `backlog\n${s.teamKey(c)}`;
-  async function backlogSettingsOf(c) {
+  function backlogSettingsOf(c, view) {
     const held = s.keptValue(key(c));
-    if (held) return held.value;
-    const [levels, config, settings, areas] = await Promise.all([
-      s.az(azLevelsArgs(c)).then(parseBacklogLevels),
-      s.az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
-      s.az(azTeamSettingsArgs(c)).then(parseTeamSettings),
-      s.areasOf(c),
-    ]);
-    const value = { ...backlogLevels(levels, config), config, settings, area: areas.default };
-    const until = backlogUntil(settings, Date.now());
-    s.keep(key(c), value, until);
-    s.keepAreasUntil(c, until);
-    return value;
+    if (held) return { level: Promise.resolve(held.value.level), config: Promise.resolve(held.value.config), all: Promise.resolve(held.value) };
+    const levels = s.az(azLevelsArgs(c), what(view, "levels")).then(parseBacklogLevels);
+    const config = s.az(azBacklogConfigArgs(c), what(view, "backlog-config")).then(parseBacklogConfig);
+    const all = Promise.all([levels, config, s.az(azTeamSettingsArgs(c), what(view, "team-settings")).then(parseTeamSettings), s.areasOf(c, view)]).then(([lv, cf, settings, areas]) => {
+      const value = { ...backlogLevels(lv, cf), config: cf, settings, area: areas.default };
+      const until = backlogUntil(settings, Date.now());
+      s.keep(key(c), value, until);
+      s.keepAreasUntil(c, until);
+      return value;
+    });
+    return { level: levels.then(requirementLevel), config, all };
   }
   const forget = (c) => {
     s.drop(key(c));
@@ -230,9 +235,9 @@ export function backlogView(s) {
   // The colors of the project's work item types (s.typesOf, which keeps
   // them) and their warnings; a read that fails gives none and the warning
   // that says so.
-  async function typeColorsOf(c) {
+  async function typeColorsOf(c, view) {
     try {
-      const { types } = await s.typesOf(c);
+      const { types } = await s.typesOf(c, view);
       return { colors: types.colors, warnings: types.warnings };
     } catch (e) {
       return { colors: {}, warnings: [`Farben der Work-Item-Typen nicht gelesen: ${errorText(e)}`] };
@@ -240,18 +245,27 @@ export function backlogView(s) {
   }
   return {
     forget,
-    async load(view) {
+    async load(view, { live = NO_LIVE }) {
       const c = view.context;
-      const me = s.whoAmI();
-      const kept = await backlogSettingsOf(c);
-      const types = typeColorsOf(c);
-      const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
-      const read = ids.slice(0, AZ_QUERY_LIMIT);
-      const out = read.length ? await s.az(azQueryArgs(c, idsWiql(read, kept.config.orderField ? [kept.config.orderField] : []))) : "";
-      const { colors, warnings } = await types;
-      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me, typeColors: colors });
-      s.noViewerOf(data);
-      return { data, warnings };
+      const me = s.whoAmI(view);
+      const settings = backlogSettingsOf(c, view);
+      let types = null;
+      const typesRead = typeColorsOf(c, view).then((t) => (types = t));
+      const idsRead = settings.level.then((level) => s.az(azBacklogIdsArgs(c, level.id), { failure: azRestFailure, ...what(view, "backlog-ids") })).then(parseBacklogIds);
+      const outRead = Promise.all([idsRead, settings.config]).then(([ids, config]) => {
+        const read = ids.slice(0, AZ_QUERY_LIMIT);
+        return read.length ? s.az(azQueryArgs(c, idsWiql(read, config.orderField ? [config.orderField] : [])), what(view, "backlog-items")) : "";
+      });
+      const [kept, ids, out] = await Promise.all([settings.all, idsRead, outRead]);
+      const viewer = await me;
+      const list = (colors) => {
+        const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer, typeColors: colors });
+        s.noViewerOf(data);
+        return data;
+      };
+      if (!types) live.partial(() => ({ data: list({}), warnings: [] }));
+      const { colors, warnings } = await typesRead;
+      return { data: list(colors), warnings };
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
     // Creates a work item ({ type, title }) in the team's default area and
@@ -262,21 +276,21 @@ export function backlogView(s) {
       const c = view.context;
       let iteration = data.meta.iteration;
       if (data.meta.follows) {
-        iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c))).defaultIteration;
+        iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c), what(view, "team-settings"))).defaultIteration;
         if (!iteration) throw new BoardError("Das Team nennt gerade keine Standard-Iteration (Team-Einstellungen in Azure)");
       }
       const args = azCreateArgs(c, { type, title, area: data.meta.area, iteration });
-      return parseCreated(await s.az(args, { write: true }).catch(onRefusal(c)));
+      return parseCreated(await s.az(args, { write: true, ...what(view, "create") }).catch(onRefusal(c)));
     },
     // Makes the work item `id` a child of `parent`.
     async addParent(view, id, parent) {
-      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true }), parent);
+      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true, ...what(view, "parent-link") }), parent);
     },
     // The work items createdWiql finds for a create ({ type, title,
     // child }) in the view's project, as parseWorkItems reads them.
     async findCreated(view, { type, title, child }) {
       const c = view.context;
-      return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child }))), c);
+      return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child })), what(view, "created-items")), c);
     },
   };
 }

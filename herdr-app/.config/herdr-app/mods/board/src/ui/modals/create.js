@@ -13,6 +13,7 @@ import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { itemLabel } from "../../shared.js";
 import { createTypes } from "../../kinds/backlog.js";
 import { CREATE_KEY, createItem } from "../../actions/create.js";
+import { SAVED_WRITE, restartRead } from "../../actions/write.js";
 import { backdrop, button, cycleField, fieldFrame, fieldLabel, wireTextField } from "../helpers.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
@@ -48,15 +49,18 @@ export const createModal = {
     cx.notify();
   },
 
-  // Creates the work item and closes the dialog; without a title, or while
-  // another create of the view is under way, it stays and says so.
+  // Creates the work item and closes the dialog; without a title, while
+  // another create of the view is under way, or while the view shows its
+  // saved state (SAVED_WRITE), it stays and says so.
   create(b, cx) {
     const m = b.modal;
     if (m?.kind !== "create") return;
     const title = m.input.value().trim();
-    const busy = b.state(m.view.id).pending[CREATE_KEY];
-    if (!title || busy) {
-      m.error = busy ? "Ein Work Item wird noch angelegt …" : "Der Titel fehlt";
+    const st = b.state(m.view.id);
+    const busy = st.pending[CREATE_KEY];
+    if (!title || busy || st.saved) {
+      m.error = busy ? "Ein Work Item wird noch angelegt …" : st.saved ? SAVED_WRITE : "Der Titel fehlt";
+      if (st.saved && !busy) restartRead(b, m.view, cx);
       return cx.notify();
     }
     b.closeModal(cx);

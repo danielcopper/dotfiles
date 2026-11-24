@@ -3,7 +3,8 @@
 // source as the board uses it (makeGithub).
 
 import { CONFIG_NAME, BoardError, DRAFT_REVIEW, PAGE, STATE_LOOKS, errorText, failure, firstLine, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
-import { GH_TIMEOUT, call } from "../tools.js";
+import { NO_LIVE } from "../loading.js";
+import { GH_TIMEOUT, call, what } from "../tools.js";
 
 // Theme colors for GitHub's named colors: a Projects v2 option's and an
 // issue type's (IssueTypeColor), which share the names.
@@ -139,6 +140,11 @@ export function nextBoardPage(json, view) {
   const after = items.pageInfo.endCursor;
   if (typeof after !== "string") throw new BoardError(`Projekt „${project.title}“: GitHub nannte nach ${items.nodes.length} Einträgen nicht, wo die nächsten beginnen`);
   return { after, read: items.nodes.length };
+}
+
+export function boardPages(json, view, calls) {
+  const total = json?.data?.repositoryOwner?.projectV2?.items?.totalCount ?? 0;
+  return Math.min(calls, Math.max(1, Math.ceil(Math.min(total, view.limit) / PAGE)));
 }
 
 // The logins of the people a pull request asks to review; a team's request,
@@ -407,15 +413,17 @@ export const UNREAD = {
 // part in (among its last THREAD_COMMENTS comments) whose last comment is
 // someone else's. waiting: someone else's pull request one reviewed, all of
 // it read, that asks nothing of one ("wartet auf Autor"). Comments as such
-// are no reason.
-function prAttention(pr, row, viewer, asked, errors) {
+// are no reason. `pending`: its follow-up for more threads is still to
+// come, which leaves it unsure but not unread.
+function prAttention(pr, row, viewer, asked, errors, pending = false) {
   const unread = errors.map((e) => firstLine(e.message)).filter(Boolean);
   if (!viewer) return { attention: [], waiting: false, unread };
   const threads = pr.reviewThreads;
   const nodes = Array.isArray(threads?.nodes) ? threads.nodes : null;
   if (!nodes || nodes.some((t) => !Array.isArray(t?.comments?.nodes))) unread.push(UNREAD.threads);
   const more = Boolean(nodes) && (threads.totalCount ?? 0) > nodes.length;
-  if (more) unread.push(UNREAD.moreThreads(nodes.length));
+  if (more && !pending) unread.push(UNREAD.moreThreads(nodes.length));
+  const sure = () => !unread.length && !pending;
   const open = (nodes ?? []).filter((t) => t && !t.isResolved).map((t) => (t.comments?.nodes ?? []).map((c) => c?.author?.login ?? null));
   // Whether a thread waits on the viewer: its last comment is someone else's.
   const awaitsViewer = (authors) => authors.length > 0 && authors.at(-1) !== viewer;
@@ -427,7 +435,7 @@ function prAttention(pr, row, viewer, asked, errors) {
     if (row.checks.state === "failed") reasons.push("Checks rot");
     if (pr.mergeable === "CONFLICTING") reasons.push("Konflikt");
     const ready = !pr.isDraft && [null, "APPROVED"].includes(pr.reviewDecision ?? null) && ["passed", "none"].includes(row.checks.state) && pr.mergeable === "MERGEABLE";
-    if (!reasons.length && !unread.length && ready) reasons.push("bereit zum Mergen");
+    if (!reasons.length && sure() && ready) reasons.push("bereit zum Mergen");
     return { attention: reasons, waiting: false, unread };
   }
   const reviews = Array.isArray(pr.latestReviews?.nodes) ? pr.latestReviews : null;
@@ -444,7 +452,7 @@ function prAttention(pr, row, viewer, asked, errors) {
   // A head unknown is no review's commit, so it gives no reason.
   if (requested && review && review.commit?.oid === head) reasons.push("Review erneut angefragt");
   if (open.some((authors) => authors.includes(viewer) && awaitsViewer(authors))) reasons.push("Antwort erwartet");
-  return { attention: reasons, waiting: Boolean(review) && !requested && !reasons.length && !unread.length, unread };
+  return { attention: reasons, waiting: Boolean(review) && !requested && !reasons.length && sure(), unread };
 }
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
@@ -575,7 +583,7 @@ export const askingSearch = (query) => setsMe(query, ASKING);
 // order, then the others in theirs. A search missing from the answer is
 // explained by the error at its alias.
 // warnings: the first lines of the errors neither a row nor notRead holds.
-export function parseGithubList(json, view, errors = []) {
+export function parseGithubList(json, view, errors = [], pending = null) {
   const seen = new Set();
   const viewer = json?.data?.viewer?.login ?? null;
   const shown = new Set();
@@ -604,7 +612,8 @@ export function parseGithubList(json, view, errors = []) {
       seen.add(pr.id);
       at.forEach((e) => shown.add(e));
       const row = prRow(pr, Boolean(errorAt(at, [...path, "commits"])));
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at), ownByQuery: own });
+      const waits = Boolean(pending?.has(pr.id));
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at, waits), ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
     });
     // Array's sort keeps the order of rows it ranks alike.
     rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
@@ -917,15 +926,15 @@ export function makeGithub(paths) {
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
-      async load(item) {
-        const { json, errors } = await gh(paths, githubRelatedArgs(item));
+      async load(item, view) {
+        const { json, errors } = await gh(paths, githubRelatedArgs(item), what(view, "related"));
         return parseGithubRelated(json, item, errors);
       },
     },
     pullRequest: {
       reads: (item) => item.kind === "pr" && Number.isInteger(item.number) && item.repo.includes("/"),
-      async load(item) {
-        const { json, errors } = await gh(paths, githubPullRequestArgs(item));
+      async load(item, view) {
+        const { json, errors } = await gh(paths, githubPullRequestArgs(item), what(view, "pull-request"));
         return parseGithubPullRequest(json, item, errors);
       },
     },
@@ -935,11 +944,11 @@ export function makeGithub(paths) {
         if (!item.contentId || !ASSIGN[item.kind]) return "Auf diesen Eintrag hat gh keinen Zugriff";
         return null;
       },
-      people: (item) => people.get(item.repo, () => gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors))),
+      people: (item, view) => people.get(item.repo, () => gh(paths, githubAssignableArgs(item), what(view, "assignable")).then(({ json, errors }) => parseAssignable(json, item, errors))),
       // Without the list, GitHub names no one to assign but no one.
       fallbackMe: () => null,
       async write(view, item, person) {
-        return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item) })).json, item, person);
+        return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item), ...what(view, "assign") })).json, item, person);
       },
     },
     views: {
@@ -947,19 +956,22 @@ export function makeGithub(paths) {
         // The first page, then each next one, one call each, until GitHub
         // has no more, the view's limit is read, or as many calls ran as
         // full pages would take to read it.
-        async load(view, hiddenFor) {
+        async load(view, { hiddenFor, live = NO_LIVE }) {
           const hidden = hiddenFor(view);
-          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden));
+          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden), what(view, "board-page-1"));
           const calls = Math.ceil(view.limit / PAGE);
+          const pages = boardPages(json, view, calls);
           for (let call = 1, next = nextBoardPage(json, view); next && call < calls; call++, next = nextBoardPage(json, view)) {
-            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read));
+            live.partial(() => ({ data: { ...parseGithubBoard(json, view, hidden, errors), partial: true }, warnings: [...warnings] }));
+            live.page(call + 1, Math.max(call + 1, pages));
+            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read), what(view, `board-page-${call + 1}`));
             addBoardPage(json, page.json, page.errors);
             warnings.push(...page.warnings);
           }
           return { data: parseGithubBoard(json, view, hidden, errors), warnings };
         },
         async move(view, data, card, column) {
-          checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
+          checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH, ...what(view, "move") })).json, card);
         },
       },
       list: {
@@ -967,22 +979,26 @@ export function makeGithub(paths) {
         // FIRST_THREADS threads, the follow-up for them, one call per
         // THREAD_IDS of them (addThreads; one that fails leaves its rows
         // unread). The errors a row or a section shows are not warnings too.
-        async load(view) {
-          const { json, errors } = await gh(paths, githubListArgs(view));
+        async load(view, { live = NO_LIVE }) {
+          const { json, errors } = await gh(paths, githubListArgs(view), what(view, "list"));
+          const result = (pending = null) => {
+            const data = parseGithubList(json, view, errors, pending);
+            return { data, warnings: data.warnings };
+          };
           const ids = moreThreadIds(json, view);
+          if (ids.length) live.partial(() => result(new Set(ids)));
           for (let at = 0; at < ids.length; at += THREAD_IDS) {
             const chunk = ids.slice(at, at + THREAD_IDS);
             let page = null;
             let failed = null;
             try {
-              page = await gh(paths, githubThreadsArgs(chunk));
+              page = await gh(paths, githubThreadsArgs(chunk), what(view, "threads"));
             } catch (e) {
               failed = errorText(e);
             }
             errors.push(...addThreads(json, view, chunk, page?.json ?? null, page?.errors ?? [], failed));
           }
-          const data = parseGithubList(json, view, errors);
-          return { data, warnings: data.warnings };
+          return result();
         },
       },
     },

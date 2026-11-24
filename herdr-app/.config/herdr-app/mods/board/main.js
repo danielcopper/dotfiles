@@ -88,11 +88,27 @@
 // after that refresh; a create for a team whose default iteration follows the
 // current one reads the team's settings first, one call more. The PR tabs
 // read nothing yet. Finding gh and az costs one sh call now and then
-// (toolPaths says when). A view refreshes when its tab first shows, on `r`
-// (which first drops what its source keeps of it: its source's forget), after
-// a column is hidden or shown (the command menu's "Spalte ausblenden", a name
-// in the hidden line, the column menu), when it is shown again older than
-// refreshMinutes, and every refreshMinutes while it shows.
+// (toolPaths says when). A view refreshes when its tab first shows (unless it
+// has data the prefetch tried within refreshMinutes), on `r` (which first
+// drops what its source keeps of it: its source's forget), after a column is
+// hidden or shown (the command menu's "Spalte ausblenden", a name in the
+// hidden line, the column menu), when it is shown again tried longer than
+// refreshMinutes ago (not while a read of it runs: that one shows), and every
+// refreshMinutes while it shows. Besides, after each read of views.json (the
+// start, `r`), while the board shows, the prefetch reads each other view with
+// a loader once, as its tab would (prefetchOrder: one at a time, none tried
+// within refreshMinutes, none whose own last read since it found its source
+// unavailable), so a start or an `r` costs each other view's refresh at most
+// once; it waits while any read runs, a write is under way or a dialog is
+// busy. After that a view not shown reads nothing. The Azure calls of a load
+// that need nothing of each other run side by side: the Sprint's settings
+// (iteration, areas, columns, types) and who az is; its taskboard once the
+// iteration came, its query once the areas came too; the Backlog's settings
+// (levels, configuration, team settings, areas), the types' colors and who az
+// is; its ids once the levels came, the query for their fields once the
+// configuration came too. What a view drew last, as read, is saved
+// (loading.js) and drawn after a restart with its age until its read replaces
+// it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -107,36 +123,37 @@
 // anything it could load), scroll.js (how the details scroll; the sums a
 // board column shares), sources/ (GitHub; Azure in sources/azure/:
 // common.js, sprint.js, backlog.js, related.js, index.js), tools.js
-// (running gh and az), actions/ (starting a session, writing a change at
-// once, moving a card, changing a state, creating a work item, assigning an
-// item), ui/helpers.js, ui/tones.js (the tones of labels and types, the
-// selected background, the tints), ui/layer.js (the board layer),
-// ui/related.js (the related items as drawn), ui/band.js (which cards of a
-// board column draw whole), ui/shapes/ (how a view's data is drawn and
-// worked: board, prs, sprint, backlog, placeholder), ui/modals/ (the
-// dialogs: start, status, columns, create, assign, commands, sprints) and
-// this one, the Board, which looks the shape up.
+// (running gh and az, a log line each), loading.js (the saved state, what a
+// load draws before its end, the prefetch's order, the top bar's words for a
+// read), actions/ (starting a session, writing a change at once, moving a
+// card, changing a state, creating a work item, assigning an item),
+// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
+// background, the tints), ui/layer.js (the board layer), ui/related.js (the
+// related items as drawn), ui/band.js (which cards of a board column draw
+// whole), ui/shapes/ (how a view's data is drawn and worked: board, prs,
+// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
+// columns, create, assign, commands, sprints) and this one, the Board, which
+// looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { Input, InputState, ScrollHandle, TextView, h_flex, v_flex } from "gpui-base";
 import { appHome, checking, exec, focused, home, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, theme, writeTextFile } from "herdr";
 
 // ==== src/shared.js ====
 
 // What the board's modules share: its names, its error and how one is
-// shown, small checks and text helpers, an item's key and type, and labels
-// for times.
+// shown, its lines for herdr's log, small checks and text helpers, an
+// item's key and type, and labels for times.
 
 export const MOD = "board";
 // The config's base name; the extension is added where the path is built.
 export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
-  // unavailable: az is missing, not signed in or without its extension. It
-  // is set for the Azure views, to tell this apart from a failure; nothing
-  // reads it yet. unclear: a write may or may not have landed.
+  // unavailable: az is missing, not signed in or without its extension.
+  // unclear: a write may or may not have landed.
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
@@ -164,6 +181,9 @@ export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 // The message to show for an error: a BoardError's own, else marked as
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
+
+// herdr's log gets console.log.
+export const boardLog = { write: (line) => console.log(line) };
 
 // An error's message for the UI; an unexpected one is logged with its stack.
 export function report(e) {
@@ -279,14 +299,6 @@ export function readMemo() {
     drop: (key) => kept.delete(key),
     clear: () => kept.clear(),
   };
-}
-
-export function updatedLabel(at, now) {
-  if (!at) return "";
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 60) return `vor ${s} s`;
-  if (s < 3600) return `vor ${Math.floor(s / 60)} min`;
-  return `vor ${Math.floor(s / 3600)} h`;
 }
 
 // A day in ms, and the end of an iteration's last day from Azure's
@@ -1335,7 +1347,7 @@ export async function findTool(execute, tool, on, timeoutMs) {
   const unknown = `Pfad von ${toolOn(tool, on)} nicht ermittelt`;
   let r;
   try {
-    r = await execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs });
+    r = await logged("sh", { kind: `which-${tool}` }, () => execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs }));
   } catch (e) {
     const msg = firstLine(e?.message ?? e);
     if (on && String(e?.message ?? e).includes(NO_SH)) return { program: tool, bare: true };
@@ -1393,16 +1405,118 @@ export function toolPaths(execute) {
   };
 }
 
+// The line names no argument: no query text, no token.
+export const callLine = (tool, { view = null, kind = "call" } = {}, ms, outcome) => `board: ${tool} ${kind} ${ms} ms ${outcome} view=${view ?? "-"}`;
+export const what = (view, kind) => ({ what: { view: view?.id ?? null, kind } });
+
+async function logged(tool, about, run) {
+  const began = Date.now();
+  let outcome = "failed";
+  try {
+    const r = await run();
+    outcome = r?.code ? `exit ${r.code}` : "ok";
+    return r;
+  } finally {
+    boardLog.write(callLine(tool, about, Date.now() - began, outcome));
+  }
+}
+
 // One run of a program: its result, or a BoardError when it could not run.
 // With `paths` (toolPaths) it runs by what that finds. `write` is for calls
 // that change something (see execRejection).
-export async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
-  const start = (program) => exec(program, args, { on, timeout });
+export async function call(tool, args, on, timeout, { write = false, paths = null, what: about } = {}) {
+  const start = (program) => logged(tool, about, () => exec(program, args, { on, timeout }));
   try {
     return await (paths ? paths.run(tool, on, timeout, start) : start(tool));
   } catch (e) {
     throw e instanceof BoardError ? e : execRejection(tool, e, timeout, on, { write });
   }
+}
+
+// ==== src/loading.js ====
+
+// How views load beyond one read: each view's last good data kept on disk
+// (the saved state, drawn at once after a restart), what a load draws before
+// its end, the order the prefetch reads the other views in, and the top
+// bar's words for a read and an age.
+
+// herdr's store refuses a value whose JSON string takes more than 1 MiB in
+// UTF-8, and a file of more than 8 MiB for all keys (gpui-kit's
+// storage.rs).
+export const SAVED_MAX = 1000000;
+export const SAVED_PREFIX = "board:data:";
+// Raised when what a shape draws from changes, so that no older data is drawn.
+export const SAVED_VERSION = 1;
+export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
+
+// Data read for other hidden columns or another form of the view is not
+// its data.
+const savedSig = (view, hidden) => JSON.stringify([SAVED_VERSION, view, [...hidden].sort()]);
+
+// The size the store measures `text` by.
+export function storeBytes(text) {
+  const json = JSON.stringify(text);
+  let bytes = json.length;
+  for (let i = 0; i < json.length; i++) {
+    const unit = json.charCodeAt(i);
+    if (unit >= 0x80) bytes++;
+    // A surrogate is half of a 4-byte character, so 2 bytes.
+    if (unit >= 0x800 && (unit < 0xd800 || unit > 0xdfff)) bytes++;
+  }
+  return bytes;
+}
+
+export function savedText(view, hidden, { data, warnings }, at) {
+  const text = JSON.stringify({ sig: savedSig(view, hidden), at, data, warnings });
+  return storeBytes(text) <= SAVED_MAX ? text : null;
+}
+
+export function readSaved(text, view, hidden) {
+  let entry;
+  try {
+    entry = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (entry?.sig !== savedSig(view, hidden) || !Number.isFinite(entry.at) || typeof entry.data?.shape !== "string") return null;
+  return { data: entry.data, warnings: Array.isArray(entry.warnings) ? entry.warnings : [], at: entry.at };
+}
+
+export const goneSaved = (keys, ids) => keys.filter((k) => k.startsWith(SAVED_PREFIX) && !ids.has(k.slice(SAVED_PREFIX.length)));
+
+// A load's live: partial(result) draws result() ({ data, warnings }) before
+// the end, calling it at once or not at all; page(n, of) names the page
+// under way.
+export const NO_LIVE = { partial() {}, page() {} };
+
+export const refreshDue = (st, now, every) => now - st.tried >= every;
+
+export function prefetchOrder(views, { shown, source, now, every, stateOf, loads }) {
+  const due = views.filter((v) => {
+    if (v.id === shown?.id || !loads(v)) return false;
+    const st = stateOf(v.id);
+    return !st.loading && !st.unavailable && refreshDue(st, now, every);
+  });
+  const rank = (v) => [v.source === source ? 0 : 1, stateOf(v.id).at];
+  return due.sort((a, b) => {
+    const [x, y] = [rank(a), rank(b)];
+    return x[0] - y[0] || x[1] - y[1];
+  });
+}
+
+export function sinceLabel(at, now) {
+  if (!at) return "";
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 60) return `vor ${s} s`;
+  if (s < 3600) return `vor ${Math.floor(s / 60)} min`;
+  if (s < 48 * 3600) return `vor ${Math.floor(s / 3600)} h`;
+  return `vor ${Math.floor(s / 86400)} d`;
+}
+
+export function readLabels(st, now) {
+  if (!st) return { reading: "", age: "" };
+  const page = st.progress?.pages > 1 ? ` Seite ${st.progress.page} von ${st.progress.pages}` : "";
+  return { reading: st.loading ? `lädt …${page}` : "", age: st.at ? `Stand ${sinceLabel(st.at, now)}` : "" };
 }
 
 // ==== src/actions/start.js ====
@@ -1987,24 +2101,27 @@ export const PARENTS_UNREAD = "Titel der übergeordneten Work Items nicht gelese
 const parentsKey = (s, c) => `parents\n${s.teamKey(c)}`;
 
 // One query by id for the parents outside the sprint: az boards query reads no linked item (sources/azure/related.js).
-export async function parentTitles(s, c, items) {
+// `before` gets the items before that query, with the titles known so far.
+export async function parentTitles(s, c, items, view = null, before = null) {
   const key = parentsKey(s, c);
   const held = s.keptValue(key);
   const titles = new Map(held?.value ?? []);
   const own = new Map(items.map((i) => [i.number, i.title]));
   const missing = [...new Set(items.map((i) => i.parent).filter((id) => Number.isInteger(id) && !own.has(id) && !titles.has(id)))];
+  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
+  const titled = () => items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i));
   let warning = null;
   if (missing.length) {
+    before?.(titled());
     try {
-      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing))), c).map((i) => [i.number, i.title]));
+      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing)), what(view, "parents")), c).map((i) => [i.number, i.title]));
       for (const id of missing) titles.set(id, found.get(id) ?? null);
       s.keep(key, titles, held?.until ?? Date.now() + TEAM_KEEP_MS);
     } catch (e) {
       warning = `${PARENTS_UNREAD}: ${errorText(e)}`;
     }
   }
-  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
-  return { items: items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i)), warning };
+  return { items: titled(), warning };
 }
 
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
@@ -2018,33 +2135,36 @@ export async function parentTitles(s, c, items) {
 // the team's sprint, areas and columns, not the project's types); `r`
 // drops the team's iterations and its parent titles too (forget).
 //
-// load(view, hiddenFor, chosen) shows the sprint `chosen` ({ id, name };
-// null: the current one), looked up by its id among the team's
-// iterations: its taskboard and query by its id and path, the team's
-// settings as for the current one. Where the team no longer has it, the
-// current sprint, or none where none runs, shows, meta.gone names it and
-// the load says so (notice); a read of it that fails names it. Where the
-// team has no sprint running and none is chosen, it reads no work items
-// (sprintBoard without an iteration).
+// load(view, { chosen }) shows the sprint `chosen` ({ id, name }; null:
+// the current one), looked up by its id among the team's iterations: its
+// taskboard and query by its id and path, the team's settings as for the
+// current one. Where the team no longer has it, the current sprint, or
+// none where none runs, shows, meta.gone names it and the load says so
+// (notice); a read of it that fails names it. Where the team has no sprint
+// running and none is chosen, it reads no work items (sprintBoard without
+// an iteration).
 export function sprintView(s) {
   const iterations = readMemo();
-  const iterationsOf = (c) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c)).then(parseIterations));
+  const iterationsOf = (c, view) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c), what(view, "iterations")).then(parseIterations));
   const currentKey = (c) => `iteration\n${s.teamKey(c)}`;
-  async function settingsOf(c) {
+  function settingsOf(c, view) {
     const team = s.teamKey(c);
     const [iteration, board] = [s.keptValue(currentKey(c)), s.keptValue(`board\n${team}`)];
-    const [it, areas, columns, { types: ty, fresh }] = await Promise.all([
-      iteration ? iteration.value : s.az(azIterationArgs(c)).then(parseIteration),
-      s.areasOf(c),
-      board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
-      s.typesOf(c),
-    ]);
-    const until = iteration?.until ?? (it ? iterationUntil(it.finish, Date.now()) : dayEnd(Date.now()));
-    s.keepAreasUntil(c, until);
-    if (!iteration) s.keep(currentKey(c), it, until);
-    if (!board) s.keep(`board\n${team}`, { columns }, until);
-    if (fresh) s.keepTypesUntil(c, until);
-    return { iteration: it, areas, columns, types: ty };
+    const parts = {
+      iteration: iteration ? Promise.resolve(iteration.value) : s.az(azIterationArgs(c), what(view, "iteration")).then(parseIteration),
+      areas: s.areasOf(c, view),
+      columns: board ? Promise.resolve(board.value.columns) : s.az(azColumnsArgs(c), what(view, "columns")).then(parseColumns),
+      types: s.typesOf(c, view),
+    };
+    const all = Promise.all([parts.iteration, parts.areas, parts.columns, parts.types]).then(([it, areas, columns, { types: ty, fresh }]) => {
+      const until = iteration?.until ?? (it ? iterationUntil(it.finish, Date.now()) : dayEnd(Date.now()));
+      s.keepAreasUntil(c, until);
+      if (!iteration) s.keep(currentKey(c), it, until);
+      if (!board) s.keep(`board\n${team}`, { columns }, until);
+      if (fresh) s.keepTypesUntil(c, until);
+      return { iteration: it, areas, columns, types: ty };
+    });
+    return { ...parts, all };
   }
   const forgetSettings = (c) => {
     s.drop(currentKey(c));
@@ -2054,25 +2174,31 @@ export function sprintView(s) {
   const onRefusal = (c) => s.dropOnRefusal(forgetSettings, c);
   // The team's current iteration's id: as the Sprint keeps it, else read
   // (and not kept: settingsOf keeps it with the settings it belongs to).
-  async function currentIdOf(c) {
+  async function currentIdOf(c, view) {
     const kept = s.keptValue(currentKey(c));
-    return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c))))?.id ?? null;
+    return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c), what(view, "iteration"))))?.id ?? null;
   }
-  async function loadSprint(view, chosen) {
+  async function loadSprint(view, chosen, live) {
     const c = view.context;
-    const me = s.whoAmI();
-    const [kept, listed] = await Promise.all([settingsOf(c), chosen ? iterationsOf(c) : null]);
-    const found = listed?.find((i) => i.id === chosen.id) ?? null;
-    const iteration = found ?? kept.iteration;
-    const [places, items] = iteration
-      ? await Promise.all([s.az(azTaskboardArgs(c, iteration.id)), s.az(azQueryArgs(c, sprintWiql(iteration, kept.areas)))])
-      : [null, null];
+    const me = s.whoAmI(view);
+    const settings = settingsOf(c, view);
+    const listed = chosen ? iterationsOf(c, view) : null;
+    const shown = Promise.all([settings.iteration, listed]).then(([current, list]) => list?.find((i) => i.id === chosen.id) ?? current);
+    const placesRead = shown.then((it) => (it ? s.az(azTaskboardArgs(c, it.id), what(view, "taskboard")) : null));
+    const itemsRead = Promise.all([shown, settings.areas]).then(([it, areas]) => (it ? s.az(azQueryArgs(c, sprintWiql(it, areas)), what(view, "sprint-items")) : null));
+    const [kept, list, iteration, places, items] = await Promise.all([settings.all, listed, shown, placesRead, itemsRead]);
+    const found = list?.find((i) => i.id === chosen.id) ?? null;
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
     const placed = places === null ? new Map() : parseTaskboard(places);
-    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c));
-    const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled.items, places: placed, viewer: await me });
-    s.noViewerOf(data);
+    const board = (titled, viewer) => {
+      const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled, places: placed, viewer });
+      s.noViewerOf(data);
+      return data;
+    };
+    const drawn = (soFar) => void me.then((viewer) => live.partial(() => ({ data: board(soFar, viewer), warnings: [...kept.types.warnings] }))).catch(report);
+    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c), view, drawn);
+    const data = board(titled.items, await me);
     if (data.meta.unknownColumns) forgetSettings(c);
     const instead = currentId ? "der aktuelle Sprint wird gezeigt" : "das Team hat keinen laufenden Sprint";
     return { data, warnings: [...kept.types.warnings, ...(titled.warning ? [titled.warning] : [])], notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
@@ -2085,16 +2211,16 @@ export function sprintView(s) {
     },
     async iterations(view) {
       const c = view.context;
-      const [list, current] = await Promise.all([iterationsOf(c), currentIdOf(c)]);
+      const [list, current] = await Promise.all([iterationsOf(c, view), currentIdOf(c, view)]);
       return list.map((i) => ({ ...i, current: i.id === current }));
     },
-    load: (view, hiddenFor, chosen = null) =>
-      loadSprint(view, chosen).catch((e) => {
+    load: (view, { chosen = null, live = NO_LIVE }) =>
+      loadSprint(view, chosen, live).catch((e) => {
         throw chosen && e instanceof BoardError ? new BoardError(`${chosen.name} ließ sich nicht lesen: ${e.message}`, e) : e;
       }),
     async move(view, data, card, column) {
       const file = await writeMoveBody(card.number, column);
-      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }).catch(onRefusal(view.context));
+      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
       checkTaskboardMove(out, card, column);
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
@@ -2160,9 +2286,13 @@ export function parseBacklogLevels(stdout) {
 // level below it, whose types (Tasks) may be created under one of its
 // items: the team's task level, else the configuration's.
 export function backlogLevels(levels, config) {
+  return { level: requirementLevel(levels), childLevel: levels.find((l) => l.type === "task") ?? config.taskLevel ?? null };
+}
+
+export function requirementLevel(levels) {
   const level = levels.find((l) => l.type === "requirement");
   if (!level) throw new BoardError("Das Team hat keine Backlog-Ebene für Anforderungen (Stories)");
-  return { level, childLevel: levels.find((l) => l.type === "task") ?? config.taskLevel ?? null };
+  return level;
 }
 
 // A field's reference name, as a WIQL query may name it; anything else is
@@ -2309,20 +2439,19 @@ export function createdWiql({ project, type, title, child = false }) {
 // writes, and what `r` or a refused write drops (forget).
 export function backlogView(s) {
   const key = (c) => `backlog\n${s.teamKey(c)}`;
-  async function backlogSettingsOf(c) {
+  function backlogSettingsOf(c, view) {
     const held = s.keptValue(key(c));
-    if (held) return held.value;
-    const [levels, config, settings, areas] = await Promise.all([
-      s.az(azLevelsArgs(c)).then(parseBacklogLevels),
-      s.az(azBacklogConfigArgs(c)).then(parseBacklogConfig),
-      s.az(azTeamSettingsArgs(c)).then(parseTeamSettings),
-      s.areasOf(c),
-    ]);
-    const value = { ...backlogLevels(levels, config), config, settings, area: areas.default };
-    const until = backlogUntil(settings, Date.now());
-    s.keep(key(c), value, until);
-    s.keepAreasUntil(c, until);
-    return value;
+    if (held) return { level: Promise.resolve(held.value.level), config: Promise.resolve(held.value.config), all: Promise.resolve(held.value) };
+    const levels = s.az(azLevelsArgs(c), what(view, "levels")).then(parseBacklogLevels);
+    const config = s.az(azBacklogConfigArgs(c), what(view, "backlog-config")).then(parseBacklogConfig);
+    const all = Promise.all([levels, config, s.az(azTeamSettingsArgs(c), what(view, "team-settings")).then(parseTeamSettings), s.areasOf(c, view)]).then(([lv, cf, settings, areas]) => {
+      const value = { ...backlogLevels(lv, cf), config: cf, settings, area: areas.default };
+      const until = backlogUntil(settings, Date.now());
+      s.keep(key(c), value, until);
+      s.keepAreasUntil(c, until);
+      return value;
+    });
+    return { level: levels.then(requirementLevel), config, all };
   }
   const forget = (c) => {
     s.drop(key(c));
@@ -2332,9 +2461,9 @@ export function backlogView(s) {
   // The colors of the project's work item types (s.typesOf, which keeps
   // them) and their warnings; a read that fails gives none and the warning
   // that says so.
-  async function typeColorsOf(c) {
+  async function typeColorsOf(c, view) {
     try {
-      const { types } = await s.typesOf(c);
+      const { types } = await s.typesOf(c, view);
       return { colors: types.colors, warnings: types.warnings };
     } catch (e) {
       return { colors: {}, warnings: [`Farben der Work-Item-Typen nicht gelesen: ${errorText(e)}`] };
@@ -2342,18 +2471,27 @@ export function backlogView(s) {
   }
   return {
     forget,
-    async load(view) {
+    async load(view, { live = NO_LIVE }) {
       const c = view.context;
-      const me = s.whoAmI();
-      const kept = await backlogSettingsOf(c);
-      const types = typeColorsOf(c);
-      const ids = parseBacklogIds(await s.az(azBacklogIdsArgs(c, kept.level.id), { failure: azRestFailure }));
-      const read = ids.slice(0, AZ_QUERY_LIMIT);
-      const out = read.length ? await s.az(azQueryArgs(c, idsWiql(read, kept.config.orderField ? [kept.config.orderField] : []))) : "";
-      const { colors, warnings } = await types;
-      const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer: await me, typeColors: colors });
-      s.noViewerOf(data);
-      return { data, warnings };
+      const me = s.whoAmI(view);
+      const settings = backlogSettingsOf(c, view);
+      let types = null;
+      const typesRead = typeColorsOf(c, view).then((t) => (types = t));
+      const idsRead = settings.level.then((level) => s.az(azBacklogIdsArgs(c, level.id), { failure: azRestFailure, ...what(view, "backlog-ids") })).then(parseBacklogIds);
+      const outRead = Promise.all([idsRead, settings.config]).then(([ids, config]) => {
+        const read = ids.slice(0, AZ_QUERY_LIMIT);
+        return read.length ? s.az(azQueryArgs(c, idsWiql(read, config.orderField ? [config.orderField] : [])), what(view, "backlog-items")) : "";
+      });
+      const [kept, ids, out] = await Promise.all([settings.all, idsRead, outRead]);
+      const viewer = await me;
+      const list = (colors) => {
+        const data = backlogList({ ...kept, ids, items: parseWorkItems(out, c, kept.config.orderField), viewer, typeColors: colors });
+        s.noViewerOf(data);
+        return data;
+      };
+      if (!types) live.partial(() => ({ data: list({}), warnings: [] }));
+      const { colors, warnings } = await typesRead;
+      return { data: list(colors), warnings };
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
     // Creates a work item ({ type, title }) in the team's default area and
@@ -2364,21 +2502,21 @@ export function backlogView(s) {
       const c = view.context;
       let iteration = data.meta.iteration;
       if (data.meta.follows) {
-        iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c))).defaultIteration;
+        iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c), what(view, "team-settings"))).defaultIteration;
         if (!iteration) throw new BoardError("Das Team nennt gerade keine Standard-Iteration (Team-Einstellungen in Azure)");
       }
       const args = azCreateArgs(c, { type, title, area: data.meta.area, iteration });
-      return parseCreated(await s.az(args, { write: true }).catch(onRefusal(c)));
+      return parseCreated(await s.az(args, { write: true, ...what(view, "create") }).catch(onRefusal(c)));
     },
     // Makes the work item `id` a child of `parent`.
     async addParent(view, id, parent) {
-      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true }), parent);
+      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true, ...what(view, "parent-link") }), parent);
     },
     // The work items createdWiql finds for a create ({ type, title,
     // child }) in the view's project, as parseWorkItems reads them.
     async findCreated(view, { type, title, child }) {
       const c = view.context;
-      return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child }))), c);
+      return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child })), what(view, "created-items")), c);
     },
   };
 }
@@ -2480,9 +2618,9 @@ const section = (count, lines, error = null) => ({
 // (related.js): one az call, and one query more where it has children or
 // a parent. A failed query shows its reason in the children's place and
 // the parent's and marks the read to be repeated after the next refresh
-// (retry). `az(args)` runs az.
-export async function loadAzureRelated(az, c, item) {
-  const read = parseRelatedItem(await az(azRelatedArgs(c, item.number)));
+// (retry). `az(args, options)` runs az, for the view `view`.
+export async function loadAzureRelated(az, c, item, view = null) {
+  const read = parseRelatedItem(await az(azRelatedArgs(c, item.number), what(view, "related")));
   const parentIds = read.parent === null ? [] : [read.parent];
   const ids = [...read.children, ...parentIds];
   let children = section(read.children.length, []);
@@ -2490,7 +2628,7 @@ export async function loadAzureRelated(az, c, item) {
   let retry = false;
   if (ids.length) {
     try {
-      const out = await az(azQueryArgs(c, idsWiql(ids)));
+      const out = await az(azQueryArgs(c, idsWiql(ids)), what(view, "related-items"));
       children = section(read.children.length, parseChildren(out, read.children, c));
       parents = section(parentIds.length, parseChildren(out, parentIds, c));
     } catch (e) {
@@ -2550,14 +2688,14 @@ export function parseAzurePullRequest(stdout) {
 // id, read in the view's organisation.
 export const azurePullRequest = (az) => ({
   reads: (item) => item.kind === "pr" && Number.isInteger(item.number),
-  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number))),
+  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number), what(view, "pull-request"))),
 });
 
 // The Azure source's `related` (related.js): a work item with an id has
 // some to read.
 export const azureRelated = (az) => ({
   reads: (item) => item.kind === "workitem" && Number.isInteger(item.number),
-  load: (item, view) => loadAzureRelated(az, view.context, item),
+  load: (item, view) => loadAzureRelated(az, view.context, item, view),
 });
 
 // ==== src/sources/azure/index.js ====
@@ -2585,26 +2723,26 @@ export const azureRelated = (az) => ({
 // The project's work item types, one entry for both views (typesOf), are
 // kept TEAM_KEEP_MS from their read (even where another read of the Sprint's
 // settings fails), or, where a Sprint's whole settings read brought them, as
-// long as the Sprint's settings. What is not kept is read at the same time.
-// A refresh then reads the taskboard's columns of the work items and the
-// sprint's work items, also at the same time. The team's kept settings (not
-// the project's types) are dropped, so that they are read again, by `r` on
-// the Sprint (forget), by a task in a column the columns read do not know,
-// and by a move or state change Azure refuses; its iterations and parent
-// titles only by `r`.
+// long as the Sprint's settings. A refresh reads what is not kept, the
+// taskboard's columns of the work items and the sprint's work items; which
+// call waits for which, the main.js header says (Calls). The team's kept
+// settings (not the project's types) are dropped, so that they are read
+// again, by `r` on the Sprint (forget), by a task in a column the columns
+// read do not know, and by a move or state change Azure refuses; its
+// iterations and parent titles only by `r`.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
 // for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the
 // iteration ends that the team's default iteration follows, where that is
 // sooner (backlogUntil): the team's backlog levels, its backlog
-// configuration and its settings. A refresh then reads the level's ids (az
-// rest) and, after them, one query for their fields; a backlog without
-// ids asks no query. `r` on the Backlog and a state change or create Azure
-// refuses drop what it keeps (not the project's types). Beside the ids, a
-// refresh reads the project's work item types (for their colors) where
-// neither view keeps them, and keeps them TEAM_KEEP_MS (typesOf); one that
-// fails is a warning, keeps nothing and is read again with the next
-// refresh.
+// configuration and its settings. A refresh reads the level's ids (az
+// rest) and one query for their fields (the order: the main.js header,
+// Calls); a backlog without ids asks no query. `r` on the Backlog and a
+// state change or create Azure refuses drop what it keeps (not the
+// project's types). Beside the ids, a refresh reads the project's work
+// item types (for their colors) where neither view keeps them, and keeps
+// them TEAM_KEEP_MS (typesOf); one that fails is a warning, keeps nothing
+// and is read again with the next refresh.
 //
 // Both views read the team's areas (the Backlog for its default area) and
 // keep them as one, for the shorter of their times (areasOf); `r` on
@@ -2635,10 +2773,10 @@ export function makeAzure(paths) {
   };
   let viewer = null;
   let viewerError = null;
-  const whoAmI = () =>
+  const whoAmI = (view = null) =>
     viewer
       ? Promise.resolve(viewer)
-      : az(AZ_ME_ARGS, {}, AZ_ME_TIMEOUT).then((out) => {
+      : az(AZ_ME_ARGS, what(view, "me"), AZ_ME_TIMEOUT).then((out) => {
         viewer = parseViewer(out);
         viewerError = viewer ? null : "keinen Benutzer genannt";
         return viewer;
@@ -2661,10 +2799,10 @@ export function makeAzure(paths) {
     // (even where another read of the Sprint's settings fails), or, where a
     // Sprint's whole settings read brought them, as long as those
     // (keepTypesUntil); no forget drops it.
-    async typesOf(c) {
+    async typesOf(c, view = null) {
       const held = keptValue(typesKey(c));
       if (held) return { types: held.value, fresh: false };
-      const types = parseAzureTypes(await az(azTypesArgs(c)));
+      const types = parseAzureTypes(await az(azTypesArgs(c), what(view, "types")));
       keep(typesKey(c), types, Date.now() + TEAM_KEEP_MS);
       return { types, fresh: true };
     },
@@ -2677,10 +2815,10 @@ export function makeAzure(paths) {
     // its own settings for a shorter time (keepAreasUntil: the Sprint's
     // as long as its settings, the Backlog's until backlogUntil); either
     // view's forget drops it.
-    async areasOf(c) {
+    async areasOf(c, view = null) {
       const held = keptValue(areasKey(c));
       if (held) return held.value;
-      const value = parseAreas(await az(azAreasArgs(c)));
+      const value = parseAreas(await az(azAreasArgs(c), what(view, "areas")));
       keep(areasKey(c), value, Date.now() + TEAM_KEEP_MS);
       return value;
     },
@@ -2701,7 +2839,7 @@ export function makeAzure(paths) {
       throw e;
     },
     setState: (view, item, state, onRefusal) =>
-      az(azStateArgs(view.context, item.number, state), { write: true }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
+      az(azStateArgs(view.context, item.number, state), { write: true, ...what(view, "state") }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
   };
   const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
   const members = readMemo();
@@ -2718,12 +2856,12 @@ export function makeAzure(paths) {
       // each time, so a viewer read since counts.
       async people(item, view) {
         const c = view.context;
-        const [list, me] = await Promise.all([members.get(teamKey(c), () => az(azMembersArgs(c)).then(parseMemberList)), whoAmI()]);
+        const [list, me] = await Promise.all([members.get(teamKey(c), () => az(azMembersArgs(c), what(view, "members")).then(parseMemberList)), whoAmI(view)]);
         return membersFor(list, me);
       },
       // Without the list, az still knows its own account: "me".
       fallbackMe: () => ({ login: viewer, name: null, me: true }),
-      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true }), item.number, person),
+      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true, ...what(view, "assign") }), item.number, person),
     },
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
@@ -2873,6 +3011,11 @@ export function nextBoardPage(json, view) {
   const after = items.pageInfo.endCursor;
   if (typeof after !== "string") throw new BoardError(`Projekt „${project.title}“: GitHub nannte nach ${items.nodes.length} Einträgen nicht, wo die nächsten beginnen`);
   return { after, read: items.nodes.length };
+}
+
+export function boardPages(json, view, calls) {
+  const total = json?.data?.repositoryOwner?.projectV2?.items?.totalCount ?? 0;
+  return Math.min(calls, Math.max(1, Math.ceil(Math.min(total, view.limit) / PAGE)));
 }
 
 // The logins of the people a pull request asks to review; a team's request,
@@ -3141,15 +3284,17 @@ export const UNREAD = {
 // part in (among its last THREAD_COMMENTS comments) whose last comment is
 // someone else's. waiting: someone else's pull request one reviewed, all of
 // it read, that asks nothing of one ("wartet auf Autor"). Comments as such
-// are no reason.
-function prAttention(pr, row, viewer, asked, errors) {
+// are no reason. `pending`: its follow-up for more threads is still to
+// come, which leaves it unsure but not unread.
+function prAttention(pr, row, viewer, asked, errors, pending = false) {
   const unread = errors.map((e) => firstLine(e.message)).filter(Boolean);
   if (!viewer) return { attention: [], waiting: false, unread };
   const threads = pr.reviewThreads;
   const nodes = Array.isArray(threads?.nodes) ? threads.nodes : null;
   if (!nodes || nodes.some((t) => !Array.isArray(t?.comments?.nodes))) unread.push(UNREAD.threads);
   const more = Boolean(nodes) && (threads.totalCount ?? 0) > nodes.length;
-  if (more) unread.push(UNREAD.moreThreads(nodes.length));
+  if (more && !pending) unread.push(UNREAD.moreThreads(nodes.length));
+  const sure = () => !unread.length && !pending;
   const open = (nodes ?? []).filter((t) => t && !t.isResolved).map((t) => (t.comments?.nodes ?? []).map((c) => c?.author?.login ?? null));
   // Whether a thread waits on the viewer: its last comment is someone else's.
   const awaitsViewer = (authors) => authors.length > 0 && authors.at(-1) !== viewer;
@@ -3161,7 +3306,7 @@ function prAttention(pr, row, viewer, asked, errors) {
     if (row.checks.state === "failed") reasons.push("Checks rot");
     if (pr.mergeable === "CONFLICTING") reasons.push("Konflikt");
     const ready = !pr.isDraft && [null, "APPROVED"].includes(pr.reviewDecision ?? null) && ["passed", "none"].includes(row.checks.state) && pr.mergeable === "MERGEABLE";
-    if (!reasons.length && !unread.length && ready) reasons.push("bereit zum Mergen");
+    if (!reasons.length && sure() && ready) reasons.push("bereit zum Mergen");
     return { attention: reasons, waiting: false, unread };
   }
   const reviews = Array.isArray(pr.latestReviews?.nodes) ? pr.latestReviews : null;
@@ -3178,7 +3323,7 @@ function prAttention(pr, row, viewer, asked, errors) {
   // A head unknown is no review's commit, so it gives no reason.
   if (requested && review && review.commit?.oid === head) reasons.push("Review erneut angefragt");
   if (open.some((authors) => authors.includes(viewer) && awaitsViewer(authors))) reasons.push("Antwort erwartet");
-  return { attention: reasons, waiting: Boolean(review) && !requested && !reasons.length && !unread.length, unread };
+  return { attention: reasons, waiting: Boolean(review) && !requested && !reasons.length && sure(), unread };
 }
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
@@ -3309,7 +3454,7 @@ export const askingSearch = (query) => setsMe(query, ASKING);
 // order, then the others in theirs. A search missing from the answer is
 // explained by the error at its alias.
 // warnings: the first lines of the errors neither a row nor notRead holds.
-export function parseGithubList(json, view, errors = []) {
+export function parseGithubList(json, view, errors = [], pending = null) {
   const seen = new Set();
   const viewer = json?.data?.viewer?.login ?? null;
   const shown = new Set();
@@ -3338,7 +3483,8 @@ export function parseGithubList(json, view, errors = []) {
       seen.add(pr.id);
       at.forEach((e) => shown.add(e));
       const row = prRow(pr, Boolean(errorAt(at, [...path, "commits"])));
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at), ownByQuery: own });
+      const waits = Boolean(pending?.has(pr.id));
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at, waits), ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
     });
     // Array's sort keeps the order of rows it ranks alike.
     rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
@@ -3651,15 +3797,15 @@ export function makeGithub(paths) {
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
-      async load(item) {
-        const { json, errors } = await gh(paths, githubRelatedArgs(item));
+      async load(item, view) {
+        const { json, errors } = await gh(paths, githubRelatedArgs(item), what(view, "related"));
         return parseGithubRelated(json, item, errors);
       },
     },
     pullRequest: {
       reads: (item) => item.kind === "pr" && Number.isInteger(item.number) && item.repo.includes("/"),
-      async load(item) {
-        const { json, errors } = await gh(paths, githubPullRequestArgs(item));
+      async load(item, view) {
+        const { json, errors } = await gh(paths, githubPullRequestArgs(item), what(view, "pull-request"));
         return parseGithubPullRequest(json, item, errors);
       },
     },
@@ -3669,11 +3815,11 @@ export function makeGithub(paths) {
         if (!item.contentId || !ASSIGN[item.kind]) return "Auf diesen Eintrag hat gh keinen Zugriff";
         return null;
       },
-      people: (item) => people.get(item.repo, () => gh(paths, githubAssignableArgs(item)).then(({ json, errors }) => parseAssignable(json, item, errors))),
+      people: (item, view) => people.get(item.repo, () => gh(paths, githubAssignableArgs(item), what(view, "assignable")).then(({ json, errors }) => parseAssignable(json, item, errors))),
       // Without the list, GitHub names no one to assign but no one.
       fallbackMe: () => null,
       async write(view, item, person) {
-        return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item) })).json, item, person);
+        return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item), ...what(view, "assign") })).json, item, person);
       },
     },
     views: {
@@ -3681,19 +3827,22 @@ export function makeGithub(paths) {
         // The first page, then each next one, one call each, until GitHub
         // has no more, the view's limit is read, or as many calls ran as
         // full pages would take to read it.
-        async load(view, hiddenFor) {
+        async load(view, { hiddenFor, live = NO_LIVE }) {
           const hidden = hiddenFor(view);
-          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden));
+          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden), what(view, "board-page-1"));
           const calls = Math.ceil(view.limit / PAGE);
+          const pages = boardPages(json, view, calls);
           for (let call = 1, next = nextBoardPage(json, view); next && call < calls; call++, next = nextBoardPage(json, view)) {
-            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read));
+            live.partial(() => ({ data: { ...parseGithubBoard(json, view, hidden, errors), partial: true }, warnings: [...warnings] }));
+            live.page(call + 1, Math.max(call + 1, pages));
+            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read), what(view, `board-page-${call + 1}`));
             addBoardPage(json, page.json, page.errors);
             warnings.push(...page.warnings);
           }
           return { data: parseGithubBoard(json, view, hidden, errors), warnings };
         },
         async move(view, data, card, column) {
-          checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH })).json, card);
+          checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH, ...what(view, "move") })).json, card);
         },
       },
       list: {
@@ -3701,22 +3850,26 @@ export function makeGithub(paths) {
         // FIRST_THREADS threads, the follow-up for them, one call per
         // THREAD_IDS of them (addThreads; one that fails leaves its rows
         // unread). The errors a row or a section shows are not warnings too.
-        async load(view) {
-          const { json, errors } = await gh(paths, githubListArgs(view));
+        async load(view, { live = NO_LIVE }) {
+          const { json, errors } = await gh(paths, githubListArgs(view), what(view, "list"));
+          const result = (pending = null) => {
+            const data = parseGithubList(json, view, errors, pending);
+            return { data, warnings: data.warnings };
+          };
           const ids = moreThreadIds(json, view);
+          if (ids.length) live.partial(() => result(new Set(ids)));
           for (let at = 0; at < ids.length; at += THREAD_IDS) {
             const chunk = ids.slice(at, at + THREAD_IDS);
             let page = null;
             let failed = null;
             try {
-              page = await gh(paths, githubThreadsArgs(chunk));
+              page = await gh(paths, githubThreadsArgs(chunk), what(view, "threads"));
             } catch (e) {
               failed = errorText(e);
             }
             errors.push(...addThreads(json, view, chunk, page?.json ?? null, page?.errors ?? [], failed));
           }
-          const data = parseGithubList(json, view, errors);
-          return { data, warnings: data.warnings };
+          return result();
         },
       },
     },
@@ -4257,23 +4410,50 @@ export function typeTone(t, item) {
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
-// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>") and a
-// Sprint's folded stories ("folded:<view>", readStoredFolds). A
-// full or missing localStorage keeps them for this session only.
+// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>"), a
+// Sprint's folded stories ("folded:<view>", readStoredFolds) and each
+// view's last good data ("board:data:<view>", loading.js). A full or
+// missing localStorage keeps them for this session only.
 export const store = {
   get(key) {
+    const v = store.text(key);
     try {
-      const v = localStorage.getItem(key);
       return v === null ? null : JSON.parse(v);
     } catch {
       return null;
     }
   },
   set(key, value) {
+    store.setText(key, JSON.stringify(value));
+  },
+  text(key) {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      return localStorage.getItem(key);
     } catch {
-      // Kept in memory only; see above.
+      return null;
+    }
+  },
+  // Null, or why the store refused the text.
+  setText(key, text) {
+    try {
+      localStorage.setItem(key, text);
+      return null;
+    } catch (e) {
+      return firstLine(e?.message ?? e) || "refused";
+    }
+  },
+  remove(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Gone with the session; see above.
+    }
+  },
+  keys() {
+    try {
+      return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k) => typeof k === "string");
+    } catch {
+      return [];
     }
   },
 };
@@ -4880,6 +5060,7 @@ export function writeAtOnce(b, view, w, cx) {
   const same = (u) => u.key === openKey && u.kind === w.open.kind;
   const toasts = w.texts.toasts ?? { unclear: `Status von ${label}`, refused: `Status von ${label} nicht geändert` };
   if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
+  if (st.saved) return refuseOnSaved(b, view, cx);
   if (w.refuse) return b.say(w.refuse, "warning", cx);
   w.apply();
   st.pending[key] = true;
@@ -4935,6 +5116,20 @@ export function writeAtOnce(b, view, w, cx) {
       if (followed && current && (w.againOnRefusal || openOf(st, key))) b.refresh(current, cx);
     }
   }
+}
+
+// The saved state may be long out of date: no write goes against it, and
+// the person makes it again once a read replaced it. That read runs from
+// the moment the saved state shows; one that failed starts again here.
+export const SAVED_WRITE = "Gezeigt ist der gespeicherte Stand: erst nach dem Neuladen noch einmal";
+function refuseOnSaved(b, view, cx) {
+  b.say(SAVED_WRITE, "info", cx);
+  restartRead(b, view, cx);
+}
+
+export function restartRead(b, view, cx) {
+  const { current } = viewStands(b, view);
+  if (current && !b.state(view.id).loading) b.refresh(current, cx);
 }
 
 // Whether an outcome of the item `key`, of any kind, is still open.
@@ -6229,15 +6424,18 @@ export const createModal = {
     cx.notify();
   },
 
-  // Creates the work item and closes the dialog; without a title, or while
-  // another create of the view is under way, it stays and says so.
+  // Creates the work item and closes the dialog; without a title, while
+  // another create of the view is under way, or while the view shows its
+  // saved state (SAVED_WRITE), it stays and says so.
   create(b, cx) {
     const m = b.modal;
     if (m?.kind !== "create") return;
     const title = m.input.value().trim();
-    const busy = b.state(m.view.id).pending[CREATE_KEY];
-    if (!title || busy) {
-      m.error = busy ? "Ein Work Item wird noch angelegt …" : "Der Titel fehlt";
+    const st = b.state(m.view.id);
+    const busy = st.pending[CREATE_KEY];
+    if (!title || busy || st.saved) {
+      m.error = busy ? "Ein Work Item wird noch angelegt …" : st.saved ? SAVED_WRITE : "Der Titel fehlt";
+      if (st.saved && !busy) restartRead(b, m.view, cx);
       return cx.notify();
     }
     b.closeModal(cx);
@@ -6461,7 +6659,7 @@ export const startModal = {
     m.error = null;
     cx.spawn(async (cx) => {
       try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
+        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT, what(m.view, "checkout"));
         if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
         const folder = lastLine(r.stdout);
         if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
@@ -6965,9 +7163,10 @@ export function revealCard(s, at, content, top, height) {
 // the columns names the hidden ones and a click on a name shows it again;
 // the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
-// count, target, cards }], total, limited, viewer, read }
-// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
-// columns hidden by default) and project.priorityField.
+// count, target, cards }], total, limited, viewer, read, partial (while
+// later pages are still to come) } (parseGithubBoard). View fields it
+// reads: id, source, layout, hide (the columns hidden by default) and
+// project.priorityField.
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
@@ -7146,7 +7345,7 @@ function drawBoard(b, t, mono, view, st) {
         : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name unten oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
     )
     .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
-    .when(Boolean(st.data.limited), (el) =>
+    .when(Boolean(st.data.limited) && !st.data.partial, (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
         .child(`Nur die ersten ${st.data.read} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );
@@ -7352,28 +7551,26 @@ export const prsShape = {
       ...(s.notRead?.length ? [`${s.notRead.length} Treffer in „${s.name}“ nicht gelesen: ${s.notRead[0]}`] : []),
     ]),
   // The detail panel's rows of a pull request: why the viewer has to act on
-  // it, its checks, where it has them, and what of it could not be read, a
-  // warning each, as a pull request a level down shows its own (levelParts,
-  // ui/related.js).
+  // it, its checks, where it has them, and a note for each part that could
+  // not be read or is still to come, as a pull request a level down shows
+  // its own (levelParts, ui/related.js).
   detailParts(b, t, view, item) {
     const sections = [];
     if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(markColor(t)).child(reason))));
     if (item.checks) sections.push(checksSection(t, item.checks));
     sections.push(...(item.unread ?? []).map((text) => detailNote(t, "unread-note", text, "warning")));
+    if (item.threadsPending) sections.push(detailNote(t, "pending-note", "Review-Threads werden noch gelesen …", "info"));
     return sections.length ? { sections } : {};
   },
 };
 
-// A row's cell that says whether the viewer has to act on its pull
-// request: a mark and the reasons ("● Review angefragt"), with "· ?" after
-// them where it could not read all; where it names none but could not read
-// all, "? nicht ganz gelesen"; "wartet auf Autor" on someone else's one
-// reviewed that asks nothing yet; else nothing. Every row keeps it, so the
-// cells after it line up.
+// Every row keeps the cell, so the cells after it line up.
+export const THREADS_PENDING = "… Threads laden";
 function attentionCell(t, r) {
   const cell = div().w(200).flex_none().truncate().text_size(12);
-  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${[...r.attention, ...(r.unread?.length ? ["?"] : [])].join(" · ")}`);
-  return cell.text_color(t.muted).child(r.unread?.length ? "? nicht ganz gelesen" : r.waiting ? "wartet auf Autor" : "");
+  const unsure = r.unread?.length ? ["?"] : r.threadsPending ? ["…"] : [];
+  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${[...r.attention, ...unsure].join(" · ")}`);
+  return cell.text_color(t.muted).child(r.unread?.length ? "? nicht ganz gelesen" : r.threadsPending ? THREADS_PENDING : r.waiting ? "wartet auf Autor" : "");
 }
 
 // A section's count: the rows it holds (each pull request once, in its first
@@ -8284,6 +8481,10 @@ export function shownDescription(text, format) {
 // ==== src/main.js ====
 
 const TICK_MS = 30000;
+export const PREFETCH_GAP_MS = 1500;
+export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+// From the application root (gpui-kit's svg).
+export const REFRESH_ICON = "mods/board/refresh.svg";
 // How often a copy looks whether it shows (watchShown). herdr draws, and so
 // renders, only a copy that shows, again on a change of its live data (spaces
 // and tabs, the focus, shared state); a change of the layout alone is not
@@ -8357,6 +8558,8 @@ export default class Board extends View {
     this.config = null;
     this.configErrors = [];
     this.views = {}; // per view id, see state()
+    this.prefetchWaits = false;
+    this.prefetchLeft = new Set();
     // What the top bar shows, as last chosen: the source, its tab (a context
     // id) per source, the view per team context, and "nur meine".
     migrateShownView();
@@ -8482,12 +8685,16 @@ export default class Board extends View {
   // sprints the sprint picker chose, by their id: foldsOf); sprint (the
   // sprint a Sprint view shows in place of the current one, { id, name } as
   // the sprint picker chose it, null for the current one; kept while the
-  // board runs, never stored).
+  // board runs, never stored); saved (no read of this session has ended on
+  // the data drawn: the saved state, or what a read drew over it so far),
+  // restored (the saved state was looked for), progress ({ page, pages } of
+  // a read) and unavailable (the last read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
+      saved: false, restored: false, progress: null, unavailable: false,
     };
     return this.views[id];
   }
@@ -8558,6 +8765,7 @@ export default class Board extends View {
       });
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
       this.paths.reset();
+      for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
       if (!this.config) return;
       // Open outcomes of a view that is gone, or is now of another kind than
@@ -8570,7 +8778,13 @@ export default class Board extends View {
       // A dialog of a view that is gone, or of another kind now, closes.
       const m = this.modal;
       if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+      // A views.json with problems leaves those views out.
+      if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
+      this.prefetchLeft = new Set(kinds.keys());
       const shown = this.view();
+      if (shown) this.restore(shown);
+      cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => viewsOf(this.config ?? {}).forEach((v) => this.restore(v))));
+      if (!shown || !this.loader(shown)) this.schedulePrefetch(cx);
       if (!shown) return;
       this.sources[shown.source]?.forget?.(shown);
       // The open details' related items are read again too.
@@ -8589,14 +8803,37 @@ export default class Board extends View {
     st.loading = true;
     st.again = false;
     st.tried = Date.now();
+    st.progress = null;
     const open = st.detail ? this.selected(view) : null;
     st.related = keptRelated(st.related, open ? open.key : null, (this.panelIn(view)?.levels ?? []).map((l) => l.item.key));
     const started = st.tried;
     const run = ++st.runs;
     const chosen = st.sprint;
+    const before = { data: st.data, warnings: st.warnings };
+    // Over data this session read, the new data shows only once whole.
+    const inSteps = !st.data || st.saved;
+    const hidden = this.hiddenFor(view);
     cx.spawn(async (cx) => {
+      let drew = false;
+      let ended = false;
+      const live = {
+        partial: (result) => {
+          if (ended || !inSteps) return;
+          const { data, warnings } = result();
+          drew = true;
+          st.data = SHAPES[data.shape].received(data, st);
+          st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
+          this.keepSelection(view);
+          cx.notify();
+        },
+        page: (page, pages) => {
+          if (ended) return;
+          st.progress = { page, pages };
+          cx.notify();
+        },
+      };
       try {
-        const { data, warnings, notice } = await loader.load(view, (v) => this.hiddenFor(v), chosen);
+        const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live });
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
@@ -8604,17 +8841,30 @@ export default class Board extends View {
         st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
         st.error = null;
         st.at = Date.now();
+        st.saved = false;
+        st.unavailable = false;
+        // A sprint the picker chose is the view's only while the board runs.
+        if (!chosen) this.save(view, hidden, { data, warnings }, st.at, cx);
         this.keepSelection(view);
         this.chooseWanted(view, run, cx);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
         st.error = report(e);
+        st.unavailable = Boolean(e?.unavailable);
+        // A failed read keeps what showed before it, not what it drew on its
+        // way.
+        if (drew) {
+          st.data = before.data && SHAPES[before.data.shape].received(before.data, st);
+          st.warnings = before.warnings;
+        }
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
           this.say(`${open.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
         }
       } finally {
+        ended = true;
         st.loading = false;
+        st.progress = null;
         // The follow-up refresh reads the view from the config as it is now.
         const fresh = this.viewById(view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
@@ -8622,10 +8872,71 @@ export default class Board extends View {
         // or wants a retry and so was not kept (keptRelated), are read now;
         // after a follow-up refresh, once it ended.
         this.readRelated(cx);
+        this.schedulePrefetch(cx);
         cx.notify();
       }
     });
     cx.notify();
+  }
+
+  restore(view) {
+    const st = this.state(view.id);
+    if (st.restored) return;
+    st.restored = true;
+    if (st.data || !this.loader(view)) return;
+    const key = savedKey(view.id);
+    const text = store.text(key);
+    if (text === null) return;
+    const before = { data: st.data, warnings: st.warnings, at: st.at, saved: st.saved, sel: st.sel, picked: st.picked, detail: st.detail, sprint: st.sprint };
+    try {
+      const saved = readSaved(text, view, this.hiddenFor(view));
+      const shape = SHAPES[saved?.data.shape];
+      if (!shape?.loads) return;
+      const data = shape.received(saved.data, st);
+      const warnings = [...saved.warnings, ...shape.warnings(view, saved.data)];
+      Object.assign(st, { data, warnings, at: saved.at, saved: true });
+      this.keepSelection(view);
+    } catch (e) {
+      // An entry from code that drew it otherwise: the read draws instead.
+      Object.assign(st, before);
+      store.remove(key);
+      boardLog.write(`board: ${key} dropped: ${firstLine(e?.message ?? e)}`);
+    }
+  }
+
+  // After the draw the data came with. Where the store does not take the
+  // read, the entry before goes too: a restart would draw it as the last.
+  save(view, hidden, read, at, cx) {
+    cx.timer.after(0, () => this.guarded("Speichern", () => {
+      const key = savedKey(view.id);
+      const text = savedText(view, hidden, read, at);
+      const refused = text === null ? `more than ${SAVED_MAX} bytes` : store.setText(key, text);
+      if (refused === null) return;
+      store.remove(key);
+      boardLog.write(`board: ${key} not saved: ${refused}`);
+    }));
+  }
+
+  schedulePrefetch(cx) {
+    if (this.prefetchWaits) return;
+    this.prefetchWaits = true;
+    cx.timer.after(PREFETCH_GAP_MS, (cx) => {
+      this.prefetchWaits = false;
+      this.guarded("Vorladen", () => this.prefetchNext(cx));
+    });
+  }
+
+  prefetchNext(cx) {
+    if (!this.config || !boardShown(this.isLayer()) || this.modal?.busy) return;
+    if (Object.values(this.views).some((st) => st.loading || Object.keys(st.pending).length)) return;
+    const [next, ...rest] = prefetchOrder(viewsOf(this.config).filter((v) => this.prefetchLeft.has(v.id)), {
+      shown: this.view(), source: this.source()?.id, now: Date.now(), every: this.config.refreshMinutes * 60000,
+      stateOf: (id) => this.state(id), loads: (v) => Boolean(this.loader(v)),
+    });
+    this.prefetchLeft = new Set(rest.map((v) => v.id));
+    if (!next) return;
+    this.restore(next);
+    this.refresh(next, cx);
   }
 
   // After the refresh `run` (its number, st.runs) succeeded: the item a
@@ -8657,13 +8968,12 @@ export default class Board extends View {
   }
 
   // Every TICK_MS while the board shows: the shown view once refreshMinutes
-  // have passed since it was last tried.
+  // have passed since it was last tried, and the prefetch where it waited.
   tick(cx) {
     if (!this.config || !boardShown(this.isLayer())) return;
-    const every = this.config.refreshMinutes * 60000;
-    const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
-    if (shown && due(shown)) this.refresh(shown, cx);
+    if (shown && refreshDue(this.state(shown.id), Date.now(), this.config.refreshMinutes * 60000)) this.refresh(shown, cx);
+    this.schedulePrefetch(cx);
     cx.notify();
   }
 
@@ -9072,13 +9382,15 @@ export default class Board extends View {
     this.showContext(cx);
   }
 
-  // After another tab came up: the notice goes, and its view, without data
-  // or older than refreshMinutes, loads (where its source reads it).
+  // After another tab came up: the notice goes, and its view loads as the
+  // header says (Calls).
   showContext(cx) {
     this.notice = null;
     const v = this.view();
     const st = v && this.state(v.id);
-    if (v && (!st.data || Date.now() - st.tried >= this.config.refreshMinutes * 60000)) this.refresh(v, cx);
+    if (v) this.restore(v);
+    if (v && !st.loading && (!st.data || refreshDue(st, Date.now(), this.config.refreshMinutes * 60000))) this.refresh(v, cx);
+    if (v && !this.loader(v)) this.schedulePrefetch(cx);
     cx.notify();
   }
 
@@ -9493,10 +9805,11 @@ export default class Board extends View {
   // The top bar, two rows so that neither the tabs nor the filter have to
   // give way on a small screen: the source toggle, a tab per context of the
   // shown source and a team's view switch (where it has two); then "nur
-  // meine", the filter, when the shown view was read, and refresh. Without a
-  // valid views.json the first row holds only the board's name.
+  // meine", the filter, the read under way, the age of the data drawn and
+  // refresh. Without a valid views.json the first row holds only the
+  // board's name.
   toolbar(t, view, st) {
-    const updated = st?.loading ? "lädt …" : st?.at ? `aktualisiert ${updatedLabel(st.at, Date.now())}` : "";
+    const { reading, age } = readLabels(st, Date.now());
     const source = this.source();
     const context = this.context();
     const row = () => h_flex().gap(12).px(16).items_center();
@@ -9534,8 +9847,9 @@ export default class Board extends View {
           .child(div().text_color(t.dim).child("/"))
           .child(Input.new(this.filterInput).flex_1().text_size(12.5).text_color(t.foreground)),
       )
-      .child(div().flex_none().text_size(12).text_color(t.muted).child(updated))
-      .child(button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
+      .when(Boolean(reading), (el) => el.child(div().id("reading").flex_none().text_size(12).text_color(t.muted).child(reading)))
+      .when(Boolean(age), (el) => el.child(div().id("age").flex_none().text_size(12).text_color(t.muted).child(age)))
+      .child(button(t, "refresh", svg(REFRESH_ICON).size(14).when(Boolean(st?.loading), (el) => el.spin(1000)), false, (cx) => this.reload(cx)));
     return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
   }
 
@@ -9572,12 +9886,12 @@ export default class Board extends View {
   }
 
   // The shown source's tabs: number, name and, for a view with data, how
-  // many items it holds ("…" while it loads; shownOf while the filter or
-  // "nur meine" hides some).
+  // many items it holds ("…" while it loads without data; shownOf while the
+  // filter or "nur meine" hides some).
   tabs(t, context) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
-      if (st.loading) return "…";
+      if (st.loading && !st.data) return "…";
       const n = st.data ? SHAPES[st.data.shape].count(this, st.data) : null;
       return n ? shownOf(n.shown, n.total) : "";
     };
@@ -9651,11 +9965,12 @@ export default class Board extends View {
   main(t, mono, view, st) {
     const box = v_flex().flex_1().min_w(0).min_h(0);
     const message = (text) => box.child(div().p(20).text_color(t.muted).child(text));
-    if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
+    const loading = () => box.child(h_flex().id("loading").p(20).gap(8).text_color(t.muted).child(div().frames(SPINNER_FRAMES, 150)).child("Lädt …"));
+    if (!this.config) return this.configErrors.length ? message(`Keine gültige Ansicht in ${CONFIG_NAME}.json`) : loading();
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
     if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
-    if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
+    if (!st.data && !st.error) return st.loading ? loading() : message("Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(st.error));
     const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];

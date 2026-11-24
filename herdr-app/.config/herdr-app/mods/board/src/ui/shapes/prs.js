@@ -39,28 +39,26 @@ export const prsShape = {
       ...(s.notRead?.length ? [`${s.notRead.length} Treffer in „${s.name}“ nicht gelesen: ${s.notRead[0]}`] : []),
     ]),
   // The detail panel's rows of a pull request: why the viewer has to act on
-  // it, its checks, where it has them, and what of it could not be read, a
-  // warning each, as a pull request a level down shows its own (levelParts,
-  // ui/related.js).
+  // it, its checks, where it has them, and a note for each part that could
+  // not be read or is still to come, as a pull request a level down shows
+  // its own (levelParts, ui/related.js).
   detailParts(b, t, view, item) {
     const sections = [];
     if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(markColor(t)).child(reason))));
     if (item.checks) sections.push(checksSection(t, item.checks));
     sections.push(...(item.unread ?? []).map((text) => detailNote(t, "unread-note", text, "warning")));
+    if (item.threadsPending) sections.push(detailNote(t, "pending-note", "Review-Threads werden noch gelesen …", "info"));
     return sections.length ? { sections } : {};
   },
 };
 
-// A row's cell that says whether the viewer has to act on its pull
-// request: a mark and the reasons ("● Review angefragt"), with "· ?" after
-// them where it could not read all; where it names none but could not read
-// all, "? nicht ganz gelesen"; "wartet auf Autor" on someone else's one
-// reviewed that asks nothing yet; else nothing. Every row keeps it, so the
-// cells after it line up.
+// Every row keeps the cell, so the cells after it line up.
+export const THREADS_PENDING = "… Threads laden";
 function attentionCell(t, r) {
   const cell = div().w(200).flex_none().truncate().text_size(12);
-  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${[...r.attention, ...(r.unread?.length ? ["?"] : [])].join(" · ")}`);
-  return cell.text_color(t.muted).child(r.unread?.length ? "? nicht ganz gelesen" : r.waiting ? "wartet auf Autor" : "");
+  const unsure = r.unread?.length ? ["?"] : r.threadsPending ? ["…"] : [];
+  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${[...r.attention, ...unsure].join(" · ")}`);
+  return cell.text_color(t.muted).child(r.unread?.length ? "? nicht ganz gelesen" : r.threadsPending ? THREADS_PENDING : r.waiting ? "wartet auf Autor" : "");
 }
 
 // A section's count: the rows it holds (each pull request once, in its first

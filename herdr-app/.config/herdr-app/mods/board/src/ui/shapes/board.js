@@ -4,9 +4,10 @@
 // the columns names the hidden ones and a click on a name shows it again;
 // the command menu's "Spalten…" opens the column menu (modals/columns.js).
 // The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
-// count, target, cards }], total, limited, viewer, read }
-// (parseGithubBoard). View fields it reads: id, source, layout, hide (the
-// columns hidden by default) and project.priorityField.
+// count, target, cards }], total, limited, viewer, read, partial (while
+// later pages are still to come) } (parseGithubBoard). View fields it
+// reads: id, source, layout, hide (the columns hidden by default) and
+// project.priorityField.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -201,7 +202,7 @@ function drawBoard(b, t, mono, view, st) {
         : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name unten oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
     )
     .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
-    .when(Boolean(st.data.limited), (el) =>
+    .when(Boolean(st.data.limited) && !st.data.partial, (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
         .child(`Nur die ersten ${st.data.read} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
     );

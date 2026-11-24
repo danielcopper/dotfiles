@@ -3,7 +3,9 @@
 // view as makeAzure uses it (sprintView).
 
 import { home, readTextFile, writeTextFile } from "herdr";
-import { BoardError, errorText, failure, firstLine, readMemo } from "../../shared.js";
+import { BoardError, errorText, failure, firstLine, readMemo, report } from "../../shared.js";
+import { NO_LIVE } from "../../loading.js";
+import { what } from "../../tools.js";
 import { NO_STORY } from "../../kinds/sprint.js";
 import {
   AREA_PATH, AZ_QUERY_LIMIT, TEAM_KEEP_MS, WORK_ITEM_FIELDS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, dayEnd, idsWiql, iterationUntil, jsonOrNull,
@@ -212,24 +214,27 @@ export const PARENTS_UNREAD = "Titel der übergeordneten Work Items nicht gelese
 const parentsKey = (s, c) => `parents\n${s.teamKey(c)}`;
 
 // One query by id for the parents outside the sprint: az boards query reads no linked item (sources/azure/related.js).
-export async function parentTitles(s, c, items) {
+// `before` gets the items before that query, with the titles known so far.
+export async function parentTitles(s, c, items, view = null, before = null) {
   const key = parentsKey(s, c);
   const held = s.keptValue(key);
   const titles = new Map(held?.value ?? []);
   const own = new Map(items.map((i) => [i.number, i.title]));
   const missing = [...new Set(items.map((i) => i.parent).filter((id) => Number.isInteger(id) && !own.has(id) && !titles.has(id)))];
+  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
+  const titled = () => items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i));
   let warning = null;
   if (missing.length) {
+    before?.(titled());
     try {
-      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing))), c).map((i) => [i.number, i.title]));
+      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing)), what(view, "parents")), c).map((i) => [i.number, i.title]));
       for (const id of missing) titles.set(id, found.get(id) ?? null);
       s.keep(key, titles, held?.until ?? Date.now() + TEAM_KEEP_MS);
     } catch (e) {
       warning = `${PARENTS_UNREAD}: ${errorText(e)}`;
     }
   }
-  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
-  return { items: items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i)), warning };
+  return { items: titled(), warning };
 }
 
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
@@ -243,33 +248,36 @@ export async function parentTitles(s, c, items) {
 // the team's sprint, areas and columns, not the project's types); `r`
 // drops the team's iterations and its parent titles too (forget).
 //
-// load(view, hiddenFor, chosen) shows the sprint `chosen` ({ id, name };
-// null: the current one), looked up by its id among the team's
-// iterations: its taskboard and query by its id and path, the team's
-// settings as for the current one. Where the team no longer has it, the
-// current sprint, or none where none runs, shows, meta.gone names it and
-// the load says so (notice); a read of it that fails names it. Where the
-// team has no sprint running and none is chosen, it reads no work items
-// (sprintBoard without an iteration).
+// load(view, { chosen }) shows the sprint `chosen` ({ id, name }; null:
+// the current one), looked up by its id among the team's iterations: its
+// taskboard and query by its id and path, the team's settings as for the
+// current one. Where the team no longer has it, the current sprint, or
+// none where none runs, shows, meta.gone names it and the load says so
+// (notice); a read of it that fails names it. Where the team has no sprint
+// running and none is chosen, it reads no work items (sprintBoard without
+// an iteration).
 export function sprintView(s) {
   const iterations = readMemo();
-  const iterationsOf = (c) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c)).then(parseIterations));
+  const iterationsOf = (c, view) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c), what(view, "iterations")).then(parseIterations));
   const currentKey = (c) => `iteration\n${s.teamKey(c)}`;
-  async function settingsOf(c) {
+  function settingsOf(c, view) {
     const team = s.teamKey(c);
     const [iteration, board] = [s.keptValue(currentKey(c)), s.keptValue(`board\n${team}`)];
-    const [it, areas, columns, { types: ty, fresh }] = await Promise.all([
-      iteration ? iteration.value : s.az(azIterationArgs(c)).then(parseIteration),
-      s.areasOf(c),
-      board?.value.columns ?? s.az(azColumnsArgs(c)).then(parseColumns),
-      s.typesOf(c),
-    ]);
-    const until = iteration?.until ?? (it ? iterationUntil(it.finish, Date.now()) : dayEnd(Date.now()));
-    s.keepAreasUntil(c, until);
-    if (!iteration) s.keep(currentKey(c), it, until);
-    if (!board) s.keep(`board\n${team}`, { columns }, until);
-    if (fresh) s.keepTypesUntil(c, until);
-    return { iteration: it, areas, columns, types: ty };
+    const parts = {
+      iteration: iteration ? Promise.resolve(iteration.value) : s.az(azIterationArgs(c), what(view, "iteration")).then(parseIteration),
+      areas: s.areasOf(c, view),
+      columns: board ? Promise.resolve(board.value.columns) : s.az(azColumnsArgs(c), what(view, "columns")).then(parseColumns),
+      types: s.typesOf(c, view),
+    };
+    const all = Promise.all([parts.iteration, parts.areas, parts.columns, parts.types]).then(([it, areas, columns, { types: ty, fresh }]) => {
+      const until = iteration?.until ?? (it ? iterationUntil(it.finish, Date.now()) : dayEnd(Date.now()));
+      s.keepAreasUntil(c, until);
+      if (!iteration) s.keep(currentKey(c), it, until);
+      if (!board) s.keep(`board\n${team}`, { columns }, until);
+      if (fresh) s.keepTypesUntil(c, until);
+      return { iteration: it, areas, columns, types: ty };
+    });
+    return { ...parts, all };
   }
   const forgetSettings = (c) => {
     s.drop(currentKey(c));
@@ -279,25 +287,31 @@ export function sprintView(s) {
   const onRefusal = (c) => s.dropOnRefusal(forgetSettings, c);
   // The team's current iteration's id: as the Sprint keeps it, else read
   // (and not kept: settingsOf keeps it with the settings it belongs to).
-  async function currentIdOf(c) {
+  async function currentIdOf(c, view) {
     const kept = s.keptValue(currentKey(c));
-    return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c))))?.id ?? null;
+    return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c), what(view, "iteration"))))?.id ?? null;
   }
-  async function loadSprint(view, chosen) {
+  async function loadSprint(view, chosen, live) {
     const c = view.context;
-    const me = s.whoAmI();
-    const [kept, listed] = await Promise.all([settingsOf(c), chosen ? iterationsOf(c) : null]);
-    const found = listed?.find((i) => i.id === chosen.id) ?? null;
-    const iteration = found ?? kept.iteration;
-    const [places, items] = iteration
-      ? await Promise.all([s.az(azTaskboardArgs(c, iteration.id)), s.az(azQueryArgs(c, sprintWiql(iteration, kept.areas)))])
-      : [null, null];
+    const me = s.whoAmI(view);
+    const settings = settingsOf(c, view);
+    const listed = chosen ? iterationsOf(c, view) : null;
+    const shown = Promise.all([settings.iteration, listed]).then(([current, list]) => list?.find((i) => i.id === chosen.id) ?? current);
+    const placesRead = shown.then((it) => (it ? s.az(azTaskboardArgs(c, it.id), what(view, "taskboard")) : null));
+    const itemsRead = Promise.all([shown, settings.areas]).then(([it, areas]) => (it ? s.az(azQueryArgs(c, sprintWiql(it, areas)), what(view, "sprint-items")) : null));
+    const [kept, list, iteration, places, items] = await Promise.all([settings.all, listed, shown, placesRead, itemsRead]);
+    const found = list?.find((i) => i.id === chosen.id) ?? null;
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
     const placed = places === null ? new Map() : parseTaskboard(places);
-    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c));
-    const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled.items, places: placed, viewer: await me });
-    s.noViewerOf(data);
+    const board = (titled, viewer) => {
+      const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled, places: placed, viewer });
+      s.noViewerOf(data);
+      return data;
+    };
+    const drawn = (soFar) => void me.then((viewer) => live.partial(() => ({ data: board(soFar, viewer), warnings: [...kept.types.warnings] }))).catch(report);
+    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c), view, drawn);
+    const data = board(titled.items, await me);
     if (data.meta.unknownColumns) forgetSettings(c);
     const instead = currentId ? "der aktuelle Sprint wird gezeigt" : "das Team hat keinen laufenden Sprint";
     return { data, warnings: [...kept.types.warnings, ...(titled.warning ? [titled.warning] : [])], notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
@@ -310,16 +324,16 @@ export function sprintView(s) {
     },
     async iterations(view) {
       const c = view.context;
-      const [list, current] = await Promise.all([iterationsOf(c), currentIdOf(c)]);
+      const [list, current] = await Promise.all([iterationsOf(c, view), currentIdOf(c, view)]);
       return list.map((i) => ({ ...i, current: i.id === current }));
     },
-    load: (view, hiddenFor, chosen = null) =>
-      loadSprint(view, chosen).catch((e) => {
+    load: (view, { chosen = null, live = NO_LIVE }) =>
+      loadSprint(view, chosen, live).catch((e) => {
         throw chosen && e instanceof BoardError ? new BoardError(`${chosen.name} ließ sich nicht lesen: ${e.message}`, e) : e;
       }),
     async move(view, data, card, column) {
       const file = await writeMoveBody(card.number, column);
-      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true }).catch(onRefusal(view.context));
+      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
       checkTaskboardMove(out, card, column);
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),

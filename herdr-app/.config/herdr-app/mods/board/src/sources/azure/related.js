@@ -29,6 +29,7 @@
 // no checks (Azure's policies would cost another call).
 
 import { BoardError, DRAFT_REVIEW, STATE_LOOKS, isObject, otherLook, report } from "../../shared.js";
+import { what } from "../../tools.js";
 import { CHILD_LINK, DESCRIPTION, PARENT_LINK, azJson, azOrg, azQueryArgs, idsWiql, parseWorkItems } from "./common.js";
 
 // The work item with its links.
@@ -96,9 +97,9 @@ const section = (count, lines, error = null) => ({
 // (related.js): one az call, and one query more where it has children or
 // a parent. A failed query shows its reason in the children's place and
 // the parent's and marks the read to be repeated after the next refresh
-// (retry). `az(args)` runs az.
-export async function loadAzureRelated(az, c, item) {
-  const read = parseRelatedItem(await az(azRelatedArgs(c, item.number)));
+// (retry). `az(args, options)` runs az, for the view `view`.
+export async function loadAzureRelated(az, c, item, view = null) {
+  const read = parseRelatedItem(await az(azRelatedArgs(c, item.number), what(view, "related")));
   const parentIds = read.parent === null ? [] : [read.parent];
   const ids = [...read.children, ...parentIds];
   let children = section(read.children.length, []);
@@ -106,7 +107,7 @@ export async function loadAzureRelated(az, c, item) {
   let retry = false;
   if (ids.length) {
     try {
-      const out = await az(azQueryArgs(c, idsWiql(ids)));
+      const out = await az(azQueryArgs(c, idsWiql(ids)), what(view, "related-items"));
       children = section(read.children.length, parseChildren(out, read.children, c));
       parents = section(parentIds.length, parseChildren(out, parentIds, c));
     } catch (e) {
@@ -166,12 +167,12 @@ export function parseAzurePullRequest(stdout) {
 // id, read in the view's organisation.
 export const azurePullRequest = (az) => ({
   reads: (item) => item.kind === "pr" && Number.isInteger(item.number),
-  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number))),
+  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number), what(view, "pull-request"))),
 });
 
 // The Azure source's `related` (related.js): a work item with an id has
 // some to read.
 export const azureRelated = (az) => ({
   reads: (item) => item.kind === "workitem" && Number.isInteger(item.number),
-  load: (item, view) => loadAzureRelated(az, view.context, item),
+  load: (item, view) => loadAzureRelated(az, view.context, item, view),
 });

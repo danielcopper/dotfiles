@@ -1,6 +1,6 @@
 // What the board's modules share: its names, its error and how one is
-// shown, small checks and text helpers, an item's key and type, and labels
-// for times.
+// shown, its lines for herdr's log, small checks and text helpers, an
+// item's key and type, and labels for times.
 
 
 
@@ -9,9 +9,8 @@ export const MOD = "board";
 export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
-  // unavailable: az is missing, not signed in or without its extension. It
-  // is set for the Azure views, to tell this apart from a failure; nothing
-  // reads it yet. unclear: a write may or may not have landed.
+  // unavailable: az is missing, not signed in or without its extension.
+  // unclear: a write may or may not have landed.
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
@@ -39,6 +38,9 @@ export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 // The message to show for an error: a BoardError's own, else marked as
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);
+
+// herdr's log gets console.log.
+export const boardLog = { write: (line) => console.log(line) };
 
 // An error's message for the UI; an unexpected one is logged with its stack.
 export function report(e) {
@@ -154,14 +156,6 @@ export function readMemo() {
     drop: (key) => kept.delete(key),
     clear: () => kept.clear(),
   };
-}
-
-export function updatedLabel(at, now) {
-  if (!at) return "";
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 60) return `vor ${s} s`;
-  if (s < 3600) return `vor ${Math.floor(s / 60)} min`;
-  return `vor ${Math.floor(s / 3600)} h`;
 }
 
 // A day in ms, and the end of an iteration's last day from Azure's

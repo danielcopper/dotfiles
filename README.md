@@ -243,7 +243,8 @@ Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
 stows the package without folding (the reason is in its comment on
 `no_folding_pkgs`), so relink it
 with `mise run dotfiles-relink herdr-app` rather than a bare `stow -R
-herdr-app`. Which files of the package git tracks is set in the root
+herdr-app`; a file new to the package, such as a mod's icon, is linked only
+by that run. Which files of the package git tracks is set in the root
 `.gitignore`.
 
 - **`settings.json` is a reference copy, not stowed.** herdr replaces
@@ -412,6 +413,37 @@ herdr-app`. Which files of the package git tracks is set in the root
   "nur meine" thins says so ("1/4"); a tab's count leaves the cards of hidden
   columns out. The code holds nothing of mine; the header of
   `mods/board/src/main.js` describes the file's fields.
+  Each view keeps its last good read in herdr's localStorage (about 217 kB
+  for a board of 300 cards; herdr's store takes at most 1 MiB a value and
+  8 MiB in all, so a view keeps at most a million bytes, and one the store
+  refuses keeps nothing, which herdr's log names). Each read of
+  `views.json` (the start, `r`) drops the entries of views it no longer
+  has, unless the file has problems. After a restart, and on a switch to a
+  tab not read yet, the view draws that state at once, its age at the top
+  right ("Stand vor 3 min", "vor 2 d" from two days on), and reads anew
+  behind it; a read that fails keeps it and says why. Every tab's age is
+  that of what it draws. Nothing is written against that saved state: a
+  move, a status change, an assignment or a create is refused with a note
+  and has to be made again once the read is in; a read that failed starts
+  again. While a view shows nothing or only its saved state, a GitHub board
+  draws each page as it comes, the "Nur die ersten" note after the last;
+  the PR list draws before the follow-up for pull requests with many review
+  threads, their rows marked "…" until it came ("?" stays for what could
+  not be read); the Sprint draws before its parents' titles, the Backlog
+  before its types' colors. A read over data read since the start shows
+  its result only once whole, so the selection and open details stay. The
+  top right says which page a board reads ("lädt … Seite 2 von 3"). After
+  each read of `views.json`, once the shown view is read, the board reads
+  each other view once, one at a time in the background, the shown
+  source's first, the oldest or never read first, none tried within
+  `refreshMinutes` and none whose own last read since then found az unavailable;
+  it waits while another read runs, something is written or a dialog is
+  busy, so a switch to such a tab shows it at once. After that a view
+  refreshes only while it shows, as above. While a read of the shown view
+  runs, `↻` turns, and an empty view shows a spinner before "Lädt …". Each
+  gh, az and sh run (checkout, finding gh and az) writes one line to
+  herdr's log (console.log), without its arguments: `board: <gh|az|sh>
+  <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `v` a team's Sprint and Backlog, `m`
   turns "nur meine" on and off (the source toggle, the tabs, the switch and
   "nur meine" take clicks too), `/` filters, `r` refreshes (the shown view

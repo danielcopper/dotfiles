@@ -3,7 +3,7 @@
 // on its machine.
 
 import { exec } from "herdr";
-import { BoardError, failure, firstLine, lastLine, readMemo } from "./shared.js";
+import { BoardError, boardLog, failure, firstLine, lastLine, readMemo } from "./shared.js";
 
 // How long gh may take, and az: an az run starts Python, and most ask Azure
 // a few times.
@@ -110,7 +110,7 @@ export async function findTool(execute, tool, on, timeoutMs) {
   const unknown = `Pfad von ${toolOn(tool, on)} nicht ermittelt`;
   let r;
   try {
-    r = await execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs });
+    r = await logged("sh", { kind: `which-${tool}` }, () => execute("sh", whichArgs(tool, on), { on, timeout: timeoutMs }));
   } catch (e) {
     const msg = firstLine(e?.message ?? e);
     if (on && String(e?.message ?? e).includes(NO_SH)) return { program: tool, bare: true };
@@ -168,11 +168,27 @@ export function toolPaths(execute) {
   };
 }
 
+// The line names no argument: no query text, no token.
+export const callLine = (tool, { view = null, kind = "call" } = {}, ms, outcome) => `board: ${tool} ${kind} ${ms} ms ${outcome} view=${view ?? "-"}`;
+export const what = (view, kind) => ({ what: { view: view?.id ?? null, kind } });
+
+async function logged(tool, about, run) {
+  const began = Date.now();
+  let outcome = "failed";
+  try {
+    const r = await run();
+    outcome = r?.code ? `exit ${r.code}` : "ok";
+    return r;
+  } finally {
+    boardLog.write(callLine(tool, about, Date.now() - began, outcome));
+  }
+}
+
 // One run of a program: its result, or a BoardError when it could not run.
 // With `paths` (toolPaths) it runs by what that finds. `write` is for calls
 // that change something (see execRejection).
-export async function call(tool, args, on, timeout, { write = false, paths = null } = {}) {
-  const start = (program) => exec(program, args, { on, timeout });
+export async function call(tool, args, on, timeout, { write = false, paths = null, what: about } = {}) {
+  const start = (program) => logged(tool, about, () => exec(program, args, { on, timeout }));
   try {
     return await (paths ? paths.run(tool, on, timeout, start) : start(tool));
   } catch (e) {

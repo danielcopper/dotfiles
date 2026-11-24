@@ -86,11 +86,27 @@
 // after that refresh; a create for a team whose default iteration follows the
 // current one reads the team's settings first, one call more. The PR tabs
 // read nothing yet. Finding gh and az costs one sh call now and then
-// (toolPaths says when). A view refreshes when its tab first shows, on `r`
-// (which first drops what its source keeps of it: its source's forget), after
-// a column is hidden or shown (the command menu's "Spalte ausblenden", a name
-// in the hidden line, the column menu), when it is shown again older than
-// refreshMinutes, and every refreshMinutes while it shows.
+// (toolPaths says when). A view refreshes when its tab first shows (unless it
+// has data the prefetch tried within refreshMinutes), on `r` (which first
+// drops what its source keeps of it: its source's forget), after a column is
+// hidden or shown (the command menu's "Spalte ausblenden", a name in the
+// hidden line, the column menu), when it is shown again tried longer than
+// refreshMinutes ago (not while a read of it runs: that one shows), and every
+// refreshMinutes while it shows. Besides, after each read of views.json (the
+// start, `r`), while the board shows, the prefetch reads each other view with
+// a loader once, as its tab would (prefetchOrder: one at a time, none tried
+// within refreshMinutes, none whose own last read since it found its source
+// unavailable), so a start or an `r` costs each other view's refresh at most
+// once; it waits while any read runs, a write is under way or a dialog is
+// busy. After that a view not shown reads nothing. The Azure calls of a load
+// that need nothing of each other run side by side: the Sprint's settings
+// (iteration, areas, columns, types) and who az is; its taskboard once the
+// iteration came, its query once the areas came too; the Backlog's settings
+// (levels, configuration, team settings, areas), the types' colors and who az
+// is; its ids once the levels came, the query for their fields once the
+// configuration came too. What a view drew last, as read, is saved
+// (loading.js) and drawn after a restart with its age until its read replaces
+// it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -105,22 +121,24 @@
 // anything it could load), scroll.js (how the details scroll; the sums a
 // board column shares), sources/ (GitHub; Azure in sources/azure/:
 // common.js, sprint.js, backlog.js, related.js, index.js), tools.js
-// (running gh and az), actions/ (starting a session, writing a change at
-// once, moving a card, changing a state, creating a work item, assigning an
-// item), ui/helpers.js, ui/tones.js (the tones of labels and types, the
-// selected background, the tints), ui/layer.js (the board layer),
-// ui/related.js (the related items as drawn), ui/band.js (which cards of a
-// board column draw whole), ui/shapes/ (how a view's data is drawn and
-// worked: board, prs, sprint, backlog, placeholder), ui/modals/ (the
-// dialogs: start, status, columns, create, assign, commands, sprints) and
-// this one, the Board, which looks the shape up.
+// (running gh and az, a log line each), loading.js (the saved state, what a
+// load draws before its end, the prefetch's order, the top bar's words for a
+// read), actions/ (starting a session, writing a change at once, moving a
+// card, changing a state, creating a work item, assigning an item),
+// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
+// background, the tints), ui/layer.js (the board layer), ui/related.js (the
+// related items as drawn), ui/band.js (which cards of a board column draw
+// whole), ui/shapes/ (how a view's data is drawn and worked: board, prs,
+// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
+// columns, create, assign, commands, sprints) and this one, the Board, which
+// looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, layout, nextCommand, notify, props, readTextFile, run, settings, spaces, theme } from "herdr";
-import { MOD, CONFIG_NAME, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem, updatedLabel } from "./shared.js";
+import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
 import { readStoredFolds } from "./kinds/sprint.js";
@@ -128,6 +146,7 @@ import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, shownIndex, stepIndex, teamViewAfter } from "./contexts.js";
 import { toolPaths } from "./tools.js";
+import { SAVED_MAX, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
 import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
 import { makeSources } from "./sources/index.js";
 import { keptRelated, pathLabel, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
@@ -160,6 +179,7 @@ export * from "./sources/azure/backlog.js";
 export * from "./sources/azure/related.js";
 export * from "./sources/azure/index.js";
 export * from "./tools.js";
+export * from "./loading.js";
 export * from "./actions/start.js";
 export * from "./actions/write.js";
 export * from "./actions/move.js";
@@ -188,6 +208,10 @@ export * from "./ui/modals/start.js";
 export * from "./ui/modals/status.js";
 
 const TICK_MS = 30000;
+export const PREFETCH_GAP_MS = 1500;
+export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+// From the application root (gpui-kit's svg).
+export const REFRESH_ICON = "mods/board/refresh.svg";
 // How often a copy looks whether it shows (watchShown). herdr draws, and so
 // renders, only a copy that shows, again on a change of its live data (spaces
 // and tabs, the focus, shared state); a change of the layout alone is not
@@ -261,6 +285,8 @@ export default class Board extends View {
     this.config = null;
     this.configErrors = [];
     this.views = {}; // per view id, see state()
+    this.prefetchWaits = false;
+    this.prefetchLeft = new Set();
     // What the top bar shows, as last chosen: the source, its tab (a context
     // id) per source, the view per team context, and "nur meine".
     migrateShownView();
@@ -386,12 +412,16 @@ export default class Board extends View {
   // sprints the sprint picker chose, by their id: foldsOf); sprint (the
   // sprint a Sprint view shows in place of the current one, { id, name } as
   // the sprint picker chose it, null for the current one; kept while the
-  // board runs, never stored).
+  // board runs, never stored); saved (no read of this session has ended on
+  // the data drawn: the saved state, or what a read drew over it so far),
+  // restored (the saved state was looked for), progress ({ page, pages } of
+  // a read) and unavailable (the last read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
+      saved: false, restored: false, progress: null, unavailable: false,
     };
     return this.views[id];
   }
@@ -462,6 +492,7 @@ export default class Board extends View {
       });
       if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
       this.paths.reset();
+      for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
       if (!this.config) return;
       // Open outcomes of a view that is gone, or is now of another kind than
@@ -474,7 +505,13 @@ export default class Board extends View {
       // A dialog of a view that is gone, or of another kind now, closes.
       const m = this.modal;
       if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+      // A views.json with problems leaves those views out.
+      if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
+      this.prefetchLeft = new Set(kinds.keys());
       const shown = this.view();
+      if (shown) this.restore(shown);
+      cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => viewsOf(this.config ?? {}).forEach((v) => this.restore(v))));
+      if (!shown || !this.loader(shown)) this.schedulePrefetch(cx);
       if (!shown) return;
       this.sources[shown.source]?.forget?.(shown);
       // The open details' related items are read again too.
@@ -493,14 +530,37 @@ export default class Board extends View {
     st.loading = true;
     st.again = false;
     st.tried = Date.now();
+    st.progress = null;
     const open = st.detail ? this.selected(view) : null;
     st.related = keptRelated(st.related, open ? open.key : null, (this.panelIn(view)?.levels ?? []).map((l) => l.item.key));
     const started = st.tried;
     const run = ++st.runs;
     const chosen = st.sprint;
+    const before = { data: st.data, warnings: st.warnings };
+    // Over data this session read, the new data shows only once whole.
+    const inSteps = !st.data || st.saved;
+    const hidden = this.hiddenFor(view);
     cx.spawn(async (cx) => {
+      let drew = false;
+      let ended = false;
+      const live = {
+        partial: (result) => {
+          if (ended || !inSteps) return;
+          const { data, warnings } = result();
+          drew = true;
+          st.data = SHAPES[data.shape].received(data, st);
+          st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
+          this.keepSelection(view);
+          cx.notify();
+        },
+        page: (page, pages) => {
+          if (ended) return;
+          st.progress = { page, pages };
+          cx.notify();
+        },
+      };
       try {
-        const { data, warnings, notice } = await loader.load(view, (v) => this.hiddenFor(v), chosen);
+        const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live });
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
@@ -508,17 +568,30 @@ export default class Board extends View {
         st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
         st.error = null;
         st.at = Date.now();
+        st.saved = false;
+        st.unavailable = false;
+        // A sprint the picker chose is the view's only while the board runs.
+        if (!chosen) this.save(view, hidden, { data, warnings }, st.at, cx);
         this.keepSelection(view);
         this.chooseWanted(view, run, cx);
         this.settleUnclear(view, started, data, cx);
       } catch (e) {
         st.error = report(e);
+        st.unavailable = Boolean(e?.unavailable);
+        // A failed read keeps what showed before it, not what it drew on its
+        // way.
+        if (drew) {
+          st.data = before.data && SHAPES[before.data.shape].received(before.data, st);
+          st.warnings = before.warnings;
+        }
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
           this.say(`${open.map((u) => u.label).join(", ")}: Ergebnis weiter offen, Neuladen fehlgeschlagen (${errorText(e)})`, "warning", cx);
         }
       } finally {
+        ended = true;
         st.loading = false;
+        st.progress = null;
         // The follow-up refresh reads the view from the config as it is now.
         const fresh = this.viewById(view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
@@ -526,10 +599,71 @@ export default class Board extends View {
         // or wants a retry and so was not kept (keptRelated), are read now;
         // after a follow-up refresh, once it ended.
         this.readRelated(cx);
+        this.schedulePrefetch(cx);
         cx.notify();
       }
     });
     cx.notify();
+  }
+
+  restore(view) {
+    const st = this.state(view.id);
+    if (st.restored) return;
+    st.restored = true;
+    if (st.data || !this.loader(view)) return;
+    const key = savedKey(view.id);
+    const text = store.text(key);
+    if (text === null) return;
+    const before = { data: st.data, warnings: st.warnings, at: st.at, saved: st.saved, sel: st.sel, picked: st.picked, detail: st.detail, sprint: st.sprint };
+    try {
+      const saved = readSaved(text, view, this.hiddenFor(view));
+      const shape = SHAPES[saved?.data.shape];
+      if (!shape?.loads) return;
+      const data = shape.received(saved.data, st);
+      const warnings = [...saved.warnings, ...shape.warnings(view, saved.data)];
+      Object.assign(st, { data, warnings, at: saved.at, saved: true });
+      this.keepSelection(view);
+    } catch (e) {
+      // An entry from code that drew it otherwise: the read draws instead.
+      Object.assign(st, before);
+      store.remove(key);
+      boardLog.write(`board: ${key} dropped: ${firstLine(e?.message ?? e)}`);
+    }
+  }
+
+  // After the draw the data came with. Where the store does not take the
+  // read, the entry before goes too: a restart would draw it as the last.
+  save(view, hidden, read, at, cx) {
+    cx.timer.after(0, () => this.guarded("Speichern", () => {
+      const key = savedKey(view.id);
+      const text = savedText(view, hidden, read, at);
+      const refused = text === null ? `more than ${SAVED_MAX} bytes` : store.setText(key, text);
+      if (refused === null) return;
+      store.remove(key);
+      boardLog.write(`board: ${key} not saved: ${refused}`);
+    }));
+  }
+
+  schedulePrefetch(cx) {
+    if (this.prefetchWaits) return;
+    this.prefetchWaits = true;
+    cx.timer.after(PREFETCH_GAP_MS, (cx) => {
+      this.prefetchWaits = false;
+      this.guarded("Vorladen", () => this.prefetchNext(cx));
+    });
+  }
+
+  prefetchNext(cx) {
+    if (!this.config || !boardShown(this.isLayer()) || this.modal?.busy) return;
+    if (Object.values(this.views).some((st) => st.loading || Object.keys(st.pending).length)) return;
+    const [next, ...rest] = prefetchOrder(viewsOf(this.config).filter((v) => this.prefetchLeft.has(v.id)), {
+      shown: this.view(), source: this.source()?.id, now: Date.now(), every: this.config.refreshMinutes * 60000,
+      stateOf: (id) => this.state(id), loads: (v) => Boolean(this.loader(v)),
+    });
+    this.prefetchLeft = new Set(rest.map((v) => v.id));
+    if (!next) return;
+    this.restore(next);
+    this.refresh(next, cx);
   }
 
   // After the refresh `run` (its number, st.runs) succeeded: the item a
@@ -561,13 +695,12 @@ export default class Board extends View {
   }
 
   // Every TICK_MS while the board shows: the shown view once refreshMinutes
-  // have passed since it was last tried.
+  // have passed since it was last tried, and the prefetch where it waited.
   tick(cx) {
     if (!this.config || !boardShown(this.isLayer())) return;
-    const every = this.config.refreshMinutes * 60000;
-    const due = (v) => Date.now() - this.state(v.id).tried >= every;
     const shown = this.view();
-    if (shown && due(shown)) this.refresh(shown, cx);
+    if (shown && refreshDue(this.state(shown.id), Date.now(), this.config.refreshMinutes * 60000)) this.refresh(shown, cx);
+    this.schedulePrefetch(cx);
     cx.notify();
   }
 
@@ -976,13 +1109,15 @@ export default class Board extends View {
     this.showContext(cx);
   }
 
-  // After another tab came up: the notice goes, and its view, without data
-  // or older than refreshMinutes, loads (where its source reads it).
+  // After another tab came up: the notice goes, and its view loads as the
+  // header says (Calls).
   showContext(cx) {
     this.notice = null;
     const v = this.view();
     const st = v && this.state(v.id);
-    if (v && (!st.data || Date.now() - st.tried >= this.config.refreshMinutes * 60000)) this.refresh(v, cx);
+    if (v) this.restore(v);
+    if (v && !st.loading && (!st.data || refreshDue(st, Date.now(), this.config.refreshMinutes * 60000))) this.refresh(v, cx);
+    if (v && !this.loader(v)) this.schedulePrefetch(cx);
     cx.notify();
   }
 
@@ -1397,10 +1532,11 @@ export default class Board extends View {
   // The top bar, two rows so that neither the tabs nor the filter have to
   // give way on a small screen: the source toggle, a tab per context of the
   // shown source and a team's view switch (where it has two); then "nur
-  // meine", the filter, when the shown view was read, and refresh. Without a
-  // valid views.json the first row holds only the board's name.
+  // meine", the filter, the read under way, the age of the data drawn and
+  // refresh. Without a valid views.json the first row holds only the
+  // board's name.
   toolbar(t, view, st) {
-    const updated = st?.loading ? "lädt …" : st?.at ? `aktualisiert ${updatedLabel(st.at, Date.now())}` : "";
+    const { reading, age } = readLabels(st, Date.now());
     const source = this.source();
     const context = this.context();
     const row = () => h_flex().gap(12).px(16).items_center();
@@ -1438,8 +1574,9 @@ export default class Board extends View {
           .child(div().text_color(t.dim).child("/"))
           .child(Input.new(this.filterInput).flex_1().text_size(12.5).text_color(t.foreground)),
       )
-      .child(div().flex_none().text_size(12).text_color(t.muted).child(updated))
-      .child(button(t, "refresh", "↻", false, (cx) => this.reload(cx)));
+      .when(Boolean(reading), (el) => el.child(div().id("reading").flex_none().text_size(12).text_color(t.muted).child(reading)))
+      .when(Boolean(age), (el) => el.child(div().id("age").flex_none().text_size(12).text_color(t.muted).child(age)))
+      .child(button(t, "refresh", svg(REFRESH_ICON).size(14).when(Boolean(st?.loading), (el) => el.spin(1000)), false, (cx) => this.reload(cx)));
     return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
   }
 
@@ -1476,12 +1613,12 @@ export default class Board extends View {
   }
 
   // The shown source's tabs: number, name and, for a view with data, how
-  // many items it holds ("…" while it loads; shownOf while the filter or
-  // "nur meine" hides some).
+  // many items it holds ("…" while it loads without data; shownOf while the
+  // filter or "nur meine" hides some).
   tabs(t, context) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
-      if (st.loading) return "…";
+      if (st.loading && !st.data) return "…";
       const n = st.data ? SHAPES[st.data.shape].count(this, st.data) : null;
       return n ? shownOf(n.shown, n.total) : "";
     };
@@ -1555,11 +1692,12 @@ export default class Board extends View {
   main(t, mono, view, st) {
     const box = v_flex().flex_1().min_w(0).min_h(0);
     const message = (text) => box.child(div().p(20).text_color(t.muted).child(text));
-    if (!this.config) return message(this.configErrors.length ? `Keine gültige Ansicht in ${CONFIG_NAME}.json` : "Lädt …");
+    const loading = () => box.child(h_flex().id("loading").p(20).gap(8).text_color(t.muted).child(div().frames(SPINNER_FRAMES, 150)).child("Lädt …"));
+    if (!this.config) return this.configErrors.length ? message(`Keine gültige Ansicht in ${CONFIG_NAME}.json`) : loading();
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
     if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
-    if (!st.data && !st.error) return message(st.loading ? "Lädt …" : "Noch nichts geladen");
+    if (!st.data && !st.error) return st.loading ? loading() : message("Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(st.error));
     const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];

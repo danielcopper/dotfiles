@@ -55,6 +55,7 @@ export function writeAtOnce(b, view, w, cx) {
   const same = (u) => u.key === openKey && u.kind === w.open.kind;
   const toasts = w.texts.toasts ?? { unclear: `Status von ${label}`, refused: `Status von ${label} nicht geändert` };
   if (st.pending[key]) return b.say(`${label} wird noch gespeichert`, "info", cx);
+  if (st.saved) return refuseOnSaved(b, view, cx);
   if (w.refuse) return b.say(w.refuse, "warning", cx);
   w.apply();
   st.pending[key] = true;
@@ -110,6 +111,20 @@ export function writeAtOnce(b, view, w, cx) {
       if (followed && current && (w.againOnRefusal || openOf(st, key))) b.refresh(current, cx);
     }
   }
+}
+
+// The saved state may be long out of date: no write goes against it, and
+// the person makes it again once a read replaced it. That read runs from
+// the moment the saved state shows; one that failed starts again here.
+export const SAVED_WRITE = "Gezeigt ist der gespeicherte Stand: erst nach dem Neuladen noch einmal";
+function refuseOnSaved(b, view, cx) {
+  b.say(SAVED_WRITE, "info", cx);
+  restartRead(b, view, cx);
+}
+
+export function restartRead(b, view, cx) {
+  const { current } = viewStands(b, view);
+  if (current && !b.state(view.id).loading) b.refresh(current, cx);
 }
 
 // Whether an outcome of the item `key`, of any kind, is still open.

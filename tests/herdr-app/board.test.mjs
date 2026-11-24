@@ -115,6 +115,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
@@ -161,6 +162,9 @@ registerHooks({
 });
 
 const board = await import(pathToFileURL(mainPath).href);
+// The board's lines for herdr's log (boardLog), kept here rather than printed.
+const logged = [];
+board.boardLog.write = (line) => logged.push(line);
 // Every render marks the fake host as drawing, as herdr does (ScrollHandle).
 // herdr draws, and so renders, only a copy that shows (a stack draws only
 // its shown child, a tab only while shown), so rendering one that does not
@@ -1920,12 +1924,14 @@ test("a new tab goes to a space in the checkout or below it on that machine, els
 
 // ---- Labels ----
 
-test("the refresh time and PR ages read as German labels", () => {
+test("the data's age and PR ages read as German labels; the age counts days from two days on", () => {
   const now = Date.parse("2026-11-18T12:00:00");
-  assert.equal(board.updatedLabel(0, now), "");
-  assert.equal(board.updatedLabel(now - 40000, now), "vor 40 s");
-  assert.equal(board.updatedLabel(now - 3 * 60000 - 5000, now), "vor 3 min");
-  assert.equal(board.updatedLabel(now - 2 * 3600000, now), "vor 2 h");
+  assert.equal(board.sinceLabel(0, now), "");
+  assert.equal(board.sinceLabel(now - 40000, now), "vor 40 s");
+  assert.equal(board.sinceLabel(now - 3 * 60000 - 5000, now), "vor 3 min");
+  assert.equal(board.sinceLabel(now - 2 * 3600000, now), "vor 2 h");
+  assert.equal(board.sinceLabel(now - 47 * 3600000, now), "vor 47 h");
+  assert.equal(board.sinceLabel(now - 48 * 3600000, now), "vor 2 d");
   assert.equal(board.ageLabel("2026-11-18T08:00:00", now), "heute");
   assert.equal(board.ageLabel("2026-11-17T23:00:00", now), "gestern");
   assert.equal(board.ageLabel("2026-11-14T10:00:00", now), "vor 4 Tagen");
@@ -2267,7 +2273,12 @@ const sessionSpace = { id: "s5", name: "y", folder: "/r/tender", machine: null, 
 const memory = new Map();
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
-  value: { getItem: (k) => memory.get(k) ?? null, setItem: (k, v) => memory.set(k, String(v)) },
+  value: {
+    getItem: (k) => memory.get(k) ?? null, setItem: (k, v) => memory.set(k, String(v)), removeItem: (k) => memory.delete(k),
+    key: (i) => [...memory.keys()][i] ?? null, get length() {
+      return memory.size;
+    },
+  },
 });
 
 const ok = (stdout) => ({ code: 0, stdout, stderr: "" });
@@ -2275,10 +2286,12 @@ const ok = (stdout) => ({ code: 0, stdout, stderr: "" });
 // A Board on the fake host, started with `props`, its calls not answered
 // yet. `stored`:
 // what the store holds before (by default the GitHub source as the one last
-// shown, so the board opens on its first view).
+// shown, so the board opens on its first view); `raw`: entries it holds as
+// they stand (a saved state: savedFor).
 async function bootBoard(options = {}) {
   memory.clear();
   for (const [key, value] of Object.entries(options.stored ?? { source: "github" })) memory.set(key, JSON.stringify(value));
+  for (const [key, text] of Object.entries(options.raw ?? {})) memory.set(key, text);
   clockOffset = 0;
   const host = fakeHost(options);
   globalThis.__boardHost = host;
@@ -5788,7 +5801,8 @@ test("UI: the chosen sprint lasts while the board runs: nothing of it is stored,
   const { b, cx, host } = await openSprint();
   await pickSprint(b, cx, host, "Sprint 11");
   assert.equal(b.state(b.view().id).data.meta.iterationId, SPRINT_11);
-  assert.equal([...memory.values(), ...Object.values(host.files)].some((v) => v.includes(SPRINT_11) || v.includes("Sprint 11")), false, "nothing stored");
+  await cx.fire();
+  assert.equal([...memory.values(), ...Object.values(host.files)].some((v) => v.includes(SPRINT_11) || v.includes("Sprint 11")), false, "nothing stored, not even its saved state");
   const stored = Object.fromEntries([...memory].map(([k, v]) => [k, JSON.parse(v)]));
   const again = await openSprint({ stored });
   assert.equal(again.st().sprint, null);
@@ -11480,4 +11494,598 @@ test("a progress bar is 6 high, each of its segments as high by the bar's stretc
   for (const segment of bar.kids) assert.ok(heightFrom(bar, segment) && !segment.with.h, "the bar's height");
   const wide = byId(board.progressLine(t, { done: 1, total: 31 }, []), "progress-bar");
   assert.deepEqual([wide.with.h, wide.kids[0].with.h], [[6], [6]]);
+});
+
+// ---- Loading: the saved state, reads in steps, the prefetch, the call log, the spinner ----
+
+// testConfig's views as the board reads them, and the saved entry of the
+// view `id` for `data` read at `at` (its hidden columns by default).
+const testView = (id) => board.viewsOf(board.readConfig(testConfig()).config).find((v) => v.id === id);
+const savedFor = (id, data, at, { hidden = board.hiddenColumns(testView(id), null), warnings = [] } = {}) =>
+  board.savedText(testView(id), hidden, { data, warnings }, at);
+const savedOf = (id) => board.readSaved(memory.get(board.savedKey(id)) ?? "", testView(id), board.hiddenColumns(testView(id), null));
+// github-board.json as read for "mine", its first card retitled, so that it
+// tells the saved state from a read's.
+function savedBoard() {
+  const data = githubBoard();
+  data.columns.find((c) => c.cards.length).cards[0].title = "Gespeicherter Titel";
+  return data;
+}
+const allCards = (data) => data.columns.flatMap((c) => c.cards);
+const ageOf = (root) => texts(byId(root, "age")).join("");
+const readingOf = (root) => texts(byId(root, "reading")).join("");
+const refreshSpins = (root) => byId(root, "refresh").kids[0].styles.includes("spin");
+const MIN = 60000;
+const isListCall = (args) => args.some((a) => String(a).includes("search("));
+const isThreadsCall = (args) => args.some((a) => String(a).includes("nodes(ids:"));
+const isOtherCall = (args) => isBoardCall(args) && args.includes("number=8");
+const isMineCall = (args) => isBoardCall(args) && !isOtherCall(args);
+
+test("UI: a view draws its saved state at once, with its age beside the turning ↻, and the read that follows replaces it and saves its own after the draw", async () => {
+  const at = Date.now() - 5 * MIN;
+  const { b, cx, host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  let root = b.render();
+  assert.deepEqual([st().saved, st().loading, allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [true, true, true], "drawn before gh answers");
+  assert.ok(byId(root, "columns"), "its columns, not „Lädt …“");
+  assert.deepEqual([ageOf(root), readingOf(root), refreshSpins(root)], ["Stand vor 5 min", "lädt …", true]);
+  assert.equal(host.open("gh").length, 1, "and reads it");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  root = b.render();
+  assert.deepEqual([st().saved, allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [false, false], "replaced by the read");
+  assert.deepEqual([ageOf(root), byId(root, "reading"), refreshSpins(root)], ["Stand vor 0 s", null, false]);
+  assert.equal(savedOf("mine").at, at, "the entry before stays until after the draw");
+  await cx.fire();
+  const saved = savedOf("mine");
+  assert.equal(saved.at, st().at, "saved with its read's time");
+  assert.equal(allCards(saved.data).length, allCards(st().data).length);
+});
+
+test("UI: a read that fails keeps the saved state, its age and says why; a write against the saved state is refused, also while its read runs, and one whose read failed starts it again", async () => {
+  const at = Date.now() - 5 * MIN;
+  const { b, cx, host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  await press(b, cx, "l", shiftL);
+  assert.equal(b.notice?.text, board.SAVED_WRITE);
+  assert.deepEqual(host.open("gh").map((c) => isBoardCall(c.args)), [true], "no move, only the read under way");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" });
+  assert.equal(host.open("gh").length, 0, "the write refused during the read asked for no read after it");
+  const root = b.render();
+  assert.deepEqual([st().saved, st().error, allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [true, "GitHub antwortete mit HTTP 502: Bad Gateway", true]);
+  assert.deepEqual([ageOf(root), texts(root).includes("GitHub antwortete mit HTTP 502: Bad Gateway")], ["Stand vor 5 min", true]);
+  await press(b, cx, "l", shiftL);
+  assert.deepEqual(host.open("gh").map((c) => isBoardCall(c.args)), [true], "the read again, still no move");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await press(b, cx, "l", shiftL);
+  assert.ok(host.open("gh").some((c) => c.args.some((a) => String(a).includes("updateProjectV2ItemFieldValue"))), "on read data the move is written");
+});
+
+test("the saved state: an entry is a view's only while its form and hidden columns are the same; one the store would take more than SAVED_MAX bytes for is none, counted as the store counts, and a board at its limit of 1000 items fits; gone views' entries are named", () => {
+  const view = testView("mine");
+  const hidden = board.hiddenColumns(view, null);
+  const text = board.savedText(view, hidden, { data: githubBoard(), warnings: ["w"] }, 5);
+  assert.deepEqual(Object.keys(board.readSaved(text, view, hidden)), ["data", "warnings", "at"]);
+  assert.deepEqual(board.readSaved(text, view, hidden).warnings, ["w"]);
+  assert.equal(board.readSaved(text, view, new Set(["Done"])), null, "other hidden columns");
+  assert.equal(board.readSaved(text, { ...view, filter: "" }, hidden), null, "another form of the view");
+  assert.equal(board.readSaved("{", view, hidden), null);
+  assert.equal(board.readSaved(JSON.stringify({ ...JSON.parse(text), at: "x" }), view, hidden), null);
+  for (const data of [null, {}, { shape: 3 }]) assert.equal(board.readSaved(JSON.stringify({ ...JSON.parse(text), data }), view, hidden), null, JSON.stringify(data));
+  const sizes = [
+    ["a", 3], ['"', 4], ["\n", 4], ["ä", 4], ["€", 5], ["😀", 6], ["\u007f", 3], ["\u0080", 4], ["\u07ff", 4], ["\u0800", 5],
+    ["\ud7ff", 5], ["\ue000", 5], ["\u{10000}", 6], ["\u{103ff}", 6], ["\ud800", 8],
+  ];
+  assert.deepEqual(sizes.map(([text]) => board.storeBytes(text)), sizes.map(([, bytes]) => bytes));
+  const pad = (s, n) => ({ data: { shape: "board", pad: s.repeat(n) }, warnings: [] });
+  assert.equal(board.savedText(view, hidden, pad("x", board.SAVED_MAX), 1), null);
+  assert.equal(board.savedText(view, hidden, pad("€", board.SAVED_MAX / 2), 1), null, "fewer characters than SAVED_MAX, more bytes");
+  assert.ok(board.savedText(view, hidden, pad("x", board.SAVED_MAX - 1000), 1), "just below");
+  const answer = json("github-board-cards.json");
+  const items = answer.data.repositoryOwner.projectV2.items;
+  const base = items.nodes;
+  items.nodes = Array.from({ length: 1000 }, (_, i) => ({ ...base[i % base.length], id: `PVTI_${i}` }));
+  assert.ok(board.savedText(view, hidden, { data: board.parseGithubBoard(answer, view, hidden), warnings: [] }, 1), "1000 cards");
+  assert.equal(board.savedKey("mine"), "board:data:mine");
+  assert.deepEqual(board.goneSaved(["board:data:mine", "board:data:gone", "data:gone", "source", "hidden:gone"], new Set(["mine"])), ["board:data:gone"]);
+});
+
+// What a shape's data holds, as saved: each key's own, and the types of what
+// is no object; an array as the set of what its items hold.
+function skeleton(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return [...new Set(v.map((x) => JSON.stringify(skeleton(x))))].sort().map((x) => JSON.parse(x));
+  if (typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map((k) => [k, skeleton(v[k])]));
+  return typeof v;
+}
+
+test("what each shape keeps in its saved data is the form SAVED_VERSION names: a change to it raises SAVED_VERSION and the fingerprint here", () => {
+  const print = (data) => createHash("sha256").update(JSON.stringify(skeleton(JSON.parse(JSON.stringify(data))))).digest("hex").slice(0, 12);
+  const shapes = {
+    board: githubBoard(), prs: board.parseGithubList(json("github-list.json"), testView("prs")), sprint: sprintData(), backlog: backlogData(),
+  };
+  assert.deepEqual({ version: board.SAVED_VERSION, ...Object.fromEntries(Object.entries(shapes).map(([k, d]) => [k, print(d)])) },
+    { version: 1, board: "180d63b68cc0", prs: "ec79f6598c09", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
+});
+
+test("UI: on start the entries of views views.json no longer has are dropped; a saved state of another form of the view is not drawn; the other views' saved states come after the first draw; one too large to save drops the one before and says so in herdr's log", async () => {
+  const at = Date.now() - MIN;
+  logged.length = 0;
+  const prs = board.parseGithubList(json("github-list.json"), testView("prs"));
+  const { b, cx, host, st } = await bootBoard({ raw: {
+    "board:data:gone": "{}", "board:data:prs": savedFor("prs", prs, at), "board:data:mine": savedFor("mine", savedBoard(), at, { hidden: new Set(["Done"]) }),
+  } });
+  assert.deepEqual([memory.has("board:data:gone"), memory.has("board:data:prs")], [false, true]);
+  assert.deepEqual([st().data, st().loading], [null, true], "not its data");
+  assert.equal(b.state("prs").data, null, "the other tabs' saved states wait for the first draw");
+  await cx.fire();
+  assert.equal(b.state("prs").data.shape, "prs", "and come after it");
+  const huge = boardPage(0, 6, null);
+  for (const n of huge.data.repositoryOwner.projectV2.items.nodes) n.content.title = "x".repeat(200000);
+  memory.set("board:data:mine", savedFor("mine", savedBoard(), at));
+  await host.answer("gh", ok(JSON.stringify(huge)));
+  assert.equal(st().data.shape, "board", "drawn");
+  await cx.fire();
+  assert.equal(memory.has("board:data:mine"), false, "not saved, and the older entry gone");
+  assert.ok(logged.includes(`board: board:data:mine not saved: more than ${board.SAVED_MAX} bytes`), logged.join("\n"));
+});
+
+test("UI: a views.json with problems drops no saved entry, not even those of the views it leaves out; read without them it drops the gone views' entries", async () => {
+  const at = Date.now() - MIN;
+  const broken = JSON.parse(testConfig());
+  broken.sources.github.views.find((v) => v.id === "prs").sections = "none";
+  const raw = { "board:data:gone": "{}", "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), at) };
+  const { b, cx, host } = await bootBoard({ config: JSON.stringify(broken), raw });
+  assert.ok(b.configErrors.length, "the problem is said");
+  assert.equal(b.viewById("prs"), null, "the view is left out");
+  assert.deepEqual([memory.has("board:data:gone"), memory.has("board:data:prs")], [true, true]);
+  host.config = testConfig();
+  await press(b, cx, "r");
+  assert.deepEqual([memory.has("board:data:gone"), memory.has("board:data:prs")], [false, true]);
+});
+
+test("UI: an entry the store refuses drops the one before, and herdr's log names its key and the store's reason", async () => {
+  const at = Date.now() - MIN;
+  logged.length = 0;
+  const { cx, host } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  const store = globalThis.localStorage;
+  const setItem = store.setItem;
+  store.setItem = (k, v) => {
+    if (k.startsWith(board.SAVED_PREFIX)) throw new Error("store value `board:data:mine` is 9 bytes, over the limit\nmore");
+    return setItem(k, v);
+  };
+  try {
+    await host.answer("gh", ok(fixture("github-board.json")));
+    await cx.fire();
+  } finally {
+    store.setItem = setItem;
+  }
+  assert.equal(memory.has("board:data:mine"), false);
+  assert.ok(logged.includes("board: board:data:mine not saved: store value `board:data:mine` is 9 bytes, over the limit"), logged.join("\n"));
+});
+
+test("UI: a saved entry the board cannot draw is dropped and said in herdr's log; the view reads as if it had none, on start, on a switch to its tab and among the other views' saved states", async () => {
+  const at = Date.now() - MIN;
+  logged.length = 0;
+  const other = board.parseGithubBoard(json("github-board.json"), testView("other"), board.hiddenColumns(testView("other"), null));
+  const { b, cx, host, st } = await bootBoard({ raw: {
+    "board:data:mine": savedFor("mine", { shape: "board", meta: {}, columns: [{ id: "c", name: "C", hidden: false }] }, at),
+    "board:data:prs": savedFor("prs", { shape: "prs" }, at), "board:data:other": savedFor("other", other, at),
+  } });
+  assert.deepEqual([st().data, st().saved, st().at, st().sel, memory.has("board:data:mine")], [null, false, 0, null, false]);
+  assert.ok(logged.some((l) => l.startsWith("board: board:data:mine dropped: ")), logged.join("\n"));
+  assert.deepEqual(host.open("gh").map((c) => isMineCall(c.args)), [true], "and is read");
+  assert.ok(byId(b.render(), "loading"));
+  await press(b, cx, "2");
+  assert.deepEqual([b.state("prs").data, memory.has("board:data:prs")], [null, false]);
+  assert.equal(host.open("gh").filter((c) => isListCall(c.args)).length, 1, "the switch reads it");
+  await cx.fire();
+  assert.equal(b.state("other").saved, true, "the next view's saved state still comes");
+});
+
+test("UI: a GitHub board without data draws each page as it comes, with its warnings, says which page it reads, and the „Nur die ersten“ note waits for the last", async () => {
+  const config = JSON.parse(testConfig());
+  config.sources.github.views[0].limit = 150;
+  const { b, host, st } = await bootBoard({ config: JSON.stringify(config) });
+  assert.equal(readingOf(b.render()), "lädt …", "the pages are not known before the first");
+  const first = boardPage(0, 3, "c1", { total: 9 });
+  first.errors = [{ message: "Ein Fehler der ersten Seite", path: ["elsewhere"] }];
+  await host.answer("gh", ok(JSON.stringify(first)), isBoardCall);
+  let root = b.render();
+  assert.deepEqual([st().loading, allCards(st().data).length], [true, 3], "the first page drawn");
+  assert.ok(texts(root).includes("Ein Fehler der ersten Seite"), "with its warnings");
+  assert.equal(readingOf(root), "lädt … Seite 2 von 2");
+  assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "no note before the last page");
+  assert.equal(texts(byId(root, "tab-github:mine")).includes("…"), false, "the tab counts what is drawn");
+  const page = (total) => boardPage(0, 3, "c1", { total });
+  assert.deepEqual([board.boardPages(page(250), testView("mine"), 10), board.boardPages(page(250), { limit: 150 }, 2), board.boardPages(page(0), testView("mine"), 10)], [3, 2, 1],
+    "the pages by the count GitHub names, no more than the calls; a page more than it names counts as one more");
+  await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, "c2", { first: false, total: 9 }))), isBoardCall);
+  root = b.render();
+  assert.deepEqual([st().loading, allCards(st().data).length, byId(root, "reading")], [false, 6, null]);
+  assert.ok(texts(root).some((x) => x.startsWith("Nur die ersten 6 von 9")), "the note at the end");
+});
+
+test("UI: a refresh over a board read since the start, by r or by the timer, draws its pages only once all came: the chosen card of a later page, its open details and the counts stay; the top right names the page", async () => {
+  for (const how of ["r", "timer"]) {
+    const config = JSON.parse(testConfig());
+    config.sources.github.views[0].limit = 150;
+    const { b, cx, host, st } = await bootBoard({ config: JSON.stringify(config) });
+    await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1", { total: 6 }))), isBoardCall);
+    await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, null, { first: false, total: 6 }))), isBoardCall);
+    const late = allCards(st().data)[5].key;
+    b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), late), key: late }, cx);
+    st().detail = true;
+    const count = () => texts(byId(b.render(), "tab-github:mine")).at(-1);
+    const before = count();
+    if (how === "r") await press(b, cx, "r");
+    else {
+      advance(3 * MIN);
+      await cx.tick();
+    }
+    assert.deepEqual(host.open("gh").filter((c) => isMineCall(c.args)).length, 1, `${how}: read`);
+    await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1", { total: 6 }))), isMineCall);
+    assert.deepEqual([allCards(st().data).length, st().sel.key, st().picked, st().detail, count()], [6, late, late, true, before], `${how}: the board as it was`);
+    assert.equal(readingOf(b.render()), "lädt … Seite 2 von 2", how);
+    await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, null, { first: false, total: 6 }))), isMineCall);
+    assert.deepEqual([st().loading, allCards(st().data).length, st().sel.key, st().detail], [false, 6, late, true], `${how}: the new read, the card still chosen`);
+  }
+});
+
+test("UI: a board whose later page fails shows what it showed before the read, not its first page", async () => {
+  const at = Date.now() - MIN;
+  const { host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  assert.equal(allCards(st().data).length, 3);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isBoardCall);
+  assert.deepEqual([allCards(st().data).some((c) => c.title === "Gespeicherter Titel"), st().saved, st().error], [true, true, "GitHub antwortete mit HTTP 502: Bad Gateway"]);
+});
+
+test("UI: what a load draws on its way counts only while it runs: a late part or page after its end changes nothing, the late part is not even built", async () => {
+  const { b, cx, host, st } = await bootBoard();
+  await host.answer("gh", ok(fixture("github-board.json")));
+  const loader = b.sources.github.views.board;
+  let live = null;
+  loader.load = async (view, options) => {
+    live = options.live;
+    return { data: board.parseGithubBoard(json("github-board.json"), view, options.hiddenFor(view)), warnings: [] };
+  };
+  await press(b, cx, "3");
+  const other = b.state("other");
+  assert.deepEqual([other.loading, other.data.shape], [false, "board"]);
+  const drawn = other.data;
+  let built = 0;
+  live.partial(() => (built++, { data: savedBoard(), warnings: ["spät"] }));
+  live.page(2, 3);
+  assert.deepEqual([other.data, other.warnings.includes("spät"), other.progress, built], [drawn, false, null, 0]);
+  assert.ok(st().data);
+});
+
+test("UI: a load builds what it would draw on its way only where that is drawn: over nothing, not over data this session read", async () => {
+  const { b, cx, host } = await bootBoard();
+  await host.answer("gh", ok(fixture("github-board.json")));
+  const loader = b.sources.github.views.board;
+  let [loads, built] = [0, 0];
+  loader.load = async (view, options) => {
+    loads++;
+    const result = () => ({ data: board.parseGithubBoard(json("github-board.json"), view, options.hiddenFor(view)), warnings: [] });
+    options.live.partial(() => (built++, result()));
+    return result();
+  };
+  await press(b, cx, "3");
+  assert.deepEqual([loads, built, b.state("other").loading], [1, 1, false], "over nothing");
+  await press(b, cx, "r");
+  assert.deepEqual([loads, built, b.state("other").loading], [2, 1, false], "over this session's read");
+});
+
+test("UI: a saved entry that fails to draw leaves the view's state as it was before: one that fails once the selection moved, a Sprint's that dropped the chosen sprint", async () => {
+  const sprintId = "azure:team:Example Project/Example Team:sprint";
+  const other = board.parseGithubBoard(json("github-board.json"), testView("other"), board.hiddenColumns(testView("other"), null));
+  for (const [id, entry] of [["other", other], [sprintId, { shape: "sprint", meta: { gone: { id: "s", name: "S" } } }]]) {
+    logged.length = 0;
+    const { b, cx } = await bootBoard({ raw: { [board.savedKey(id)]: savedFor(id, entry, Date.now() - MIN) } });
+    const st = b.state(id);
+    const before = { warnings: ["vorher"], at: 7, sel: { col: 0, key: "k" }, picked: "k", detail: true, sprint: { id: "s", name: "S" } };
+    Object.assign(st, before);
+    if (id === "other") b.scrollToSelection = () => { throw new Error("kein Platz"); };
+    await cx.fire();
+    assert.ok(logged.some((l) => l.startsWith(`board: ${board.savedKey(id)} dropped: `)), logged.join("\n"));
+    assert.deepEqual([st.data, st.saved, st.warnings, st.at, st.sel, st.picked, st.detail, st.sprint],
+      [null, false, before.warnings, before.at, before.sel, before.picked, before.detail, before.sprint], id);
+  }
+});
+
+test("a pull request whose more threads are still to come is pending: no „mehr als“ unread, never „bereit zum Mergen“ nor „wartet auf Autor“ before them", () => {
+  const data = json("github-list-attention.json");
+  const view = shippedListView();
+  const row = (list, n) => list.sections.flatMap((x) => x.rows).find((r) => r.number === n);
+  const plain = attentionList(data);
+  assert.ok(row(plain, 201).attention.includes("bereit zum Mergen"));
+  const waits = plain.sections.flatMap((x) => x.rows).find((r) => r.waiting);
+  attentionPr(data, 201).reviewThreads.totalCount = 12;
+  attentionPr(data, waits.number).reviewThreads.totalCount = 12;
+  const pending = board.parseGithubList(data, view, [], new Set(["PR_sample201", waits.key]));
+  assert.deepEqual([row(pending, 201).attention, row(pending, 201).unread, row(pending, 201).threadsPending], [[], [], true]);
+  assert.deepEqual([row(pending, waits.number).waiting, row(pending, waits.number).threadsPending], [false, true]);
+  assert.deepEqual(row(board.parseGithubList(data, view), 201).unread, [UNREAD.moreThreads(1)], "without the follow-up to come: unread");
+  assert.equal(row(pending, 101).threadsPending, undefined, "a row that waits for none carries no mark");
+});
+
+test("UI: the PR list draws before its follow-up for more threads, with its warnings, the rows that wait for it with „…“, not „?“, and their details say so; the follow-up fills them in, and one that fails marks them „?“", async () => {
+  for (const [what, answer, mark, idle] of [
+    ["the follow-up", (nodes) => ok(JSON.stringify({ data: { nodes } })), "● neue Commits seit deinem Review · Antwort erwartet", "wartet auf Autor"],
+    ["a failed follow-up", () => ({ code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }), "● neue Commits seit deinem Review · ?", "? nicht ganz gelesen"],
+  ]) {
+    const { b, cx, host } = await bootBoard({ config: shippedConfig(), stored: { source: "github", "tab:github": "github:prs" } });
+    const data = json("github-list-attention.json");
+    const node = cutThreads(data, 102, 12, [...resolvedThreads(11), waitingThread]);
+    const resolved = cutThreads(data, 301, 12, resolvedThreads(12));
+    attentionPr(data, 302).reviewThreads.totalCount = attentionPr(data, 302).reviewThreads.nodes.length;
+    data.errors = [{ message: "Ein Fehler abseits der Zeilen", path: ["elsewhere"] }];
+    await host.answer("gh", ok(JSON.stringify(data)), isListCall);
+    const cell = (id, start) => texts(byId(b.render(), `row-${id}`)).find((x) => x.startsWith(start));
+    assert.equal(cell(node.id, "●"), "● neue Commits seit deinem Review · …", `${what}: drawn before it`);
+    assert.equal(cell(resolved.id, "…"), board.THREADS_PENDING, `${what}: a row with nothing to do waits too`);
+    assert.equal(b.state("prs").loading, true);
+    assert.ok(texts(byId(b.render(), "row-PR_sample101")).length, "the other rows too");
+    assert.ok(texts(b.render()).includes("Ein Fehler abseits der Zeilen"), `${what}: the list's warnings before it`);
+    await click(b, cx, `row-${resolved.id}`);
+    await click(b, cx, `row-${resolved.id}`);
+    assert.deepEqual(texts(byId(detailPanel(b), "pending-note")), ["Review-Threads werden noch gelesen …"]);
+    await host.answer("gh", answer([node, resolved]), isThreadsCall);
+    assert.equal(cell(node.id, "●"), mark, what);
+    assert.equal(cell(resolved.id, idle.slice(0, 1)), idle, what);
+    assert.equal(byId(detailPanel(b), "pending-note"), null, `${what}: the details no longer wait`);
+    assert.ok(texts(b.render()).includes("Ein Fehler abseits der Zeilen"), `${what}: and after it`);
+  }
+});
+
+test("the prefetch's order: not the shown view, none without a loader, loading, unavailable or tried within refreshMinutes; the shown source's first, then the oldest data, never read first", () => {
+  const views = [
+    { id: "a", source: "github" }, { id: "b", source: "github" }, { id: "c", source: "azure" }, { id: "d", source: "github" },
+    { id: "e", source: "github" }, { id: "f", source: "github" }, { id: "g", source: "azure" }, { id: "h", source: "github" },
+  ];
+  const states = {
+    a: { at: 0, tried: 0 }, b: { at: 50, tried: 50 }, c: { at: 0, tried: 0 }, d: { at: 10, tried: 10 },
+    e: { at: 0, tried: 0, loading: true }, f: { at: 0, tried: 0, unavailable: true }, g: { at: 5, tried: 95 }, h: { at: 0, tried: 0 },
+  };
+  const order = board.prefetchOrder(views, { shown: { id: "a" }, source: "github", now: 100, every: 30, stateOf: (id) => states[id], loads: (v) => v.id !== "h" });
+  assert.deepEqual(order.map((v) => v.id), ["d", "b", "c"]);
+  assert.deepEqual([board.refreshDue({ tried: 70 }, 100, 30), board.refreshDue({ tried: 71 }, 100, 30)], [true, false]);
+});
+
+test("UI: once the shown view is read, the prefetch reads each other view once, one at a time, the shown source's first; az that is not installed is not asked again; after that only the shown view refreshes, until r reads each other view once more, Azure's too", async () => {
+  const { b, cx, host } = await bootBoard();
+  await cx.fire();
+  assert.equal(host.open("gh").length, 1, "nothing before the shown view is read");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true], "the PR list, alone");
+  await host.answer("gh", ok(fixture("github-list.json")), isListCall);
+  assert.equal(b.state("prs").data.shape, "prs");
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isOtherCall(c.args)), [true], "then the other board");
+  await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
+  const asked = () => host.asked.filter((a) => a.tool === "az").length;
+  await cx.fire();
+  await cx.fire();
+  const sprint = b.state("azure:team:Example Project/Example Team:sprint");
+  const backlog = b.state("azure:team:Example Project/Example Team:backlog");
+  assert.deepEqual([sprint.error, sprint.unavailable, backlog.unavailable, asked()], ["az ist nicht installiert", true, true, 2], "then Azure's, which say why");
+  await cx.fire();
+  assert.deepEqual([host.open("gh").length, asked()], [0, 2], "nothing left to read");
+  for (let n = 0; n < 2; n++) {
+    advance(3 * MIN);
+    await cx.tick();
+    assert.deepEqual(host.open("gh").map((c) => isMineCall(c.args)), [true], "the shown view, every refreshMinutes");
+    await host.answer("gh", ok(fixture("github-board.json")));
+    await cx.tick();
+    await cx.fire();
+    assert.deepEqual([host.open("gh").length, asked()], [0, 2], "the others not again");
+  }
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), isMineCall);
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true], "r: the others once more");
+  await host.answer("gh", ok(fixture("github-list.json")), isListCall);
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isOtherCall(c.args)), [true]);
+  await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
+  await cx.fire();
+  await cx.fire();
+  await cx.fire();
+  assert.deepEqual([host.open("gh").length, asked(), sprint.unavailable, backlog.unavailable], [0, 4, true, true], "Azure's asked again, as az may be there now");
+  advance(3 * MIN);
+  await press(b, cx, "2");
+  assert.deepEqual([ageOf(b.render()), host.open("gh").map((c) => isListCall(c.args))], ["Stand vor 3 min", [true]], "a tab shown later: its last state and its age, read behind them");
+});
+
+test("UI: the prefetch yields to a read the person starts: r reads beside the one under way and the next waits for both; a switch to the view it reads shows that read, no second", async () => {
+  const { b, cx, host } = await bootBoard();
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true]);
+  await press(b, cx, "r");
+  assert.equal(host.open("gh").length, 2, "r reads at once");
+  await host.answer("gh", ok(fixture("github-list.json")), isListCall);
+  await cx.fire();
+  assert.equal(host.open("gh").length, 1, "the next prefetch waits for r's read");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isOtherCall(c.args)), [true], "then it goes on");
+  await press(b, cx, "3");
+  assert.equal(host.open("gh").length, 1, "the switch reads nothing more");
+  assert.ok(byId(b.render(), "loading"), "and shows that read under way");
+  await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
+  assert.equal(b.state("other").data.shape, "board");
+  await cx.fire();
+  assert.equal(host.open("gh").length, 0);
+});
+
+test("UI: on a start over a tab that reads nothing yet the prefetch begins at once", async () => {
+  const { cx, host } = await bootBoard({ stored: { source: "azure", "tab:azure": "azure:prs:Example Project" } });
+  const asked = () => host.asked.filter((a) => a.tool === "az").length;
+  assert.deepEqual([host.open("gh").length, asked()], [0, 0], "nothing for the shown tab");
+  await cx.fire();
+  assert.equal(asked(), 1, "the shown source's Sprint first");
+});
+
+test("UI: the prefetch waits while a write runs, a dialog is busy or the board does not show, and goes on after", async () => {
+  const { b, cx, host } = await bootBoard();
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await press(b, cx, "l", shiftL);
+  const moving = host.open("gh");
+  assert.equal(moving.length, 1, "the move");
+  await cx.fire();
+  assert.equal(host.open("gh").length, 1, "no prefetch beside it");
+  await host.answer("gh", confirmed(moving[0].args.find((a) => a.startsWith("item="))?.slice(5)));
+  b.modal = { kind: "start", busy: "Sitzung wird geöffnet …" };
+  await cx.tick();
+  await cx.fire();
+  assert.equal(host.open("gh").length, 0, "none while a dialog is busy");
+  b.modal = null;
+  await cx.tick();
+  const panes = host.panes;
+  host.panes = () => [];
+  await cx.fire();
+  await cx.tick();
+  await cx.fire();
+  assert.equal(host.open("gh").length, 0, "none while the board does not show");
+  host.panes = panes;
+  await cx.tick();
+  await cx.fire();
+  assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true]);
+});
+
+test("UI: each tab shows the age of what it draws: two saved tabs their own, a prefetched one its read's, and a new board the saved ones'", async () => {
+  const { b, cx, host } = await bootBoard({ raw: {
+    "board:data:mine": savedFor("mine", savedBoard(), Date.now() - 10 * MIN), "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), Date.now() - 20 * MIN),
+  } });
+  assert.equal(ageOf(b.render()), "Stand vor 10 min");
+  await cx.fire();
+  assert.deepEqual(texts(byId(b.render(), "tab-github:prs")).at(-1), "4", "a saved tab's count");
+  await press(b, cx, "2");
+  assert.deepEqual([ageOf(b.render()), readingOf(b.render())], ["Stand vor 20 min", "lädt …"], "at once, while its read runs");
+  await press(b, cx, "1");
+  await host.answer("gh", ok(fixture("github-board.json")), isMineCall);
+  await host.answer("gh", ok(fixture("github-list.json")), isListCall);
+  await cx.fire();
+  await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
+  advance(2 * MIN);
+  await press(b, cx, "3");
+  assert.deepEqual([ageOf(b.render()), host.open("gh").length], ["Stand vor 2 min", 0], "the prefetched tab: its read's age, no read again");
+  await press(b, cx, "1");
+  assert.equal(ageOf(b.render()), "Stand vor 2 min");
+  await cx.fire();
+  const again = new board.default();
+  again.init({}, fakeCx());
+  await settle();
+  advance(MIN);
+  assert.deepEqual([again.state("mine").saved, ageOf(again.render())], [true, "Stand vor 3 min"], "after a restart: the saved read's age");
+});
+
+test("UI: the Azure Sprint asks for the taskboard once the sprint is known and the query once its areas are too, in any order of answers; it draws before its parents' titles", async () => {
+  const datas = [];
+  for (const order of [["iteration", "areas", "columns", "types"], ["types", "columns", "areas", "iteration"]]) {
+    const { b, host } = await bootBoard({ stored: { source: "azure" }, which: found });
+    assert.deepEqual(openCounts(host, [...SETTINGS, "me"]), [1, 1, 1, 1, 1]);
+    const answers = { iteration: iterationAnswer(), areas: fixture("azure-sprint-areas.json"), columns: fixture("azure-sprint-columns.json"), types: fixture("azure-sprint-types.json") };
+    const seen = [];
+    for (const kind of order) {
+      await host.answer("az", ok(answers[kind]), AZ[kind]);
+      seen.push([kind, openAz(host, "places").length, openAz(host, "query").length]);
+    }
+    const iterationAt = order.indexOf("iteration");
+    const areasAt = order.indexOf("areas");
+    assert.deepEqual(seen.map(([, places]) => places), order.map((_, i) => Number(i >= iterationAt)), `${order}: the taskboard once the sprint is known`);
+    assert.deepEqual(seen.map(([, , query]) => query), order.map((_, i) => Number(i >= Math.max(iterationAt, areasAt))), `${order}: the query once its areas are known too`);
+    const st = b.state(b.view().id);
+    await host.answer("az", ok(fixture("azure-sprint-taskboard.json")), AZ.places);
+    await host.answer("az", ok(fixture("azure-sprint-items.json")), AZ.query);
+    await host.answer("az", ok(fixture("azure-sprint-account.json")), AZ.me);
+    assert.equal(openAz(host, "parents").length, 1, "its parents' titles under way");
+    const titles = () => board.sprintItems(st.data).filter((i) => Number.isInteger(i.parent)).map((i) => i.parentTitle);
+    assert.deepEqual([st.loading, st.data.shape, titles().includes(null)], [true, "sprint", true], "drawn before them");
+    await host.answer("az", ok(fixture("azure-sprint-parents.json")), AZ.parents);
+    assert.deepEqual([st.loading, titles().includes(null)], [false, false]);
+    datas.push(st.data);
+  }
+  assert.deepEqual(datas[0], datas[1], "the same sprint either way");
+});
+
+test("UI: the Azure Backlog asks for the level's ids once its levels came and for their fields once its configuration came too; the rows draw before the types' colors", async () => {
+  const { b, host } = await bootBoard({ stored: BACKLOG_STORED, which: found });
+  assert.deepEqual(backlogCounts(host, [...BACKLOG_SETTINGS, "types", "me", "ids"]), [1, 1, 1, 1, 1, 1, 0]);
+  await host.answer("az", ok(fixture("azure-backlog-levels.json")), AZB.levels);
+  assert.deepEqual(backlogCounts(host, ["config", "settings", "areas", "ids"]), [1, 1, 1, 1], "the ids beside the rest of the settings");
+  await host.answer("az", ok(fixture("azure-backlog-ids.json")), AZB.ids);
+  assert.equal(openAzb(host, "query").length, 0, "the fields wait for the order field");
+  await host.answer("az", ok(fixture("azure-backlog-config.json")), AZB.config);
+  assert.equal(openAzb(host, "query").length, 1);
+  await host.answer("az", ok(fixture("azure-backlog-settings.json")), AZB.settings);
+  await host.answer("az", ok(fixture("azure-sprint-areas.json")), AZB.areas);
+  await host.answer("az", ok(fixture("azure-backlog-items.json")), AZB.query);
+  await host.answer("az", ok(fixture("azure-sprint-account.json")), AZB.me);
+  const st = b.state(b.view().id);
+  assert.deepEqual([st.loading, st.data.shape, st.data.rows.length > 0, st.data.meta.typeColors], [true, "backlog", true, {}], "drawn without the colors");
+  await host.answer("az", ok(fixture("azure-sprint-types.json")), AZB.types);
+  assert.deepEqual([st.loading, Object.keys(st.data.meta.typeColors).length > 0], [false, true]);
+  assert.deepEqual(st.data.meta.typeColors, board.parseAzureTypes(fixture("azure-sprint-types.json")).colors);
+  assert.deepEqual({ ...st.data, meta: { ...st.data.meta, typeColors: {} } }, backlogData(), "as one read in a row makes it");
+});
+
+test("each gh, az and sh run logs one line: what it ran for, its view and how long it took, how it ended; no argument, so no query text and no token; finding gh and az too", async () => {
+  logged.length = 0;
+  const { host } = await bootBoard();
+  assert.match(logged[0], /^board: sh which-gh \d+ ms ok view=-$/, "finding gh first");
+  logged.length = 0;
+  advance(1234);
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isBoardCall);
+  const ms = (line) => Number(line.match(/ (\d+) ms /)[1]);
+  assert.match(logged[0], /^board: gh board-page-1 \d+ ms ok view=mine$/);
+  assert.ok(ms(logged[0]) >= 1234 && ms(logged[0]) < 1234 + 5000, logged[0]);
+  assert.match(logged[1], /^board: gh board-page-2 \d+ ms exit 1 view=mine$/);
+  const { host: az } = await bootBoard({ stored: { source: "azure" }, which: found });
+  await az.answer("az", new Error("boom"), AZ.iteration);
+  await az.answer("az", ok(fixture("azure-sprint-areas.json")), AZ.areas);
+  assert.ok(logged.includes(`board: az iteration ${ms(logged.find((l) => l.includes(" iteration ")))} ms failed view=azure:team:Example Project/Example Team:sprint`));
+  assert.ok(logged.some((l) => /^board: az areas \d+ ms ok view=azure:team:Example Project\/Example Team:sprint$/.test(l)));
+  assert.ok(logged.some((l) => /^board: sh which-az \d+ ms ok view=-$/.test(l)), logged.join("\n"));
+  for (const line of logged) assert.match(line, /^board: (gh|az|sh) [a-z0-9-]+ \d+ ms (ok|exit \d+|failed) view=[^{}\n]+$/, line);
+  assert.equal(board.callLine("gh", undefined, 3, "ok"), "board: gh call 3 ms ok view=-");
+});
+
+test("UI: „Lädt …“ in an empty view has a spinner before it; the ↻ turns while a read of the shown view runs, also over data, not for a prefetch of another view", async () => {
+  const { b, cx, host } = await bootBoard();
+  let root = b.render();
+  const loading = byId(root, "loading");
+  assert.deepEqual(loading.kids[0].with.frames, [["◐", "◓", "◑", "◒"], 150]);
+  assert.equal(loading.kids[1], "Lädt …");
+  assert.deepEqual([refreshSpins(root), byId(root, "refresh").kids[0].with.path[0]], [true, "mods/board/refresh.svg"]);
+  assert.equal(byId(root, "age"), null, "a view never read names no age");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  root = b.render();
+  assert.deepEqual([byId(root, "loading"), refreshSpins(root)], [null, false]);
+  await cx.fire();
+  assert.equal(host.open("gh").length, 1, "a prefetch runs");
+  assert.equal(refreshSpins(b.render()), false, "it is not the shown view's");
+  await host.answer("gh", ok(fixture("github-list.json")), isListCall);
+  advance(3 * MIN);
+  await cx.tick();
+  root = b.render();
+  assert.deepEqual([refreshSpins(root), Boolean(byId(root, "columns"))], [true, true], "a refresh over the data drawn");
+  assert.match(readFileSync(join(modDir, "refresh.svg"), "utf8"), /^<svg [^>]*stroke="currentColor"/, "tinted with the text color");
+});
+
+test("UI: the create dialog on a Backlog that shows its saved state stays open with its title and says it is refused; while the read runs nothing more is read, after a failed one it starts again", async () => {
+  const id = "azure:team:Example Project/Example Team:backlog";
+  const { b, cx, host } = await bootBoard({ stored: BACKLOG_STORED, which: found, raw: { [`board:data:${id}`]: savedFor(id, backlogData(), Date.now() - MIN) } });
+  assert.equal(b.state(id).saved, true);
+  await press(b, cx, "n");
+  b.modal.input.set_value("Sample new story");
+  await click(b, cx, "create-go");
+  assert.deepEqual([b.modal?.kind, b.modal?.error, b.modal?.input.value()], ["create", board.SAVED_WRITE, "Sample new story"]);
+  assert.deepEqual([openAzb(host, "create").length, openAzb(host, "levels").length], [0, 1], "no create, the one read under way");
+  await host.answer("az", { code: 1, stdout: "", stderr: "ERROR: boom" }, AZB.levels);
+  assert.deepEqual([b.state(id).loading, b.state(id).saved, openAzb(host, "levels").length], [false, true, 0], "the read failed");
+  await click(b, cx, "create-go");
+  assert.deepEqual([b.modal?.error, openAzb(host, "create").length, openAzb(host, "levels").length], [board.SAVED_WRITE, 0, 1], "the read again, still no create");
 });

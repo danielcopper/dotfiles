@@ -11,7 +11,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { layout, notify, panes, settings, spaces } from "herdr";
-import { MOD, cardType } from "../shared.js";
+import { MOD, cardType, firstLine } from "../shared.js";
 import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS } from "../actions/start.js";
 import { layers } from "./layer.js";
@@ -20,23 +20,50 @@ import { stateColor } from "../kinds/states.js";
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
-// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>") and a
-// Sprint's folded stories ("folded:<view>", readStoredFolds). A
-// full or missing localStorage keeps them for this session only.
+// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>"), a
+// Sprint's folded stories ("folded:<view>", readStoredFolds) and each
+// view's last good data ("board:data:<view>", loading.js). A full or
+// missing localStorage keeps them for this session only.
 export const store = {
   get(key) {
+    const v = store.text(key);
     try {
-      const v = localStorage.getItem(key);
       return v === null ? null : JSON.parse(v);
     } catch {
       return null;
     }
   },
   set(key, value) {
+    store.setText(key, JSON.stringify(value));
+  },
+  text(key) {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      return localStorage.getItem(key);
     } catch {
-      // Kept in memory only; see above.
+      return null;
+    }
+  },
+  // Null, or why the store refused the text.
+  setText(key, text) {
+    try {
+      localStorage.setItem(key, text);
+      return null;
+    } catch (e) {
+      return firstLine(e?.message ?? e) || "refused";
+    }
+  },
+  remove(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Gone with the session; see above.
+    }
+  },
+  keys() {
+    try {
+      return Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k) => typeof k === "string");
+    } catch {
+      return [];
     }
   },
 };

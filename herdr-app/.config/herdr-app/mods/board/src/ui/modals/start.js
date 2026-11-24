@@ -11,7 +11,7 @@ import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { knownAgents, machines, notify, run, spaces } from "herdr";
 import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine, report } from "../../shared.js";
 import { startSettings } from "../../config.js";
-import { call } from "../../tools.js";
+import { call, what } from "../../tools.js";
 import { checkoutArgs, renderTemplate, sessionName, spaceForTab, startCommand, templateVars } from "../../actions/start.js";
 import { backdrop, button, cycleField, fieldFrame, fieldLabel, machineName, onMachine, wireTextField } from "../helpers.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
@@ -71,7 +71,7 @@ export const startModal = {
     m.error = null;
     cx.spawn(async (cx) => {
       try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT);
+        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT, what(m.view, "checkout"));
         if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
         const folder = lastLine(r.stdout);
         if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
