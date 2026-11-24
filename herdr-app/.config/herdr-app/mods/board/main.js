@@ -731,6 +731,8 @@ export const isMine = (item, me) =>
 // with `mine` on, it is one's own.
 export const shows = (item, filter, mine, viewer) => matches(item, filter) && (!mine || isMine(item, viewer));
 
+export const showsAll = (filter, mine) => !mine && !String(filter ?? "").trim();
+
 // Keyboard movement: sel = { col, key } (key null on an empty column) → the
 // next sel. "up"/"down" move within the column, "left"/"right" to the next
 // column, keeping the row where they can. `columns` are those that show
@@ -935,7 +937,8 @@ export function withHidden(board, hidden) {
 // The columns as the board shows them: hidden ones left out, the others with
 // the cards that show (`mine`: only one's own).
 export function shownColumns(board, filter, mine = false) {
-  return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
+  const all = showsAll(filter, mine);
+  return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: all ? c.cards : c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }
 
 // ==== src/kinds/states.js ====
@@ -7195,7 +7198,10 @@ const TITLE_CHAR_PX = 6.5;
 // The list's width until herdr measured it.
 const LIST_W_GUESS = 300;
 
-const cardLabels = (card) => card.labels.filter((l) => l !== epicLabel(card));
+function cardLabels(card) {
+  const epic = epicLabel(card);
+  return card.labels.filter((l) => l !== epic);
+}
 
 // A card never measured: its lines as drawCard draws them, its title's
 // wrapped by its length in the list's `width`; a line that holds only a

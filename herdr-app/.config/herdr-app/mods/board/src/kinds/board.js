@@ -2,7 +2,7 @@
 // where a card may go, and the columns as shown.
 
 import { isObject, textList } from "../shared.js";
-import { shows } from "../select.js";
+import { shows, showsAll } from "../select.js";
 
 // The stored toggles of a view, { hide: [names], show: [names] }, or null when
 // what was stored is not that.
@@ -135,5 +135,6 @@ export function withHidden(board, hidden) {
 // The columns as the board shows them: hidden ones left out, the others with
 // the cards that show (`mine`: only one's own).
 export function shownColumns(board, filter, mine = false) {
-  return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
+  const all = showsAll(filter, mine);
+  return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: all ? c.cards : c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
 }

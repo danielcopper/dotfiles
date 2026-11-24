@@ -94,6 +94,8 @@ export const isMine = (item, me) =>
 // with `mine` on, it is one's own.
 export const shows = (item, filter, mine, viewer) => matches(item, filter) && (!mine || isMine(item, viewer));
 
+export const showsAll = (filter, mine) => !mine && !String(filter ?? "").trim();
+
 // Keyboard movement: sel = { col, key } (key null on an empty column) → the
 // next sel. "up"/"down" move within the column, "left"/"right" to the next
 // column, keeping the row where they can. `columns` are those that show

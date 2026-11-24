@@ -258,7 +258,10 @@ const TITLE_CHAR_PX = 6.5;
 // The list's width until herdr measured it.
 const LIST_W_GUESS = 300;
 
-const cardLabels = (card) => card.labels.filter((l) => l !== epicLabel(card));
+function cardLabels(card) {
+  const epic = epicLabel(card);
+  return card.labels.filter((l) => l !== epic);
+}
 
 // A card never measured: its lines as drawCard draws them, its title's
 // wrapped by its length in the list's `width`; a line that holds only a
