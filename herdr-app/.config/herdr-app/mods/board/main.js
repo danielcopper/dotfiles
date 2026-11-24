@@ -8671,24 +8671,21 @@ export default class Board extends View {
 
   // ---- data ----
 
-  // A view's state: data and error, loading (again: one more refresh
-  // after this one), at (last success) and tried (last start), warnings,
-  // moves (laid over refreshes, see pendingMoves), pending (keys of items
-  // being written), unclear (open outcomes: key, label, at and
-  // writeAtOnce's w.open; see settleUnclear), stored/hidden (the person's
-  // toggles and the hidden set), sel ({ col, key }, null before the first
-  // data), picked (the key of the item the person chose, see clickItem),
-  // runs (how many refreshes have started), want (an item to choose once a
-  // refresh has it: chooseWanted) and detail; related (the related items
-  // readRelated read, by item key); folds (a Sprint's folded stories, as
-  // the store keeps them: readStoredFolds) and chosenFolds (those in the
-  // sprints the sprint picker chose, by their id: foldsOf); sprint (the
-  // sprint a Sprint view shows in place of the current one, { id, name } as
-  // the sprint picker chose it, null for the current one; kept while the
-  // board runs, never stored); saved (no read of this session has ended on
-  // the data drawn: the saved state, or what a read drew over it so far),
-  // restored (the saved state was looked for), progress ({ page, pages } of
-  // a read) and unavailable (the last read found its source unavailable).
+  // A view's state: again (one more refresh after this one), at (last
+  // success) and tried (last start), moves (laid over refreshes, see
+  // pendingMoves), pending (keys of items being written), unclear (open
+  // outcomes: key, label, at and writeAtOnce's w.open; see settleUnclear),
+  // stored/hidden (the person's toggles and the hidden set), sel
+  // ({ col, key }, null before the first data), picked (the key of the item
+  // the person chose, see clickItem), want (an item to choose once a refresh
+  // has it: chooseWanted), related (by item key: readRelated), folds (as the
+  // store keeps them: readStoredFolds) and chosenFolds (in the sprints the
+  // sprint picker chose, by their id: foldsOf), sprint (the sprint a Sprint
+  // view shows in place of the current one, { id, name } as the sprint picker
+  // chose it, null for the current one; never stored), saved (the data drawn
+  // is the saved state, or what a read drew over it so far), restored (the
+  // saved state was looked for), progress ({ page, pages }) and unavailable
+  // (the last read since views.json was read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
