@@ -41,11 +41,12 @@ function boardFilter(view, hidden) {
   return filterWith(view, names.length ? `-${fieldKey(view.project.field)}:${names.map(quoted).join(",")}` : "");
 }
 
-// The items a board's query reads: the page after `read` items (from the
-// cursor $after where there are any), PAGE at most and no more than the
+// The items a board's query reads: the page after `read` items, from the
+// cursor $after where `paged` (a page after the first; `read` may be 0
+// there, after an empty first page), PAGE at most and no more than the
 // view's limit leaves, with whether more follow and where they start.
-function itemsSelection(view, read) {
-  const after = read ? ", after: $after" : "";
+function itemsSelection(view, read, paged) {
+  const after = paged ? ", after: $after" : "";
   return `items(first: ${Math.min(PAGE, view.limit - read)}${after}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes { ${ITEM_FIELDS} } }`;
 }
 
@@ -80,7 +81,7 @@ export function githubBoardArgs(view, hidden) {
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
   const doc = boardQuery(vars, "  viewer { login }\n", `id title url
         field(name: $field) { ... on ProjectV2SingleSelectField { id name options { id name color } } }
-        ${itemsSelection(view, 0)}${counts}`);
+        ${itemsSelection(view, 0, false)}${counts}`);
   return [...boardArgs(view, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(view, `${key}:${quoted(n)}`)}`])];
 }
 
@@ -88,7 +89,7 @@ export function githubBoardArgs(view, hidden) {
 // `after`, `read` items read before it: the same items as the first page's
 // query, nothing else.
 export function githubBoardPageArgs(view, hidden, after, read) {
-  return [...boardArgs(view, hidden, boardQuery(", $after: String!", "", itemsSelection(view, read))), "-f", `after=${after}`];
+  return [...boardArgs(view, hidden, boardQuery(", $after: String!", "", itemsSelection(view, read, true))), "-f", `after=${after}`];
 }
 
 // Where a board's items stand in its answers.
@@ -106,9 +107,10 @@ function pageError(errors) {
 // page's answer `page` (githubBoardPageArgs, and its GraphQL errors)
 // added, each item once (one that moved between two reads may come
 // twice), and that page's pageInfo, which says whether more follow. A page
-// without its items is explained by GitHub's error (pageError); one that
-// says more follow but adds no item or names the same cursor again would
-// have the board ask for the same page over and over, and fails.
+// without its items is explained by GitHub's error (pageError). One that
+// says more follow but adds no item or names the same cursor again means
+// GitHub's paging is stuck: the calls left would read nothing new, so it
+// fails.
 export function addBoardPage(json, page, errors = []) {
   const project = json.data.repositoryOwner.projectV2;
   const items = project.items;
@@ -120,7 +122,7 @@ export function addBoardPage(json, page, errors = []) {
   const seen = new Set(items.nodes.map((n) => n?.id));
   const added = next.nodes.filter((n) => !seen.has(n?.id));
   if (next.pageInfo?.hasNextPage && (!added.length || next.pageInfo.endCursor === items.pageInfo.endCursor)) {
-    throw new BoardError(`Projekt „${project.title}“: GitHub lieferte nach ${items.nodes.length} Einträgen keine weiteren`);
+    throw new BoardError(`Projekt „${project.title}“: GitHub kam nach ${items.nodes.length} Einträgen nicht weiter`);
   }
   items.nodes.push(...added);
   items.pageInfo = next.pageInfo;
@@ -229,7 +231,7 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ hat kein Auswahlfeld „${fieldName}“`);
   }
   if (!Array.isArray(project.items?.nodes)) {
-    const e = errorAt(errors, ["repositoryOwner", "projectV2", "items"]);
+    const e = errorAt(errors, ITEMS_PATH);
     throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
   }
   const names = [...hidden];

@@ -729,6 +729,12 @@ test("a board's next page is one query of its items after the cursor: the same f
   assert.equal(value("h0"), undefined);
   assert.match(board.githubBoardPageArgs({ ...githubView(), limit: 250 }, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
   assert.match(board.githubBoardArgs({ ...githubView(), limit: 30 }, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
+  const empty = boardPage(0, 0, "c0");
+  const next = board.nextBoardPage(empty, githubView());
+  assert.deepEqual(next, { after: "c0", read: 0 }, "an empty first page that says more follow");
+  const after = board.githubBoardPageArgs(githubView(), HIDDEN, next.after, next.read);
+  assert.match(after[3], /items\(first: 100, after: \$after, query/, "its next page reads from the cursor it declares");
+  assert.ok(after.includes("after=c0"));
 });
 
 test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addBoardPage, nextBoardPage)", () => {
@@ -750,7 +756,7 @@ test("a board's pages add up: each item once, the last page's pageInfo; the next
   const cut = board.parseGithubBoard(board.addBoardPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN);
   assert.deepEqual([cut.limited, cut.total, cut.read], [true, 9, 5], "cut: said, with how many it read");
   const stuck = (page) => () => board.addBoardPage(boardPage(0, 3, "c1"), page);
-  const STUCK = { message: "Projekt „Sample“: GitHub lieferte nach 3 Einträgen keine weiteren" };
+  const STUCK = { message: "Projekt „Sample“: GitHub kam nach 3 Einträgen nicht weiter" };
   assert.throws(stuck(boardPage(1, 3, "c2", { first: false })), STUCK, "more promised, but only items it holds");
   assert.throws(stuck(boardPage(3, 4, "c1", { first: false })), STUCK, "more promised, from the same cursor");
   assert.equal(board.addBoardPage(boardPage(0, 3, "c1"), boardPage(1, 3, null, { first: false })).data.repositoryOwner.projectV2.items.nodes.length, 3,
