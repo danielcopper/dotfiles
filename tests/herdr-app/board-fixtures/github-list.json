@@ -41,6 +41,7 @@
       "nodes": [
        {
         "commit": {
+         "oid": "2820cccccccccccccccccccccccccccccccccccc",
          "statusCheckRollup": {
           "state": "SUCCESS",
           "contexts": {
@@ -64,6 +65,15 @@
         }
        }
       ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
      }
     }
    ]
@@ -97,6 +107,7 @@
       "nodes": [
        {
         "commit": {
+         "oid": "1921cccccccccccccccccccccccccccccccccccc",
          "statusCheckRollup": {
           "state": "SUCCESS",
           "contexts": {
@@ -116,6 +127,15 @@
         }
        }
       ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
      }
     },
     {
@@ -152,10 +172,20 @@
       "nodes": [
        {
         "commit": {
+         "oid": "0808cccccccccccccccccccccccccccccccccccc",
          "statusCheckRollup": null
         }
        }
       ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
      }
     },
     {
@@ -193,6 +223,7 @@
       "nodes": [
        {
         "commit": {
+         "oid": "2820cccccccccccccccccccccccccccccccccccc",
          "statusCheckRollup": {
           "state": "SUCCESS",
           "contexts": {
@@ -208,6 +239,15 @@
         }
        }
       ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
      }
     },
     {
@@ -236,6 +276,7 @@
       "nodes": [
        {
         "commit": {
+         "oid": "0077cccccccccccccccccccccccccccccccccccc",
          "statusCheckRollup": {
           "state": "SUCCESS",
           "contexts": {
@@ -260,6 +301,15 @@
         }
        }
       ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
      }
     }
    ]

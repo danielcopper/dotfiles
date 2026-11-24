@@ -95,16 +95,18 @@ export const otherLook = (state) => ({ state: String(state ?? "?").toLowerCase()
 // yet.
 export const DRAFT_REVIEW = "Entwurf";
 
-// The tones a PR list's section may take (views.json, a section's "tone"),
-// by copper's names for its hues, each as the theme name the board draws it
-// in (ui/tones.js takes those to copper's colors), and the order in which
-// sections without one take them, by their place in the view.
-export const SECTION_TONES = { red: "ansi1", orange: "ansi11", yellow: "ansi3", green: "ansi2", teal: "ansi6", blue: "ansi4", violet: "ansi5" };
-export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", "orange", "red"];
+// copper's hues by its names, each as the theme name the board draws it in
+// (ui/tones.js takes those to copper's colors; orange is ansi11, which only
+// a GitHub color named ORANGE and the mark on a pull request the viewer has
+// to act on take).
+export const COPPER_HUES = { red: "ansi1", green: "ansi2", yellow: "ansi3", blue: "ansi4", violet: "ansi5", teal: "ansi6", orange: "ansi11" };
 
-// The theme name of the section at `index` with the tone `tone` (none: the
-// one SECTION_TONE_ORDER gives its place).
-export const sectionColor = (tone, index) => SECTION_TONES[tone ?? SECTION_TONE_ORDER[index % SECTION_TONE_ORDER.length]];
+// The tones a PR list's section may take (views.json, a section's "tone"):
+// copper's hues but orange, the mark's (ui/tones.js, markColor); and the
+// order in which sections without one take them, by their place, past the
+// ones other sections set (config.js).
+export const SECTION_TONES = Object.fromEntries(Object.entries(COPPER_HUES).filter(([name]) => name !== "orange"));
+export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", "red"];
 
 // The label of an item's parent, an issue or work item of the same source
 // and repo: "tender#3002", "AB#7".

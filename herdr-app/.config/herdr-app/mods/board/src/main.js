@@ -17,9 +17,10 @@
 //     Projects filter such as "assignee:@me"); its columns are the options
 //     of that single-select field. A list has sections [{ name, query,
 //     tone? }], one GitHub search for pull requests each; tone is one of
-//     copper's hue names, "red", "orange", "yellow", "green", "teal",
-//     "blue" or "violet", and without one a section takes one by its place
-//     (blue, violet, teal, then the others: SECTION_TONE_ORDER). A view
+//     copper's hues but orange (the mark's), "red", "green", "yellow",
+//     "blue", "violet" or "teal" (SECTION_TONES), and without one a section
+//     takes the next of blue, violet, teal, green, yellow and red
+//     (SECTION_TONE_ORDER) by its place that no other section sets. A view
 //     may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, open ("space" | "tab"), checkout (the folder the session starts
@@ -40,11 +41,12 @@
 // its limit take: ten for the 1000 by default; a list view one, which
 // GitHub prices by its connections, each counted as full: per section one
 // search, then per pull request of its limit (50 by default) its assignees,
-// review requests, last commit (and that one's checks), latest reviews and
-// review threads, and per thread (REVIEW_THREADS, 50) its comments, so with
-// the defaults 1 + 50 * 6 + 50 * 50 = 2801 requests a section, about 28
-// points (a hundred requests each) of GitHub's 5000 an hour, 84 for the
-// shipped three sections; the threads' comments are 2500 of them. An issue's
+// review requests, last commit (and that one's checks), latest reviews
+// (LATEST_REVIEWS, 20) and review threads, and per thread (REVIEW_THREADS,
+// 50) its comments, so with the defaults 1 + 50 * 6 + 50 * 50 = 2801
+// requests a section, about 28 points (a hundred requests each) of GitHub's
+// 5000 an hour, 84 for the shipped three sections; the threads' comments
+// are 2500 of them. An issue's
 // related items (its description, parent, sub-issues and linked pull
 // requests) cost one more when its details open, again on `r` while they are
 // open, and again after a refresh where their last read failed (readRelated;

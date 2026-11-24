@@ -490,54 +490,66 @@ herdr-app`. Which files of the package git tracks is set in the root
   less than 420 or more than 720 pixels (detailWidth in
   `mods/board/src/ui/helpers.js` has the rule).
   The GitHub PR list says whether I have to act on a pull request: such a row
-  carries an orange mark with the reasons ("● Review angefragt"), its details
-  list them under "DU BIST DRAN", and in each section those rows come first,
-  in GitHub's order, then the others in theirs. On someone else's pull
-  request the reasons are my review asked for while I gave none ("Review
-  angefragt"), commits after my latest review, asked again or not ("neue
-  Commits seit deinem Review"), and an unresolved review thread I took part
-  in whose last comment is someone else's ("Antwort erwartet"); one I
-  reviewed that asks nothing of me, and does not ask my review again, says
-  "wartet auf Autor". On my own: changes requested ("Änderungen gewünscht"),
-  unresolved threads whose last comment is someone else's ("2 offene
-  Threads"), failing checks ("Checks rot"), a merge conflict ("Konflikt"),
-  and with none of these, approved, all checks passed, mergeable without
-  conflict and no draft: "bereit zum Mergen". Comments as such are no reason.
-  It reads each pull request's first 50 review threads and of each the
-  authors of its last 10 comments ("50+ offene Threads" where it has more
-  than 50; a thread I took part in only before its last 10 comments counts
-  as one I did not). The shipped `views.json` has three sections: "Zu
-  prüfen" (review asked of me), "Meine" (opened by me) and "Geprüft" (open
-  pull requests I reviewed and did not open, `reviewed-by:@me
-  -author:@me`): GitHub drops a review request once the review is given, so
-  without it a reviewed pull request would leave the list. A pull request
-  that asks my review again shows in "Zu prüfen", the first section that
-  finds it. A `views.json` of my own without that search keeps working and
-  shows no reviewed pull requests. Without the login gh runs as nothing is
-  marked. The header of `mods/board/src/main.js` says what the list's
-  request costs.
+  carries a mark with the reasons ("● Review angefragt"), its details list
+  them under "DU BIST DRAN", and in each section those rows come first, in
+  GitHub's order, then the others in theirs. On someone else's pull request
+  the reasons are my review asked for, of me or of a team I am in (a search
+  that sets `review-requested:@me` found it), while I gave none or mine was
+  dismissed ("Review angefragt"); commits after my latest review, asked again
+  or not ("neue Commits seit deinem Review"); and an unresolved review thread
+  I took part in whose last comment is someone else's ("Antwort erwartet").
+  One I reviewed that asks nothing of me, and does not ask my review again,
+  says "wartet auf Autor". On my own: changes requested ("Änderungen
+  gewünscht"), unresolved threads whose last comment is someone else's ("2
+  offene Threads"), failing checks ("Checks rot"), a merge conflict
+  ("Konflikt"), and with none of these: "bereit zum Mergen", where it is no
+  draft, no review is still required (approved, or a repo that asks for none),
+  its checks passed or it has none, and it merges without conflict (not while
+  GitHub still works that out). Comments as such are no reason. It reads each
+  pull request's first 50 review threads and of each the authors of its last
+  10 comments (a thread I took part in only before its last 10 comments counts
+  as one I did not), and the first 20 latest reviews. Where it could not read
+  all it needs (an error at the pull request, a part GitHub did not send, more
+  than 50 threads, more than 20 reviews without mine among them), nothing says
+  "wartet auf Autor" or "bereit zum Mergen": the row says "? nicht ganz
+  gelesen" where it names no reason, a count of my threads gets a "+" ("3+
+  offene Threads"), and the details list what is missing under "NICHT GANZ
+  GELESEN". A pull request GitHub sent as nothing for an error is counted
+  under the list ("1 Treffer in „Meine“ nicht gelesen: …"). The shipped
+  `views.json` has three sections: "Zu prüfen" (review asked of me), "Meine"
+  (opened by me) and "Geprüft" (open pull requests I reviewed and did not
+  open, `reviewed-by:@me -author:@me`): GitHub drops a review request once the
+  review is given, so without it a reviewed pull request would leave the list.
+  A pull request that asks my review again shows in "Zu prüfen", the first
+  section that finds it. A `views.json` of my own without that search keeps
+  working and shows no reviewed pull requests. Without the login gh runs as
+  nothing is marked. The header of `mods/board/src/main.js` says what the
+  list's request costs.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,
-  its source says. A PR list's section has a tone, its `tone` in
-  `views.json` (one of copper's hue names: red, orange, yellow, green, teal,
-  blue, violet), else one by its place (blue, violet, teal, then green,
-  yellow, orange, red; the shipped file sets blue, violet and teal): its head
-  shows its name and count in that tone on a band of its tint, as a column's
-  head does, and each of its rows has a thin stripe in it at its left, the
-  accent while the row is selected. Labels are chips in their GitHub color,
-  brought onto the theme's hues by hue, grey ones muted; issue types are
-  chips in their named GitHub color, pink as violet. An Epic by its
-  "[Epic]" title alone gets an "Epic" chip in its "epic" label's color, in
-  place of that label's own chip, and the details name it an Epic. A thin line
-  across the top of a card or row is in its type's color: on Azure, of every
-  work item, the color the project's work item types define (kept as makeAzure
-  says), brought onto the theme by hue as a label's is; on GitHub, of an issue
-  with an issue type, that type's named color as its chip has it. A type
-  without a color, and an item without a type (an Epic by its title too), has
-  no line; where the Backlog could not read the types, or where they name
-  their colors in a form the board does not read, the view says so and draws
-  none.
+  its source says. A PR list's section has a tone, its `tone` in `views.json`
+  (one of copper's hues but orange: red, green, yellow, blue, violet, teal),
+  else the next of blue, violet, teal, green, yellow and red by its place that
+  no other section sets (the shipped file sets blue, violet and teal): its
+  head shows its name and count in that tone on a band of its tint, as a
+  column's head does, and each of its rows has a thin stripe in it at its
+  left, the accent while the row is selected. The mark on a pull request I
+  have to act on is in copper's orange, which no section and no check state
+  takes; on a theme without copper's colors, in the theme's foreground, since
+  each of its hues is a section's or a check state's. Labels are chips in
+  their GitHub color, brought onto the theme's hues by hue, grey ones muted;
+  issue types are chips in their named GitHub color, pink as violet. An Epic
+  by its "[Epic]" title alone gets an "Epic" chip in its "epic" label's color,
+  in place of that label's own chip, and the details name it an Epic. A thin
+  line across the top of a card or row is in its type's color: on Azure, of
+  every work item, the color the project's work item types define (kept as
+  makeAzure says), brought onto the theme by hue as a label's is; on GitHub,
+  of an issue with an issue type, that type's named color as its chip has it.
+  A type without a color, and an item without a type (an Epic by its title
+  too), has no line; where the Backlog could not read the types, or where they
+  name their colors in a form the board does not read, the view says so and
+  draws none.
   The copper themes carry copper's colors for mods, and there the board draws
   in them: its seven hues (red, orange, yellow, green, teal, blue, violet; a
   label's red reaches further toward orange than halfway, so GitHub's dark
@@ -548,12 +560,12 @@ herdr-app`. Which files of the package git tracks is set in the root
   copper's blue step for it, and a column a card is dragged over keeps its
   ground, marked by the accent border. A theme without those colors
   (catppuccin-mocha) draws in its red, green, yellow, blue, violet and teal,
-  an issue type's or a list section's orange as yellow, with its colors at a
-  low alpha under chips and heads, a selected card or row on a tint of the
-  accent, so its chips stay readable, and a column a card is dragged over on
-  the theme's `selected`. `mods/board/src/ui/tones.js` holds the label and
-  type colors, which theme takes which colors, the selected background and
-  how strong the tints are.
+  an issue type's orange as yellow, the mark on a pull request in its
+  foreground, with its colors at a low alpha under chips and heads, a selected
+  card or row on a tint of the accent, so its chips stay readable, and a
+  column a card is dragged over on the theme's `selected`.
+  `mods/board/src/ui/tones.js` holds the label and type colors, which theme
+  takes which colors, the selected background and how strong the tints are.
   The details of a GitHub issue show its description formatted, as GitHub
   does (its Markdown drawn by herdr's TextView: headings, lists, code, links,
   tables; its HTML shows as text, its comments not at all, but for one not

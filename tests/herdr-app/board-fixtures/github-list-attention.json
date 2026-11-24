@@ -4,7 +4,7 @@
    "login": "sample-user"
   },
   "s0": {
-   "issueCount": 3,
+   "issueCount": 6,
    "nodes": [
     {
      "id": "PR_sample103",
@@ -57,8 +57,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "APPROVED",
         "author": {
          "login": "sample-user"
         },
@@ -129,8 +131,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "COMMENTED",
         "author": {
          "login": "sample-reviewer"
         },
@@ -196,8 +200,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 2,
       "nodes": [
        {
+        "state": "CHANGES_REQUESTED",
         "author": {
          "login": "sample-reviewer"
         },
@@ -206,11 +212,205 @@
         }
        },
        {
+        "state": "CHANGES_REQUESTED",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0102bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+       }
+      ]
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_sample104",
+     "number": 104,
+     "title": "feat(api): asked of a team",
+     "url": "https://github.com/example/tender/pull/104",
+     "isDraft": false,
+     "createdAt": "2026-11-18T09:00:00Z",
+     "updatedAt": "2026-11-20T09:00:00Z",
+     "headRefName": "feat/104-sample",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {}
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0104aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 4
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_sample105",
+     "number": 105,
+     "title": "feat(api): a team asked again",
+     "url": "https://github.com/example/tender/pull/105",
+     "isDraft": false,
+     "createdAt": "2026-11-18T09:00:00Z",
+     "updatedAt": "2026-11-20T09:00:00Z",
+     "headRefName": "feat/105-sample",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {}
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0105aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 4
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "state": "COMMENTED",
+        "author": {
+         "login": "sample-user"
+        },
+        "commit": {
+         "oid": "0105aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      ]
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_sample106",
+     "number": 106,
+     "title": "feat(api): a review dismissed",
+     "url": "https://github.com/example/tender/pull/106",
+     "isDraft": false,
+     "createdAt": "2026-11-18T09:00:00Z",
+     "updatedAt": "2026-11-20T09:00:00Z",
+     "headRefName": "feat/106-sample",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "example/tender"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0106aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 4
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "MERGEABLE",
+     "latestReviews": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "state": "DISMISSED",
+        "author": {
+         "login": "sample-user"
+        },
+        "commit": {
+         "oid": "0106aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
        }
       ]
@@ -280,6 +480,7 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 0,
       "nodes": []
      },
      "reviewThreads": {
@@ -332,8 +533,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "APPROVED",
         "author": {
          "login": "sample-reviewer"
         },
@@ -415,8 +618,10 @@
      },
      "mergeable": "CONFLICTING",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "CHANGES_REQUESTED",
         "author": {
          "login": "sample-reviewer"
         },
@@ -545,8 +750,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "CHANGES_REQUESTED",
         "author": {
          "login": "sample-user"
         },
@@ -642,8 +849,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 2,
       "nodes": [
        {
+        "state": "CHANGES_REQUESTED",
         "author": {
          "login": "sample-reviewer"
         },
@@ -652,6 +861,7 @@
         }
        },
        {
+        "state": "CHANGES_REQUESTED",
         "author": {
          "login": "sample-user"
         },
@@ -711,8 +921,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "APPROVED",
         "author": {
          "login": "sample-user"
         },
@@ -772,8 +984,10 @@
      },
      "mergeable": "MERGEABLE",
      "latestReviews": {
+      "totalCount": 1,
       "nodes": [
        {
+        "state": "COMMENTED",
         "author": {
          "login": "sample-user"
         },

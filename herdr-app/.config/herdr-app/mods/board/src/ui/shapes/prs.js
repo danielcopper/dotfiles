@@ -1,16 +1,16 @@
 // The prs shape: a list of pull requests in sections, walked as one column.
 // The data: { shape: "prs", sections: [{ name, color, count, fetched,
-// limited, skipped, rows }], viewer } (parseGithubList); a row's author,
-// draft mark and checks show where it has them, and whether the viewer has
-// to act on it (its attention and waiting). Each section is drawn in its
-// color's tone (namedTone): its head on a band of that tone, each row with
-// a stripe of it at its left. View fields it reads: id.
+// limited, skipped, notRead, rows }], viewer } (parseGithubList); a row's
+// author, draft mark and checks show where it has them, and whether the
+// viewer has to act on it (its attention, waiting and unread). Each section
+// is drawn in its color, a theme name: its head on a band of it, each row
+// with a stripe of it at its left. View fields it reads: id.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { ageLabel, cardLabel } from "../../shared.js";
 import { checkColor, checksSection, detailSection, selectedLook, shownOf } from "../helpers.js";
-import { ATTENTION_TONE, headBg, namedTone, toneColor } from "../tones.js";
+import { headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -35,28 +35,32 @@ export const prsShape = {
   loads: true,
   enterHint: "Detail · Review",
   received: (data) => data,
-  warnings: (_view, data) => data.sections.filter((s) => s.skipped).map((s) => `${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`),
+  warnings: (_view, data) =>
+    data.sections.flatMap((s) => [
+      ...(s.skipped ? [`${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`] : []),
+      ...(s.notRead?.length ? [`${s.notRead.length} Treffer in „${s.name}“ nicht gelesen: ${s.notRead[0]}`] : []),
+    ]),
   // The detail panel's rows of a pull request: why the viewer has to act on
-  // it, and its checks, where it has them.
+  // it, what of it could not be read, and its checks, where it has them.
   detailParts(b, t, view, item) {
     const sections = [];
-    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(attentionColor(t)).child(reason))));
+    const line = (color) => (text) => div().text_color(color).child(text);
+    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map(line(markColor(t)))));
+    if (item.unread?.length) sections.push(detailSection(t, "NICHT GANZ GELESEN", ...item.unread.map(line(t.muted))));
     if (item.checks) sections.push(checksSection(t, item.checks));
     return sections.length ? { sections } : {};
   },
 };
 
-// The color of the mark on a pull request the viewer has to act on.
-const attentionColor = (t) => toneColor(t, namedTone(t, ATTENTION_TONE));
-
 // A row's cell that says whether the viewer has to act on its pull
-// request: a mark and the reasons ("● Review angefragt"), "wartet auf
-// Autor" on someone else's one reviewed that asks nothing yet, else
-// nothing; every row keeps it, so the cells after it line up.
+// request: a mark and the reasons ("● Review angefragt"); where it names
+// none but could not read all ("? nicht ganz gelesen"); "wartet auf Autor"
+// on someone else's one reviewed that asks nothing yet; else nothing.
+// Every row keeps it, so the cells after it line up.
 function attentionCell(t, r) {
   const cell = div().w(200).flex_none().truncate().text_size(12);
-  if (r.attention?.length) return cell.font_semibold().text_color(attentionColor(t)).child(`● ${r.attention.join(" · ")}`);
-  return cell.text_color(t.muted).child(r.waiting ? "wartet auf Autor" : "");
+  if (r.attention?.length) return cell.font_semibold().text_color(markColor(t)).child(`● ${r.attention.join(" · ")}`);
+  return cell.text_color(t.muted).child(r.unread?.length ? "? nicht ganz gelesen" : r.waiting ? "wartet auf Autor" : "");
 }
 
 // A section's count: the rows it holds (each pull request once, in its first
@@ -101,7 +105,7 @@ function drawPrs(b, t, mono, view, st) {
   const children = [];
   for (const [i, s] of st.data.sections.entries()) {
     const rows = s.rows.filter((r) => b.visible(r, st.data));
-    const tone = namedTone(t, s.color);
+    const tone = s.color;
     children.push(
       div().id(`section-${i}`).flex_none().mt(8).px(20).py(3).bg(headBg(t, tone, t.background)).text_size(11).font_semibold().text_color(toneColor(t, tone))
         .child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`),

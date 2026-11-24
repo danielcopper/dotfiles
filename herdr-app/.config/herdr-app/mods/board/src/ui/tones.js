@@ -5,8 +5,9 @@
 // (paletteOf); how strong the tints are on a theme without copper's colors;
 // and tint, which the rest of the board tints with too.
 // Which theme name a status or a state has, its source says (GITHUB_COLORS,
-// CATEGORY_COLORS); the selected look, border and background, is
-// selectedLook in helpers.js.
+// CATEGORY_COLORS), and a PR list section's, views.json (SECTION_TONES in
+// shared.js); the selected look, border and background, is selectedLook in
+// helpers.js.
 //
 // Two paths, chosen once per theme (copperColors), never per color: a theme
 // that carries copper's colors for mods (themes/copper-*.json, from
@@ -16,13 +17,14 @@
 // a theme color or a tint of one, so a theme with other colors, or with
 // surfaces of its own, changes the board with it.
 
-import { cardType, epicLabel } from "../shared.js";
+import { COPPER_HUES, cardType, epicLabel } from "../shared.js";
 
 // How strong a tint is (the alpha byte after #rrggbb), on a theme without
 // copper's colors: a chip's background (CHIP_ALPHA, under text in the
-// chip's own tone), a column head's (HEAD_ALPHA, under its name and its
-// muted count) and a selected card's or row's (SELECTED_ALPHA, under its
-// text and chips). Measured against the copper themes' colors with copper's
+// chip's own tone), a column head's and a PR list section head's
+// (HEAD_ALPHA, under its name and its muted count, or a section's name
+// and count in its tone) and a selected card's or row's (SELECTED_ALPHA,
+// under its text and chips). Measured against the copper themes' colors with copper's
 // own left out, and against catppuccin-mocha as herdr resolves it: that text
 // stays at 4.5:1 or more on every ground the shapes draw it on
 // (board.test.mjs), but for a muted chip and dim text on a selected card in
@@ -62,10 +64,11 @@ export function layered(top, alpha, ground, fallback) {
 // A tone's copper color is its ANSI slot's: copper's port lays ansi1 to
 // ansi6 out as red, green, yellow, blue, violet and teal, and a bright
 // variant counts as its plain one (chipTone), but for ansi11, which stands
-// for orange: only GitHub's ORANGE takes it (GITHUB_COLORS), and a label
-// takes it for copper's orange (hueTone). Any other tone (muted, dim) is the
-// neutral.
-const ANSI_COPPER = { ansi1: "red", ansi2: "green", ansi3: "yellow", ansi4: "blue", ansi5: "violet", ansi6: "teal", ansi11: "orange" };
+// for orange: GitHub's ORANGE takes it (GITHUB_COLORS), a label takes it
+// for copper's orange (hueTone), and the mark on a pull request the viewer
+// has to act on is drawn in it (markColor). Any other tone (muted, dim) is
+// the neutral. COPPER_HUES (shared.js) holds the slots by copper's names.
+const ANSI_COPPER = Object.fromEntries(Object.entries(COPPER_HUES).map(([color, tone]) => [tone, color]));
 const COPPER_COLORS = [...Object.values(ANSI_COPPER), "neutral"];
 const COPPER_KEYS = [3, 4, "text"];
 const copperKey = (color, key) => `copper-${color}-${key}`;
@@ -112,7 +115,8 @@ function copperTint(t, tone, grounds) {
 // `selected`, a selected card's or row's background; `chip(tone)` and
 // `head(tone, ground)`, a chip's and a column head's background;
 // `drop(ground)`, a drop target column's background, where `ground` is its
-// own.
+// own; `mark`, the color of the mark on a pull request the viewer has to
+// act on, a PR list's, which no section tone and no check state shares.
 const palettes = new WeakMap();
 function paletteOf(t) {
   if (!palettes.has(t)) palettes.set(t, copperColors(t) ? copperPalette(t) : tintedPalette(t));
@@ -129,7 +133,9 @@ function paletteOf(t) {
 // column head on its tone's copper tint for both grounds a head stands on
 // (copperTint), a column's chrome and the Sprint's background, so a head
 // looks the same on either. A drop target keeps its ground and the accent
-// border marks it: its `selected` would match a selected card.
+// border marks it: its `selected` would match a selected card. The mark
+// takes copper's orange, which no section may take (SECTION_TONES) and no
+// check state has.
 function copperPalette(t) {
   return {
     hues: Object.entries(ANSI_COPPER).map(([tone, color]) => [tone, copperKey(color, "text")]),
@@ -140,6 +146,7 @@ function copperPalette(t) {
     chip: (tone) => copperTint(t, tone, [t.background, t.selected]),
     head: (tone) => copperTint(t, tone, [t.chrome, t.background]),
     drop: (ground) => ground,
+    mark: t[copperKey("orange", "text")],
   };
 }
 
@@ -158,7 +165,11 @@ function copperPalette(t) {
 // it stands on, opaque, so a column that changes its own ground (a drop
 // target) leaves the head as it is; without an opaque ground, the
 // translucent tint; without a color, `raised`. A drop target takes the
-// theme's `selected`.
+// theme's `selected`. The mark takes the theme's foreground: each of its
+// six hues is a section's tone or a check state's (yellow, pending, too),
+// and a bright variant matches its plain one (catppuccin-mocha's ansi11 is
+// its ansi3) or reads below 4.5:1 (HUE_TONES); the mark's dot and weight
+// set it apart.
 function tintedPalette(t) {
   const text = (tone) => t[tone] ?? t.muted;
   return {
@@ -170,6 +181,7 @@ function tintedPalette(t) {
     chip: (tone) => tint(text(tone), CHIP_ALPHA, t.raised),
     head: (tone, ground) => layered(text(tone), HEAD_ALPHA, ground, tint(text(tone), HEAD_ALPHA, t.raised)),
     drop: () => t.selected,
+    mark: t.foreground,
   };
 }
 
@@ -181,21 +193,11 @@ export const selectedBg = (t) => paletteOf(t).selected;
 export const chipBg = (t, tone) => paletteOf(t).chip(tone);
 export const headBg = (t, tone, ground) => paletteOf(t).head(tone, ground);
 export const dropBg = (t, ground) => paletteOf(t).drop(ground);
+export const markColor = (t) => paletteOf(t).mark;
 
 // The tone of a note's level, which toneColor draws every note the board
 // shows in: an error, a warning, a success, information.
 export const NOTE_TONES = { error: "ansi1", warning: "ansi3", success: "ansi2", info: "muted" };
-
-// The tone of a named color a source or views.json gives (a GitHub issue
-// type's, a PR list section's) in the theme `t`: as it is in a copper
-// theme, its plain variant in any other (chipTone), so orange (ansi11)
-// takes copper's orange there and the theme's yellow here.
-export const namedTone = (t, name) => paletteOf(t).named(name);
-
-// The tone of the mark on a pull request the viewer has to act on, in a
-// PR list (namedTone): orange, which none of a list's default section tones
-// is, nor a check's state.
-export const ATTENTION_TONE = "ansi11";
 
 // The tones a label can take on a theme without copper's colors: the
 // theme's red, green, yellow, blue, violet and teal. Not their bright
