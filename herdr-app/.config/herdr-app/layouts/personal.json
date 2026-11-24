@@ -140,7 +140,8 @@
                       },
                       "radius": 10,
                       "gap": 8,
-                      "lone": true
+                      "lone": true,
+                      "veil": 0.4
                     }
                   }
                 },
