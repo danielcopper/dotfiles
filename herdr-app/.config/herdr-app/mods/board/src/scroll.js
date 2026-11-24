@@ -7,14 +7,14 @@
 // and draws the position as a thumb. All lengths are the script's pixels
 // (measured ones divided by herdr's zoom: ui/related.js).
 //
-// A move by a page or end key glides: the content and the thumb carry
-// herdr's transition of `top` at every draw (motionOf), GLIDE while the
-// block stands where such a key put it (`glideTo`: the heights it was
-// measured at then; every other mover drops it, and only a change of the
-// heights could move the offset besides), else a zero duration. gpui-kit keeps a transition's
-// value per element and property, adopting the first one it sees, and
-// eases toward a changed target with the duration given in that draw; a
-// zero duration takes the target at once (gpui-kit's base/src/motion.rs,
+// A move by a page or end key glides: the content and the thumb carry herdr's
+// transition of `top` at every draw (motionOf), GLIDE while the block stands
+// where such a key put it (`glideTo`: the heights it was measured at then;
+// every other mover drops it, and only a change of the heights could move the
+// offset besides), else a zero duration. gpui-kit keeps a transition's value
+// per element and property, adopting the first one it sees, and eases toward
+// a changed target with the duration given in that draw; a zero duration
+// takes the target at once (gpui-kit's base/src/motion.rs,
 // transition_with_status). So a transition set only once the target has
 // changed would not ease that change, and j/k, the wheel, a line scrolled
 // into view, another item or level and a change of the heights (a fold, a

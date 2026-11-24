@@ -47,9 +47,9 @@ export const FOLDED_H = 12 * LINE_PX;
 // when it starts and every draw reads: the measured height of each
 // description by its item's key, the key of the item whose description is
 // unfolded (null: none; another item's shows folded), and the block's
-// scroll (scroll.js): its offset, where a page or end key put it (null:
-// nowhere), the item it is of (`at`), the heights of its window and its
-// content, and of each row by its id.
+// scroll (scroll.js): its offset, the heights a page or end key's move
+// was made at (`glideTo`; null: none), the item it is of (`at`), the
+// heights of its window and its content, and of each row by its id.
 export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glideTo: null, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.

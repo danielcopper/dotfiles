@@ -9198,6 +9198,20 @@ test("UI: Esc from a level back up brings the scroll of the level above back at 
   assert.deepEqual([b.panel.levels.length, byId(detailPanel(b), "related-lines")], [1, null], "a pull request's level, which draws no block");
   await press(b, cx, "escape");
   assert.deepEqual([b.panel.levels.length, b.panel.line, offsetOf(b), glidesOf(b)], [0, 3, 134, STILL], "the scroll it had, without a glide");
+  // Where a re-read takes the line away, the way back up marks none and
+  // scrolls no line into view: the restored scroll alone moves the block.
+  await press(b, cx, "end");
+  b.panel.line = 3;
+  await press(b, cx, "enter");
+  assert.deepEqual([b.panel.levels.length, glidesOf(b)[0]], [1, null], "the pull request's level again, read before");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+  const without = json("github-related.json");
+  const prs = without.data.repository.issue.closedByPullRequestsReferences;
+  prs.nodes = prs.nodes.filter((n) => n.number !== 3020);
+  prs.totalCount = prs.nodes.length;
+  await host.answer("gh", ok(JSON.stringify(without)), readRelatedOf(3004));
+  assert.deepEqual([b.panel.levels.length, b.panel.line, offsetOf(b), glidesOf(b)], [0, null, 134, STILL], "no line marked: the scroll it had, without a glide");
 });
 
 test("the details block's glide belongs to the move a page or end key made: another item's offset, a restored one and any other move drop it (motionOf)", () => {

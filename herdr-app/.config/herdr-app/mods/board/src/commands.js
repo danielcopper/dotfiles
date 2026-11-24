@@ -22,8 +22,9 @@
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
 //   the hint line names (its key by default). The hint line names each key
-//   once (hintsOf), and neither the moves nor a key that its place on the
-//   board already names; README, "herdr app", lists those it leaves out.
+//   once (hintsOf), and neither the moves nor a key named elsewhere (where
+//   it acts, or only in the menu); README, "herdr app", lists those it
+//   leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc).
 // `c` is what the Board says of the moment (Board.actionContext): { b,

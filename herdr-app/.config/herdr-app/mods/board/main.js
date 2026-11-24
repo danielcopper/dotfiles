@@ -35,20 +35,20 @@
 // with.
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
-// up to 100 items it reads (GitHub's most), at most as many as full pages
-// of its limit take: ten for the 1000 by default; a list view one. An issue's related items (its
-// description, parent, sub-issues and linked pull requests) cost one more
-// when its details open, again on `r` while they are open, and again
-// after a refresh where their last read failed (readRelated; what a refresh
-// keeps of them keptRelated says); an item the details panel went down to
-// (Enter on a line, related.js) costs the same when it shows, a pull request
-// one gh or az call for its details (az repos pr show), and on `r` each
-// level's again, so that a level whose item is no longer among the lines of
-// the one above can go. An Azure work item's related items (its description,
-// parent, children and linked pull requests) cost the same, one az call (az
-// boards work-item show --expand relations), and one WIQL query more for its
-// children's and its parent's titles and states where it has either
-// (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// up to 100 items it reads (GitHub's most), at most as many as full pages of
+// its limit take: ten for the 1000 by default; a list view one. An issue's
+// related items (its description, parent, sub-issues and linked pull
+// requests) cost one more when its details open, again on `r` while they are
+// open, and again after a refresh where their last read failed (readRelated;
+// what a refresh keeps of them keptRelated says); an item the details panel
+// went down to (Enter on a line, related.js) costs the same when it shows, a
+// pull request one gh or az call for its details (az repos pr show), and on
+// `r` each level's again, so that a level whose item is no longer among the
+// lines of the one above can go. An Azure work item's related items (its
+// description, parent, children and linked pull requests) cost the same, one
+// az call (az boards work-item show --expand relations), and one WIQL query
+// more for its children's and its parent's titles and states where it has
+// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their fields;
 // for a sprint the sprint picker chose, by its id and path; none while the
 // team has no sprint running and none is chosen), its Backlog two, one after
@@ -332,8 +332,8 @@ const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] 
 // "source" may stay from views.json's first form, as "github".
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
-// The most items a board reads, and so its default limit: ten pages of
-// GitHub's (PAGE), one gh call each.
+// The most items a board reads, and its default limit: ten of GitHub's
+// pages (PAGE).
 const BOARD_LIMIT = 10 * PAGE;
 
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
@@ -4946,14 +4946,14 @@ export const columnsModal = {
 // and draws the position as a thumb. All lengths are the script's pixels
 // (measured ones divided by herdr's zoom: ui/related.js).
 //
-// A move by a page or end key glides: the content and the thumb carry
-// herdr's transition of `top` at every draw (motionOf), GLIDE while the
-// block stands where such a key put it (`glideTo`: the heights it was
-// measured at then; every other mover drops it, and only a change of the
-// heights could move the offset besides), else a zero duration. gpui-kit keeps a transition's
-// value per element and property, adopting the first one it sees, and
-// eases toward a changed target with the duration given in that draw; a
-// zero duration takes the target at once (gpui-kit's base/src/motion.rs,
+// A move by a page or end key glides: the content and the thumb carry herdr's
+// transition of `top` at every draw (motionOf), GLIDE while the block stands
+// where such a key put it (`glideTo`: the heights it was measured at then;
+// every other mover drops it, and only a change of the heights could move the
+// offset besides), else a zero duration. gpui-kit keeps a transition's value
+// per element and property, adopting the first one it sees, and eases toward
+// a changed target with the duration given in that draw; a zero duration
+// takes the target at once (gpui-kit's base/src/motion.rs,
 // transition_with_status). So a transition set only once the target has
 // changed would not ease that change, and j/k, the wheel, a line scrolled
 // into view, another item or level and a change of the heights (a fold, a
@@ -5098,9 +5098,9 @@ export const FOLDED_H = 12 * LINE_PX;
 // when it starts and every draw reads: the measured height of each
 // description by its item's key, the key of the item whose description is
 // unfolded (null: none; another item's shows folded), and the block's
-// scroll (scroll.js): its offset, where a page or end key put it (null:
-// nowhere), the item it is of (`at`), the heights of its window and its
-// content, and of each row by its id.
+// scroll (scroll.js): its offset, the heights a page or end key's move
+// was made at (`glideTo`; null: none), the item it is of (`at`), the
+// heights of its window and its content, and of each row by its id.
 export const relatedState = () => ({ heights: new Map(), unfolded: null, offset: 0, glideTo: null, at: null, viewport: 0, content: 0, sizes: new Map() });
 
 // Whether the description of `item` is taller than FOLDED_H, as measured.
@@ -5317,8 +5317,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
 //   the hint line names (its key by default). The hint line names each key
-//   once (hintsOf), and neither the moves nor a key that its place on the
-//   board already names; README, "herdr app", lists those it leaves out.
+//   once (hintsOf), and neither the moves nor a key named elsewhere (where
+//   it acts, or only in the menu); README, "herdr app", lists those it
+//   leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc).
 // `c` is what the Board says of the moment (Board.actionContext): { b,

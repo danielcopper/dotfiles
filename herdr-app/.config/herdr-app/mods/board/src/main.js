@@ -33,20 +33,20 @@
 // with.
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
-// up to 100 items it reads (GitHub's most), at most as many as full pages
-// of its limit take: ten for the 1000 by default; a list view one. An issue's related items (its
-// description, parent, sub-issues and linked pull requests) cost one more
-// when its details open, again on `r` while they are open, and again
-// after a refresh where their last read failed (readRelated; what a refresh
-// keeps of them keptRelated says); an item the details panel went down to
-// (Enter on a line, related.js) costs the same when it shows, a pull request
-// one gh or az call for its details (az repos pr show), and on `r` each
-// level's again, so that a level whose item is no longer among the lines of
-// the one above can go. An Azure work item's related items (its description,
-// parent, children and linked pull requests) cost the same, one az call (az
-// boards work-item show --expand relations), and one WIQL query more for its
-// children's and its parent's titles and states where it has either
-// (sources/azure/related.js). An Azure team's Sprint two az calls (the
+// up to 100 items it reads (GitHub's most), at most as many as full pages of
+// its limit take: ten for the 1000 by default; a list view one. An issue's
+// related items (its description, parent, sub-issues and linked pull
+// requests) cost one more when its details open, again on `r` while they are
+// open, and again after a refresh where their last read failed (readRelated;
+// what a refresh keeps of them keptRelated says); an item the details panel
+// went down to (Enter on a line, related.js) costs the same when it shows, a
+// pull request one gh or az call for its details (az repos pr show), and on
+// `r` each level's again, so that a level whose item is no longer among the
+// lines of the one above can go. An Azure work item's related items (its
+// description, parent, children and linked pull requests) cost the same, one
+// az call (az boards work-item show --expand relations), and one WIQL query
+// more for its children's and its parent's titles and states where it has
+// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
 // taskboard's column of each work item, and one WIQL query for their fields;
 // for a sprint the sprint picker chose, by its id and path; none while the
 // team has no sprint running and none is chosen), its Backlog two, one after

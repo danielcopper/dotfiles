@@ -35,8 +35,8 @@ const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] 
 // "source" may stay from views.json's first form, as "github".
 const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
 
-// The most items a board reads, and so its default limit: ten pages of
-// GitHub's (PAGE), one gh call each.
+// The most items a board reads, and its default limit: ten of GitHub's
+// pages (PAGE).
 const BOARD_LIMIT = 10 * PAGE;
 
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
