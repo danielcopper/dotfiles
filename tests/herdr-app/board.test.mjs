@@ -11082,3 +11082,22 @@ test("UI: each draw takes its colors from the theme it draws in, after a switch 
     assert.deepEqual(dots, LARGE_SHOWN.map((id) => text(GITHUB_TONES[LARGE_OPTIONS.find(([o]) => o === id)[2]])), `${name}: column dots`);
   }
 });
+
+test("a space on a branch is an item's session where a part of the branch is the item's number followed by „-“, or its last part is the number", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const on = (branch) => Boolean(board.linkedSession(card, [{ id: "s", name: "x", folder: "/r/tender.worktrees/x", branch, status: "idle", tabs: [] }]));
+  const branches = ["feat/3000-x", "3000", "3000-x", "feat/3000", "a/b/3000-y", "feat/3000-x/more", "feat/30001-x", "feat/13000-x", "feat/3000x", "feat/3000/x", "feat/x3000", "feat-3000"];
+  assert.deepEqual(branches.map((br) => [br, on(br)]), branches.map((br) => [br, /(^|\/)3000(-|$)/.test(br)]));
+  assert.deepEqual(branches.filter(on), ["feat/3000-x", "3000", "3000-x", "feat/3000", "a/b/3000-y", "feat/3000-x/more"]);
+});
+
+test("a progress bar is 6 high, each of its segments as high by the bar's stretch, and a continuous one too", () => {
+  globalThis.__boardHost = fakeHost();
+  const t = copperTheme("dark");
+  const bar = byId(board.progressLine(t, { done: 1, total: 3 }, []), "progress-bar");
+  assert.deepEqual(bar.with.h, [6]);
+  assert.equal(bar.kids.length, 3);
+  for (const segment of bar.kids) assert.ok(heightFrom(bar, segment) && !segment.with.h, "the bar's height");
+  const wide = byId(board.progressLine(t, { done: 1, total: 31 }, []), "progress-bar");
+  assert.deepEqual([wide.with.h, wide.kids[0].with.h], [[6], [6]]);
+});

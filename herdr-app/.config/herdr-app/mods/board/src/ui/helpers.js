@@ -537,7 +537,7 @@ export function progressLine(t, progress, end) {
   const { done, total } = progress;
   const on = toneColor(t, PROGRESS_TONE);
   const bar = total <= PROGRESS_SEGMENTS
-    ? h_flex().id("progress-bar").flex_1().min_w(40).gap(2).children(Array.from({ length: total }, (_, i) => div().flex_1().h(6).rounded(1).bg(i < done ? on : t.border)))
+    ? h_flex().id("progress-bar").flex_1().min_w(40).h(6).items_stretch().gap(2).children(Array.from({ length: total }, (_, i) => div().flex_1().rounded(1).bg(i < done ? on : t.border)))
     : div().id("progress-bar").flex_1().min_w(40).h(6).rounded(1).bg(t.border).child(div().h(6).w(`${((100 * done) / total).toFixed(2)}%`).rounded(1).bg(on));
   const number = (text) => div().flex_none().text_size(11).text_color(t.muted).child(text);
   return h_flex().id("card-progress").gap(8).items_center().child(number(`${done} / ${total}`)).child(bar).child(number(`${Math.floor((100 * done) / total)} %`)).children(end);

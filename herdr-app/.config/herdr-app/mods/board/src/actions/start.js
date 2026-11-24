@@ -28,13 +28,18 @@ export function linkedSession(item, allSpaces) {
     if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
   }
   if (!hits.length && item.source === "github" && key) {
-    const own = new RegExp(`(^|/)${item.number}(-|$)`);
     hits = allSpaces
-      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : own.test(s.branch) && (s.folder ?? "").includes(item.repoShort)))
+      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : numberedBranch(s.branch, item.number) && (s.folder ?? "").includes(item.repoShort)))
       .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
   }
   hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
   return hits[0] ?? null;
+}
+
+// No RegExp: one would be compiled per card on every render.
+function numberedBranch(branch, number) {
+  const parts = String(branch).split("/");
+  return parts.some((part, i) => part.startsWith(`${number}-`) || (i === parts.length - 1 && part === String(number)));
 }
 
 export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };

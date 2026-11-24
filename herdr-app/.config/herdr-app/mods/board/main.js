@@ -643,6 +643,7 @@ export function startSettings(config, view, repo) {
 // between them, case-insensitive; an empty filter matches anything.
 export function wordsMatch(texts, filter) {
   const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
   const hay = texts.filter(Boolean).join("\n").toLowerCase();
   return words.every((w) => hay.includes(w));
 }
@@ -711,6 +712,7 @@ export function fuzzyMatch(text, query) {
 // Cards whose text holds every word of the filter (wordsMatch); their
 // assignees count by name and by login.
 export function matches(card, text) {
+  if (!String(text ?? "").trim()) return true;
   return wordsMatch([card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
     ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])], text);
 }
@@ -1429,13 +1431,18 @@ export function linkedSession(item, allSpaces) {
     if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
   }
   if (!hits.length && item.source === "github" && key) {
-    const own = new RegExp(`(^|/)${item.number}(-|$)`);
     hits = allSpaces
-      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : own.test(s.branch) && (s.folder ?? "").includes(item.repoShort)))
+      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : numberedBranch(s.branch, item.number) && (s.folder ?? "").includes(item.repoShort)))
       .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
   }
   hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
   return hits[0] ?? null;
+}
+
+// No RegExp: one would be compiled per card on every render.
+function numberedBranch(branch, number) {
+  const parts = String(branch).split("/");
+  return parts.some((part, i) => part.startsWith(`${number}-`) || (i === parts.length - 1 && part === String(number)));
 }
 
 export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
@@ -4757,7 +4764,7 @@ export function progressLine(t, progress, end) {
   const { done, total } = progress;
   const on = toneColor(t, PROGRESS_TONE);
   const bar = total <= PROGRESS_SEGMENTS
-    ? h_flex().id("progress-bar").flex_1().min_w(40).gap(2).children(Array.from({ length: total }, (_, i) => div().flex_1().h(6).rounded(1).bg(i < done ? on : t.border)))
+    ? h_flex().id("progress-bar").flex_1().min_w(40).h(6).items_stretch().gap(2).children(Array.from({ length: total }, (_, i) => div().flex_1().rounded(1).bg(i < done ? on : t.border)))
     : div().id("progress-bar").flex_1().min_w(40).h(6).rounded(1).bg(t.border).child(div().h(6).w(`${((100 * done) / total).toFixed(2)}%`).rounded(1).bg(on));
   const number = (text) => div().flex_none().text_size(11).text_color(t.muted).child(text);
   return h_flex().id("card-progress").gap(8).items_center().child(number(`${done} / ${total}`)).child(bar).child(number(`${Math.floor((100 * done) / total)} %`)).children(end);

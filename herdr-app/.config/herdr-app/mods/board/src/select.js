@@ -7,6 +7,7 @@ import { itemKey, sameItem } from "./shared.js";
 // between them, case-insensitive; an empty filter matches anything.
 export function wordsMatch(texts, filter) {
   const words = String(filter ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
   const hay = texts.filter(Boolean).join("\n").toLowerCase();
   return words.every((w) => hay.includes(w));
 }
@@ -75,6 +76,7 @@ export function fuzzyMatch(text, query) {
 // Cards whose text holds every word of the filter (wordsMatch); their
 // assignees count by name and by login.
 export function matches(card, text) {
+  if (!String(text ?? "").trim()) return true;
   return wordsMatch([card.title, card.number !== null ? `#${card.number}` : "", itemKey(card), card.repo, card.type, card.author, card.branch,
     ...(card.labels ?? []), ...(card.assignees ?? []), ...(card.assigneeLogins ?? [])], text);
 }
