@@ -364,35 +364,34 @@ by that run. Which files of the package git tracks is set in the root
   it brings the tab's content back with the place before the board, the pane
   under it too, and from there it shows the board again.
   Whenever the board comes to show, there or in a Board tab, it takes the
-  keyboard: the start dialog's message while the dialog is on that field, else
-  the filter being typed, else the board itself; to show the layer's board, the
-  button and `b` also send it the board's focus command, which herdr hands only
-  to a copy that shows. The tab's content comes back, with the keyboard, on a
-  second press of the button or `b`, on `Esc` when the board has nothing else to
-  close (details, a notice, the filter), on `Enter` to an item's session, and
-  when the focus moves to another space, tab or pane, for example to the agent
-  the board just started; a new program in the same pane keeps the board. Any
-  click outside the board but the button's (the tab bar, the sidebar, the right
-  panel; any mouse button), pressed and released within 8 px, brings the tab's
-  content back, while a press that turns into a drag (a divider, a tab) keeps
-  the board; a herdr before 0.1.18 brings the content back on the press. The
-  pane gets the keyboard only if the board still has it then, otherwise what was
-  pressed keeps it. While the board shows, the tab bar marks no tab as the
-  shown one (`mods/board-tabs/`, above). The board layer is found by its
-  shape, not by ids. Without
-  one, the button and `b` show the board's "Board" tab or open one, except in
-  the personal layout, where they say the layer is missing. A Board tab left
-  open from before is best closed there: when the layer hides the board, that
-  tab's board may take the keyboard if its tab is the shown one. A top bar
-  toggles between its sources, GitHub and Azure, and shows one tab per context
-  of the shown source, as `mods/board/views.json` sets them: on Azure each of my
-  teams, with a switch between its Sprint and its Backlog, followed by the pull
-  requests of its project; on GitHub "Meine Aufgaben" (my issues on the Tender
-  project's board, in the columns of its Status field) and "PRs" (pull requests
-  I am asked to review, I opened, or I reviewed, with checks, review state and
-  whether I have to act on them). A team's
-  Sprint shows its current sprint the way Azure's taskboard does: one row per
-  story (its id, title, own state and assignee), its tasks as cards in the
+  keyboard: the start dialog's message or the new space's name while the dialog
+  is on that field, else the filter being typed, else the board itself; to show
+  the layer's board, the button and `b` also send it the board's focus command,
+  which herdr hands only to a copy that shows. The tab's content comes back,
+  with the keyboard, on a second press of the button or `b`, on `Esc` when the
+  board has nothing else to close (details, a notice, the filter), on `Enter` to
+  an item's session, and when the focus moves to another space, tab or pane, for
+  example to the agent the board just started; a new program in the same pane
+  keeps the board. Any click outside the board but the button's (the tab bar,
+  the sidebar, the right panel; any mouse button), pressed and released within
+  8 px, brings the tab's content back, while a press that turns into a drag (a
+  divider, a tab) keeps the board; a herdr before 0.1.18 brings the content back
+  on the press. The pane gets the keyboard only if the board still has it then,
+  otherwise what was pressed keeps it. While the board shows, the tab bar marks
+  no tab as the shown one (`mods/board-tabs/`, above). The board layer is found
+  by its shape, not by ids. Without one, the button and `b` show the board's
+  "Board" tab or open one, except in the personal layout, where they say the
+  layer is missing. A Board tab left open from before is best closed there: when
+  the layer hides the board, that tab's board may take the keyboard if its tab
+  is the shown one. A top bar toggles between its sources, GitHub and Azure, and
+  shows one tab per context of the shown source, as `mods/board/views.json` sets
+  them: on Azure each of my teams, with a switch between its Sprint and its
+  Backlog, followed by the pull requests of its project; on GitHub "Meine
+  Aufgaben" (my issues on the Tender project's board, in the columns of its
+  Status field) and "PRs" (pull requests I am asked to review, I opened, or I
+  reviewed, with checks, review state and whether I have to act on them). A
+  team's Sprint shows its current sprint the way Azure's taskboard does: one row
+  per story (its id, title, own state and assignee), its tasks as cards in the
   team's taskboard columns, each with its own state, assignee and id, and the
   tasks whose story is not in the sprint in a row "Ohne Story" at the top; it
   holds the work items of the sprint in the team's areas, and its tasks are the
@@ -725,20 +724,28 @@ by that run. Which files of the package git tracks is set in the root
   again; a level whose item is no longer among the lines of the level above
   goes, and the board says so, where those lines came whole (lines that could
   not all be read, or were cut short, decide nothing). `Enter` opens the
-  details, a
-  second `Enter` goes to the item's session or starts one: a new
-  space or tab on the chosen machine, in the repo's checkout, whose agent gets
-  the first message views.json sets (`/implement <n>`, `/pr-review <n>` for a
-  pull request) and makes its own worktree. In the start dialog and the
-  create dialog `Tab` and shift-`Tab` move between the fields, from the
-  message or title too: the board binds them in its own key context, as the
-  leader does (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
-  The session is named after the item (`romm-tender#2845 …`, `AB#456 …`
-  for a work item), which is how the board finds it again. A status change
-  shows at once and is written to GitHub or Azure; a refusal moves the card
-  back (or sets the state back) with the error, and a write without a clear
-  answer refreshes the board and then says where the card is, or which state
-  the work item has. A state set on Azure
+  details, a second `Enter` goes to the item's session or starts one: a new tab
+  on the chosen machine, in the repo's checkout, whose agent gets the first
+  message views.json sets (`/implement <n>`, `/pr-review <n>` for a pull
+  request) and makes its own worktree. The start dialog's "Öffnen in" says where
+  the tab goes: `Enter` or a click on it opens a picker like the assignee
+  picker, with "Neuer Space …" and the chosen machine's spaces. An existing
+  space gets the tab, in the checkout's folder whatever the space's own; a new
+  space takes the name typed in the field that then shows, prefilled with the
+  repo's name (for a work item the checkout's last folder). Preselected is the
+  space of that name, ignoring case, else the space I am in, else that machine's
+  first; "Neuer Space …" only where the machine has none. Another machine in
+  "Rechner" chooses anew among its spaces, and one whose spaces herdr has not
+  read says so and offers only a new space. `Esc` in the picker goes back to the
+  dialog. In the start dialog and the create dialog `Tab` and shift-`Tab` move
+  between the fields, from the message or title too: the board binds them in its
+  own key context, as the leader does (the comment above `BOARD_KEYS` in
+  `mods/board/src/main.js`). The tab is named after the item
+  (`romm-tender#2845 …`, `AB#456 …` for a work item), which is how the board
+  finds it again. A status change shows at once and is written to GitHub or
+  Azure; a refusal moves the card back (or sets the state back) with the error,
+  and a write without a clear answer refreshes the board and then says where the
+  card is, or which state the work item has. A state set on Azure
   refreshes the Sprint either way, since which column it puts a task in is
   Azure's to say. Who an item is assigned to shows the same way on both
   sources, by name (on GitHub the login where the account has no name): on a

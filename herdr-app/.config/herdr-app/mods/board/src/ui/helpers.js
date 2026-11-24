@@ -199,12 +199,11 @@ const MENU_ROWS = 10;
 // height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
-// The window of a menu with a filter (the assignee picker, the command menu,
-// the sprint picker) over the rows of `list` the filter leaves: MENU_ROWS at
-// once from m.top, the marked row m.at (-1 for none). Its window follows the
-// mark where a key moves it (followMark); the wheel moves it alone
-// (menuWheel). menuWindow keeps both within the rows and gives the rows it
-// shows (`shown`) and what menu() takes for them.
+// The window of a menu with a filter over the rows of `list` the filter
+// leaves: MENU_ROWS at once from m.top, the marked row m.at (-1 for none).
+// Its window follows the mark where a key moves it (followMark); the wheel
+// moves it alone (menuWheel). menuWindow keeps both within the rows and gives
+// the rows it shows (`shown`) and what menu() takes for them.
 export function menuWindow(m, list) {
   const count = list.length;
   m.at = Math.max(-1, Math.min(m.at, count - 1));
@@ -236,9 +235,8 @@ export function menuWheel(m, by, count) {
   m.top = top;
 }
 
-// A row's name in a menu with a fuzzy filter (the command menu, the sprint
-// picker), the filter's letters in it (`at`, fuzzyRank) in the accent
-// color.
+// A row's name in a menu with a fuzzy filter, the filter's letters in it
+// (`at`, fuzzyRank) in the accent color.
 export function markedName(t, name, at) {
   const hits = new Set(at);
   const runs = [];
@@ -291,15 +289,13 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
-// A menu with a filter (the command menu, the assignee picker, the sprint
-// picker): opens the dialog `m` ({ kind, view, … }) as b.modal with its
-// filter, an InputState with `placeholder` made for it (m.input; field and
-// textField "filter", inputFocused, filter; at, the marked row; top and
-// wheel, its window). Enter in the filter picks the marked row (pick(i,
-// cx)). When it opens and at each change of the filter, mark() marks the
-// row startAt(m) gives and brings the window, from the top, to it
-// (followMark over count(m) rows); it returns mark, for a menu whose rows
-// come later.
+// A menu with a filter: opens the dialog `m` ({ kind, view, … }) as b.modal
+// with its filter, an InputState with `placeholder` made for it (m.input;
+// field "filter", inputs, inputFocused, filter; at, the marked row; top and
+// wheel, its window). Enter in the filter picks the marked row (pick(i, cx)).
+// When it opens and at each change of the filter, mark() marks the row
+// startAt(m) gives and brings the window, from the top, to it (followMark
+// over count(m) rows); it returns mark, for a menu whose rows come later.
 export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
   const mark = () => {
     m.at = startAt(m);
@@ -351,19 +347,25 @@ export const filterMenuHead = (t, m) => [
 export const menuNote = (t, text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
 
 // A dialog's text field, the InputState `input` for the dialog m's field
-// `field`: m.inputFocused follows its focus (Board.boardHasKeyboard), a
+// `field`, kept as m.inputs[field] (Board.takeKeyboard): m.inputFocused
+// follows the focus of the dialog's fields (Board.boardHasKeyboard), a
 // focus moves the dialog onto that field, and Enter in it runs
 // `submit(cx)`.
 export function wireTextField(b, m, input, field, submit) {
-  m.textField = field;
+  m.inputs = { ...m.inputs, [field]: input };
   m.inputFocused = false;
   input.on("focus", (_e, cx) => {
     m.inputFocused = true;
+    m.focusedField = field;
     if (b.modal === m) m.field = field;
     cx.notify();
   });
+  // A blur that comes after another field of the dialog took the focus
+  // leaves it.
   input.on("blur", () => {
+    if (m.focusedField !== field) return;
     m.inputFocused = false;
+    m.focusedField = null;
   });
   input.on("submit", (_e, cx) => submit(cx));
 }

@@ -420,7 +420,7 @@ test("validateConfig keeps valid GitHub views and names each problem of the othe
   assert.equal(config.azure, null);
   assert.equal(config.refreshMinutes, 3);
   const text = errors.join("\n");
-  for (const expected of [/refreshMinutes/, /„colour“ gibt es nicht/, /„start\.colour“ gibt es nicht/, /„start\.open“ ist "space" oder "tab"/,
+  for (const expected of [/refreshMinutes/, /„colour“ gibt es nicht/, /„start\.colour“ gibt es nicht/, /„start\.open“ gibt es nicht mehr: „Öffnen in“ im Startdialog wählt den Space/,
     /„id“ ok gibt es schon/, /GitHub-Ansicht 3 \(„No id“\): „id“ fehlt/, /GitHub-Ansicht 4 \(„Bad source“\): „source“ ist hier "github" oder fehlt/,
     /„project“ braucht/, /GitHub-Ansicht 6 \(„Bad layout“\): „layout“ ist "board" oder "list"/,
     /„sections“ braucht/, /„hide“ muss eine Liste/, /GitHub-Ansicht 9 \(„Typo“\): „hidden“ gibt es nicht/, /GitHub-Ansicht 10 \(„On“\): „on“ gibt es nicht/]) {
@@ -542,7 +542,7 @@ test("start settings: defaults < start < the view's start < the repo's entry", (
   const config = sampleConfig();
   const [mine, , other] = config.github.views;
   const s = board.startSettings(config, mine, "example/tender");
-  assert.deepEqual([s.message, s.review, s.checkout, s.machine, s.open], ["/work {number}", "/look {number}", "~/src/tender", "server", "space"]);
+  assert.deepEqual([s.message, s.review, s.checkout, s.machine], ["/work {number}", "/look {number}", "~/src/tender", "server"]);
   assert.equal(board.startSettings(config, other, "other/repo").checkout, "~/src/work");
   assert.equal(board.startSettings(config, other, "other/repo").message, "OT {number}");
   assert.equal(board.startSettings(config, other, "example/tender").checkout, "~/src/tender", "the repo's entry wins over the view's start");
@@ -1901,26 +1901,39 @@ test("the checkout script works under dash too", { skip: !dash && "no dash on th
   assert.equal(run("~/src/none").status, 3);
 });
 
-test("a session opens as a new space on its machine or a tab in a space there", () => {
-  assert.deepEqual(board.startCommand({ open: "space", on: "server", folder: "/w", argv: ["claude"], task: "/work 1", name: "tender#1 t" }),
-    ["space.new", { name: "tender#1 t", tab: "tender#1 t", machine: "server", folder: "/w", argv: ["claude"], task: "/work 1" }]);
-  assert.deepEqual(board.startCommand({ open: "space", on: null, folder: "/w", argv: ["claude"], task: "", name: "n" }),
-    ["space.new", { name: "n", tab: "n", machine: "", folder: "/w", argv: ["claude"] }]);
-  assert.deepEqual(board.startCommand({ open: "tab", on: null, folder: "/w", argv: ["claude"], task: "go", name: "n", space: "s2" }),
+test("a session opens as a new space with its own name on its machine, or a tab in a space there; the tab carries the session's name", () => {
+  assert.deepEqual(board.startCommand({ on: "server", folder: "/w", argv: ["claude"], task: "/work 1", name: "tender#1 t", spaceName: "tender" }),
+    ["space.new", { name: "tender", tab: "tender#1 t", machine: "server", folder: "/w", argv: ["claude"], task: "/work 1" }]);
+  assert.deepEqual(board.startCommand({ on: null, folder: "/w", argv: ["claude"], task: "", name: "n", spaceName: "mine" }),
+    ["space.new", { name: "mine", tab: "n", machine: "", folder: "/w", argv: ["claude"] }]);
+  assert.deepEqual(board.startCommand({ on: null, folder: "/w", argv: ["claude"], task: "go", name: "n", space: "s2", spaceName: "unused" }),
     ["tab.new", { name: "n", space: "s2", folder: "/w", argv: ["claude"], task: "go" }]);
 });
 
-test("a new tab goes to a space in the checkout or below it on that machine, else the shown one there", () => {
+test("Öffnen in preselects the space named like the repo, ignoring case, else the shown one, else the machine's first; none without spaces", () => {
   const spaces = [
-    { id: "a", machine: null, folder: "/home/me/src/other", active: true },
-    { id: "b", machine: "server", folder: "/home/me/src/tender/docs", active: false },
-    { id: "c", machine: null, folder: "/home/me/src/tender", active: false },
-    { id: "d", machine: "laptop", folder: "/home/me/src/tender.worktrees/feat/9-x", active: false },
+    { id: "a", name: "other", machine: null, active: true },
+    { id: "b", name: "Tender", machine: "server", active: false },
+    { id: "c", name: "TENDER", machine: null, active: false },
+    { id: "d", name: "notes", machine: "server", active: false },
+    { id: "e", name: "x", machine: "laptop", active: false },
+    { id: "f", name: "y", machine: "laptop", active: false },
   ];
-  assert.equal(board.spaceForTab(spaces, null, "/home/me/src/tender").id, "c");
-  assert.equal(board.spaceForTab(spaces, "server", "/home/me/src/tender").id, "b");
-  assert.equal(board.spaceForTab(spaces, null, "/home/me/src/none").id, "a");
-  assert.equal(board.spaceForTab(spaces, "laptop", "/home/me/src/tender"), null, "a worktree beside the checkout is not in it");
+  const pre = (on, name) => board.preselectedSpace(board.spacesOn(spaces, on), name)?.id ?? null;
+  assert.deepEqual(board.spacesOn(spaces, "server").map((s) => s.id), ["b", "d"], "only the machine's spaces, in herdr's order");
+  assert.deepEqual(board.spacesOn(spaces, undefined).map((s) => s.id), ["a", "c"], "this machine's");
+  assert.equal(pre(null, "tender"), "c");
+  assert.equal(pre("server", "tender"), "b");
+  assert.equal(pre(null, "none"), "a", "the shown space");
+  assert.equal(pre("laptop", "none"), "e", "the shown space is on another machine: the first");
+  assert.equal(pre(null, ""), "a", "no name: the shown space");
+  assert.equal(pre("desk", "tender"), null);
+});
+
+test("a new space's name is the repo's short name, an Azure item's its checkout's last folder", () => {
+  assert.equal(board.spaceNameFor({ repoShort: "tender" }, "~/src/other"), "tender");
+  assert.equal(board.spaceNameFor({ source: "azure" }, "~/Repos/vc/"), "vc");
+  assert.equal(board.spaceNameFor({ source: "azure" }, null), "");
 });
 
 // ---- Labels ----
@@ -3444,7 +3457,7 @@ async function openStart(b, cx) {
   assert.equal(b.modal?.kind, "start");
 }
 
-test("UI: Enter in the dialog opens the session in the checkout; Esc does nothing while it starts", async () => {
+test("UI: Enter in the dialog opens the session in the checkout, as a tab in the shown space; Esc does nothing while it starts", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
   assert.equal(b.modal.input.value(), "/work 3004");
@@ -3458,7 +3471,7 @@ test("UI: Enter in the dialog opens the session in the checkout; Esc does nothin
   await host.answer("sh", ok("/home/me/src/tender\n"));
   assert.equal(b.modal, null);
   const name = "tender#3004 feat(api): page through long lists";
-  assert.deepEqual(host.runs.at(-1), ["space.new", { name, tab: name, machine: "", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
+  assert.deepEqual(host.runs.at(-1), ["tab.new", { name, space: "s1", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
   assert.equal(b.notice.text, `Sitzung wird geöffnet: ${name}`);
   await cx.fire();
   assert.equal(b.notice.text, `Sitzung wird geöffnet: ${name}`, "not there at the first check");
@@ -3479,10 +3492,10 @@ test("UI: a session that does not appear is warned about after the last check on
   assert.match(b.notice.text, /^Sitzung wird geöffnet/, "no warning before the last check");
   assert.equal(host.notes.length, notes);
   await cx.fire();
-  assert.equal(b.notice.text, "Kein Space und kein Tab „tender#3004 feat(api): page through long lists“ erschienen; die Sitzung ist wohl nicht gestartet");
+  assert.equal(b.notice.text, "Kein Tab „tender#3004 feat(api): page through long lists“ erschienen; die Sitzung ist wohl nicht gestartet");
   assert.equal(host.notes.at(-1).level, "warning");
 });
-test("UI: a checkout that is missing, or no space for a tab, is said in the dialog, which stays", async () => {
+test("UI: a checkout that is missing, or a folder not read, is said in the dialog, which stays", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
   board.startModal.start(b, cx);
@@ -3498,37 +3511,330 @@ test("UI: a checkout that is missing, or no space for a tab, is said in the dial
   assert.equal(b.modal.error, "Checkout-Ordner nicht gelesen");
 });
 
-test("UI: another machine in the dialog runs the checkout there; a tab needs a space on it", async () => {
+const SESSION = "tender#3004 feat(api): page through long lists";
+const spaceOf = (id, name, machine = null, active = false) => ({ id, name, folder: `/r/${name}`, machine, branch: "main", active, status: null, tabs: [{ id: `${id}t`, name: "1" }] });
+// The start dialog's "Öffnen in" value and whether it shows the new
+// space's name field.
+const openInShown = (b) => {
+  const root = b.render();
+  return [texts(byId(root, "choice-open"))[0], texts(root).includes("Name des neuen Space")];
+};
+// The board's own space, moved to a machine the dialog does not offer, so
+// that this one has none.
+const elsewhere = (host) => ({ ...host.spaceList[0], machine: "laptop" });
+// From the message to "Öffnen in", then Enter: the space picker.
+async function openPicker(b, cx) {
+  for (let i = 0; i < 3; i++) await press(b, cx, "tab");
+  assert.equal(b.modal.field, "open");
+  await press(b, cx, "enter");
+  assert.equal(b.modal.kind, "openIn");
+}
+const openInRows = (b) => byId(b.render(), "open-in-rows").kids.map((k) => texts(k).join(""));
+
+test("UI: Öffnen in preselects the space named like the repo, and the session opens as a tab there", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "Tender")];
+  await openStart(b, cx);
+  assert.deepEqual(openInShown(b), ["Tender", false]);
+  await press(b, cx, "tab");
+  await press(b, cx, "enter");
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.deepEqual(host.runs.at(-1), ["tab.new", { name: SESSION, space: "s3", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
+});
+
+test("UI: Enter on Öffnen in opens the space picker: Neuer Space and this machine's spaces, the choice marked; the filter narrows them, Enter takes one", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "tender"), spaceOf("s4", "srv", "server")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  assert.deepEqual(openInRows(b), ["Neuer Space …", "x/r/tender", "tender/r/tender"]);
+  assert.ok(texts(b.render()).includes("Öffnen in · Dieser Rechner · Enter · Esc"));
+  assert.equal(b.modal.at, 2, "the dialog's choice");
+  b.modal.input.type("zz");
+  assert.deepEqual([openInRows(b), b.modal.at], [[], -1]);
+  assert.ok(texts(b.render()).includes("Kein Space passt zum Filter"));
+  assert.equal(b.modal.inputFocused, true, "the filter has the keyboard");
+  b.modal.input.type("x");
+  assert.deepEqual([openInRows(b), b.modal.at], [["x/r/tender"], 0]);
+  cx.call((own) => b.modal.input.submit(own));
+  assert.deepEqual([b.modal.kind, b.modal.field], ["start", "open"]);
+  assert.ok(b.handle.held, "the board has the keyboard for the choice");
+  assert.deepEqual(openInShown(b), ["x", false]);
+  board.startModal.start(b, cx);
+  await settle();
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.equal(host.runs.at(-1)[1].space, "s1");
+});
+
+test("UI: Neuer Space … in the picker shows the name field, prefilled with the repo's name, which takes the keyboard; Enter there opens a space of that name", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
+  await openPicker(b, cx);
+  await press(b, cx, "up");
+  cx.call((own) => b.modal.input.submit(own));
+  const m = b.modal;
+  assert.deepEqual([m.kind, m.field, m.inputFocused, m.nameInput.value()], ["start", "name", true, "tender"]);
+  assert.deepEqual(openInShown(b), ["Neuer Space …", true]);
+  m.nameInput.type("api work");
+  cx.call((own) => m.nameInput.submit(own));
+  await settle();
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.deepEqual(host.runs.at(-1), ["space.new", { name: "api work", tab: SESSION, machine: "", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
+});
+
+test("UI: Esc in the space picker goes back to the dialog with its choice; a second Esc closes the dialog", async () => {
+  const { b, cx } = await openBoard();
+  await openStart(b, cx);
+  const m = b.modal;
+  await openPicker(b, cx);
+  await press(b, cx, "up");
+  await press(b, cx, "escape");
+  assert.equal(b.modal, m);
+  assert.deepEqual([m.field, b.handle.held, openInShown(b)], ["open", true, ["x", false]]);
+  assert.ok(texts(b.render()).includes("Tab wechselt das Feld · ↵ wählt den Space"));
+  await press(b, cx, "space");
+  assert.equal(b.modal.kind, "openIn", "space opens it too");
+  await press(b, cx, "escape");
+  await press(b, cx, "escape");
+  assert.equal(b.modal, null);
+});
+
+test("UI: a click on Öffnen in opens the picker; a click on a row takes it", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work")];
+  await openStart(b, cx);
+  await click(b, cx, "choice-open");
+  assert.equal(b.modal.kind, "openIn");
+  await click(b, cx, "open-in-row-2");
+  assert.deepEqual([b.modal.kind, openInShown(b)], ["start", ["work", false]]);
+});
+
+test("UI: a new space needs a name: without one the dialog says so and starts nothing", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [elsewhere(host)];
+  await openStart(b, cx);
+  assert.deepEqual(openInShown(b), ["Neuer Space …", true], "no space on the machine: a new one");
+  b.modal.nameInput.type("  ");
+  board.startModal.start(b, cx);
+  await settle();
+  assert.equal(b.modal.error, "Der neue Space braucht einen Namen");
+  assert.deepEqual([host.open("sh").length, host.runs.length, b.modal.busy], [0, 0, null]);
+});
+
+test("UI: Tab reaches the new space's name only while a new space is chosen", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  for (let i = 0; i < 4; i++) await press(b, cx, "tab");
+  assert.equal(b.modal.field, "message", "a space is chosen: round to the message");
+  host.spaceList = [];
+  for (let i = 0; i < 4; i++) await press(b, cx, "tab");
+  assert.deepEqual([b.modal.field, b.modal.inputFocused], ["name", true]);
+  const stopped = cx.stopped;
+  await press(b, cx, "l");
+  assert.equal(cx.stopped, stopped, "typing goes to the name");
+  await press(b, cx, "tab");
+  assert.equal(b.modal.field, "message");
+});
+
+test("UI: another machine in the dialog runs the checkout there and opens the tab in its space; a space of another machine is not offered here", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [elsewhere(host), spaceOf("s2", "tender", "server")];
+  await openStart(b, cx);
+  assert.deepEqual(openInShown(b), ["Neuer Space …", true], "this machine has no space");
   await press(b, cx, "tab");
   await press(b, cx, "tab");
-  assert.equal(b.modal.field, "machine");
   await press(b, cx, "l");
   await settle();
-  await press(b, cx, "tab");
-  await press(b, cx, "l");
-  assert.equal(b.modal.open, "tab");
+  assert.deepEqual(openInShown(b), ["tender", false], "the server's space");
   await press(b, cx, "enter");
   assert.equal(host.open("sh")[0].options.on, "server");
   await host.answer("sh", ok("/home/me/src/tender\n"));
-  assert.equal(b.modal.error, "Kein Space auf server für einen neuen Tab; als neuer Space öffnen");
-  assert.equal(host.runs.length, 0);
+  assert.deepEqual(host.runs.at(-1), ["tab.new", { name: SESSION, space: "s2", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
 });
 
-test("UI: a tab on this machine needs a space here; one in the same folder on another machine does not count", async () => {
+test("UI: a new space on another machine is made there with its name", async () => {
   const { b, cx, host } = await openBoard();
-  host.spaceList = [{ id: "s2", name: "y", folder: "/home/me/src/tender", machine: "server", branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Board", active: true }] }];
   await openStart(b, cx);
   await press(b, cx, "tab");
   await press(b, cx, "tab");
+  await press(b, cx, "l");
+  await settle();
+  assert.deepEqual(openInShown(b), ["Neuer Space …", true], "no space on the server");
+  await press(b, cx, "enter");
+  await host.answer("sh", ok("/srv/tender\n"));
+  assert.deepEqual(host.runs.at(-1), ["space.new", { name: "tender", tab: SESSION, machine: "server", folder: "/srv/tender", argv: ["claude"], task: "/work 3004" }]);
+});
+
+test("UI: changing the machine drops the space chosen and preselects among that machine's spaces again", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "tender"), spaceOf("s4", "a", "server"), spaceOf("s5", "TENDER", "server")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  b.modal.input.type("x");
+  cx.call((own) => b.modal.input.submit(own));
+  assert.deepEqual(openInShown(b), ["x", false]);
+  await press(b, cx, "tab", { modifiers: { shift: true } });
+  await press(b, cx, "l");
+  await settle();
+  assert.deepEqual(openInShown(b), ["TENDER", false]);
+  await press(b, cx, "l");
+  await settle();
+  assert.deepEqual(openInShown(b), ["tender", false], "back here: the rule again, not the earlier choice");
+});
+
+test("UI: a machine whose spaces herdr has not read says so in the dialog and the picker, and leaves Neuer Space usable", async () => {
+  const { b, cx, host } = await openBoard();
+  let layout = "loading";
+  host.machines = () => [{ name: null, layout: "ready" }, { name: "server", layout }];
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s4", "srv", "server")];
+  await openStart(b, cx);
+  await press(b, cx, "tab");
   await press(b, cx, "tab");
   await press(b, cx, "l");
-  assert.equal(b.modal.open, "tab");
+  await settle();
+  const note = "Die Spaces auf server sind noch nicht gelesen; „Neuer Space …“ geht trotzdem";
+  assert.ok(texts(b.render()).includes(note));
+  assert.deepEqual(openInShown(b), ["Neuer Space …", true]);
+  await press(b, cx, "tab");
   await press(b, cx, "enter");
+  assert.deepEqual(openInRows(b), ["Neuer Space …"]);
+  assert.ok(texts(b.render()).includes(note), "the picker says so too");
+  await press(b, cx, "escape");
+  layout = "unavailable";
+  assert.ok(texts(b.render()).includes("Die Spaces auf server sind nicht lesbar; „Neuer Space …“ geht trotzdem"));
+  host.machines = () => [{ name: null, layout: "ready" }];
+  assert.ok(texts(b.render()).includes("Die Spaces auf server sind nicht lesbar; „Neuer Space …“ geht trotzdem"), "gone from herdr's machines");
+  host.machines = () => [{ name: null, layout: "ready" }, { name: "server", layout }];
+  layout = "ready";
+  assert.deepEqual(openInShown(b), ["srv", false], "read now: its spaces are offered");
+  assert.equal(texts(b.render()).some((s) => s.startsWith("Die Spaces")), false);
+});
+
+test("UI: a space chosen that goes before the checkout is found is said in the dialog, which stays", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "tender")];
+  await openStart(b, cx);
+  board.startModal.start(b, cx);
+  await settle();
+  host.spaceList = [host.spaceList[0]];
   await host.answer("sh", ok("/home/me/src/tender\n"));
-  assert.equal(b.modal.error, "Kein Space auf diesem Rechner für einen neuen Tab; als neuer Space öffnen");
-  assert.deepEqual(host.runs, []);
+  assert.deepEqual([b.modal?.kind, b.modal.error, host.runs.length], ["start", "Den Space „tender“ auf diesem Rechner gibt es nicht mehr", 0]);
+});
+
+const shiftTab = (b, cx) => press(b, cx, "tab", { modifiers: { shift: true } });
+const pickRow = (b, cx) => cx.call((own) => b.modal.input.submit(own));
+
+test("UI: a tab of the session's name there before Starten is not the session just opened", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  host.spaceList = [...host.spaceList, { ...spaceOf("s8", "tender"), tabs: [{ id: "t8", name: SESSION }] }];
+  board.startModal.start(b, cx);
+  await settle();
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  await cx.fire();
+  await cx.fire();
+  await cx.fire();
+  assert.equal(b.notice.text, `Kein Tab „${SESSION}“ erschienen; die Sitzung ist wohl nicht gestartet`);
+});
+
+test("UI: the session is there once a tab of its name is; a space of its name without one is not it", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  board.startModal.start(b, cx);
+  await settle();
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  host.spaceList = [...host.spaceList, spaceOf("s9", SESSION)];
+  await cx.fire();
+  assert.equal(b.notice.text, `Sitzung wird geöffnet: ${SESSION}`);
+  host.spaceList = [...host.spaceList, { ...spaceOf("s8", "tender"), tabs: [{ id: "t8", name: SESSION }] }];
+  await cx.fire();
+  assert.equal(b.notice.text, `Sitzung geöffnet: ${SESSION}`);
+});
+
+test("UI: a space whose id is \"new\" is a space like any other", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("new", "work")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  b.modal.input.type("work");
+  pickRow(b, cx);
+  assert.deepEqual(openInShown(b), ["work", false]);
+});
+
+test("UI: an existing space picked after the new space's name was emptied starts there", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  await press(b, cx, "up");
+  pickRow(b, cx);
+  b.modal.nameInput.type("");
+  await shiftTab(b, cx);
+  await press(b, cx, "enter");
+  await press(b, cx, "down");
+  pickRow(b, cx);
+  assert.deepEqual(openInShown(b), ["x", false]);
+  board.startModal.start(b, cx);
+  await settle();
+  assert.equal(b.modal.error, null);
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.deepEqual(host.runs.at(-1), ["tab.new", { name: SESSION, space: "s1", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
+});
+
+test("UI: Öffnen in opens no picker while the session starts", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  for (let i = 0; i < 3; i++) await press(b, cx, "tab");
+  board.startModal.start(b, cx);
+  await settle();
+  await press(b, cx, "enter");
+  await click(b, cx, "choice-open");
+  assert.equal(b.modal.kind, "start");
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.equal(host.runs.length, 1);
+});
+
+test("UI: picking where the session opens clears the dialog's error", async () => {
+  const { b, cx } = await openBoard();
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  await press(b, cx, "up");
+  pickRow(b, cx);
+  b.modal.nameInput.type(" ");
+  board.startModal.start(b, cx);
+  await settle();
+  assert.ok(texts(b.render()).includes("Der neue Space braucht einen Namen"));
+  await shiftTab(b, cx);
+  await press(b, cx, "enter");
+  await press(b, cx, "down");
+  pickRow(b, cx);
+  assert.deepEqual([b.modal.error, texts(b.render()).includes("Der neue Space braucht einen Namen")], [null, false]);
+});
+
+test("UI: an item without a repo names its new space, and finds its space, by its checkout's last folder", async () => {
+  const { b, cx, host } = await openBoard({ config: testConfig({ start: { checkout: "~/Repos/vc" } }) });
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "VC")];
+  const item = { source: "azure", kind: "workitem", number: 301, title: "t", repo: null, assignees: [] };
+  cx.call((own) => board.startModal.open(b, b.view(), item, own));
+  await settle();
+  assert.deepEqual([b.modal.nameInput.value(), openInShown(b)], ["vc", ["VC", false]]);
+});
+
+test("UI: a dialog's field keeps the keyboard where the blur of the field it came from comes after its focus", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [];
+  await openStart(b, cx);
+  const m = b.modal;
+  const blurMessage = [];
+  const message = m.input;
+  const blur = message.blur;
+  message.blur = () => blurMessage.push(blur);
+  m.field = "name";
+  b.takeKeyboard();
+  assert.equal(m.inputFocused, true);
+  blurMessage.forEach((late) => late());
+  assert.equal(m.inputFocused, true, "the message's late blur leaves the name's focus");
+  m.nameInput.blur();
+  assert.equal(m.inputFocused, false);
 });
 
 test("UI: Enter twice on a card with a session goes to it", async () => {
@@ -3596,6 +3902,32 @@ test("UI: agents asked of a machine no longer chosen are ignored, also when the 
   asks[1].resolve([{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }]);
   await settle();
   assert.equal(b.modal.agents.length, 1);
+});
+
+test("UI: agents that answer while the space picker is open reach the dialog, also when the ask fails", async () => {
+  const { b, cx, host } = await openBoard();
+  const asks = [];
+  host.knownAgents = ({ on }) => {
+    const d = deferred();
+    asks.push({ on, ...d });
+    return d.promise;
+  };
+  const agentShown = () => texts(byId(b.render(), "choice-agent"))[0];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  asks[0].resolve([{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }]);
+  await settle();
+  await press(b, cx, "escape");
+  assert.equal(agentShown(), "Claude Code");
+  await press(b, cx, "tab", { modifiers: { shift: true } });
+  await press(b, cx, "l");
+  await press(b, cx, "tab");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal.kind, asks.map((a) => a.on)], ["openIn", [null, "server"]]);
+  asks[1].reject(new Error("down"));
+  await settle();
+  await press(b, cx, "escape");
+  assert.equal(agentShown(), "Agents auf server nicht lesbar: down");
 });
 // ---- UI: gh by the shell's path ----
 

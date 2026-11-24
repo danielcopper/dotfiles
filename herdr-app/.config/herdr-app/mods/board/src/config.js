@@ -4,12 +4,13 @@
 import { CONFIG_NAME, PAGE, SECTION_TONES, SECTION_TONE_ORDER, isObject, isText, textList } from "./shared.js";
 import { viewDefaults, viewKind } from "./kinds/index.js";
 
-export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
+export const START_DEFAULTS = { agent: null, machine: null, checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
-// Keys of the start that made a worktree or set the status; the agent's own
-// skills do both now.
+// Keys of a start that made a worktree or set the status: the agent's own
+// skills do both.
 const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
+const GONE_OPEN = "gibt es nicht mehr: „Öffnen in“ im Startdialog wählt den Space";
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
@@ -22,10 +23,10 @@ function startProblems(start, where) {
   const out = [];
   for (const [key, value] of Object.entries(start)) {
     if (GONE_START.includes(key)) out.push(`„${where}.${key}“ ${GONE}`);
+    else if (key === "open") out.push(`„${where}.open“ ${GONE_OPEN}`);
     else if (!START_KEYS.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
     else if (value !== null && typeof value !== "string") out.push(`„${where}.${key}“ muss Text sein`);
   }
-  if (start.open !== undefined && start.open !== "space" && start.open !== "tab") out.push(`„${where}.open“ ist "space" oder "tab"`);
   return out;
 }
 

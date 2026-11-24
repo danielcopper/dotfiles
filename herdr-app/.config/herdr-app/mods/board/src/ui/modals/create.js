@@ -4,7 +4,7 @@
 // The backlog shape opens it (n) as b.modal = { kind: "create", view,
 // types, at (the chosen type), parent (the selected item, or null), input
 // (the title's InputState, made for this dialog), field ("title" or
-// "type"), textField ("title"), inputFocused, error }. Enter or Anlegen
+// "type"), inputs ({ title }), inputFocused, error }. Enter or Anlegen
 // creates (actions/create.js): the dialog closes and the notice says how it
 // goes.
 

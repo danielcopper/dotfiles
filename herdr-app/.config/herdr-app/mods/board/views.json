@@ -3,8 +3,7 @@
   "start": {
     "agent": "claude",
     "message": "/implement {number}",
-    "review": "/pr-review {number}",
-    "open": "space"
+    "review": "/pr-review {number}"
   },
   "repos": {
     "danielcopper/romm-tender": { "checkout": "~/Repos/romm-tender" },

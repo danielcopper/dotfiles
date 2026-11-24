@@ -26,9 +26,9 @@
 //     of SECTION_TONE_ORDER by its place that no other section sets. A view
 //     may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
-//   machine, open ("space" | "tab"), checkout (the folder the session starts
-//   in; ~ is that machine's home), message (the first message for issues and
-//   work items) and review (for pull requests). Templates take {number}
+//   machine, checkout (the folder the session starts in; ~ is that
+//   machine's home), message (the first message for issues and work items)
+//   and review (for pull requests). Templates take {number}
 //   {title} {url} {owner} {repo} {key}.
 // - repos: { "<owner>/<repo>": { any start field } }. startSettings says
 //   which start applies.
@@ -116,7 +116,7 @@
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
-// the command menu and the sprint picker), commands.js (the action table,
+// the menus that rank their rows by name), commands.js (the action table,
 // which the keys of its actions, the hint line and the command menu read),
 // related.js (the items related to an item, read when its details open: what
 // is kept, their lines), description.js (a description as drawn, without
@@ -354,12 +354,13 @@ export const kindOf = (view) => KINDS[viewKind(view)] ?? null;
 // views.json: reading it, what is wrong with it, and the start settings for
 // an item.
 
-export const START_DEFAULTS = { agent: null, machine: null, open: "space", checkout: null, message: "", review: "" };
+export const START_DEFAULTS = { agent: null, machine: null, checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
-// Keys of the start that made a worktree or set the status; the agent's own
-// skills do both now.
+// Keys of a start that made a worktree or set the status: the agent's own
+// skills do both.
 const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
+const GONE_OPEN = "gibt es nicht mehr: „Öffnen in“ im Startdialog wählt den Space";
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
@@ -372,10 +373,10 @@ function startProblems(start, where) {
   const out = [];
   for (const [key, value] of Object.entries(start)) {
     if (GONE_START.includes(key)) out.push(`„${where}.${key}“ ${GONE}`);
+    else if (key === "open") out.push(`„${where}.open“ ${GONE_OPEN}`);
     else if (!START_KEYS.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
     else if (value !== null && typeof value !== "string") out.push(`„${where}.${key}“ muss Text sein`);
   }
-  if (start.open !== undefined && start.open !== "space" && start.open !== "tab") out.push(`„${where}.open“ ist "space" oder "tab"`);
   return out;
 }
 
@@ -661,11 +662,11 @@ export function wordsMatch(texts, filter) {
   return words.every((w) => hay.includes(w));
 }
 
-// The filter of the command menu and the sprint picker (rankByName): {
-// entry, at } for each entry of `list` whose text (`textOf`) holds the
-// letters of `query` in its order, `at` where they stand in it
-// (fuzzyMatch), best first. A tie keeps the shorter text first, then the
-// list's order. An empty query keeps the list as it is, with no letters.
+// A menu's filter (rankByName): { entry, at } for each entry of `list` whose
+// text (`textOf`) holds the letters of `query` in its order, `at` where they
+// stand in it (fuzzyMatch), best first. A tie keeps the shorter text first,
+// then the list's order. An empty query keeps the list as it is, with no
+// letters.
 export function fuzzyRank(list, query, textOf) {
   if (!String(query ?? "").trim()) return list.map((entry) => ({ entry, at: [] }));
   const scored = list.map((entry, n) => ({ entry, n, text: textOf(entry), match: fuzzyMatch(textOf(entry), query) }));
@@ -676,8 +677,7 @@ export function fuzzyRank(list, query, textOf) {
 }
 
 // The entries of `list` the filter `query` leaves by their names, best
-// first (fuzzyRank), each with `at`, where its letters stand in the name:
-// the command menu's actions, the sprint picker's sprints.
+// first (fuzzyRank), each with `at`, where its letters stand in the name.
 export const rankByName = (list, query) => fuzzyRank(list, query, (e) => e.name).map(({ entry, at }) => ({ ...entry, at }));
 
 // How the letters of `query` fit `text`, case-insensitive and spaces left
@@ -1526,8 +1526,8 @@ export function readLabels(st, now) {
 
 const NAME_MAX = 60;
 
-// The name of the tab and space a session starts in: the item's key and title,
-// cut to NAME_MAX characters. linkedSession finds the session by it.
+// The name of the tab a session starts in: the item's key and title, cut to
+// NAME_MAX characters. linkedSession finds the session by it.
 export function sessionName(item) {
   const key = itemKey(item);
   const full = key ? `${key} ${item.title}` : item.title;
@@ -1587,19 +1587,26 @@ export const CHECKOUT_SCRIPT = [
 
 export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
 
-// The space a new tab goes into: one on that machine in the checkout or
-// below it, else the shown space when it is on that machine.
-export function spaceForTab(allSpaces, on, repoFolder) {
-  const here = allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
-  return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}/`))) ?? here.find((s) => s.active) ?? null;
+export const spacesOn = (allSpaces, on) => allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
+
+// The name a new space gets by default and an existing one is preselected
+// by: the repo's short name; an Azure item, which has no repo, takes its
+// checkout's last folder.
+export function spaceNameFor(item, checkout) {
+  if (item.repoShort) return item.repoShort;
+  return String(checkout ?? "").split("/").filter(Boolean).pop() ?? "";
 }
 
-// The app command that opens a session: [name, args]. A new space and its
-// first tab both carry the session's name.
-export function startCommand({ open, on, folder, argv, task, name, space }) {
+export function preselectedSpace(here, name) {
+  const wanted = String(name ?? "").toLowerCase();
+  return (wanted && here.find((s) => s.name.toLowerCase() === wanted)) || here.find((s) => s.active) || here[0] || null;
+}
+
+// The app command that opens a session: [name, args].
+export function startCommand({ on, folder, argv, task, name, space, spaceName }) {
   const common = { folder, argv, ...(task ? { task } : {}) };
-  if (open === "tab") return ["tab.new", { name, space, ...common }];
-  return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
+  if (space) return ["tab.new", { name, space, ...common }];
+  return ["space.new", { name: spaceName, tab: name, machine: on ?? "", ...common }];
 }
 
 // ==== src/sources/azure/common.js ====
@@ -4588,12 +4595,11 @@ const MENU_ROWS = 10;
 // height in the script's pixels.
 export const MENU_ROW_PX = 28;
 
-// The window of a menu with a filter (the assignee picker, the command menu,
-// the sprint picker) over the rows of `list` the filter leaves: MENU_ROWS at
-// once from m.top, the marked row m.at (-1 for none). Its window follows the
-// mark where a key moves it (followMark); the wheel moves it alone
-// (menuWheel). menuWindow keeps both within the rows and gives the rows it
-// shows (`shown`) and what menu() takes for them.
+// The window of a menu with a filter over the rows of `list` the filter
+// leaves: MENU_ROWS at once from m.top, the marked row m.at (-1 for none).
+// Its window follows the mark where a key moves it (followMark); the wheel
+// moves it alone (menuWheel). menuWindow keeps both within the rows and gives
+// the rows it shows (`shown`) and what menu() takes for them.
 export function menuWindow(m, list) {
   const count = list.length;
   m.at = Math.max(-1, Math.min(m.at, count - 1));
@@ -4625,9 +4631,8 @@ export function menuWheel(m, by, count) {
   m.top = top;
 }
 
-// A row's name in a menu with a fuzzy filter (the command menu, the sprint
-// picker), the filter's letters in it (`at`, fuzzyRank) in the accent
-// color.
+// A row's name in a menu with a fuzzy filter, the filter's letters in it
+// (`at`, fuzzyRank) in the accent color.
 export function markedName(t, name, at) {
   const hits = new Set(at);
   const runs = [];
@@ -4680,15 +4685,13 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
-// A menu with a filter (the command menu, the assignee picker, the sprint
-// picker): opens the dialog `m` ({ kind, view, … }) as b.modal with its
-// filter, an InputState with `placeholder` made for it (m.input; field and
-// textField "filter", inputFocused, filter; at, the marked row; top and
-// wheel, its window). Enter in the filter picks the marked row (pick(i,
-// cx)). When it opens and at each change of the filter, mark() marks the
-// row startAt(m) gives and brings the window, from the top, to it
-// (followMark over count(m) rows); it returns mark, for a menu whose rows
-// come later.
+// A menu with a filter: opens the dialog `m` ({ kind, view, … }) as b.modal
+// with its filter, an InputState with `placeholder` made for it (m.input;
+// field "filter", inputs, inputFocused, filter; at, the marked row; top and
+// wheel, its window). Enter in the filter picks the marked row (pick(i, cx)).
+// When it opens and at each change of the filter, mark() marks the row
+// startAt(m) gives and brings the window, from the top, to it (followMark
+// over count(m) rows); it returns mark, for a menu whose rows come later.
 export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
   const mark = () => {
     m.at = startAt(m);
@@ -4740,19 +4743,25 @@ export const filterMenuHead = (t, m) => [
 export const menuNote = (t, text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
 
 // A dialog's text field, the InputState `input` for the dialog m's field
-// `field`: m.inputFocused follows its focus (Board.boardHasKeyboard), a
+// `field`, kept as m.inputs[field] (Board.takeKeyboard): m.inputFocused
+// follows the focus of the dialog's fields (Board.boardHasKeyboard), a
 // focus moves the dialog onto that field, and Enter in it runs
 // `submit(cx)`.
 export function wireTextField(b, m, input, field, submit) {
-  m.textField = field;
+  m.inputs = { ...m.inputs, [field]: input };
   m.inputFocused = false;
   input.on("focus", (_e, cx) => {
     m.inputFocused = true;
+    m.focusedField = field;
     if (b.modal === m) m.field = field;
     cx.notify();
   });
+  // A blur that comes after another field of the dialog took the focus
+  // leaves it.
   input.on("blur", () => {
+    if (m.focusedField !== field) return;
     m.inputFocused = false;
+    m.focusedField = null;
   });
   input.on("submit", (_e, cx) => submit(cx));
 }
@@ -6388,7 +6397,7 @@ export const commandsModal = {
 // The backlog shape opens it (n) as b.modal = { kind: "create", view,
 // types, at (the chosen type), parent (the selected item, or null), input
 // (the title's InputState, made for this dialog), field ("title" or
-// "type"), textField ("title"), inputFocused, error }. Enter or Anlegen
+// "type"), inputs ({ title }), inputFocused, error }. Enter or Anlegen
 // creates (actions/create.js): the dialog closes and the notice says how it
 // goes.
 
@@ -6510,6 +6519,106 @@ function cycleType(m, by, cx) {
   cx.notify();
 }
 
+// ==== src/ui/modals/open-in.js ====
+
+// The start dialog's space picker ("Öffnen in"): where the session opens,
+// as a menu like the assignee picker's (helpers.js menu, without digits:
+// typing goes to the filter). Its rows are "Neuer Space …" and the spaces
+// of the machine the dialog has chosen, in herdr's order, narrowed by
+// their names (rankByName). Without a filter the dialog's current choice
+// is marked, under a filter the first row it leaves. Enter or a click
+// takes the row and goes back to the dialog, on the new space's name for
+// "Neuer Space …"; Esc goes back without a choice (Board.closeModal, by
+// m.back). Enter or a click on "Öffnen in" opens it as b.modal = { kind:
+// "openIn", view, back (the start dialog), and openFilterMenu's fields }.
+
+// Not a text: a space's id, herdr's text, can never equal it.
+export const NEW_SPACE = Symbol("new space");
+export const NEW_SPACE_LABEL = "Neuer Space …";
+
+// Where the start dialog `m` opens the session, from the spaces herdr
+// knows now: { on, layout (the machine's, machines()), readable, here (its
+// spaces where readable), space (null for a new space) }. A chosen space
+// that is gone, and no choice since the machine changed (m.target null),
+// fall back to preselectedSpace.
+export function openIn(m) {
+  const on = m.machines[m.machine];
+  const layout = machines().find((x) => (x.name ?? null) === (on ?? null))?.layout ?? (on ? "unavailable" : "ready");
+  const readable = layout === "ready";
+  const here = readable ? spacesOn(spaces(), on) : [];
+  const space = m.target === NEW_SPACE ? null : here.find((s) => s.id === m.target) ?? preselectedSpace(here, m.spaceName);
+  return { on, layout, readable, here, space };
+}
+
+export function spacesNote({ on, layout }) {
+  const why = layout === "loading" ? "noch nicht gelesen" : "nicht lesbar";
+  return `Die Spaces ${onMachine(on)} sind ${why}; „${NEW_SPACE_LABEL}“ geht trotzdem`;
+}
+
+function openInRows(m) {
+  const rows = [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...openIn(m.back).here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
+  return rankByName(rows, m.filter);
+}
+
+function openInStartAt(m) {
+  const rows = openInRows(m);
+  if (m.filter) return rows.length ? 0 : -1;
+  const chosen = openIn(m.back).space?.id ?? NEW_SPACE;
+  return Math.max(0, rows.findIndex((r) => r.id === chosen));
+}
+
+function pickOpenIn(b, m, i, cx) {
+  const row = openInRows(m)[i];
+  if (!row) return;
+  const start = m.back;
+  start.target = row.id;
+  start.field = row.id === NEW_SPACE ? "name" : "open";
+  start.error = null;
+  b.modal = start;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+export const openInModal = {
+  open(b, start, cx) {
+    const m = { kind: "openIn", view: start.view, back: start };
+    openFilterMenu(b, m, {
+      placeholder: "Filter: Name des Space",
+      count: (m) => openInRows(m).length,
+      startAt: openInStartAt,
+      pick: (i, cx) => pickOpenIn(b, m, i, cx),
+    }, cx);
+  },
+
+  // Every key but Esc (the Board's): filterMenuKey.
+  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, openInRows(b.modal).length),
+
+  render(b, t) {
+    const m = b.modal;
+    const target = openIn(m.back);
+    const rows = openInRows(m);
+    const { shown, ...win } = menuWindow(m, rows);
+    return menu(t, {
+      id: "open-in",
+      rowId: "open-in-row",
+      width: 440,
+      title: `Öffnen in · ${machineName(target.on)}`,
+      head: filterMenuHead(t, m),
+      digits: false,
+      rows: shown.map((r) => [
+        markedName(t, r.name, r.at),
+        ...(r.folder ? [div().flex_none().max_w(200).truncate().text_size(11).text_color(t.dim).child(r.folder)] : []),
+      ]),
+      ...win,
+      pick: (i, cx) => pickOpenIn(b, m, i, cx),
+      foot: [
+        ...(rows.length ? [] : [menuNote(t, "Kein Space passt zum Filter", t.muted)]),
+        ...(target.readable ? [] : [menuNote(t, spacesNote(target), t.muted)]),
+      ],
+    });
+  },
+};
+
 // ==== src/ui/modals/sprints.js ====
 
 // The sprint picker: which sprint a team's Sprint view shows, as a menu
@@ -6597,19 +6706,23 @@ export const sprintsModal = {
 // ==== src/ui/modals/start.js ====
 
 // The start dialog: opens an item's session in its checkout, on a machine
-// and with an agent chosen here, as a new space or tab, with a first message
-// to edit. It is b.modal = { kind: "start", view, item, settings, input
-// (the message's InputState, made for this dialog), field, textField (the
-// field that is the input: "message"), inputFocused,
-// agents, agent, agentsError, machines, machine, machineNote, agentNote,
-// notes, open, busy, error }.
+// and with an agent chosen here, as a new tab in a space of that machine or
+// in a new space ("Öffnen in", the space picker: open-in.js), with a first
+// message to edit. It is b.modal = { kind: "start", view, item, settings,
+// input (the message's InputState) and nameInput (the new space's name),
+// made for this dialog, field, inputs, inputFocused, agents, agent,
+// agentsError, machines, machine, machineNote, agentNote, notes, spaceName
+// (spaceNameFor), target (null, NEW_SPACE or a space's id: openIn), busy,
+// error }.
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
-// The fields Tab walks, in order.
 const FIELDS = ["message", "agent", "machine", "open"];
+const fieldsOf = (m) => (openIn(m).space ? FIELDS : [...FIELDS, "name"]);
+// The start dialog `m` counts as open while its space picker is over it.
+const stillOpen = (b, m) => b.modal === m || b.modal?.back === m;
 
 export const startModal = {
   // Opens the dialog for an item, or says where its checkout is missing. An
@@ -6630,11 +6743,15 @@ export const startModal = {
     let machine = list.indexOf(settings.machine ?? null);
     const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
     if (machine < 0) machine = 0;
+    const spaceName = spaceNameFor(item, settings.checkout);
+    const nameInput = InputState.new({ placeholder: "Name des neuen Space" });
+    nameInput.set_value(spaceName);
     const m = {
-      kind: "start", view, item, settings, input, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, open: settings.open === "tab" ? "tab" : "space", busy: null, error: null,
+      kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, busy: null, error: null,
     };
     wireTextField(b, m, input, "message", (cx) => startModal.start(b, cx));
+    wireTextField(b, m, nameInput, "name", (cx) => startModal.start(b, cx));
     b.modal = m;
     input.focus();
     loadAgents(b, cx);
@@ -6642,42 +6759,42 @@ export const startModal = {
   },
 
   // Opens the item's session in its checkout on the chosen machine: finds the
-  // checkout's folder there, then runs space.new or tab.new. run() answers
+  // checkout's folder there, then runs tab.new in the chosen space, where it
+  // is still there, or space.new with the name given. run() answers
   // nothing, so the board says the session is being opened and watches for a
-  // space or tab of its name (watchSession). The dialog stays until the
-  // folder is known or the start failed; a failure that comes after the
-  // dialog went shows in the banner and as a toast.
+  // new tab of its name (watchSession). The dialog stays until run() opens
+  // the session; a failure that comes after the dialog went shows in the
+  // banner and as a toast.
   start(b, cx) {
     const m = b.modal;
     if (m?.kind !== "start" || m.busy) return;
     const agent = m.agents[m.agent];
     if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
-    const on = m.machines[m.machine];
+    const { on, space } = openIn(m);
+    const spaceName = m.nameInput.value().trim();
+    if (!space && !spaceName) return void ((m.error = "Der neue Space braucht einen Namen"), cx.notify());
     const task = m.input.value().trim();
     const name = sessionName(m.item);
     m.busy = "Sitzung wird geöffnet …";
     m.error = null;
+    const before = tabsNamed(name);
     cx.spawn(async (cx) => {
       try {
         const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT, what(m.view, "checkout"));
         if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
         const folder = lastLine(r.stdout);
         if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
-        let space = null;
-        if (m.open === "tab") {
-          space = spaceForTab(spaces(), on, folder);
-          if (!space) throw new BoardError(`Kein Space ${onMachine(on)} für einen neuen Tab; als neuer Space öffnen`);
-        }
-        run(...startCommand({ open: m.open, on, folder, argv: agent.run, task, name, space: space?.id }));
-        if (b.modal === m) {
+        if (space && !spaces().some((s) => s.id === space.id)) throw new BoardError(`Den Space „${space.name}“ ${onMachine(on)} gibt es nicht mehr`);
+        run(...startCommand({ on, folder, argv: agent.run, task, name, space: space?.id, spaceName }));
+        if (stillOpen(b, m)) {
           b.modal = null;
           b.handle.focus();
         }
         b.say(`Sitzung wird geöffnet: ${name}${on ? ` auf ${on}` : ""}`, "info", cx);
-        watchSession(b, name, cx);
+        watchSession(b, name, before, cx);
       } catch (e) {
         const why = report(e);
-        if (b.modal === m) m.error = why;
+        if (stillOpen(b, m)) m.error = why;
         else {
           b.say(`${itemLabel(m.item)}: Sitzung nicht geöffnet: ${why}`, "error", cx);
           notify({ title: `Sitzung für ${itemLabel(m.item)} nicht geöffnet`, body: why, level: "error" });
@@ -6690,18 +6807,19 @@ export const startModal = {
     cx.notify();
   },
 
-  // Tab and shift-Tab (`back`): the next or previous field.
-  tab: (b, back, cx) => cycleField(b, FIELDS, back, cx),
+  tab: (b, back, cx) => cycleField(b, fieldsOf(b.modal), back, cx),
 
   // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey,
   // where Tab comes here at all rather than as the board's action); h/l or
-  // the arrows change a choice, Enter starts. Typing goes to the message.
+  // the arrows change a choice, Enter starts, on "Öffnen in" Enter and
+  // space open the space picker. Typing goes to the text field.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
     if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
-    if (m.field === "message") return;
+    if (m.inputs[m.field]) return;
     cx.stop_propagation();
+    if (m.field === "open") return k === "enter" || k === "space" ? pickSpace(b, cx) : undefined;
     if (k === "enter") return startModal.start(b, cx);
     if (k === "h" || k === "left") return cycle(b, m.field, -1, cx);
     if (k === "l" || k === "right" || k === "space") return cycle(b, m.field, 1, cx);
@@ -6711,7 +6829,7 @@ export const startModal = {
     const m = b.modal;
     const label = (text) => fieldLabel(t, text);
     const frame = (field, inner) => fieldFrame(t, m, field, inner);
-    const choice = (field, title, value) =>
+    const choice = (field, title, value, mark = "◂ ▸", act = (cx) => cycle(b, field, 1, cx)) =>
       v_flex()
         .flex_1()
         .min_w(0)
@@ -6722,12 +6840,15 @@ export const startModal = {
             .on_click((_e, cx) => {
               m.field = field;
               b.handle.focus();
-              cycle(b, field, 1, cx);
+              act(cx);
             })
             .child(div().flex_1().min_w(0).truncate().child(value))
-            .child(div().text_color(t.dim).child("◂ ▸"))),
+            .child(div().text_color(t.dim).child(mark))),
         );
     const agent = m.agents[m.agent];
+    const target = openIn(m);
+    const notes = [...m.notes, ...(target.readable ? [] : [spacesNote(target)])];
+    const hint = m.field === "open" ? "Tab wechselt das Feld · ↵ wählt den Space" : "Tab wechselt das Feld · ◂ ▸ wählt";
     return backdrop(
       t,
       "start-backdrop",
@@ -6760,15 +6881,21 @@ export const startModal = {
                 .gap(12)
                 .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
                 .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen als", m.open === "tab" ? "neuer Tab" : "neuer Space")),
+                .child(choice("open", "Öffnen in", target.space ? target.space.name : NEW_SPACE_LABEL, "▾", (cx) => pickSpace(b, cx))),
             )
+            .when(!target.space, (el) => el.child(
+              v_flex()
+                .gap(6)
+                .child(label("Name des neuen Space"))
+                .child(frame("name", Input.new(m.nameInput).flex_1().text_size(12).text_color(t.foreground))),
+            ))
             .child(
               v_flex()
                 .gap(6)
                 .child(label("Erste Nachricht"))
                 .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
             )
-            .children(m.notes.map((n) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(n)))
+            .children(notes.map((n) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(n)))
             .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
         )
         .child(
@@ -6779,7 +6906,7 @@ export const startModal = {
             .items_center()
             .border_t(1)
             .border_color(t.border)
-            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? "Tab wechselt das Feld · ◂ ▸ wählt"))
+            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.busy ?? hint))
             .child(button(t, "start-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx), Boolean(m.busy)))
             .child(button(t, "start-go", "Starten ↵", true, (cx) => startModal.start(b, cx), Boolean(m.busy))),
         ),
@@ -6796,7 +6923,7 @@ function loadAgents(b, cx) {
   cx.spawn(async (cx) => {
     try {
       const agents = (await knownAgents({ on })).filter((a) => a.installed);
-      if (b.modal !== m || m.machines[m.machine] !== on) return;
+      if (!stillOpen(b, m) || m.machines[m.machine] !== on) return;
       m.agents = agents;
       const wanted = m.settings.agent;
       m.agent = Math.max(0, agents.findIndex((a) => a.key === wanted));
@@ -6805,7 +6932,7 @@ function loadAgents(b, cx) {
         m.agentNote = `Agent „${wanted}“ ist ${onMachine(on)} nicht installiert; gewählt: ${agents[0].name}`;
       }
     } catch (e) {
-      if (b.modal !== m || m.machines[m.machine] !== on) return;
+      if (!stillOpen(b, m) || m.machines[m.machine] !== on) return;
       m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
     }
     m.notes = [m.machineNote, m.agentNote].filter(Boolean);
@@ -6820,20 +6947,26 @@ function cycle(b, field, by, cx) {
   if (field === "machine") {
     m.machine = (m.machine + by + m.machines.length) % m.machines.length;
     m.machineNote = null;
+    m.target = null;
     loadAgents(b, cx);
   }
-  if (field === "open") m.open = m.open === "space" ? "tab" : "space";
   cx.notify();
 }
 
-// Looks for a space or tab named `name` after each wait in SESSION_CHECKS;
-// says so when it appears, warns when it has not after the last.
-function watchSession(b, name, cx, at = 0) {
+function pickSpace(b, cx) {
+  if (!b.modal.busy) openInModal.open(b, b.modal, cx);
+}
+
+const tabsNamed = (name) => new Set(spaces().flatMap((s) => s.tabs.filter((t) => t.name === name).map((t) => t.id)));
+
+// `before`: the tabs of that name at Starten; a tab of the item left from
+// before is not the session.
+function watchSession(b, name, before, cx, at = 0) {
   cx.timer.after(SESSION_CHECKS[at], (cx) => {
-    const there = spaces().some((s) => s.name === name || s.tabs.some((t) => t.name === name));
+    const there = spaces().some((s) => s.tabs.some((t) => t.name === name && !before.has(t.id)));
     if (there) return b.say(`Sitzung geöffnet: ${name}`, "success", cx);
-    if (at + 1 < SESSION_CHECKS.length) return watchSession(b, name, cx, at + 1);
-    b.say(`Kein Space und kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
+    if (at + 1 < SESSION_CHECKS.length) return watchSession(b, name, before, cx, at + 1);
+    b.say(`Kein Tab „${name}“ erschienen; die Sitzung ist wohl nicht gestartet`, "warning", cx);
     notify({ title: "Sitzung nicht erschienen", body: name, level: "warning" });
   });
 }
@@ -6887,7 +7020,7 @@ export const statusModal = {
 // between them (Board.tabKey). A new dialog is a module here and its
 // entry in MODALS.
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, openIn: openInModal };
 
 // ==== src/ui/shapes/backlog.js ====
 
@@ -9544,14 +9677,13 @@ export default class Board extends View {
     return this.isLayer() && boardShown(true);
   }
 
-  // Gives the board's keyboard to where it belongs, the one rule for it:
-  // the open dialog's text field when the dialog is on it (m.textField:
-  // the start dialog's message, the create dialog's title), else the filter
-  // while one is typed, else the board itself, which hands its keys to a
-  // dialog without a text field (the status menu) or on another field.
+  // Gives the board's keyboard to where it belongs, the one rule for it: the
+  // open dialog's text field when the dialog is on one (m.inputs), else the
+  // filter while one is typed, else the board itself, which hands its keys to
+  // a dialog without a text field (the status menu) or on another field.
   takeKeyboard() {
-    const m = this.modal;
-    if (m?.input && m.field === m.textField) m.input.focus();
+    const input = this.modal?.inputs?.[this.modal.field];
+    if (input) input.focus();
     else if (this.filtering) this.filterInput.focus();
     else this.handle.focus();
   }
@@ -9642,9 +9774,11 @@ export default class Board extends View {
     }
   }
 
+  // A dialog opened from another (m.back: the start dialog's space picker)
+  // goes back to that one, on the field it was opened from.
   closeModal(cx) {
     if (this.modal?.busy) return;
-    this.modal = null;
+    this.modal = this.modal?.back ?? null;
     this.handle.focus();
     cx.notify();
   }

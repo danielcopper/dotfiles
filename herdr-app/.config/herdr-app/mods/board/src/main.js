@@ -24,9 +24,9 @@
 //     of SECTION_TONE_ORDER by its place that no other section sets. A view
 //     may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
-//   machine, open ("space" | "tab"), checkout (the folder the session starts
-//   in; ~ is that machine's home), message (the first message for issues and
-//   work items) and review (for pull requests). Templates take {number}
+//   machine, checkout (the folder the session starts in; ~ is that
+//   machine's home), message (the first message for issues and work items)
+//   and review (for pull requests). Templates take {number}
 //   {title} {url} {owner} {repo} {key}.
 // - repos: { "<owner>/<repo>": { any start field } }. startSettings says
 //   which start applies.
@@ -114,7 +114,7 @@
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
-// the command menu and the sprint picker), commands.js (the action table,
+// the menus that rank their rows by name), commands.js (the action table,
 // which the keys of its actions, the hint line and the command menu read),
 // related.js (the items related to an item, read when its details open: what
 // is kept, their lines), description.js (a description as drawn, without
@@ -201,6 +201,7 @@ export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
 export * from "./ui/modals/create.js";
+export * from "./ui/modals/open-in.js";
 export * from "./ui/modals/assign.js";
 export * from "./ui/modals/commands.js";
 export * from "./ui/modals/sprints.js";
@@ -1235,14 +1236,13 @@ export default class Board extends View {
     return this.isLayer() && boardShown(true);
   }
 
-  // Gives the board's keyboard to where it belongs, the one rule for it:
-  // the open dialog's text field when the dialog is on it (m.textField:
-  // the start dialog's message, the create dialog's title), else the filter
-  // while one is typed, else the board itself, which hands its keys to a
-  // dialog without a text field (the status menu) or on another field.
+  // Gives the board's keyboard to where it belongs, the one rule for it: the
+  // open dialog's text field when the dialog is on one (m.inputs), else the
+  // filter while one is typed, else the board itself, which hands its keys to
+  // a dialog without a text field (the status menu) or on another field.
   takeKeyboard() {
-    const m = this.modal;
-    if (m?.input && m.field === m.textField) m.input.focus();
+    const input = this.modal?.inputs?.[this.modal.field];
+    if (input) input.focus();
     else if (this.filtering) this.filterInput.focus();
     else this.handle.focus();
   }
@@ -1333,9 +1333,11 @@ export default class Board extends View {
     }
   }
 
+  // A dialog opened from another (m.back: the start dialog's space picker)
+  // goes back to that one, on the field it was opened from.
   closeModal(cx) {
     if (this.modal?.busy) return;
-    this.modal = null;
+    this.modal = this.modal?.back ?? null;
     this.handle.focus();
     cx.notify();
   }

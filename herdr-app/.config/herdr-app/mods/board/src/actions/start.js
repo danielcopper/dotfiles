@@ -5,8 +5,8 @@ import { itemKey } from "../shared.js";
 
 const NAME_MAX = 60;
 
-// The name of the tab and space a session starts in: the item's key and title,
-// cut to NAME_MAX characters. linkedSession finds the session by it.
+// The name of the tab a session starts in: the item's key and title, cut to
+// NAME_MAX characters. linkedSession finds the session by it.
 export function sessionName(item) {
   const key = itemKey(item);
   const full = key ? `${key} ${item.title}` : item.title;
@@ -66,17 +66,24 @@ export const CHECKOUT_SCRIPT = [
 
 export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
 
-// The space a new tab goes into: one on that machine in the checkout or
-// below it, else the shown space when it is on that machine.
-export function spaceForTab(allSpaces, on, repoFolder) {
-  const here = allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
-  return here.find((s) => s.folder && (s.folder === repoFolder || s.folder.startsWith(`${repoFolder}/`))) ?? here.find((s) => s.active) ?? null;
+export const spacesOn = (allSpaces, on) => allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
+
+// The name a new space gets by default and an existing one is preselected
+// by: the repo's short name; an Azure item, which has no repo, takes its
+// checkout's last folder.
+export function spaceNameFor(item, checkout) {
+  if (item.repoShort) return item.repoShort;
+  return String(checkout ?? "").split("/").filter(Boolean).pop() ?? "";
 }
 
-// The app command that opens a session: [name, args]. A new space and its
-// first tab both carry the session's name.
-export function startCommand({ open, on, folder, argv, task, name, space }) {
+export function preselectedSpace(here, name) {
+  const wanted = String(name ?? "").toLowerCase();
+  return (wanted && here.find((s) => s.name.toLowerCase() === wanted)) || here.find((s) => s.active) || here[0] || null;
+}
+
+// The app command that opens a session: [name, args].
+export function startCommand({ on, folder, argv, task, name, space, spaceName }) {
   const common = { folder, argv, ...(task ? { task } : {}) };
-  if (open === "tab") return ["tab.new", { name, space, ...common }];
-  return ["space.new", { name, tab: name, machine: on ?? "", ...common }];
+  if (space) return ["tab.new", { name, space, ...common }];
+  return ["space.new", { name: spaceName, tab: name, machine: on ?? "", ...common }];
 }
