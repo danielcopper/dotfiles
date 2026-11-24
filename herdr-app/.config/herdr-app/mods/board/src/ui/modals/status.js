@@ -22,7 +22,7 @@ export const statusModal = {
       id: "status",
       rowId: "status",
       width: 280,
-      title: "Status ändern · j/k Enter · Esc",
+      title: "Status ändern · Enter · Esc",
       at: m.at,
       pick: (i, cx) => pickTarget(b, m, i, cx),
       rows: m.targets.map((c) => [

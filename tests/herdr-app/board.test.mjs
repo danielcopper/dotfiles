@@ -2938,7 +2938,7 @@ test("UI: the command menu's „Spalten…“ opens the column menu: every colum
   await runCommand(b, cx, "Spalten…");
   assert.equal(b.modal?.kind, "columns");
   assert.deepEqual([0, 1].map((i) => byId(b.render(), `column-${i}`).styles.includes("bg")), [true, false], "the row at the cursor is marked");
-  assert.ok(texts(byId(b.render(), "columns-menu")).includes("Spalten zeigen · j/k Enter · Esc"), "under its title");
+  assert.ok(texts(byId(b.render(), "columns-menu")).includes("Spalten zeigen · Enter · Esc"), "under its title");
   const rows = () => [0, 1, 2, 3, 4].map((i) => texts(byId(b.render(), `column-${i}`)).filter(Boolean));
   assert.deepEqual(rows(), [
     ["1", "Backlog", "265", "ausgeblendet"],
@@ -5448,7 +5448,7 @@ test("UI: „Sprint wählen…“ in the command menu opens the sprint picker: t
   assert.equal(openAz(host, "iteration").length, 0, "the current sprint is kept: not read again");
   assert.ok(texts(byId(b.render(), "sprints-menu")).includes("lädt …"));
   await host.answer("az", iterationsAnswer(), isIterationsCall);
-  assert.ok(texts(byId(b.render(), "sprints-menu")).includes("Sprint · Example Team · ↑↓ Enter · Esc"));
+  assert.ok(texts(byId(b.render(), "sprints-menu")).includes("Sprint · Example Team · Enter · Esc"));
   assert.deepEqual(sprintPickerRows(b), [["Sprint 10", fixtureDates(0)], ["Sprint 11", fixtureDates(1)], ["Sprint 12", "aktuell", fixtureDates(2)], ["Sprint 13", fixtureDates(3)],
     ["Ideen", "ohne Daten"]]);
   assert.equal(b.modal.at, 2, "the current one is marked");
@@ -9975,7 +9975,7 @@ test("UI: `:` opens the command menu over a GitHub card: what can run on the car
   ]);
   assert.deepEqual(menuHeads(b), ["Issue tender#3004 · feat(api): page through long lists", "Mine", "Board"], "the window's ten rows: three groups");
   const menuEl = byId(b.render(), "commands-menu");
-  assert.ok(texts(menuEl).includes("Befehle · ↑↓ Enter · Esc"));
+  assert.ok(texts(menuEl).includes("Befehle · Enter · Esc"));
   assert.deepEqual([b.modal.inputFocused, b.modal.at], [true, 0], "the filter has the keyboard, the first row is marked");
   const first = byId(b.render(), "command-0");
   assert.deepEqual([first.styles.includes("bg"), texts(first.kids.at(-1)), first.kids.at(-1).styles.includes("flex_none")], [true, ["Enter"], true], "marked, its key last, at the right");
@@ -10539,4 +10539,14 @@ test("UI: an action of the top bar leaves the shown view's selection as it is, b
     }
     assert.deepEqual([b.context().id, st().sel.key, st().detail], ["github:prs", "PVTI_rec4", true], how);
   }
+});
+
+test("UI: no dialog's head names the keys that move its mark, only Enter and Esc: the status menu's and the assignee picker's (the column, command and sprint menus' tests name theirs)", async () => {
+  const { b, cx } = await openBoard();
+  const title = (id) => texts(byId(b.render(), `${id}-menu`))[0];
+  await press(b, cx, "s");
+  assert.equal(title("status"), "Status ändern · Enter · Esc");
+  await press(b, cx, "escape");
+  await press(b, cx, "a");
+  assert.equal(title("assign"), "Zuweisen · tender#3004 · Enter · Esc");
 });

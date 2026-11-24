@@ -87,7 +87,7 @@ export const assignModal = {
       id: "assign",
       rowId: "assign-row",
       width: 420,
-      title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
+      title: `Zuweisen · ${m.label} · Enter · Esc`,
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [

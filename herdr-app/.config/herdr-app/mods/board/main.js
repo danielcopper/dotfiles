@@ -5154,7 +5154,7 @@ export const assignModal = {
       id: "assign",
       rowId: "assign-row",
       width: 420,
-      title: `Zuweisen · ${m.label} · ↑↓ Enter · Esc`,
+      title: `Zuweisen · ${m.label} · Enter · Esc`,
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
@@ -5200,7 +5200,7 @@ export const columnsModal = {
       id: "columns",
       rowId: "column",
       width: 320,
-      title: "Spalten zeigen · j/k Enter · Esc",
+      title: "Spalten zeigen · Enter · Esc",
       at: m.at,
       pick: (i, cx) => toggleAt(b, m, i, cx),
       rows: columnsOf(b, m).map((c) => [
@@ -6013,7 +6013,7 @@ export const commandsModal = {
       id: "commands",
       rowId: "command",
       width: 440,
-      title: "Befehle · ↑↓ Enter · Esc",
+      title: "Befehle · Enter · Esc",
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((e) => [
@@ -6225,7 +6225,7 @@ export const sprintsModal = {
       id: "sprints",
       rowId: "sprint",
       width: 440,
-      title: `Sprint · ${m.team} · ↑↓ Enter · Esc`,
+      title: `Sprint · ${m.team} · Enter · Esc`,
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [
@@ -6507,7 +6507,7 @@ export const statusModal = {
       id: "status",
       rowId: "status",
       width: 280,
-      title: "Status ändern · j/k Enter · Esc",
+      title: "Status ändern · Enter · Esc",
       at: m.at,
       pick: (i, cx) => pickTarget(b, m, i, cx),
       rows: m.targets.map((c) => [

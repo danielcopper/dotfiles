@@ -60,7 +60,7 @@ export const commandsModal = {
       id: "commands",
       rowId: "command",
       width: 440,
-      title: "Befehle · ↑↓ Enter · Esc",
+      title: "Befehle · Enter · Esc",
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((e) => [
