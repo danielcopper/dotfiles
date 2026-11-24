@@ -1,12 +1,4 @@
-// UI helpers: lasting settings, colors and machine names, whether the board
-// shows, and the pieces that the Board, its shapes and its modals draw
-// alike (a button, a backdrop for a dialog, a menu, its keys and its
-// window, a menu whose rows a read brings, a row's name marked by the
-// filter, a length in the script's pixels, a detail section, a check's
-// color, a status pill, a column's color and head, a card's edge, the line
-// of its type, a selected card's or row's look, a card's chip in a tone,
-// for a label, for its type and for a session). Which tones and tints they
-// take: tones.js.
+// Which tones and tints these helpers take: tones.js.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
@@ -95,6 +87,12 @@ export function boardShown(isLayer) {
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }
+
+// GPUI's own 2 px (DRAG_THRESHOLD) is less than a tap on the Deck's touch
+// screen may move; 8 px is GTK's drag threshold and Android's touch slop.
+export const CLICK_SLOP = 8;
+
+export const inPlace = (from, to) => !from || !to || Math.hypot(to.x - from.x, to.y - from.y) <= CLICK_SLOP;
 
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.

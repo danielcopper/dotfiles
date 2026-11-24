@@ -3959,11 +3959,12 @@ test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async
 });
 
 // Fires the left button's `event` ("on_mouse_down" or "on_mouse_up") on the
-// element with the id `id`, as the board draws it now.
-async function mouse(b, cx, id, event) {
+// element with the id `id`, as the board draws it now, the pointer at `at`
+// in the window (null: an event without a position).
+async function mouse(b, cx, id, event, at = { x: 100, y: 100 }) {
   const el = byId(b.render(), id);
   assert.ok(el, `no ${id}`);
-  el.with[event][1]({}, cx);
+  el.with[event][1]({ button: "left", click_count: 1, ...(at && { position: at }) }, cx);
   await settle();
 }
 const clickCard = async (b, cx, key) => {
@@ -4000,6 +4001,32 @@ test("UI: a click on a card selects it; a click on the card the person chose ope
   await mouse(b, cx, "card-PVTI_rec2", "on_mouse_up");
   assert.equal(st().detail, false, "a release without a press on the card is no click");
   assert.equal(host.open("gh").filter((c) => !isRelatedCall(c.args)).length, 1, "only H wrote");
+});
+
+test("UI: a press on a card released on it more than 8 px away is a drag given up: nothing chosen, no details; within 8 px it is a click", async () => {
+  const { b, cx, st } = await openBoard();
+  const release = (key, x, y = 100) => mouse(b, cx, `card-${key}`, "on_mouse_up", { x, y });
+  const drag = async (key, x, y) => {
+    await mouse(b, cx, `card-${key}`, "on_mouse_down");
+    await release(key, x, y);
+  };
+  await drag("PVTI_rec1", 109);
+  await drag("PVTI_rec1", 106, 106);
+  assert.deepEqual([st().sel.key, st().detail, b.drag], ["PVTI_rec4", false, null], "dragged back onto itself twice, 9 px across, then 6 px each way");
+  await drag("PVTI_rec1", 108);
+  assert.deepEqual([st().sel.key, st().detail], ["PVTI_rec1", false], "8 px across: a click chooses it");
+  await drag("PVTI_rec1", 100, 108);
+  assert.equal(st().detail, true, "8 px down: a second click opens the details");
+  await press(b, cx, "escape");
+  await drag("PVTI_rec1", 150, 140);
+  assert.deepEqual([st().sel.key, st().detail], ["PVTI_rec1", false], "the chosen card dragged back onto itself once opens nothing");
+  await mouse(b, cx, "card-PVTI_rec1", "on_mouse_down", null);
+  await release("PVTI_rec1", 300);
+  assert.equal(st().detail, true, "a press without a position counts as not moved");
+  await press(b, cx, "escape");
+  await mouse(b, cx, "card-PVTI_rec1", "on_mouse_down");
+  await mouse(b, cx, "card-PVTI_rec1", "on_mouse_up", null);
+  assert.equal(st().detail, true, "and so does a release without one");
 });
 
 test("UI: a selection the board sets on another card closes open details: after a filter or a refresh; on the same card they stay", async () => {

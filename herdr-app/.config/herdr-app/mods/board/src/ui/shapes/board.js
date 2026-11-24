@@ -19,7 +19,7 @@ import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js"
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import {
-  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, labelChip, selectedLook, showsMeta, shownOf, statusPill, store, typeChip, typeLine, unzoomed,
+  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, inPlace, labelChip, selectedLook, showsMeta, shownOf, statusPill, store, typeChip, typeLine, unzoomed,
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 import { rowTops } from "../../scroll.js";
@@ -332,24 +332,22 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure) {
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .when(Boolean(measure), (el) => el.on_size_change(measure))
-    .on_mouse_down("left", (_e, cx) => {
+    .on_mouse_down("left", (e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
-      // The press selects nothing: it is no choice (clickItem) until it ends
-      // as a click or a drop.
-      b.drag = { key: card.key, from: card.column };
+      b.drag = { key: card.key, from: card.column, at: e.position };
       b.over = ci;
       b.handle.focus();
       cx.notify();
     })
-    .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click (clickItem). Released on
-      // another card: the column under it takes the drop. A release without
-      // a press on the card is no click.
+    .on_mouse_up("left", (e, cx) => {
+      // Released on another card it bubbles to the column under it, which
+      // takes the drop.
       if (b.modal || b.drag?.key !== card.key) return;
       cx.stop_propagation();
+      const clicked = inPlace(b.drag.at, e.position);
       b.endDrag(cx);
-      b.clickItem(view, { col: ci, key: card.key }, cx);
+      if (clicked) b.clickItem(view, { col: ci, key: card.key }, cx);
     })
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(CARD.lineGap)

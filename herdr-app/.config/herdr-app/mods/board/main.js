@@ -4398,15 +4398,7 @@ export function typeTone(t, item) {
 
 // ==== src/ui/helpers.js ====
 
-// UI helpers: lasting settings, colors and machine names, whether the board
-// shows, and the pieces that the Board, its shapes and its modals draw
-// alike (a button, a backdrop for a dialog, a menu, its keys and its
-// window, a menu whose rows a read brings, a row's name marked by the
-// filter, a length in the script's pixels, a detail section, a check's
-// color, a status pill, a column's color and head, a card's edge, the line
-// of its type, a selected card's or row's look, a card's chip in a tone,
-// for a label, for its type and for a session). Which tones and tints they
-// take: tones.js.
+// Which tones and tints these helpers take: tones.js.
 
 // Settings that last across reloads: the shown source ("source"), each
 // source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
@@ -4485,6 +4477,12 @@ export function boardShown(isLayer) {
   const shownTabs = new Set(spaces().filter((s) => s.active).flatMap((s) => s.tabs.filter((t) => t.active).map((t) => t.id)));
   return panes().some((p) => p.mod === MOD && shownTabs.has(p.tab));
 }
+
+// GPUI's own 2 px (DRAG_THRESHOLD) is less than a tap on the Deck's touch
+// screen may move; 8 px is GTK's drag threshold and Android's touch slop.
+export const CLICK_SLOP = 8;
+
+export const inPlace = (from, to) => !from || !to || Math.hypot(to.x - from.x, to.y - from.y) <= CLICK_SLOP;
 
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
@@ -7480,24 +7478,22 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure) {
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .when(Boolean(measure), (el) => el.on_size_change(measure))
-    .on_mouse_down("left", (_e, cx) => {
+    .on_mouse_down("left", (e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
-      // The press selects nothing: it is no choice (clickItem) until it ends
-      // as a click or a drop.
-      b.drag = { key: card.key, from: card.column };
+      b.drag = { key: card.key, from: card.column, at: e.position };
       b.over = ci;
       b.handle.focus();
       cx.notify();
     })
-    .on_mouse_up("left", (_e, cx) => {
-      // Released on the card it started on: a click (clickItem). Released on
-      // another card: the column under it takes the drop. A release without
-      // a press on the card is no click.
+    .on_mouse_up("left", (e, cx) => {
+      // Released on another card it bubbles to the column under it, which
+      // takes the drop.
       if (b.modal || b.drag?.key !== card.key) return;
       cx.stop_propagation();
+      const clicked = inPlace(b.drag.at, e.position);
       b.endDrag(cx);
-      b.clickItem(view, { col: ci, key: card.key }, cx);
+      if (clicked) b.clickItem(view, { col: ci, key: card.key }, cx);
     })
     .child(cardEdge(t, col))
     .child(v_flex().flex_1().min_w(0).gap(CARD.lineGap)
@@ -8609,7 +8605,7 @@ export default class Board extends View {
     this.filtering = false;
     this.modal = null; // a dialog: { kind, … }, its kind a key of MODALS
     this.notice = null; // { text, level }
-    this.drag = null; // { key, from }
+    this.drag = null; // { key, from, at }: `at` where it was pressed
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);

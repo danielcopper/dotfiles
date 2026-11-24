@@ -298,7 +298,7 @@ export default class Board extends View {
     this.filtering = false;
     this.modal = null; // a dialog: { kind, … }, its kind a key of MODALS
     this.notice = null; // { text, level }
-    this.drag = null; // { key, from }
+    this.drag = null; // { key, from, at }: `at` where it was pressed
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
