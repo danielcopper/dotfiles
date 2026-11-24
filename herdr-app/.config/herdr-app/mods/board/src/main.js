@@ -580,6 +580,8 @@ export default class Board extends View {
         if (drew) {
           st.data = before.data && SHAPES[before.data.shape].received(before.data, st);
           st.warnings = before.warnings;
+          if (st.data) this.keepSelection(view);
+          else Object.assign(st, { sel: null, picked: null, detail: false });
         }
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {

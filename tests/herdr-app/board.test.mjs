@@ -11858,6 +11858,26 @@ test("UI: a board whose later page fails shows what it showed before the read, n
   assert.deepEqual([allCards(st().data).some((c) => c.title === "Gespeicherter Titel"), st().saved, st().error], [true, true, "GitHub antwortete mit HTTP 502: Bad Gateway"]);
 });
 
+test("UI: a board whose later page fails selects again in what it showed before: a card there, or none where it showed nothing, the choice and the details gone", async () => {
+  const saved = savedBoard();
+  const first = new Set(allCards(board.parseGithubBoard(boardPage(0, 3, "c1"), githubView(), HIDDEN)).map((c) => c.key));
+  for (const c of saved.columns) c.cards = c.cards.filter((card) => !first.has(card.key));
+  const fail = { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" };
+  const over = await bootBoard({ raw: { "board:data:mine": savedFor("mine", saved, Date.now() - MIN) } });
+  await over.host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  assert.ok(first.has(over.st().sel.key), "the first page's card selected");
+  await over.host.answer("gh", fail, isBoardCall);
+  const { sel } = over.st();
+  assert.equal(over.b.navColumns(over.b.view())[sel.col]?.shown.some((c) => c.key === sel.key), true, `a card of the saved state, in its column: ${JSON.stringify(sel)}`);
+  const { b, cx, host, st } = await bootBoard();
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  const key = allCards(st().data)[1].key;
+  b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), key), key }, cx);
+  st().detail = true;
+  await host.answer("gh", fail, isBoardCall);
+  assert.deepEqual([st().data, st().sel, st().picked, st().detail], [null, null, null, false]);
+});
+
 test("UI: what a load draws on its way counts only while it runs: a late part or page after its end changes nothing, the late part is not even built", async () => {
   const { b, cx, host, st } = await bootBoard();
   await host.answer("gh", ok(fixture("github-board.json")));
