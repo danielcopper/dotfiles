@@ -4020,7 +4020,7 @@ test("UI: a selection the board sets on another card closes open details: after 
 
 test("UI: a chosen item and one the board selects in its place are scrolled into view; a selection that stays put is not", async () => {
   const { b, cx, host } = await openBoard();
-  const list = (col) => b.shapeState.board.columns[col].scroll;
+  const list = (col) => board.keptOf(b, b.navColumns(b.view())[col].id).scroll;
   host.scrolled.splice(0);
   await press(b, cx, "l");
   assert.deepEqual(host.scrolled.splice(0), [{ handle: list(1), row: 0 }], "l: 3000, In progress's first row, in its own list");
@@ -11102,7 +11102,23 @@ const notifies = (cx, fn) => cx.call((own) => {
   fn(own);
   return n;
 });
-const handleOf = (b, ci) => b.shapeState.board.columns[ci].scroll;
+// A shown column's list handle; it claims the states, as a draw would, only
+// where no draw has yet.
+function handleOf(b, ci) {
+  const ids = b.navColumns(b.view()).map((c) => c.id);
+  return (board.keptOf(b, ids[ci]) ?? board.columnsKept(b, ids)[ci]).scroll;
+}
+function listsOf(b) {
+  const root = b.render();
+  return Object.fromEntries(b.navColumns(b.view()).map((c, ci) => [c.id, byId(root, `cards-${ci}`).with.track_scroll[0]]));
+}
+function wideBoard(n, { none = false } = {}) {
+  const data = json("github-board.json");
+  const project = data.data.repositoryOwner.projectV2;
+  project.field.options = Array.from({ length: n }, (_, i) => ({ id: `opt-${i}`, name: `Spalte ${i}`, color: "GRAY" }));
+  project.items.nodes.forEach((node, i) => (node.fieldValueByName = none && i === 0 ? null : { optionId: `opt-${i % n}`, name: "x" }));
+  return JSON.stringify(data);
+}
 const bandTimers = (cx) => cx.every.filter((f) => f.ms === board.BAND_MS).length;
 // One look of the copy's BAND_MS timer → how often it asked for a draw.
 function bandLook(cx) {
@@ -11206,7 +11222,7 @@ test("UI: the wheel over a column asks a draw only where its list scrolled past 
   assert.equal(wheel(1e6), 0, "drawn at the end: no draw more");
 });
 
-test("UI: while the board shows, and only then, a timer every BAND_MS (100 ms) reads each shown column's handle and asks a draw only where a window left its band: a drag of the scrollbar's thumb, released anywhere; a window grown past the band; no timer while the board is hidden, from its start too; nothing while it shows another view", async () => {
+test("UI: while the board shows, and only then, a timer every BAND_MS (100 ms) reads the handle of each column its last draw showed and asks a draw only where a window left its band: a drag of the scrollbar's thumb, released anywhere; a window grown past the band; not a column hidden since; no timer while the board is hidden, from its start too; nothing while it shows another view", async () => {
   const { b, cx, host } = await longBoard();
   assert.equal(board.BAND_MS, 100);
   assert.equal(bandTimers(cx), 1, "one timer while the board shows");
@@ -11236,8 +11252,16 @@ test("UI: while the board shows, and only then, a timer every BAND_MS (100 ms) r
   assert.equal(bandLook(cx), 1, "which reads where the handle went meanwhile");
   await cx.look();
   assert.equal(bandTimers(cx), 1, "still one");
+  const [first, second] = b.navColumns(b.view());
+  b.toggleColumn(b.view(), first, cx);
+  cardList(b, 0);
+  board.keptOf(b, first.id).scroll.y = 8000;
+  assert.equal(bandLook(cx), 0, "the first column hidden, then a draw: its list is not read");
+  board.keptOf(b, second.id).scroll.y = 4000;
+  assert.equal(bandLook(cx), 1, "the column that draw put first: read by its own handle");
+  const list = handleOf(b, 0);
   await click(b, cx, "tab-github:prs");
-  handleOf(b, 0).y = 8000;
+  list.y = 8000;
   assert.equal(bandLook(cx), 0, "the PR list shows");
   const late = await bootBoard({ shown: false });
   assert.equal(bandTimers(late.cx), 0, "a copy hidden from its start: none");
@@ -11318,6 +11342,89 @@ test("UI: a column's band stays where it stood across a refresh and a switch to 
   assert.deepEqual(wholeAt(cardList(b, 0)), there, "after a switch to the PR list and back");
 });
 
+test("UI: a column that takes over a state another column held draws its top whole in that very draw, while herdr has not yet run the scroll to the top", async () => {
+  const { b, cx, host } = await longBoard();
+  const list = handleOf(b, 0);
+  list.y = 4000;
+  measureWhole(b, cx, 100);
+  assert.ok(isFrame(cardList(b, 0).kids[0]));
+  const others = b.shapeState.board.pool.length - 3;
+  board.columnsKept(b, Array.from({ length: others }, (_, i) => `other-${i}`));
+  host.scrolled.splice(0);
+  await press(b, cx, "r");
+  await host.answer("gh", ok(largeBoardAnswer(300).replaceAll("opt-ready", "opt-renamed")), isBoardCall);
+  const drawn = cardList(b, 0);
+  assert.equal(b.navColumns(b.view())[0].id, "opt-renamed");
+  assert.equal(board.keptOf(b, "opt-renamed").scroll, list, "the state of the column it replaces, used longest ago");
+  assert.deepEqual(host.scrolled.filter((s) => s.handle === list).at(-1), { handle: list, row: 0 }, "its list to the top");
+  assert.deepEqual(wholeAt(drawn), bandAt(drawn, 0), "the handle still at 4000: the cards at the top whole");
+  assert.equal(bandLook(cx), 0);
+  list.y = 0;
+  assert.equal(bandLook(cx), 0, "herdr ran it: in the band");
+});
+
+test("UI: a board column keeps its list's ScrollHandle by its id, not its place: a column that comes in front of the others (Ohne Status) leaves each its own, and takes one of its own", async () => {
+  const { b, cx, host } = await openBoard();
+  const before = listsOf(b);
+  Object.values(before).forEach((handle, i) => (handle.y = 100 * (i + 1)));
+  const offsets = Object.fromEntries(Object.entries(before).map(([id, handle]) => [id, handle.y]));
+  await press(b, cx, "r");
+  await host.answer("gh", ok(boardWith((nodes) => (nodes.find((n) => n.id === "PVTI_rec1").fieldValueByName = null))), isBoardCall);
+  const after = listsOf(b);
+  assert.equal(Object.keys(after)[0], board.NO_STATUS, "Ohne Status in front");
+  assert.deepEqual(Object.fromEntries(Object.keys(before).map((id) => [id, after[id].y])), offsets, "each column where it stood");
+  for (const id of Object.keys(before)) assert.equal(after[id], before[id], `${id}: its own handle`);
+  assert.equal(new Set(Object.values(after)).size, Object.keys(after).length, "Ohne Status one of its own");
+});
+
+test("UI: a board that shows more columns than keep their own state: those that hold one keep it, by id, when a column comes in front, and that one shares one of theirs, the same at every draw", async () => {
+  const { b, cx, host } = await openBoard({ answer: wideBoard(24) });
+  const before = listsOf(b);
+  assert.equal(new Set(Object.values(before)).size, 24, "24 columns, each its own");
+  Object.values(before).forEach((handle, i) => (handle.y = 10 * (i + 1)));
+  await press(b, cx, "r");
+  await host.answer("gh", ok(wideBoard(24, { none: true })), isBoardCall);
+  const after = listsOf(b);
+  assert.equal(Object.keys(after)[0], board.NO_STATUS);
+  for (const id of Object.keys(before)) assert.equal(after[id], before[id], `${id}: its own handle`);
+  assert.ok(Object.values(before).includes(after[board.NO_STATUS]), "Ohne Status shares one");
+  assert.deepEqual(listsOf(b), after, "and again at the next draw");
+});
+
+test("a board column's kept state (columnsKept): one of the SCROLLS made at the start, held by the column's id; a column without one takes one no column holds, else the one used longest ago whose column the draw does not show, its width anew and its list scrolled to the top, its band there at once; past SCROLLS shown, a column without one shares the one made at its place; keptOf claims none and counts no use", async () => {
+  const { host } = await bootBoard();
+  const b = { shapeState: { board: board.boardShape.state() } };
+  const st = b.shapeState.board;
+  const scrolls = st.pool.length;
+  host.scrolled.splice(0);
+  const draw = (ids) => board.columnsKept(b, ids);
+  const named = (prefix, n) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  const a = draw(named("a", 3));
+  assert.equal(new Set(a).size, 3, "each its own");
+  const other = draw(named("b", 5));
+  assert.ok(other.every((k) => !a.includes(k)), "another view's columns take ones no column holds");
+  assert.deepEqual(draw(named("a", 3)), a, "the first view's again: their own");
+  draw(named("c", scrolls - 8));
+  draw(named("a", 3));
+  assert.equal(new Set(st.byId.values()).size, scrolls, "all held");
+  assert.deepEqual(host.scrolled, [], "a state no column held before scrolls nothing");
+  assert.equal(board.keptOf(b, "d0"), undefined, "keptOf: none for a column without one");
+  assert.equal(board.keptOf(b, "b0"), other[0], "keptOf: b0's own");
+  other[0].cardWidth = 280;
+  other[0].band.lo = 40;
+  other[0].scroll.y = 500;
+  assert.equal(draw(["d0"])[0], other[0], "a new column: the one used longest ago, b0's (keptOf counted no use)");
+  assert.deepEqual([other[0].cardWidth, other[0].band, st.byId.has("b0")], [0, { ...board.bandState(), revealed: { from: 500, to: 0 } }, false],
+    "its width anew, its band where its list goes: the top; b0 holds none now");
+  assert.deepEqual(host.scrolled.splice(0), [{ handle: other[0].scroll, row: 0 }], "its list to the top");
+  const [e0, b1] = draw(["e0", "b1"]);
+  assert.deepEqual([e0, b1], [other[2], other[1]], "not b1's, the oldest, which the draw shows: b2's");
+  const many = draw(named("f", scrolls + 2));
+  assert.equal(new Set(many.slice(0, scrolls)).size, scrolls, "the first SCROLLS shown each their own");
+  assert.deepEqual(many.slice(scrolls), [st.pool[0], st.pool[1]], "those past them: the ones made at their places");
+  assert.deepEqual(draw(named("f", scrolls + 2)), many, "the same at the next draw");
+});
+
 test("UI: a card's measure asks one draw where it is more than 2 pixels off the height its draw took or the column's cards changed width, and its height is the frame's once it leaves the band", async () => {
   const fresh = await openBoard({ answer: largeBoardAnswer(300) });
   Object.assign(handleOf(fresh.b, 0), { width: 300, height: LIST_H });
@@ -11375,7 +11482,7 @@ test("UI: at herdr's zoom 2 a column takes its handle's lengths as herdr gives t
   assert.ok(wholeAt(list).includes(40) && isFrame(list.kids[0]), `${wholeAt(list)}`);
 });
 
-test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every card of a column draws whole and unmeasured, as before the band, and the log says so once per board copy", async () => {
+test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every card of a column draws whole and unmeasured, as before the band, also one that takes over a state another column held, and the log says so once per board copy", async () => {
   const logged = [];
   const log = console.log;
   console.log = (...a) => logged.push(a.join(" "));
@@ -11398,6 +11505,9 @@ test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every
   host.scrolled.splice(0);
   await press(b, cx, "g", G);
   assert.deepEqual(host.scrolled.splice(0), [{ handle: handleOf(b, 0), row: 99 }], "G still scrolls to the last row");
+  board.columnsKept(b, Array.from({ length: b.shapeState.board.pool.length }, (_, i) => `other-${i}`));
+  const back = cardList(b, 0);
+  assert.deepEqual(wholeAt(back), back.kids.map((_, i) => i), "a state another column held, taken back: all whole");
 });
 
 test("the band's sums: a handle read, a window herdr has not laid out yet as VIEWPORT_GUESS high; the band about the offset, kept within the content; whether a window left it; a key's reveal, which the band follows until the handle moved; a card's height before it is measured", async () => {

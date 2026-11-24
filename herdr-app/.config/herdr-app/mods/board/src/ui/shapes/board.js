@@ -23,7 +23,7 @@ import {
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 import { rowTops } from "../../scroll.js";
-import { bandState, inBand, leftBand, placeBand, readsScroll, revealCard, scrollOf } from "../band.js";
+import { bandState, inBand, leftBand, placeBand, readsScroll, revealCard, revealTop, scrollOf } from "../band.js";
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
@@ -33,31 +33,64 @@ const SCROLLS = 24;
 
 // The board shape's own state on a Board (state(), shapes/index.js).
 const boardState = (b) => b.shapeState.board;
-const columnKept = (b, ci) => boardState(b).columns[ci % SCROLLS];
 const columnLeft = (kept) => leftBand(kept.band, scrollOf(kept.scroll));
+
+// By id, not place: a column coming in front (Ohne Status) must not hand its
+// neighbours their state; a state passed on starts anew, scrolled to the top.
+function columnKept(b, id) {
+  const st = boardState(b);
+  let kept = st.byId.get(id);
+  if (!kept) {
+    const free = st.pool.filter((k) => !st.showing.includes(k.id)).sort((x, y) => x.used - y.used)[0];
+    if (!free) return st.pool[Math.max(0, st.showing.indexOf(id)) % SCROLLS];
+    st.byId.delete(free.id);
+    const band = bandState();
+    if (free.id !== null) {
+      free.scroll.scroll_to_item(0);
+      if (st.windowed) revealTop(band, scrollOf(free.scroll));
+    }
+    kept = Object.assign(free, { id, band, cardWidth: 0 });
+    st.byId.set(id, kept);
+  }
+  kept.used = ++st.clock;
+  return kept;
+}
+
+// All of a draw's columns at once, so that a new one takes no state from a
+// column later in the draw.
+export function columnsKept(b, ids) {
+  boardState(b).showing = ids;
+  return ids.map((id) => columnKept(b, id));
+}
+
+// Unlike columnKept, claims no state and counts no use.
+export const keptOf = (b, id) => boardState(b).byId.get(id);
 
 export const boardShape = {
   state() {
-    const columns = Array.from({ length: SCROLLS }, () => ({ scroll: ScrollHandle.new(), band: bandState(), cardWidth: 0 }));
-    const windowed = readsScroll(columns[0].scroll);
+    // A state's `id`: the column holding it, null for none; `used`: the
+    // clock at its last use, the oldest passed on first.
+    const pool = Array.from({ length: SCROLLS }, () => ({ id: null, used: 0, scroll: ScrollHandle.new(), band: bandState(), cardWidth: 0 }));
+    const windowed = readsScroll(pool[0].scroll);
     if (!windowed) console.log("board: this herdr reads no scroll position back (0.1.18 does), so every card of a column draws whole");
-    return { columns, windowed, drawn: 0, heights: new Map() };
+    return { pool, byId: new Map(), clock: 0, showing: [], windowed, heights: new Map() };
   },
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   columnCount: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo(b, view, sel, row) {
-    const kept = columnKept(b, sel.col);
+    const col = b.navColumns(view)[sel.col];
+    const kept = columnKept(b, col.id);
     if (boardState(b).windowed) {
       const at = scrollOf(kept.scroll);
-      const { heights, tops, content } = columnLayout(b, b.navColumns(view)[sel.col], kept, at.width);
+      const { heights, tops, content } = columnLayout(b, col, kept, at.width);
       revealCard(kept.band, at, content, tops[row], heights[row]);
     }
     kept.scroll.scroll_to_item(row);
   },
   bandsLeft(b) {
     const st = boardState(b);
-    return st.windowed && st.columns.slice(0, st.drawn).some(columnLeft);
+    return st.windowed && st.pool.some((k) => st.showing.includes(k.id) && columnLeft(k));
   },
   // All items, whatever the filter: the cards of the shown columns.
   items: (data) => data.columns.filter((c) => !c.hidden).flatMap((c) => c.cards),
@@ -133,14 +166,14 @@ function drawBoard(b, t, mono, view, st) {
   const allSpaces = spaces();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const { windowed } = boardState(b);
-  boardState(b).drawn = Math.min(cols.length, SCROLLS);
+  const states = columnsKept(b, cols.map((c) => c.id));
   const columnEl = (col, ci) => {
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
     const ground = t.chrome;
     const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), ground);
-    const kept = columnKept(b, ci);
+    const kept = states[ci];
     const at = windowed ? scrollOf(kept.scroll) : null;
     const layout = at && columnLayout(b, col, kept, at.width);
     if (at) placeBand(kept.band, layout.content, at);

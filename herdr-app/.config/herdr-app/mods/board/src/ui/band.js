@@ -41,6 +41,11 @@ export function leftBand(s, at) {
   return offset < s.lo || offset + at.viewport > s.hi;
 }
 
+// As herdr's scroll_to_item(0) on a list scrolled to `at`.
+export function revealTop(s, at) {
+  s.revealed = { from: at.offset, to: 0 };
+}
+
 // As herdr's scroll_to_item: the smallest scroll that shows the card.
 export function revealCard(s, at, content, top, height) {
   const to = revealOffset({ offset: at.offset, viewport: at.viewport, content }, top, height);
