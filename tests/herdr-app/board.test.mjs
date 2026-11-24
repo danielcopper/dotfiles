@@ -10964,3 +10964,121 @@ test("UI: no dialog's head names the keys that move its mark, only Enter and Esc
   await press(b, cx, "a");
   assert.equal(title("assign"), "Zuweisen · tender#3004 · Enter · Esc");
 });
+
+// ---- A large board: what a full draw costs ----
+
+// Label colors with the tone the label colors' test names for them in a
+// copper theme.
+const LARGE_LABEL_TONES = {
+  d73a4a: "ansi1", "0075ca": "ansi4", cfd3d7: "muted", a2eeef: "ansi6", "7057ff": "ansi5", "008672": "ansi6", e4e669: "ansi2", d876e3: "ansi5",
+  "5319e7": "ansi5", e99695: "ansi1", fbca04: "ansi3", "0e8a16": "ansi2", b60205: "ansi1", d93f0b: "ansi1", ff7f00: "ansi11", "1d76db": "ansi4",
+};
+const LARGE_COLORS = Object.keys(LARGE_LABEL_TONES);
+const LARGE_OPTIONS = [["opt-backlog", "Backlog", "GREEN"], ["opt-ready", "Ready", "BLUE"], ["opt-progress", "In progress", "YELLOW"], ["opt-review", "In review", "ORANGE"], ["opt-done", "Done", "PURPLE"]];
+const LARGE_SHOWN = ["opt-ready", "opt-progress", "opt-review"];
+
+// A board answer of `n` items in the shapes of github-board-cards.json,
+// with made-up names: up to five labels, issue types, Epics by their title,
+// priorities, milestones, parents, sub-issues from none to 45, assignees
+// and pull requests, in the three columns testConfig does not hide.
+function largeBoardAnswer(n) {
+  const types = [null, { name: "Bug", color: "RED" }, { name: "Task", color: "YELLOW" }, { name: "Feature", color: "BLUE" }, null, { name: "Epic", color: "PURPLE" }];
+  const priorities = [null, { name: "P0", color: "RED" }, { name: "P1", color: "ORANGE" }, { name: "P2", color: "YELLOW" }, { name: "P3", color: "GRAY" }];
+  const totals = [0, 3, 12, 30, 31, 45, 0, 7];
+  const nodes = Array.from({ length: n }, (_, i) => {
+    const number = 1000 + i;
+    const labels = Array.from({ length: i % 6 }, (_, k) => ({ name: `label-${(i + 3 * k) % 24}`, color: LARGE_COLORS[(i + 5 * k) % LARGE_COLORS.length] }));
+    const total = totals[i % totals.length];
+    const shared = { author: { login: "sample-user" }, number, repository: { nameWithOwner: "example/tender" }, milestone: i % 2 ? { title: `v${i % 3}` } : null };
+    const content = i % 17 === 5
+      ? { ...shared, __typename: "PullRequest", id: `PR_sample${number}`, title: `feat(sample): change number ${number}`, url: `https://github.com/example/tender/pull/${number}`,
+        headRefName: `feat/${number}-sample`, labels: { nodes: labels }, assignees: { nodes: [] }, reviewRequests: { nodes: [] } }
+      : { ...shared, __typename: "Issue", id: `I_sample${number}`, url: `https://github.com/example/tender/issues/${number}`,
+        title: i % 11 === 0 ? `[Epic] Sample topic number ${number}` : `fix(sample): make sample thing ${number} read as the resolver states it`,
+        issueType: types[i % types.length], labels: { nodes: i % 11 === 0 ? [...labels, { name: "epic", color: "5319e7" }] : labels },
+        assignees: { nodes: i % 4 ? [{ login: "sample-user" }] : [] },
+        parent: i % 3 ? { number: 900 + (i % 9), title: `[Epic] Sample parent ${900 + (i % 9)} with a title long enough to be cut short`, repository: { nameWithOwner: i % 5 ? "example/tender" : "example/atlas" } } : null,
+        subIssuesSummary: { total, completed: Math.floor(total * ((i % 5) / 4)) } };
+    return { id: `PVTI_large${i}`, fieldValueByName: { optionId: LARGE_SHOWN[i % 3], name: "x" }, priority: priorities[i % priorities.length], content };
+  });
+  return JSON.stringify({
+    data: {
+      viewer: { login: "sample-user" },
+      repositoryOwner: { projectV2: { id: "PVT_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7",
+        field: { id: "PVTSSF_sample", name: "Status", options: LARGE_OPTIONS.map(([id, name, color]) => ({ id, name, color })) },
+        priorityField: { id: "PVTSSF_priority" }, h0: { totalCount: 40 }, h1: { totalCount: 120 },
+        items: { totalCount: n, pageInfo: { hasNextPage: false, endCursor: "end" }, nodes } } },
+    },
+  });
+}
+
+// One draw of `b` and what it cost: the elements it made and its OKLCH
+// conversions (oklch, tones.js, takes one Math.atan2 per color).
+function drawCost(b, host) {
+  const cost = { elements: 0, conversions: 0 };
+  const made = { div: host.div, h_flex: host.h_flex, v_flex: host.v_flex };
+  for (const [kind, make] of Object.entries(made)) host[kind] = (...a) => (cost.elements++, make(...a));
+  const atan2 = Math.atan2;
+  Math.atan2 = (...a) => (cost.conversions++, atan2(...a));
+  try {
+    b.render();
+  } finally {
+    Object.assign(host, made);
+    Math.atan2 = atan2;
+  }
+  return cost;
+}
+
+test("UI: a full draw of a board of 300 cards (labels, types, priorities, milestones, parents, sub-issues up to 45) converts at most 100 colors to OKLCH and makes at most 8000 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
+  const { b, host } = await openBoard({ answer: largeBoardAnswer(300) });
+  assert.equal(b.views.mine.data.columns.filter((c) => !c.hidden).reduce((n, c) => n + c.cards.length, 0), 300);
+  for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
+    host.theme = () => ({ ...t });
+    for (const draw of [1, 2]) {
+      const cost = drawCost(b, host);
+      assert.ok(cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
+      assert.ok(cost.elements <= 8000, `${name}, draw ${draw}: ${cost.elements} elements`);
+    }
+  }
+});
+
+test("UI: each draw takes its colors from the theme it draws in, after a switch of the theme too: label chips by their color's hue, priorities, column dots and card edges, through copper-dark, catppuccin-mocha, copper-light, copper-dark without copper's colors and copper-dark again", async () => {
+  const answer = largeBoardAnswer(30);
+  const { b, host } = await openBoard({ answer });
+  const nodes = JSON.parse(answer).data.repositoryOwner.projectV2.items.nodes;
+  const copperName = (tone) => Object.entries(board.COPPER_HUES).find(([, slot]) => slot === tone)?.[0] ?? "neutral";
+  const themes = [["copper-dark", copperTheme("dark"), true], ["catppuccin-mocha", catppuccinTheme(), false], ["copper-light", copperTheme("light"), true],
+    ["copper-dark without copper's colors", tintedCopper("dark"), false], ["copper-dark again", copperTheme("dark"), true]];
+  for (const [name, t, copper] of themes) {
+    host.theme = () => ({ ...t });
+    const text = (tone) => (copper ? t[`copper-${copperName(tone)}-text`] : t[tone] ?? t.muted);
+    const chipBgs = (tone) => (copper ? [3, 4].map((step) => t[`copper-${copperName(tone)}-${step}`]) : [`${text(tone).slice(0, 7)}1a`]);
+    // Without copper's colors: the nearest of the theme's hues by OKLCH hue.
+    const lch = (hex) => {
+      const [, a, b2] = oklab(`#${hex.replace("#", "")}`);
+      return { c: Math.hypot(a, b2), h: ((Math.atan2(b2, a) * 180) / Math.PI + 360) % 360 };
+    };
+    const apartBy = (x, y) => Math.min(Math.abs(x - y), 360 - Math.abs(x - y));
+    const nearest = (hex) =>
+      lch(hex).c < board.GREY_CHROMA ? "muted" : board.HUE_TONES.reduce((best, tone) => (apartBy(lch(hex).h, lch(t[tone]).h) < apartBy(lch(hex).h, lch(t[best]).h) ? tone : best));
+    const root = b.render();
+    let labels = 0;
+    for (const node of nodes) {
+      const card = byId(root, `card-${node.id}`);
+      for (const { name: label, color } of node.content.labels.nodes.filter((l) => l.name !== "epic").slice(0, 3)) {
+        const tone = copper ? LARGE_LABEL_TONES[color] : nearest(color);
+        const [fg, bg] = chipLook(chipOf(card, label));
+        assert.equal(fg, text(tone), `${name}: ${node.id} ${label} #${color}`);
+        assert.ok(chipBgs(tone).includes(bg), `${name}: ${node.id} ${label} #${color} on ${bg}`);
+        labels++;
+      }
+      const priority = node.priority && byId(card, "priority");
+      if (priority) assert.equal(chipLook(priority)[0], text(copper ? GITHUB_TONES[node.priority.color] : board.chipTone(GITHUB_TONES[node.priority.color])), `${name}: ${node.id} priority`);
+      const [, , color] = LARGE_OPTIONS.find(([id]) => id === node.fieldValueByName.optionId);
+      assert.equal(card.kids[0].with.bg[0], text(GITHUB_TONES[color]), `${name}: ${node.id} edge`);
+    }
+    assert.ok(labels > 30, `${name}: ${labels} label chips`);
+    const dots = LARGE_SHOWN.map((id) => byId(root, `col-${LARGE_SHOWN.indexOf(id)}`).kids[0].kids[0].with.bg[0]);
+    assert.deepEqual(dots, LARGE_SHOWN.map((id) => text(GITHUB_TONES[LARGE_OPTIONS.find(([o]) => o === id)[2]])), `${name}: column dots`);
+  }
+});

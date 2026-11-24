@@ -4011,8 +4011,33 @@ function copperTint(t, tone, grounds) {
 // act on, a PR list's, which no section tone and no check state shares.
 const palettes = new WeakMap();
 function paletteOf(t) {
-  if (!palettes.has(t)) palettes.set(t, copperColors(t) ? copperPalette(t) : tintedPalette(t));
-  return palettes.get(t);
+  let palette = palettes.get(t);
+  if (!palette) {
+    palette = remembered(t, copperColors(t) ? copperPalette(t) : tintedPalette(t));
+    palettes.set(t, palette);
+  }
+  return palette;
+}
+
+// herdr's theme() gives a new object on each call, so this lasts one render.
+function remembered(t, palette) {
+  const once = (fn, key = (x) => x) => {
+    const seen = new Map();
+    return (...args) => {
+      const k = key(...args);
+      if (!seen.has(k)) seen.set(k, fn(...args));
+      return seen.get(k);
+    };
+  };
+  const hueAt = new Map(palette.hues.map(([tone, name]) => [tone, oklch(t[name])?.h]));
+  return {
+    ...palette,
+    text: once(palette.text),
+    chip: once(palette.chip),
+    head: once(palette.head, (tone, ground) => `${tone} ${ground}`),
+    hueAt,
+    hueTone: once((hex) => nearestHue(palette, hueAt, hex)),
+  };
 }
 
 // A copper theme's palette. A label takes one of copper's seven hues, as
@@ -4144,24 +4169,25 @@ function apart(one, other) {
 // nearest to it by OKLCH hue, but between two hues with a border of their
 // own the one on its side of that border; a grey one (GREY_CHROMA), one
 // that is no color, or a theme without those colors gives "muted".
-export function hueTone(t, hex) {
+export const hueTone = (t, hex) => paletteOf(t).hueTone(hex);
+
+// hueTone for a palette whose hues' OKLCH hues `hueAt` holds by tone.
+function nearestHue({ hues, borders }, hueAt, hex) {
   const own = oklch(hex);
   if (!own || own.c < GREY_CHROMA) return "muted";
-  const { hues, borders } = paletteOf(t);
-  const hueOf = (tone) => oklch(t[hues.find(([name]) => name === tone)?.[1]])?.h;
   // How far round from `from` a hue lies, going up.
   const round = (h, from) => (h - from + 360) % 360;
   for (const [low, high, at] of borders) {
-    const [from, to] = [hueOf(low), hueOf(high)];
+    const [from, to] = [hueAt.get(low), hueAt.get(high)];
     if (from === undefined || to === undefined || round(own.h, from) > round(to, from)) continue;
     return round(own.h, from) < round(at, from) ? low : high;
   }
   let best = "muted";
   let distance = Infinity;
-  for (const [tone, name] of hues) {
-    const theirs = oklch(t[name]);
-    if (!theirs) continue;
-    const d = Math.min(Math.abs(own.h - theirs.h), 360 - Math.abs(own.h - theirs.h));
+  for (const [tone] of hues) {
+    const theirs = hueAt.get(tone);
+    if (theirs === undefined) continue;
+    const d = Math.min(Math.abs(own.h - theirs), 360 - Math.abs(own.h - theirs));
     if (d < distance) [best, distance] = [tone, d];
   }
   return best;
