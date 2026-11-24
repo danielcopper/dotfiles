@@ -392,8 +392,7 @@ export const detailSection = (t, title, ...kids) => sectionFrame(t).child(sectio
 export const checksSection = (t, checks) => detailSection(t, "CHECKS", div().text_color(checkColor(t, checks.state)).child(checks.text));
 
 // A note of the detail panel, under its sections: `text` in its note
-// `level`'s tone (NOTE_TONES), with the id `id`. A pull request's warnings
-// a level down and what a PR list could not read of one show as such notes.
+// `level`'s tone (NOTE_TONES), with the id `id`.
 export const detailNote = (t, id, text, level) => div().id(id).px(18).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES[level])).child(text);
 
 // The detail panel's parts of a work item (the sprint and the backlog

@@ -36,16 +36,18 @@
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
-// its limit take: ten for the 1000 by default; a list view one, which
-// GitHub prices by its connections, each counted as full: per section one
-// search, then per pull request of its limit (50 by default) its assignees,
-// review requests, last commit (and that one's checks), latest reviews
-// (LATEST_REVIEWS, 20) and review threads, and per thread (REVIEW_THREADS,
-// 50) its comments, so with the defaults 1 + 50 * 6 + 50 * 50 = 2801
-// requests a section, about 28 points (a hundred requests each) of GitHub's
-// 5000 an hour, 84 for the shipped three sections; the threads' comments
-// are 2500 of them. An issue's
-// related items (its description, parent, sub-issues and linked pull
+// its limit take: ten for the 1000 by default; a list view one, and one more
+// per THREAD_IDS (100) pull requests in it with more than FIRST_THREADS (10)
+// review threads. GitHub prices a request by its connections, each counted
+// as full: the list's per section one search, then per pull request of its
+// limit (50 by default) its assignees, review requests, last commit (and
+// that one's checks), latest reviews (LATEST_REVIEWS, 20) and review
+// threads, and per thread (FIRST_THREADS) its comments, so with the defaults
+// 1 + 50 * 6 + 50 * 10 = 801 requests a section, about 8 points (a hundred
+// requests each) of GitHub's 5000 an hour, 24 for the shipped three
+// sections; the follow-up (githubThreadsArgs) 51 per such pull request
+// (REVIEW_THREADS threads and their comments), about one point for two. An
+// issue's related items (its description, parent, sub-issues and linked pull
 // requests) cost one more when its details open, again on `r` while they are
 // open, and again after a refresh where their last read failed (readRelated;
 // what a refresh keeps of them keptRelated says); an item the details panel
@@ -56,15 +58,15 @@
 // description, parent, children and linked pull requests) cost the same, one
 // az call (az boards work-item show --expand relations), and one WIQL query
 // more for its children's and its parent's titles and states where it has
-// either (sources/azure/related.js). An Azure team's Sprint two az calls (the
-// taskboard's column of each work item, and one WIQL query for their fields;
-// for a sprint the sprint picker chose, by its id and path; none while the
-// team has no sprint running and none is chosen), its Backlog two, one after
-// the other (the level's work items in their list by az rest, then one WIQL
-// query for their fields; one for an empty backlog), and one more for the
-// project's work item types (their colors) while neither view keeps them;
-// either one more while who az is stays unknown. What the Sprint and the
-// Backlog read once and keep, and for how long, makeAzure says. An
+// either (sources/azure/related.js). An Azure team's Sprint two az calls
+// (the taskboard's column of each work item, and one WIQL query for their
+// fields; for a sprint the sprint picker chose, by its id and path; none
+// while the team has no sprint running and none is chosen), its Backlog two,
+// one after the other (the level's work items in their list by az rest, then
+// one WIQL query for their fields; one for an empty backlog), and one more
+// for the project's work item types (their colors) while neither view keeps
+// them; either one more while who az is stays unknown. What the Sprint and
+// the Backlog read once and keep, and for how long, makeAzure says. An
 // assignment costs one gh or az call, and the assignee picker one more per
 // repo or team the first time it opens there (GitHub's assignable users with
 // who gh is; the team's members, and who az is while that is unknown). The

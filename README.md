@@ -401,17 +401,17 @@ herdr-app`. Which files of the package git tracks is set in the root
   the toasts keep it. The pull request tabs read nothing yet; each says which
   view it will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
-  me, opened by me, or asking for my review; a list section of my own
-  search, one whose query sets author, assignee or (user-)review-requested
-  to @me, counts whole; on Azure: assigned to the account az is signed in
-  as, which needs `az login`, and a story stays dimmed for my tasks in it)
-  without reading anything again. A context or view added to `views.json`
-  adds a tab, and `r` reads the file again; the board remembers the source,
-  tab and team view shown last, and "nur meine". A count in a tab, a column
-  or a list section that the filter or "nur meine" thins says so ("1/4"); a
-  tab's count leaves the cards of hidden columns out. The code holds nothing
-  of mine; the header of `mods/board/src/main.js` describes the file's
-  fields.
+  me, opened by me, or asking for my review; a list section of my own search,
+  whose query sets author, assignee, reviewed-by, review-requested or
+  user-review-requested to @me, counts whole, so "Geprüft" stays; on Azure:
+  assigned to the account az is signed in as, which needs `az login`, and a
+  story stays dimmed for my tasks in it) without reading anything again. A
+  context or view added to `views.json` adds a tab, and `r` reads the file
+  again; the board remembers the source, tab and team view shown last, and
+  "nur meine". A count in a tab, a column or a list section that the filter or
+  "nur meine" thins says so ("1/4"); a tab's count leaves the cards of hidden
+  columns out. The code holds nothing of mine; the header of
+  `mods/board/src/main.js` describes the file's fields.
   Keys: `1 2 3` or `[ ]` switch the tab, `v` a team's Sprint and Backlog, `m`
   turns "nur meine" on and off (the source toggle, the tabs, the switch and
   "nur meine" take clicks too), `/` filters, `r` refreshes (the shown view
@@ -496,37 +496,41 @@ herdr-app`. Which files of the package git tracks is set in the root
   the reasons are my review asked for, of me or of a team I am in (a search
   that sets `review-requested:@me` found it), while I gave none or mine was
   dismissed ("Review angefragt"); commits after my latest review, asked again
-  or not ("neue Commits seit deinem Review"); and an unresolved review thread
-  I took part in whose last comment is someone else's ("Antwort erwartet").
-  One I reviewed that asks nothing of me, and does not ask my review again,
-  says "wartet auf Autor". On my own: changes requested ("Änderungen
-  gewünscht"), unresolved threads whose last comment is someone else's ("2
-  offene Threads"), failing checks ("Checks rot"), a merge conflict
-  ("Konflikt"), and with none of these: "bereit zum Mergen", where it is no
-  draft, no review is still required (approved, or a repo that asks for none),
-  its checks passed or it has none, and it merges without conflict (not while
-  GitHub still works that out). Comments as such are no reason. It reads each
-  pull request's first 50 review threads and of each the authors of its last
-  10 comments (a thread I took part in only before its last 10 comments counts
-  as one I did not), and the first 20 latest reviews. Where it could not read
-  all it needs (an error at the pull request, a part GitHub did not send, more
-  than 50 threads, more than 20 reviews without mine among them), nothing says
+  or not ("neue Commits seit deinem Review"); my review asked for again while
+  mine is on its last commit ("Review erneut angefragt"); and an unresolved
+  review thread I took part in whose last comment is someone else's ("Antwort
+  erwartet"). One I reviewed that asks nothing of me says "wartet auf Autor".
+  On my own: changes requested ("Änderungen gewünscht"), unresolved threads
+  whose last comment is someone else's ("2 offene Threads"), failing checks
+  ("Checks rot"), a merge conflict ("Konflikt"), and with none of these:
+  "bereit zum Mergen", where it is no draft, no review is still required
+  (approved, or a repo that asks for none), its checks passed or it has none,
+  and it merges without conflict (not while GitHub still works that out).
+  Comments as such are no reason. It reads each pull request's first 10 review
+  threads in its one request and, for those with more, the first 50 in one
+  more per 100 of them, and of each thread the authors of its last 10 comments
+  (a thread I took part in only before its last 10 comments counts as one I
+  did not), and the first 20 latest reviews. Where it could not read all it
+  needs (an error at the pull request, a part GitHub did not send, more than
+  50 threads, more than 20 reviews without mine among them), nothing says
   "wartet auf Autor" or "bereit zum Mergen": the row says "? nicht ganz
   gelesen" where it names no reason and adds "· ?" after its reasons where it
   names some, checks GitHub sent an error for show "?", and the details list
-  what is missing as warnings after the checks. Where it has more than 50
-  threads, a count of my threads gets a "+" ("3+ offene Threads"). A pull
-  request GitHub sent as nothing for an error is named among the list's notes
-  above it ("1 Treffer in „Meine“ nicht gelesen: …"). The shipped `views.json`
-  has three sections: "Zu prüfen" (review asked of me), "Meine" (opened by me)
-  and "Geprüft" (open pull requests I reviewed and did not open,
-  `reviewed-by:@me -author:@me`): GitHub drops a review request once the
-  review is given, so without it a reviewed pull request would leave the list.
-  A pull request that asks my review again shows in "Zu prüfen", the first
-  section that finds it. A `views.json` of my own without that search keeps
-  working and shows no reviewed pull requests. Without the login gh runs as
-  nothing is marked. The header of `mods/board/src/main.js` says what the
-  list's request costs.
+  what is missing as warnings after the checks. Where it has more threads than
+  it read (more than 50, or more than 10 where the second request failed), a
+  count of my threads gets a "+" ("3+ offene Threads"). A pull request GitHub
+  sent as nothing for an error is named among the list's notes above it ("1
+  Treffer in „Meine“ nicht gelesen: …"). The shipped `views.json` has three
+  sections: "Zu prüfen" (review asked of me), "Meine" (opened by me) and
+  "Geprüft" (open pull requests I reviewed and did not open, `reviewed-by:@me
+  -author:@me`): GitHub drops a review request once the review is given, so
+  without it a reviewed pull request would leave the list. A pull request that
+  asks my review again shows in "Zu prüfen", the first section that finds it.
+  A `views.json` of my own without that search keeps working and shows no
+  reviewed pull requests. Without the login gh runs as nothing is marked. The
+  list's request costs about 8 of GitHub's 5000 points an hour per section
+  with 50 pull requests, the one for more threads about one per two pull
+  requests; the header of `mods/board/src/main.js` says how.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,
