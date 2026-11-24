@@ -2930,8 +2930,8 @@ export const REVIEW_THREADS = 50;
 export const THREAD_COMMENTS = 10;
 
 // A pull request's fields as a row of a PR list shows it (prRow), which
-// the details panel shows of a pull request it goes down to too (with its
-// head commit's oid, which the commits' block holds for PR_ATTENTION_FIELDS).
+// the details panel shows of a pull request it goes down to too. The head
+// commit's oid is prAttention's; it stands here, where its checks are read.
 const PR_ROW_FIELDS = `
       id number title url isDraft createdAt updatedAt headRefName reviewDecision
       repository { nameWithOwner } author { login }
@@ -3010,9 +3010,9 @@ function prAttention(pr, row, viewer) {
   const answered = (authors) => authors.length > 0 && authors.at(-1) !== viewer;
   if (pr.author?.login === viewer) {
     const reasons = [];
-    const waitingThreads = open.filter(answered).length;
+    const unanswered = open.filter(answered).length;
     if (pr.reviewDecision === "CHANGES_REQUESTED") reasons.push("Änderungen gewünscht");
-    if (waitingThreads) reasons.push(threadsText(waitingThreads, (threads?.totalCount ?? 0) > threads.nodes.length));
+    if (unanswered) reasons.push(threadsText(unanswered, (threads?.totalCount ?? 0) > threads.nodes.length));
     if (row.checks.state === "failed") reasons.push("Checks rot");
     if (pr.mergeable === "CONFLICTING") reasons.push("Konflikt");
     if (!reasons.length && !pr.isDraft && pr.reviewDecision === "APPROVED" && row.checks.state === "passed" && pr.mergeable === "MERGEABLE") reasons.push("bereit zum Mergen");

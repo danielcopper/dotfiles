@@ -1136,6 +1136,7 @@ test("on someone else's pull request the viewer has to act where their review is
   assert.deepEqual(reasonsWith(301, (pr) => pr.reviewThreads.nodes.push({ isResolved: false, comments: { nodes: [{ author: { login: "sample-user" } }, { author: null }] } })),
     [["Antwort erwartet"], false], "a last comment whose author is gone is someone else's");
   assert.deepEqual(reasonsWith(303, (pr) => (pr.reviewThreads.nodes[0].isResolved = true)), [[], true], "a resolved thread asks nothing");
+  assert.deepEqual(reasonsWith(303, (pr) => (pr.reviewThreads.nodes[0].comments = null)), [[], true], "a thread whose comments GitHub did not send");
   assert.deepEqual(reasonsWith(101, (pr) => (pr.reviewRequests.nodes = [])), [[], false], "neither asked nor reviewed: nothing");
   assert.deepEqual(reasonsWith(301, (pr) => (pr.author = null)), [[], true], "an author who is gone is not sample-user");
   assert.deepEqual(reasonsWith(101, (pr) => {
@@ -1158,6 +1159,7 @@ test("on one's own pull request the viewer has to act on changes requested, thre
   assert.deepEqual(reasonsWith(203, threads(open(1), 70)), [["1+ offene Threads"], false]);
   assert.deepEqual(reasonsWith(203, threads([], 70)), [[], false], "none open of those it sent: no reason");
   assert.deepEqual(reasonsWith(203, (pr) => (pr.reviewThreads = null)), [[], false], "no threads read");
+  assert.deepEqual(reasonsWith(203, threads([{ isResolved: false, comments: { nodes: [] } }, null], 2)), [[], false], "a thread without comments it sent, and one it sent as null");
   assert.deepEqual(reasonsWith(201, threads(open(1), 1)), [["1 offener Thread"], false], "an open thread: not ready");
   for (const [why, change] of [
     ["a draft", (pr) => (pr.isDraft = true)],
@@ -1179,6 +1181,8 @@ test("on one's own pull request the viewer has to act on changes requested, thre
 test("without the viewer's login no row asks anything of anyone, and the rows keep GitHub's order", () => {
   const data = json("github-list-attention.json");
   delete data.data.viewer;
+  attentionPr(data, 202).author = null;
+  attentionPr(data, 303).reviewThreads.nodes.push({ isResolved: false, comments: { nodes: [{ author: null }, { author: { login: "sample-contributor" } }] } });
   assert.deepEqual(attentionOf(attentionList(data)).map((s) => s.map(([n, a, w]) => [n, a.length, w])), [
     [[103, 0, false], [101, 0, false], [102, 0, false]], [[203, 0, false], [201, 0, false], [202, 0, false]], [[301, 0, false], [302, 0, false], [303, 0, false]],
   ]);
@@ -9201,16 +9205,18 @@ test("UI: in a copper theme each PR list section's head sits on a band of its to
 });
 
 test("UI: a PR list section's tone from views.json; on a theme without copper's colors its band is the tone's color laid over the background at HEAD_ALPHA, its stripe and text the theme's color, orange the theme's yellow, as the mark", async () => {
-  const t = catppuccinTheme();
-  const { b } = await openAttention(t, attentionConfig("orange"));
-  const root = b.render();
-  ["ansi4", "ansi5", "ansi3"].forEach((tone, i) => {
-    const [bg, fg] = sectionHead(root, i);
-    assert.deepEqual([bg, fg], [over(`${t[tone]}${board.HEAD_ALPHA}`, t.background), t[tone]], `${i}: ${tone}`);
-  });
-  assert.equal(b.views.prs.data.sections[2].color, "ansi11", "views.json's orange");
-  assert.deepEqual([102, 201, 302].map((n) => rowStripe(root, n)), [t.ansi4, t.ansi5, t.ansi3], "the first row, selected, has the accent");
-  assert.equal(rowCell(root, 101, "● Review angefragt").with.text_color[0], t.ansi3);
+  for (const [name, t] of Object.entries(TINTED())) {
+    const { b } = await openAttention(t, attentionConfig("orange"));
+    const root = b.render();
+    ["ansi4", "ansi5", "ansi3"].forEach((tone, i) => {
+      const [bg, fg] = sectionHead(root, i);
+      assert.deepEqual([bg, fg], [over(`${t[tone]}${board.HEAD_ALPHA}`, t.background), t[tone]], `${name} ${i}: ${tone}`);
+    });
+    assert.equal(b.views.prs.data.sections[2].color, "ansi11", "views.json's orange");
+    assert.deepEqual([102, 201, 302].map((n) => rowStripe(root, n)), [t.ansi4, t.ansi5, t.ansi3], `${name}: the first row, selected, has the accent`);
+    assert.equal(rowCell(root, 101, "● Review angefragt").with.text_color[0], t.ansi3, name);
+  }
+  assert.notEqual(tintedCopper("dark").ansi3, tintedCopper("dark").ansi11, "a theme whose yellow is not its bright yellow tells the two apart");
   const copper = copperTheme("dark");
   const inCopper = await openAttention(copper, attentionConfig("orange"));
   assert.equal(sectionHead(inCopper.b.render(), 2)[1], copper["copper-orange-text"], "copper's orange in a copper theme");
