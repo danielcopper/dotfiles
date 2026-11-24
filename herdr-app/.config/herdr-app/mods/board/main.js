@@ -104,17 +104,18 @@
 // which the keys of its actions, the hint line and the command menu read),
 // related.js (the items related to an item, read when its details open: what
 // is kept, their lines), description.js (a description as drawn, without
-// anything it could load), scroll.js (how the details scroll), sources/
-// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
-// related.js, index.js), tools.js (running gh and az), actions/ (starting a
-// session, writing a change at once, moving a card, changing a state,
-// creating a work item, assigning an item), ui/helpers.js, ui/tones.js (the
-// tones of labels and types, the selected background, the tints),
-// ui/layer.js (the board layer), ui/related.js (the related items as drawn),
-// ui/shapes/ (how a view's data is drawn and worked: board, prs, sprint,
-// backlog, placeholder), ui/modals/ (the dialogs: start, status, columns,
-// create, assign, commands, sprints) and this one, the Board, which looks
-// the shape up.
+// anything it could load), scroll.js (how the details scroll; the sums a
+// board column shares), sources/ (GitHub; Azure in sources/azure/:
+// common.js, sprint.js, backlog.js, related.js, index.js), tools.js
+// (running gh and az), actions/ (starting a session, writing a change at
+// once, moving a card, changing a state, creating a work item, assigning an
+// item), ui/helpers.js, ui/tones.js (the tones of labels and types, the
+// selected background, the tints), ui/layer.js (the board layer),
+// ui/related.js (the related items as drawn), ui/band.js (which cards of a
+// board column draw whole), ui/shapes/ (how a view's data is drawn and
+// worked: board, prs, sprint, backlog, placeholder), ui/modals/ (the
+// dialogs: start, status, columns, create, assign, commands, sprints) and
+// this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -4360,7 +4361,7 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
     .id(`${id}-rows`)
     .relative()
     .gap(2)
-    .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(-unzoomed(e.delta?.y ?? 0), cx)))
+    .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(wheelMove(e), cx)))
     .children(rows.flatMap((kids, n) => [...(heads[n] ? [heading(heads[n], n)] : []), row(kids, n)]))
     .when(count > rows.length, (el) => el.child(
       div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
@@ -4390,6 +4391,8 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 // reports them in the window's pixels and scales a script's lengths by its
 // zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
+
+export const wheelMove = (e) => -unzoomed(e.delta?.y ?? 0);
 
 // How many rows a menu with a filter shows at once (menuWindow).
 const MENU_ROWS = 10;
@@ -4667,7 +4670,8 @@ export const columnHead = (t, col, count, ground) =>
 
 // A card's left edge: a narrow bar in its column's color, as tall as the
 // card's content beside it.
-export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
+export const CARD_EDGE = 3;
+export const cardEdge = (t, col) => div().w(CARD_EDGE).flex_none().rounded(2).bg(columnColor(t, col));
 
 // A thin line across the top of a card or row in its type's color
 // (typeLineTone: `hex`, an Azure type's color, or a GitHub issue type's),
@@ -4729,8 +4733,9 @@ export function cardHead(t, kids, item) {
 }
 
 // `parent`: partOfText, or null where the card names none.
+export const showsMeta = (item, parent) => Boolean(item.milestone || parent);
 export function cardMeta(t, item, parent) {
-  if (!item.milestone && !parent) return null;
+  if (!showsMeta(item, parent)) return null;
   return h_flex()
     .id("card-meta")
     .gap(8)
@@ -4747,13 +4752,15 @@ export const cardEnd = (t, item, session, pending) => [
   ...(item.assignees.length ? [assigneeText(t, item).min_w(0).truncate()] : []),
 ];
 
+export const footLines = (chips, progress, ends) => ({ chips: chips > 0 || (!progress?.total && ends > 0), progress: Boolean(progress?.total) });
+
 export function cardFoot(t, chips, progress, end) {
-  const bar = progressLine(t, progress, end);
-  return [chipLine(chips, bar ? [] : end), bar].filter(Boolean);
+  const shows = footLines(chips.length, progress, end.length);
+  const bar = shows.progress ? progressLine(t, progress, end) : null;
+  return [shows.chips ? chipLine(chips, bar ? [] : end) : null, bar].filter(Boolean);
 }
 
 function chipLine(chips, end) {
-  if (!chips.length && !end.length) return null;
   return h_flex().id("card-chips").gap(5).items_center().child(h_flex().flex_1().min_w(0).gap(5).flex_wrap().items_center().children(chips)).children(end);
 }
 
@@ -5431,13 +5438,16 @@ export function thumbOf(s, min = 16) {
   return { top, height };
 }
 
-// Where row `i` of a column of rows stands: the heights of the rows before
-// it (`heights`, one per row), `gap` between rows, after `pad` above the
-// first → { top, height }.
-export function rowSpan(heights, i, gap, pad) {
-  let top = pad;
-  for (let j = 0; j < i; j++) top += heights[j] + gap;
-  return { top, height: heights[i] ?? 0 };
+// Where each row of a column of rows stands, `gap` between them, after `pad`
+// above the first → { tops, content }, content down to the last row's end.
+export function rowTops(heights, gap, pad = 0) {
+  const tops = [];
+  let at = pad;
+  for (const h of heights) {
+    tops.push(at);
+    at += h + gap;
+  }
+  return { tops, content: heights.length ? at - gap : pad };
 }
 
 // The block's offset when it draws the details of the item `key`: 0 for
@@ -5539,7 +5549,9 @@ const rowId = (r, i) => (r.kind === "line" ? `related-line-${r.n}` : `related-ro
 function lineSpan(ui, item, entry, n) {
   const rows = relatedRows(item, entry);
   const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
-  return i < 0 ? null : rowSpan(rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX), i, FRAME.gap, FRAME.py);
+  if (i < 0) return null;
+  const heights = rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX);
+  return { top: rowTops(heights, FRAME.gap, FRAME.py).tops[i], height: heights[i] };
 }
 
 // Scrolls line `n` into view.
@@ -5690,7 +5702,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .min_h(0)
     .overflow_hidden()
     .on_scroll_wheel((e, cx) => {
-      scrollBy(ui, -unzoomed(e.delta?.y ?? 0));
+      scrollBy(ui, wheelMove(e));
       cx.notify();
     })
     .child(content);
@@ -6888,6 +6900,55 @@ export function unclearMoveLines(due, data) {
   });
 }
 
+// ==== src/ui/band.js ====
+
+// A board column draws whole only the cards in its band, its window and
+// half a window above and below; every other card is a frame of its height.
+// herdr gives a mod's draw 50 ms, which a column of a few hundred whole
+// cards outgrows.
+
+// The list's height until herdr laid it out (scrollOf).
+export const VIEWPORT_GUESS = 1000;
+
+export const bandState = () => ({ lo: 0, hi: 0, content: 0, revealed: null });
+
+// herdr before 0.1.18 reads nothing back from a ScrollHandle.
+export const readsScroll = (handle) => typeof handle.offset === "function";
+
+export function scrollOf(handle) {
+  const { width, height } = handle.viewport_size();
+  return { offset: handle.offset().y, viewport: height || VIEWPORT_GUESS, width };
+}
+
+// herdr runs a key's scroll_to_item at its next frame: until the handle
+// has moved, the band stands where that scroll goes.
+function followed(s, at) {
+  if (s.revealed?.from === at.offset) return s.revealed.to;
+  s.revealed = null;
+  return at.offset;
+}
+
+const bandOffset = (s, at, content) => clampOffset(followed(s, at), content, at.viewport);
+
+export function placeBand(s, content, at) {
+  const offset = bandOffset(s, at, content);
+  const vp = at.viewport;
+  Object.assign(s, { content, lo: offset - vp / 2, hi: offset + vp + vp / 2 });
+}
+
+export const inBand = (s, top, height) => top < s.hi && top + height > s.lo;
+
+export function leftBand(s, at) {
+  const offset = bandOffset(s, at, s.content);
+  return offset < s.lo || offset + at.viewport > s.hi;
+}
+
+// As herdr's scroll_to_item: the smallest scroll that shows the card.
+export function revealCard(s, at, content, top, height) {
+  const to = revealOffset({ offset: at.offset, viewport: at.viewport, content }, top, height);
+  s.revealed = to === at.offset ? null : { from: at.offset, to };
+}
+
 // ==== src/ui/shapes/board.js ====
 
 // The board shape: a view's data as columns of cards, which a card moves
@@ -6906,16 +6967,34 @@ const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, w
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
 
-// The board shape's own state on a Board (state(), shapes/index.js): one
-// scroll handle per column (SCROLLS, reused beyond).
+// The board shape's own state on a Board (state(), shapes/index.js).
 const boardState = (b) => b.shapeState.board;
+const columnKept = (b, ci) => boardState(b).columns[ci % SCROLLS];
+const columnLeft = (kept) => leftBand(kept.band, scrollOf(kept.scroll));
 
 export const boardShape = {
-  state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
+  state() {
+    const columns = Array.from({ length: SCROLLS }, () => ({ scroll: ScrollHandle.new(), band: bandState(), cardWidth: 0 }));
+    const windowed = readsScroll(columns[0].scroll);
+    if (!windowed) console.log("board: this herdr reads no scroll position back (0.1.18 does), so every card of a column draws whole");
+    return { columns, windowed, drawn: 0, heights: new Map() };
+  },
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   columnCount: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
-  scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
+  scrollTo(b, view, sel, row) {
+    const kept = columnKept(b, sel.col);
+    if (boardState(b).windowed) {
+      const at = scrollOf(kept.scroll);
+      const { heights, tops, content } = columnLayout(b, b.navColumns(view)[sel.col], kept, at.width);
+      revealCard(kept.band, at, content, tops[row], heights[row]);
+    }
+    kept.scroll.scroll_to_item(row);
+  },
+  bandsLeft(b) {
+    const st = boardState(b);
+    return st.windowed && st.columns.slice(0, st.drawn).some(columnLeft);
+  },
   // All items, whatever the filter: the cards of the shown columns.
   items: (data) => data.columns.filter((c) => !c.hidden).flatMap((c) => c.cards),
   count(b, data) {
@@ -6961,19 +7040,47 @@ export const boardShape = {
   },
 };
 
+const CARD_GAP = 6;
+
+function columnLayout(b, col, kept, listWidth) {
+  const measured = boardState(b).heights;
+  const heights = col.shown.map((card) => {
+    const m = measured.get(card.key);
+    return m && (m.width === kept.cardWidth || !kept.cardWidth) ? m.height : cardHeightGuess(card, listWidth);
+  });
+  return { heights, ...rowTops(heights, CARD_GAP) };
+}
+
+const MEASURE_SLACK = 2;
+
+function cardMeasure(b, kept, layout, card, i) {
+  return (size, cx) => {
+    const height = unzoomed(size.height);
+    const width = unzoomed(size.width);
+    boardState(b).heights.set(card.key, { height, width });
+    const resized = Boolean(kept.cardWidth) && width !== kept.cardWidth;
+    kept.cardWidth = width;
+    if (resized || Math.abs(height - layout.heights[i]) > MEASURE_SLACK) cx.notify();
+  };
+}
+
 function drawBoard(b, t, mono, view, st) {
   const cols = b.navColumns(view);
   const allSpaces = spaces();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
+  const { windowed } = boardState(b);
+  boardState(b).drawn = Math.min(cols.length, SCROLLS);
   const columnEl = (col, ci) => {
-    // Cards the filter or "nur meine" hides in this column.
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
-    // The column's ground, which its head is laid over too; a drop target
-    // takes another.
     const ground = t.chrome;
     const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), ground);
+    const kept = columnKept(b, ci);
+    const at = windowed ? scrollOf(kept.scroll) : null;
+    const layout = at && columnLayout(b, col, kept, at.width);
+    if (at) placeBand(kept.band, layout.content, at);
+    const whole = (card, measure) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure);
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -6988,6 +7095,10 @@ function drawBoard(b, t, mono, view, st) {
       .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
       .bg(target ? dropBg(t, ground) : ground)
       .p(10)
+      .when(windowed, (el) => el.on_scroll_wheel((_e, cx) => {
+        // GPUI moved the list before the event reached its column.
+        if (columnLeft(kept)) cx.notify();
+      }))
       .on_hover((hovered, cx) => {
         if (!b.drag) return;
         if (hovered) b.over = ci;
@@ -7008,10 +7119,13 @@ function drawBoard(b, t, mono, view, st) {
           .id(`cards-${ci}`)
           .flex_1()
           .min_h(0)
-          .gap(6)
+          .gap(CARD_GAP)
           .overflow_y_scrollbar()
-          .track_scroll(boardState(b).scrolls[ci % SCROLLS])
-          .children(col.shown.map((card) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces)))
+          .track_scroll(kept.scroll)
+          .children(col.shown.map((card, i) => {
+            if (!layout) return whole(card, null);
+            return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, layout, card, i)) : cardFrame(t, st, card, layout.heights[i]);
+          }))
           .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
   };
@@ -7063,11 +7177,42 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
+function cardFrame(t, st, card, height) {
+  return div()
+    .flex_none()
+    .h(height)
+    .rounded(8)
+    .border_1()
+    .map(selectedLook(t, st.sel?.key === card.key, t.border, t.background));
+}
+
+// drawCard's box, which cardHeightGuess sums.
+const CARD = { py: 9, pl: 5, pr: 9, border: 1, gap: 7, lineGap: 6, titleLine: 17 };
+// About the height of a line of 11-pixel text and the width of a title's
+// character, for a card never measured.
+const LINE_GUESS = 16;
+const TITLE_CHAR_PX = 6.5;
+// The list's width until herdr measured it.
+const LIST_W_GUESS = 300;
+
+const cardLabels = (card) => card.labels.filter((l) => l !== epicLabel(card));
+
+// A card never measured: its lines as drawCard draws them, its title's
+// wrapped by its length in the list's `width`; a line that holds only a
+// session chip or "speichert …" is left out, the card's measure corrects it.
+export function cardHeightGuess(card, width) {
+  const room = Math.max(60, (width || LIST_W_GUESS) - CARD.pl - CARD.pr - 2 * CARD.border - CARD_EDGE - CARD.gap);
+  const titleLines = Math.max(1, Math.ceil(((card.title ?? "").length * TITLE_CHAR_PX) / room));
+  const foot = footLines((cardType(card) ? 1 : 0) + cardLabels(card).length, card.sub, card.assignees.length);
+  const lines = [LINE_GUESS, CARD.titleLine * titleLines, ...[showsMeta(card, partOfText(card)), foot.chips, foot.progress].filter(Boolean).map(() => LINE_GUESS)];
+  return 2 * (CARD.py + CARD.border) + rowTops(lines, CARD.lineGap).content;
+}
+
+function drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const type = typeChip(t, card);
-  const labels = card.labels.filter((l) => l !== epicLabel(card));
+  const labels = cardLabels(card);
   const line = typeLine(t, card, null, 6);
   const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
   const chips = [...(type ? [type] : []), ...labels.slice(0, 3).map((l) => labelChip(t, card, l)), ...(labels.length > 3 ? [chip(t, `+${labels.length - 3}`)] : [])];
@@ -7077,15 +7222,16 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
     .relative()
     .flex_none()
     .items_stretch()
-    .py(9)
-    .pl(5)
-    .pr(9)
-    .gap(7)
+    .py(CARD.py)
+    .pl(CARD.pl)
+    .pr(CARD.pr)
+    .gap(CARD.gap)
     .rounded(8)
     .border_1()
     .map(selectedLook(t, selected, t.border, t.background))
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
+    .when(Boolean(measure), (el) => el.on_size_change(measure))
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
@@ -7106,9 +7252,9 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
       b.clickItem(view, { col: ci, key: card.key }, cx);
     })
     .child(cardEdge(t, col))
-    .child(v_flex().flex_1().min_w(0).gap(6)
+    .child(v_flex().flex_1().min_w(0).gap(CARD.lineGap)
       .child(cardHead(t, [div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card))], card))
-      .child(div().text_size(12.5).line_height("17px").child(card.title))
+      .child(div().text_size(12.5).line_height(`${CARD.titleLine}px`).child(card.title))
       .when(Boolean(meta), (el) => el.child(meta))
       .children(cardFoot(t, chips, card.sub, end)))
     .when(Boolean(line), (el) => el.child(line));
@@ -7642,17 +7788,18 @@ function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
 // the sprint it shows, null for the current one, whose id `id` names
 // where it is known) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
-// panel's share of the width is no narrower than one of: detailWidth; a
-// list has none), detailParts (its rows in the detail
-// panel), settle (b, view, due, data, cx: says how the unclear writes of
-// its items ended up), moveTo, toggleColumn, openStatusMenu, navigate (its
-// own keyboard movement in place of navigate's, select.js), pickStatus
+// panel's share of the width is no narrower than one of: detailWidth; a list
+// has none), bandsLeft (b: whether a column scrolled past the cards it drew
+// whole, which the Board asks every BAND_MS), detailParts (its rows in the
+// detail panel), settle (b, view, due, data, cx: says how the unclear writes
+// of its items ended up), moveTo, toggleColumn, openStatusMenu, navigate
+// (its own keyboard movement in place of navigate's, select.js), pickStatus
 // (what a pick in the status menu does in place of a move to that column),
 // and assign (how its items' assignees are found and changed: { find(data,
 // key), withItem(data, key, patch) (the data with the item's fields set),
 // where (where an item no longer is: "im Sprint") }; a shape that has it
-// takes a, the assignee picker, ui/modals/assign.js, and its settle says
-// the outcomes of unclear assignments, unclearAssignLines).
+// takes a, the assignee picker, ui/modals/assign.js, and its settle says the
+// outcomes of unclear assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw
@@ -8133,6 +8280,14 @@ const TICK_MS = 30000;
 // render sees the copy be hidden, and none may come when it comes to show:
 // this timer sees both, and a render that comes first sees the show too.
 export const WATCH_MS = 250;
+// How often a copy that shows asks its shape's bandsLeft (shapes/index.js),
+// from the look that sees it show to the one that sees it hidden
+// (watchShown): herdr tells a script of no drag of a scrollbar's thumb.
+// on_window_mouse_move would, but it calls the script at every move of the
+// pointer anywhere in the window; on_window_mouse_up sees only the release.
+// An ask reads each shown column's ScrollHandle: its offset and its window's
+// size.
+export const BAND_MS = 100;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
@@ -8180,10 +8335,12 @@ export default class Board extends View {
     this.initProps = initProps;
     // Whether this copy showed when it last looked (at init, in a render or
     // on the WATCH_MS timer; null before the first look), the focus the
-    // layer's board was shown with (watchShown, followFocus), and the last
-    // failure each guarded step said (guarded).
+    // layer's board was shown with (watchShown, followFocus), its BAND_MS
+    // timer while it shows (followBandsWhile), and the last failure each
+    // guarded step said (guarded).
     this.wasShown = null;
     this.seen = null;
+    this.bandTimer = null;
     this.failed = {};
     this.handle = cx.focus_handle();
     this.config = null;
@@ -8233,6 +8390,7 @@ export default class Board extends View {
     // copy behind the tab's content) leaves the keyboard where it is.
     this.wasShown = boardShown(this.isLayer());
     if (this.wasShown) {
+      this.followBandsWhile(true, cx);
       this.takeKeyboard();
       cx.timer.after(300, () => this.guarded("Tastatur", () => this.takeKeyboard()));
     }
@@ -8496,6 +8654,16 @@ export default class Board extends View {
     const shown = this.view();
     if (shown && due(shown)) this.refresh(shown, cx);
     cx.notify();
+  }
+
+  followBandsWhile(shown, cx) {
+    this.bandTimer?.cancel();
+    this.bandTimer = shown ? cx.timer.every(BAND_MS, (cx) => this.guarded("Spalten", () => this.followBands(cx))) : null;
+  }
+
+  followBands(cx) {
+    const view = this.view();
+    if (view && this.shape(view).bandsLeft?.(this)) cx.notify();
   }
 
   // ---- related items, the details panel ----
@@ -9056,15 +9224,20 @@ export default class Board extends View {
 
   // At every look (a render or the WATCH_MS timer, see there): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
-  // after the look and only where it still shows. While hidden, the layer's
-  // board forgets the focus it compared with (followFocus), so it starts
-  // anew when it shows.
+  // after the look and only where it still shows, and starts its BAND_MS
+  // timer. While hidden, the timer stops and the layer's board forgets the
+  // focus it compared with (followFocus), so it starts anew when it shows.
   watchShown(cx) {
     const shown = boardShown(this.isLayer());
     const was = this.wasShown;
     this.wasShown = shown;
-    if (!shown) this.seen = null;
-    if (!shown || was !== false) return;
+    if (!shown) {
+      this.seen = null;
+      this.followBandsWhile(false, cx);
+      return;
+    }
+    if (was !== false) return;
+    this.followBandsWhile(true, cx);
     cx.timer.after(0, () => this.guarded("Tastatur", () => {
       if (boardShown(this.isLayer())) this.takeKeyboard();
     }));

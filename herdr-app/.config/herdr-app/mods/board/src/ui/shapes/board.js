@@ -11,16 +11,18 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { spaces } from "herdr";
-import { cardLabel, epicLabel, partOfText } from "../../shared.js";
+import { cardLabel, cardType, epicLabel, partOfText } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hasStep, hideable, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { linkedSession } from "../../actions/start.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import {
-  button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, labelChip, selectedLook, shownOf, statusPill, store, typeChip, typeLine,
+  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, labelChip, selectedLook, showsMeta, shownOf, statusPill, store, typeChip, typeLine, unzoomed,
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
+import { rowTops } from "../../scroll.js";
+import { bandState, inBand, leftBand, placeBand, readsScroll, revealCard, scrollOf } from "../band.js";
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
@@ -28,16 +30,34 @@ const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, w
 // How many columns keep their own scroll position.
 const SCROLLS = 24;
 
-// The board shape's own state on a Board (state(), shapes/index.js): one
-// scroll handle per column (SCROLLS, reused beyond).
+// The board shape's own state on a Board (state(), shapes/index.js).
 const boardState = (b) => b.shapeState.board;
+const columnKept = (b, ci) => boardState(b).columns[ci % SCROLLS];
+const columnLeft = (kept) => leftBand(kept.band, scrollOf(kept.scroll));
 
 export const boardShape = {
-  state: () => ({ scrolls: Array.from({ length: SCROLLS }, () => ScrollHandle.new()) }),
+  state() {
+    const columns = Array.from({ length: SCROLLS }, () => ({ scroll: ScrollHandle.new(), band: bandState(), cardWidth: 0 }));
+    const windowed = readsScroll(columns[0].scroll);
+    if (!windowed) console.log("board: this herdr reads no scroll position back (0.1.18 does), so every card of a column draws whole");
+    return { columns, windowed, drawn: 0, heights: new Map() };
+  },
   nav: (b, st) => shownColumns(st.data, b.filterText, b.mine),
   columnCount: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
-  scrollTo: (b, view, sel, row) => boardState(b).scrolls[sel.col % SCROLLS].scroll_to_item(row),
+  scrollTo(b, view, sel, row) {
+    const kept = columnKept(b, sel.col);
+    if (boardState(b).windowed) {
+      const at = scrollOf(kept.scroll);
+      const { heights, tops, content } = columnLayout(b, b.navColumns(view)[sel.col], kept, at.width);
+      revealCard(kept.band, at, content, tops[row], heights[row]);
+    }
+    kept.scroll.scroll_to_item(row);
+  },
+  bandsLeft(b) {
+    const st = boardState(b);
+    return st.windowed && st.columns.slice(0, st.drawn).some(columnLeft);
+  },
   // All items, whatever the filter: the cards of the shown columns.
   items: (data) => data.columns.filter((c) => !c.hidden).flatMap((c) => c.cards),
   count(b, data) {
@@ -83,19 +103,47 @@ export const boardShape = {
   },
 };
 
+const CARD_GAP = 6;
+
+function columnLayout(b, col, kept, listWidth) {
+  const measured = boardState(b).heights;
+  const heights = col.shown.map((card) => {
+    const m = measured.get(card.key);
+    return m && (m.width === kept.cardWidth || !kept.cardWidth) ? m.height : cardHeightGuess(card, listWidth);
+  });
+  return { heights, ...rowTops(heights, CARD_GAP) };
+}
+
+const MEASURE_SLACK = 2;
+
+function cardMeasure(b, kept, layout, card, i) {
+  return (size, cx) => {
+    const height = unzoomed(size.height);
+    const width = unzoomed(size.width);
+    boardState(b).heights.set(card.key, { height, width });
+    const resized = Boolean(kept.cardWidth) && width !== kept.cardWidth;
+    kept.cardWidth = width;
+    if (resized || Math.abs(height - layout.heights[i]) > MEASURE_SLACK) cx.notify();
+  };
+}
+
 function drawBoard(b, t, mono, view, st) {
   const cols = b.navColumns(view);
   const allSpaces = spaces();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
+  const { windowed } = boardState(b);
+  boardState(b).drawn = Math.min(cols.length, SCROLLS);
   const columnEl = (col, ci) => {
-    // Cards the filter or "nur meine" hides in this column.
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
-    // The column's ground, which its head is laid over too; a drop target
-    // takes another.
     const ground = t.chrome;
     const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), ground);
+    const kept = columnKept(b, ci);
+    const at = windowed ? scrollOf(kept.scroll) : null;
+    const layout = at && columnLayout(b, col, kept, at.width);
+    if (at) placeBand(kept.band, layout.content, at);
+    const whole = (card, measure) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure);
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -110,6 +158,10 @@ function drawBoard(b, t, mono, view, st) {
       .border_color(target ? t.accent : focusedCol && !st.sel?.key ? t.input : t.border)
       .bg(target ? dropBg(t, ground) : ground)
       .p(10)
+      .when(windowed, (el) => el.on_scroll_wheel((_e, cx) => {
+        // GPUI moved the list before the event reached its column.
+        if (columnLeft(kept)) cx.notify();
+      }))
       .on_hover((hovered, cx) => {
         if (!b.drag) return;
         if (hovered) b.over = ci;
@@ -130,10 +182,13 @@ function drawBoard(b, t, mono, view, st) {
           .id(`cards-${ci}`)
           .flex_1()
           .min_h(0)
-          .gap(6)
+          .gap(CARD_GAP)
           .overflow_y_scrollbar()
-          .track_scroll(boardState(b).scrolls[ci % SCROLLS])
-          .children(col.shown.map((card) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces)))
+          .track_scroll(kept.scroll)
+          .children(col.shown.map((card, i) => {
+            if (!layout) return whole(card, null);
+            return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, layout, card, i)) : cardFrame(t, st, card, layout.heights[i]);
+          }))
           .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
   };
@@ -185,11 +240,42 @@ function hiddenLine(b, t, view, st) {
     );
 }
 
-function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
+function cardFrame(t, st, card, height) {
+  return div()
+    .flex_none()
+    .h(height)
+    .rounded(8)
+    .border_1()
+    .map(selectedLook(t, st.sel?.key === card.key, t.border, t.background));
+}
+
+// drawCard's box, which cardHeightGuess sums.
+const CARD = { py: 9, pl: 5, pr: 9, border: 1, gap: 7, lineGap: 6, titleLine: 17 };
+// About the height of a line of 11-pixel text and the width of a title's
+// character, for a card never measured.
+const LINE_GUESS = 16;
+const TITLE_CHAR_PX = 6.5;
+// The list's width until herdr measured it.
+const LIST_W_GUESS = 300;
+
+const cardLabels = (card) => card.labels.filter((l) => l !== epicLabel(card));
+
+// A card never measured: its lines as drawCard draws them, its title's
+// wrapped by its length in the list's `width`; a line that holds only a
+// session chip or "speichert …" is left out, the card's measure corrects it.
+export function cardHeightGuess(card, width) {
+  const room = Math.max(60, (width || LIST_W_GUESS) - CARD.pl - CARD.pr - 2 * CARD.border - CARD_EDGE - CARD.gap);
+  const titleLines = Math.max(1, Math.ceil(((card.title ?? "").length * TITLE_CHAR_PX) / room));
+  const foot = footLines((cardType(card) ? 1 : 0) + cardLabels(card).length, card.sub, card.assignees.length);
+  const lines = [LINE_GUESS, CARD.titleLine * titleLines, ...[showsMeta(card, partOfText(card)), foot.chips, foot.progress].filter(Boolean).map(() => LINE_GUESS)];
+  return 2 * (CARD.py + CARD.border) + rowTops(lines, CARD.lineGap).content;
+}
+
+function drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const type = typeChip(t, card);
-  const labels = card.labels.filter((l) => l !== epicLabel(card));
+  const labels = cardLabels(card);
   const line = typeLine(t, card, null, 6);
   const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
   const chips = [...(type ? [type] : []), ...labels.slice(0, 3).map((l) => labelChip(t, card, l)), ...(labels.length > 3 ? [chip(t, `+${labels.length - 3}`)] : [])];
@@ -199,15 +285,16 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
     .relative()
     .flex_none()
     .items_stretch()
-    .py(9)
-    .pl(5)
-    .pr(9)
-    .gap(7)
+    .py(CARD.py)
+    .pl(CARD.pl)
+    .pr(CARD.pr)
+    .gap(CARD.gap)
     .rounded(8)
     .border_1()
     .map(selectedLook(t, selected, t.border, t.background))
     .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
+    .when(Boolean(measure), (el) => el.on_size_change(measure))
     .on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
       if (b.modal) return;
@@ -228,9 +315,9 @@ function drawCard(b, t, mono, view, st, card, col, ci, allSpaces) {
       b.clickItem(view, { col: ci, key: card.key }, cx);
     })
     .child(cardEdge(t, col))
-    .child(v_flex().flex_1().min_w(0).gap(6)
+    .child(v_flex().flex_1().min_w(0).gap(CARD.lineGap)
       .child(cardHead(t, [div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(card))], card))
-      .child(div().text_size(12.5).line_height("17px").child(card.title))
+      .child(div().text_size(12.5).line_height(`${CARD.titleLine}px`).child(card.title))
       .when(Boolean(meta), (el) => el.child(meta))
       .children(cardFoot(t, chips, card.sub, end)))
     .when(Boolean(line), (el) => el.child(line));

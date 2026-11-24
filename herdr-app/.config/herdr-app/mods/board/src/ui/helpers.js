@@ -132,7 +132,7 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
     .id(`${id}-rows`)
     .relative()
     .gap(2)
-    .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(-unzoomed(e.delta?.y ?? 0), cx)))
+    .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(wheelMove(e), cx)))
     .children(rows.flatMap((kids, n) => [...(heads[n] ? [heading(heads[n], n)] : []), row(kids, n)]))
     .when(count > rows.length, (el) => el.child(
       div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
@@ -162,6 +162,8 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
 // reports them in the window's pixels and scales a script's lengths by its
 // zoom (gpui-kit's crates/shell/src/value.rs, scaled_px).
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
+
+export const wheelMove = (e) => -unzoomed(e.delta?.y ?? 0);
 
 // How many rows a menu with a filter shows at once (menuWindow).
 const MENU_ROWS = 10;
@@ -439,7 +441,8 @@ export const columnHead = (t, col, count, ground) =>
 
 // A card's left edge: a narrow bar in its column's color, as tall as the
 // card's content beside it.
-export const cardEdge = (t, col) => div().w(3).flex_none().rounded(2).bg(columnColor(t, col));
+export const CARD_EDGE = 3;
+export const cardEdge = (t, col) => div().w(CARD_EDGE).flex_none().rounded(2).bg(columnColor(t, col));
 
 // A thin line across the top of a card or row in its type's color
 // (typeLineTone: `hex`, an Azure type's color, or a GitHub issue type's),
@@ -501,8 +504,9 @@ export function cardHead(t, kids, item) {
 }
 
 // `parent`: partOfText, or null where the card names none.
+export const showsMeta = (item, parent) => Boolean(item.milestone || parent);
 export function cardMeta(t, item, parent) {
-  if (!item.milestone && !parent) return null;
+  if (!showsMeta(item, parent)) return null;
   return h_flex()
     .id("card-meta")
     .gap(8)
@@ -519,13 +523,15 @@ export const cardEnd = (t, item, session, pending) => [
   ...(item.assignees.length ? [assigneeText(t, item).min_w(0).truncate()] : []),
 ];
 
+export const footLines = (chips, progress, ends) => ({ chips: chips > 0 || (!progress?.total && ends > 0), progress: Boolean(progress?.total) });
+
 export function cardFoot(t, chips, progress, end) {
-  const bar = progressLine(t, progress, end);
-  return [chipLine(chips, bar ? [] : end), bar].filter(Boolean);
+  const shows = footLines(chips.length, progress, end.length);
+  const bar = shows.progress ? progressLine(t, progress, end) : null;
+  return [shows.chips ? chipLine(chips, bar ? [] : end) : null, bar].filter(Boolean);
 }
 
 function chipLine(chips, end) {
-  if (!chips.length && !end.length) return null;
   return h_flex().id("card-chips").gap(5).items_center().child(h_flex().flex_1().min_w(0).gap(5).flex_wrap().items_center().children(chips)).children(end);
 }
 

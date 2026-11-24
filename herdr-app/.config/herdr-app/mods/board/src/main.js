@@ -102,17 +102,18 @@
 // which the keys of its actions, the hint line and the command menu read),
 // related.js (the items related to an item, read when its details open: what
 // is kept, their lines), description.js (a description as drawn, without
-// anything it could load), scroll.js (how the details scroll), sources/
-// (GitHub; Azure in sources/azure/: common.js, sprint.js, backlog.js,
-// related.js, index.js), tools.js (running gh and az), actions/ (starting a
-// session, writing a change at once, moving a card, changing a state,
-// creating a work item, assigning an item), ui/helpers.js, ui/tones.js (the
-// tones of labels and types, the selected background, the tints),
-// ui/layer.js (the board layer), ui/related.js (the related items as drawn),
-// ui/shapes/ (how a view's data is drawn and worked: board, prs, sprint,
-// backlog, placeholder), ui/modals/ (the dialogs: start, status, columns,
-// create, assign, commands, sprints) and this one, the Board, which looks
-// the shape up.
+// anything it could load), scroll.js (how the details scroll; the sums a
+// board column shares), sources/ (GitHub; Azure in sources/azure/:
+// common.js, sprint.js, backlog.js, related.js, index.js), tools.js
+// (running gh and az), actions/ (starting a session, writing a change at
+// once, moving a card, changing a state, creating a work item, assigning an
+// item), ui/helpers.js, ui/tones.js (the tones of labels and types, the
+// selected background, the tints), ui/layer.js (the board layer),
+// ui/related.js (the related items as drawn), ui/band.js (which cards of a
+// board column draw whole), ui/shapes/ (how a view's data is drawn and
+// worked: board, prs, sprint, backlog, placeholder), ui/modals/ (the
+// dialogs: start, status, columns, create, assign, commands, sprints) and
+// this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -170,6 +171,7 @@ export * from "./ui/helpers.js";
 export * from "./ui/tones.js";
 export * from "./ui/layer.js";
 export * from "./ui/related.js";
+export * from "./ui/band.js";
 export * from "./ui/shapes/index.js";
 export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
@@ -193,6 +195,14 @@ const TICK_MS = 30000;
 // render sees the copy be hidden, and none may come when it comes to show:
 // this timer sees both, and a render that comes first sees the show too.
 export const WATCH_MS = 250;
+// How often a copy that shows asks its shape's bandsLeft (shapes/index.js),
+// from the look that sees it show to the one that sees it hidden
+// (watchShown): herdr tells a script of no drag of a scrollbar's thumb.
+// on_window_mouse_move would, but it calls the script at every move of the
+// pointer anywhere in the window; on_window_mouse_up sees only the release.
+// An ask reads each shown column's ScrollHandle: its offset and its window's
+// size.
+export const BAND_MS = 100;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
@@ -240,10 +250,12 @@ export default class Board extends View {
     this.initProps = initProps;
     // Whether this copy showed when it last looked (at init, in a render or
     // on the WATCH_MS timer; null before the first look), the focus the
-    // layer's board was shown with (watchShown, followFocus), and the last
-    // failure each guarded step said (guarded).
+    // layer's board was shown with (watchShown, followFocus), its BAND_MS
+    // timer while it shows (followBandsWhile), and the last failure each
+    // guarded step said (guarded).
     this.wasShown = null;
     this.seen = null;
+    this.bandTimer = null;
     this.failed = {};
     this.handle = cx.focus_handle();
     this.config = null;
@@ -293,6 +305,7 @@ export default class Board extends View {
     // copy behind the tab's content) leaves the keyboard where it is.
     this.wasShown = boardShown(this.isLayer());
     if (this.wasShown) {
+      this.followBandsWhile(true, cx);
       this.takeKeyboard();
       cx.timer.after(300, () => this.guarded("Tastatur", () => this.takeKeyboard()));
     }
@@ -556,6 +569,16 @@ export default class Board extends View {
     const shown = this.view();
     if (shown && due(shown)) this.refresh(shown, cx);
     cx.notify();
+  }
+
+  followBandsWhile(shown, cx) {
+    this.bandTimer?.cancel();
+    this.bandTimer = shown ? cx.timer.every(BAND_MS, (cx) => this.guarded("Spalten", () => this.followBands(cx))) : null;
+  }
+
+  followBands(cx) {
+    const view = this.view();
+    if (view && this.shape(view).bandsLeft?.(this)) cx.notify();
   }
 
   // ---- related items, the details panel ----
@@ -1116,15 +1139,20 @@ export default class Board extends View {
 
   // At every look (a render or the WATCH_MS timer, see there): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
-  // after the look and only where it still shows. While hidden, the layer's
-  // board forgets the focus it compared with (followFocus), so it starts
-  // anew when it shows.
+  // after the look and only where it still shows, and starts its BAND_MS
+  // timer. While hidden, the timer stops and the layer's board forgets the
+  // focus it compared with (followFocus), so it starts anew when it shows.
   watchShown(cx) {
     const shown = boardShown(this.isLayer());
     const was = this.wasShown;
     this.wasShown = shown;
-    if (!shown) this.seen = null;
-    if (!shown || was !== false) return;
+    if (!shown) {
+      this.seen = null;
+      this.followBandsWhile(false, cx);
+      return;
+    }
+    if (was !== false) return;
+    this.followBandsWhile(true, cx);
     cx.timer.after(0, () => this.guarded("Tastatur", () => {
       if (boardShown(this.isLayer())) this.takeKeyboard();
     }));

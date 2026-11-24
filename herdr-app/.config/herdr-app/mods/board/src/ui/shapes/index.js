@@ -18,17 +18,18 @@
 // the sprint it shows, null for the current one, whose id `id` names
 // where it is known) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
-// panel's share of the width is no narrower than one of: detailWidth; a
-// list has none), detailParts (its rows in the detail
-// panel), settle (b, view, due, data, cx: says how the unclear writes of
-// its items ended up), moveTo, toggleColumn, openStatusMenu, navigate (its
-// own keyboard movement in place of navigate's, select.js), pickStatus
+// panel's share of the width is no narrower than one of: detailWidth; a list
+// has none), bandsLeft (b: whether a column scrolled past the cards it drew
+// whole, which the Board asks every BAND_MS), detailParts (its rows in the
+// detail panel), settle (b, view, due, data, cx: says how the unclear writes
+// of its items ended up), moveTo, toggleColumn, openStatusMenu, navigate
+// (its own keyboard movement in place of navigate's, select.js), pickStatus
 // (what a pick in the status menu does in place of a move to that column),
 // and assign (how its items' assignees are found and changed: { find(data,
 // key), withItem(data, key, patch) (the data with the item's fields set),
 // where (where an item no longer is: "im Sprint") }; a shape that has it
-// takes a, the assignee picker, ui/modals/assign.js, and its settle says
-// the outcomes of unclear assignments, unclearAssignLines).
+// takes a, the assignee picker, ui/modals/assign.js, and its settle says the
+// outcomes of unclear assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw

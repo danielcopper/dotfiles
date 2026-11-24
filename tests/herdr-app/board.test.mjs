@@ -2019,7 +2019,7 @@ function textView(format, id, text) {
 // them: `props`), and shared() reads `sharedValues`; a test may change each.
 // focusCalls counts the calls of a focus handle's focus().
 const found = (tool) => `/opt/fake/bin/${tool}`;
-function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)) } = {}) {
+function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false } = {}) {
   const calls = [];
   const host = {
     calls,
@@ -2102,12 +2102,21 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
       return input;
     },
     // herdr refuses a ScrollHandle made while a view draws. Each handle's
-    // scroll_to_item(row) is recorded in `scrolled` as { handle, row }.
+    // scroll_to_item(row) is recorded in `scrolled` as { handle, row }. Its
+    // readers (herdr 0.1.18; none with `oldScroll`) give what a test sets:
+    // `y` scrolled down, the window `width` × `height`, the `content`'s
+    // height; all zero as before herdr's first frame.
     scrolled: [],
     "ScrollHandle.new": () => {
       if (host.drawing) throw new Error("ScrollHandle.new() cannot run during render; create state in init() or in an event handler and keep it on the view");
       const handle = { scroll_to_item: (row) => host.scrolled.push({ handle, row }) };
-      return handle;
+      if (oldScroll) return handle;
+      return Object.assign(handle, {
+        y: 0, width: 0, height: 0, content: 0,
+        offset: () => ({ x: 0, y: handle.y }),
+        viewport_size: () => ({ width: handle.width, height: handle.height }),
+        content_size: () => ({ width: handle.width, height: Math.max(handle.content, handle.height) }),
+      });
     },
     div: () => element("div"),
     h_flex: () => element("h_flex"),
@@ -2192,7 +2201,11 @@ function fakeCx({ bindKeys = (bindings) => bindings.length } = {}) {
       spawn: live((fn) => Promise.resolve().then(() => fn(scope(true)))),
       timer: {
         after: live((ms, fn) => cx.later.push(fn)),
-        every: live((ms, fn) => cx.every.push(Object.assign(fn, { ms }))),
+        // A task whose cancel() takes it out of `every`.
+        every: live((ms, fn) => {
+          cx.every.push(Object.assign(fn, { ms }));
+          return { cancel: () => (cx.every = cx.every.filter((f) => f !== fn)) };
+        }),
       },
       notify: live(() => {}),
       stop_propagation: live(() => {
@@ -3984,7 +3997,7 @@ test("UI: a selection the board sets on another card closes open details: after 
 
 test("UI: a chosen item and one the board selects in its place are scrolled into view; a selection that stays put is not", async () => {
   const { b, cx, host } = await openBoard();
-  const list = (col) => b.shapeState.board.scrolls[col];
+  const list = (col) => b.shapeState.board.columns[col].scroll;
   host.scrolled.splice(0);
   await press(b, cx, "l");
   assert.deepEqual(host.scrolled.splice(0), [{ handle: list(1), row: 0 }], "l: 3000, In progress's first row, in its own list");
@@ -9640,7 +9653,7 @@ test("the details block's offset stays within its content; a span comes into vie
   assert.deepEqual(board.thumbOf({ offset: 0, content: 10000, viewport: 100 }), { top: 0, height: 16 }, "never thinner than 16");
   assert.deepEqual([board.thumbOf({ offset: 0, content: 300, viewport: 0 }), board.thumbOf({ offset: 0, content: 100, viewport: 100 })], [null, null],
     "a window not measured, or content as tall as it: none");
-  assert.deepEqual([board.rowSpan([18, 40, 18], 0, 6, 12), board.rowSpan([18, 40, 18], 2, 6, 12)], [{ top: 12, height: 18 }, { top: 82, height: 18 }]);
+  assert.deepEqual([board.rowTops([18, 40, 18], 6, 12), board.rowTops([], 6, 12)], [{ tops: [12, 36, 82], content: 100 }, { tops: [], content: 12 }]);
 });
 
 test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its window, clamped at both ends; without the panel's keyboard they do nothing; the hint line leaves them out", async () => {
@@ -11029,17 +11042,375 @@ function drawCost(b, host) {
   return cost;
 }
 
-test("UI: a full draw of a board of 300 cards (labels, types, priorities, milestones, parents, sub-issues up to 45) converts at most 100 colors to OKLCH and makes at most 8000 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
+test("UI: a full draw of a board of 300 cards (labels, types, priorities, milestones, parents, sub-issues up to 45) in columns whose lists herdr laid out 900 pixels high converts at most 100 colors to OKLCH and makes at most 1500 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
   const { b, host } = await openBoard({ answer: largeBoardAnswer(300) });
   assert.equal(b.views.mine.data.columns.filter((c) => !c.hidden).reduce((n, c) => n + c.cards.length, 0), 300);
+  for (const ci of [0, 1, 2]) Object.assign(handleOf(b, ci), { width: 300, height: 900 });
   for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
     host.theme = () => ({ ...t });
     for (const draw of [1, 2]) {
       const cost = drawCost(b, host);
       assert.ok(cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
-      assert.ok(cost.elements <= 8000, `${name}, draw ${draw}: ${cost.elements} elements`);
+      assert.ok(cost.elements <= 1500, `${name}, draw ${draw}: ${cost.elements} elements`);
     }
   }
+});
+
+// ---- A long column: only the cards about its window drawn whole ----
+
+const cardList = (b, ci) => byId(b.render(), `cards-${ci}`);
+const isFrame = (el) => el.with.id === undefined;
+const wholeAt = (list) => list.kids.flatMap((k, i) => (isFrame(k) ? [] : [i]));
+// Runs a handler with a cx of its own → how often it asked for a draw.
+const notifies = (cx, fn) => cx.call((own) => {
+  let n = 0;
+  own.notify = () => n++;
+  fn(own);
+  return n;
+});
+const handleOf = (b, ci) => b.shapeState.board.columns[ci].scroll;
+const bandTimers = (cx) => cx.every.filter((f) => f.ms === board.BAND_MS).length;
+// One look of the copy's BAND_MS timer → how often it asked for a draw.
+function bandLook(cx) {
+  const notes = globalThis.__boardHost.notes.length;
+  let n = 0;
+  for (const fn of cx.every.filter((f) => f.ms === board.BAND_MS)) fn({ notify: () => n++ });
+  assert.equal(globalThis.__boardHost.notes.length, notes, "the look did not fail");
+  return n;
+}
+const LIST_H = 900;
+// Lengths in the window's pixels at herdr's `zoom`.
+const scaled = (box, zoom) => Object.fromEntries(Object.entries(box).map(([k, v]) => [k, v * zoom]));
+const G = { char: "G", modifiers: { shift: true } };
+
+// A board of 300 cards, 100 a column; herdr laid each list out 300 wide and
+// LIST_H high and measured each card drawn whole `card` high, until no
+// other card is drawn whole.
+async function longBoard({ card = 100, zoom = 1 } = {}) {
+  const opened = await openBoard({ answer: largeBoardAnswer(300) });
+  const { b, cx, host } = opened;
+  host.theme = () => copperTheme("dark");
+  if (zoom !== 1) host.settings = () => ({ zoom });
+  for (const ci of [0, 1, 2]) Object.assign(handleOf(b, ci), { width: 300, height: LIST_H });
+  measureWhole(b, cx, card, zoom);
+  return opened;
+}
+
+// herdr measures every card drawn whole `height` high, until a draw draws
+// no other.
+function measureWhole(b, cx, height, zoom = 1) {
+  for (let round = 0; round < 10; round++) {
+    let fresh = 0;
+    for (const ci of [0, 1, 2]) {
+      for (const kid of cardList(b, ci).kids.filter((k) => !isFrame(k))) {
+        const key = kid.with.id[0].slice("card-".length);
+        if (b.shapeState.board.heights.get(key)?.height === height) continue;
+        fresh++;
+        cx.call((own) => kid.with.on_size_change[0](scaled({ width: 300, height }, zoom), own));
+      }
+    }
+    if (!fresh) return;
+  }
+  assert.fail("the cards drawn whole never settled");
+}
+
+// Where each card of a list stands: a whole one `card` high (measured), a
+// frame as tall as it is drawn, 6 pixels between them.
+const topsOf = (list, card = 100) => board.rowTops(list.kids.map((k) => (isFrame(k) ? k.with.h[0] : card)), 6).tops;
+// The cards whole in a list scrolled `offset` down: those in its window and
+// half a window above and below.
+const bandAt = (list, offset) => topsOf(list).flatMap((top, i) => (top < offset + LIST_H * 1.5 && top + (isFrame(list.kids[i]) ? list.kids[i].with.h[0] : 100) > offset - LIST_H / 2 ? [i] : []));
+
+test("UI: a long column draws whole only the cards about its window, half a window above and below; every other card is a frame, one element as tall as the card (measured, or guessed where it never was), and every card stays a child of the list in its order", async () => {
+  const { b, st } = await longBoard();
+  const list = cardList(b, 0);
+  const cards = b.navColumns(b.view())[0].shown;
+  assert.equal(list.kids.length, 100, "every card a child: scroll_to_item names a card by its row");
+  // At the top: the window [0, 900) and half of it below, 106 pixels a card.
+  assert.deepEqual(wholeAt(list), Array.from({ length: 13 }, (_, i) => i), "the cards from 0 to 1350 pixels");
+  assert.deepEqual(list.kids.slice(0, 13).map((k) => k.with.id[0]), cards.slice(0, 13).map((c) => `card-${c.key}`), "in their order");
+  const frame = list.kids[50];
+  assert.deepEqual([frame.kids, frame.with.h[0]], [[], board.cardHeightGuess(cards[50], 300)], "a frame: no element inside, its height guessed from its lines in the list's width");
+  const plain = list.kids[1];
+  assert.deepEqual([frame.with.border_color[0], frame.with.bg[0], frame.with.rounded[0], frame.styles.includes("border_1")], [plain.with.border_color[0], plain.with.bg[0], plain.with.rounded[0], true], "in a card's border and ground");
+  assert.ok(board.cardHeightGuess(cards[50], 300) > board.cardHeightGuess({ ...cards[50], title: "x", labels: [], type: null, assignees: [], sub: null, milestone: null, parent: null }, 300), "a card with more lines is guessed taller");
+  assert.equal(st().sel.key, cards[0].key);
+});
+
+test("UI: a column draws whole the cards about where its ScrollHandle says the list stands scrolled, each column by its own, kept within the list", async () => {
+  const { b, cx } = await longBoard();
+  handleOf(b, 0).y = 4000;
+  measureWhole(b, cx, 100);
+  const list = cardList(b, 0);
+  const band = bandAt(list, 4000);
+  assert.deepEqual(wholeAt(list), band, "whole: the cards in [3550, 5350)");
+  assert.ok(band.includes(40) && band.length >= 16, `${band}`);
+  assert.equal(wholeAt(cardList(b, 1))[0], 0, "another column by its own handle");
+  handleOf(b, 0).y = 1e6;
+  measureWhole(b, cx, 100);
+  const end = cardList(b, 0);
+  assert.ok(!isFrame(end.kids[99]) && isFrame(end.kids[0]), "past its end, as herdr's offset stands until herdr clamps it: drawn at the end");
+});
+
+test("UI: the wheel over a column asks a draw only where its list scrolled past the band, by the offset the handle reads after GPUI moved the list", async () => {
+  const { b, cx } = await longBoard();
+  const column = byId(b.render(), "col-0");
+  // GPUI moves the list before the event reaches its column, and keeps the
+  // offset within the list at its next frame.
+  const wheel = (y) => {
+    handleOf(b, 0).y = y;
+    return notifies(cx, (own) => column.with.on_scroll_wheel[0]({ delta: { x: 0, y: -100 } }, own));
+  };
+  assert.equal(wheel(450), 0, "450 down: the window's end at the band's");
+  assert.equal(wheel(451), 1, "451: past it");
+  cardList(b, 0);
+  assert.equal(wheel(1), 0, "drawn about 451: 1 is the band's top");
+  assert.equal(wheel(0), 1, "0: above it");
+  assert.equal(wheel(1e6), 1, "past the list's end, before GPUI keeps it within: the end, past the band");
+  measureWhole(b, cx, 100);
+  assert.ok(!isFrame(cardList(b, 0).kids[99]));
+  assert.equal(wheel(1e6), 0, "drawn at the end: no draw more");
+});
+
+test("UI: while the board shows, and only then, a timer every BAND_MS (100 ms) reads each shown column's handle and asks a draw only where a window left its band: a drag of the scrollbar's thumb, released anywhere; a window grown past the band; no timer while the board is hidden, from its start too; nothing while it shows another view", async () => {
+  const { b, cx, host } = await longBoard();
+  assert.equal(board.BAND_MS, 100);
+  assert.equal(bandTimers(cx), 1, "one timer while the board shows");
+  assert.equal(bandLook(cx), 0, "at the top");
+  handleOf(b, 0).y = 4000;
+  assert.equal(bandLook(cx), 1, "the thumb dragged to 4000");
+  assert.equal(bandLook(cx), 1, "until a draw");
+  measureWhole(b, cx, 100);
+  assert.ok(wholeAt(cardList(b, 0)).includes(40));
+  assert.equal(bandLook(cx), 0, "drawn there: nothing more");
+  handleOf(b, 2).y = 451;
+  assert.equal(bandLook(cx), 1, "the third column");
+  cardList(b, 2);
+  handleOf(b, 1).height = LIST_H + 451;
+  assert.equal(bandLook(cx), 1, "the second column's window 451 higher: its end past the band");
+  cardList(b, 1);
+  assert.equal(bandLook(cx), 0);
+  const shown = host.panes;
+  host.panes = () => [];
+  await cx.look();
+  assert.equal(bandTimers(cx), 0, "hidden: the timer stopped");
+  await cx.look();
+  handleOf(b, 0).y = 0;
+  host.panes = shown;
+  await cx.look();
+  assert.equal(bandTimers(cx), 1, "shown again: one timer");
+  assert.equal(bandLook(cx), 1, "which reads where the handle went meanwhile");
+  await cx.look();
+  assert.equal(bandTimers(cx), 1, "still one");
+  await click(b, cx, "tab-github:prs");
+  handleOf(b, 0).y = 8000;
+  assert.equal(bandLook(cx), 0, "the PR list shows");
+  const late = await bootBoard({ shown: false });
+  assert.equal(bandTimers(late.cx), 0, "a copy hidden from its start: none");
+  late.host.panes = shown;
+  await late.cx.look();
+  assert.equal(bandTimers(late.cx), 1, "until it shows");
+});
+
+test("UI: a key that selects a card outside the band scrolls to its row and draws it whole, marked, while herdr has not yet run the scroll; once the handle moved the band follows it again; a frame keeps the selected card's mark; gg back", async () => {
+  const { b, cx, host, st } = await longBoard();
+  const handle = handleOf(b, 0);
+  const { accent, border } = copperTheme("dark");
+  host.scrolled.splice(0);
+  await press(b, cx, "g", G);
+  assert.deepEqual(host.scrolled.splice(0), [{ handle, row: 99 }], "G: the last card's row");
+  let list = cardList(b, 0);
+  assert.ok(!isFrame(list.kids[99]) && isFrame(list.kids[0]), "the last card whole, the first a frame, the handle still at the top");
+  assert.equal(list.kids[99].with.border_color[0], accent, "marked");
+  assert.equal(bandLook(cx), 0, "the handle not moved yet: the band stays where the scroll goes");
+  measureWhole(b, cx, 100);
+  list = cardList(b, 0);
+  const end = topsOf(list).at(-1) + 100 - LIST_H;
+  handle.y = end - 3;
+  assert.equal(bandLook(cx), 0, "herdr ran it, 3 pixels from the sum: the handle's offset, in the band");
+  handle.y = 0;
+  assert.equal(bandLook(cx), 1, "the wheel back at the top, where G started: the band follows the handle");
+  assert.ok(!isFrame(cardList(b, 0).kids[0]), "the first card whole");
+  handle.y = end - 3;
+  cardList(b, 0);
+  await press(b, cx, "k");
+  assert.ok(!isFrame(cardList(b, 0).kids[98]), "k: the one above, already whole");
+  handle.y = 0;
+  assert.equal(bandLook(cx), 1, "the wheel back at the top");
+  list = cardList(b, 0);
+  assert.ok(isFrame(list.kids[98]), "scrolled away");
+  assert.deepEqual([list.kids[98].with.border_color[0], list.kids[97].with.border_color[0]], [accent, border], "the frame of the selected card marked, another not");
+  await press(b, cx, "g");
+  await press(b, cx, "g");
+  assert.deepEqual(host.scrolled.splice(0).at(-1), { handle, row: 0 }, "gg: the first row");
+  assert.equal(st().sel.key, b.navColumns(b.view())[0].shown[0].key);
+  assert.ok(!isFrame(cardList(b, 0).kids[0]));
+});
+
+test("UI: a frame carries no handler of its own: a card dragged onto another column and released over one of its frames moves there, chosen", async () => {
+  const { b, cx, st } = await longBoard();
+  const key = b.navColumns(b.view())[0].shown[0].key;
+  const to = b.navColumns(b.view())[2].id;
+  await mouse(b, cx, `card-${key}`, "on_mouse_down");
+  byId(b.render(), "col-2").with.on_hover[0](true, cx);
+  const frame = cardList(b, 2).kids[60];
+  assert.ok(isFrame(frame));
+  assert.deepEqual(Object.keys(frame.with).filter((k) => k.startsWith("on_")), [], "nothing that could stop the release on its way to the column");
+  await mouse(b, cx, "col-2", "on_mouse_up");
+  assert.deepEqual([board.findCard(st().data, key).column.id, st().sel.key, b.drag], [to, key, null]);
+});
+
+test("UI: a column whose content shrinks below where it stood scrolled (the filter) draws the cards it keeps whole, from its top", async () => {
+  const { b } = await longBoard();
+  handleOf(b, 0).y = topsOf(cardList(b, 0))[80];
+  assert.ok(isFrame(cardList(b, 0).kids[0]));
+  b.filterText = "change number";
+  const kept = cardList(b, 0);
+  assert.ok(kept.kids.length > 2 && kept.kids.length < 10, `a few pull requests: ${kept.kids.length}`);
+  assert.deepEqual(wholeAt(kept), kept.kids.map((_, i) => i), "all of them whole");
+});
+
+test("UI: a column's band stays where it stood across a refresh and a switch to another tab and back", async () => {
+  const { b, cx, host } = await longBoard();
+  handleOf(b, 0).y = 4000;
+  measureWhole(b, cx, 100);
+  const there = wholeAt(cardList(b, 0));
+  assert.ok(there.includes(40) && !there.includes(0), `${there}`);
+  await press(b, cx, "r");
+  await host.answer("gh", ok(largeBoardAnswer(300)), isBoardCall);
+  assert.deepEqual(wholeAt(cardList(b, 0)), there, "after a refresh");
+  await click(b, cx, "tab-github:prs");
+  await click(b, cx, "tab-github:mine");
+  assert.deepEqual(wholeAt(cardList(b, 0)), there, "after a switch to the PR list and back");
+});
+
+test("UI: a card's measure asks one draw where it is more than 2 pixels off the height its draw took or the column's cards changed width, and its height is the frame's once it leaves the band", async () => {
+  const fresh = await openBoard({ answer: largeBoardAnswer(300) });
+  Object.assign(handleOf(fresh.b, 0), { width: 300, height: LIST_H });
+  const card = fresh.b.navColumns(fresh.b.view())[0].shown[0];
+  assert.equal(notifies(fresh.cx, (own) => cardList(fresh.b, 0).kids[0].with.on_size_change[0]({ width: 300, height: board.cardHeightGuess(card, 300) }, own)), 0,
+    "a column's first measure, at its guess: no draw");
+  const { b, cx } = await longBoard({ card: 120 });
+  const sized = (el, height, width = 300) => notifies(cx, (own) => el.with.on_size_change[0]({ width, height }, own));
+  assert.equal(sized(cardList(b, 0).kids[1], 122), 0, "2 pixels off: no draw");
+  assert.equal(sized(cardList(b, 0).kids[1], 140), 1, "20 off: one");
+  assert.equal(sized(cardList(b, 0).kids[1], 140), 0, "drawn at it: none");
+  handleOf(b, 0).y = 5000;
+  const far = cardList(b, 0);
+  assert.ok(isFrame(far.kids[1]), "scrolled away");
+  assert.equal(far.kids[1].with.h[0], 140, "its frame as tall as it was measured");
+  const shown = b.navColumns(b.view())[0].shown;
+  const first = wholeAt(far).slice(3).find((i) => !b.shapeState.board.heights.has(shown[i].key));
+  const guess = board.cardHeightGuess(shown[first], 300);
+  assert.ok(Math.abs(guess - 120) > 2, `${guess}`);
+  assert.equal(sized(far.kids[first], 120), 1, "a card drawn whole at its guess, measured for the first time");
+  assert.equal(sized(cardList(b, 0).kids[first], 120, 280), 1, "the same height at another width");
+  assert.equal(sized(cardList(b, 0).kids[first], 120, 280), 0, "and again");
+});
+
+test("UI: a card's measure holds at the width it was taken at: in a list of another width a card measured only at the old one is a frame of its height guessed at the new, until the width is back", async () => {
+  const { b, cx } = await longBoard();
+  const cards = b.navColumns(b.view())[0].shown;
+  const sized = (el, height, width) => notifies(cx, (own) => el.with.on_size_change[0]({ width, height }, own));
+  const i = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].find((n) => ![100, board.cardHeightGuess(cards[n], 300)].includes(board.cardHeightGuess(cards[n], 200)));
+  assert.ok(i, "a card guessed apart at 300 and at 200");
+  handleOf(b, 0).y = 4000;
+  assert.deepEqual([isFrame(cardList(b, 0).kids[i]), cardList(b, 0).kids[i].with.h[0]], [true, 100], "measured at 300: 100 high");
+  handleOf(b, 0).width = 200;
+  const narrow = cardList(b, 0);
+  sized(narrow.kids[wholeAt(narrow)[0]], 80, 200);
+  assert.equal(cardList(b, 0).kids[i].with.h[0], board.cardHeightGuess(cards[i], 200), "200 wide: guessed at the list's width");
+  handleOf(b, 0).width = 300;
+  const back = cardList(b, 0);
+  sized(back.kids[wholeAt(back)[0]], 100, 300);
+  assert.equal(cardList(b, 0).kids[i].with.h[0], 100, "300 again: its measure");
+});
+
+test("UI: at herdr's zoom 2 a column takes its handle's lengths as herdr gives them, in the script's pixels, and a card's measure in the window's divided by the zoom", async () => {
+  const { b, cx } = await longBoard({ zoom: 2 });
+  let list = cardList(b, 0);
+  assert.deepEqual(wholeAt(list), Array.from({ length: 13 }, (_, i) => i), "the cards 200 window pixels, 100 high, as at zoom 1");
+  handleOf(b, 0).y = 450;
+  assert.equal(bandLook(cx), 0);
+  handleOf(b, 0).y = 451;
+  assert.equal(bandLook(cx), 1);
+  handleOf(b, 0).y = 4000;
+  measureWhole(b, cx, 100, 2);
+  list = cardList(b, 0);
+  assert.deepEqual(wholeAt(list), bandAt(list, 4000));
+  assert.ok(wholeAt(list).includes(40) && isFrame(list.kids[0]), `${wholeAt(list)}`);
+});
+
+test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every card of a column draws whole and unmeasured, as before the band, and the log says so once per board copy", async () => {
+  const logged = [];
+  const log = console.log;
+  console.log = (...a) => logged.push(a.join(" "));
+  let opened;
+  try {
+    await openBoard({ answer: largeBoardAnswer(300) });
+    assert.deepEqual(logged, [], "a herdr that reads it back: nothing");
+    opened = await openBoard({ answer: largeBoardAnswer(300), oldScroll: true });
+  } finally {
+    console.log = log;
+  }
+  const { b, cx, host } = opened;
+  assert.deepEqual(logged.filter((l) => l.includes("0.1.18")).length, 1, logged.join("\n"));
+  const list = cardList(b, 0);
+  assert.deepEqual(wholeAt(list), list.kids.map((_, i) => i), "all 100 whole");
+  assert.equal(list.kids.length, 100);
+  assert.equal(list.kids.filter((k) => k.with.on_size_change).length, 0, "no card measured: a measure would ask a draw");
+  assert.equal(byId(b.render(), "col-0").with.on_scroll_wheel, undefined, "no wheel to follow");
+  assert.equal(bandLook(cx), 0);
+  host.scrolled.splice(0);
+  await press(b, cx, "g", G);
+  assert.deepEqual(host.scrolled.splice(0), [{ handle: handleOf(b, 0), row: 99 }], "G still scrolls to the last row");
+});
+
+test("the band's sums: a handle read, a window herdr has not laid out yet as VIEWPORT_GUESS high; the band about the offset, kept within the content; whether a window left it; a key's reveal, which the band follows until the handle moved; a card's height before it is measured", async () => {
+  await openBoard();
+  assert.deepEqual(board.rowTops([100, 50, 80], 6), { tops: [0, 106, 162], content: 242 });
+  assert.deepEqual(board.rowTops([], 6), { tops: [], content: 0 });
+  const s = board.bandState();
+  board.placeBand(s, 1000, { offset: 900, viewport: 500 });
+  assert.deepEqual([s.lo, s.hi, s.content], [250, 1250, 1000], "kept within the content: its end at the window's");
+  assert.deepEqual([board.inBand(s, 150, 100), board.inBand(s, 150, 101), board.inBand(s, 1249, 10), board.inBand(s, 1250, 10)], [false, true, true, false]);
+  assert.deepEqual([board.leftBand(s, { offset: 250, viewport: 500 }), board.leftBand(s, { offset: 249, viewport: 500 }), board.leftBand(s, { offset: 5000, viewport: 500 })], [false, true, false],
+    "the band's top; above it; past the content's end, at its end");
+  board.placeBand(s, 300, { offset: 900, viewport: 500 });
+  assert.equal(s.lo, -250, "content lower than the window: at its top");
+  const read = (y, height) => board.scrollOf({ offset: () => ({ x: 0, y }), viewport_size: () => ({ width: 280, height }) });
+  assert.deepEqual(read(40, 500), { offset: 40, viewport: 500, width: 280 });
+  assert.deepEqual(read(0, 0), { offset: 0, viewport: board.VIEWPORT_GUESS, width: 280 }, "a window not laid out yet: VIEWPORT_GUESS high");
+  const guessed = board.bandState();
+  board.placeBand(guessed, 5000, read(0, 0));
+  assert.deepEqual([guessed.lo, guessed.hi], [-board.VIEWPORT_GUESS / 2, board.VIEWPORT_GUESS * 1.5], "a band about it");
+  assert.deepEqual([board.leftBand(guessed, read(500, 0)), board.leftBand(guessed, read(501, 0))], [false, true], "and left by its end");
+  const unlaid = board.bandState();
+  board.revealCard(unlaid, read(0, 0), 5000, 1300, 200);
+  assert.equal(unlaid.revealed.to, 1500 - board.VIEWPORT_GUESS, "a card revealed in it");
+  const r = board.bandState();
+  const at = { offset: 1000, viewport: 400 };
+  board.revealCard(r, at, 5000, 1300, 200);
+  assert.deepEqual(r.revealed, { from: 1000, to: 1100 }, "below the window: its end at the window's");
+  board.placeBand(r, 5000, at);
+  assert.deepEqual([r.lo, board.leftBand(r, at)], [900, false], "the handle not moved: about 1100");
+  assert.equal(board.leftBand(r, { offset: 3000, viewport: 400 }), true, "moved: the handle's offset");
+  board.placeBand(r, 5000, at);
+  assert.equal(r.lo, 800, "back at where the key's scroll started: about the handle, the reveal done");
+  board.revealCard(r, at, 5000, 1200, 100);
+  assert.equal(r.revealed, null, "in the window: nothing to follow");
+  board.revealCard(r, at, 5000, 300, 100);
+  assert.equal(r.revealed.to, 300, "above: its top at the window's");
+  board.revealCard(r, at, 1000, 900, 100);
+  assert.equal(r.revealed.to, 600, "kept within the content it is given");
+  const bare = { title: "x", labels: [], type: null, assignees: [], sub: null, milestone: null, parent: null };
+  const long = { ...bare, title: "t".repeat(100) };
+  assert.deepEqual([board.cardHeightGuess(bare, 300), board.cardHeightGuess(long, 300), board.cardHeightGuess(long, 600), board.cardHeightGuess(long, 0)], [59, 93, 76, 93],
+    "a long title on three lines, on two in a wider list; a list not laid out yet taken as 300 wide");
+  assert.deepEqual([{ labels: ["a"] }, { type: "Bug" }, { assignees: ["x"] }, { milestone: "v1" }, { parent: 1 }, { sub: { total: 3, done: 1 } }].map((f) => board.cardHeightGuess({ ...bare, ...f }, 300)), [81, 81, 81, 81, 81, 81]);
+  assert.equal(board.cardHeightGuess({ ...bare, labels: ["a"], milestone: "v1", sub: { total: 3, done: 1 } }, 300), 125);
+  assert.deepEqual([board.cardHeightGuess({ ...bare, assignees: ["x"], sub: { total: 3, done: 1 } }, 300), board.cardHeightGuess({ ...bare, title: "[Epic] x", labels: ["Epic"] }, 300), board.cardHeightGuess({ ...bare, parent: { number: 1 } }, 300)], [81, 81, 59],
+    "the assignees on the progress line; an Epic by its title alone its type's chip; a parent the card cannot name no meta line");
 });
 
 test("UI: each draw takes its colors from the theme it draws in, after a switch of the theme too: label chips by their color's hue, priorities, column dots and card edges, through copper-dark, catppuccin-mocha, copper-light, copper-dark without copper's colors and copper-dark again", async () => {

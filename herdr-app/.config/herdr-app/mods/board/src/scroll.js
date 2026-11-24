@@ -75,13 +75,16 @@ export function thumbOf(s, min = 16) {
   return { top, height };
 }
 
-// Where row `i` of a column of rows stands: the heights of the rows before
-// it (`heights`, one per row), `gap` between rows, after `pad` above the
-// first → { top, height }.
-export function rowSpan(heights, i, gap, pad) {
-  let top = pad;
-  for (let j = 0; j < i; j++) top += heights[j] + gap;
-  return { top, height: heights[i] ?? 0 };
+// Where each row of a column of rows stands, `gap` between them, after `pad`
+// above the first → { tops, content }, content down to the last row's end.
+export function rowTops(heights, gap, pad = 0) {
+  const tops = [];
+  let at = pad;
+  for (const h of heights) {
+    tops.push(at);
+    at += h + gap;
+  }
+  return { tops, content: heights.length ? at - gap : pad };
 }
 
 // The block's offset when it draws the details of the item `key`: 0 for

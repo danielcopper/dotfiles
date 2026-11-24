@@ -481,13 +481,18 @@ herdr-app`. Which files of the package git tracks is set in the root
   line below the columns names the hidden ones ("ausgeblendet: Backlog, Done"),
   a click on a name shows that column again, and the command menu's "Spalten…"
   opens a menu of every column, shown or hidden, where `Enter`, a digit or a
-  click hides or shows one. A click on a card or a list's row selects it; a
-  click on one I chose (clicked before, moved
-  to with the keys or dragged onto another column; not one the board selected by
+  click hides or shows one. A long column draws whole only the cards about what
+  it shows, half its height above and below; every other card is an empty frame
+  of the card's height until the column scrolls near it: at once by the wheel or
+  a key, within a tenth of a second by the scrollbar's thumb, wherever the
+  pointer is released (`mods/board/src/ui/band.js`). herdr before 0.1.18 tells a
+  mod no scroll position; there every card draws whole. A click on a card or a
+  list's row selects it; a click on one I chose (clicked before, moved to with
+  the keys or dragged onto another column; not one the board selected by
   itself) opens its details. Where the board selects another item by itself (a
-  refresh, the filter, a hidden column), open details close. The details take
-  a third of the board's width, half of it beside a single column, but never
-  less than 420 or more than 720 pixels (detailWidth in
+  refresh, the filter, a hidden column), open details close. The details take a
+  third of the board's width, half of it beside a single column, but never less
+  than 420 or more than 720 pixels (detailWidth in
   `mods/board/src/ui/helpers.js` has the rule).
   The GitHub PR list says whether I have to act on a pull request: such a row
   carries a mark with the reasons ("● Review angefragt"), its details list
