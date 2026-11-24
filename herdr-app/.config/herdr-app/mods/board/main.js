@@ -9585,9 +9585,10 @@ export default class Board extends View {
 
   // At every look (a render or the WATCH_MS timer, see there): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
-  // after the look and only where it still shows, and starts its BAND_MS
-  // timer. While hidden, the timer stops and the layer's board forgets the
-  // focus it compared with (followFocus), so it starts anew when it shows.
+  // after the look and only where it still shows; it starts its BAND_MS
+  // timer and the prefetch at once. While hidden, the timer stops and the
+  // layer's board forgets the focus it compared with (followFocus), so it
+  // starts anew when it shows.
   watchShown(cx) {
     const shown = boardShown(this.isLayer());
     const was = this.wasShown;
@@ -9599,6 +9600,7 @@ export default class Board extends View {
     }
     if (was !== false) return;
     this.followBandsWhile(true, cx);
+    this.schedulePrefetch(cx);
     cx.timer.after(0, () => this.guarded("Tastatur", () => {
       if (boardShown(this.isLayer())) this.takeKeyboard();
     }));

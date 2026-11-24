@@ -12094,6 +12094,19 @@ test("UI: the prefetch waits while a write runs, a dialog is busy or the board d
   assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true]);
 });
 
+test("UI: a board that shows again goes on with the prefetch at the look that sees it, not at the next tick", async () => {
+  const { cx, host } = await bootBoard();
+  await host.answer("gh", ok(fixture("github-board.json")));
+  const panes = host.panes;
+  host.panes = () => [];
+  await cx.look();
+  await cx.fire();
+  assert.equal(host.open("gh").length, 0, "none while the board does not show");
+  host.panes = panes;
+  await cx.look();
+  assert.deepEqual(host.open("gh").map((c) => isListCall(c.args)), [true], "the PR list, once it shows");
+});
+
 test("UI: a view read or restored in the background scrolls none of the shown view's lists: its own first selection is set, no column of the shown board and not the PR list's rows scroll", async () => {
   const list = board.parseGithubList(json("github-list.json"), testView("prs"));
   const { b, cx, host } = await bootBoard({ raw: { "board:data:prs": savedFor("prs", list, Date.now() - 20 * MIN) } });
