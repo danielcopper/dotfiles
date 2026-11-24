@@ -109,21 +109,7 @@ export function backdrop(t, id, panel) {
     .child(panel);
 }
 
-// A menu over the board (the status, the column, the assignee, the
-// command and the sprint menu): a panel `width` wide, `<id>-menu` on a
-// backdrop `<id>-backdrop`, with a title line, `head` (children under it,
-// such as a filter), its rows in `<id>-rows`: one per entry of `rows` (its
-// own children), each `<rowId>-<i>` and led by its digit (1–9) unless
-// `digits` is false, a heading `<id>-head-<i>` before a row where `heads`
-// names one (by the row's place in `rows`), then `foot` (children under
-// them).
-// `rows` may be a window of a longer list of `count` rows whose first row
-// is `from`: `i` counts in the whole list; then a thin thumb
-// `<id>-thumb` at the rows' right shows where the window is, a line under
-// them says how many rows follow ("↓ 3 weitere"), and the mouse wheel over
-// them calls `wheel(by, cx)` (by: the script's pixels, down for more than
-// 0; menuWindow). The row `at` is marked; a click on a row picks it
-// (`pick(i, cx)`); menuKey takes its keys.
+// menuKey takes a menu's keys.
 export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
   const below = count - from - rows.length;
   const share = (n) => `${((100 * n) / count).toFixed(2)}%`;
@@ -164,7 +150,7 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
       .border_color(t.input)
       .bg(t.popover)
       .shadow_lg()
-      .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(title))
+      .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(`${title} · Enter · Esc`))
       .children(head)
       .child(list)
       .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))

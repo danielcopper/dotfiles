@@ -72,7 +72,7 @@ export const sprintsModal = {
       id: "sprints",
       rowId: "sprint",
       width: 440,
-      title: `Sprint · ${m.team} · Enter · Esc`,
+      title: `Sprint · ${m.team}`,
       head: filterMenuHead(t, m),
       digits: false,
       rows: shown.map((r) => [

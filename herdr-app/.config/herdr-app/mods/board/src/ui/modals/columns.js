@@ -31,7 +31,7 @@ export const columnsModal = {
       id: "columns",
       rowId: "column",
       width: 320,
-      title: "Spalten zeigen · Enter · Esc",
+      title: "Spalten zeigen",
       at: m.at,
       pick: (i, cx) => toggleAt(b, m, i, cx),
       rows: columnsOf(b, m).map((c) => [
