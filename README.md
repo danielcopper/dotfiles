@@ -570,7 +570,20 @@ by that run. Which files of the package git tracks is set in the root
   or not ("neue Commits seit deinem Review"); my review asked for again while
   mine is on its last commit ("Review erneut angefragt"); and an unresolved
   review thread I took part in whose last comment is someone else's ("Antwort
-  erwartet"). One I reviewed that asks nothing of me says "wartet auf Autor".
+  erwartet"), where I have a latest review (not a dismissed one) only if that
+  comment was published after it: a reply I answered with a new review asks
+  nothing more of me, even while its thread stays unresolved. My latest
+  review, for each of these reasons, is the last of my last 5 reviews on the
+  pull request that approves, asks for changes, or has a text or a comment
+  that starts a thread; a reply in a thread alone, which GitHub files as a
+  review too, never counts, nor does one with neither text nor comments.
+  Where none of the 5 counts, I have none: every such comment counts. Where
+  GitHub sends too little to tell whether one of them counts (it reads each
+  one's first 10 comments), the reasons count it, and where that is all that
+  decides them, the row is not wholly read (its details say "deine letzten
+  Reviews nicht ganz gelesen"). Where GitHub sends no time for the comment or
+  the review, the comment counts. One I reviewed that asks nothing of me says
+  "wartet auf Autor".
   On my own: changes requested ("Änderungen gewünscht"), unresolved threads
   whose last comment is someone else's ("2 offene Threads"), failing checks
   ("Checks rot"), a merge conflict ("Konflikt"), and with none of these:
@@ -581,9 +594,11 @@ by that run. Which files of the package git tracks is set in the root
   threads in its one request and, for those with more, the first 50 in one
   more per 100 of them, and of each thread the authors of its last 10 comments
   (a thread I took part in only before its last 10 comments counts as one I
-  did not), and the first 20 latest reviews. Where it could not read all it
-  needs (an error at the pull request, a part GitHub did not send, more than
-  50 threads, more than 20 reviews without mine among them), nothing says
+  did not), and my last 5 reviews; it asks gh for my login until it knows it,
+  which the reviews need before the list's answer names it. Where it could not
+  read all it needs (an error at the pull request, a part GitHub did not send,
+  more than 50 threads, reviews it cannot tell apart where that decides, or
+  reviews read for another login than the answer names), nothing says
   "wartet auf Autor" or "bereit zum Mergen": the row says "? nicht ganz
   gelesen" where it names no reason and adds "· ?" after its reasons where it
   names some, checks GitHub sent an error for show "?", and the details list
@@ -599,9 +614,8 @@ by that run. Which files of the package git tracks is set in the root
   asks my review again shows in "Zu prüfen", the first section that finds it.
   A `views.json` of my own without that search keeps working and shows no
   reviewed pull requests. Without the login gh runs as nothing is marked. The
-  list's request costs about 8 of GitHub's 5000 points an hour per section
-  with 50 pull requests, the one for more threads about one per two pull
-  requests; the header of `mods/board/src/main.js` says how.
+  header of `mods/board/src/main.js` says how many of GitHub's points an hour
+  the list's requests cost.
   A card, on a GitHub board and on the Sprint's taskboard, shows one line per
   topic, each only where it has something, so a card without them stays as
   compact as before: its key with its priority at the right ("P1": on GitHub the

@@ -56,16 +56,21 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
+     "reviews": {
       "nodes": [
        {
         "state": "APPROVED",
+        "body": "",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0103aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comments": {
+         "totalCount": 0,
+         "nodes": []
         }
        }
       ]
@@ -130,19 +135,8 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
-      "nodes": [
-       {
-        "state": "COMMENTED",
-        "author": {
-         "login": "sample-reviewer"
-        },
-        "commit": {
-         "oid": "0101aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }
-       }
-      ]
+     "reviews": {
+      "nodes": []
      },
      "reviewThreads": {
       "totalCount": 0,
@@ -199,25 +193,21 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 2,
+     "reviews": {
       "nodes": [
        {
         "state": "CHANGES_REQUESTED",
-        "author": {
-         "login": "sample-reviewer"
-        },
-        "commit": {
-         "oid": "0102aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }
-       },
-       {
-        "state": "CHANGES_REQUESTED",
+        "body": "Please split the parser change out.",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0102bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "comments": {
+         "totalCount": 0,
+         "nodes": []
         }
        }
       ]
@@ -275,8 +265,7 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 0,
+     "reviews": {
       "nodes": []
      },
      "reviewThreads": {
@@ -332,16 +321,21 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
+     "reviews": {
       "nodes": [
        {
         "state": "COMMENTED",
+        "body": "One question before I approve.",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0105aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comments": {
+         "totalCount": 0,
+         "nodes": []
         }
        }
       ]
@@ -401,16 +395,21 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
+     "reviews": {
       "nodes": [
        {
         "state": "DISMISSED",
+        "body": "This breaks the cache.",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0106aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comments": {
+         "totalCount": 0,
+         "nodes": []
         }
        }
       ]
@@ -479,8 +478,7 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 0,
+     "reviews": {
       "nodes": []
      },
      "reviewThreads": {
@@ -532,19 +530,8 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
-      "nodes": [
-       {
-        "state": "APPROVED",
-        "author": {
-         "login": "sample-reviewer"
-        },
-        "commit": {
-         "oid": "0201aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }
-       }
-      ]
+     "reviews": {
+      "nodes": []
      },
      "reviewThreads": {
       "totalCount": 1,
@@ -556,12 +543,16 @@
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           },
           {
            "author": {
             "login": "sample-user"
-           }
+           },
+           "createdAt": "2026-11-19T11:00:00Z",
+           "publishedAt": "2026-11-19T11:00:00Z"
           }
          ]
         }
@@ -617,19 +608,8 @@
       ]
      },
      "mergeable": "CONFLICTING",
-     "latestReviews": {
-      "totalCount": 1,
-      "nodes": [
-       {
-        "state": "CHANGES_REQUESTED",
-        "author": {
-         "login": "sample-reviewer"
-        },
-        "commit": {
-         "oid": "0202aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }
-       }
-      ]
+     "reviews": {
+      "nodes": []
      },
      "reviewThreads": {
       "totalCount": 4,
@@ -641,7 +621,9 @@
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           }
          ]
         }
@@ -653,17 +635,23 @@
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           },
           {
            "author": {
             "login": "sample-user"
-           }
+           },
+           "createdAt": "2026-11-19T11:00:00Z",
+           "publishedAt": "2026-11-19T11:00:00Z"
           },
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T12:00:00Z",
+           "publishedAt": "2026-11-19T12:00:00Z"
           }
          ]
         }
@@ -675,12 +663,16 @@
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           },
           {
            "author": {
             "login": "sample-user"
-           }
+           },
+           "createdAt": "2026-11-19T11:00:00Z",
+           "publishedAt": "2026-11-19T11:00:00Z"
           }
          ]
         }
@@ -692,7 +684,9 @@
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           }
          ]
         }
@@ -749,16 +743,25 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
+     "reviews": {
       "nodes": [
        {
         "state": "CHANGES_REQUESTED",
+        "body": "",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0301aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comments": {
+         "totalCount": 1,
+         "nodes": [
+          {
+           "replyTo": null
+          }
+         ]
         }
        }
       ]
@@ -773,7 +776,9 @@
           {
            "author": {
             "login": "sample-user"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           }
          ]
         }
@@ -785,12 +790,16 @@
           {
            "author": {
             "login": "sample-reviewer"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           },
           {
            "author": {
             "login": "sample-contributor"
-           }
+           },
+           "createdAt": "2026-11-19T11:00:00Z",
+           "publishedAt": "2026-11-19T11:00:00Z"
           }
          ]
         }
@@ -848,25 +857,21 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 2,
+     "reviews": {
       "nodes": [
        {
         "state": "CHANGES_REQUESTED",
-        "author": {
-         "login": "sample-reviewer"
-        },
-        "commit": {
-         "oid": "0102aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }
-       },
-       {
-        "state": "CHANGES_REQUESTED",
+        "body": "Please split the parser change out.",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0102bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "comments": {
+         "totalCount": 0,
+         "nodes": []
         }
        }
       ]
@@ -920,16 +925,21 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
+     "reviews": {
       "nodes": [
        {
         "state": "APPROVED",
+        "body": "",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0302bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "comments": {
+         "totalCount": 0,
+         "nodes": []
         }
        }
       ]
@@ -983,16 +993,28 @@
       ]
      },
      "mergeable": "MERGEABLE",
-     "latestReviews": {
-      "totalCount": 1,
+     "reviews": {
       "nodes": [
        {
         "state": "COMMENTED",
+        "body": "",
+        "submittedAt": "2026-11-19T10:00:00Z",
         "author": {
          "login": "sample-user"
         },
         "commit": {
          "oid": "0303aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comments": {
+         "totalCount": 2,
+         "nodes": [
+          {
+           "replyTo": null
+          },
+          {
+           "replyTo": null
+          }
+         ]
         }
        }
       ]
@@ -1007,12 +1029,16 @@
           {
            "author": {
             "login": "sample-user"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           },
           {
            "author": {
             "login": "sample-contributor"
-           }
+           },
+           "createdAt": "2026-11-19T11:00:00Z",
+           "publishedAt": "2026-11-19T11:00:00Z"
           }
          ]
         }
@@ -1024,12 +1050,16 @@
           {
            "author": {
             "login": "sample-user"
-           }
+           },
+           "createdAt": "2026-11-19T10:00:00Z",
+           "publishedAt": "2026-11-19T10:00:00Z"
           },
           {
            "author": {
             "login": "sample-contributor"
-           }
+           },
+           "createdAt": "2026-11-19T11:00:00Z",
+           "publishedAt": "2026-11-19T11:00:00Z"
           }
          ]
         }

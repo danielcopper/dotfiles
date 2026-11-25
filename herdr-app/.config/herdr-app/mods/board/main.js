@@ -44,17 +44,20 @@
 // its limit take: ten for the 1000 by default (each item's priority,
 // milestone and parent, with its title and repo, and the first page's look
 // at the priority field add no connection and so no points; see below); a
-// list view one, and one more per THREAD_IDS (100) pull requests in it with
-// more than FIRST_THREADS (10) review threads. GitHub prices a request by
-// its connections, each counted as full: the list's per section one search,
-// then per pull request of its limit (50 by default) its assignees, review
-// requests, last commit (and that one's checks), latest reviews
-// (LATEST_REVIEWS, 20) and review threads, and per thread (FIRST_THREADS)
-// its comments, so with the defaults 1 + 50 * 6 + 50 * 10 = 801 requests a
-// section, about 8 points (a hundred requests each) of GitHub's 5000 an
-// hour, 24 for the shipped three sections; the follow-up (githubThreadsArgs)
-// 51 per such pull request (REVIEW_THREADS threads and their comments),
-// about one point for two. An issue's related items (its description,
+// list view one, one more per THREAD_IDS (100) pull requests in it with
+// more than FIRST_THREADS (10) review threads, and, until the board knows
+// it, one more for the login gh runs as (githubViewerArgs, one point).
+// GitHub prices a request by its connections, each counted as full: the
+// list's per section one search, then per pull request of its limit (50
+// by default) its assignees, review requests, review threads, last commit
+// (and that one's checks) and the viewer's last reviews (VIEWER_REVIEWS,
+// 5), per thread (FIRST_THREADS) its comments and per review
+// (VIEWER_REVIEWS) its comments, so with the defaults
+// 1 + 50 * 6 + 50 * 10 + 50 * 5 = 1051 requests a section, about 11
+// points (a hundred requests each) of GitHub's 5000 an hour, 32 for the
+// shipped three sections; the follow-up (githubThreadsArgs) 51 per such
+// pull request (REVIEW_THREADS threads and their comments), about one
+// point for two. An issue's related items (its description,
 // parent, sub-issues and linked pull requests) cost one more when its
 // details open, again on `r` while they are open, and again after a refresh
 // where their last read failed (readRelated; what a refresh keeps of them
@@ -3341,21 +3344,20 @@ export function checkMoveResult(json, card) {
 
 // How many review threads of a pull request a PR list reads: FIRST_THREADS
 // in its one request, REVIEW_THREADS in the follow-up for those with more
-// (githubThreadsArgs); of each thread how many comments, the last ones; and
-// how many latest reviews (prAttention).
+// (githubThreadsArgs); of each thread how many comments, the last ones; how
+// many of the viewer's reviews, the last ones; and of each how many
+// comments, the first ones (prAttention).
 export const FIRST_THREADS = 10;
 export const REVIEW_THREADS = 50;
 export const THREAD_COMMENTS = 10;
-export const LATEST_REVIEWS = 20;
+export const VIEWER_REVIEWS = 5;
+export const REVIEW_COMMENTS = 10;
 // How many pull requests one follow-up for more threads reads by their ids:
 // GitHub's most, as for a page (PAGE).
 export const THREAD_IDS = PAGE;
 
-// A pull request's first `first` review threads, how many it has, and of
-// each whether it is resolved and who wrote its last THREAD_COMMENTS
-// comments.
 const threadsSelection = (first) =>
-  `reviewThreads(first: ${first}) { totalCount nodes { isResolved comments(last: ${THREAD_COMMENTS}) { nodes { author { login } } } } }`;
+  `reviewThreads(first: ${first}) { totalCount nodes { isResolved comments(last: ${THREAD_COMMENTS}) { nodes { author { login } createdAt publishedAt } } } }`;
 
 // A pull request's fields as a row of a PR list shows it (prRow), which
 // the details panel shows of a pull request it goes down to too. The head
@@ -3369,16 +3371,13 @@ const PR_ROW_FIELDS = `
         checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }`;
 
 // What a PR list reads of a pull request besides its row's fields, to tell
-// whether the viewer has to act on it (prAttention): whether it merges
-// without conflict; its latest reviews, "A list of latest reviews per user
-// associated with the pull request that are not also pending review"
-// (GitHub's schema), the first LATEST_REVIEWS and how many there are, each
-// with its state and the commit it was given on; and its first
-// FIRST_THREADS review threads (threadsSelection). The details panel's pull
-// request a level down does without them.
+// whether the viewer has to act on it (prAttention). The states leave out
+// pending reviews. The details panel's pull request a level down does
+// without these fields.
 const PR_ATTENTION_FIELDS = `
       mergeable
-      latestReviews(first: ${LATEST_REVIEWS}) { totalCount nodes { state author { login } commit { oid } } }
+      reviews(last: ${VIEWER_REVIEWS}, author: $login, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) { nodes {
+        state body submittedAt author { login } commit { oid } comments(first: ${REVIEW_COMMENTS}) { totalCount nodes { replyTo { id } } } } }
       ${threadsSelection(FIRST_THREADS)}`;
 
 const PR_FIELDS = `
@@ -3423,34 +3422,40 @@ export const UNREAD = {
   threads: "Review-Threads fehlen",
   moreThreads: (read) => `mehr als ${read} Review-Threads`,
   reviews: "Reviews fehlen",
-  moreReviews: `mehr als ${LATEST_REVIEWS} Reviews`,
+  reviewKind: "deine letzten Reviews nicht ganz gelesen",
   head: "letzter Commit fehlt",
 };
+
+// Whether a review of the viewer's counts as one, as opposed to a reply in
+// a thread alone, which GitHub files as a COMMENTED review of its own: true,
+// false, or null where GitHub sent too little to tell.
+function realReview(review) {
+  if (["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state)) return true;
+  if (review.state !== "COMMENTED") return null;
+  const comments = review.comments?.nodes;
+  if (Array.isArray(comments) && comments.some((c) => c?.replyTo === null)) return true;
+  if (typeof review.body !== "string") return null;
+  if (review.body !== "") return true;
+  return Array.isArray(comments) && review.comments.totalCount === comments.length && comments.every((c) => c?.replyTo) ? false : null;
+}
+
+// Of `reviews` the one given last; where GitHub sent no time to tell, the
+// later in its order.
+const lastGiven = (reviews) => reviews.reduce((last, r) => (last && Date.parse(r.submittedAt) < Date.parse(last.submittedAt) ? last : r), null);
 
 // Whether the `viewer` has to act on the pull request `pr` (its `row`
 // read; `asked`: whether a search that asks for one's review, or a team's
 // one is in, found it; `errors`: GitHub's errors at its path): { attention,
-// waiting, unread }. attention: the reasons, as the row names them; none
-// where the viewer has nothing to do, or is unknown. unread: what of it the
-// list could not read whole, so that no reason, nor "nothing to do", can be
-// told for sure: those errors' first lines (also where the viewer is
-// unknown) and UNREAD's parts. On one's own
-// pull request the reasons are changes requested; unresolved review threads
-// whose last comment is someone else's; failing checks; a merge conflict;
-// or, where none of these is and all of it was read, "bereit zum Mergen":
-// no draft, no review still required (approved, or a repo that asks for
-// none), its checks passed or it has none, and it merges without conflict
-// (a mergeability still being calculated is no "without"). On someone
-// else's: one's review is asked for and one has given none; one's latest
-// review (not a dismissed one) was given on another commit than the head,
-// asked again or not; one's review is asked for again while one's latest is
-// on the head ("Review erneut angefragt"); an unresolved thread one took
-// part in (among its last THREAD_COMMENTS comments) whose last comment is
-// someone else's. waiting: someone else's pull request one reviewed, all of
-// it read, that asks nothing of one ("wartet auf Autor"). Comments as such
-// are no reason. `pending`: its follow-up for more threads is still to
-// come, which leaves it unsure but not unread.
-function prAttention(pr, row, viewer, asked, errors, pending = false) {
+// waiting, unread }. attention: the reasons, as the row names them (the
+// README's GitHub PR list paragraph lists them); none where the viewer has
+// nothing to do, or is unknown. waiting: someone else's pull request one
+// reviewed, all of it read, that asks nothing of one ("wartet auf Autor").
+// unread: what of it the list could not read whole, so that no reason, nor
+// "nothing to do", can be told for sure: those errors' first lines (also
+// where the viewer is unknown) and UNREAD's parts. `pending`: its follow-up
+// for more threads is still to come, which leaves it unsure but not unread.
+// `login`: whose reviews the request asked for, none for anyone's.
+function prAttention(pr, row, viewer, asked, errors, pending = false, login = null) {
   const unread = errors.map((e) => firstLine(e.message)).filter(Boolean);
   if (!viewer) return { attention: [], waiting: false, unread };
   const threads = pr.reviewThreads;
@@ -3459,9 +3464,9 @@ function prAttention(pr, row, viewer, asked, errors, pending = false) {
   const more = Boolean(nodes) && (threads.totalCount ?? 0) > nodes.length;
   if (more && !pending) unread.push(UNREAD.moreThreads(nodes.length));
   const sure = () => !unread.length && !pending;
-  const open = (nodes ?? []).filter((t) => t && !t.isResolved).map((t) => (t.comments?.nodes ?? []).map((c) => c?.author?.login ?? null));
-  // Whether a thread waits on the viewer: its last comment is someone else's.
-  const awaitsViewer = (authors) => authors.length > 0 && authors.at(-1) !== viewer;
+  const open = (nodes ?? []).filter((t) => t && !t.isResolved).map((t) => t.comments?.nodes ?? []);
+  const authorOf = (comment) => comment?.author?.login ?? null;
+  const awaitsViewer = (comments) => comments.length > 0 && authorOf(comments.at(-1)) !== viewer;
   const reasons = [];
   if (pr.author?.login === viewer) {
     const unanswered = open.filter(awaitsViewer).length;
@@ -3473,31 +3478,50 @@ function prAttention(pr, row, viewer, asked, errors, pending = false) {
     if (!reasons.length && sure() && ready) reasons.push("bereit zum Mergen");
     return { attention: reasons, waiting: false, unread };
   }
-  const reviews = Array.isArray(pr.latestReviews?.nodes) ? pr.latestReviews : null;
+  // The reviews of `login`, anyone's without it: unread where they may be
+  // another's than the viewer's.
+  const mine = (!login || login === viewer) && Array.isArray(pr.reviews?.nodes) && pr.reviews.nodes.every((r) => r && r.author?.login === viewer);
+  const reviews = mine ? pr.reviews.nodes : null;
   if (!reviews) unread.push(UNREAD.reviews);
-  const latest = (reviews?.nodes ?? []).find((r) => r?.author?.login === viewer) ?? null;
-  const review = latest?.state === "DISMISSED" ? null : latest;
-  // The viewer's latest review may be one GitHub did not send.
-  if (reviews && !latest && (reviews.totalCount ?? 0) > reviews.nodes.length) unread.push(UNREAD.moreReviews);
+  // The last review of the viewer's that counts, one GitHub sent too little
+  // of to tell counted as one (realReview); and the last that surely counts.
+  // A dismissed review is none.
+  const kept = (r) => (r?.state === "DISMISSED" ? null : r);
+  const review = kept(lastGiven((reviews ?? []).filter((r) => realReview(r) !== false)));
+  const sureReview = kept(lastGiven((reviews ?? []).filter((r) => realReview(r) === true)));
   const head = pr.commits?.nodes?.[0]?.commit?.oid ?? null;
   if (review && !head) unread.push(UNREAD.head);
   const requested = asked || row.reviewers.includes(viewer);
-  if (requested && !review) reasons.push("Review angefragt");
-  if (review && head && review.commit?.oid !== head) reasons.push("neue Commits seit deinem Review");
-  // A head unknown is no review's commit, so it gives no reason.
-  if (requested && review && review.commit?.oid === head) reasons.push("Review erneut angefragt");
-  if (open.some((authors) => authors.includes(viewer) && awaitsViewer(authors))) reasons.push("Antwort erwartet");
+  // A time missing on either side parses as NaN, which no comparison holds
+  // for: the reply counts.
+  const before = (comments, r) => Date.parse(comments.at(-1)?.publishedAt ?? comments.at(-1)?.createdAt) <= Date.parse(r?.submittedAt);
+  const reasonsBy = (r) => [
+    requested && !r && "Review angefragt",
+    r && head && r.commit?.oid !== head && "neue Commits seit deinem Review",
+    // A head unknown is no review's commit, so it gives no reason.
+    requested && r && r.commit?.oid === head && "Review erneut angefragt",
+    open.some((comments) => comments.some((c) => authorOf(c) === viewer) && awaitsViewer(comments) && !before(comments, r)) && "Antwort erwartet",
+  ].filter(Boolean);
+  reasons.push(...reasonsBy(review));
+  const told = (r, said) => JSON.stringify([said, Boolean(r) && !said.length]);
+  if (told(review, reasons) !== told(sureReview, reasonsBy(sureReview))) unread.push(UNREAD.reviewKind);
   return { attention: reasons, waiting: Boolean(review) && !requested && !reasons.length && sure(), unread };
 }
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
-// …), and the login gh runs as.
-export function githubListArgs(view) {
+// …), and the login gh runs as. Each pull request's reviews are `login`'s;
+// without it, anyone's (GitHub drops an argument whose variable is unset).
+export function githubListArgs(view, login) {
   const searches = view.sections.map((_, i) => `s${i}: search(type: ISSUE, first: ${view.limit}, query: $q${i}) { ${PR_FIELDS} }`);
-  const vars = view.sections.map((_, i) => `$q${i}: String!`).join(", ");
+  const vars = ["$login: String", ...view.sections.map((_, i) => `$q${i}: String!`)].join(", ");
   const doc = `query(${vars}) {\nviewer { login }\n${searches.join("\n")}\n}`;
-  return ["api", "graphql", "-f", `query=${doc}`, ...view.sections.flatMap((s, i) => ["-f", `q${i}=${s.query}`])];
+  return ["api", "graphql", "-f", `query=${doc}`, ...(login ? ["-f", `login=${login}`] : []), ...view.sections.flatMap((s, i) => ["-f", `q${i}=${s.query}`])];
 }
+
+// One GraphQL request for the login gh runs as, which a list's request
+// needs before its answer names it (githubListArgs).
+export const VIEWER_QUERY = "query { viewer { login } }";
+export const githubViewerArgs = () => ["api", "graphql", "-f", `query=${VIEWER_QUERY}`];
 
 // The ids of the pull requests in a list's answer `json` (githubListArgs,
 // for `view`) with more review threads than it read, each once.
@@ -3616,9 +3640,10 @@ export const askingSearch = (query) => setsMe(query, ASKING);
 // A duplicate's errors stay warnings: its row is another node's. A
 // section's rows on which the viewer has to act come first, in GitHub's
 // order, then the others in theirs. A search missing from the answer is
-// explained by the error at its alias.
+// explained by the error at its alias. `login`: whose reviews the request
+// asked for (githubListArgs).
 // warnings: the first lines of the errors neither a row nor notRead holds.
-export function parseGithubList(json, view, errors = [], pending = null) {
+export function parseGithubList(json, view, errors = [], pending = null, login = null) {
   const seen = new Set();
   const viewer = json?.data?.viewer?.login ?? null;
   const shown = new Set();
@@ -3648,7 +3673,7 @@ export function parseGithubList(json, view, errors = [], pending = null) {
       at.forEach((e) => shown.add(e));
       const row = prRow(pr, Boolean(errorAt(at, [...path, "commits"])));
       const waits = Boolean(pending?.has(pr.id));
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at, waits), ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at, waits, login), ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
     });
     // Array's sort keeps the order of rows it ranks alike.
     rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
@@ -3952,10 +3977,12 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // description (related.js says what `related` holds), and a pull request's
 // details (pullRequest, the same); and an item's assignment (assign:
 // actions/assign.js says what it holds), whose people are read once per repo
-// and kept while the board runs (one that fails is not kept). gh runs by the
-// path `paths` (toolPaths) finds.
+// and kept while the board runs (one that fails is not kept). A list keeps
+// the login gh runs as while the board runs, as gh last named it.
+// gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   const people = readMemo();
+  let login = null;
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
@@ -4010,14 +4037,19 @@ export function makeGithub(paths) {
         },
       },
       list: {
-        // The list's request, then, for its pull requests with more than
-        // FIRST_THREADS threads, the follow-up for them, one call per
-        // THREAD_IDS of them (addThreads; one that fails leaves its rows
-        // unread). The errors a row or a section shows are not warnings too.
+        // The login gh runs as, where it is not known yet (a question that
+        // fails leaves it unknown); the list's request; then, for its pull
+        // requests with more than FIRST_THREADS threads, the follow-up for
+        // them, one call per THREAD_IDS of them (addThreads; one that fails
+        // leaves its rows unread). The errors a row or a section shows are
+        // not warnings too.
         async load(view, { live = NO_LIVE }) {
-          const { json, errors } = await gh(paths, githubListArgs(view), what(view, "list"));
+          login ??= await gh(paths, githubViewerArgs(), what(view, "login")).then((r) => r.json?.data?.viewer?.login ?? null, () => null);
+          const asked = login;
+          const { json, errors } = await gh(paths, githubListArgs(view, asked), what(view, "list"));
+          login = json?.data?.viewer?.login ?? login;
           const result = (pending = null) => {
-            const data = parseGithubList(json, view, errors, pending);
+            const data = parseGithubList(json, view, errors, pending, asked);
             return { data, warnings: data.warnings };
           };
           const ids = moreThreadIds(json, view);

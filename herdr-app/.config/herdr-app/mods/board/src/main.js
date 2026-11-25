@@ -42,17 +42,20 @@
 // its limit take: ten for the 1000 by default (each item's priority,
 // milestone and parent, with its title and repo, and the first page's look
 // at the priority field add no connection and so no points; see below); a
-// list view one, and one more per THREAD_IDS (100) pull requests in it with
-// more than FIRST_THREADS (10) review threads. GitHub prices a request by
-// its connections, each counted as full: the list's per section one search,
-// then per pull request of its limit (50 by default) its assignees, review
-// requests, last commit (and that one's checks), latest reviews
-// (LATEST_REVIEWS, 20) and review threads, and per thread (FIRST_THREADS)
-// its comments, so with the defaults 1 + 50 * 6 + 50 * 10 = 801 requests a
-// section, about 8 points (a hundred requests each) of GitHub's 5000 an
-// hour, 24 for the shipped three sections; the follow-up (githubThreadsArgs)
-// 51 per such pull request (REVIEW_THREADS threads and their comments),
-// about one point for two. An issue's related items (its description,
+// list view one, one more per THREAD_IDS (100) pull requests in it with
+// more than FIRST_THREADS (10) review threads, and, until the board knows
+// it, one more for the login gh runs as (githubViewerArgs, one point).
+// GitHub prices a request by its connections, each counted as full: the
+// list's per section one search, then per pull request of its limit (50
+// by default) its assignees, review requests, review threads, last commit
+// (and that one's checks) and the viewer's last reviews (VIEWER_REVIEWS,
+// 5), per thread (FIRST_THREADS) its comments and per review
+// (VIEWER_REVIEWS) its comments, so with the defaults
+// 1 + 50 * 6 + 50 * 10 + 50 * 5 = 1051 requests a section, about 11
+// points (a hundred requests each) of GitHub's 5000 an hour, 32 for the
+// shipped three sections; the follow-up (githubThreadsArgs) 51 per such
+// pull request (REVIEW_THREADS threads and their comments), about one
+// point for two. An issue's related items (its description,
 // parent, sub-issues and linked pull requests) cost one more when its
 // details open, again on `r` while they are open, and again after a refresh
 // where their last read failed (readRelated; what a refresh keeps of them
