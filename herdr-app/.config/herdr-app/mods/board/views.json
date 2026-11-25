@@ -13,9 +13,9 @@
     "azure": {
       "org": "https://dev.azure.com/l-p-a",
       "contexts": [
-        { "team": { "project": "VC", "team": "VC Core Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/VC", "~/Repos"] },
+        { "team": { "project": "VC", "team": "VC Core Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/VC"] },
         { "prs": { "project": "VC" } },
-        { "team": { "project": "LPA Captano", "team": "LPA Captano Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/Captano", "~/Repos"] },
+        { "team": { "project": "LPA Captano", "team": "LPA Captano Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/Captano"] },
         { "prs": { "project": "LPA Captano" } }
       ]
     },
