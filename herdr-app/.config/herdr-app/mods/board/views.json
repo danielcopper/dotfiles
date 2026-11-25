@@ -12,11 +12,10 @@
   "sources": {
     "azure": {
       "org": "https://dev.azure.com/l-p-a",
-      "repoFolders": ["~/Projects", "~/Repos"],
       "contexts": [
-        { "team": { "project": "VC", "team": "VC Core Team" }, "views": ["sprint", "backlog"] },
+        { "team": { "project": "VC", "team": "VC Core Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/VC", "~/Repos"] },
         { "prs": { "project": "VC" } },
-        { "team": { "project": "LPA Captano", "team": "LPA Captano Team" }, "views": ["sprint", "backlog"] },
+        { "team": { "project": "LPA Captano", "team": "LPA Captano Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/Captano", "~/Repos"] },
         { "prs": { "project": "LPA Captano" } }
       ]
     },
