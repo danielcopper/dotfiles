@@ -524,15 +524,16 @@ by that run. Which files of the package git tracks is set in the root
   `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
   iteration and sprint), `o` opens the item in the browser, and `n` creates a
   work item: a dialog asks for its type (the level's, Story first; with a Story
-  selected also Task, as its child) and its title (`h/l` switch the type). It is
-  created in the team's default area and iteration, assigned to me, and
-  shows, selected, once Azure has named its id and the Backlog is read again;
-  a Task is linked to the selected Story as its parent and, being no Story,
-  does not show in the list. Where Azure's answer to a create leaves open
-  whether it landed, the board asks Azure after the next refresh for work
-  items of that project, type and title that I created today (a Task only
-  among those without a parent): exactly one is taken as the new one, none
-  means it did not land, several are named; the header's "Calls:" says what
+  selected also Task, as its child) and its title; the type is a choice like
+  the start dialog's (`←`/`→`, its list on space or a click), and `Enter`
+  creates from either field. It is created in the team's default area and
+  iteration, assigned to me, and shows, selected, once Azure has named its id
+  and the Backlog is read again; a Task is linked to the selected Story as its
+  parent and, being no Story, does not show in the list. Where Azure's answer to
+  a create leaves open whether it landed, the board asks Azure after the next
+  refresh for work items of that project, type and title that I created today (a
+  Task only among those without a parent): exactly one is taken as the new one,
+  none means it did not land, several are named; the header's "Calls:" says what
   that costs. A team whose default iteration follows the current one has it
   read again for each create. Where a work item's session starts is only
   `start.checkout` so far. On a GitHub view `h/l j/k` move over the

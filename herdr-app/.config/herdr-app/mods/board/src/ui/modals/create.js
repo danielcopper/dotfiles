@@ -1,12 +1,8 @@
 // The create dialog: a new work item on a team's backlog, its type (the
 // level's types, its default first; with an item of the level selected also
 // the types of the level below, as that item's children) and its title.
-// The backlog shape opens it (n) as b.modal = { kind: "create", view,
-// types, at (the chosen type), parent (the selected item, or null), input
-// (the title's InputState, made for this dialog), field ("title" or
-// "type"), inputs ({ title }), inputFocused, error }. Enter or Anlegen
-// creates (actions/create.js): the dialog closes and the notice says how it
-// goes.
+// The backlog shape opens it (n). Enter or Anlegen creates
+// (actions/create.js): the dialog closes and the notice says how it goes.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
@@ -15,10 +11,32 @@ import { createTypes } from "../../kinds/backlog.js";
 import { CREATE_KEY, createItem } from "../../actions/create.js";
 import { SAVED_WRITE, restartRead } from "../../actions/write.js";
 import { backdrop, button, cycleField, fieldFrame, fieldLabel, wireTextField } from "../helpers.js";
+import { LIST_HINT, choiceBox, choiceHint, choiceKey, escapeList, listKey, listKeyboard, listShield } from "../choices.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
 // The fields Tab walks, in order.
 const CREATE_FIELDS = ["title", "type"];
+
+export const CREATE_HINTS = {
+  title: "↵ legt an · Tab wechselt das Feld",
+  type: choiceHint("legt an"),
+  list: LIST_HINT,
+};
+
+const typeName = (m, type) => (type.child ? `${type.name} (unter ${itemLabel(m.parent)})` : type.name);
+
+const CREATE_CHOICES = {
+  type: {
+    entries: (m) => m.types.map((type, i) => ({ id: i, name: typeName(m, type) })),
+    current: (m) => m.at,
+    value: (m) => typeName(m, m.types[m.at]),
+    take: (b, row) => (b.modal.at = row.id),
+    placeholder: "Filter: Name des Typs",
+    none: "Kein Typ passt zum Filter",
+    width: 320,
+    anchor: "top_left",
+  },
+};
 
 // Where a new work item of the chosen type goes, as the dialog says it.
 function whereText(m) {
@@ -42,7 +60,7 @@ export const createModal = {
       return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
-    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
+    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", list: null, error: null };
     wireTextField(b, m, input, "title", (_e, cx) => createModal.create(b, cx));
     b.modal = m;
     input.focus();
@@ -67,28 +85,32 @@ export const createModal = {
     createItem(b, m.view, { type: m.types[m.at], title, parent: m.parent }, cx);
   },
 
-  // Tab and shift-Tab (`back`): the next or previous field.
-  tab: (b, back, cx) => cycleField(b, CREATE_FIELDS, back, cx),
+  keyboard: listKeyboard,
+  escape: escapeList,
 
-  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey);
-  // on the type h/l or the arrows change it, Enter creates. Typing goes to
-  // the title.
+  // Tab and shift-Tab (`back`): the next or previous field.
+  tab(b, back, cx) {
+    b.modal.list = null;
+    cycleField(b, CREATE_FIELDS, back, cx);
+  },
+
+  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey).
+  // Typing goes to the title.
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
     if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
+    if (m.list) return listKey(b, e, cx);
     if (m.field === "title") return;
     cx.stop_propagation();
     if (k === "enter") return createModal.create(b, cx);
-    const by = { h: -1, left: -1, k: -1, up: -1, l: 1, right: 1, j: 1, down: 1, space: 1 }[k];
-    if (by) cycleType(m, by, cx);
+    choiceKey(b, CREATE_CHOICES, k, cx);
   },
 
   render(b, t) {
     const m = b.modal;
     const label = (text) => fieldLabel(t, text);
     const frame = (field, inner) => fieldFrame(t, m, field, inner);
-    const type = m.types[m.at];
     return backdrop(
       t,
       "create-backdrop",
@@ -107,30 +129,17 @@ export const createModal = {
         )
         .child(
           v_flex().px(20).py(16).gap(14)
-            .child(v_flex().gap(6).child(label("Typ")).child(
-              frame("type", h_flex().id("create-type").flex_1().min_w(0).gap(6).cursor_pointer()
-                .on_click((_e, cx) => {
-                  m.field = "type";
-                  b.handle.focus();
-                  cycleType(m, 1, cx);
-                })
-                .child(div().flex_1().min_w(0).truncate().child(type.child ? `${type.name} (unter ${itemLabel(m.parent)})` : type.name))
-                .child(div().text_color(t.dim).child("◂ ▸"))),
-            ))
+            .child(v_flex().gap(6).child(label("Typ")).child(choiceBox(b, t, CREATE_CHOICES, "type")))
             .child(v_flex().gap(6).child(label("Titel")).child(frame("title", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))))
             .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
         )
         .child(
           h_flex().px(20).py(12).gap(8).items_center().border_t(1).border_color(t.border)
-            .child(div().flex_1().text_size(12).text_color(t.muted).child("Tab wechselt das Feld · ◂ ▸ wählt den Typ"))
+            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.list ? CREATE_HINTS.list : CREATE_HINTS[m.field]))
             .child(button(t, "create-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx)))
             .child(button(t, "create-go", "Anlegen ↵", true, (cx) => createModal.create(b, cx))),
         ),
+      listShield(b),
     );
   },
 };
-
-function cycleType(m, by, cx) {
-  m.at = (m.at + by + m.types.length) % m.types.length;
-  cx.notify();
-}

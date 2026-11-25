@@ -1,5 +1,5 @@
 // A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
-// in), from a table of the dialog's, by field: {
+// in, the create dialog's Typ), from a table of the dialog's, by field: {
 // entries(m), each { id, name } (and a space's `folder`); current(m), the
 // id of the entry the field is on; value(m), the text the field shows;
 // take(b, row, cx), which puts the field on that entry; fieldAfter(row),

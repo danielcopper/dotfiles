@@ -6550,224 +6550,10 @@ export const commandsModal = {
   },
 };
 
-// ==== src/ui/modals/create.js ====
-
-// The create dialog: a new work item on a team's backlog, its type (the
-// level's types, its default first; with an item of the level selected also
-// the types of the level below, as that item's children) and its title.
-// The backlog shape opens it (n) as b.modal = { kind: "create", view,
-// types, at (the chosen type), parent (the selected item, or null), input
-// (the title's InputState, made for this dialog), field ("title" or
-// "type"), inputs ({ title }), inputFocused, error }. Enter or Anlegen
-// creates (actions/create.js): the dialog closes and the notice says how it
-// goes.
-
-// The fields Tab walks, in order.
-const CREATE_FIELDS = ["title", "type"];
-
-// Where a new work item of the chosen type goes, as the dialog says it.
-function whereText(m) {
-  const meta = m.data.meta;
-  const type = m.types[m.at];
-  const place = type?.child ? `unter ${itemLabel(m.parent)} „${m.parent.title}“` : `in „${meta.level.name}“`;
-  return `Neu ${place}; Bereich ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
-}
-
-export const createModal = {
-  // Opens the dialog for the view's backlog, or says why a new work item
-  // cannot be made there: no type, no default area or iteration.
-  open(b, view, cx) {
-    const data = b.state(view.id).data;
-    if (!data) return;
-    const parent = b.selected(view);
-    const types = createTypes(data, parent);
-    if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
-    if (!data.meta.area || !data.meta.iteration) {
-      const missing = [!data.meta.area && "keinen Standardbereich", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
-      return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
-    }
-    const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
-    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
-    wireTextField(b, m, input, "title", (_e, cx) => createModal.create(b, cx));
-    b.modal = m;
-    input.focus();
-    cx.notify();
-  },
-
-  // Creates the work item and closes the dialog; without a title, while
-  // another create of the view is under way, or while the view shows its
-  // saved state (SAVED_WRITE), it stays and says so.
-  create(b, cx) {
-    const m = b.modal;
-    if (m?.kind !== "create") return;
-    const title = m.input.value().trim();
-    const st = b.state(m.view.id);
-    const busy = st.pending[CREATE_KEY];
-    if (!title || busy || st.saved) {
-      m.error = busy ? "Ein Work Item wird noch angelegt …" : st.saved ? SAVED_WRITE : "Der Titel fehlt";
-      if (st.saved && !busy) restartRead(b, m.view, cx);
-      return cx.notify();
-    }
-    b.closeModal(cx);
-    createItem(b, m.view, { type: m.types[m.at], title, parent: m.parent }, cx);
-  },
-
-  // Tab and shift-Tab (`back`): the next or previous field.
-  tab: (b, back, cx) => cycleField(b, CREATE_FIELDS, back, cx),
-
-  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey);
-  // on the type h/l or the arrows change it, Enter creates. Typing goes to
-  // the title.
-  key(b, e, cx) {
-    const m = b.modal;
-    const k = e.key;
-    if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
-    if (m.field === "title") return;
-    cx.stop_propagation();
-    if (k === "enter") return createModal.create(b, cx);
-    const by = { h: -1, left: -1, k: -1, up: -1, l: 1, right: 1, j: 1, down: 1, space: 1 }[k];
-    if (by) cycleType(m, by, cx);
-  },
-
-  render(b, t) {
-    const m = b.modal;
-    const label = (text) => fieldLabel(t, text);
-    const frame = (field, inner) => fieldFrame(t, m, field, inner);
-    const type = m.types[m.at];
-    return backdrop(
-      t,
-      "create-backdrop",
-      v_flex()
-        .id("create-dialog")
-        .w(560)
-        .rounded(12)
-        .border_1()
-        .border_color(t.input)
-        .bg(t.popover)
-        .shadow_lg()
-        .child(
-          v_flex().px(20).py(16).gap(4).border_b(1).border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.context.team}`))
-            .child(div().text_size(12).text_color(t.muted).child(whereText(m))),
-        )
-        .child(
-          v_flex().px(20).py(16).gap(14)
-            .child(v_flex().gap(6).child(label("Typ")).child(
-              frame("type", h_flex().id("create-type").flex_1().min_w(0).gap(6).cursor_pointer()
-                .on_click((_e, cx) => {
-                  m.field = "type";
-                  b.handle.focus();
-                  cycleType(m, 1, cx);
-                })
-                .child(div().flex_1().min_w(0).truncate().child(type.child ? `${type.name} (unter ${itemLabel(m.parent)})` : type.name))
-                .child(div().text_color(t.dim).child("◂ ▸"))),
-            ))
-            .child(v_flex().gap(6).child(label("Titel")).child(frame("title", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))))
-            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
-        )
-        .child(
-          h_flex().px(20).py(12).gap(8).items_center().border_t(1).border_color(t.border)
-            .child(div().flex_1().text_size(12).text_color(t.muted).child("Tab wechselt das Feld · ◂ ▸ wählt den Typ"))
-            .child(button(t, "create-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx)))
-            .child(button(t, "create-go", "Anlegen ↵", true, (cx) => createModal.create(b, cx))),
-        ),
-    );
-  },
-};
-
-function cycleType(m, by, cx) {
-  m.at = (m.at + by + m.types.length) % m.types.length;
-  cx.notify();
-}
-
-// ==== src/ui/modals/sprints.js ====
-
-// The sprint picker: which sprint a team's Sprint view shows, as a menu
-// like the command menu's (helpers.js menu, without digits: typing goes to
-// the filter). Its rows are the team's iterations, past, current and
-// future, in Azure's order (the source's iterations; makeAzure says how
-// long they are kept), each with its dates, the team's current sprint
-// marked "aktuell"; the filter has the keyboard and narrows them by their
-// names as the command menu's does (rankByName), its letters in the
-// accent color. Up/down, ctrl-j/k and ctrl-n/p mark a row, Enter or a
-// click shows that sprint (the sprint shape's showSprint), Esc closes; its
-// window shows MENU_ROWS rows, follows the mark, and the mouse wheel moves
-// it (helpers.js: openReadMenu, filterMenuKey, menuWindow). Without a
-// filter the sprint startRow names is marked (the current one, where the
-// team has one); under a filter, the first row it leaves. The command
-// menu's "Sprint wählen…" and a click on the sprint's name in the view's
-// head open it (the sprint shape's pickSprint) as b.modal = { kind:
-// "sprints", view, team, and openReadMenu's fields }. Where the iterations
-// cannot be read, it says so in the dialog and as a toast.
-
-const sprintRowsOf = (m) => rankByName(m.list ?? [], m.filter);
-
-// The row marked when the rows come or the filter changes (-1 for none),
-// by the rule in the header.
-function sprintStartAt(m) {
-  const rows = sprintRowsOf(m);
-  if (!rows.length) return -1;
-  return m.filter ? 0 : startRow(rows, Date.now());
-}
-
-// Shows the row at `i`, where there is one, and closes the picker; the
-// current sprint's row goes back to the current one.
-function pickSprintRow(b, m, i, cx) {
-  const row = sprintRowsOf(m)[i];
-  if (!row) return;
-  b.closeModal(cx);
-  b.shape(m.view).showSprint(b, m.view, row.current ? null : { id: row.id, name: row.name }, cx, row.id);
-}
-
-export const sprintsModal = {
-  // Opens the picker for the Sprint view `view`, then asks its source for
-  // the team's iterations.
-  open(b, view, cx) {
-    const m = { kind: "sprints", view, team: view.context?.team ?? view.name };
-    openReadMenu(b, m, {
-      placeholder: "Filter: Name des Sprints",
-      count: (m) => sprintRowsOf(m).length,
-      startAt: sprintStartAt,
-      pick: (i, cx) => pickSprintRow(b, m, i, cx),
-      read: () => b.loader(view).iterations(view),
-      failed: (e) => ({ error: `Die Sprints des Teams ließen sich nicht lesen: ${report(e)}`, list: [] }),
-      title: "Sprint wählen: Sprints nicht gelesen",
-    }, cx);
-  },
-
-  // Every key but Esc (the Board's): filterMenuKey.
-  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, sprintRowsOf(b.modal).length),
-
-  render(b, t) {
-    const m = b.modal;
-    const rows = sprintRowsOf(m);
-    const { shown, ...win } = menuWindow(m, rows);
-    const year = new Date(Date.now()).getUTCFullYear();
-    const empty = m.error ? null : m.list?.length ? "Kein Sprint passt zum Filter" : "Das Team hat keine Sprints";
-    const message = !m.list ? "lädt …" : !rows.length ? empty : null;
-    return menu(t, {
-      id: "sprints",
-      rowId: "sprint",
-      width: 440,
-      title: `Sprint · ${m.team}`,
-      head: filterMenuHead(t, m),
-      digits: false,
-      rows: shown.map((r) => [
-        markedName(t, r.name, r.at),
-        ...(r.current ? [toneChip(t, "aktuell", NOTE_TONES.success).flex_none()] : []),
-        div().flex_none().text_size(11).text_color(t.dim).child(sprintDates(r, year)),
-      ]),
-      ...win,
-      pick: (i, cx) => pickSprintRow(b, m, i, cx),
-      foot: message ? [menuNote(t, message, t.muted)] : [],
-    });
-  },
-};
-
 // ==== src/ui/choices.js ====
 
 // A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
-// in), from a table of the dialog's, by field: {
+// in, the create dialog's Typ), from a table of the dialog's, by field: {
 // entries(m), each { id, name } (and a space's `folder`); current(m), the
 // id of the entry the field is on; value(m), the text the field shows;
 // take(b, row, cx), which puts the field on that entry; fieldAfter(row),
@@ -6941,6 +6727,228 @@ export const listShield = (b) =>
       closeList(b, cx);
     })
     : null;
+
+// ==== src/ui/modals/create.js ====
+
+// The create dialog: a new work item on a team's backlog, its type (the
+// level's types, its default first; with an item of the level selected also
+// the types of the level below, as that item's children) and its title.
+// The backlog shape opens it (n). Enter or Anlegen creates
+// (actions/create.js): the dialog closes and the notice says how it goes.
+
+// The fields Tab walks, in order.
+const CREATE_FIELDS = ["title", "type"];
+
+export const CREATE_HINTS = {
+  title: "↵ legt an · Tab wechselt das Feld",
+  type: choiceHint("legt an"),
+  list: LIST_HINT,
+};
+
+const typeName = (m, type) => (type.child ? `${type.name} (unter ${itemLabel(m.parent)})` : type.name);
+
+const CREATE_CHOICES = {
+  type: {
+    entries: (m) => m.types.map((type, i) => ({ id: i, name: typeName(m, type) })),
+    current: (m) => m.at,
+    value: (m) => typeName(m, m.types[m.at]),
+    take: (b, row) => (b.modal.at = row.id),
+    placeholder: "Filter: Name des Typs",
+    none: "Kein Typ passt zum Filter",
+    width: 320,
+    anchor: "top_left",
+  },
+};
+
+// Where a new work item of the chosen type goes, as the dialog says it.
+function whereText(m) {
+  const meta = m.data.meta;
+  const type = m.types[m.at];
+  const place = type?.child ? `unter ${itemLabel(m.parent)} „${m.parent.title}“` : `in „${meta.level.name}“`;
+  return `Neu ${place}; Bereich ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
+}
+
+export const createModal = {
+  // Opens the dialog for the view's backlog, or says why a new work item
+  // cannot be made there: no type, no default area or iteration.
+  open(b, view, cx) {
+    const data = b.state(view.id).data;
+    if (!data) return;
+    const parent = b.selected(view);
+    const types = createTypes(data, parent);
+    if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
+    if (!data.meta.area || !data.meta.iteration) {
+      const missing = [!data.meta.area && "keinen Standardbereich", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
+      return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
+    }
+    const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
+    const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", list: null, error: null };
+    wireTextField(b, m, input, "title", (_e, cx) => createModal.create(b, cx));
+    b.modal = m;
+    input.focus();
+    cx.notify();
+  },
+
+  // Creates the work item and closes the dialog; without a title, while
+  // another create of the view is under way, or while the view shows its
+  // saved state (SAVED_WRITE), it stays and says so.
+  create(b, cx) {
+    const m = b.modal;
+    if (m?.kind !== "create") return;
+    const title = m.input.value().trim();
+    const st = b.state(m.view.id);
+    const busy = st.pending[CREATE_KEY];
+    if (!title || busy || st.saved) {
+      m.error = busy ? "Ein Work Item wird noch angelegt …" : st.saved ? SAVED_WRITE : "Der Titel fehlt";
+      if (st.saved && !busy) restartRead(b, m.view, cx);
+      return cx.notify();
+    }
+    b.closeModal(cx);
+    createItem(b, m.view, { type: m.types[m.at], title, parent: m.parent }, cx);
+  },
+
+  keyboard: listKeyboard,
+  escape: escapeList,
+
+  // Tab and shift-Tab (`back`): the next or previous field.
+  tab(b, back, cx) {
+    b.modal.list = null;
+    cycleField(b, CREATE_FIELDS, back, cx);
+  },
+
+  // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey).
+  // Typing goes to the title.
+  key(b, e, cx) {
+    const m = b.modal;
+    const k = e.key;
+    if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
+    if (m.list) return listKey(b, e, cx);
+    if (m.field === "title") return;
+    cx.stop_propagation();
+    if (k === "enter") return createModal.create(b, cx);
+    choiceKey(b, CREATE_CHOICES, k, cx);
+  },
+
+  render(b, t) {
+    const m = b.modal;
+    const label = (text) => fieldLabel(t, text);
+    const frame = (field, inner) => fieldFrame(t, m, field, inner);
+    return backdrop(
+      t,
+      "create-backdrop",
+      v_flex()
+        .id("create-dialog")
+        .w(560)
+        .rounded(12)
+        .border_1()
+        .border_color(t.input)
+        .bg(t.popover)
+        .shadow_lg()
+        .child(
+          v_flex().px(20).py(16).gap(4).border_b(1).border_color(t.border)
+            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.context.team}`))
+            .child(div().text_size(12).text_color(t.muted).child(whereText(m))),
+        )
+        .child(
+          v_flex().px(20).py(16).gap(14)
+            .child(v_flex().gap(6).child(label("Typ")).child(choiceBox(b, t, CREATE_CHOICES, "type")))
+            .child(v_flex().gap(6).child(label("Titel")).child(frame("title", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))))
+            .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
+        )
+        .child(
+          h_flex().px(20).py(12).gap(8).items_center().border_t(1).border_color(t.border)
+            .child(div().flex_1().text_size(12).text_color(t.muted).child(m.list ? CREATE_HINTS.list : CREATE_HINTS[m.field]))
+            .child(button(t, "create-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx)))
+            .child(button(t, "create-go", "Anlegen ↵", true, (cx) => createModal.create(b, cx))),
+        ),
+      listShield(b),
+    );
+  },
+};
+
+// ==== src/ui/modals/sprints.js ====
+
+// The sprint picker: which sprint a team's Sprint view shows, as a menu
+// like the command menu's (helpers.js menu, without digits: typing goes to
+// the filter). Its rows are the team's iterations, past, current and
+// future, in Azure's order (the source's iterations; makeAzure says how
+// long they are kept), each with its dates, the team's current sprint
+// marked "aktuell"; the filter has the keyboard and narrows them by their
+// names as the command menu's does (rankByName), its letters in the
+// accent color. Up/down, ctrl-j/k and ctrl-n/p mark a row, Enter or a
+// click shows that sprint (the sprint shape's showSprint), Esc closes; its
+// window shows MENU_ROWS rows, follows the mark, and the mouse wheel moves
+// it (helpers.js: openReadMenu, filterMenuKey, menuWindow). Without a
+// filter the sprint startRow names is marked (the current one, where the
+// team has one); under a filter, the first row it leaves. The command
+// menu's "Sprint wählen…" and a click on the sprint's name in the view's
+// head open it (the sprint shape's pickSprint) as b.modal = { kind:
+// "sprints", view, team, and openReadMenu's fields }. Where the iterations
+// cannot be read, it says so in the dialog and as a toast.
+
+const sprintRowsOf = (m) => rankByName(m.list ?? [], m.filter);
+
+// The row marked when the rows come or the filter changes (-1 for none),
+// by the rule in the header.
+function sprintStartAt(m) {
+  const rows = sprintRowsOf(m);
+  if (!rows.length) return -1;
+  return m.filter ? 0 : startRow(rows, Date.now());
+}
+
+// Shows the row at `i`, where there is one, and closes the picker; the
+// current sprint's row goes back to the current one.
+function pickSprintRow(b, m, i, cx) {
+  const row = sprintRowsOf(m)[i];
+  if (!row) return;
+  b.closeModal(cx);
+  b.shape(m.view).showSprint(b, m.view, row.current ? null : { id: row.id, name: row.name }, cx, row.id);
+}
+
+export const sprintsModal = {
+  // Opens the picker for the Sprint view `view`, then asks its source for
+  // the team's iterations.
+  open(b, view, cx) {
+    const m = { kind: "sprints", view, team: view.context?.team ?? view.name };
+    openReadMenu(b, m, {
+      placeholder: "Filter: Name des Sprints",
+      count: (m) => sprintRowsOf(m).length,
+      startAt: sprintStartAt,
+      pick: (i, cx) => pickSprintRow(b, m, i, cx),
+      read: () => b.loader(view).iterations(view),
+      failed: (e) => ({ error: `Die Sprints des Teams ließen sich nicht lesen: ${report(e)}`, list: [] }),
+      title: "Sprint wählen: Sprints nicht gelesen",
+    }, cx);
+  },
+
+  // Every key but Esc (the Board's): filterMenuKey.
+  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, sprintRowsOf(b.modal).length),
+
+  render(b, t) {
+    const m = b.modal;
+    const rows = sprintRowsOf(m);
+    const { shown, ...win } = menuWindow(m, rows);
+    const year = new Date(Date.now()).getUTCFullYear();
+    const empty = m.error ? null : m.list?.length ? "Kein Sprint passt zum Filter" : "Das Team hat keine Sprints";
+    const message = !m.list ? "lädt …" : !rows.length ? empty : null;
+    return menu(t, {
+      id: "sprints",
+      rowId: "sprint",
+      width: 440,
+      title: `Sprint · ${m.team}`,
+      head: filterMenuHead(t, m),
+      digits: false,
+      rows: shown.map((r) => [
+        markedName(t, r.name, r.at),
+        ...(r.current ? [toneChip(t, "aktuell", NOTE_TONES.success).flex_none()] : []),
+        div().flex_none().text_size(11).text_color(t.dim).child(sprintDates(r, year)),
+      ]),
+      ...win,
+      pick: (i, cx) => pickSprintRow(b, m, i, cx),
+      foot: message ? [menuNote(t, message, t.muted)] : [],
+    });
+  },
+};
 
 // ==== src/ui/modals/start.js ====
 

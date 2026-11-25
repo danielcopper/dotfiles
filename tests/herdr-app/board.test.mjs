@@ -8796,6 +8796,53 @@ test("UI: a list of more than ten rows shows ten, the marked one among them, and
   assert.deepEqual([shownRows(b).at(-1), b.modal.list.at, b.modal.list.top], ["tender/r/tender", 15, 6], "read after it opened: the window follows the mark");
 });
 
+test("UI: the create dialog's type is a choice like the start dialog's: ← and → step, space or a click opens its list at the field, Enter there takes a type, Esc or a press beside closes only the list; Enter on the field creates; the hint names the keys", async () => {
+  const { b, cx, host } = await openBacklog();
+  await press(b, cx, "n");
+  const m = b.modal;
+  const shownType = () => texts(byId(b.render(), "choice-type"));
+  assert.equal(hintOf(b, "create-go"), "↵ legt an · Tab wechselt das Feld");
+  m.input.set_value("Sample new story");
+  await press(b, cx, "tab");
+  assert.deepEqual([shownType(), hintOf(b, "create-go")], [["User Story", "▾"], "← → wählt · Leertaste öffnet die Liste · ↵ legt an · Tab wechselt das Feld"]);
+  await press(b, cx, "right");
+  assert.equal(shownType()[0], "Bug");
+  await press(b, cx, "left");
+  await press(b, cx, "left");
+  assert.equal(shownType()[0], "Task (unter AB#301)", "round");
+  for (const k of ["j", "down", "k", "up"]) await press(b, cx, k);
+  assert.equal(shownType()[0], "Task (unter AB#301)", "j, k and the arrows up and down step no more");
+  await press(b, cx, "space");
+  assert.deepEqual([m.list?.choice, shownRows(b), m.list.at, m.inputFocused], ["type", ["User Story", "Bug", "Task (unter AB#301)"], 2, true]);
+  assert.deepEqual(byId(b.render(), "choice-type-list").with.anchor, ["top_left"]);
+  assert.equal(hintOf(b, "create-go"), "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste");
+  b.handle.focus();
+  b.takeKeyboard();
+  assert.deepEqual([m.inputFocused, m.focusedField], [true, "filter"], "the list's filter takes the keyboard back");
+  assert.equal(m.list.input.placeholder, "Filter: Name des Typs");
+  m.list.input.type("zz");
+  assert.ok(texts(b.render()).includes("Kein Typ passt zum Filter"));
+  m.list.input.type("bug");
+  await press(b, cx, "enter");
+  assert.deepEqual([m.list, m.field, shownType()[0], b.handle.held, b.modal], [null, "type", "Bug", true, m], "taken, not created");
+  await click(b, cx, "choice-type");
+  await press(b, cx, "escape");
+  assert.deepEqual([b.modal, m.list], [m, null]);
+  await click(b, cx, "choice-type");
+  const beside = fakeCx();
+  beside.call((own) => byId(b.render(), "choice-list-shield").with.on_mouse_down[1]({}, own));
+  assert.deepEqual([b.modal, m.list, shownType()[0]], [m, null, "Bug"]);
+  await press(b, cx, "space");
+  await press(b, cx, "tab");
+  assert.deepEqual([m.list, m.field, m.inputFocused, shownType()[0]], [null, "title", true, "Bug"], "Tab closes the list, taking nothing");
+  await press(b, cx, "tab");
+  assert.equal(openAzb(host, "create").length, 0);
+  await press(b, cx, "enter");
+  assert.equal(b.modal, null);
+  const [create] = openAzb(host, "create");
+  assert.ok(create.args.includes("Bug"), create.args.join(" "));
+});
+
 test("the fake cx keeps herdr's rule: a handler's cx is stale once it returns; init's, a spawn's and a timer's stay valid", async () => {
   const cx = fakeCx();
   let kept = null;
