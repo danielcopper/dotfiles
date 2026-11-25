@@ -508,37 +508,41 @@ by that run. Which files of the package git tracks is set in the root
   move within a column (the stories' or a taskboard column) and `h/l` stay in
   the row: they go to the row's item in the next column that has one, past
   empty cells, and move nothing where no column further on has one; `H/L` move
-  a task to the next column its type has (through the taskboard's own column,
-  not the state, since two columns may map to one state; az takes the request
-  from a file under `~/.cache/herdr-app/board/`), `s` sets a story's or task's
-  state from its type's states, a click selects, and `Enter` shows the details
-  (parent, state, assignee, column, area and iteration). `z`, while the board
-  and not the details panel has the keyboard, folds the selected story's tasks
-  away and back; on a task it folds its story's, which it then selects where it
-  shows. A click on the triangle in a story's row folds it without choosing
-  anything; a fold that takes the selected task away selects its story, where
-  that shows. A folded row says how many tasks it holds, the keys pass over
-  them, and the board remembers the folded stories per sprint, after a restart
-  too (a new sprint starts unfolded); a chosen sprint's folds last while the
-  board runs and leave the current sprint's alone. On a Backlog `j/k` move,
-  `s` sets the state, `Enter` shows the details (parent, state, assignee, area,
-  iteration and sprint), `o` opens the item in the browser, and `n` creates a
-  work item: a dialog asks for its type (the level's, Story first; with a Story
-  selected also Task, as its child) and its title; the type is a choice like
-  the start dialog's (`←`/`→`, its list on space or a click), and `Enter`
-  creates from either field. It is created in the team's default area and
-  iteration, assigned to me, and shows, selected, once Azure has named its id
-  and the Backlog is read again; a Task is linked to the selected Story as its
-  parent and, being no Story, does not show in the list. Where Azure's answer to
-  a create leaves open whether it landed, the board asks Azure after the next
-  refresh for work items of that project, type and title that I created today (a
-  Task only among those without a parent): exactly one is taken as the new one,
-  none means it did not land, several are named; the header's "Calls:" says what
-  that costs. A team whose default iteration follows the current one has it
-  read again for each create. A work item's session starts in the repo chosen
-  in the start dialog (below). On a GitHub view `h/l j/k` move over the
-  columns shown, `H/L` move a card one column, hidden ones included (`s` picks
-  from a menu, hidden ones too, or drag the card onto a column; the notice
+  a task to the next column its type has (az takes the request from a file under
+  `~/.cache/herdr-app/board/`). Like Azure's taskboard, a move across states
+  sets the state the column maps (as `s` does), and the column itself is sent
+  where the task keeps its state or another column maps the new one too; a move
+  that set a state reads the Sprint again, and where the state lands and the
+  column does not, the notice says so and that read shows where the task stands.
+  `s` sets a story's or task's state from its type's states, a click selects,
+  and `Enter` shows the details (parent, state, assignee, column, area and
+  iteration). `z`, while the board and not the details panel has the keyboard,
+  folds the selected story's tasks away and back; on a task it folds its
+  story's, which it then selects where it shows. A click on the triangle in a
+  story's row folds it without choosing anything; a fold that takes the selected
+  task away selects its story, where that shows. A folded row says how many
+  tasks it holds, the keys pass over them, and the board remembers the folded
+  stories per sprint, after a restart too (a new sprint starts unfolded); a
+  chosen sprint's folds last while the board runs and leave the current sprint's
+  alone. On a Backlog `j/k` move, `s` sets the state, `Enter` shows the details
+  (parent, state, assignee, area, iteration and sprint), `o` opens the item in
+  the browser, and `n` creates a work item: a dialog asks for its type (the
+  level's, Story first; with a Story selected also Task, as its child) and its
+  title; the type is a choice like the start dialog's (`←`/`→`, its list on
+  space or a click), and `Enter` creates from either field. It is created in the
+  team's default area and iteration, assigned to me, and shows, selected, once
+  Azure has named its id and the Backlog is read again; a Task is linked to the
+  selected Story as its parent and, being no Story, does not show in the list.
+  Where Azure's answer to a create leaves open whether it landed, the board asks
+  Azure after the next refresh for work items of that project, type and title
+  that I created today (a Task only among those without a parent): exactly one
+  is taken as the new one, none means it did not land, several are named; the
+  header's "Calls:" says what that costs. A team whose default iteration follows
+  the current one has it read again for each create. A work item's session
+  starts in the repo chosen in the start dialog (below). On a GitHub view `h/l
+  j/k` move over the columns shown, `H/L` move a card one column, hidden ones
+  included (`s` picks from a menu, hidden ones too, or drag the card onto a
+  column; the notice
   says when a card went to a hidden column), the command menu's "Spalte
   ausblenden" hides the selected column (views.json sets which start hidden),
   `o` opens the item in the browser. A GitHub board reads its items in pages of

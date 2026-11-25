@@ -36,8 +36,7 @@ export const rowOf = (item) => item.row ?? item.key;
 export const isTask = (item) => Boolean(item?.row);
 
 // A task's state as shown: moved since it was read, the state its new
-// column maps its type to (Azure sets that state with the move), until a
-// refresh reads it; else its own.
+// column maps its type to, until a refresh reads it; else its own.
 export function shownState(item, column) {
   if (!isTask(item) || !column || item.column === item.readColumn) return item.state;
   return column.mappings?.[item.type] ?? item.state;

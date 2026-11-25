@@ -3,10 +3,9 @@
 // as cards in the team's taskboard columns (drawTask); a task's parent
 // outside the sprint has a row too, its sprint beside its type, and tasks
 // without a parent read stand in the row "Ohne Story". H/L move a task to
-// the next column (through the taskboard's own column, not the state: two
-// columns may map to one state), s changes a story's or a task's state from
-// its type's states (the status menu), Enter shows the details; both write
-// at once (actions/move.js, actions/write.js). z (while the board has the
+// the next column, s changes a story's or a task's state from its type's
+// states (the status menu), Enter shows the details; both write at once
+// (actions/move.js, actions/write.js). z (while the board has the
 // keyboard), or a click on the triangle in a story's row, folds its tasks
 // away and back (toggleStoryFold; foldsOf says where that is kept). Keys walk
 // the stories, then each column's tasks but the folded ones (sprintNav,
@@ -72,6 +71,8 @@ const SPRINT_LOOKUP = { find: findSprintItem, where: "im Sprint" };
 const SPRINT_STATES = { ...SPRINT_LOOKUP, withState: withItemState, stateOf: stateNow, again: true };
 // How the sprint finds and changes its items' assignees (actions/assign.js).
 const SPRINT_ASSIGN = { ...SPRINT_LOOKUP, withItem: withSprintItem };
+// The state a move goes by may be out of date.
+const SPRINT_MOVES = { againOnRefusal: true };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -128,7 +129,7 @@ export const sprintShape = {
       ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, SPRINT_ASSIGN),
     ], cx),
   assign: SPRINT_ASSIGN,
-  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
+  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, SPRINT_MOVES, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, SPRINT_STATES, cx),
   // The detail panel's rows of a story or task: its state as a pill (a click

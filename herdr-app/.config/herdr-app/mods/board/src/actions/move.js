@@ -5,16 +5,15 @@
 // so.
 
 import { itemLabel } from "../shared.js";
-import { canDrop, findCard, moveCard, rollback } from "../kinds/board.js";
+import { dropRefusal, findCard, moveCard, rollback } from "../kinds/board.js";
 import { selectionInColumns } from "../select.js";
 import { writeAtOnce } from "./write.js";
 
-// Moves a card to a column at once and writes it. A refusal moves it back
-// with the error shown; a write whose outcome is unclear leaves it and
-// refreshes. A card moved to a hidden column leaves the board; the notice
-// says so, and the selection, where it was on that card, stays in its
-// column.
-export function moveCardTo(b, view, key, columnId, cx) {
+// A card moved to a hidden column leaves the board; the notice says so, and
+// the selection, where it was on that card, stays in its column. A loader's
+// move may answer { state, sendColumn }; a state written reads the view
+// again.
+export function moveCardTo(b, view, key, columnId, how, cx) {
   const st = b.state(view.id);
   const found = findCard(st.data, key);
   const to = st.data?.columns.find((c) => c.id === columnId);
@@ -23,24 +22,29 @@ export function moveCardTo(b, view, key, columnId, cx) {
   const label = itemLabel(found.card);
   const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
+  let wrote = null;
   writeAtOnce(b, view, {
     key,
     label,
-    refuse: canDrop(st.data, found.card, to) ? null : `${label} kann nicht nach „${to.name}“`,
+    refuse: dropRefusal(st.data, found.card, to),
     apply() {
       const before = b.navColumns(view);
       st.moves.push(move);
       st.data = moveCard(st.data, key, columnId);
       if (to.hidden && st.sel?.key === key) reselectIn(b, view, before);
     },
-    write: () => b.loader(view).move(view, st.data, found.card, to),
+    write: async () => (wrote = await b.loader(view).move(view, st.data, found.card, to)),
     landed: () => (move.confirmedAt = Date.now()),
     failed: () => (st.moves = st.moves.filter((m) => m !== move)),
     undo: () => (st.data = rollback(st.data, move)),
     open: { kind: "move", to: { id: to.id, name: to.name } },
+    get again() {
+      return Boolean(wrote?.state);
+    },
+    againOnRefusal: how.againOnRefusal,
     texts: {
       pending: () => `${label} → ${to.name}${hiddenNote()} …`,
-      landed: () => `${label} steht jetzt in „${to.name}“${hiddenNote()}`,
+      landed: () => (wrote?.state && !wrote.sendColumn ? `${label} hat jetzt den Status „${wrote.state}“` : `${label} steht jetzt in „${to.name}“${hiddenNote()}`),
       unclear: `${label} → ${to.name}`,
       // With an earlier outcome of the card open, where it is now is for
       // the refresh to say.

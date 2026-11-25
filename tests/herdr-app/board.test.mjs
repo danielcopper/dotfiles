@@ -2074,6 +2074,7 @@ test("on a write, only az's known refusal forms are refusals; any other failure 
     "ERROR: argument --state: expected one argument",
     "ERROR: the following arguments are required: --id",
     "ERROR: unrecognized arguments: --stat New",
+    "ERROR: Taskboard column 'To Do' is not mapped to current work item state 'In Progress'. Change the work item state to mapped column before changing the column.",
     "ERROR: Operation returned a 400 status code.",
     "ERROR: Operation returned a 404 status code.",
     "ERROR: The requested resource requires user authentication: https://dev.azure.com/example-org/_apis/wit/workitems/102",
@@ -2773,6 +2774,7 @@ async function press(b, cx, k, extra) {
   await settle();
 }
 const shiftL = { char: "L", modifiers: { shift: true } };
+const shiftH = { char: "H", modifiers: { shift: true } };
 // A gh call for a board view's items, and one for an issue's related items.
 const isBoardCall = (args) => args.some((a) => String(a).includes("projectV2(number"));
 const isRelatedCall = (args) => args.some((a) => String(a).includes("closedByPullRequestsReferences"));
@@ -6442,25 +6444,27 @@ test("UI: the Sprint and the Backlog of a team read its backlog configuration an
 
 test("UI: H/L move a task through the taskboard's columns with the column's name as newColumn; a story stays and says why", async () => {
   const { b, cx, host, st, view } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#312");
   await press(b, cx, "l", shiftL);
-  const path = "/home/sample/.cache/herdr-app/board/taskboard-move-311.json";
-  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In Progress" });
+  const path = "/home/sample/.cache/herdr-app/board/taskboard-move-312.json";
+  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In PR/Work done" });
   const [move] = openAz(host, "move");
-  assert.deepEqual(move.args, board.azMoveArgs(view.context, ITERATION_ID, 311, path));
-  assert.equal(board.findCard(st().data, "AB#311").column.name, "In Progress", "the card moves at once");
-  assert.ok(texts(byId(b.render(), "card-AB#311")).includes("In Progress"), "with the state that column maps it to");
-  await host.answer("az", ok(JSON.stringify({ workItemId: 311, column: "In Progress" })), AZ.move);
-  assert.equal(b.notice.text, "AB#311 steht jetzt in „In Progress“", "by its column's name");
-  await press(b, cx, "l", shiftL);
-  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In PR/Work done" }, "the next move rewrites the work item's file");
-  await host.answer("az", ok(JSON.stringify({ count: 1, value: [JSON.parse(moved(311, "pr", "In PR/Work done").stdout)] })), AZ.move);
-  assert.equal(b.notice.text, "AB#311 steht jetzt in „In PR/Work done“", "an answer as a list too");
+  assert.deepEqual(move.args, board.azMoveArgs(view.context, ITERATION_ID, 312, path));
+  assert.equal(openAz(host, "state").length, 0, "a column of the task's own state sets no state");
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "In PR/Work done", "the card moves at once");
+  await host.answer("az", ok(JSON.stringify({ workItemId: 312, column: "In PR/Work done" })), AZ.move);
+  assert.equal(b.notice.text, "AB#312 steht jetzt in „In PR/Work done“", "by its column's name");
+  await press(b, cx, "h", shiftH);
+  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In Progress" }, "the next move rewrites the work item's file");
+  await host.answer("az", ok(JSON.stringify({ count: 1, value: [{ workItemId: 312, columnId: COLUMN.prog }] })), AZ.move);
+  assert.equal(b.notice.text, "AB#312 steht jetzt in „In Progress“", "an answer as a list too, by its column id");
+  assert.equal(host.open("az").length, 0, "a move that set no state reads nothing again");
   await click(b, cx, "card-AB#332");
   await press(b, cx, "l", shiftL);
-  assert.deepEqual(JSON.parse(host.files["/home/sample/.cache/herdr-app/board/taskboard-move-332.json"]), { newColumn: "Done" }, "a Bug skips the column only Tasks map");
-  await host.answer("az", ok(JSON.stringify({ workItemId: 332, columnId: COLUMN.done })), AZ.move);
-  assert.equal(b.notice.text, "AB#332 steht jetzt in „Done“", "by its column id");
+  assert.equal(board.findCard(st().data, "AB#332").column.name, "Done", "a Bug skips the column only Tasks map");
+  await host.answer("az", ok(JSON.stringify({ id: 332, fields: { "System.State": "Done" } })), AZ.state);
+  assert.equal(b.notice.text, "AB#332 hat jetzt den Status „Done“");
+  await answerRefresh(host, { me: false });
   await click(b, cx, "story-AB#301");
   await press(b, cx, "l", shiftL);
   assert.equal(b.notice.text, "AB#301 ist eine Story: H/L verschieben Tasks, s ändert ihren Status");
@@ -6469,26 +6473,144 @@ test("UI: H/L move a task through the taskboard's columns with the column's name
 
 test("UI: a move Azure refuses goes back; one whose request cannot be written down refuses before az runs", async () => {
   const { b, cx, host, st } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#312");
   host.failWrite = new Error("read-only file system");
   await press(b, cx, "l", shiftL);
-  assert.equal(host.open("az").length, 0);
-  assert.equal(b.notice.text, "AB#311 bleibt in „To Do“: Die Anfrage an Azure ließ sich nicht ablegen (/home/sample/.cache/herdr-app/board/taskboard-move-311.json): read-only file system");
+  assert.deepEqual(openCounts(host, ["move", "state"]), [0, 0]);
+  assert.equal(b.notice.text, "AB#312 bleibt in „In Progress“: Die Anfrage an Azure ließ sich nicht ablegen (/home/sample/.cache/herdr-app/board/taskboard-move-312.json): read-only file system");
+  assert.deepEqual(openCounts(host, ["places", "query"]), [1, 1], "a refused move reads the Sprint again");
+  await answerRefresh(host, { me: false });
   host.failWrite = null;
   await press(b, cx, "l", shiftL);
   await host.answer("az", azRefused("TF401320: Rule Error for field Task State."), AZ.move);
-  assert.equal(board.findCard(st().data, "AB#311").column.name, "To Do");
-  assert.equal(b.notice.text, "AB#311 bleibt in „To Do“: TF401320: Rule Error for field Task State.");
-  await refreshSprint(b, cx);
-  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 0], "a refused move drops the team's settings, not the project's types");
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "In Progress");
+  assert.equal(b.notice.text, "AB#312 bleibt in „In Progress“: TF401320: Rule Error for field Task State.");
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 0], "read again, the refusal having dropped the team's settings, not the project's types");
   await answerSettings(host);
   await answerRefresh(host, { me: false });
-  assert.equal(board.findCard(st().data, "AB#311").column.name, "To Do", "a refresh lays no refused move over what it read");
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "In Progress", "a refresh lays no refused move over what it read");
   await press(b, cx, "l", shiftL);
   await host.answer("az", { code: 1, stdout: "", stderr: "Traceback (most recent call last):\nKeyError: 'value'\n" }, AZ.move);
-  assert.equal(board.findCard(st().data, "AB#311").column.name, "In Progress", "a write without a clear answer keeps the card");
-  assert.equal(b.notice.text, "AB#311 → In Progress: Ergebnis unklar: Traceback (most recent call last):; lädt neu");
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "In PR/Work done", "a write without a clear answer keeps the card");
+  assert.equal(b.notice.text, "AB#312 → In PR/Work done: Ergebnis unklar: Traceback (most recent call last):; lädt neu");
   assert.deepEqual(["places", "query"].map((k) => openAz(host, k).length), [1, 1]);
+});
+
+test("a task's move sets the state its target column maps where that is not its own, and sends the column where it is or where another column maps that state too; a column or type without a state is refused", () => {
+  const data = sprintData();
+  const plan = (key, column, patch = {}) => board.movePlan(data, { ...board.findCard(data, key).card, ...patch }, data.columns.find((c) => c.name === column));
+  assert.deepEqual(plan("AB#312", "In PR/Work done"), { state: null, sendColumn: true }, "the task's own state: the column alone");
+  assert.deepEqual(plan("AB#312", "To Do"), { state: "To Do", sendColumn: false }, "another state, mapped by that column only: the state alone");
+  assert.deepEqual(plan("AB#311", "Done"), { state: "Done", sendColumn: false });
+  assert.deepEqual(plan("AB#311", "In Progress"), { state: "In Progress", sendColumn: true }, "a state two columns map: the state, then the column");
+  assert.deepEqual(plan("AB#311", "In PR/Work done"), { state: "In Progress", sendColumn: true });
+  assert.deepEqual(plan("AB#332", "To Do"), { state: "New", sendColumn: false }, "by the card's own type");
+  assert.deepEqual(plan("AB#311", "In PR/Work done", { column: COLUMN.prog }), { state: null, sendColumn: true }, "a task moved since it was read has the state its column maps");
+  assert.throws(() => plan("AB#332", "In PR/Work done"), (e) => !e.unclear && e.message === "Die Spalte „In PR/Work done“ hat für Bug keinen Status");
+  assert.throws(() => plan("AB#311", "To Do", { type: "Epic" }), (e) => !e.unclear && e.message === "Die Spalte „To Do“ hat für Epic keinen Status");
+});
+
+test("UI: a task moved to a column of another state gets that state by az boards work-item update, the column only where another column maps that state too", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "h", shiftH);
+  const [update] = openAz(host, "state");
+  assert.deepEqual(update.args, board.azStateArgs(sprintTeam(), 312, "To Do"));
+  assert.equal(openAz(host, "move").length, 0, "no column sent before the state");
+  assert.equal(host.files["/home/sample/.cache/herdr-app/board/taskboard-move-312.json"], undefined, "nor written down");
+  assert.ok(texts(byId(b.render(), "card-AB#312")).includes("To Do"), "the card shows the state its new column maps at once");
+  await host.answer("az", ok(JSON.stringify({ id: 312, fields: { "System.State": "To Do" } })), AZ.state);
+  assert.equal(b.notice.text, "AB#312 hat jetzt den Status „To Do“", "the state, which is what Azure confirmed");
+  assert.equal(openAz(host, "move").length, 0, "only that column maps the state: no column sent");
+  assert.deepEqual(openCounts(host, ["places", "query"]), [1, 1], "the Sprint is read again: where the state put the task is Azure's to say");
+  const items = json("azure-sprint-items.json");
+  items[3].fields["System.State"] = "To Do";
+  await answerRefresh(host, { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 312: ["todo", "To Do"] }) });
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "To Do");
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  const path = "/home/sample/.cache/herdr-app/board/taskboard-move-311.json";
+  assert.deepEqual(JSON.parse(host.files[path]), { newColumn: "In Progress" }, "written down before the state is set");
+  assert.deepEqual([openAz(host, "state").length, openAz(host, "move").length], [1, 0]);
+  await host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "In Progress" } })), AZ.state);
+  assert.deepEqual(openAz(host, "move")[0].args, board.azMoveArgs(b.view().context, ITERATION_ID, 311, path), "then the column, which shares its state with another");
+  await host.answer("az", moved(311, "prog", "In Progress"), AZ.move);
+  assert.equal(b.notice.text, "AB#311 steht jetzt in „In Progress“");
+  assert.equal(board.findCard(st().data, "AB#311").column.name, "In Progress");
+  assert.deepEqual(openCounts(host, ["places", "query"]), [1, 1], "a move that set a state reads the Sprint again");
+});
+
+test("UI: a move whose state Azure refuses goes back and sends no column; one whose state is unclear keeps the card and reads again", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZ.state);
+  assert.equal(board.findCard(st().data, "AB#311").column.name, "To Do");
+  assert.equal(b.notice.text, "AB#311 bleibt in „To Do“: TF401320: Rule Error for field State.");
+  assert.equal(openAz(host, "move").length, 0);
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 0], "read again, the refusal having dropped the team's settings, as a refused move's does");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false });
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", { code: 1, stdout: "", stderr: "ERROR: Operation returned a 503 status code.\n" }, AZ.state);
+  assert.equal(b.notice.text, "AB#311 → In Progress: Ergebnis unklar: Azure antwortete mit einem Fehler (az): Operation returned a 503 status code.; lädt neu");
+  assert.deepEqual([board.findCard(st().data, "AB#311").column.name, openAz(host, "move").length], ["In Progress", 0]);
+});
+
+test("UI: a move whose state landed and whose column did not says so, keeps the card and says after the refresh where it stands", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "In Progress" } })), AZ.state);
+  await host.answer("az", azRefused("TF401320: Rule Error for field Task State."), AZ.move);
+  assert.equal(b.notice.text, "AB#311 → In Progress: Status ist jetzt „In Progress“, Spalte nicht geändert: TF401320: Rule Error for field Task State.; lädt neu");
+  assert.equal(board.findCard(st().data, "AB#311").column.name, "In Progress", "the card is not sent back");
+  assert.deepEqual(openCounts(host, [...SETTINGS, "places"]), [1, 1, 1, 0, 0], "read again, with the team's settings the refused column dropped");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["pr", "In PR/Work done"] }) });
+  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In PR/Work done“, nicht in „In Progress“");
+  const again = await openSprint();
+  await click(again.b, again.cx, "card-AB#311");
+  await press(again.b, again.cx, "l", shiftL);
+  await again.host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "In Progress" } })), AZ.state);
+  await again.host.answer("az", ok("{}"), AZ.move);
+  assert.equal(again.b.notice.text, "AB#311 → In Progress: Status ist jetzt „In Progress“, Spalte: Ergebnis unklar: Azure hat die Verschiebung nicht bestätigt; lädt neu");
+  assert.equal(board.findCard(again.st().data, "AB#311").column.name, "In Progress");
+});
+
+test("UI: a task moved onto a column without a state for its type is refused before any write and says why", async () => {
+  const { b, cx, host, st } = await openSprint();
+  b.moveTo(b.view(), "AB#332", columnId(st().data, "In PR/Work done"), cx);
+  await settle();
+  assert.equal(b.notice.text, "AB#332 kann nicht nach „In PR/Work done“: Die Spalte hat für Bug keinen Status");
+  assert.equal(host.open("az").length, 0);
+});
+
+test("UI: a move Azure refuses as not mapped to the task's state, which the Sprint showed out of date, goes back, and the Sprint is read again", async () => {
+  const { b, cx, host, st } = await openSprint();
+  await click(b, cx, "card-AB#312");
+  await press(b, cx, "l", shiftL);
+  const said = "Taskboard column 'In PR/Work done' is not mapped to current work item state 'Done'. Change the work item state to mapped column before changing the column.";
+  await host.answer("az", azRefused(said), AZ.move);
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "In Progress");
+  assert.equal(b.notice.text, `AB#312 bleibt in „In Progress“: ${said}`);
+  assert.deepEqual(openCounts(host, SETTINGS), [1, 1, 1, 0], "read again, the refusal having dropped the team's settings");
+  await answerSettings(host);
+  const items = json("azure-sprint-items.json");
+  items[3].fields["System.State"] = "Done";
+  await answerRefresh(host, { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 312: ["done", "Done"] }) });
+  assert.equal(board.findCard(st().data, "AB#312").column.name, "Done", "where Azure has it");
+});
+
+test("UI: an unexpected error of a move's column write after its state landed goes to herdr's log with its stack", async () => {
+  const { b, cx, host } = await openSprint();
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "l", shiftL);
+  await host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "In Progress" } })), AZ.state);
+  logged.length = 0;
+  await host.answer("az", null, AZ.move);
+  assert.equal(b.notice.text, "AB#311 → In Progress: Status ist jetzt „In Progress“, Spalte nicht geändert: Unerwarteter Fehler: Cannot read properties of null (reading 'code'); lädt neu");
+  assert.equal(logged.filter((l) => /^TypeError: Cannot read properties of null \(reading 'code'\)\n {4}at /.test(l)).length, 1, logged.join("\n"));
 });
 
 test("UI: s on a task offers its type's states and sets one with az boards work-item update; then the Sprint is read again", async () => {
@@ -7029,16 +7151,16 @@ test("UI: who az is has its own short timeout, and one it runs out of is said", 
 
 test("UI: a move Azure does not confirm is unclear: the card stays, the Sprint is read again and says where it stands", async () => {
   const { b, cx, host } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#312");
   await press(b, cx, "l", shiftL);
   await host.answer("az", ok(""), AZ.move);
-  assert.equal(b.notice.text, "AB#311 → In Progress: Ergebnis unklar: Azure hat die Verschiebung nicht bestätigt; lädt neu");
-  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
-  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“");
-  await press(b, cx, "l", shiftL);
+  assert.equal(b.notice.text, "AB#312 → In PR/Work done: Ergebnis unklar: Azure hat die Verschiebung nicht bestätigt; lädt neu");
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 312: ["pr", "In PR/Work done"] }) });
+  assert.equal(b.notice.text, "AB#312 steht nach dem Neuladen in „In PR/Work done“");
+  await press(b, cx, "h", shiftH);
   await host.answer("az", ok("{}"), AZ.move);
-  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
-  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“, nicht in „In PR/Work done“");
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 312: ["pr", "In PR/Work done"] }) });
+  assert.equal(b.notice.text, "AB#312 steht nach dem Neuladen in „In PR/Work done“, nicht in „In Progress“");
   assert.equal(host.notes.at(-1).title, "Status nach dem Neuladen");
 });
 
@@ -7620,68 +7742,68 @@ test("a move counts as landed only where Azure's answer names the work item in i
 
 test("UI: an open outcome waits through a write of another kind: a state change that lands keeps the move's report", async () => {
   const { b, cx, host } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#312");
   await press(b, cx, "l", shiftL);
   await host.answer("az", ok(""), AZ.move);
-  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "move"]]);
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#312", "move"]]);
   await press(b, cx, "s");
   await press(b, cx, "3");
-  await host.answer("az", ok(JSON.stringify({ id: 311, fields: { "System.State": "Done" } })), AZ.state);
-  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "move"]], "the move's outcome is still open");
-  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
-  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“");
+  await host.answer("az", ok(JSON.stringify({ id: 312, fields: { "System.State": "Done" } })), AZ.state);
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#312", "move"]], "the move's outcome is still open");
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 312: ["pr", "In PR/Work done"] }) });
+  assert.equal(b.notice.text, "AB#312 steht nach dem Neuladen in „In PR/Work done“");
 });
 
 test("UI: a refused state change while a move of the item is open refreshes, and the move's line is said after it", async () => {
   const { b, cx, host } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#312");
   await press(b, cx, "l", shiftL);
   await host.answer("az", ok(""), AZ.move);
   await press(b, cx, "s");
   await press(b, cx, "3");
-  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
-  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "move"]], "not due while the state is written");
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 312: ["pr", "In PR/Work done"] }) });
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#312", "move"]], "not due while the state is written");
   await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZ.state);
-  assert.equal(b.notice.text, "AB#311 bleibt „In Progress“: TF401320: Rule Error for field State.");
+  assert.equal(b.notice.text, "AB#312 bleibt „In Progress“: TF401320: Rule Error for field State.");
   assert.deepEqual(openCounts(host, [...SETTINGS, "places"]), [1, 1, 1, 0, 0], "a refresh follows (the refusal dropped the team's settings)");
   await answerSettings(host);
-  await answerRefresh(host, { me: false, places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
-  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“");
+  await answerRefresh(host, { me: false, places: taskboardAnswer({ 312: ["pr", "In PR/Work done"] }) });
+  assert.equal(b.notice.text, "AB#312 steht nach dem Neuladen in „In PR/Work done“");
 });
 
 test("UI: a move that lands while a state change of the item is open refreshes, and the state's line is said after it", async () => {
   const { b, cx, host } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#313");
   await press(b, cx, "s");
   await press(b, cx, "3");
   await host.answer("az", ok("{}"), AZ.state);
   await press(b, cx, "l", shiftL);
   const items = json("azure-sprint-items.json");
-  items[2].fields["System.State"] = "Done";
+  items[4].fields["System.State"] = "Done";
   await answerRefresh(host, { me: false, items: JSON.stringify(items) });
-  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "state"]], "not due while the move is written");
-  await host.answer("az", moved(311, "prog", "In Progress"), AZ.move);
-  assert.equal(b.notice.text, "AB#311 steht jetzt in „In Progress“");
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#313", "state"]], "not due while the move is written");
+  await host.answer("az", moved(313, "done", "Done"), AZ.move);
+  assert.equal(b.notice.text, "AB#313 steht jetzt in „Done“");
   assert.deepEqual(openCounts(host, ["places", "query"]), [1, 1], "a refresh follows");
-  await answerRefresh(host, { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 311: ["prog", "In Progress"] }) });
-  assert.equal(b.notice.text, "AB#311 hat nach dem Neuladen den Status „Done“");
+  await answerRefresh(host, { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 313: ["done", "Done"] }) });
+  assert.equal(b.notice.text, "AB#313 hat nach dem Neuladen den Status „Done“");
 });
 
 test("UI: an unclear move and an unclear state change of one item stay open side by side, and one refresh says both", async () => {
   const { b, cx, host } = await openSprint();
-  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#312");
   await press(b, cx, "l", shiftL);
   await host.answer("az", ok(""), AZ.move);
   await press(b, cx, "s");
   await press(b, cx, "3");
   const items = json("azure-sprint-items.json");
-  items[2].fields["System.State"] = "Done";
-  const after = { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 311: ["prog", "In Progress"] }) };
+  items[3].fields["System.State"] = "Done";
+  const after = { me: false, items: JSON.stringify(items), places: taskboardAnswer({ 312: ["pr", "In PR/Work done"] }) };
   await answerRefresh(host, after);
   await host.answer("az", ok("{}"), AZ.state);
-  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#311", "move"], ["AB#311", "state"]]);
+  assert.deepEqual(b.state(b.view().id).unclear.map((u) => [u.key, u.kind]), [["AB#312", "move"], ["AB#312", "state"]]);
   await answerRefresh(host, after);
-  assert.equal(b.notice.text, "AB#311 steht nach dem Neuladen in „In Progress“; AB#311 hat nach dem Neuladen den Status „Done“");
+  assert.equal(b.notice.text, "AB#312 steht nach dem Neuladen in „In PR/Work done“; AB#312 hat nach dem Neuladen den Status „Done“");
 });
 
 test("who az is: the name of a JSON answer, in lower case, else null", () => {

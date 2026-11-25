@@ -119,7 +119,7 @@ export const boardShape = {
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
   assign: BOARD_ASSIGN,
-  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
+  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, {}, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
   // The detail panel's rows of a card: its column as a pill, and Status s.

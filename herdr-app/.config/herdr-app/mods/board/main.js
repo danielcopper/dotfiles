@@ -97,35 +97,37 @@
 // iterations) the first time it opens for a team, one more for the team's
 // current sprint where the Sprint keeps none, and a refresh of a sprint it
 // chose one where `r` dropped them. A state change costs one az call, a
-// Backlog's create one and a child's parent link one more; a create reads the
-// Backlog again, and one whose answer was unclear asks one WIQL query more
-// after that refresh; a create for a team whose default iteration follows the
-// current one reads the team's settings first, one call more. The PR tabs
-// read nothing yet. The start dialog's Repo field costs one sh call
-// when it opens and one per machine chosen in it (its repos; none
-// without repoFolders). Finding gh and az costs one sh call now and then
-// (toolPaths says when). A view refreshes when its tab first shows (unless it
-// has data the prefetch tried within refreshMinutes), on `r` (which first
-// drops what its source keeps of it: its source's forget), after a column is
-// hidden or shown (the command menu's "Spalte ausblenden", a name in the
-// hidden line, the column menu), when it is shown again tried longer than
-// refreshMinutes ago (not while a read of it runs: that one shows), and every
-// refreshMinutes while it shows. Besides, after each read of views.json (the
-// start, `r`), while the board shows, the prefetch reads each other view with
-// a loader once, as its tab would (prefetchOrder: one at a time, none tried
-// within refreshMinutes, none whose own last read since it found its source
-// unavailable), so a start or an `r` costs each other view's refresh at most
-// once; it waits while any read runs, a write is under way or a dialog is
-// busy. After that a view not shown reads nothing. The Azure calls of a load
-// that need nothing of each other run side by side: the Sprint's settings
-// (iteration, areas, columns, types, backlog configuration) and who az is;
-// its taskboard once the iteration came, its query once the areas and the
-// configuration came too, its parents' query and the team's settings once
-// all that came; the Backlog's settings (levels, configuration, team
-// settings, areas), the types' colors and who az is; its ids once the
-// levels came, the query for their fields once the configuration came too.
-// What a view drew last, as read, is saved (loading.js) and drawn after a
-// restart with its age until its read replaces it.
+// Sprint's move one (its column, or its state where only that column maps the
+// new one) or two (its state, then its column), a Backlog's create one and a
+// child's parent link one more; a Sprint's move that set a state, or whose
+// write was refused, reads the Sprint again, a create the Backlog, and one
+// whose answer was unclear asks one WIQL query more after that refresh; a
+// create for a team whose default iteration follows the current one reads the
+// team's settings first, one call more. The PR tabs read nothing yet. The
+// start dialog's Repo field costs one sh call when it opens and one per
+// machine chosen in it (its repos; none without repoFolders). Finding gh and
+// az costs one sh call now and then (toolPaths says when). A view refreshes
+// when its tab first shows (unless it has data the prefetch tried within
+// refreshMinutes), on `r` (which first drops what its source keeps of it: its
+// source's forget), after a column is hidden or shown (the command menu's
+// "Spalte ausblenden", a name in the hidden line, the column menu), when it is
+// shown again tried longer than refreshMinutes ago (not while a read of it
+// runs: that one shows), and every refreshMinutes while it shows. Besides,
+// after each read of views.json (the start, `r`), while the board shows, the
+// prefetch reads each other view with a loader once, as its tab would
+// (prefetchOrder: one at a time, none tried within refreshMinutes, none whose
+// own last read since it found its source unavailable), so a start or an `r`
+// costs each other view's refresh at most once; it waits while any read runs,
+// a write is under way or a dialog is busy. After that a view not shown reads
+// nothing. The Azure calls of a load that need nothing of each other run side
+// by side: the Sprint's settings (iteration, areas, columns, types, backlog
+// configuration) and who az is; its taskboard once the iteration came, its
+// query once the areas and the configuration came too, its parents' query and
+// the team's settings once all that came; the Backlog's settings (levels,
+// configuration, team settings, areas), the types' colors and who az is; its
+// ids once the levels came, the query for their fields once the configuration
+// came too. What a view drew last, as read, is saved (loading.js) and drawn
+// after a restart with its age until its read replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -171,7 +173,7 @@ export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
   // unavailable: az is missing, not signed in or without its extension.
-  // unclear: a write may or may not have landed.
+  // unclear: a write may or may not have landed (failure), or landed in part (partly).
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
@@ -185,6 +187,8 @@ export class BoardError extends Error {
 export function failure(text, { write = false, unclear = false } = {}) {
   return write && unclear ? new BoardError(`Ergebnis unklar: ${text}`, { unclear: true }) : new BoardError(text);
 }
+
+export const partly = (text) => new BoardError(text, { unclear: true });
 
 export const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 export const isText = (v) => typeof v === "string" && v.trim() !== "";
@@ -943,19 +947,19 @@ export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
 }
 
-// Whether a card may go to a column: one that takes drops; one that maps
-// the card's type, where the column names the types it takes (a
-// taskboard's column, whose name is no state); and, where the board's meta
-// names its types' states for columns named after states (meta.types; no
-// board carries them yet), a state of the card's own type. The sprint
-// names its types' states as meta.typeStates instead, for the status menu:
-// its columns are no states.
-export function canDrop(board, card, column) {
-  if (!column?.target) return false;
-  if (column.types && !column.types.includes(card.type)) return false;
+// Why a card may not go to a column, as the board says it, or null where it
+// may. A taskboard's column names the types it takes (column.types), since
+// its name is no state; no board carries meta.types yet. The sprint names
+// its types' states as meta.typeStates instead, for the status menu.
+export function dropRefusal(board, card, column) {
+  const refused = (why = "") => `${itemLabel(card)} kann nicht nach „${column?.name}“${why}`;
+  if (!column?.target) return refused();
+  if (column.types && !column.types.includes(card.type)) return refused(`: Die Spalte hat für ${card.type} keinen Status`);
   const states = board.meta?.types?.[card.type];
-  return !states || states.includes(column.name);
+  return !states || states.includes(column.name) ? null : refused();
 }
+
+export const canDrop = (board, card, column) => !dropRefusal(board, card, column);
 
 export const targetsFor = (board, card) => board.columns.filter((c) => canDrop(board, card, c));
 
@@ -1033,8 +1037,7 @@ export const rowOf = (item) => item.row ?? item.key;
 export const isTask = (item) => Boolean(item?.row);
 
 // A task's state as shown: moved since it was read, the state its new
-// column maps its type to (Azure sets that state with the move), until a
-// refresh reads it; else its own.
+// column maps its type to, until a refresh reads it; else its own.
 export function shownState(item, column) {
   if (!isTask(item) || !column || item.column === item.readColumn) return item.state;
   return column.mappings?.[item.type] ?? item.state;
@@ -1722,8 +1725,10 @@ const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connect
 // error responses"), which also names "Max retries" and is tested first.
 const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
 // ERROR: answers that are a refusal: rule errors (TF401320), something that
-// does not exist, az's own argument errors, and 4xx status lines.
-const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+// does not exist, a taskboard column that does not map the work item's
+// state, az's own argument errors, and 4xx status lines.
+const AZ_REFUSED =
+  /^TF401320\b|does not exist|is not mapped to current work item state|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
 
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
 // lines are left out; without an ERROR: line, from all it printed). Missing
@@ -2263,6 +2268,22 @@ export function checkTaskboardMove(stdout, card, column) {
   }
 }
 
+// Azure takes a taskboard column only where it maps the work item's
+// current state.
+// Which of the columns sharing a state a state change puts a task in, the
+// docs do not say.
+export function movePlan(data, card, column) {
+  const state = column.mappings?.[card.type];
+  if (!state) throw new BoardError(`Die Spalte „${column.name}“ hat für ${card.type} keinen Status`);
+  if (state === shownState(card, data.columns.find((c) => c.id === card.column))) return { state: null, sendColumn: true };
+  return { state, sendColumn: data.columns.some((c) => c.id !== column.id && c.mappings?.[card.type] === state) };
+}
+
+function columnNotMoved(state, e) {
+  const column = e instanceof BoardError && e.unclear ? `Spalte: ${e.message}` : `Spalte nicht geändert: ${report(e)}`;
+  return partly(`Status ist jetzt „${state}“, ${column}`);
+}
+
 export const PARENTS_UNREAD = "Übergeordnete Work Items außerhalb des Sprints nicht gelesen, ihre Tasks stehen unter „Ohne Story“";
 export const TITLES_UNREAD = "Titel der übergeordneten Work Items nicht gelesen";
 export function parentsLost(ids) {
@@ -2443,9 +2464,17 @@ export function sprintView(s) {
         throw chosen && e instanceof BoardError ? new BoardError(`${chosen.name} ließ sich nicht lesen: ${e.message}`, e) : e;
       }),
     async move(view, data, card, column) {
-      const file = await writeMoveBody(card.number, column);
-      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
-      checkTaskboardMove(out, card, column);
+      const plan = movePlan(data, card, column);
+      const file = plan.sendColumn ? await writeMoveBody(card.number, column) : null;
+      if (plan.state) await s.setState(view, card, plan.state, onRefusal);
+      if (!file) return plan;
+      try {
+        const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
+        checkTaskboardMove(out, card, column);
+      } catch (e) {
+        throw plan.state ? columnNotMoved(plan.state, e) : e;
+      }
+      return plan;
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
   };
@@ -5294,8 +5323,9 @@ export function viewStands(b, view) {
 //   whose follow-up failed; toasts: the toasts' titles, { unclear (also a
 //   landed write whose follow-up failed), refused } ("Status von AB#3",
 //   "Status von AB#3 nicht geändert" by default);
-// - w.again: refresh after a write that landed too; w.againOnRefusal:
-//   after one that was refused too (what it met may have been out of date).
+// - w.again: refresh after a write that landed too (looked up after the
+//   write, so a getter may go by its answer); w.againOnRefusal: after one
+//   that was refused too (what it met may have been out of date).
 // A write that landed or was refused refreshes the view too while an open
 // outcome of the item, of any kind, remains: the refresh tells it, so
 // it does not wait for the timer. A refresh follows only while the view
@@ -7736,12 +7766,11 @@ function drawBacklog(b, t, mono, view, st) {
 // unclear moves ended up. The board and the sprint shape move their cards
 // so.
 
-// Moves a card to a column at once and writes it. A refusal moves it back
-// with the error shown; a write whose outcome is unclear leaves it and
-// refreshes. A card moved to a hidden column leaves the board; the notice
-// says so, and the selection, where it was on that card, stays in its
-// column.
-export function moveCardTo(b, view, key, columnId, cx) {
+// A card moved to a hidden column leaves the board; the notice says so, and
+// the selection, where it was on that card, stays in its column. A loader's
+// move may answer { state, sendColumn }; a state written reads the view
+// again.
+export function moveCardTo(b, view, key, columnId, how, cx) {
   const st = b.state(view.id);
   const found = findCard(st.data, key);
   const to = st.data?.columns.find((c) => c.id === columnId);
@@ -7750,24 +7779,29 @@ export function moveCardTo(b, view, key, columnId, cx) {
   const label = itemLabel(found.card);
   const move = { key, from: found.column.id, to: columnId, at: Date.now(), confirmedAt: null };
   const hiddenNote = () => (st.hidden?.has(to.name) ? " (ausgeblendet)" : "");
+  let wrote = null;
   writeAtOnce(b, view, {
     key,
     label,
-    refuse: canDrop(st.data, found.card, to) ? null : `${label} kann nicht nach „${to.name}“`,
+    refuse: dropRefusal(st.data, found.card, to),
     apply() {
       const before = b.navColumns(view);
       st.moves.push(move);
       st.data = moveCard(st.data, key, columnId);
       if (to.hidden && st.sel?.key === key) reselectIn(b, view, before);
     },
-    write: () => b.loader(view).move(view, st.data, found.card, to),
+    write: async () => (wrote = await b.loader(view).move(view, st.data, found.card, to)),
     landed: () => (move.confirmedAt = Date.now()),
     failed: () => (st.moves = st.moves.filter((m) => m !== move)),
     undo: () => (st.data = rollback(st.data, move)),
     open: { kind: "move", to: { id: to.id, name: to.name } },
+    get again() {
+      return Boolean(wrote?.state);
+    },
+    againOnRefusal: how.againOnRefusal,
     texts: {
       pending: () => `${label} → ${to.name}${hiddenNote()} …`,
-      landed: () => `${label} steht jetzt in „${to.name}“${hiddenNote()}`,
+      landed: () => (wrote?.state && !wrote.sendColumn ? `${label} hat jetzt den Status „${wrote.state}“` : `${label} steht jetzt in „${to.name}“${hiddenNote()}`),
       unclear: `${label} → ${to.name}`,
       // With an earlier outcome of the card open, where it is now is for
       // the refresh to say.
@@ -7962,7 +7996,7 @@ export const boardShape = {
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
   assign: BOARD_ASSIGN,
-  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
+  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, {}, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
   // The detail panel's rows of a card: its column as a pill, and Status s.
@@ -8381,10 +8415,9 @@ function scrollToRow(b, view, key) {
 // as cards in the team's taskboard columns (drawTask); a task's parent
 // outside the sprint has a row too, its sprint beside its type, and tasks
 // without a parent read stand in the row "Ohne Story". H/L move a task to
-// the next column (through the taskboard's own column, not the state: two
-// columns may map to one state), s changes a story's or a task's state from
-// its type's states (the status menu), Enter shows the details; both write
-// at once (actions/move.js, actions/write.js). z (while the board has the
+// the next column, s changes a story's or a task's state from its type's
+// states (the status menu), Enter shows the details; both write at once
+// (actions/move.js, actions/write.js). z (while the board has the
 // keyboard), or a click on the triangle in a story's row, folds its tasks
 // away and back (toggleStoryFold; foldsOf says where that is kept). Keys walk
 // the stories, then each column's tasks but the folded ones (sprintNav,
@@ -8429,6 +8462,8 @@ const SPRINT_LOOKUP = { find: findSprintItem, where: "im Sprint" };
 const SPRINT_STATES = { ...SPRINT_LOOKUP, withState: withItemState, stateOf: stateNow, again: true };
 // How the sprint finds and changes its items' assignees (actions/assign.js).
 const SPRINT_ASSIGN = { ...SPRINT_LOOKUP, withItem: withSprintItem };
+// The state a move goes by may be out of date.
+const SPRINT_MOVES = { againOnRefusal: true };
 
 export const sprintShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -8485,7 +8520,7 @@ export const sprintShape = {
       ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, SPRINT_ASSIGN),
     ], cx),
   assign: SPRINT_ASSIGN,
-  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, cx),
+  moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, SPRINT_MOVES, cx),
   openStatusMenu: (b, view, cx) => openStateMenu(b, view, SPRINT_STATES, cx),
   pickStatus: (b, view, key, target, cx) => setStateAtOnce(b, view, key, target.name, SPRINT_STATES, cx),
   // The detail panel's rows of a story or task: its state as a pill (a click

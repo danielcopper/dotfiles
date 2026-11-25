@@ -3,10 +3,10 @@
 // view as makeAzure uses it (sprintView).
 
 import { home, readTextFile, writeTextFile } from "herdr";
-import { BoardError, byOrder, errorText, failure, firstLine, readMemo, report } from "../../shared.js";
+import { BoardError, byOrder, errorText, failure, firstLine, partly, readMemo, report } from "../../shared.js";
 import { NO_LIVE } from "../../loading.js";
 import { what } from "../../tools.js";
-import { NO_STORY } from "../../kinds/sprint.js";
+import { NO_STORY, shownState } from "../../kinds/sprint.js";
 import { ORDER_UNCHECKED } from "../../kinds/backlog.js";
 import {
   AREA_PATH, AZ_QUERY_LIMIT, TEAM_KEEP_MS, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, categoryStates, dayEnd, idsWiql, iterationUntil, jsonOrNull, orderFields, parseWorkItems,
@@ -235,6 +235,22 @@ export function checkTaskboardMove(stdout, card, column) {
   }
 }
 
+// Azure takes a taskboard column only where it maps the work item's
+// current state.
+// Which of the columns sharing a state a state change puts a task in, the
+// docs do not say.
+export function movePlan(data, card, column) {
+  const state = column.mappings?.[card.type];
+  if (!state) throw new BoardError(`Die Spalte „${column.name}“ hat für ${card.type} keinen Status`);
+  if (state === shownState(card, data.columns.find((c) => c.id === card.column))) return { state: null, sendColumn: true };
+  return { state, sendColumn: data.columns.some((c) => c.id !== column.id && c.mappings?.[card.type] === state) };
+}
+
+function columnNotMoved(state, e) {
+  const column = e instanceof BoardError && e.unclear ? `Spalte: ${e.message}` : `Spalte nicht geändert: ${report(e)}`;
+  return partly(`Status ist jetzt „${state}“, ${column}`);
+}
+
 export const PARENTS_UNREAD = "Übergeordnete Work Items außerhalb des Sprints nicht gelesen, ihre Tasks stehen unter „Ohne Story“";
 export const TITLES_UNREAD = "Titel der übergeordneten Work Items nicht gelesen";
 export function parentsLost(ids) {
@@ -415,9 +431,17 @@ export function sprintView(s) {
         throw chosen && e instanceof BoardError ? new BoardError(`${chosen.name} ließ sich nicht lesen: ${e.message}`, e) : e;
       }),
     async move(view, data, card, column) {
-      const file = await writeMoveBody(card.number, column);
-      const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
-      checkTaskboardMove(out, card, column);
+      const plan = movePlan(data, card, column);
+      const file = plan.sendColumn ? await writeMoveBody(card.number, column) : null;
+      if (plan.state) await s.setState(view, card, plan.state, onRefusal);
+      if (!file) return plan;
+      try {
+        const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
+        checkTaskboardMove(out, card, column);
+      } catch (e) {
+        throw plan.state ? columnNotMoved(plan.state, e) : e;
+      }
+      return plan;
     },
     setState: (view, item, state) => s.setState(view, item, state, onRefusal),
   };

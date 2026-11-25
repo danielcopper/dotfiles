@@ -34,8 +34,10 @@ const AZ_SENT_FAILURE = /Error occurred in request\.|HTTPSConnectionPool|Connect
 // error responses"), which also names "Max retries" and is tested first.
 const AZ_SERVER_ERROR = /Operation returned a 5\d\d status code|TF400898|too many \d+ error responses/i;
 // ERROR: answers that are a refusal: rule errors (TF401320), something that
-// does not exist, az's own argument errors, and 4xx status lines.
-const AZ_REFUSED = /^TF401320\b|does not exist|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
+// does not exist, a taskboard column that does not map the work item's
+// state, az's own argument errors, and 4xx status lines.
+const AZ_REFUSED =
+  /^TF401320\b|does not exist|is not mapped to current work item state|^argument |the following arguments are required|unrecognized arguments|Operation returned a 4\d\d status code|requires user authentication/i;
 
 // What went wrong with an az call that ran, from its ERROR: line (WARNING:
 // lines are left out; without an ERROR: line, from all it printed). Missing

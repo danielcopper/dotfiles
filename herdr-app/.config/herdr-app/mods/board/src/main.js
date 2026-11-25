@@ -95,35 +95,37 @@
 // iterations) the first time it opens for a team, one more for the team's
 // current sprint where the Sprint keeps none, and a refresh of a sprint it
 // chose one where `r` dropped them. A state change costs one az call, a
-// Backlog's create one and a child's parent link one more; a create reads the
-// Backlog again, and one whose answer was unclear asks one WIQL query more
-// after that refresh; a create for a team whose default iteration follows the
-// current one reads the team's settings first, one call more. The PR tabs
-// read nothing yet. The start dialog's Repo field costs one sh call
-// when it opens and one per machine chosen in it (its repos; none
-// without repoFolders). Finding gh and az costs one sh call now and then
-// (toolPaths says when). A view refreshes when its tab first shows (unless it
-// has data the prefetch tried within refreshMinutes), on `r` (which first
-// drops what its source keeps of it: its source's forget), after a column is
-// hidden or shown (the command menu's "Spalte ausblenden", a name in the
-// hidden line, the column menu), when it is shown again tried longer than
-// refreshMinutes ago (not while a read of it runs: that one shows), and every
-// refreshMinutes while it shows. Besides, after each read of views.json (the
-// start, `r`), while the board shows, the prefetch reads each other view with
-// a loader once, as its tab would (prefetchOrder: one at a time, none tried
-// within refreshMinutes, none whose own last read since it found its source
-// unavailable), so a start or an `r` costs each other view's refresh at most
-// once; it waits while any read runs, a write is under way or a dialog is
-// busy. After that a view not shown reads nothing. The Azure calls of a load
-// that need nothing of each other run side by side: the Sprint's settings
-// (iteration, areas, columns, types, backlog configuration) and who az is;
-// its taskboard once the iteration came, its query once the areas and the
-// configuration came too, its parents' query and the team's settings once
-// all that came; the Backlog's settings (levels, configuration, team
-// settings, areas), the types' colors and who az is; its ids once the
-// levels came, the query for their fields once the configuration came too.
-// What a view drew last, as read, is saved (loading.js) and drawn after a
-// restart with its age until its read replaces it.
+// Sprint's move one (its column, or its state where only that column maps the
+// new one) or two (its state, then its column), a Backlog's create one and a
+// child's parent link one more; a Sprint's move that set a state, or whose
+// write was refused, reads the Sprint again, a create the Backlog, and one
+// whose answer was unclear asks one WIQL query more after that refresh; a
+// create for a team whose default iteration follows the current one reads the
+// team's settings first, one call more. The PR tabs read nothing yet. The
+// start dialog's Repo field costs one sh call when it opens and one per
+// machine chosen in it (its repos; none without repoFolders). Finding gh and
+// az costs one sh call now and then (toolPaths says when). A view refreshes
+// when its tab first shows (unless it has data the prefetch tried within
+// refreshMinutes), on `r` (which first drops what its source keeps of it: its
+// source's forget), after a column is hidden or shown (the command menu's
+// "Spalte ausblenden", a name in the hidden line, the column menu), when it is
+// shown again tried longer than refreshMinutes ago (not while a read of it
+// runs: that one shows), and every refreshMinutes while it shows. Besides,
+// after each read of views.json (the start, `r`), while the board shows, the
+// prefetch reads each other view with a loader once, as its tab would
+// (prefetchOrder: one at a time, none tried within refreshMinutes, none whose
+// own last read since it found its source unavailable), so a start or an `r`
+// costs each other view's refresh at most once; it waits while any read runs,
+// a write is under way or a dialog is busy. After that a view not shown reads
+// nothing. The Azure calls of a load that need nothing of each other run side
+// by side: the Sprint's settings (iteration, areas, columns, types, backlog
+// configuration) and who az is; its taskboard once the iteration came, its
+// query once the areas and the configuration came too, its parents' query and
+// the team's settings once all that came; the Backlog's settings (levels,
+// configuration, team settings, areas), the types' colors and who az is; its
+// ids once the levels came, the query for their fields once the configuration
+// came too. What a view drew last, as read, is saved (loading.js) and drawn
+// after a restart with its age until its read replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's

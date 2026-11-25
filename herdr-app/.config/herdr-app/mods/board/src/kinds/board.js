@@ -1,7 +1,7 @@
 // A board's columns and cards: hidden columns, moves and their rollback,
 // where a card may go, and the columns as shown.
 
-import { isObject, textList } from "../shared.js";
+import { isObject, itemLabel, textList } from "../shared.js";
 import { shows, showsAll } from "../select.js";
 
 // The stored toggles of a view, { hide: [names], show: [names] }, or null when
@@ -95,19 +95,19 @@ export function applyMoves(board, moves) {
   return moves.reduce((b, m) => moveCard(b, m.key, m.to), board);
 }
 
-// Whether a card may go to a column: one that takes drops; one that maps
-// the card's type, where the column names the types it takes (a
-// taskboard's column, whose name is no state); and, where the board's meta
-// names its types' states for columns named after states (meta.types; no
-// board carries them yet), a state of the card's own type. The sprint
-// names its types' states as meta.typeStates instead, for the status menu:
-// its columns are no states.
-export function canDrop(board, card, column) {
-  if (!column?.target) return false;
-  if (column.types && !column.types.includes(card.type)) return false;
+// Why a card may not go to a column, as the board says it, or null where it
+// may. A taskboard's column names the types it takes (column.types), since
+// its name is no state; no board carries meta.types yet. The sprint names
+// its types' states as meta.typeStates instead, for the status menu.
+export function dropRefusal(board, card, column) {
+  const refused = (why = "") => `${itemLabel(card)} kann nicht nach „${column?.name}“${why}`;
+  if (!column?.target) return refused();
+  if (column.types && !column.types.includes(card.type)) return refused(`: Die Spalte hat für ${card.type} keinen Status`);
   const states = board.meta?.types?.[card.type];
-  return !states || states.includes(column.name);
+  return !states || states.includes(column.name) ? null : refused();
 }
+
+export const canDrop = (board, card, column) => !dropRefusal(board, card, column);
 
 export const targetsFor = (board, card) => board.columns.filter((c) => canDrop(board, card, c));
 

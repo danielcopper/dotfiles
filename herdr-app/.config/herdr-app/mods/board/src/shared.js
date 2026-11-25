@@ -10,7 +10,7 @@ export const CONFIG_NAME = "views";
 
 export class BoardError extends Error {
   // unavailable: az is missing, not signed in or without its extension.
-  // unclear: a write may or may not have landed.
+  // unclear: a write may or may not have landed (failure), or landed in part (partly).
   constructor(message, { unavailable = false, unclear = false } = {}) {
     super(message);
     this.unavailable = unavailable;
@@ -24,6 +24,8 @@ export class BoardError extends Error {
 export function failure(text, { write = false, unclear = false } = {}) {
   return write && unclear ? new BoardError(`Ergebnis unklar: ${text}`, { unclear: true }) : new BoardError(text);
 }
+
+export const partly = (text) => new BoardError(text, { unclear: true });
 
 export const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 export const isText = (v) => typeof v === "string" && v.trim() !== "";

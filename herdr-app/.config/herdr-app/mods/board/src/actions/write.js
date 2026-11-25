@@ -42,8 +42,9 @@ export function viewStands(b, view) {
 //   whose follow-up failed; toasts: the toasts' titles, { unclear (also a
 //   landed write whose follow-up failed), refused } ("Status von AB#3",
 //   "Status von AB#3 nicht geändert" by default);
-// - w.again: refresh after a write that landed too; w.againOnRefusal:
-//   after one that was refused too (what it met may have been out of date).
+// - w.again: refresh after a write that landed too (looked up after the
+//   write, so a getter may go by its answer); w.againOnRefusal: after one
+//   that was refused too (what it met may have been out of date).
 // A write that landed or was refused refreshes the view too while an open
 // outcome of the item, of any kind, remains: the refresh tells it, so
 // it does not wait for the timer. A refresh follows only while the view
