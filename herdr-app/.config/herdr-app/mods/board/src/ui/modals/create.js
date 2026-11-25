@@ -43,7 +43,7 @@ export const createModal = {
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
     const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
-    wireTextField(b, m, input, "title", (cx) => createModal.create(b, cx));
+    wireTextField(b, m, input, "title", (_e, cx) => createModal.create(b, cx));
     b.modal = m;
     input.focus();
     cx.notify();

@@ -1,24 +1,17 @@
 // The start dialog: opens an item's session in its checkout, on a machine
 // and with an agent chosen here, as a new tab in a space of that machine or
-// in a new space ("Öffnen in", the space picker: open-in.js), with a first
-// message to edit. It is b.modal = { kind: "start", view, item, settings,
-// input (the message's InputState) and nameInput (the new space's name),
-// made for this dialog, field, inputs, inputFocused, agents, agent,
-// agentsError, machines, machine, machineNote, agentNote, notes, spaceName
-// (spaceNameFor), target (null, NEW_SPACE or the chosen space's id and
-// name: whereToOpen), renamed (the new space's name was typed), busy,
-// error }.
+// in a new space ("Öffnen in"), with a first message to edit.
 
 import { div } from "gpui-kit";
-import { h_flex, v_flex, Input, InputState } from "gpui-base";
+import { h_flex, v_flex, Input, InputState, Textarea, TextareaState } from "gpui-base";
 import { knownAgents, machines, notify, run, spaces } from "herdr";
 import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine, report } from "../../shared.js";
 import { startSettings } from "../../config.js";
 import { call, what } from "../../tools.js";
 import { checkoutArgs, preselectedSpace, renderTemplate, sessionName, spaceNameFor, spacesOn, startCommand, templateVars } from "../../actions/start.js";
-import { backdrop, button, cycleField, fieldFrame, fieldLabel, machineName, onMachine, wireTextField } from "../helpers.js";
+import { backdrop, button, cycleField, fieldBox, fieldFrame, fieldLabel, machineName, onMachine, wireTextField } from "../helpers.js";
+import { LIST_HINT, choiceBox, choiceHint, choiceKey, escapeList, listKey, listKeyboard, listShield } from "../choices.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
-import { NEW_SPACE, NEW_SPACE_LABEL, openInModal, spacesNote } from "./open-in.js";
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
@@ -26,8 +19,71 @@ const CHECKOUT_TIMEOUT = 30000;
 const SESSION_CHECKS = [1000, 2000, 3000];
 const FIELDS = ["message", "agent", "machine", "open"];
 const fieldsOf = (m) => (whereToOpen(m).newSpace ? [...FIELDS, "name"] : FIELDS);
-// The start dialog `m` counts as open while its space picker is over it.
-const stillOpen = (b, m) => b.modal === m || b.modal?.back === m;
+const stillOpen = (b, m) => b.modal === m;
+const MESSAGE_ROWS = 6;
+
+// Not a text: a space's id, herdr's text, can never equal it.
+export const NEW_SPACE = Symbol("new space");
+export const NEW_SPACE_LABEL = "Neuer Space …";
+
+// herdr's own Enter in the message is a line break; the later binding wins.
+export const MESSAGE_KEY_CONTEXT = "BoardMessage";
+export const START_ACTION = "board_start";
+export const MESSAGE_KEYS = [{ keystroke: "enter", action: START_ACTION, context: `${MESSAGE_KEY_CONTEXT} > Input` }];
+
+export const START_HINTS = {
+  message: "↵ startet · ⇧↵ neue Zeile · PageUp/PageDown blättert · Tab wechselt das Feld",
+  name: "↵ startet · Tab wechselt das Feld",
+  choice: choiceHint("startet"),
+  list: LIST_HINT,
+};
+
+const agentsPending = (m) => m.agentsError ?? "lädt …";
+const openedIn = (where) => where.space ?? where.gone ?? where.unread;
+
+const START_CHOICES = {
+  agent: {
+    entries: (m) => m.agents.map((a, i) => ({ id: i, name: a.name })),
+    current: (m) => m.agent,
+    value: (m) => m.agents[m.agent]?.name ?? agentsPending(m),
+    take: (b, row) => (b.modal.agent = row.id),
+    placeholder: "Filter: Name des Agents",
+    none: "Kein Agent passt zum Filter",
+    empty: agentsPending,
+    width: 240,
+    anchor: "top_left",
+  },
+  machine: {
+    entries: (m) => m.machines.map((on, i) => ({ id: i, name: machineName(on) })),
+    current: (m) => m.machine,
+    value: (m) => machineName(m.machines[m.machine]),
+    take: (b, row, cx) => chooseMachine(b, row.id, cx),
+    placeholder: "Filter: Name des Rechners",
+    none: "Kein Rechner passt zum Filter",
+    width: 240,
+    anchor: "top_left",
+  },
+  open: {
+    entries: (m) => spaceRows(m),
+    current: (m) => openedIn(whereToOpen(m))?.id ?? NEW_SPACE,
+    value: (m) => openedIn(whereToOpen(m))?.name ?? NEW_SPACE_LABEL,
+    take: (b, row) => chooseSpace(b.modal, row),
+    fieldAfter: (row) => (row.id === NEW_SPACE ? "name" : "open"),
+    notes: (m) => {
+      const where = whereToOpen(m);
+      return where.readable ? [] : [spacesNote(where)];
+    },
+    placeholder: "Filter: Name des Space",
+    none: "Kein Space passt zum Filter",
+    width: 360,
+    anchor: "top_right",
+  },
+};
+
+export function spacesNote({ on, layout }) {
+  const why = layout === "loading" ? "noch nicht gelesen" : "nicht lesbar";
+  return `Die Spaces ${onMachine(on)} sind ${why}; „${NEW_SPACE_LABEL}“ geht trotzdem`;
+}
 
 export const startModal = {
   // Opens the dialog for an item, or says where its checkout is missing. An
@@ -40,7 +96,8 @@ export const startModal = {
       const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
       return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
     }
-    const input = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
+    const input = TextareaState.new({ placeholder: "Erste Nachricht an den Agent" });
+    input.set_auto_grow(1, MESSAGE_ROWS);
     const template = item.kind === "pr" ? settings.review : settings.message;
     input.set_value(renderTemplate(template, templateVars(item)));
     const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
@@ -53,10 +110,10 @@ export const startModal = {
     nameInput.set_value(spaceName);
     const m = {
       kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, busy: null, error: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, list: null, busy: null, error: null,
     };
-    wireTextField(b, m, input, "message", (cx) => startModal.start(b, cx));
-    wireTextField(b, m, nameInput, "name", (cx) => startModal.start(b, cx));
+    wireMessage(b, m, input);
+    wireTextField(b, m, nameInput, "name", (_e, cx) => startModal.start(b, cx));
     nameInput.on("change", () => {
       m.target = NEW_SPACE;
       m.renamed = true;
@@ -76,7 +133,9 @@ export const startModal = {
   // banner and as a toast.
   start(b, cx) {
     const m = b.modal;
-    if (m?.kind !== "start" || m.busy) return;
+    if (m?.kind !== "start") return;
+    m.error = null;
+    if (m.busy) return void cx.notify();
     const agent = m.agents[m.agent];
     if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
     const { on, space, gone, unread, newSpace } = whereToOpen(m);
@@ -86,7 +145,6 @@ export const startModal = {
     const task = m.input.value().trim();
     const name = sessionName(m.item);
     m.busy = "Sitzung wird geöffnet …";
-    m.error = null;
     const before = tabsNamed(name);
     cx.spawn(async (cx) => {
       try {
@@ -122,48 +180,36 @@ export const startModal = {
     cx.notify();
   },
 
-  tab: (b, back, cx) => cycleField(b, fieldsOf(b.modal), back, cx),
+  keys: MESSAGE_KEYS,
+  keyboard: listKeyboard,
+  escape: escapeList,
+
+  tab(b, back, cx) {
+    b.modal.list = null;
+    cycleField(b, fieldsOf(b.modal), back, cx);
+  },
 
   // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey,
-  // where Tab comes here at all rather than as the board's action); h/l or
-  // the arrows change a choice, Enter starts, on "Öffnen in" Enter and
-  // space open the space picker. Typing goes to the text field.
+  // where Tab comes here at all rather than as the board's action).
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
     if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
+    if (m.list) return listKey(b, e, cx);
     if (m.inputs[m.field]) return;
     cx.stop_propagation();
-    if (m.field === "open") return k === "enter" || k === "space" ? pickSpace(b, cx) : undefined;
     if (k === "enter") return startModal.start(b, cx);
-    if (k === "h" || k === "left") return cycle(b, m.field, -1, cx);
-    if (k === "l" || k === "right" || k === "space") return cycle(b, m.field, 1, cx);
+    choiceKey(b, START_CHOICES, k, cx);
   },
 
   render(b, t) {
     const m = b.modal;
     const label = (text) => fieldLabel(t, text);
     const frame = (field, inner) => fieldFrame(t, m, field, inner);
-    const choice = (field, title, value, mark = "◂ ▸", act = (cx) => cycle(b, field, 1, cx)) =>
-      v_flex()
-        .flex_1()
-        .min_w(0)
-        .gap(6)
-        .child(label(title))
-        .child(
-          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
-            .on_click((_e, cx) => {
-              m.field = field;
-              b.handle.focus();
-              act(cx);
-            })
-            .child(div().flex_1().min_w(0).truncate().child(value))
-            .child(div().text_color(t.dim).child(mark))),
-        );
-    const agent = m.agents[m.agent];
+    const choice = (field, title) => v_flex().flex_1().min_w(0).gap(6).child(label(title)).child(choiceBox(b, t, START_CHOICES, field));
     const where = whereToOpen(m);
     const notes = [...m.notes, ...(where.readable ? [] : [spacesNote(where)]), ...(where.gone ? [goneNote(where)] : []), ...(where.unread ? [unreadNote(where)] : [])];
-    const hint = m.field === "open" ? "Tab wechselt das Feld · ↵ wählt den Space" : "Tab wechselt das Feld · ◂ ▸ wählt";
+    const hint = m.list ? START_HINTS.list : START_HINTS[m.field] ?? START_HINTS.choice;
     return backdrop(
       t,
       "start-backdrop",
@@ -194,9 +240,9 @@ export const startModal = {
             .child(
               h_flex()
                 .gap(12)
-                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
-                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen in", (where.space ?? where.gone ?? where.unread)?.name ?? NEW_SPACE_LABEL, "▾", (cx) => pickSpace(b, cx))),
+                .child(choice("agent", "Agent"))
+                .child(choice("machine", "Rechner"))
+                .child(choice("open", "Öffnen in")),
             )
             .when(where.newSpace, (el) => el.child(
               v_flex()
@@ -208,7 +254,18 @@ export const startModal = {
               v_flex()
                 .gap(6)
                 .child(label("Erste Nachricht"))
-                .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
+                .child(
+                  fieldBox(t, m, "message")
+                    .id("start-message")
+                    .py(8)
+                    .items_start()
+                    .key_context(MESSAGE_KEY_CONTEXT)
+                    .on_action(START_ACTION, (_e, cx) => {
+                      cx.stop_propagation();
+                      startModal.start(b, cx);
+                    })
+                    .child(Textarea.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
+                ),
             )
             .children(notes.map((n) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(n)))
             .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
@@ -225,6 +282,7 @@ export const startModal = {
             .child(button(t, "start-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx), Boolean(m.busy)))
             .child(button(t, "start-go", "Starten ↵", true, (cx) => startModal.start(b, cx), Boolean(m.busy))),
         ),
+      listShield(b),
     );
   },
 };
@@ -255,17 +313,13 @@ function loadAgents(b, cx) {
   });
 }
 
-function cycle(b, field, by, cx) {
+function chooseMachine(b, machine, cx) {
   const m = b.modal;
-  if (m.busy) return;
-  if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
-  if (field === "machine") {
-    m.machine = (m.machine + by + m.machines.length) % m.machines.length;
-    m.machineNote = null;
-    m.target = m.target === NEW_SPACE && m.renamed ? NEW_SPACE : null;
-    loadAgents(b, cx);
-  }
-  cx.notify();
+  if (machine === m.machine) return;
+  m.machine = machine;
+  m.machineNote = null;
+  m.target = m.target === NEW_SPACE && m.renamed ? NEW_SPACE : null;
+  loadAgents(b, cx);
 }
 
 const layoutOf = (on) => machines().find((x) => (x.name ?? null) === (on ?? null))?.layout ?? (on ? "unavailable" : "ready");
@@ -290,15 +344,46 @@ const goneNote = ({ on, gone }) => `Den Space „${gone.name}“ ${onMachine(on)
 const unreadNote = ({ on, unread }) => `Den Space „${unread.name}“ ${onMachine(on)} kann das Board erst prüfen, wenn es die Spaces dort gelesen hat; warten oder neu wählen`;
 const uncheckedNote = (on, space) => `Den Space „${space.name}“ ${onMachine(on)} konnte das Board nicht prüfen; die Spaces dort waren nicht gelesen`;
 
+const spaceRows = (m) => [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...whereToOpen(m).here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
+
 function chooseSpace(m, row) {
   m.target = row.id === NEW_SPACE ? NEW_SPACE : { id: row.id, name: row.name };
-  m.field = row.id === NEW_SPACE ? "name" : "open";
   m.error = null;
 }
 
-function pickSpace(b, cx) {
-  const m = b.modal;
-  if (!m.busy) openInModal.open(b, m, { where: () => whereToOpen(m), choose: (row) => chooseSpace(m, row) }, cx);
+// A plain Enter gets to the message's submit only where the board's binding
+// (MESSAGE_KEYS) is missing (dropped by a load of keys.json, or never
+// bound), after herdr put a line break in place of each selection and told
+// "change".
+function wireMessage(b, m, input) {
+  let before = input.value();
+  let now = before;
+  input.on("change", () => {
+    before = now;
+    now = input.value();
+  });
+  wireTextField(b, m, input, "message", (e, cx) => {
+    if (e?.shift || e?.secondary) return;
+    now = before;
+    b.bindKeys(cx);
+    const single = takeBackEnter(input, before);
+    if (!single) {
+      m.error = "Tasten neu gebunden – bitte Enter noch einmal";
+      return cx.notify();
+    }
+    startModal.start(b, cx);
+  });
+}
+
+// herdr's Enter leaves the active cursor after its own line break.
+function takeBackEnter(input, before) {
+  const text = input.value();
+  const at = input.selected_range().start - 1;
+  const end = before.length - (text.length - at - 1);
+  const single = end >= at && text === `${before.slice(0, at)}\n${before.slice(end)}`;
+  input.set_value(before);
+  input.set_selected_range(single ? { start: at, end } : { start: before.length, end: before.length });
+  return single;
 }
 
 const tabsNamed = (name) => new Set(spaces().flatMap((s) => s.tabs.filter((t) => t.name === name).map((t) => t.id)));

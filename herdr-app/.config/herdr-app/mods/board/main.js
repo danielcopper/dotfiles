@@ -133,18 +133,19 @@
 // load draws before its end, the prefetch's order, the top bar's words for a
 // read), actions/ (starting a session, writing a change at once, moving a
 // card, changing a state, creating a work item, assigning an item),
-// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
-// background, the tints), ui/layer.js (the board layer), ui/related.js (the
-// related items as drawn), ui/band.js (which cards of a board column draw
-// whole), ui/shapes/ (how a view's data is drawn and worked: board, prs,
-// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign, commands, sprints) and this one, the Board, which
-// looks the shape up.
+// ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
+// ui/tones.js (the tones of labels and types, the selected background, the
+// tints), ui/layer.js (the board layer), ui/related.js (the related items as
+// drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
+// (how a view's data is drawn and worked: board, prs, sprint, backlog,
+// placeholder), ui/modals/ (the dialogs: start, status, columns, create,
+// assign, commands, sprints) and this one, the Board, which looks the shape
+// up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
 import { View, div, svg } from "gpui-kit";
-import { Input, InputState, ScrollHandle, TextView, h_flex, v_flex } from "gpui-base";
+import { Input, InputState, Popup, ScrollHandle, TextView, Textarea, TextareaState, h_flex, v_flex } from "gpui-base";
 import { appHome, checking, exec, focused, home, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, theme, writeTextFile } from "herdr";
 
 // ==== src/shared.js ====
@@ -4708,7 +4709,7 @@ export function button(t, id, label, primary, action, disabled = false) {
 
 // A backdrop over the whole board that swallows presses, with a panel on
 // it.
-export function backdrop(t, id, panel) {
+export function backdrop(t, id, panel, over = null) {
   return div()
     .id(id)
     .absolute()
@@ -4719,11 +4720,13 @@ export function backdrop(t, id, panel) {
     .bg(tint(t.background, "b3"))
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
-    .child(panel);
+    .child(panel)
+    .when(Boolean(over), (el) => el.child(over));
 }
 
-// menuKey takes a menu's keys.
-export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
+export const menu = (t, spec) => backdrop(t, `${spec.id}-backdrop`, menuPanel(t, spec));
+
+export function menuPanel(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
   const below = count - from - rows.length;
   const share = (n) => `${((100 * n) / count).toFixed(2)}%`;
   const row = (kids, n) =>
@@ -4750,25 +4753,21 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
     .when(count > rows.length, (el) => el.child(
       div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
     ));
-  return backdrop(
-    t,
-    `${id}-backdrop`,
-    v_flex()
-      .id(`${id}-menu`)
-      .w(width)
-      .p(8)
-      .gap(2)
-      .rounded(10)
-      .border_1()
-      .border_color(t.input)
-      .bg(t.popover)
-      .shadow_lg()
-      .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(`${title} · Enter · Esc`))
-      .children(head)
-      .child(list)
-      .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))
-      .children(foot),
-  );
+  return v_flex()
+    .id(`${id}-menu`)
+    .w(width)
+    .p(8)
+    .gap(2)
+    .rounded(10)
+    .border_1()
+    .border_color(t.input)
+    .bg(t.popover)
+    .shadow_lg()
+    .when(title !== null, (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.muted).child(`${title} · Enter · Esc`)))
+    .children(head)
+    .child(list)
+    .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))
+    .children(foot);
 }
 
 // A length herdr measured, or a wheel's move, in the script's pixels: herdr
@@ -4845,11 +4844,12 @@ export function filterMenuKey(e, cx, m, count) {
   const k = e.key;
   const ctrl = e.modifiers?.control;
   const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
-  if (!by) return;
+  if (!by) return false;
   cx.stop_propagation();
   m.at = Math.max(0, Math.min(m.at + by, count - 1));
   followMark(m, count);
   cx.notify();
+  return true;
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;
@@ -4874,30 +4874,35 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
-// A menu with a filter: opens the dialog `m` ({ kind, view, … }) as b.modal
-// with its filter, an InputState with `placeholder` made for it (m.input;
-// field "filter", inputs, inputFocused, filter; at, the marked row; top and
-// wheel, its window). Enter in the filter picks the marked row (pick(i, cx)).
-// When it opens and at each change of the filter, mark() marks the row
-// startAt(m) gives and brings the window, from the top, to it (followMark
-// over count(m) rows); it returns mark, for a menu whose rows come later.
-export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
+// A filter over rows, on `holder` (a menu with a filter, or a list in a
+// dialog); the returned mark() is for rows that come later.
+export function wireFilter(m, holder, { placeholder, count, startAt, pick }) {
   const mark = () => {
-    m.at = startAt(m);
-    m.top = 0;
-    followMark(m, count(m));
+    holder.at = startAt(holder);
+    holder.top = 0;
+    followMark(holder, count(holder));
   };
   const input = InputState.new({ placeholder });
-  Object.assign(m, { input, field: "filter", filter: "", wheel: 0 });
+  Object.assign(holder, { input, filter: "", wheel: 0 });
   mark();
-  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
+  trackFocus(m, input, "filter");
+  input.on("submit", (_e, cx) => pick(holder.at, cx));
   input.on("change", (_e, cx) => {
-    m.filter = input.value();
+    holder.filter = input.value();
     mark();
     cx.notify();
   });
+  return mark;
+}
+
+// A menu with a filter: opens the dialog `m` ({ kind, view, … }) as b.modal
+// with its filter (wireFilter, on m itself; field "filter", inputs).
+export function openFilterMenu(b, m, spec, cx) {
+  const mark = wireFilter(m, m, spec);
+  m.field = "filter";
+  m.inputs = { filter: m.input };
   b.modal = m;
-  input.focus();
+  m.input.focus();
   cx.notify();
   return mark;
 }
@@ -4931,28 +4936,34 @@ export const filterMenuHead = (t, m) => [
 ];
 export const menuNote = (t, text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
 
-// A dialog's text field, the InputState `input` for the dialog m's field
-// `field`, kept as m.inputs[field] (Board.takeKeyboard): m.inputFocused
-// follows the focus of the dialog's fields (Board.boardHasKeyboard), a
-// focus moves the dialog onto that field, and Enter in it runs
-// `submit(cx)`.
+// A dialog's text field, the text input `input` for the dialog m's field
+// `field`, kept as m.inputs[field] (Board.takeKeyboard): a focus moves the
+// dialog onto that field (trackFocus), and Enter in it runs `submit(e, cx)`.
 export function wireTextField(b, m, input, field, submit) {
   m.inputs = { ...m.inputs, [field]: input };
+  trackFocus(m, input, field, () => {
+    if (b.modal === m) m.field = field;
+  });
+  input.on("submit", submit);
+}
+
+// m.inputFocused, which Board.boardHasKeyboard reads, follows the focus of
+// the dialog m's inputs.
+function trackFocus(m, input, name, focused = () => {}) {
   m.inputFocused = false;
   input.on("focus", (_e, cx) => {
     m.inputFocused = true;
-    m.focusedField = field;
-    if (b.modal === m) m.field = field;
+    m.focusedField = name;
+    focused();
     cx.notify();
   });
-  // A blur that comes after another field of the dialog took the focus
+  // A blur that comes after another input of the dialog took the focus
   // leaves it.
   input.on("blur", () => {
-    if (m.focusedField !== field) return;
+    if (m.focusedField !== name) return;
     m.inputFocused = false;
     m.focusedField = null;
   });
-  input.on("submit", (_e, cx) => submit(cx));
 }
 
 // Tab and shift-Tab (`back`) in the open dialog: the next or previous of
@@ -4967,8 +4978,8 @@ export function cycleField(b, fields, back, cx) {
 
 // A dialog field's label, and its frame, marked while the dialog is on it.
 export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).child(text);
-export const fieldFrame = (t, m, field, inner) =>
-  h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+export const fieldBox = (t, m, field) => h_flex().px(10).rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background);
+export const fieldFrame = (t, m, field, inner) => fieldBox(t, m, field).h(34).items_center().child(inner);
 
 // The detail panel's width, its one home, from the number of columns that
 // share the rest of the board area with it (its shape's columnCount; none
@@ -6577,7 +6588,7 @@ export const createModal = {
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
     const m = { kind: "create", view, data, types, at: 0, parent, input, field: "title", error: null };
-    wireTextField(b, m, input, "title", (cx) => createModal.create(b, cx));
+    wireTextField(b, m, input, "title", (_e, cx) => createModal.create(b, cx));
     b.modal = m;
     input.focus();
     cx.notify();
@@ -6669,82 +6680,6 @@ function cycleType(m, by, cx) {
   cx.notify();
 }
 
-// ==== src/ui/modals/open-in.js ====
-
-// The start dialog's space picker ("Öffnen in"), a menu without digits:
-// typing goes to the filter. Esc goes back to the dialog it was opened from
-// (m.back, Board.closeModal).
-
-// Not a text: a space's id, herdr's text, can never equal it.
-export const NEW_SPACE = Symbol("new space");
-export const NEW_SPACE_LABEL = "Neuer Space …";
-
-export function spacesNote({ on, layout }) {
-  const why = layout === "loading" ? "noch nicht gelesen" : "nicht lesbar";
-  return `Die Spaces ${onMachine(on)} sind ${why}; „${NEW_SPACE_LABEL}“ geht trotzdem`;
-}
-
-function openInRows(m) {
-  const rows = [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...m.where().here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
-  return rankByName(rows, m.filter);
-}
-
-function openInStartAt(m) {
-  const rows = openInRows(m);
-  if (m.filter) return rows.length ? 0 : -1;
-  const chosen = m.where().space?.id ?? NEW_SPACE;
-  return Math.max(0, rows.findIndex((r) => r.id === chosen));
-}
-
-function pickOpenIn(b, m, i, cx) {
-  const row = openInRows(m)[i];
-  if (!row) return;
-  b.modal = m.back;
-  m.choose(row);
-  b.takeKeyboard();
-  cx.notify();
-}
-
-export const openInModal = {
-  open(b, back, { where, choose }, cx) {
-    const m = { kind: "openIn", view: back.view, back, where, choose };
-    openFilterMenu(b, m, {
-      placeholder: "Filter: Name des Space",
-      count: (m) => openInRows(m).length,
-      startAt: openInStartAt,
-      pick: (i, cx) => pickOpenIn(b, m, i, cx),
-    }, cx);
-  },
-
-  // Every key but Esc (the Board's): filterMenuKey.
-  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, openInRows(b.modal).length),
-
-  render(b, t) {
-    const m = b.modal;
-    const where = m.where();
-    const rows = openInRows(m);
-    const { shown, ...win } = menuWindow(m, rows);
-    return menu(t, {
-      id: "open-in",
-      rowId: "open-in-row",
-      width: 440,
-      title: `Öffnen in · ${machineName(where.on)}`,
-      head: filterMenuHead(t, m),
-      digits: false,
-      rows: shown.map((r) => [
-        markedName(t, r.name, r.at),
-        ...(r.folder ? [div().flex_none().max_w(200).truncate().text_size(11).text_color(t.dim).child(r.folder)] : []),
-      ]),
-      ...win,
-      pick: (i, cx) => pickOpenIn(b, m, i, cx),
-      foot: [
-        ...(rows.length ? [] : [menuNote(t, "Kein Space passt zum Filter", t.muted)]),
-        ...(where.readable ? [] : [menuNote(t, spacesNote(where), t.muted)]),
-      ],
-    });
-  },
-};
-
 // ==== src/ui/modals/sprints.js ====
 
 // The sprint picker: which sprint a team's Sprint view shows, as a menu
@@ -6829,18 +6764,189 @@ export const sprintsModal = {
   },
 };
 
+// ==== src/ui/choices.js ====
+
+// A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
+// in), from a table of the dialog's, by field: {
+// entries(m), each { id, name } (and a space's `folder`); current(m), the
+// id of the entry the field is on; value(m), the text the field shows;
+// take(b, row, cx), which puts the field on that entry; fieldAfter(row),
+// the field the dialog goes on to once the list took `row` (by default it
+// stays); the list's placeholder, none (said where the filter leaves no
+// row), empty(m) (said instead where no filter is typed), notes(m) (said
+// under the rows), width and anchor }. The open list is the dialog's
+// m.list.
+
+export const LIST_HINT = "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste";
+export const choiceHint = (enter) => `← → wählt · Leertaste öffnet die Liste · ↵ ${enter} · Tab wechselt das Feld`;
+
+export function choiceBox(b, t, choices, field) {
+  const m = b.modal;
+  const trigger = h_flex()
+    .id(`choice-${field}`)
+    .flex_1()
+    .min_w(0)
+    .gap(6)
+    .cursor_pointer()
+    .on_click((_e, cx) => {
+      m.field = field;
+      b.handle.focus();
+      openList(b, choices, field, cx);
+    })
+    .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
+    .child(div().text_color(t.dim).child("▾"));
+  return Popup.new(`choice-${field}-list`, fieldFrame(t, m, field, trigger))
+    .anchor(choices[field].anchor)
+    .when(m.list?.choice === field, (el) => el.content(listPanel(b, t)));
+}
+
+export function choiceKey(b, choices, k, cx) {
+  const field = b.modal.field;
+  if (k === "space") return openList(b, choices, field, cx);
+  if (k === "h" || k === "left") return step(b, choices[field], -1, cx);
+  if (k === "l" || k === "right") return step(b, choices[field], 1, cx);
+}
+
+function step(b, spec, by, cx) {
+  const m = b.modal;
+  if (m.busy) return;
+  const rows = spec.entries(m);
+  if (rows.length) {
+    const now = rows.findIndex((r) => r.id === spec.current(m));
+    // An entry the field is on but does not list (a chosen space that is
+    // gone, or on a machine whose spaces are not read) stands before the
+    // first.
+    const next = now < 0 ? (by > 0 ? 0 : rows.length - 1) : (now + by + rows.length) % rows.length;
+    spec.take(b, rows[next], cx);
+  }
+  cx.notify();
+}
+
+function openList(b, choices, field, cx) {
+  const m = b.modal;
+  const spec = choices[field];
+  if (m.busy || !spec) return;
+  const list = { choice: field, spec, field: "filter", mark: null };
+  m.field = field;
+  m.list = list;
+  wireFilter(m, list, {
+    placeholder: spec.placeholder,
+    count: () => listRows(m).length,
+    startAt: () => {
+      list.mark = null;
+      return markedAt(m, listRows(m));
+    },
+    pick: (_at, cx) => {
+      if (m.list === list) takeRow(b, syncedRows(m)[list.at], cx);
+    },
+  });
+  list.input.focus();
+  cx.notify();
+}
+
+export function closeList(b, cx) {
+  b.modal.list = null;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+export function escapeList(b, cx) {
+  if (!b.modal.list) return false;
+  closeList(b, cx);
+  return true;
+}
+
+export const listKeyboard = (m) => m.list?.input ?? null;
+
+const listRows = (m) => rankByName(m.list.spec.entries(m), m.list.filter);
+
+function markedAt(m, rows) {
+  const { list } = m;
+  const moved = list.mark === null ? -1 : rows.findIndex((r) => r.id === list.mark);
+  if (moved >= 0) return moved;
+  if (!rows.length) return -1;
+  if (list.filter) return 0;
+  return rows.findIndex((r) => r.id === list.spec.current(m));
+}
+
+// Entries that come after the list opened (agents read, spaces herdr read)
+// move the mark to where markedAt puts it now.
+function syncedRows(m) {
+  const rows = listRows(m);
+  const at = markedAt(m, rows);
+  if (at !== m.list.at) {
+    m.list.at = at;
+    followMark(m.list, rows.length);
+  }
+  return rows;
+}
+
+// herdr hands the filter's Enter to its submit as well, which then finds
+// the list closed.
+export function listKey(b, e, cx) {
+  const list = b.modal.list;
+  const rows = syncedRows(b.modal);
+  if (e.key === "enter") {
+    cx.stop_propagation();
+    return takeRow(b, rows[list.at], cx);
+  }
+  if (filterMenuKey(e, cx, list, rows.length)) list.mark = rows[list.at]?.id ?? null;
+}
+
+function takeRow(b, row, cx) {
+  const m = b.modal;
+  if (!row) return;
+  const { spec, choice } = m.list;
+  m.list = null;
+  spec.take(b, row, cx);
+  m.field = spec.fieldAfter?.(row) ?? choice;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+function listPanel(b, t) {
+  const m = b.modal;
+  const { spec } = m.list;
+  const rows = syncedRows(m);
+  const { shown, ...win } = menuWindow(m.list, rows);
+  const none = m.list.filter || !spec.empty ? spec.none : spec.empty(m);
+  return div()
+    .id("choice-list")
+    .mt(4)
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .child(menuPanel(t, {
+      id: "choice-list",
+      rowId: "choice-list-row",
+      width: spec.width,
+      title: null,
+      head: filterMenuHead(t, m.list),
+      digits: false,
+      rows: shown.map((r) => [
+        markedName(t, r.name, r.at),
+        ...(r.folder ? [div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(r.folder)] : []),
+      ]),
+      ...win,
+      pick: (i, cx) => takeRow(b, rows[i], cx),
+      foot: [
+        ...(rows.length ? [] : [menuNote(t, none, t.muted)]),
+        ...(spec.notes?.(m) ?? []).map((n) => menuNote(t, n, t.muted)),
+      ],
+    }));
+}
+
+export const listShield = (b) =>
+  b.modal.list
+    ? div().id("choice-list-shield").absolute().inset_0().on_mouse_down("left", (_e, cx) => {
+      cx.stop_propagation();
+      closeList(b, cx);
+    })
+    : null;
+
 // ==== src/ui/modals/start.js ====
 
 // The start dialog: opens an item's session in its checkout, on a machine
 // and with an agent chosen here, as a new tab in a space of that machine or
-// in a new space ("Öffnen in", the space picker: open-in.js), with a first
-// message to edit. It is b.modal = { kind: "start", view, item, settings,
-// input (the message's InputState) and nameInput (the new space's name),
-// made for this dialog, field, inputs, inputFocused, agents, agent,
-// agentsError, machines, machine, machineNote, agentNote, notes, spaceName
-// (spaceNameFor), target (null, NEW_SPACE or the chosen space's id and
-// name: whereToOpen), renamed (the new space's name was typed), busy,
-// error }.
+// in a new space ("Öffnen in"), with a first message to edit.
 
 const CHECKOUT_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
@@ -6848,8 +6954,71 @@ const CHECKOUT_TIMEOUT = 30000;
 const SESSION_CHECKS = [1000, 2000, 3000];
 const FIELDS = ["message", "agent", "machine", "open"];
 const fieldsOf = (m) => (whereToOpen(m).newSpace ? [...FIELDS, "name"] : FIELDS);
-// The start dialog `m` counts as open while its space picker is over it.
-const stillOpen = (b, m) => b.modal === m || b.modal?.back === m;
+const stillOpen = (b, m) => b.modal === m;
+const MESSAGE_ROWS = 6;
+
+// Not a text: a space's id, herdr's text, can never equal it.
+export const NEW_SPACE = Symbol("new space");
+export const NEW_SPACE_LABEL = "Neuer Space …";
+
+// herdr's own Enter in the message is a line break; the later binding wins.
+export const MESSAGE_KEY_CONTEXT = "BoardMessage";
+export const START_ACTION = "board_start";
+export const MESSAGE_KEYS = [{ keystroke: "enter", action: START_ACTION, context: `${MESSAGE_KEY_CONTEXT} > Input` }];
+
+export const START_HINTS = {
+  message: "↵ startet · ⇧↵ neue Zeile · PageUp/PageDown blättert · Tab wechselt das Feld",
+  name: "↵ startet · Tab wechselt das Feld",
+  choice: choiceHint("startet"),
+  list: LIST_HINT,
+};
+
+const agentsPending = (m) => m.agentsError ?? "lädt …";
+const openedIn = (where) => where.space ?? where.gone ?? where.unread;
+
+const START_CHOICES = {
+  agent: {
+    entries: (m) => m.agents.map((a, i) => ({ id: i, name: a.name })),
+    current: (m) => m.agent,
+    value: (m) => m.agents[m.agent]?.name ?? agentsPending(m),
+    take: (b, row) => (b.modal.agent = row.id),
+    placeholder: "Filter: Name des Agents",
+    none: "Kein Agent passt zum Filter",
+    empty: agentsPending,
+    width: 240,
+    anchor: "top_left",
+  },
+  machine: {
+    entries: (m) => m.machines.map((on, i) => ({ id: i, name: machineName(on) })),
+    current: (m) => m.machine,
+    value: (m) => machineName(m.machines[m.machine]),
+    take: (b, row, cx) => chooseMachine(b, row.id, cx),
+    placeholder: "Filter: Name des Rechners",
+    none: "Kein Rechner passt zum Filter",
+    width: 240,
+    anchor: "top_left",
+  },
+  open: {
+    entries: (m) => spaceRows(m),
+    current: (m) => openedIn(whereToOpen(m))?.id ?? NEW_SPACE,
+    value: (m) => openedIn(whereToOpen(m))?.name ?? NEW_SPACE_LABEL,
+    take: (b, row) => chooseSpace(b.modal, row),
+    fieldAfter: (row) => (row.id === NEW_SPACE ? "name" : "open"),
+    notes: (m) => {
+      const where = whereToOpen(m);
+      return where.readable ? [] : [spacesNote(where)];
+    },
+    placeholder: "Filter: Name des Space",
+    none: "Kein Space passt zum Filter",
+    width: 360,
+    anchor: "top_right",
+  },
+};
+
+export function spacesNote({ on, layout }) {
+  const why = layout === "loading" ? "noch nicht gelesen" : "nicht lesbar";
+  return `Die Spaces ${onMachine(on)} sind ${why}; „${NEW_SPACE_LABEL}“ geht trotzdem`;
+}
 
 export const startModal = {
   // Opens the dialog for an item, or says where its checkout is missing. An
@@ -6862,7 +7031,8 @@ export const startModal = {
       const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
       return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
     }
-    const input = InputState.new({ placeholder: "Erste Nachricht an den Agent" });
+    const input = TextareaState.new({ placeholder: "Erste Nachricht an den Agent" });
+    input.set_auto_grow(1, MESSAGE_ROWS);
     const template = item.kind === "pr" ? settings.review : settings.message;
     input.set_value(renderTemplate(template, templateVars(item)));
     const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name);
@@ -6875,10 +7045,10 @@ export const startModal = {
     nameInput.set_value(spaceName);
     const m = {
       kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
-      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, busy: null, error: null,
+      notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, list: null, busy: null, error: null,
     };
-    wireTextField(b, m, input, "message", (cx) => startModal.start(b, cx));
-    wireTextField(b, m, nameInput, "name", (cx) => startModal.start(b, cx));
+    wireMessage(b, m, input);
+    wireTextField(b, m, nameInput, "name", (_e, cx) => startModal.start(b, cx));
     nameInput.on("change", () => {
       m.target = NEW_SPACE;
       m.renamed = true;
@@ -6898,7 +7068,9 @@ export const startModal = {
   // banner and as a toast.
   start(b, cx) {
     const m = b.modal;
-    if (m?.kind !== "start" || m.busy) return;
+    if (m?.kind !== "start") return;
+    m.error = null;
+    if (m.busy) return void cx.notify();
     const agent = m.agents[m.agent];
     if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
     const { on, space, gone, unread, newSpace } = whereToOpen(m);
@@ -6908,7 +7080,6 @@ export const startModal = {
     const task = m.input.value().trim();
     const name = sessionName(m.item);
     m.busy = "Sitzung wird geöffnet …";
-    m.error = null;
     const before = tabsNamed(name);
     cx.spawn(async (cx) => {
       try {
@@ -6944,48 +7115,36 @@ export const startModal = {
     cx.notify();
   },
 
-  tab: (b, back, cx) => cycleField(b, fieldsOf(b.modal), back, cx),
+  keys: MESSAGE_KEYS,
+  keyboard: listKeyboard,
+  escape: escapeList,
+
+  tab(b, back, cx) {
+    b.modal.list = null;
+    cycleField(b, fieldsOf(b.modal), back, cx);
+  },
 
   // Every key but Esc (the Board's): Tab walks the fields (Board.tabKey,
-  // where Tab comes here at all rather than as the board's action); h/l or
-  // the arrows change a choice, Enter starts, on "Öffnen in" Enter and
-  // space open the space picker. Typing goes to the text field.
+  // where Tab comes here at all rather than as the board's action).
   key(b, e, cx) {
     const m = b.modal;
     const k = e.key;
     if (k === "tab") return b.tabKey(Boolean(e.modifiers?.shift), cx);
+    if (m.list) return listKey(b, e, cx);
     if (m.inputs[m.field]) return;
     cx.stop_propagation();
-    if (m.field === "open") return k === "enter" || k === "space" ? pickSpace(b, cx) : undefined;
     if (k === "enter") return startModal.start(b, cx);
-    if (k === "h" || k === "left") return cycle(b, m.field, -1, cx);
-    if (k === "l" || k === "right" || k === "space") return cycle(b, m.field, 1, cx);
+    choiceKey(b, START_CHOICES, k, cx);
   },
 
   render(b, t) {
     const m = b.modal;
     const label = (text) => fieldLabel(t, text);
     const frame = (field, inner) => fieldFrame(t, m, field, inner);
-    const choice = (field, title, value, mark = "◂ ▸", act = (cx) => cycle(b, field, 1, cx)) =>
-      v_flex()
-        .flex_1()
-        .min_w(0)
-        .gap(6)
-        .child(label(title))
-        .child(
-          frame(field, h_flex().id(`choice-${field}`).flex_1().min_w(0).gap(6).cursor_pointer()
-            .on_click((_e, cx) => {
-              m.field = field;
-              b.handle.focus();
-              act(cx);
-            })
-            .child(div().flex_1().min_w(0).truncate().child(value))
-            .child(div().text_color(t.dim).child(mark))),
-        );
-    const agent = m.agents[m.agent];
+    const choice = (field, title) => v_flex().flex_1().min_w(0).gap(6).child(label(title)).child(choiceBox(b, t, START_CHOICES, field));
     const where = whereToOpen(m);
     const notes = [...m.notes, ...(where.readable ? [] : [spacesNote(where)]), ...(where.gone ? [goneNote(where)] : []), ...(where.unread ? [unreadNote(where)] : [])];
-    const hint = m.field === "open" ? "Tab wechselt das Feld · ↵ wählt den Space" : "Tab wechselt das Feld · ◂ ▸ wählt";
+    const hint = m.list ? START_HINTS.list : START_HINTS[m.field] ?? START_HINTS.choice;
     return backdrop(
       t,
       "start-backdrop",
@@ -7016,9 +7175,9 @@ export const startModal = {
             .child(
               h_flex()
                 .gap(12)
-                .child(choice("agent", "Agent", agent ? agent.name : m.agentsError ?? "lädt …"))
-                .child(choice("machine", "Rechner", machineName(m.machines[m.machine])))
-                .child(choice("open", "Öffnen in", (where.space ?? where.gone ?? where.unread)?.name ?? NEW_SPACE_LABEL, "▾", (cx) => pickSpace(b, cx))),
+                .child(choice("agent", "Agent"))
+                .child(choice("machine", "Rechner"))
+                .child(choice("open", "Öffnen in")),
             )
             .when(where.newSpace, (el) => el.child(
               v_flex()
@@ -7030,7 +7189,18 @@ export const startModal = {
               v_flex()
                 .gap(6)
                 .child(label("Erste Nachricht"))
-                .child(frame("message", Input.new(m.input).flex_1().text_size(12).text_color(t.foreground))),
+                .child(
+                  fieldBox(t, m, "message")
+                    .id("start-message")
+                    .py(8)
+                    .items_start()
+                    .key_context(MESSAGE_KEY_CONTEXT)
+                    .on_action(START_ACTION, (_e, cx) => {
+                      cx.stop_propagation();
+                      startModal.start(b, cx);
+                    })
+                    .child(Textarea.new(m.input).flex_1().text_size(12).text_color(t.foreground)),
+                ),
             )
             .children(notes.map((n) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(n)))
             .when(Boolean(m.error), (el) => el.child(div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(m.error ?? ""))),
@@ -7047,6 +7217,7 @@ export const startModal = {
             .child(button(t, "start-cancel", "Abbrechen Esc", false, (cx) => b.closeModal(cx), Boolean(m.busy)))
             .child(button(t, "start-go", "Starten ↵", true, (cx) => startModal.start(b, cx), Boolean(m.busy))),
         ),
+      listShield(b),
     );
   },
 };
@@ -7077,17 +7248,13 @@ function loadAgents(b, cx) {
   });
 }
 
-function cycle(b, field, by, cx) {
+function chooseMachine(b, machine, cx) {
   const m = b.modal;
-  if (m.busy) return;
-  if (field === "agent" && m.agents.length) m.agent = (m.agent + by + m.agents.length) % m.agents.length;
-  if (field === "machine") {
-    m.machine = (m.machine + by + m.machines.length) % m.machines.length;
-    m.machineNote = null;
-    m.target = m.target === NEW_SPACE && m.renamed ? NEW_SPACE : null;
-    loadAgents(b, cx);
-  }
-  cx.notify();
+  if (machine === m.machine) return;
+  m.machine = machine;
+  m.machineNote = null;
+  m.target = m.target === NEW_SPACE && m.renamed ? NEW_SPACE : null;
+  loadAgents(b, cx);
 }
 
 const layoutOf = (on) => machines().find((x) => (x.name ?? null) === (on ?? null))?.layout ?? (on ? "unavailable" : "ready");
@@ -7112,15 +7279,46 @@ const goneNote = ({ on, gone }) => `Den Space „${gone.name}“ ${onMachine(on)
 const unreadNote = ({ on, unread }) => `Den Space „${unread.name}“ ${onMachine(on)} kann das Board erst prüfen, wenn es die Spaces dort gelesen hat; warten oder neu wählen`;
 const uncheckedNote = (on, space) => `Den Space „${space.name}“ ${onMachine(on)} konnte das Board nicht prüfen; die Spaces dort waren nicht gelesen`;
 
+const spaceRows = (m) => [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...whereToOpen(m).here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
+
 function chooseSpace(m, row) {
   m.target = row.id === NEW_SPACE ? NEW_SPACE : { id: row.id, name: row.name };
-  m.field = row.id === NEW_SPACE ? "name" : "open";
   m.error = null;
 }
 
-function pickSpace(b, cx) {
-  const m = b.modal;
-  if (!m.busy) openInModal.open(b, m, { where: () => whereToOpen(m), choose: (row) => chooseSpace(m, row) }, cx);
+// A plain Enter gets to the message's submit only where the board's binding
+// (MESSAGE_KEYS) is missing (dropped by a load of keys.json, or never
+// bound), after herdr put a line break in place of each selection and told
+// "change".
+function wireMessage(b, m, input) {
+  let before = input.value();
+  let now = before;
+  input.on("change", () => {
+    before = now;
+    now = input.value();
+  });
+  wireTextField(b, m, input, "message", (e, cx) => {
+    if (e?.shift || e?.secondary) return;
+    now = before;
+    b.bindKeys(cx);
+    const single = takeBackEnter(input, before);
+    if (!single) {
+      m.error = "Tasten neu gebunden – bitte Enter noch einmal";
+      return cx.notify();
+    }
+    startModal.start(b, cx);
+  });
+}
+
+// herdr's Enter leaves the active cursor after its own line break.
+function takeBackEnter(input, before) {
+  const text = input.value();
+  const at = input.selected_range().start - 1;
+  const end = before.length - (text.length - at - 1);
+  const single = end >= at && text === `${before.slice(0, at)}\n${before.slice(end)}`;
+  input.set_value(before);
+  input.set_selected_range(single ? { start: at, end } : { start: before.length, end: before.length });
+  return single;
 }
 
 const tabsNamed = (name) => new Set(spaces().flatMap((s) => s.tabs.filter((t) => t.name === name).map((t) => t.id)));
@@ -7178,15 +7376,18 @@ export const statusModal = {
 
 // The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
 // and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
-// on Esc unless it is busy). A dialog keeps its state, and makes the inputs
-// it needs, in b.modal; one that belongs to a view keeps it as
-// b.modal.view, and a reload that finishes while it is open closes it when
-// views.json no longer has that view of that kind. A dialog with fields
-// also has tab(b, back, cx), which Tab and shift-Tab (`back`) call to move
-// between them (Board.tabKey). A new dialog is a module here and its
-// entry in MODALS.
+// on Esc unless it is busy, or unless its escape(b, cx) took Esc: Esc in a
+// choice's open list closes only the list). A dialog keeps its state, and
+// makes the inputs it needs, in b.modal; one that belongs to a view keeps
+// it as b.modal.view, and a reload that finishes while it is open closes it
+// when views.json no longer has that view of that kind. A dialog with
+// fields also has tab(b, back, cx), which Tab and shift-Tab (`back`) call
+// to move between them (Board.tabKey). Optional: keys, the key bindings
+// Board.bindKeys binds for it, and keyboard(m), the input that takes the
+// keyboard before its fields (Board.takeKeyboard). A new dialog is a module
+// here and its entry in MODALS.
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, openIn: openInModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal };
 
 // ==== src/ui/shapes/backlog.js ====
 
@@ -8975,16 +9176,22 @@ export default class Board extends View {
     this.reload(cx);
   }
 
-  // Binds BOARD_KEYS in BOARD_KEY_CONTEXT, once per copy, as the leader
-  // does (mods/leader/main.js, bindKeys: each bind adds entries, and a load
-  // of keys.json drops them all). A failure leaves the rest of the board
+  // At init, and again after a load of keys.json dropped the bindings (the
+  // message's Enter finds them gone: start.js), as the leader does
+  // (mods/leader/main.js, bindKeys: each bind adds entries, and a load of
+  // keys.json drops them all). A failure leaves the rest of the board
   // working and says why.
   bindKeys(cx) {
-    const names = "Tab und shift-Tab";
+    const keys = [
+      ...BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: BOARD_KEY_CONTEXT })),
+      ...Object.values(MODALS).flatMap((d) => d.keys ?? []),
+    ];
+    const strokes = keys.map((k) => k.keystroke.replace(/[a-z]+$/, (key) => key[0].toUpperCase() + key.slice(1)));
+    const names = `${strokes.slice(0, -1).join(", ")} und ${strokes.at(-1)}`;
     try {
-      const count = cx.bind_keys(BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: BOARD_KEY_CONTEXT })));
-      if (count !== BOARD_KEYS.length) {
-        notify({ title: `Board: ${names} nicht alle gebunden`, body: `${count} von ${BOARD_KEYS.length} Bindungen angelegt`, level: "error" });
+      const count = cx.bind_keys(keys);
+      if (count !== keys.length) {
+        notify({ title: `Board: ${names} nicht alle gebunden`, body: `${count} von ${keys.length} Bindungen angelegt`, level: "error" });
       }
     } catch (e) {
       notify({ title: `Board: ${names} nicht gebunden`, body: String(e?.message ?? e), level: "error" });
@@ -9846,12 +10053,15 @@ export default class Board extends View {
     return this.isLayer() && boardShown(true);
   }
 
-  // Gives the board's keyboard to where it belongs, the one rule for it: the
-  // open dialog's text field when the dialog is on one (m.inputs), else the
-  // filter while one is typed, else the board itself, which hands its keys to
-  // a dialog without a text field (the status menu) or on another field.
+  // Gives the board's keyboard to where it belongs, the one rule for it:
+  // where the open dialog wants it (its keyboard(m): the filter of a
+  // choice's open list), else the dialog's text field when the dialog is on
+  // one (m.inputs), else the filter while one is typed, else the board
+  // itself, which hands its keys to a dialog without a text field (the
+  // status menu) or on another field.
   takeKeyboard() {
-    const input = this.modal?.inputs?.[this.modal.field];
+    const m = this.modal;
+    const input = (m && MODALS[m.kind].keyboard?.(m)) ?? m?.inputs?.[m.field];
     if (input) input.focus();
     else if (this.filtering) this.filterInput.focus();
     else this.handle.focus();
@@ -9943,11 +10153,9 @@ export default class Board extends View {
     }
   }
 
-  // A dialog opened from another (m.back: the start dialog's space picker)
-  // goes back to that one, on the field it was opened from.
   closeModal(cx) {
     if (this.modal?.busy) return;
-    this.modal = this.modal?.back ?? null;
+    this.modal = null;
     this.handle.focus();
     cx.notify();
   }
@@ -10097,10 +10305,10 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Esc closes a dialog that is not busy; every other key is the dialog's.
   modalKey(e, cx) {
     if (e.key === "escape") {
       cx.stop_propagation();
+      if (MODALS[this.modal.kind].escape?.(this, cx)) return;
       return this.closeModal(cx);
     }
     MODALS[this.modal.kind].key(this, e, cx);

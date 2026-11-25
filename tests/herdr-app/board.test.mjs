@@ -2170,16 +2170,30 @@ const advance = (ms) => (clockOffset += ms);
 // An element of the fake gpui: it records the styling calls by name (each
 // one's last arguments in `with`, every call in `calls`) and keeps its
 // children; when(cond, fn) applies fn when cond holds, map(fn) applies fn.
-// The methods named in `lacks` it does not have.
+// What fills a slot (a Popup's `trigger` and `content`) is drawn, so it is
+// kept with the children too; a second filling replaces the first, as in
+// herdr. A Popup draws its slots only: herdr drops the ordinary children
+// given to it (kept in `dropped`). The methods named in `lacks` it does
+// not have.
+const SLOTS = ["trigger", "content"];
 function element(kind, lacks = []) {
-  const el = { kind, styles: [], with: {}, calls: [], kids: [] };
+  const el = { kind, styles: [], with: {}, calls: [], kids: [], dropped: [] };
+  const slots = new Map();
   const proxy = new Proxy(el, {
     get(target, p) {
       if (p in target) return target[p];
       if (lacks.includes(p)) return undefined;
       return (...args) => {
-        if (p === "child") target.kids.push(args[0]);
-        else if (p === "children") target.kids.push(...args[0]);
+        const kids = kind === "popup" ? target.dropped : target.kids;
+        if (p === "child") kids.push(args[0]);
+        else if (p === "children") kids.push(...args[0]);
+        else if (SLOTS.includes(p)) {
+          if (slots.has(p)) target.kids[target.kids.indexOf(slots.get(p))] = args[0];
+          else target.kids.push(args[0]);
+          slots.set(p, args[0]);
+          target.with[p] = args;
+          target.calls.push([p, ...args]);
+        }
         else if (p === "when") return args[0] ? args[1](proxy) : proxy;
         else if (p === "map") return args[0](proxy);
         else {
@@ -2222,6 +2236,57 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
   const calls = [];
   const lacked = oldMouse ? ["on_window_mouse_up"] : [];
   const waiting = [];
+  // A text input of herdr's (InputState, and what TextareaState shares with
+  // it): its focus() takes the keyboard from the board's handles and the
+  // other inputs, as herdr's does. It has a selection (selected_range, in
+  // UTF-16 offsets as herdr's); set_selected_range throws, as herdr's
+  // does, for a range outside the text, ending before it starts or
+  // splitting a character. set_value, which tells no "change" as herdr's,
+  // puts the cursor at the end of a single-line input and at the start of a
+  // multi-line one (`multiLine`), as herdr's reset_selection does.
+  // `placeholder` is the one it was made with.
+  const textState = (opts, multiLine = false) => {
+    let value = opts?.value ?? "";
+    let start = multiLine ? 0 : value.length;
+    let end = start;
+    const on = {};
+    const input = {
+      placeholder: opts?.placeholder ?? "",
+      on: (event, fn) => ((on[event] = fn), true), value: () => value,
+      set_value: (v) => {
+        value = v;
+        start = end = multiLine ? 0 : v.length;
+      },
+      selected_range: () => ({ start, end }),
+      set_selected_range: (range) => {
+        for (const at of [range.start, range.end]) {
+          if (!Number.isInteger(at) || at < 0 || at > value.length) throw new Error("token range is outside the document or empty");
+          const unit = value.charCodeAt(at);
+          if (unit >= 0xdc00 && unit <= 0xdfff) throw new Error("token range splits a Unicode grapheme");
+        }
+        if (range.start > range.end) throw new Error("token range is outside the document or empty");
+        ({ start, end } = range);
+      },
+      // Enter in the field, with the cx of the key's call.
+      submit: (cx) => on.submit?.({}, cx),
+      // Typing: the value, the cursor after it, and its "change" handler
+      // told.
+      type: (text) => {
+        value = text;
+        start = end = text.length;
+        on.change?.({}, { notify() {} });
+      },
+      focus: () => {
+        for (const h of host.handles) h.held = false;
+        for (const other of host.inputs) if (other !== input) other.blur();
+        on.focus?.({}, { notify() {} });
+      },
+      blur: () => on.blur?.({}, { notify() {} }),
+      emit: (event, payload, cx) => on[event]?.(payload, cx),
+    };
+    host.inputs.push(input);
+    return input;
+  };
   const host = {
     calls,
     asked: [],
@@ -2289,30 +2354,41 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
     theme: () => ({}),
     // An input whose focus() tells its "focus" handler, and whose "blur"
     // handler hears when the board takes the keyboard back, as herdr's do.
-    "InputState.new": (opts) => {
-      let value = opts?.value ?? "";
-      const on = {};
-      // Its focus() takes the keyboard from the board's handles and the
-      // other inputs, as herdr's does.
-      const input = {
-        on: (event, fn) => ((on[event] = fn), true), value: () => value, set_value: (v) => (value = v),
-        // Enter in the field, with the cx of the key's call.
-        submit: (cx) => on.submit?.({}, cx),
-        // Typing: the value, and its "change" handler told.
-        type: (text) => {
-          value = text;
-          on.change?.({}, { notify() {} });
-        },
-        focus: () => {
-          for (const h of host.handles) h.held = false;
-          for (const other of host.inputs) if (other !== input) other.blur();
-          on.focus?.({}, { notify() {} });
-        },
-        blur: () => on.blur?.({}, { notify() {} }),
+    "InputState.new": (opts) => textState(opts),
+    // herdr's multi-line input: an input that also takes its rows
+    // (set_auto_grow, set_rows, set_soft_wrap: recorded in `layout`), whose
+    // own Enter (shift-Enter, ctrl-Enter: `secondary`) puts a line break in
+    // place of each selection (`ranges`, several cursors, the active one
+    // first: herdr's replace_text_in_ranges), the active cursor after its
+    // own, and tells its "change" handler once and then its "submit"
+    // handler, with `shift` and `secondary`.
+    "TextareaState.new": (opts) => {
+      if (host.drawing) throw new Error("TextareaState.new(...) needs a live host call; call it from init() or an event handler");
+      const area = textState(opts, true);
+      area.layout = {};
+      area.set_auto_grow = (min, max) => (area.layout.autoGrow = [min, max]);
+      area.set_rows = (rows) => (area.layout.rows = rows);
+      area.set_soft_wrap = (wrap) => (area.layout.softWrap = wrap);
+      area.enter = (cx, { shift = false, secondary = false, ranges = [area.selected_range()] } = {}) => {
+        const [active] = ranges;
+        let text = area.value();
+        for (const { start, end } of [...ranges].sort((x, y) => y.start - x.start)) text = `${text.slice(0, start)}\n${text.slice(end)}`;
+        const cursor = ranges.filter((r) => r.start < active.start).reduce((at, r) => at + 1 - (r.end - r.start), active.start + 1);
+        area.set_value(text);
+        area.set_selected_range({ start: cursor, end: cursor });
+        area.emit("change", {}, cx);
+        area.emit("submit", { secondary, shift }, cx);
       };
-      host.inputs.push(input);
-      return input;
+      return area;
     },
+    // The bare anchored surface (herdr's Popup): a box around `trigger`,
+    // whose content slot draws the surface. herdr refuses one without a
+    // trigger element.
+    "Popup.new": (id, trigger) => {
+      if (typeof trigger !== "object" || trigger === null) throw new TypeError("Popup.new(id, trigger) expects the trigger element");
+      return element("popup").id(id).trigger(trigger);
+    },
+    "Textarea.new": (state) => Object.assign(element("textarea"), { state }),
     // herdr refuses a ScrollHandle made while a view draws. Each handle's
     // scroll_to_item(row) is recorded in `scrolled` as { handle, row }. Its
     // readers (herdr 0.1.18; none with `oldScroll`) give what a test sets:
@@ -3703,14 +3779,20 @@ const openInShown = (b) => {
 // The board's own space, moved to a machine the dialog does not offer, so
 // that this one has none.
 const elsewhere = (host) => ({ ...host.spaceList[0], machine: "laptop" });
-// From the message to "Öffnen in", then Enter: the space picker.
+// From the message to "Öffnen in", then space: its list.
 async function openPicker(b, cx) {
   for (let i = 0; i < 3; i++) await press(b, cx, "tab");
   assert.equal(b.modal.field, "open");
-  await press(b, cx, "enter");
-  assert.equal(b.modal.kind, "openIn");
+  await press(b, cx, "space");
+  assert.equal(b.modal.list?.choice, "open");
 }
-const openInRows = (b) => byId(b.render(), "open-in-rows").kids.map((k) => texts(k).join(""));
+// The open list's rows, as drawn under its field.
+const listRowsDrawn = (b) => byId(b.render(), "choice-list-rows").kids.filter((k) => k.with.id?.[0]?.startsWith("choice-list-row-"));
+const shownRows = (b) => listRowsDrawn(b).map((k) => texts(k).join(""));
+// The open list's rows drawn as marked.
+const markedRows = (b) => listRowsDrawn(b).filter((k) => k.styles.includes("bg")).map((k) => texts(k).join(""));
+// Enter in the open list's filter: its marked row.
+const pickRow = (b, cx) => cx.call((own) => b.modal.list.input.submit(own));
 
 test("UI: Öffnen in preselects the space named like the repo, and the session opens as a tab there", async () => {
   const { b, cx, host } = await openBoard();
@@ -3723,39 +3805,41 @@ test("UI: Öffnen in preselects the space named like the repo, and the session o
   assert.deepEqual(host.runs.at(-1), ["tab.new", { name: SESSION, space: "s3", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
 });
 
-test("UI: Enter on Öffnen in opens the space picker: Neuer Space and this machine's spaces, the choice marked; the filter narrows them, Enter takes one", async () => {
+test("UI: space on Öffnen in opens its list under the field: Neuer Space and this machine's spaces, the choice marked; the filter narrows them, Enter takes one and closes the list", async () => {
   const { b, cx, host } = await openBoard();
   host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "tender"), spaceOf("s4", "srv", "server"), spaceOf("s5", "tend")];
   await openStart(b, cx);
   await openPicker(b, cx);
-  assert.deepEqual(openInRows(b), ["Neuer Space …", "x/r/tender", "tender/r/tender", "tend/r/tend"]);
-  assert.ok(texts(b.render()).includes("Öffnen in · Dieser Rechner · Enter · Esc"));
-  assert.equal(b.modal.at, 2, "the dialog's choice");
-  b.modal.input.type("tend");
-  assert.equal(b.modal.at, 0, "under a filter the first row it leaves");
-  assert.deepEqual(openInRows(b), ["tend/r/tend", "tender/r/tender"]);
-  b.modal.input.type("zz");
-  assert.deepEqual([openInRows(b), b.modal.at], [[], -1]);
+  assert.deepEqual(shownRows(b), ["Neuer Space …", "x/r/tender", "tender/r/tender", "tend/r/tend"]);
+  const popup = byId(b.render(), "choice-open-list");
+  assert.deepEqual([popup.kind, popup.with.anchor, chainTo(popup, hasId("choice-list-rows")) !== null], ["popup", ["top_right"], true], "anchored at the field, not a dialog over the dialog");
+  assert.equal(b.modal.list.at, 2, "the dialog's choice");
+  b.modal.list.input.type("tend");
+  assert.equal(b.modal.list.at, 0, "under a filter the first row it leaves");
+  assert.deepEqual(shownRows(b), ["tend/r/tend", "tender/r/tender"]);
+  b.modal.list.input.type("zz");
+  assert.deepEqual([shownRows(b), b.modal.list.at], [[], -1]);
   assert.ok(texts(b.render()).includes("Kein Space passt zum Filter"));
   assert.equal(b.modal.inputFocused, true, "the filter has the keyboard");
-  b.modal.input.type("x");
-  assert.deepEqual([openInRows(b), b.modal.at], [["x/r/tender"], 0]);
-  cx.call((own) => b.modal.input.submit(own));
-  assert.deepEqual([b.modal.kind, b.modal.field], ["start", "open"]);
+  b.modal.list.input.type("x");
+  assert.deepEqual([shownRows(b), b.modal.list.at], [["x/r/tender"], 0]);
+  pickRow(b, cx);
+  assert.deepEqual([b.modal.kind, b.modal.field, b.modal.list], ["start", "open", null]);
   assert.ok(b.handle.held, "the board has the keyboard for the choice");
   assert.deepEqual(openInShown(b), ["x", false]);
+  assert.equal(byId(b.render(), "choice-list"), null, "the list closed");
   board.startModal.start(b, cx);
   await settle();
   await host.answer("sh", ok("/home/me/src/tender\n"));
   assert.equal(host.runs.at(-1)[1].space, "s1");
 });
 
-test("UI: Neuer Space … in the picker shows the name field, prefilled with the repo's name, which takes the keyboard; Enter there opens a space of that name", async () => {
+test("UI: Neuer Space … taken from the list shows the name field, prefilled with the repo's name, which takes the keyboard; Enter there opens a space of that name", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
   await openPicker(b, cx);
   await press(b, cx, "up");
-  cx.call((own) => b.modal.input.submit(own));
+  pickRow(b, cx);
   const m = b.modal;
   assert.deepEqual([m.kind, m.field, m.inputFocused, m.nameInput.value()], ["start", "name", true, "tender"]);
   assert.deepEqual(openInShown(b), ["Neuer Space …", true]);
@@ -3766,31 +3850,37 @@ test("UI: Neuer Space … in the picker shows the name field, prefilled with the
   assert.deepEqual(host.runs.at(-1), ["space.new", { name: "api work", tab: SESSION, machine: "", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
 });
 
-test("UI: Esc in the space picker goes back to the dialog with its choice; a second Esc closes the dialog", async () => {
+test("UI: Esc in a choice's list closes only the list, taking nothing; a second Esc closes the dialog", async () => {
   const { b, cx } = await openBoard();
   await openStart(b, cx);
   const m = b.modal;
   await openPicker(b, cx);
   await press(b, cx, "up");
   await press(b, cx, "escape");
-  assert.equal(b.modal, m);
+  assert.deepEqual([b.modal, m.list], [m, null]);
   assert.deepEqual([m.field, b.handle.held, openInShown(b)], ["open", true, ["x", false]]);
-  assert.ok(texts(b.render()).includes("Tab wechselt das Feld · ↵ wählt den Space"));
-  await press(b, cx, "space");
-  assert.equal(b.modal.kind, "openIn", "space opens it too");
-  await press(b, cx, "escape");
   await press(b, cx, "escape");
   assert.equal(b.modal, null);
 });
 
-test("UI: a click on Öffnen in opens the picker; a click on a row takes it", async () => {
+test("UI: a click on Öffnen in opens its list; a click on a row takes it; a press beside the list closes it, taking nothing", async () => {
   const { b, cx, host } = await openBoard();
   host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work")];
   await openStart(b, cx);
   await click(b, cx, "choice-open");
-  assert.equal(b.modal.kind, "openIn");
-  await click(b, cx, "open-in-row-2");
-  assert.deepEqual([b.modal.kind, openInShown(b)], ["start", ["work", false]]);
+  assert.equal(b.modal.list?.choice, "open");
+  await click(b, cx, "choice-list-row-2");
+  assert.deepEqual([b.modal.kind, b.modal.list, openInShown(b)], ["start", null, ["work", false]]);
+  await click(b, cx, "choice-open");
+  const list = byId(b.render(), "choice-list");
+  const inside = fakeCx();
+  inside.call((own) => list.with.on_mouse_down[1]({}, own));
+  assert.equal(inside.stopped, 1, "a press on the list stays there");
+  const shield = byId(b.render(), "choice-list-shield");
+  const beside = fakeCx();
+  beside.call((own) => shield.with.on_mouse_down[1]({}, own));
+  assert.deepEqual([beside.stopped, b.modal.list, openInShown(b), b.handle.held], [1, null, ["work", false], true]);
+  assert.equal(byId(b.render(), "choice-list-shield"), null, "no shield without a list");
 });
 
 test("UI: a new space needs a name: without one the dialog says so and starts nothing", async () => {
@@ -3854,8 +3944,8 @@ test("UI: changing the machine drops the space chosen and preselects among that 
   host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "tender"), spaceOf("s4", "a", "server"), spaceOf("s5", "TENDER", "server")];
   await openStart(b, cx);
   await openPicker(b, cx);
-  b.modal.input.type("x");
-  cx.call((own) => b.modal.input.submit(own));
+  b.modal.list.input.type("x");
+  pickRow(b, cx);
   assert.deepEqual(openInShown(b), ["x", false]);
   await press(b, cx, "tab", { modifiers: { shift: true } });
   await press(b, cx, "l");
@@ -3866,7 +3956,7 @@ test("UI: changing the machine drops the space chosen and preselects among that 
   assert.deepEqual(openInShown(b), ["tender", false], "back here: the rule again, not the earlier choice");
 });
 
-test("UI: a machine whose spaces herdr has not read says so in the dialog and the picker, and leaves Neuer Space usable", async () => {
+test("UI: a machine whose spaces herdr has not read says so in the dialog and the list, and leaves Neuer Space usable", async () => {
   const { b, cx, host } = await openBoard();
   let layout = "loading";
   host.machines = () => [{ name: null, layout: "ready" }, { name: "server", layout }];
@@ -3880,9 +3970,9 @@ test("UI: a machine whose spaces herdr has not read says so in the dialog and th
   assert.ok(texts(b.render()).includes(note));
   assert.deepEqual(openInShown(b), ["Neuer Space …", true]);
   await press(b, cx, "tab");
-  await press(b, cx, "enter");
-  assert.deepEqual(openInRows(b), ["Neuer Space …"]);
-  assert.ok(texts(b.render()).includes(note), "the picker says so too");
+  await press(b, cx, "space");
+  assert.deepEqual(shownRows(b), ["Neuer Space …"]);
+  assert.ok(texts(byId(b.render(), "choice-list")).includes(note), "the list says so too");
   await press(b, cx, "escape");
   layout = "unavailable";
   assert.ok(texts(b.render()).includes("Die Spaces auf server sind nicht lesbar; „Neuer Space …“ geht trotzdem"));
@@ -3932,7 +4022,6 @@ test("UI: a space chosen that goes before the checkout is found is said in the d
 });
 
 const shiftTab = (b, cx) => press(b, cx, "tab", { modifiers: { shift: true } });
-const pickRow = (b, cx) => cx.call((own) => b.modal.input.submit(own));
 
 test("UI: a tab of the session's name there before Starten is not the session just opened", async () => {
   const { b, cx, host } = await openBoard();
@@ -3977,7 +4066,7 @@ test("UI: a typed name keeps a new space across a machine change; Neuer Space un
   await press(b, cx, "h");
   await settle();
   await press(b, cx, "tab");
-  await press(b, cx, "enter");
+  await press(b, cx, "space");
   await press(b, cx, "up");
   pickRow(b, cx);
   b.modal.nameInput.type("api");
@@ -3987,7 +4076,7 @@ test("UI: a typed name keeps a new space across a machine change; Neuer Space un
   await settle();
   assert.deepEqual([openInShown(b), b.modal.nameInput.value()], [["Neuer Space …", true], "api"], "typed: kept");
   await press(b, cx, "tab");
-  await press(b, cx, "enter");
+  await press(b, cx, "space");
   await press(b, cx, "down");
   pickRow(b, cx);
   assert.deepEqual(openInShown(b), ["srv", false]);
@@ -4007,7 +4096,7 @@ test("UI: a chosen space that closes while the dialog waits is said there, and S
   assert.equal(texts(b.render()).some((s) => s.includes("gibt es nicht mehr")), false);
   host.spaceList = all;
   await openPicker(b, cx);
-  b.modal.input.type("work");
+  b.modal.list.input.type("work");
   pickRow(b, cx);
   host.spaceList = all.filter((s) => s.id !== "s4");
   const note = "Den Space „work“ auf diesem Rechner gibt es nicht mehr; bitte neu wählen";
@@ -4023,8 +4112,18 @@ test("UI: a chosen space that closes while the dialog waits is said there, and S
   await press(b, cx, "tab");
   assert.equal(b.modal.field, "message", "no name field to walk to");
   await shiftTab(b, cx);
+  await press(b, cx, "space");
+  assert.deepEqual([b.modal.list.at, markedRows(b)], [-1, []], "the chosen space not listed: nothing marked");
   await press(b, cx, "enter");
-  b.modal.input.type("tender");
+  pickRow(b, cx);
+  assert.deepEqual([b.modal.list?.choice, texts(b.render()).includes(note), b.modal.busy], ["open", true, null], "Enter takes nothing");
+  await press(b, cx, "down");
+  assert.deepEqual(markedRows(b), ["Neuer Space …"], "↓ starts at the first row");
+  await press(b, cx, "escape");
+  await press(b, cx, "space");
+  await press(b, cx, "up");
+  assert.deepEqual(markedRows(b), ["Neuer Space …"], "↑ starts at the first row");
+  b.modal.list.input.type("tender");
   pickRow(b, cx);
   assert.equal(texts(b.render()).includes(note), false);
   board.startModal.start(b, cx);
@@ -4039,7 +4138,7 @@ test("UI: a chosen space that goes before the checkout is found leaves the dialo
   host.spaceList = all;
   await openStart(b, cx);
   await openPicker(b, cx);
-  b.modal.input.type("work");
+  b.modal.list.input.type("work");
   pickRow(b, cx);
   board.startModal.start(b, cx);
   await settle();
@@ -4058,7 +4157,7 @@ test("UI: a chosen space on a machine whose spaces herdr is reading is said in t
   host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s4", "work")];
   await openStart(b, cx);
   await openPicker(b, cx);
-  b.modal.input.type("work");
+  b.modal.list.input.type("work");
   pickRow(b, cx);
   layout = "loading";
   board.startModal.start(b, cx);
@@ -4066,6 +4165,11 @@ test("UI: a chosen space on a machine whose spaces herdr is reading is said in t
   assert.deepEqual([b.modal.error, b.modal.busy, host.open("sh").length, host.runs.length], [null, null, 0, 0]);
   assert.equal(texts(b.render()).filter((s) => s === UNREAD_WORK).length, 1);
   assert.equal(texts(b.render()).some((s) => s.includes("gibt es nicht mehr")), false, "not said to be gone");
+  await press(b, cx, "space");
+  assert.deepEqual([shownRows(b), b.modal.list.at, markedRows(b)], [["Neuer Space …"], -1, []], "its list marks nothing");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal.list?.choice, openInShown(b)], ["open", ["work", false]], "Enter takes nothing");
+  await press(b, cx, "escape");
   layout = "ready";
   assert.deepEqual([texts(b.render()).includes(UNREAD_WORK), openInShown(b)], [false, ["work", false]], "read now");
   layout = "loading";
@@ -4083,7 +4187,7 @@ test("UI: a chosen space no longer listed after the checkout, on a machine whose
   host.spaceList = all;
   await openStart(b, cx);
   await openPicker(b, cx);
-  b.modal.input.type("work");
+  b.modal.list.input.type("work");
   pickRow(b, cx);
   board.startModal.start(b, cx);
   await settle();
@@ -4116,7 +4220,7 @@ test("UI: a chosen space the board could not check after the checkout, with the 
   host.spaceList = all;
   await openStart(b, cx);
   await openPicker(b, cx);
-  b.modal.input.type("work");
+  b.modal.list.input.type("work");
   pickRow(b, cx);
   board.startModal.start(b, cx);
   await settle();
@@ -4134,7 +4238,7 @@ test("UI: a space whose id is \"new\" is a space like any other", async () => {
   host.spaceList = [{ ...host.spaceList[0] }, spaceOf("new", "work")];
   await openStart(b, cx);
   await openPicker(b, cx);
-  b.modal.input.type("work");
+  b.modal.list.input.type("work");
   pickRow(b, cx);
   assert.deepEqual(openInShown(b), ["work", false]);
 });
@@ -4147,7 +4251,7 @@ test("UI: an existing space picked after the new space's name was emptied starts
   pickRow(b, cx);
   b.modal.nameInput.type("");
   await shiftTab(b, cx);
-  await press(b, cx, "enter");
+  await press(b, cx, "space");
   await press(b, cx, "down");
   pickRow(b, cx);
   assert.deepEqual(openInShown(b), ["x", false]);
@@ -4158,15 +4262,19 @@ test("UI: an existing space picked after the new space's name was emptied starts
   assert.deepEqual(host.runs.at(-1), ["tab.new", { name: SESSION, space: "s1", folder: "/home/me/src/tender", argv: ["claude"], task: "/work 3004" }]);
 });
 
-test("UI: Öffnen in opens no picker while the session starts", async () => {
+test("UI: no choice opens its list or steps while the session starts", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
   for (let i = 0; i < 3; i++) await press(b, cx, "tab");
   board.startModal.start(b, cx);
   await settle();
-  await press(b, cx, "enter");
+  const shown = openInShown(b);
+  await press(b, cx, "l");
+  assert.deepEqual(openInShown(b), shown);
+  await press(b, cx, "space");
   await click(b, cx, "choice-open");
-  assert.equal(b.modal.kind, "start");
+  await click(b, cx, "choice-agent");
+  assert.deepEqual([b.modal.kind, b.modal.list], ["start", null]);
   await host.answer("sh", ok("/home/me/src/tender\n"));
   assert.equal(host.runs.length, 1);
 });
@@ -4182,7 +4290,7 @@ test("UI: picking where the session opens clears the dialog's error", async () =
   await settle();
   assert.ok(texts(b.render()).includes("Der neue Space braucht einen Namen"));
   await shiftTab(b, cx);
-  await press(b, cx, "enter");
+  await press(b, cx, "space");
   await press(b, cx, "down");
   pickRow(b, cx);
   assert.deepEqual([b.modal.error, texts(b.render()).includes("Der neue Space braucht einen Namen")], [null, false]);
@@ -4282,7 +4390,7 @@ test("UI: agents asked of a machine no longer chosen are ignored, also when the 
   assert.equal(b.modal.agents.length, 1);
 });
 
-test("UI: agents that answer while the space picker is open reach the dialog, also when the ask fails", async () => {
+test("UI: agents that answer while a list is open reach the dialog, also when the ask fails", async () => {
   const { b, cx, host } = await openBoard();
   const asks = [];
   host.knownAgents = ({ on }) => {
@@ -4300,8 +4408,8 @@ test("UI: agents that answer while the space picker is open reach the dialog, al
   await press(b, cx, "tab", { modifiers: { shift: true } });
   await press(b, cx, "l");
   await press(b, cx, "tab");
-  await press(b, cx, "enter");
-  assert.deepEqual([b.modal.kind, asks.map((a) => a.on)], ["openIn", [null, "server"]]);
+  await press(b, cx, "space");
+  assert.deepEqual([b.modal.list?.choice, asks.map((a) => a.on)], ["open", [null, "server"]]);
   asks[1].reject(new Error("down"));
   await settle();
   await press(b, cx, "escape");
@@ -8222,7 +8330,7 @@ function takesTab(b) {
 
 test("the board binds Tab and shift-Tab in its own key context, which its root carries only while a dialog with fields is open or, with no filter typed, an issue's details", async () => {
   const { b, cx } = await openBoard();
-  assert.deepEqual(cx.bound, board.BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: board.BOARD_KEY_CONTEXT })), "bound in that context only");
+  assert.deepEqual(cx.bound.slice(0, 2), board.BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: board.BOARD_KEY_CONTEXT })), "bound in that context only");
   assert.deepEqual(board.BOARD_KEYS.map((k) => [k.keystroke, k.back]), [["tab", false], ["shift-tab", true]]);
   assert.equal(takesTab(b), false, "nothing open: no context, no Tab action, herdr's own Tab runs");
   await openStart(b, cx);
@@ -8277,10 +8385,405 @@ test("UI: a bind_keys that fails is said in a toast, and the board works on", as
   const { b, host } = await bootBoard({ bindKeys: () => {
     throw new Error("keymap locked");
   } });
-  assert.deepEqual(host.notes.at(-1), { title: "Board: Tab und shift-Tab nicht gebunden", body: "keymap locked", level: "error" });
+  assert.deepEqual(host.notes.at(-1), { title: "Board: Tab, shift-Tab und Enter nicht gebunden", body: "keymap locked", level: "error" });
   assert.ok(b.render());
   const { host: short } = await bootBoard({ bindKeys: () => 1 });
-  assert.deepEqual(short.notes.at(-1), { title: "Board: Tab und shift-Tab nicht alle gebunden", body: "1 von 2 Bindungen angelegt", level: "error" });
+  assert.deepEqual(short.notes.at(-1), { title: "Board: Tab, shift-Tab und Enter nicht alle gebunden", body: "1 von 3 Bindungen angelegt", level: "error" });
+});
+
+// ---- the start dialog's keys ----
+
+// The message's frame as drawn: the element carrying its key context.
+const messageFrame = (b) => byId(b.render(), "start-message");
+// Enter in the message through the board's binding (MESSAGE_KEYS): the
+// handler of the message's frame for its action. Returns how often it
+// stopped the key.
+function messageEnter(b) {
+  const frame = messageFrame(b);
+  const [context] = frame.with.key_context;
+  const binding = board.MESSAGE_KEYS.find((k) => k.keystroke === "enter");
+  assert.equal(binding.context, `${context} > Input`, "bound where the message's input sits");
+  const handler = frame.calls.find((c) => c[0] === "on_action" && c[1] === binding.action)?.[2];
+  assert.ok(handler, `no on_action ${binding.action} on the message's frame`);
+  const own = fakeCx();
+  own.call((c) => handler({}, c));
+  return own.stopped;
+}
+// The hint line of the open dialog: the text before its buttons, the
+// last of which is `go`.
+const hintOf = (b, go = "start-go") => texts(chainTo(b.render(), hasId(go)).at(-2).kids[0])[0];
+
+test("the board binds Enter where the start dialog's message sits, in that message's key context only", async () => {
+  const { cx } = await openBoard();
+  assert.deepEqual(board.MESSAGE_KEYS, [{ keystroke: "enter", action: "board_start", context: "BoardMessage > Input" }]);
+  assert.deepEqual(cx.bound.slice(2), board.MESSAGE_KEYS);
+});
+
+test("UI: the message grows with its text up to six rows, in a frame of no fixed height; Enter there starts the session, shift-Enter and ctrl-Enter are herdr's line break and start nothing", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  const m = b.modal;
+  assert.deepEqual(m.input.layout, { autoGrow: [1, 6] });
+  const frame = messageFrame(b);
+  assert.equal("h" in frame.with, false, "no fixed height");
+  assert.equal(chainTo(frame, (el) => el.kind === "textarea")?.at(-1)?.state, m.input);
+  const bound = cx.bound.length;
+  m.input.set_selected_range({ start: 10, end: 10 });
+  cx.call((own) => m.input.enter(own, { shift: true }));
+  await settle();
+  assert.deepEqual([m.input.value(), m.busy, host.open("sh").length], ["/work 3004\n", null, 0], "shift-Enter: a line break");
+  cx.call((own) => m.input.enter(own, { secondary: true }));
+  await settle();
+  assert.deepEqual([m.input.value(), m.busy, host.open("sh").length, cx.bound.length], ["/work 3004\n\n", null, 0, bound], "ctrl-Enter: a line break, nothing bound");
+  m.input.set_value("/work 3004\nmore");
+  assert.equal(messageEnter(b), 1, "taken, so herdr runs no command of that name");
+  assert.equal(m.busy, "Sitzung wird geöffnet …");
+  await settle();
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.equal(host.runs.at(-1)[1].task, "/work 3004\nmore");
+});
+
+test("UI: once a load of keys.json dropped the board's Enter, Enter in the message still starts, with the message and its selection as they were before it, and the board binds its keys again", async () => {
+  for (const range of [{ start: 10, end: 10 }, { start: 6, end: 10 }]) {
+    const { b, cx, host } = await openBoard();
+    await openStart(b, cx);
+    const m = b.modal;
+    const keys = cx.bound.splice(0);
+    m.input.type("/work 3004 more");
+    m.input.set_selected_range(range);
+    cx.call((own) => m.input.enter(own));
+    assert.deepEqual([m.input.value(), m.input.selected_range(), m.busy, m.error], ["/work 3004 more", range, "Sitzung wird geöffnet …", null], JSON.stringify(range));
+    assert.deepEqual(cx.bound, keys, "all of the board's keys, once");
+    await settle();
+    await host.answer("sh", ok("/home/me/src/tender\n"));
+    assert.equal(host.runs.at(-1)[1].task, "/work 3004 more");
+  }
+});
+
+test("UI: where the message's Enter after a load of keys.json put in more than its own line break (several cursors), the board binds its keys again, puts the message back as it was before that Enter, the cursor at its end, and starts nothing, asking for Enter once more; the next Enter starts", async () => {
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  const m = b.modal;
+  const again = "Tasten neu gebunden – bitte Enter noch einmal";
+  const was = "/work 3004 more";
+  // The active cursor first; no text to type: the one there.
+  for (const [typed, ranges, why] of [
+    ["\n\n", [{ start: 1, end: 1 }, { start: 0, end: 0 }], "a message of line breaks only"],
+    ["x😀", [{ start: 1, end: 1 }, { start: 0, end: 0 }], "an emoji after the active cursor, a second cursor before it"],
+    [was, [{ start: 5, end: 5 }, { start: 10, end: 10 }], "a second cursor after the active one"],
+    [was, [{ start: 6, end: 10 }, { start: 11, end: 15 }], "two selections"],
+    [was, [{ start: 5, end: 5 }, { start: 10, end: 12 }], "a selection after the active cursor, the text as long as before"],
+    [was, [{ start: 5, end: 5 }, { start: 0, end: 1 }], "a selection before the active cursor"],
+    [was, [{ start: 15, end: 15 }, { start: 0, end: 0 }], "a second cursor before the active one, at the end"],
+    [null, [{ start: 5, end: 5 }, { start: 10, end: 10 }], "again, with no edit since the last"],
+  ]) {
+    if (typed !== null) m.input.type(typed);
+    const text = m.input.value();
+    const keys = cx.bound.splice(0);
+    cx.call((own) => m.input.enter(own, { ranges }));
+    assert.deepEqual([m.input.value(), m.input.selected_range(), m.busy, m.error, host.open("sh").length], [text, { start: text.length, end: text.length }, null, again, 0], why);
+    assert.deepEqual(cx.bound, keys, why);
+  }
+  assert.ok(texts(b.render()).includes(again));
+  assert.equal(messageEnter(b), 1);
+  assert.deepEqual([m.busy, m.error], ["Sitzung wird geöffnet …", null]);
+  await settle();
+  await host.answer("sh", ok("/home/me/src/tender\n"));
+  assert.equal(host.runs.at(-1)[1].task, was);
+});
+
+test("UI: an Enter in the start dialog that starts nothing because the chosen space is gone or not read yet, or because a start is under way, takes the ask-again error away; the dialog's note or its hint line says why", async () => {
+  const again = "Tasten neu gebunden – bitte Enter noch einmal";
+  // An Enter in the message with two cursors, after a load of keys.json.
+  const askAgain = (b, cx) => {
+    cx.bound.splice(0);
+    cx.call((own) => b.modal.input.enter(own, { ranges: [{ start: 5, end: 5 }, { start: 10, end: 10 }] }));
+    assert.equal(b.modal.error, again);
+  };
+  for (const [why, note] of [["gone", "Den Space „work“ auf diesem Rechner gibt es nicht mehr; bitte neu wählen"], ["unread", UNREAD_WORK]]) {
+    const { b, cx, host } = await openBoard();
+    let layout = "ready";
+    host.machines = () => [{ name: null, layout }];
+    const all = [{ ...host.spaceList[0] }, spaceOf("s4", "work")];
+    host.spaceList = all;
+    await openStart(b, cx);
+    await openPicker(b, cx);
+    b.modal.list.input.type("work");
+    pickRow(b, cx);
+    askAgain(b, cx);
+    if (why === "gone") host.spaceList = [all[0]];
+    else layout = "loading";
+    assert.equal(messageEnter(b), 1);
+    await settle();
+    assert.deepEqual([b.modal.error, b.modal.busy, host.open("sh").length], [null, null, 0], why);
+    assert.deepEqual([texts(b.render()).includes(note), texts(b.render()).includes(again)], [true, false], why);
+  }
+  const { b, cx, host } = await openBoard();
+  await openStart(b, cx);
+  messageEnter(b);
+  askAgain(b, cx);
+  assert.equal(notifies(cx, (own) => board.startModal.start(b, own)), 1, "drawn again");
+  await settle();
+  assert.deepEqual([b.modal.error, b.modal.busy, host.open("sh").length, hintOf(b)], [null, "Sitzung wird geöffnet …", 1, "Sitzung wird geöffnet …"], "busy");
+});
+
+test("UI: a second Enter in the message after a load of keys.json, where the first started nothing, again takes back only its own line break", async () => {
+  const { b, cx, host } = await openBoard();
+  host.knownAgents = async () => [];
+  await openStart(b, cx);
+  await settle();
+  const m = b.modal;
+  m.input.type("/work 3004 more");
+  for (const n of [1, 2]) {
+    cx.bound.splice(0);
+    m.input.set_selected_range({ start: 10, end: 10 });
+    cx.call((own) => m.input.enter(own));
+    assert.deepEqual([m.input.value(), m.busy, m.error, cx.bound.length], ["/work 3004 more", null, "Kein Agent installiert", 3], `Enter ${n}`);
+  }
+});
+
+test("UI: Enter starts the session from every field of the start dialog", async () => {
+  for (const field of ["agent", "machine", "open", "name"]) {
+    const { b, cx, host } = await openBoard();
+    host.spaceList = [];
+    await openStart(b, cx);
+    for (let i = 0; i < ["message", "agent", "machine", "open", "name"].indexOf(field); i++) await press(b, cx, "tab");
+    assert.equal(b.modal.field, field);
+    if (field === "name") cx.call((own) => b.modal.nameInput.submit(own));
+    else await press(b, cx, "enter");
+    await settle();
+    assert.deepEqual([b.modal.busy, b.modal.list, host.open("sh").length], ["Sitzung wird geöffnet …", null, 1], field);
+  }
+});
+
+test("UI: the hint line names the keys of the field that has the keyboard", async () => {
+  const { b, cx } = await openBoard();
+  await openStart(b, cx);
+  assert.equal(hintOf(b), "↵ startet · ⇧↵ neue Zeile · PageUp/PageDown blättert · Tab wechselt das Feld");
+  for (const field of ["agent", "machine", "open"]) {
+    await press(b, cx, "tab");
+    assert.equal(hintOf(b), "← → wählt · Leertaste öffnet die Liste · ↵ startet · Tab wechselt das Feld", field);
+  }
+  await press(b, cx, "space");
+  assert.equal(hintOf(b), "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste");
+  await press(b, cx, "up");
+  pickRow(b, cx);
+  assert.equal(hintOf(b), "↵ startet · Tab wechselt das Feld");
+  b.modal.input.focus();
+  assert.deepEqual([b.modal.field, hintOf(b)], ["message", "↵ startet · ⇧↵ neue Zeile · PageUp/PageDown blättert · Tab wechselt das Feld"], "a click into the message moves the dialog there");
+});
+
+test("UI: ← and → step through a choice's entries in place, round, h and l too; on Öffnen in Neuer Space shows the name field but the keyboard stays", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work")];
+  host.knownAgents = async () => [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }, { key: "codex", name: "Codex", run: ["codex"], installed: true }];
+  await openStart(b, cx);
+  const agentShown = () => texts(byId(b.render(), "choice-agent"))[0];
+  await press(b, cx, "tab");
+  await press(b, cx, "right");
+  assert.equal(agentShown(), "Codex");
+  await press(b, cx, "right");
+  assert.equal(agentShown(), "Claude Code", "round");
+  await press(b, cx, "h");
+  assert.equal(agentShown(), "Codex");
+  await press(b, cx, "tab");
+  await press(b, cx, "tab");
+  assert.deepEqual(openInShown(b), ["x", false]);
+  await press(b, cx, "right");
+  assert.deepEqual(openInShown(b), ["work", false]);
+  await press(b, cx, "right");
+  assert.deepEqual([openInShown(b), b.modal.field, b.handle.held], [["Neuer Space …", true], "open", true], "the name shows, the keyboard stays");
+  await press(b, cx, "left");
+  assert.deepEqual(openInShown(b), ["work", false]);
+  await press(b, cx, "l");
+  await press(b, cx, "l");
+  assert.deepEqual(openInShown(b), ["x", false], "round");
+  assert.equal(b.modal.list, null, "no list opened");
+});
+
+test("UI: → on Öffnen in from a chosen space that is gone goes to the first entry, ← to the last", async () => {
+  const { b, cx, host } = await openBoard();
+  const all = [{ ...host.spaceList[0] }, spaceOf("s4", "work")];
+  host.spaceList = all;
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  b.modal.list.input.type("work");
+  pickRow(b, cx);
+  host.spaceList = [all[0]];
+  await press(b, cx, "right");
+  assert.deepEqual(openInShown(b), ["Neuer Space …", true]);
+  b.modal.target = { id: "s4", name: "work" };
+  await press(b, cx, "left");
+  assert.deepEqual(openInShown(b), ["x", false]);
+});
+
+test("UI: Agent and Rechner open their lists like Öffnen in, by space or a click: the entry marked, the filter narrows them, Enter takes one; another machine reads its agents and chooses its space anew", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work"), spaceOf("s4", "srv", "server")];
+  const asks = [];
+  host.knownAgents = async ({ on }) => (asks.push(on), [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }, { key: "codex", name: "Codex", run: ["codex"], installed: true }]);
+  await openStart(b, cx);
+  await press(b, cx, "tab");
+  await press(b, cx, "space");
+  assert.deepEqual([b.modal.list?.choice, shownRows(b), b.modal.list.at, b.modal.inputFocused], ["agent", ["Claude Code", "Codex"], 0, true]);
+  assert.equal(byId(b.render(), "choice-agent-list").with.anchor[0], "top_left");
+  b.modal.list.input.type("dex");
+  assert.deepEqual(shownRows(b), ["Codex"]);
+  pickRow(b, cx);
+  assert.deepEqual([b.modal.list, b.modal.field, texts(byId(b.render(), "choice-agent"))[0], b.handle.held], [null, "agent", "Codex", true]);
+  await press(b, cx, "tab");
+  b.modal.target = { id: "s3", name: "work" };
+  await click(b, cx, "choice-machine");
+  assert.deepEqual([b.modal.list?.choice, shownRows(b), b.modal.list.at], ["machine", ["Dieser Rechner", "server"], 0]);
+  b.modal.list.input.type("zz");
+  assert.ok(texts(byId(b.render(), "choice-list")).includes("Kein Rechner passt zum Filter"));
+  b.modal.list.input.type("");
+  await press(b, cx, "down");
+  pickRow(b, cx);
+  await settle();
+  assert.deepEqual([texts(byId(b.render(), "choice-machine"))[0], openInShown(b), asks], ["server", ["srv", false], [null, "server"]]);
+  await press(b, cx, "space");
+  assert.equal(b.modal.list.at, 1, "the machine chosen");
+  pickRow(b, cx);
+  await settle();
+  assert.deepEqual(asks, [null, "server"], "the same machine taken: nothing read again");
+});
+
+test("UI: in an open list up/down, ctrl-n/p and ctrl-j/k mark a row and are taken; plain j and k, space and h/l are the filter's; Enter takes the row once", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work"), spaceOf("s5", "tend")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  const list = b.modal.list;
+  assert.equal(list.at, 1);
+  const moves = [["down", {}, 2], ["up", {}, 1], ["n", { modifiers: { control: true } }, 2], ["p", { modifiers: { control: true } }, 1], ["j", { modifiers: { control: true } }, 2], ["k", { modifiers: { control: true } }, 1]];
+  for (const [k, extra, at] of moves) {
+    const before = cx.stopped;
+    await press(b, cx, k, extra);
+    assert.deepEqual([list.at, cx.stopped - before], [at, 1], k);
+  }
+  for (const k of ["j", "k", "space", "h", "l"]) {
+    const before = cx.stopped;
+    await press(b, cx, k);
+    assert.deepEqual([b.modal.list, list.at, cx.stopped - before], [list, 1, 0], `${k} goes to the filter`);
+  }
+  await press(b, cx, "down");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal.list, openInShown(b), b.modal.busy], [null, ["work", false], null], "taken, not started");
+  cx.call((own) => list.input.submit(own));
+  await settle();
+  assert.deepEqual([b.modal.list, openInShown(b), b.modal.busy, host.open("sh").length], [null, ["work", false], null, 0], "the filter's own Enter after it does nothing");
+});
+
+test("UI: Tab in an open list closes it, taking nothing, and moves to the next field", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  await press(b, cx, "down");
+  assert.equal(boardAction(b, "board_tab"), 1);
+  assert.deepEqual([b.modal.list, b.modal.field, b.modal.inputFocused, openInShown(b)], [null, "message", true, ["x", false]]);
+});
+
+const CODEX = { key: "codex", name: "Codex", run: ["codex"], installed: true };
+const CLAUDE = { key: "claude", name: "Claude Code", run: ["claude"], installed: true };
+const GEMINI = { key: "gemini", name: "Gemini", run: ["gemini"], installed: true };
+// knownAgents answering only when a test says so: its asks, each a
+// deferred().
+function slowAgents(host) {
+  const asks = [];
+  host.knownAgents = () => {
+    const d = deferred();
+    asks.push(d);
+    return d.promise;
+  };
+  return asks;
+}
+
+test("UI: the agent list opened while the agents are read marks the agent preselected once they come, with no draw before Enter too; a key moves the mark from there", async () => {
+  for (const drawn of [true, false]) {
+    const { b, cx, host } = await openBoard();
+    const asks = slowAgents(host);
+    await openStart(b, cx);
+    await press(b, cx, "tab");
+    await press(b, cx, "space");
+    assert.deepEqual([shownRows(b), b.modal.list.at], [[], -1]);
+    asks[0].resolve([CODEX, CLAUDE, GEMINI]);
+    await settle();
+    if (drawn) {
+      assert.deepEqual([shownRows(b), b.modal.list.at], [["Codex", "Claude Code", "Gemini"], 1], "the agent preselected");
+      await press(b, cx, "down");
+      assert.equal(b.modal.list.at, 2, "from the preselected one");
+      await press(b, cx, "up");
+    }
+    await press(b, cx, "enter");
+    assert.deepEqual([b.modal.list, texts(byId(b.render(), "choice-agent"))[0]], [null, "Claude Code"], drawn ? "drawn" : "not drawn");
+  }
+});
+
+test("UI: Öffnen in opened while herdr reads the machine's spaces marks the space preselected once they are read; a mark a key moved stays on its space as more come", async () => {
+  const { b, cx, host } = await openBoard();
+  let layout = "loading";
+  host.machines = () => [{ name: null, layout }, { name: "server", layout: "ready" }];
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "tender"), spaceOf("s4", "work")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  assert.deepEqual([shownRows(b), b.modal.list.at], [["Neuer Space …"], 0]);
+  layout = "ready";
+  assert.deepEqual([shownRows(b), b.modal.list.at, openInShown(b)], [["Neuer Space …", "x/r/tender", "tender/r/tender", "work/r/work"], 2, ["tender", false]]);
+  await press(b, cx, "down");
+  host.spaceList = [host.spaceList[0], spaceOf("s2", "api"), ...host.spaceList.slice(1)];
+  assert.equal(shownRows(b)[b.modal.list.at], "work/r/work", "the mark on its space, not its place");
+  b.modal.list.input.type("t");
+  assert.equal(b.modal.list.at, 0, "a filter typed: its first row");
+  b.modal.list.input.type("");
+  assert.equal(shownRows(b)[b.modal.list.at], "tender/r/tender", "the filter emptied: the field's own again");
+  await press(b, cx, "down");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal.list, openInShown(b)], [null, ["work", false]]);
+});
+
+test("UI: the agent list says „lädt …“ while the agents are read, why where they cannot be, and that none fits a filter", async () => {
+  const { b, cx, host } = await openBoard();
+  const asks = slowAgents(host);
+  await openStart(b, cx);
+  await press(b, cx, "tab");
+  await press(b, cx, "space");
+  const said = () => texts(byId(b.render(), "choice-list"));
+  assert.ok(said().includes("lädt …"));
+  b.modal.list.input.type("cl");
+  assert.deepEqual([said().includes("Kein Agent passt zum Filter"), said().includes("lädt …")], [true, false], "a filter typed");
+  b.modal.list.input.type("");
+  asks[0].reject(new Error("down"));
+  await settle();
+  assert.ok(said().includes("Agents auf diesem Rechner nicht lesbar: down"));
+  const read = await openBoard();
+  await openStart(read.b, read.cx);
+  await press(read.b, read.cx, "tab");
+  await press(read.b, read.cx, "space");
+  read.b.modal.list.input.type("zz");
+  assert.deepEqual([shownRows(read.b), texts(byId(read.b.render(), "choice-list")).includes("Kein Agent passt zum Filter")], [[], true], "read, none fits");
+});
+
+test("UI: a list of more than ten rows shows ten, the marked one among them, and how many more below; the wheel moves its window, the mark staying", async () => {
+  const { b, cx, host } = await openBoard();
+  const many = Array.from({ length: 13 }, (_, i) => spaceOf(`s${i + 10}`, `space${String(i).padStart(2, "0")}`));
+  host.spaceList = [{ ...host.spaceList[0] }, ...many, spaceOf("s3", "tender"), spaceOf("s4", "zeta")];
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  const rows = shownRows(b);
+  assert.deepEqual([rows.length, rows.at(-1), b.modal.list.at, b.modal.list.top], [10, "tender/r/tender", 15, 6], "the repo's space marked, in view");
+  assert.ok(texts(byId(b.render(), "choice-list")).includes("↓ 1 weitere"));
+  cx.call((own) => byId(b.render(), "choice-list-rows").with.on_scroll_wheel[0]({ delta: { x: 0, y: 2 * board.MENU_ROW_PX } }, own));
+  assert.deepEqual([shownRows(b)[0], b.modal.list.at, b.modal.list.top], ["space02/r/space02", 15, 4], "up two rows");
+  assert.ok(texts(byId(b.render(), "choice-list")).includes("↓ 3 weitere"));
+  await press(b, cx, "escape");
+  let layout = "loading";
+  host.machines = () => [{ name: null, layout }];
+  await press(b, cx, "space");
+  assert.deepEqual(shownRows(b), ["Neuer Space …"]);
+  layout = "ready";
+  assert.deepEqual([shownRows(b).at(-1), b.modal.list.at, b.modal.list.top], ["tender/r/tender", 15, 6], "read after it opened: the window follows the mark");
 });
 
 test("the fake cx keeps herdr's rule: a handler's cx is stale once it returns; init's, a spawn's and a timer's stay valid", async () => {

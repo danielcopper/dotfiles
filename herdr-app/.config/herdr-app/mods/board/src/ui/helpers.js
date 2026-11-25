@@ -123,7 +123,7 @@ export function button(t, id, label, primary, action, disabled = false) {
 
 // A backdrop over the whole board that swallows presses, with a panel on
 // it.
-export function backdrop(t, id, panel) {
+export function backdrop(t, id, panel, over = null) {
   return div()
     .id(id)
     .absolute()
@@ -134,11 +134,13 @@ export function backdrop(t, id, panel) {
     .bg(tint(t.background, "b3"))
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
-    .child(panel);
+    .child(panel)
+    .when(Boolean(over), (el) => el.child(over));
 }
 
-// menuKey takes a menu's keys.
-export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
+export const menu = (t, spec) => backdrop(t, `${spec.id}-backdrop`, menuPanel(t, spec));
+
+export function menuPanel(t, { id, rowId, width, title, rows, at, pick, head = [], digits = true, from = 0, count = from + rows.length, heads = [], wheel = null, foot = [] }) {
   const below = count - from - rows.length;
   const share = (n) => `${((100 * n) / count).toFixed(2)}%`;
   const row = (kids, n) =>
@@ -165,25 +167,21 @@ export function menu(t, { id, rowId, width, title, rows, at, pick, head = [], di
     .when(count > rows.length, (el) => el.child(
       div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
     ));
-  return backdrop(
-    t,
-    `${id}-backdrop`,
-    v_flex()
-      .id(`${id}-menu`)
-      .w(width)
-      .p(8)
-      .gap(2)
-      .rounded(10)
-      .border_1()
-      .border_color(t.input)
-      .bg(t.popover)
-      .shadow_lg()
-      .child(div().px(8).py(6).text_size(12).text_color(t.muted).child(`${title} · Enter · Esc`))
-      .children(head)
-      .child(list)
-      .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))
-      .children(foot),
-  );
+  return v_flex()
+    .id(`${id}-menu`)
+    .w(width)
+    .p(8)
+    .gap(2)
+    .rounded(10)
+    .border_1()
+    .border_color(t.input)
+    .bg(t.popover)
+    .shadow_lg()
+    .when(title !== null, (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.muted).child(`${title} · Enter · Esc`)))
+    .children(head)
+    .child(list)
+    .when(below > 0, (el) => el.child(div().id(`${id}-below`).px(8).text_size(11).text_color(t.dim).child(`↓ ${below} weitere`)))
+    .children(foot);
 }
 
 // A length herdr measured, or a wheel's move, in the script's pixels: herdr
@@ -260,11 +258,12 @@ export function filterMenuKey(e, cx, m, count) {
   const k = e.key;
   const ctrl = e.modifiers?.control;
   const by = k === "down" || (ctrl && (k === "j" || k === "n")) ? 1 : k === "up" || (ctrl && (k === "k" || k === "p")) ? -1 : 0;
-  if (!by) return;
+  if (!by) return false;
   cx.stop_propagation();
   m.at = Math.max(0, Math.min(m.at + by, count - 1));
   followMark(m, count);
   cx.notify();
+  return true;
 }
 
 // A card's line of who it is assigned to (by name), in every shape alike;
@@ -289,30 +288,35 @@ export function menuKey(e, cx, m, count, pick) {
   cx.notify();
 }
 
-// A menu with a filter: opens the dialog `m` ({ kind, view, … }) as b.modal
-// with its filter, an InputState with `placeholder` made for it (m.input;
-// field "filter", inputs, inputFocused, filter; at, the marked row; top and
-// wheel, its window). Enter in the filter picks the marked row (pick(i, cx)).
-// When it opens and at each change of the filter, mark() marks the row
-// startAt(m) gives and brings the window, from the top, to it (followMark
-// over count(m) rows); it returns mark, for a menu whose rows come later.
-export function openFilterMenu(b, m, { placeholder, count, startAt, pick }, cx) {
+// A filter over rows, on `holder` (a menu with a filter, or a list in a
+// dialog); the returned mark() is for rows that come later.
+export function wireFilter(m, holder, { placeholder, count, startAt, pick }) {
   const mark = () => {
-    m.at = startAt(m);
-    m.top = 0;
-    followMark(m, count(m));
+    holder.at = startAt(holder);
+    holder.top = 0;
+    followMark(holder, count(holder));
   };
   const input = InputState.new({ placeholder });
-  Object.assign(m, { input, field: "filter", filter: "", wheel: 0 });
+  Object.assign(holder, { input, filter: "", wheel: 0 });
   mark();
-  wireTextField(b, m, input, "filter", (cx) => pick(m.at, cx));
+  trackFocus(m, input, "filter");
+  input.on("submit", (_e, cx) => pick(holder.at, cx));
   input.on("change", (_e, cx) => {
-    m.filter = input.value();
+    holder.filter = input.value();
     mark();
     cx.notify();
   });
+  return mark;
+}
+
+// A menu with a filter: opens the dialog `m` ({ kind, view, … }) as b.modal
+// with its filter (wireFilter, on m itself; field "filter", inputs).
+export function openFilterMenu(b, m, spec, cx) {
+  const mark = wireFilter(m, m, spec);
+  m.field = "filter";
+  m.inputs = { filter: m.input };
   b.modal = m;
-  input.focus();
+  m.input.focus();
   cx.notify();
   return mark;
 }
@@ -346,28 +350,34 @@ export const filterMenuHead = (t, m) => [
 ];
 export const menuNote = (t, text, color, size = 12) => div().px(8).text_size(size).text_color(color).child(text);
 
-// A dialog's text field, the InputState `input` for the dialog m's field
-// `field`, kept as m.inputs[field] (Board.takeKeyboard): m.inputFocused
-// follows the focus of the dialog's fields (Board.boardHasKeyboard), a
-// focus moves the dialog onto that field, and Enter in it runs
-// `submit(cx)`.
+// A dialog's text field, the text input `input` for the dialog m's field
+// `field`, kept as m.inputs[field] (Board.takeKeyboard): a focus moves the
+// dialog onto that field (trackFocus), and Enter in it runs `submit(e, cx)`.
 export function wireTextField(b, m, input, field, submit) {
   m.inputs = { ...m.inputs, [field]: input };
+  trackFocus(m, input, field, () => {
+    if (b.modal === m) m.field = field;
+  });
+  input.on("submit", submit);
+}
+
+// m.inputFocused, which Board.boardHasKeyboard reads, follows the focus of
+// the dialog m's inputs.
+function trackFocus(m, input, name, focused = () => {}) {
   m.inputFocused = false;
   input.on("focus", (_e, cx) => {
     m.inputFocused = true;
-    m.focusedField = field;
-    if (b.modal === m) m.field = field;
+    m.focusedField = name;
+    focused();
     cx.notify();
   });
-  // A blur that comes after another field of the dialog took the focus
+  // A blur that comes after another input of the dialog took the focus
   // leaves it.
   input.on("blur", () => {
-    if (m.focusedField !== field) return;
+    if (m.focusedField !== name) return;
     m.inputFocused = false;
     m.focusedField = null;
   });
-  input.on("submit", (_e, cx) => submit(cx));
 }
 
 // Tab and shift-Tab (`back`) in the open dialog: the next or previous of
@@ -382,8 +392,8 @@ export function cycleField(b, fields, back, cx) {
 
 // A dialog field's label, and its frame, marked while the dialog is on it.
 export const fieldLabel = (t, text) => div().text_size(12).text_color(t.muted).child(text);
-export const fieldFrame = (t, m, field, inner) =>
-  h_flex().h(34).px(10).items_center().rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background).child(inner);
+export const fieldBox = (t, m, field) => h_flex().px(10).rounded(6).border_1().border_color(m.field === field ? t.accent : t.input).bg(t.background);
+export const fieldFrame = (t, m, field, inner) => fieldBox(t, m, field).h(34).items_center().child(inner);
 
 // The detail panel's width, its one home, from the number of columns that
 // share the rest of the board area with it (its shape's columnCount; none

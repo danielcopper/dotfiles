@@ -364,10 +364,10 @@ by that run. Which files of the package git tracks is set in the root
   it brings the tab's content back with the place before the board, the pane
   under it too, and from there it shows the board again.
   Whenever the board comes to show, there or in a Board tab, it takes the
-  keyboard: the start dialog's message or the new space's name while the dialog
-  is on that field, else the filter being typed, else the board itself; to show
-  the layer's board, the button and `b` also send it the board's focus command,
-  which herdr hands only to a copy that shows. The tab's content comes back,
+  keyboard where the one rule for it says (the comment above `takeKeyboard` in
+  `mods/board/src/main.js`); to show the layer's board, the button and `b` also
+  send it the board's focus command, which herdr hands only to a copy that
+  shows. The tab's content comes back,
   with the keyboard, on a second press of the button or `b`, on `Esc` when the
   board has nothing else to close (details, a notice, the filter), on `Enter` to
   an item's session, and when the focus moves to another space, tab or pane, for
@@ -754,24 +754,40 @@ by that run. Which files of the package git tracks is set in the root
   details, a second `Enter` goes to the item's session or starts one: a new tab
   on the chosen machine, in the repo's checkout, whose agent gets the first
   message views.json sets (`/implement <n>`, `/pr-review <n>` for a pull
-  request) and makes its own worktree. The start dialog's "Öffnen in" says where
-  the tab goes: `Enter` or a click on it opens a picker like the assignee
-  picker, with "Neuer Space …" and the chosen machine's spaces. An existing
-  space gets the tab, in the checkout's folder whatever the space's own; a new
-  space takes the name typed in the field that then shows, prefilled with the
-  repo's name (for a work item the checkout's last folder). Preselected is the
-  space of that name, ignoring case, else the space I am in, else that machine's
-  first; "Neuer Space …" only where the machine has none. Another machine in
-  "Rechner" chooses anew among its spaces, unless a new space with a name I
-  typed is chosen; a machine whose spaces herdr has not read says so and offers
-  only a new space. A chosen space that closes while the dialog is open is said
-  there, and the dialog starts nothing until I choose again; for one chosen on a
-  machine whose spaces herdr is reading (again), it starts nothing until they
-  are read. `Esc` in the picker goes back to the dialog. In the start dialog and
-  the create dialog `Tab` and shift-`Tab` move between the fields, from the
-  message or title too: the board binds them in its own key context, as the
-  leader does (the comment above `BOARD_KEYS` in `mods/board/src/main.js`). The
-  tab is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
+  request) and makes its own worktree. In the start dialog `Enter` starts the
+  session from every field. The first message grows with its text up to six
+  lines and then scrolls (`PageUp`/`PageDown`, herdr's own keys there);
+  shift-`Enter` breaks the line. The board binds `Enter` in the message's own
+  key context (why: the comment above `MESSAGE_KEYS` in
+  `mods/board/src/ui/modals/start.js`); a load of `keys.json` drops that
+  binding and the board's `Tab` and shift-`Tab`, so until the board binds its
+  keys again those keys in the dialog's text fields are herdr's own (in the
+  message they indent and outdent). The first `Enter` in the message after
+  such a load binds them again and puts the message back as it was before
+  that `Enter`. Where that `Enter` put in only its one line break, in place of
+  the selection, it starts; where it put in more (several cursors), it starts
+  nothing and asks for `Enter` once more. The three choices "Agent", "Rechner"
+  and "Öffnen in" work alike: `←`/`→` (or `h`/`l`) step through the entries in
+  place, space or a click opens a list under the field, whose filter then has
+  the keyboard. Typing filters the list, `↑`/`↓` (or `ctrl-n/p`, `ctrl-j/k`)
+  mark a row, `Enter` or a click takes it and closes the list, and `Esc` or a
+  press beside the list closes only the list. The hint line names the keys of
+  the field that has the keyboard. "Öffnen in" says where the tab goes, with
+  "Neuer Space …" and the chosen machine's spaces. An existing space gets the
+  tab, in the checkout's folder whatever the space's own; a new space takes the
+  name typed in the field that then shows, prefilled with the repo's name (for a
+  work item the checkout's last folder). Preselected is the space of that name,
+  ignoring case, else the space I am in, else that machine's first; "Neuer Space
+  …" only where the machine has none. Another machine in "Rechner" chooses anew
+  among its spaces, unless a new space with a name I typed is chosen; a machine
+  whose spaces herdr has not read says so and offers only a new space. A chosen
+  space that closes while the dialog is open is said there, and the dialog
+  starts nothing until I choose again; for one chosen on a machine whose spaces
+  herdr is reading (again), it starts nothing until they are read. In the start
+  dialog and the create dialog `Tab` and shift-`Tab` move between the fields,
+  from the message or title too: the board binds them in its own key context, as
+  the leader does (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
+  The tab is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
   item), which is how the board finds it again. A status change shows at once
   and is written to GitHub or Azure; a refusal moves the card back (or sets the
   state back) with the error, and a write without a clear answer refreshes the
@@ -780,24 +796,22 @@ by that run. Which files of the package git tracks is set in the root
   a task in is Azure's to say. Who an item is assigned to shows the same way on
   both sources, by name (on GitHub the login where the account has no name): on
   a card and a story after its state or chips, in the Backlog's "Zugewiesen"
-  column and in the details ("zugewiesen: …"); the filter finds it by name
-  and by login. `a` on a GitHub card, a Sprint's story or task or a Backlog's
-  row opens a picker: "Ich", "niemand", then the people of the item's repo
-  that GitHub lets it be assigned to (the first 100), or the members of the
-  view's team on Azure, narrowed by typing; `↑`/`↓` (or `ctrl-j/k`,
-  `ctrl-n/p`) mark one, `Enter` or a click assigns it. Ten show at a time, the
-  window following the mark and moved by the mouse wheel, as in the command
-  menu. It always sets exactly one person, or no one: on GitHub the chosen one
-  replaces all assignees.
-  The people are read once per repo or team and kept while the board runs;
-  where they cannot be read, the picker and a toast say why, and it still
-  offers "niemand" (and "Ich" on Azure, which az resolves itself) with no
-  row marked, so that `Enter` assigns no one until a row is chosen. A draft
-  takes no assignment. The change shows at once and goes back with the error
-  where it is refused, as a status change does; one without a clear answer
-  refreshes the view and then says who has the item. It runs gh and az by
-  the path my shell gives, since herdr's
-  own PATH lacks Homebrew and mise. `mise run
+  column and in the details ("zugewiesen: …"); the filter finds it by name and
+  by login. `a` on a GitHub card, a Sprint's story or task or a Backlog's row
+  opens a picker: "Ich", "niemand", then the people of the item's repo that
+  GitHub lets it be assigned to (the first 100), or the members of the view's
+  team on Azure, narrowed by typing; `↑`/`↓` (or `ctrl-j/k`, `ctrl-n/p`) mark
+  one, `Enter` or a click assigns it. Ten show at a time, the window following
+  the mark and moved by the mouse wheel, as in the command menu. It always sets
+  exactly one person, or no one: on GitHub the chosen one replaces all
+  assignees. The people are read once per repo or team and kept while the board
+  runs; where they cannot be read, the picker and a toast say why, and it still
+  offers "niemand" (and "Ich" on Azure, which az resolves itself) with no row
+  marked, so that `Enter` assigns no one until a row is chosen. A draft takes no
+  assignment. The change shows at once and goes back with the error where it is
+  refused, as a status change does; one without a clear answer refreshes the
+  view and then says who has the item. It runs gh and az by the path my shell
+  gives, since herdr's own PATH lacks Homebrew and mise. `mise run
   herdr-board-test` (without mise, `node --test tests/herdr-app/board.test.mjs`
   from the repo) tests that `main.js` is built from its sources, its data
   functions and a few of its key paths against sample answers of gh, GitHub and

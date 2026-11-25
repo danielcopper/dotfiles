@@ -131,13 +131,14 @@
 // load draws before its end, the prefetch's order, the top bar's words for a
 // read), actions/ (starting a session, writing a change at once, moving a
 // card, changing a state, creating a work item, assigning an item),
-// ui/helpers.js, ui/tones.js (the tones of labels and types, the selected
-// background, the tints), ui/layer.js (the board layer), ui/related.js (the
-// related items as drawn), ui/band.js (which cards of a board column draw
-// whole), ui/shapes/ (how a view's data is drawn and worked: board, prs,
-// sprint, backlog, placeholder), ui/modals/ (the dialogs: start, status,
-// columns, create, assign, commands, sprints) and this one, the Board, which
-// looks the shape up.
+// ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
+// ui/tones.js (the tones of labels and types, the selected background, the
+// tints), ui/layer.js (the board layer), ui/related.js (the related items as
+// drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
+// (how a view's data is drawn and worked: board, prs, sprint, backlog,
+// placeholder), ui/modals/ (the dialogs: start, status, columns, create,
+// assign, commands, sprints) and this one, the Board, which looks the shape
+// up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -194,6 +195,7 @@ export * from "./actions/create.js";
 export * from "./actions/assign.js";
 export * from "./sources/index.js";
 export * from "./ui/helpers.js";
+export * from "./ui/choices.js";
 export * from "./ui/tones.js";
 export * from "./ui/layer.js";
 export * from "./ui/related.js";
@@ -207,7 +209,6 @@ export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
 export * from "./ui/modals/create.js";
-export * from "./ui/modals/open-in.js";
 export * from "./ui/modals/assign.js";
 export * from "./ui/modals/commands.js";
 export * from "./ui/modals/sprints.js";
@@ -371,16 +372,22 @@ export default class Board extends View {
     this.reload(cx);
   }
 
-  // Binds BOARD_KEYS in BOARD_KEY_CONTEXT, once per copy, as the leader
-  // does (mods/leader/main.js, bindKeys: each bind adds entries, and a load
-  // of keys.json drops them all). A failure leaves the rest of the board
+  // At init, and again after a load of keys.json dropped the bindings (the
+  // message's Enter finds them gone: start.js), as the leader does
+  // (mods/leader/main.js, bindKeys: each bind adds entries, and a load of
+  // keys.json drops them all). A failure leaves the rest of the board
   // working and says why.
   bindKeys(cx) {
-    const names = "Tab und shift-Tab";
+    const keys = [
+      ...BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: BOARD_KEY_CONTEXT })),
+      ...Object.values(MODALS).flatMap((d) => d.keys ?? []),
+    ];
+    const strokes = keys.map((k) => k.keystroke.replace(/[a-z]+$/, (key) => key[0].toUpperCase() + key.slice(1)));
+    const names = `${strokes.slice(0, -1).join(", ")} und ${strokes.at(-1)}`;
     try {
-      const count = cx.bind_keys(BOARD_KEYS.map(({ keystroke, action }) => ({ keystroke, action, context: BOARD_KEY_CONTEXT })));
-      if (count !== BOARD_KEYS.length) {
-        notify({ title: `Board: ${names} nicht alle gebunden`, body: `${count} von ${BOARD_KEYS.length} Bindungen angelegt`, level: "error" });
+      const count = cx.bind_keys(keys);
+      if (count !== keys.length) {
+        notify({ title: `Board: ${names} nicht alle gebunden`, body: `${count} von ${keys.length} Bindungen angelegt`, level: "error" });
       }
     } catch (e) {
       notify({ title: `Board: ${names} nicht gebunden`, body: String(e?.message ?? e), level: "error" });
@@ -1242,12 +1249,15 @@ export default class Board extends View {
     return this.isLayer() && boardShown(true);
   }
 
-  // Gives the board's keyboard to where it belongs, the one rule for it: the
-  // open dialog's text field when the dialog is on one (m.inputs), else the
-  // filter while one is typed, else the board itself, which hands its keys to
-  // a dialog without a text field (the status menu) or on another field.
+  // Gives the board's keyboard to where it belongs, the one rule for it:
+  // where the open dialog wants it (its keyboard(m): the filter of a
+  // choice's open list), else the dialog's text field when the dialog is on
+  // one (m.inputs), else the filter while one is typed, else the board
+  // itself, which hands its keys to a dialog without a text field (the
+  // status menu) or on another field.
   takeKeyboard() {
-    const input = this.modal?.inputs?.[this.modal.field];
+    const m = this.modal;
+    const input = (m && MODALS[m.kind].keyboard?.(m)) ?? m?.inputs?.[m.field];
     if (input) input.focus();
     else if (this.filtering) this.filterInput.focus();
     else this.handle.focus();
@@ -1339,11 +1349,9 @@ export default class Board extends View {
     }
   }
 
-  // A dialog opened from another (m.back: the start dialog's space picker)
-  // goes back to that one, on the field it was opened from.
   closeModal(cx) {
     if (this.modal?.busy) return;
-    this.modal = this.modal?.back ?? null;
+    this.modal = null;
     this.handle.focus();
     cx.notify();
   }
@@ -1493,10 +1501,10 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Esc closes a dialog that is not busy; every other key is the dialog's.
   modalKey(e, cx) {
     if (e.key === "escape") {
       cx.stop_propagation();
+      if (MODALS[this.modal.kind].escape?.(this, cx)) return;
       return this.closeModal(cx);
     }
     MODALS[this.modal.kind].key(this, e, cx);
