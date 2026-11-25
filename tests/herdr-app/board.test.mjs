@@ -126,7 +126,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -225,7 +225,7 @@ const casesBoard = () => board.parseGithubBoard(json("github-board-cases.json"),
 const azureTypes = () => board.parseAzureTypes(fixture("azure-types.json"));
 // A work item as the Azure views will show one.
 const azureItem = () => ({
-  key: "w101", source: "azure", kind: "workitem", number: 101, repo: "Example Project", repoShort: "Example Project", title: "Write the sample importer",
+  key: "w101", source: "azure", kind: "workitem", number: 101, title: "Write the sample importer",
   url: null, labels: [], assignees: [], type: "Task", parent: null, sub: null, branch: null,
 });
 const names = (b) => b.columns.map((c) => c.name);
@@ -474,6 +474,26 @@ test("validateConfig reads sources.azure: contexts of a team, with its views, or
     assert.match(text, expected);
   }
   assert.equal(errors.length, 11);
+});
+
+test("a team's repo folders are its own repoFolders, else sources.azure's, else none; a list of folders (text), each once, a trailing / aside, or nothing, said like its siblings", () => {
+  const team = (name, more = {}) => ({ team: { project: "P", team: name }, ...more });
+  const read = (azure) => board.validateConfig({ sources: { azure: { org: "https://dev.azure.com/o", ...azure } } });
+  const folders = (azure) => read(azure).config.azure.contexts.map((c) => c.repoFolders ?? null);
+  assert.deepEqual(folders({ contexts: [team("T"), { prs: { project: "P" } }] }), [[], null]);
+  assert.deepEqual(folders({ repoFolders: ["~/work"], contexts: [team("T"), team("U", { repoFolders: ["~/u", "/srv/u"] })] }), [["~/work"], ["~/u", "/srv/u"]]);
+  assert.deepEqual(folders({ repoFolders: ["~/work//", "/"], contexts: [team("T"), team("U", { repoFolders: ["~/u/", "~"] })] }), [["~/work", "/"], ["~/u", "~"]]);
+  const { config, errors } = read({ repoFolders: "~/work", contexts: [team("T"), team("U", { repoFolders: [] }), team("V", { repoFolders: ["~/v", " "] }), { prs: { project: "P" }, repoFolders: ["~/p"] },
+    team("W", { repoFolders: ["~/w", "/srv/w", "~/w/"] })] });
+  const wrong = "ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]";
+  assert.deepEqual(errors, [
+    `„sources.azure.repoFolders“ ${wrong}`,
+    `Azure-Kontext 2 („U“): „repoFolders“ ${wrong}`,
+    `Azure-Kontext 3 („V“): „repoFolders“ ${wrong}`,
+    "Azure-Kontext 4 („PRs · P“): „repoFolders“ gibt es nicht",
+    `Azure-Kontext 5 („W“): „repoFolders“ ${wrong}`,
+  ]);
+  assert.deepEqual(config.azure.contexts.map((c) => [c.name, c.repoFolders]), [["T", []]], "a wrong default leaves none");
 });
 
 test("without a valid org or any context nothing of sources.azure is used, and the board says why", () => {
@@ -2131,7 +2151,6 @@ test("templates take the item's number, title, url, owner, repo and key", () => 
   const vars = board.templateVars(card);
   assert.deepEqual(vars, { number: 3004, title: card.title, url: "https://github.com/example/tender/issues/3004", owner: "example", repo: "tender", key: "tender#3004" });
   assert.equal(board.renderTemplate("/implement {number} {nope}", vars), "/implement 3004 {nope}");
-  assert.equal(board.templateVars(azureItem()).repo, "Example Project");
 });
 
 test("the checkout script expands ~ on the machine, checks the folder and prints it", () => {
@@ -2153,6 +2172,71 @@ test("the checkout script works under dash too", { skip: !dash && "no dash on th
   const run = (checkout) => spawnSync(dash, board.checkoutArgs(checkout), { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } });
   assert.equal(run("~/src/dash").stdout, `${join(home, "src/dash")}\n`);
   assert.equal(run("~/src/none").status, 3);
+});
+
+// Under `home`: repos/alpha (a .git folder), repos/beta (a worktree's .git
+// file), repos/notes (no .git), repos/.hidden, other/alpha, a folder "a b";
+// and toprepo, a repo directly in `home`.
+function repoTree(home) {
+  for (const dir of ["repos/alpha/.git", "repos/notes", "repos/.hidden/.git", "other/alpha/.git", "a b/c d/.git"]) mkdirSync(join(home, "lists", dir), { recursive: true });
+  mkdirSync(join(home, "toprepo/.git"), { recursive: true });
+  mkdirSync(join(home, "lists/repos/beta"), { recursive: true });
+  writeFileSync(join(home, "lists/repos/beta/.git"), "gitdir: /elsewhere\n");
+  writeFileSync(join(home, "lists/repos/file"), "");
+}
+
+for (const [shell, at] of [["sh", "sh"], ["dash", dash]]) {
+  test(`the repo script lists the folders with a .git directly beneath each folder, ~ that machine's home, and names a folder that is not there (${shell})`, { skip: !at && "no dash on this machine" }, () => {
+    const home = process.env.HOME;
+    repoTree(home);
+    const folders = ["~/lists/repos", "~/lists/none", `${home}/lists/other`, "~/lists/a b"];
+    const r = spawnSync(at, board.reposArgs(folders), { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } });
+    assert.equal(r.status, 0);
+    const lists = join(home, "lists");
+    assert.equal(r.stdout, `0\t${lists}/repos/alpha\n0\t${lists}/repos/beta\n1\t\n2\t${lists}/other/alpha\n3\t${lists}/a b/c d\n`);
+    assert.deepEqual(board.parseRepos(r.stdout, folders), {
+      repos: [
+        { key: "~/lists/repos/alpha", name: "alpha", folder: `${lists}/repos/alpha`, parent: "~/lists/repos" },
+        { key: `${home}/lists/other/alpha`, name: "alpha", folder: `${lists}/other/alpha`, parent: `${home}/lists/other` },
+        { key: "~/lists/repos/beta", name: "beta", folder: `${lists}/repos/beta`, parent: "~/lists/repos" },
+        { key: "~/lists/a b/c d", name: "c d", folder: `${lists}/a b/c d`, parent: "~/lists/a b" },
+      ],
+      missing: ["~/lists/none"],
+      unreadable: [],
+    });
+    const top = spawnSync(at, board.reposArgs(["~"]), { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } });
+    assert.ok(top.stdout.split("\n").includes(`0\t${home}/toprepo`), "~ alone is that machine's home");
+    assert.deepEqual(board.parseRepos(top.stdout, ["~"]).repos.find((r) => r.name === "toprepo"), { key: "~/toprepo", name: "toprepo", folder: `${home}/toprepo`, parent: "~" });
+    assert.deepEqual(board.reposArgs(["~/x; rm -rf ~"]).slice(-1), ["~/x; rm -rf ~"], "a folder is an argument, never part of the script");
+  });
+
+  test(`the repo script names a folder it cannot enter or list (${shell})`, { skip: (!at && "no dash on this machine") || (process.getuid?.() === 0 && "root reads every folder") }, () => {
+    const home = process.env.HOME;
+    const shut = join(home, "shut");
+    for (const dir of ["closed/x/.git", "blind/y/.git", "open/z/.git"]) mkdirSync(join(shut, dir), { recursive: true });
+    chmodSync(join(shut, "closed"), 0o600);
+    chmodSync(join(shut, "blind"), 0o100);
+    try {
+      const folders = ["~/shut/closed", "~/shut/blind", "~/shut/open"];
+      const r = spawnSync(at, board.reposArgs(folders), { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home } });
+      assert.equal(r.stdout, `0\t\t\n1\t\t\n2\t${shut}/open/z\n`);
+      assert.deepEqual(board.parseRepos(r.stdout, folders), {
+        repos: [{ key: "~/shut/open/z", name: "z", folder: `${shut}/open/z`, parent: "~/shut/open" }], missing: [], unreadable: ["~/shut/closed", "~/shut/blind"],
+      });
+    } finally {
+      chmodSync(join(shut, "closed"), 0o700);
+      chmodSync(join(shut, "blind"), 0o700);
+    }
+  });
+}
+
+test("the repo script's answer: lines it did not write, or of a place it was not given, are left out", () => {
+  assert.deepEqual(board.parseRepos("banner\n\t/x\n7\t/y\n0\t/r/a\n", ["~/r"]), { repos: [{ key: "~/r/a", name: "a", folder: "/r/a", parent: "~/r" }], missing: [], unreadable: [] });
+  assert.deepEqual(board.parseRepos("", ["~/r"]), { repos: [], missing: [], unreadable: [] });
+});
+
+test("a repo directly beneath the root folder is keyed with one slash", () => {
+  assert.deepEqual(board.parseRepos("0\t//a\n", ["/"]).repos, [{ key: "/a", name: "a", folder: "//a", parent: "/" }]);
 });
 
 test("a session opens as a new space with its own name on its machine, or a tab in a space there; the tab carries the session's name", () => {
@@ -2182,12 +2266,6 @@ test("Öffnen in preselects the space named like the repo, ignoring case, else t
   assert.equal(pre("laptop", "none"), "e", "the shown space is on another machine: the first");
   assert.equal(pre(null, ""), "a", "no name: the shown space");
   assert.equal(pre("desk", "tender"), null);
-});
-
-test("a new space's name is the repo's short name, an Azure item's its checkout's last folder", () => {
-  assert.equal(board.spaceNameFor({ repoShort: "tender" }, "~/src/other"), "tender");
-  assert.equal(board.spaceNameFor({ source: "azure" }, "~/Repos/vc/"), "vc");
-  assert.equal(board.spaceNameFor({ source: "azure" }, null), "");
 });
 
 // ---- Labels ----
@@ -2514,9 +2592,9 @@ function fakeHost({
   // A call of a tool: by its name, or by the path which gave for it.
   const named = (c, tool) => c.tool === tool || c.tool.endsWith(`/${tool}`);
   // Answers the oldest open call of a tool (whose arguments hold `has`, or
-  // that `has` takes, given its arguments).
+  // that `has` takes, given its arguments and options).
   host.answer = async (tool, result, has) => {
-    const fits = (c) => (typeof has === "function" ? has(c.args) : c.args.some((a) => String(a).includes(has)));
+    const fits = (c) => (typeof has === "function" ? has(c.args, c.options) : c.args.some((a) => String(a).includes(has)));
     const at = calls.findIndex((c) => named(c, tool) && !c.done && (!has || fits(c)));
     assert.ok(at >= 0, `no open ${tool} call${has ? ` with ${has}` : ""}`);
     calls[at].done = true;
@@ -3842,6 +3920,15 @@ test("UI: Enter in the dialog opens the session in the checkout, as a tab in the
   assert.equal(b.notice.text, `Sitzung geöffnet: ${name}`);
 });
 
+test("UI: an item with a repo starts in its checkout, which the dialog names; it has no Repo field", async () => {
+  const { b, cx } = await openBoard();
+  await openStart(b, cx);
+  const root = b.render();
+  assert.deepEqual([texts(root).includes("Neue Sitzung im Checkout ~/src/tender"), byId(root, "choice-repo")], [true, null]);
+  await press(b, cx, "tab");
+  assert.equal(b.modal.field, "agent");
+});
+
 test("UI: a session that does not appear is warned about after the last check only", async () => {
   const { b, cx, host } = await openBoard();
   await openStart(b, cx);
@@ -4399,15 +4486,6 @@ test("UI: picking where the session opens clears the dialog's error", async () =
   await press(b, cx, "down");
   pickRow(b, cx);
   assert.deepEqual([b.modal.error, texts(b.render()).includes("Der neue Space braucht einen Namen")], [null, false]);
-});
-
-test("UI: an item without a repo names its new space, and finds its space, by its checkout's last folder", async () => {
-  const { b, cx, host } = await openBoard({ config: testConfig({ start: { checkout: "~/Repos/vc" } }) });
-  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "VC")];
-  const item = { source: "azure", kind: "workitem", number: 301, title: "t", repo: null, assignees: [] };
-  cx.call((own) => board.startModal.open(b, b.view(), item, own));
-  await settle();
-  assert.deepEqual([b.modal.nameInput.value(), openInShown(b)], ["vc", ["VC", false]]);
 });
 
 test("UI: a dialog's field keeps the keyboard where the blur of the field it came from comes after its focus", async () => {
@@ -5397,7 +5475,6 @@ test("UI: a column operation on a view without columns is said; a reload that fi
 
 test("UI: an Azure-like item without a repo has its key, its parent's label, and a detail that draws", async () => {
   const item = { ...azureItem(), parent: 7 };
-  delete item.repo;
   assert.deepEqual(board.templateVars(item), { number: 101, title: item.title, url: "", owner: "", repo: "", key: "AB#101" });
   assert.deepEqual([board.parentLabel(item), board.itemKey({ ...item, kind: "pr" }), board.parentLabel({ ...githubBoard().columns[2].cards[0], parent: 3002 })],
     ["AB#7", "!101", "tender#3002"]);
@@ -6492,8 +6569,228 @@ test("UI: Enter shows a work item's parent, state, assignee, column, area and it
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://dev.azure.com/example-org/Example%20Project/_workitems/edit/311"]);
   await press(b, cx, "enter");
-  assert.equal(b.modal, null);
-  assert.equal(b.notice.text, "Für AB#311 steht kein „checkout“ in views.json: „start.checkout“");
+  assert.deepEqual([b.modal?.kind, repoShown(b)], ["start", "Kein Repo gefunden"]);
+  assert.ok(texts(b.render()).includes(NO_REPO_FOLDER));
+});
+
+// testConfig with repo folders: the team's own (`own`) and those of all of
+// Azure (`all`); and a start.checkout, which a work item does not take.
+function repoConfig({ own, all } = {}) {
+  const config = JSON.parse(testConfig({ start: { checkout: "~/elsewhere" } }));
+  if (all) config.sources.azure.repoFolders = all;
+  if (own) config.sources.azure.contexts[0].repoFolders = own;
+  return JSON.stringify(config);
+}
+const SPRINT_ID = "azure:team:Example Project/Example Team:sprint";
+const isRepos = (args) => args[1] === board.REPOS_SCRIPT;
+const openRepos = (host) => host.open("sh").filter((c) => isRepos(c.args));
+const REPOS_ANSWER = ok("0\t/home/me/work/vc\n0\t/home/me/work/api\n1\t/srv/more/api\n");
+const repoShown = (b) => texts(byId(b.render(), "choice-repo"))[0];
+const NO_REPO_FOLDER = 'Kein Repo-Ordner gesetzt: in views.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder im Kontext des Teams, etwa "repoFolders": ["~/Repos"]';
+// The Sprint's AB#311 with its start dialog open; its team's repo folders
+// ~/work and /srv/more unless `config` says otherwise.
+async function openWorkItemStart(options = {}) {
+  const opened = await openSprint({ config: repoConfig({ own: ["~/work", "/srv/more"] }), ...options });
+  const { b, cx } = opened;
+  await click(b, cx, "card-AB#311");
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "start");
+  return opened;
+}
+const startNow = async (b, cx) => {
+  cx.call((own) => board.startModal.start(b, own));
+  await settle();
+};
+
+test("UI: a work item's start dialog lists the git repos beneath its team's folders on the chosen machine with one sh call and preselects none; Enter without one starts nothing and says so at the field", async () => {
+  const { b, cx, host } = await openWorkItemStart();
+  const [list, ...more] = host.open("sh");
+  assert.deepEqual([isRepos(list.args), list.args.slice(3), list.options.on, more.length], [true, ["~/work", "/srv/more"], null, 0]);
+  assert.equal(repoShown(b), "lädt …");
+  await startNow(b, cx);
+  assert.deepEqual([b.modal.error, b.modal.field, host.runs.length], ["Die Repos werden noch gelesen", "repo", 0]);
+  await host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.ok(!texts(b.render()).some((t) => t.startsWith("Neue Sitzung im Checkout")));
+  assert.deepEqual([repoShown(b), b.modal.nameInput.value()], ["Repo wählen", ""]);
+  b.modal.field = "message";
+  b.takeKeyboard();
+  await press(b, cx, "tab");
+  assert.equal(b.modal.field, "repo", "after the message");
+  b.modal.field = "message";
+  b.takeKeyboard();
+  await startNow(b, cx);
+  assert.deepEqual([b.modal.error, b.modal.field, b.modal.inputFocused, host.open("sh").length, host.runs.length], ["Repo wählen", "repo", false, 0, 0]);
+  await press(b, cx, "space");
+  assert.deepEqual(shownRows(b), ["api~/work", "api/srv/more", "vc~/work"], "by name, then by folder, each folder named");
+  b.modal.list.input.type("vc");
+  pickRow(b, cx);
+  assert.deepEqual([repoShown(b), b.modal.error], ["vc", null]);
+  const { item } = b.modal;
+  await startNow(b, cx);
+  assert.equal(host.open("sh").length, 0, "no checkout to look up");
+  const [command, args] = host.runs.at(-1);
+  assert.deepEqual([command, args.name, args.folder, args.space], ["tab.new", board.sessionName(item), "/home/me/work/vc", "s1"]);
+  assert.match(args.name, /^AB#311 /);
+  assert.equal(memory.get(`repo:${SPRINT_ID}`), JSON.stringify("~/work/vc"));
+});
+
+test("UI: with one repo folder the Repo list names no folder", async () => {
+  const { b, cx, host } = await openWorkItemStart({ config: repoConfig({ own: ["~/work"] }) });
+  await host.answer("sh", ok("0\t/home/me/work/vc\n0\t/home/me/work/api\n"), isRepos);
+  b.modal.field = "repo";
+  await press(b, cx, "space");
+  assert.deepEqual(shownRows(b), ["api", "vc"]);
+});
+
+test("UI: the dialog preselects the repo its view last started in; one no longer among the repos is not, and the dialog says so until a repo is chosen", async () => {
+  const { b, host } = await openWorkItemStart({ stored: { source: "azure", [`repo:${SPRINT_ID}`]: "/srv/more/api" } });
+  await host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual([repoShown(b), b.modal.repo], ["api", "/srv/more/api"]);
+  assert.ok(!texts(b.render()).some((t) => t.includes("in keinem Repo-Ordner")));
+  const gone = "„~/work/gone“ liegt auf diesem Rechner in keinem Repo-Ordner; bitte ein Repo wählen";
+  const again = await openWorkItemStart({ stored: { source: "azure", [`repo:${SPRINT_ID}`]: "~/work/gone" } });
+  await again.host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual([repoShown(again.b), texts(again.b.render()).includes(gone)], ["Repo wählen", true]);
+  again.b.modal.field = "repo";
+  await press(again.b, again.cx, "l");
+  assert.deepEqual([repoShown(again.b), texts(again.b.render()).includes(gone)], ["api", false]);
+  const odd = await openWorkItemStart({ stored: { source: "azure", [`repo:${SPRINT_ID}`]: 5 } });
+  await odd.host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual([repoShown(odd.b), texts(odd.b.render()).some((t) => t.includes("in keinem Repo-Ordner"))], ["Repo wählen", false], "a stored value that is no repo");
+});
+
+test("UI: another machine lists the repos there with one sh call more; the repo chosen stays where that machine has it, else the dialog says it has not", async () => {
+  const { b, cx, host } = await openWorkItemStart();
+  b.modal.field = "machine";
+  await press(b, cx, "l");
+  assert.deepEqual(openRepos(host).map((c) => c.options.on), [null, "server"]);
+  await host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.equal(repoShown(b), "lädt …", "the answer for this machine");
+  await host.answer("sh", ok("0\t/home/srv/work/vc\n"), isRepos);
+  b.modal.field = "repo";
+  await press(b, cx, "l");
+  assert.deepEqual([repoShown(b), chosenFolder(b)], ["vc", "/home/srv/work/vc"]);
+  b.modal.field = "machine";
+  await press(b, cx, "l");
+  await host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual([repoShown(b), chosenFolder(b)], ["vc", "/home/me/work/vc"], "back here: the same repo, in its folder here");
+  assert.ok(!texts(b.render()).some((t) => t.includes("in keinem Repo-Ordner")));
+  await press(b, cx, "l");
+  await host.answer("sh", ok("0\t/home/srv/work/api\n"), isRepos);
+  assert.equal(repoShown(b), "Repo wählen");
+  assert.ok(texts(b.render()).includes("„~/work/vc“ liegt auf server in keinem Repo-Ordner; bitte ein Repo wählen"));
+});
+const chosenFolder = (b) => b.modal.repos.list.find((r) => r.key === b.modal.repo)?.folder ?? null;
+const onServer = (args, options) => isRepos(args) && options.on === "server";
+
+test("UI: an answer for the machine left changes nothing: not the repo chosen since, nor the new space's name", async () => {
+  const { b, cx, host } = await openWorkItemStart({ stored: { source: "azure", [`repo:${SPRINT_ID}`]: "~/work/vc" } });
+  b.modal.field = "machine";
+  await press(b, cx, "l");
+  await host.answer("sh", ok("0\t/home/srv/work/vc\n0\t/home/srv/work/api\n"), onServer);
+  assert.deepEqual([repoShown(b), chosenFolder(b)], ["vc", "/home/srv/work/vc"], "the view's last repo");
+  b.modal.field = "repo";
+  await press(b, cx, "h");
+  const chosen = () => [b.modal.repo, repoShown(b), chosenFolder(b), b.modal.nameInput.value(), b.modal.field];
+  assert.deepEqual(chosen(), ["~/work/api", "api", "/home/srv/work/api", "api", "repo"]);
+  await host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual(chosen(), ["~/work/api", "api", "/home/srv/work/api", "api", "repo"], "the answer for this machine, which has vc too");
+  const none = await openWorkItemStart({ stored: { source: "azure", [`repo:${SPRINT_ID}`]: "~/work/vc" } });
+  none.b.modal.field = "machine";
+  await press(none.b, none.cx, "l");
+  await none.host.answer("sh", ok("0\t/home/srv/work/api\n"), onServer);
+  const lost = "„~/work/vc“ liegt auf server in keinem Repo-Ordner; bitte ein Repo wählen";
+  const nothing = () => [none.b.modal.repo, repoShown(none.b), texts(none.b.render()).includes(lost)];
+  assert.deepEqual(nothing(), [null, "Repo wählen", true]);
+  await none.host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual(nothing(), [null, "Repo wählen", true], "nothing chosen, and the view's last repo not taken from the machine left");
+});
+
+test("UI: repos that cannot be listed, or a machine that cannot be reached, are said in the Repo field, and Enter starts nothing and says why", async () => {
+  const { b, cx, host } = await openWorkItemStart();
+  b.modal.field = "machine";
+  await press(b, cx, "l");
+  await host.answer("sh", new Error("connection lost"), isRepos);
+  assert.equal(repoShown(b), "lädt …", "the failure for this machine");
+  await press(b, cx, "l");
+  await host.answer("sh", ok("0\t/srv/x\n"), isRepos);
+  await host.answer("sh", { code: 2, stdout: "", stderr: "sh: cannot list\n" }, isRepos);
+  const why = "Repos auf diesem Rechner nicht lesbar: sh: cannot list";
+  assert.equal(repoShown(b), why);
+  await startNow(b, cx);
+  assert.deepEqual([b.modal.error, host.open("sh").length, host.runs.length], [why, 0, 0]);
+  b.modal.field = "machine";
+  await press(b, cx, "l");
+  await host.answer("sh", new Error("connection to server lost"), isRepos);
+  assert.equal(repoShown(b), "Repos auf server nicht lesbar: sh auf server ließ sich nicht starten: connection to server lost");
+  await startNow(b, cx);
+  assert.deepEqual([host.open("sh").length, host.runs.length], [0, 0]);
+});
+
+test("UI: without repo folders the dialog asks no machine and says what to set in views.json; folders of all of Azure without a git repo, not there or not readable, are said", async () => {
+  const { b, cx, host } = await openWorkItemStart({ config: testConfig(), stored: { source: "azure", [`repo:${SPRINT_ID}`]: "~/work/vc" } });
+  assert.deepEqual([host.open("sh").length, repoShown(b), texts(b.render()).includes(NO_REPO_FOLDER)], [0, "Kein Repo gefunden", true]);
+  assert.ok(!texts(b.render()).some((t) => t.includes("kein Git-Repo") || t.includes("in keinem Repo-Ordner")), "only what to set");
+  await startNow(b, cx);
+  assert.deepEqual([b.modal.error, host.open("sh").length, host.runs.length], ["Kein Repo gefunden", 0, 0]);
+  const all = await openWorkItemStart({ config: repoConfig({ all: ["~/work", "~/none", "~/shut"] }) });
+  assert.deepEqual(openRepos(all.host)[0].args.slice(3), ["~/work", "~/none", "~/shut"]);
+  await all.host.answer("sh", ok("1\t\n2\t\t\n"), isRepos);
+  const shown = texts(all.b.render());
+  assert.equal(repoShown(all.b), "Kein Repo gefunden");
+  for (const note of ["Den Repo-Ordner ~/none gibt es auf diesem Rechner nicht", "Der Repo-Ordner ~/shut ist auf diesem Rechner nicht lesbar",
+    "In ~/work, ~/none, ~/shut liegt auf diesem Rechner kein Git-Repo; die Ordner stehen in views.json unter „repoFolders“"]) assert.ok(shown.includes(note), note);
+  assert.ok(!shown.includes(NO_REPO_FOLDER));
+});
+
+test("UI: a work item's new space is named after the repo chosen, and its space found by it; a name typed stays", async () => {
+  const { b, cx, host } = await openWorkItemStart();
+  host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "VC")];
+  await host.answer("sh", REPOS_ANSWER, isRepos);
+  assert.deepEqual([b.modal.nameInput.value(), openInShown(b)], ["", ["x", false]], "no repo: the shown space");
+  b.modal.field = "repo";
+  await press(b, cx, "h");
+  assert.deepEqual([repoShown(b), b.modal.nameInput.value(), openInShown(b)], ["vc", "vc", ["VC", false]]);
+  b.modal.nameInput.type("mine");
+  await press(b, cx, "h");
+  assert.deepEqual([repoShown(b), b.modal.nameInput.value()], ["api", "mine"]);
+});
+
+// The Sprint's AB#301 gone down to its pull request !57 (azure-pr-show.json:
+// repository sample-repo), with the start dialog open there; its details read
+// unless `details` is false.
+async function openPullRequestStart({ details = true, ...options } = {}) {
+  const opened = await openSprint({ config: repoConfig({ own: ["~/work", "/srv/more"] }), ...options });
+  const { b, cx, host } = opened;
+  await press(b, cx, "enter");
+  await host.answer("az", ok(fixture("azure-related-item.json")), (a) => a.includes("relations"));
+  await host.answer("az", ok(fixture("azure-related-children.json")), AZ.query);
+  await tab(b, cx);
+  await press(b, cx, ...SHIFT_G);
+  await press(b, cx, "enter");
+  if (details) await host.answer("az", ok(fixture("azure-pr-show.json")), (a) => a[0] === "repos");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, b.modal.item.kind, b.modal.item.number], ["start", "pr", 57]);
+  return opened;
+}
+
+test("UI: a pull request reached from a work item has the repo named like its Azure repository preselected where one alone is; its start leaves the view's last repo as it was", async () => {
+  const stored = { source: "azure", [`repo:${SPRINT_ID}`]: "~/work/api" };
+  const { b, cx, host } = await openPullRequestStart({ stored });
+  assert.equal(b.modal.item.azureRepo, "sample-repo");
+  await host.answer("sh", ok("0\t/home/me/work/api\n1\t/srv/more/sample-repo\n"), isRepos);
+  assert.deepEqual([repoShown(b), b.modal.repo, b.modal.nameInput.value()], ["sample-repo", "/srv/more/sample-repo", "sample-repo"]);
+  await startNow(b, cx);
+  assert.equal(host.runs.at(-1)[1].folder, "/srv/more/sample-repo");
+  assert.equal(memory.get(`repo:${SPRINT_ID}`), JSON.stringify("~/work/api"), "the view's last repo is a work item's");
+  const twice = await openPullRequestStart({ stored });
+  await twice.host.answer("sh", ok("0\t/home/me/work/sample-repo\n1\t/srv/more/sample-repo\n0\t/home/me/work/api\n"), isRepos);
+  assert.deepEqual([repoShown(twice.b), twice.b.modal.repo], ["Repo wählen", null], "two of that name: none");
+  assert.ok(!texts(twice.b.render()).some((t) => t.includes("in keinem Repo-Ordner")));
+  const unread = await openPullRequestStart({ stored, details: false });
+  await unread.host.answer("sh", ok("1\t/srv/more/sample-repo\n0\t/home/me/work/api\n"), isRepos);
+  assert.deepEqual([repoShown(unread.b), unread.b.modal.repo], ["Repo wählen", null], "its repository not read yet: none, and not the view's last");
 });
 
 test("UI: „nur meine“ keeps the stories and tasks assigned to the account az is signed in as; a story shows dimmed for its own tasks; without that account it says why", async () => {
@@ -7892,6 +8189,8 @@ test("UI: Enter on the Backlog shows a work item's parent, state, assignee, area
   await click(b, cx, "row-AB#301");
   await press(b, cx, "enter");
   assert.ok(texts(b.render()).includes("Sprint: Sprint 12"));
+  assert.equal(b.modal?.kind, "start", "Enter on shown details starts");
+  await press(b, cx, "escape");
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://dev.azure.com/example-org/Example%20Project/_workitems/edit/301"]);
 });
@@ -10036,11 +10335,11 @@ test("UI: a pull request's read that fails says why in the panel; a pull request
   assert.equal(list.host.open("gh").length, 0);
 });
 
-test("an Azure pull request the panel goes down to is az repos pr show by its id: its title, status, draft, author, branch and the reviewers' votes as a review", () => {
+test("an Azure pull request the panel goes down to is az repos pr show by its id: its title, status, draft, author, branch, the reviewers' votes as a review and its repository's name", () => {
   const c = sprintTeam();
   assert.deepEqual(board.azPullRequestArgs(c, 57), ["repos", "pr", "show", "--org", ORG, "--detect", "false", "--id", "57", "-o", "json"]);
   const d = board.parseAzurePullRequest(fixture("azure-pr-show.json"));
-  assert.deepEqual(d, { title: "Import the sample catalogue", state: "offen", color: "ansi2", done: false, draft: false, author: "Alex Sample", review: "freigegeben", branch: "feature/sample-import" });
+  assert.deepEqual(d, { title: "Import the sample catalogue", state: "offen", color: "ansi2", done: false, draft: false, author: "Alex Sample", review: "freigegeben", branch: "feature/sample-import", azureRepo: "sample-repo" });
   const as = (patch) => board.parseAzurePullRequest(JSON.stringify({ ...json("azure-pr-show.json"), ...patch }));
   assert.deepEqual([as({ status: "completed" }), as({ status: "abandoned" }), as({ status: "odd" })].map((x) => [x.state, x.color, x.done]),
     [["gemerged", "ansi5", true], ["geschlossen", "muted", true], ["odd", "muted", false]]);
@@ -10050,6 +10349,7 @@ test("an Azure pull request the panel goes down to is az repos pr show by its id
     ["abgelehnt", "abgelehnt", "wartet auf Autor", "freigegeben", "freigegeben", "", ""]);
   assert.equal(board.azureReview(null, false), "");
   assert.equal(as({ sourceRefName: null }).branch, null);
+  assert.deepEqual([as({ repository: null }).azureRepo, as({ repository: { id: "r" } }).azureRepo], [null, null]);
   assert.throws(() => board.parseAzurePullRequest("{}"), /^Error: Azure lieferte keinen Pull Request$/);
   const { reads } = board.makeAzure(null).pullRequest;
   assert.deepEqual([reads({ source: "azure", kind: "pr", number: 57 }), reads({ source: "azure", kind: "workitem", number: 57 }), reads({ source: "azure", kind: "pr", number: null })], [true, false, false]);

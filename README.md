@@ -475,9 +475,9 @@ by that run. Which files of the package git tracks is set in the root
   busy, so a switch to such a tab shows it at once. After that a view
   refreshes only while it shows, as above. While a read of the shown view
   runs, `↻` turns, and an empty view shows a spinner before "Lädt …". Each
-  gh, az and sh run (checkout, finding gh and az) writes one line to
-  herdr's log (console.log), without its arguments: `board: <gh|az|sh>
-  <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
+  gh, az and sh run (checkout, the Repo field's repos, finding gh and az) writes
+  one line to herdr's log (console.log), without its arguments: `board:
+  <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `v` a team's Sprint and Backlog, `m`
   turns "nur meine" on and off (the source toggle, the tabs, the switch and
   "nur meine" take clicks too), `/` filters, `r` refreshes (the shown view
@@ -535,8 +535,8 @@ by that run. Which files of the package git tracks is set in the root
   Task only among those without a parent): exactly one is taken as the new one,
   none means it did not land, several are named; the header's "Calls:" says what
   that costs. A team whose default iteration follows the current one has it
-  read again for each create. Where a work item's session starts is only
-  `start.checkout` so far. On a GitHub view `h/l j/k` move over the
+  read again for each create. A work item's session starts in the repo chosen
+  in the start dialog (below). On a GitHub view `h/l j/k` move over the
   columns shown, `H/L` move a card one column, hidden ones included (`s` picks
   from a menu, hidden ones too, or drag the card onto a column; the notice
   says when a card went to a hidden column), the command menu's "Spalte
@@ -762,41 +762,57 @@ by that run. Which files of the package git tracks is set in the root
   goes, and the board says so, where those lines came whole (lines that could
   not all be read, or were cut short, decide nothing). `Enter` opens the
   details, a second `Enter` goes to the item's session or starts one: a new tab
-  on the chosen machine, in the repo's checkout, whose agent gets the first
-  message views.json sets (`/implement <n>`, `/pr-review <n>` for a pull
-  request) and makes its own worktree. In the start dialog `Enter` starts the
-  session from every field. The first message grows with its text up to six
-  lines and then scrolls (`PageUp`/`PageDown`, herdr's own keys there);
-  shift-`Enter` breaks the line. The board binds `Enter` in the message's own
-  key context (why: the comment above `MESSAGE_KEYS` in
-  `mods/board/src/ui/modals/start.js`); a load of `keys.json` drops that
-  binding and the board's `Tab` and shift-`Tab`, so until the board binds its
-  keys again those keys in the dialog's text fields are herdr's own (in the
-  message they indent and outdent). The first `Enter` in the message after
-  such a load binds them again and puts the message back as it was before
-  that `Enter`. Where that `Enter` put in only its one line break, in place of
-  the selection, it starts; where it put in more (several cursors), it starts
-  nothing and asks for `Enter` once more. The three choices "Agent", "Rechner"
-  and "Öffnen in" work alike: `←`/`→` (or `h`/`l`) step through the entries in
-  place, space or a click opens a list under the field, whose filter then has
-  the keyboard. Typing filters the list, `↑`/`↓` (or `ctrl-n/p`, `ctrl-j/k`)
-  mark a row, `Enter` or a click takes it and closes the list, and `Esc` or a
-  press beside the list closes only the list. The hint line names the keys of
-  the field that has the keyboard. "Öffnen in" says where the tab goes, with
-  "Neuer Space …" and the chosen machine's spaces. An existing space gets the
-  tab, in the checkout's folder whatever the space's own; a new space takes the
-  name typed in the field that then shows, prefilled with the repo's name (for a
-  work item the checkout's last folder). Preselected is the space of that name,
-  ignoring case, else the space I am in, else that machine's first; "Neuer Space
-  …" only where the machine has none. Another machine in "Rechner" chooses anew
-  among its spaces, unless a new space with a name I typed is chosen; a machine
-  whose spaces herdr has not read says so and offers only a new space. A chosen
-  space that closes while the dialog is open is said there, and the dialog
-  starts nothing until I choose again; for one chosen on a machine whose spaces
-  herdr is reading (again), it starts nothing until they are read. In the start
-  dialog and the create dialog `Tab` and shift-`Tab` move between the fields,
-  from the message or title too: the board binds them in its own key context, as
-  the leader does (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
+  on the chosen machine, in the repo's checkout (for an item without a repo, in
+  the repo chosen under "Repo"), whose agent gets the first message views.json
+  sets (`/implement <n>`, `/pr-review <n>` for a pull request) and makes its own
+  worktree. In the start dialog `Enter` starts the session from every field. The
+  first message grows with its text up to six lines and then scrolls
+  (`PageUp`/`PageDown`, herdr's own keys there); shift-`Enter` breaks the line.
+  The board binds `Enter` in the message's own key context (why: the comment
+  above `MESSAGE_KEYS` in `mods/board/src/ui/modals/start.js`); a load of
+  `keys.json` drops that binding and the board's `Tab` and shift-`Tab`, so until
+  the board binds its keys again those keys in the dialog's text fields are
+  herdr's own (in the message they indent and outdent). The first `Enter` in the
+  message after such a load binds them again and puts the message back as it was
+  before that `Enter`. Where that `Enter` put in only its one line break, in
+  place of the selection, it starts; where it put in more (several cursors), it
+  starts nothing and asks for `Enter` once more. The choices "Repo" (only for an
+  item without a repo), "Agent", "Rechner" and "Öffnen in" work alike: `←`/`→`
+  (or `h`/`l`) step through the entries in place, space or a click opens a list
+  under the field, whose filter then has the keyboard. Typing filters the list,
+  `↑`/`↓` (or `ctrl-n/p`, `ctrl-j/k`) mark a row, `Enter` or a click takes it
+  and closes the list, and `Esc` or a press beside the list closes only the
+  list. The hint line names the keys of the field that has the keyboard. "Öffnen
+  in" says where the tab goes, with "Neuer Space …" and the chosen machine's
+  spaces. An existing space gets the tab, in the checkout's folder whatever the
+  space's own; a new space takes the name typed in the field that then shows,
+  prefilled with the repo's name (for an item without a repo the chosen repo's
+  folder name). Preselected is the space of that name, ignoring case, else the
+  space I am in, else that machine's first; "Neuer Space …" only where the
+  machine has none. Another machine in "Rechner" chooses anew among its spaces,
+  unless a new space with a name I typed is chosen; a machine whose spaces herdr
+  has not read says so and offers only a new space. A chosen space that closes
+  while the dialog is open is said there, and the dialog starts nothing until I
+  choose again; for one chosen on a machine whose spaces herdr is reading
+  (again), it starts nothing until they are read. "Repo" offers a work item, or
+  a pull request reached from one, the git repositories (a folder holding a
+  `.git`) directly beneath the folders `repoFolders` in views.json names, the
+  team's own or else those for every team under `sources.azure` (`~` is the
+  machine's home), as they are on the machine chosen under "Rechner" (the
+  header's "Calls:" says what that costs). A repo chosen stays chosen where the
+  other machine has it too. The first time nothing is chosen, and `Enter` then
+  starts nothing and says "Repo wählen"; after a start the view's next dialog
+  preselects that repo where it is among the repos listed, and otherwise, where
+  others are listed, says that it is not. A pull request the details went down
+  to from a work item has, once its details are read, the repo named like its
+  Azure repository preselected where exactly one listed repo is, and its start
+  is not remembered. A listing that fails says why in the field, a folder that
+  is not there or cannot be read is named, and where no folder is set or none
+  holds a repo the dialog says what to set in views.json; it then starts
+  nothing, and never in `start.checkout`. In the start dialog and the create
+  dialog `Tab` and shift-`Tab` move between the fields, from the message or
+  title too: the board binds them in its own key context, as the leader does
+  (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
   The tab is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
   item), which is how the board finds it again. A status change shows at once
   and is written to GitHub or Azure; a refusal moves the card back (or sets the

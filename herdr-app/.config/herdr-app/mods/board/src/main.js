@@ -7,9 +7,13 @@
 // views.json:
 // - refreshMinutes (3), see Calls below.
 // - sources: what the board shows, by source.
-//   - azure: { org (https://dev.azure.com/<org>), contexts: [...] }, a
-//     context either { team: { project, team }, views?: ["sprint",
-//     "backlog"] (both when missing) } or { prs: { project } }.
+//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts:
+//     [...] }, a context either { team: { project, team }, views?:
+//     ["sprint", "backlog"] (both when missing), repoFolders? } or { prs: {
+//     project } }. repoFolders: the folders (~ is a machine's home; each
+//     once, a trailing / aside) whose git repositories the start dialog
+//     offers for a team's items without a repo ("Repo"); a team's own in
+//     place of those for all.
 //   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
 //     names], limit? (a board: the most items it reads, 1000; a list: per
 //     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
@@ -25,9 +29,11 @@
 //     may still say source: "github".
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, checkout (the folder the session starts in; ~ is that
-//   machine's home), message (the first message for issues and work items)
-//   and review (for pull requests). Templates take {number}
-//   {title} {url} {owner} {repo} {key}.
+//   machine's home; an item without a repo (an Azure work item, or a pull
+//   request reached from one) starts in a repo of repoFolders instead),
+//   message (the first message for issues and work items) and review (for
+//   pull requests). Templates take {number} {title} {url} {owner} {repo}
+//   {key}.
 // - repos: { "<owner>/<repo>": { any start field } }. startSettings says
 //   which start applies.
 // An older views.json with its views at the top is not read; the board says
@@ -93,7 +99,9 @@
 // Backlog again, and one whose answer was unclear asks one WIQL query more
 // after that refresh; a create for a team whose default iteration follows the
 // current one reads the team's settings first, one call more. The PR tabs
-// read nothing yet. Finding gh and az costs one sh call now and then
+// read nothing yet. The start dialog's Repo field costs one sh call
+// when it opens and one per machine chosen in it (its repos; none
+// without repoFolders). Finding gh and az costs one sh call now and then
 // (toolPaths says when). A view refreshes when its tab first shows (unless it
 // has data the prefetch tried within refreshMinutes), on `r` (which first
 // drops what its source keeps of it: its source's forget), after a column is

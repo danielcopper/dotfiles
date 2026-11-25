@@ -1,6 +1,7 @@
-// The start dialog: opens an item's session in its checkout, on a machine
-// and with an agent chosen here, as a new tab in a space of that machine or
-// in a new space ("Öffnen in"), with a first message to edit.
+// The start dialog: opens an item's session in its checkout (an item
+// without a repo: in the repo chosen under "Repo"), on a machine and with an
+// agent chosen here, as a new tab in a space of that machine or in a new
+// space ("Öffnen in"), with a first message to edit.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState, Textarea, TextareaState } from "gpui-base";
@@ -8,17 +9,21 @@ import { knownAgents, machines, notify, run, spaces } from "herdr";
 import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine, report } from "../../shared.js";
 import { startSettings } from "../../config.js";
 import { call, what } from "../../tools.js";
-import { checkoutArgs, preselectedSpace, renderTemplate, sessionName, spaceNameFor, spacesOn, startCommand, templateVars } from "../../actions/start.js";
-import { backdrop, button, cycleField, fieldBox, fieldFrame, fieldLabel, machineName, onMachine, wireTextField } from "../helpers.js";
+import { checkoutArgs, parseRepos, preselectedSpace, renderTemplate, reposArgs, sessionName, spacesOn, startCommand, templateVars } from "../../actions/start.js";
+import { backdrop, button, cycleField, fieldBox, fieldFrame, fieldLabel, machineName, onMachine, store, wireTextField } from "../helpers.js";
 import { LIST_HINT, choiceBox, choiceHint, choiceKey, escapeList, listKey, listKeyboard, listShield } from "../choices.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
-const CHECKOUT_TIMEOUT = 30000;
+const SH_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
 const FIELDS = ["message", "agent", "machine", "open"];
-const fieldsOf = (m) => (whereToOpen(m).newSpace ? [...FIELDS, "name"] : FIELDS);
+const REPO_FIELDS = ["message", "repo", "agent", "machine", "open"];
+const fieldsOf = (m) => {
+  const fields = m.repos ? REPO_FIELDS : FIELDS;
+  return whereToOpen(m).newSpace ? [...fields, "name"] : fields;
+};
 const stillOpen = (b, m) => b.modal === m;
 const MESSAGE_ROWS = 6;
 
@@ -39,9 +44,36 @@ export const START_HINTS = {
 };
 
 const agentsPending = (m) => m.agentsError ?? "lädt …";
+
+export const repoStoreKey = (view) => `repo:${view.id}`;
+const reposLoading = (on, folders) => ({ state: "loading", on, folders, list: [], missing: [], unreadable: [], lost: null, error: null });
+const chosenRepo = (m) => m.repos?.list.find((r) => r.key === m.repo) ?? null;
+
+function reposPending(m) {
+  const { state, error, list } = m.repos;
+  if (state === "loading") return "lädt …";
+  if (state === "error") return error;
+  return list.length ? "Repo wählen" : "Kein Repo gefunden";
+}
 const openedIn = (where) => where.space ?? where.gone ?? where.unread;
 
 const START_CHOICES = {
+  repo: {
+    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, folder: m.repos.folders.length > 1 ? r.parent : null })),
+    current: (m) => m.repo,
+    value: (m) => chosenRepo(m)?.name ?? reposPending(m),
+    take: (b, row) => {
+      b.modal.error = null;
+      b.modal.repos.lost = null;
+      chooseRepo(b.modal, row.id);
+    },
+    notes: (m) => reposNotes(m),
+    placeholder: "Filter: Name des Repos",
+    none: "Kein Repo passt zum Filter",
+    empty: reposPending,
+    width: 360,
+    anchor: "top_left",
+  },
   agent: {
     entries: (m) => m.agents.map((a, i) => ({ id: i, name: a.name })),
     current: (m) => m.agent,
@@ -85,14 +117,28 @@ export function spacesNote({ on, layout }) {
   return `Die Spaces ${onMachine(on)} sind ${why}; „${NEW_SPACE_LABEL}“ geht trotzdem`;
 }
 
+function reposNotes(m) {
+  const { state, on, folders, list, missing, unreadable, lost } = m.repos ?? {};
+  if (state !== "ready") return [];
+  const notes = [
+    ...missing.map((f) => `Den Repo-Ordner ${f} gibt es ${onMachine(on)} nicht`),
+    ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
+  ];
+  if (!folders.length) {
+    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder im Kontext des Teams, etwa "repoFolders": ["~/Repos"]`);
+  } else if (!list.length) {
+    notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen in ${CONFIG_NAME}.json unter „repoFolders“`);
+  }
+  if (lost) notes.push(`„${lost}“ liegt ${onMachine(on)} in keinem Repo-Ordner; bitte ein Repo wählen`);
+  return notes;
+}
+
 export const startModal = {
   // Opens the dialog for an item, or says where its checkout is missing. An
-  // item without a repo (an Azure work item) takes only views.json's own
-  // start: an Azure view has no start of its own.
+  // item without a repo takes its folder from the Repo field.
   open(b, view, item, cx) {
     const settings = startSettings(b.config, view, item.repo);
-    if (!settings.checkout) {
-      if (!item.repo) return b.say(`Für ${itemLabel(item)} steht kein „checkout“ in ${CONFIG_NAME}.json: „start.checkout“`, "error", cx);
+    if (item.repo && !settings.checkout) {
       const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
       return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
     }
@@ -105,12 +151,13 @@ export const startModal = {
     let machine = list.indexOf(settings.machine ?? null);
     const machineNote = machine < 0 ? `Rechner „${settings.machine}“ ist nicht verbunden; gewählt: ${machineName(list[0])}` : null;
     if (machine < 0) machine = 0;
-    const spaceName = spaceNameFor(item, settings.checkout);
+    const spaceName = item.repoShort ?? "";
     const nameInput = InputState.new({ placeholder: "Name des neuen Space" });
     nameInput.set_value(spaceName);
     const m = {
       kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, list: null, busy: null, error: null,
+      repos: item.repo ? null : reposLoading(null, []), repo: null,
     };
     wireMessage(b, m, input);
     wireTextField(b, m, nameInput, "name", (_e, cx) => startModal.start(b, cx));
@@ -121,21 +168,29 @@ export const startModal = {
     b.modal = m;
     input.focus();
     loadAgents(b, cx);
+    loadRepos(b, cx);
     cx.notify();
   },
 
-  // Opens the item's session in its checkout on the chosen machine: finds the
-  // checkout's folder there, then runs tab.new in the chosen space, where it
-  // is still there, or space.new with the name given. run() answers
-  // nothing, so the board says the session is being opened and watches for a
-  // new tab of its name (watchSession). The dialog stays until run() opens
-  // the session; a failure that comes after the dialog went shows in the
-  // banner and as a toast.
+  // Opens the item's session on the chosen machine, in its checkout's folder
+  // there (an item without a repo: the folder of the repo chosen), then runs
+  // tab.new in the chosen space, where it is still there, or space.new with
+  // the name given. run() answers nothing, so the board says the session is
+  // being opened and watches for a new tab of its name (watchSession). The
+  // dialog stays until run() opens the session; a failure that comes after
+  // the dialog went shows in the banner and as a toast.
   start(b, cx) {
     const m = b.modal;
     if (m?.kind !== "start") return;
     m.error = null;
     if (m.busy) return void cx.notify();
+    const repo = chosenRepo(m);
+    if (m.repos && !repo) {
+      m.error = m.repos.state === "loading" ? "Die Repos werden noch gelesen" : reposPending(m);
+      m.field = "repo";
+      b.takeKeyboard();
+      return void cx.notify();
+    }
     const agent = m.agents[m.agent];
     if (!agent) return void ((m.error = m.agentsError ?? "Kein Agent gewählt"), cx.notify());
     const { on, space, gone, unread, newSpace } = whereToOpen(m);
@@ -148,10 +203,7 @@ export const startModal = {
     const before = tabsNamed(name);
     cx.spawn(async (cx) => {
       try {
-        const r = await call("sh", checkoutArgs(m.settings.checkout), on, CHECKOUT_TIMEOUT, what(m.view, "checkout"));
-        if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
-        const folder = lastLine(r.stdout);
-        if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
+        const folder = repo ? repo.folder : await checkoutFolder(m, on);
         if (space && !spaces().some((s) => s.id === space.id)) {
           // Its dialog says so for a space chosen there (goneNote, unreadNote).
           if (m.target && stillOpen(b, m)) return;
@@ -159,6 +211,7 @@ export const startModal = {
           throw new BoardError(`Den Space „${space.name}“ ${onMachine(on)} gibt es nicht mehr`);
         }
         run(...startCommand({ on, folder, argv: agent.run, task, name, space: space?.id, spaceName }));
+        if (repo && m.item.kind !== "pr") store.set(repoStoreKey(m.view), repo.key);
         if (stillOpen(b, m)) {
           b.modal = null;
           b.handle.focus();
@@ -208,7 +261,7 @@ export const startModal = {
     const frame = (field, inner) => fieldFrame(t, m, field, inner);
     const choice = (field, title) => v_flex().flex_1().min_w(0).gap(6).child(label(title)).child(choiceBox(b, t, START_CHOICES, field));
     const where = whereToOpen(m);
-    const notes = [...m.notes, ...(where.readable ? [] : [spacesNote(where)]), ...(where.gone ? [goneNote(where)] : []), ...(where.unread ? [unreadNote(where)] : [])];
+    const notes = [...m.notes, ...reposNotes(m), ...(where.readable ? [] : [spacesNote(where)]), ...(where.gone ? [goneNote(where)] : []), ...(where.unread ? [unreadNote(where)] : [])];
     const hint = m.list ? START_HINTS.list : START_HINTS[m.field] ?? START_HINTS.choice;
     return backdrop(
       t,
@@ -236,7 +289,7 @@ export const startModal = {
             .px(20)
             .py(16)
             .gap(14)
-            .child(label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
+            .child(m.repos ? v_flex().gap(6).child(label("Repo")).child(choiceBox(b, t, START_CHOICES, "repo")) : label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
             .child(
               h_flex()
                 .gap(12)
@@ -320,6 +373,63 @@ function chooseMachine(b, machine, cx) {
   m.machineNote = null;
   m.target = m.target === NEW_SPACE && m.renamed ? NEW_SPACE : null;
   loadAgents(b, cx);
+  loadRepos(b, cx);
+}
+
+async function shOutput(m, args, on, kind) {
+  const r = await call("sh", args, on, SH_TIMEOUT, what(m.view, kind));
+  if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
+  return r.stdout;
+}
+
+async function checkoutFolder(m, on) {
+  const folder = lastLine(await shOutput(m, checkoutArgs(m.settings.checkout), on, "checkout"));
+  if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
+  return folder;
+}
+
+function loadRepos(b, cx) {
+  const m = b.modal;
+  if (!m.repos) return;
+  const on = m.machines[m.machine];
+  const folders = m.view.context?.repoFolders ?? [];
+  const repos = reposLoading(on, folders);
+  m.repos = repos;
+  const listed = ({ repos: list, missing, unreadable }) => {
+    const wanted = m.repo ?? wantedRepo(m, list);
+    const there = list.some((r) => r.key === wanted);
+    Object.assign(repos, { state: "ready", list, missing, unreadable, lost: wanted && list.length && !there ? wanted : null });
+    if (there) chooseRepo(m, wanted);
+  };
+  if (!folders.length) return listed({ repos: [], missing: [], unreadable: [] });
+  cx.spawn(async (cx) => {
+    let found = null;
+    let why = null;
+    try {
+      found = parseRepos(await shOutput(m, reposArgs(folders), on, "repos"), folders);
+    } catch (e) {
+      why = `Repos ${onMachine(on)} nicht lesbar: ${report(e)}`;
+    }
+    if (b.modal?.repos !== repos) return;
+    if (found) listed(found);
+    else Object.assign(repos, { state: "error", error: why });
+    cx.notify();
+  });
+}
+
+function wantedRepo(m, list) {
+  if (m.item.kind === "pr") {
+    const named = list.filter((r) => r.name === m.item.azureRepo);
+    return named.length === 1 ? named[0].key : null;
+  }
+  const remembered = store.get(repoStoreKey(m.view));
+  return typeof remembered === "string" ? remembered : null;
+}
+
+function chooseRepo(m, key) {
+  m.repo = key;
+  m.spaceName = chosenRepo(m)?.name ?? "";
+  if (!m.renamed) m.nameInput.set_value(m.spaceName);
 }
 
 const layoutOf = (on) => machines().find((x) => (x.name ?? null) === (on ?? null))?.layout ?? (on ? "unavailable" : "ready");

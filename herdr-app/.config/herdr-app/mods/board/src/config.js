@@ -156,14 +156,19 @@ export const TEAM_VIEWS = [
 const TEAM_VIEW_IDS = TEAM_VIEWS.map((v) => v.id);
 const TEAM_VIEWS_TEXT = TEAM_VIEW_IDS.map((v) => `"${v}"`).join(" und ");
 
+const REPO_FOLDERS_TEXT = "ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]";
+const trimFolders = (v) => v.map((f) => f.replace(/(.)\/+$/, "$1"));
+const repoFoldersOk = (v) => v === undefined || (Array.isArray(v) && v.length > 0 && v.every(isText) && new Set(trimFolders(v)).size === v.length);
+
 // What is wrong with an entry of sources.azure.contexts: { "team": {
-// project, team }, "views"?: [...] } or { "prs": { project } }.
+// project, team }, "views"?: [...], "repoFolders"?: [...] } or { "prs": {
+// project } }.
 function contextProblems(c) {
   if (!isObject(c)) return ["muss ein Objekt sein"];
   const kinds = ["team", "prs"].filter((k) => c[k] !== undefined);
   if (kinds.length !== 1) return ["braucht genau eins von „team“ und „prs“"];
   const kind = kinds[0];
-  const keys = kind === "team" ? ["team", "views"] : ["prs"];
+  const keys = kind === "team" ? ["team", "views", "repoFolders"] : ["prs"];
   const fields = kind === "team" ? ["project", "team"] : ["project"];
   const out = Object.keys(c).filter((k) => !keys.includes(k)).map((k) => `„${k}“ gibt es nicht`);
   const inner = c[kind];
@@ -173,6 +178,7 @@ function contextProblems(c) {
   if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEW_IDS.includes(v)) && new Set(views).size === views.length)) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
+  if (kind === "team" && !repoFoldersOk(c.repoFolders)) out.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
   return out;
 }
 
@@ -184,15 +190,16 @@ function contextName(c) {
 }
 
 // A context as the board uses it: { id, source: "azure", kind: "team",
-// name, org, project, team, views } or { id, source: "azure", kind: "prs",
-// name, org, project }; views in the switch's order, org the organisation's
-// address (orgUrl).
-function normalizeContext(c, org) {
+// name, org, project, team, views, repoFolders } or { id, source: "azure",
+// kind: "prs", name, org, project }; views in the switch's order, org the
+// organisation's address (orgUrl).
+function normalizeContext(c, org, folders) {
   const name = contextName(c);
   if (c.team) {
     const views = c.views ?? TEAM_VIEW_IDS;
     const { project, team } = c.team;
-    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, org, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
+    const repoFolders = c.repoFolders ? trimFolders(c.repoFolders) : folders;
+    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, org, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)), repoFolders };
   }
   return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, org, project: c.prs.project };
 }
@@ -209,8 +216,11 @@ function orgUrl(value) {
 // each problem is listed.
 function readAzure(raw) {
   if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
-  const errors = Object.keys(raw).filter((k) => k !== "org" && k !== "contexts").map((k) => `„sources.azure.${k}“ gibt es nicht`);
+  const errors = Object.keys(raw).filter((k) => !["org", "contexts", "repoFolders"].includes(k)).map((k) => `„sources.azure.${k}“ gibt es nicht`);
   const org = orgUrl(raw.org);
+  const foldersOk = repoFoldersOk(raw.repoFolders);
+  if (!foldersOk) errors.push(`„sources.azure.repoFolders“ ${REPO_FOLDERS_TEXT}`);
+  const folders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
   if (!Array.isArray(raw.contexts) || !raw.contexts.length) {
     errors.push("„sources.azure.contexts“ braucht mindestens einen Eintrag: { \"team\": { \"project\", \"team\" } } oder { \"prs\": { \"project\" } }");
@@ -220,7 +230,7 @@ function readAzure(raw) {
     const name = contextName(c);
     const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
     const problems = contextProblems(c);
-    const context = problems.length ? null : normalizeContext(c, org);
+    const context = problems.length ? null : normalizeContext(c, org, folders);
     if (context && contexts.some((x) => x.id === context.id)) problems.push("gibt es schon");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
     contexts.push(context);
