@@ -9,7 +9,7 @@ import {
   parseAreas, parseMemberList, parseViewer,
 } from "./common.js";
 import { azTypesArgs, parseAzureTypes, sprintView } from "./sprint.js";
-import { backlogView } from "./backlog.js";
+import { azBacklogConfigArgs, azTeamSettingsArgs, backlogView, parseBacklogConfig, parseTeamSettings } from "./backlog.js";
 import { azurePullRequest, azureRelated } from "./related.js";
 
 // The Azure source for the board: the name of the site `o` opens, why "nur
@@ -23,10 +23,12 @@ import { azurePullRequest, azureRelated } from "./related.js";
 // (iterationUntil), or, where the team has no sprint running, until that day
 // ends (dayEnd; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint (or that none runs) and taskboard
-// columns. The titles of its items' parents outside the sprint are read
-// after its work items, only for those not kept yet, and kept TEAM_KEEP_MS
-// (parentTitles). The team's iterations, which the sprint picker lists, are
-// read when it first opens and kept while the board runs (one that fails
+// columns. Its tasks' parents outside the sprint are read with each refresh,
+// after its work items, and not kept; its other items' parents outside it
+// only for their titles, where those are not kept yet (in the tasks'
+// parents' query where there is one), and kept TEAM_KEEP_MS
+// (parentsOutside). The team's iterations, which the sprint picker lists,
+// are read when it first opens and kept while the board runs (one that fails
 // keeps nothing); which of them is current, the kept current sprint says.
 // The project's work item types, one entry for both views (typesOf), are
 // kept TEAM_KEEP_MS from their read (even where another read of the Sprint's
@@ -37,7 +39,7 @@ import { azurePullRequest, azureRelated } from "./related.js";
 // settings (not the project's types) are dropped, so that they are read
 // again, by `r` on the Sprint (forget), by a task in a column the columns
 // read do not know, and by a move or state change Azure refuses; its
-// iterations and parent titles only by `r`.
+// iterations and its parents' titles only by `r`.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
 // for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the
@@ -52,9 +54,11 @@ import { azurePullRequest, azureRelated } from "./related.js";
 // them TEAM_KEEP_MS (typesOf); one that fails is a warning, keeps nothing
 // and is read again with the next refresh.
 //
-// Both views read the team's areas (the Backlog for its default area) and
-// keep them as one, for the shorter of their times (areasOf); `r` on
-// either, or a refusal there, drops them.
+// Both views read the team's areas (the Backlog for its default area), its
+// backlog configuration (the Sprint for its order field) and its settings
+// (the Sprint for its backlog iteration, only where its tasks have parents
+// outside the sprint), and keep each as one, for the shorter of their times
+// (teamRead); `r` on either, or a refusal there, drops them.
 //
 // Who az is signed in as is read beside all that, with its own short
 // timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
@@ -96,11 +100,40 @@ export function makeAzure(paths) {
   const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
   // The key of a project's work item types, which both views keep.
   const typesKey = (c) => `types\n${c.org}\n${c.project}`;
-  const areasKey = (c) => `areas\n${teamKey(c)}`;
+  // A team's part both views read, `name` (its key's start and its log
+  // line's): of(c, view) gives it, read where it is not kept and kept
+  // TEAM_KEEP_MS; keepUntil(c, until) keeps it shorter where a view keeps
+  // its own settings for a shorter time (the Sprint's as long as its
+  // settings, the Backlog's until backlogUntil).
+  const teamRead = (name, args, parse) => {
+    const key = (c) => `${name}\n${teamKey(c)}`;
+    return {
+      async of(c, view = null) {
+        const held = keptValue(key(c));
+        if (held) return held.value;
+        const value = parse(await az(args(c), what(view, name)));
+        keep(key(c), value, Date.now() + TEAM_KEEP_MS);
+        return value;
+      },
+      keepUntil(c, until) {
+        const entry = kept.get(key(c));
+        if (entry) entry.until = Math.min(entry.until, until);
+      },
+      forget: (c) => kept.delete(key(c)),
+    };
+  };
+  const teamReads = {
+    areas: teamRead("areas", azAreasArgs, parseAreas),
+    backlogConfig: teamRead("backlog-config", azBacklogConfigArgs, parseBacklogConfig),
+    teamSettings: teamRead("team-settings", azTeamSettingsArgs, parseTeamSettings),
+  };
   // What the views share: az, what is kept, who az is (and the data's words
-  // for why it is not known), a project's work item types (typesOf), and a
-  // state change.
+  // for why it is not known), a project's work item types (typesOf), the
+  // team's parts both read (teamReads; either view's forget drops them all:
+  // forgetTeamReads), and a state change.
   const shared = {
+    ...teamReads,
+    forgetTeamReads: (c) => Object.values(teamReads).forEach((read) => read.forget(c)),
     az, keptValue, whoAmI, teamKey,
     // The project's work item types (parseAzureTypes), one entry for both
     // views: read where it is not kept and kept TEAM_KEEP_MS from their read
@@ -118,23 +151,6 @@ export function makeAzure(paths) {
       const entry = kept.get(typesKey(c));
       if (entry) entry.until = until;
     },
-    // The team's areas (parseAreas), one entry for both views: read where
-    // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
-    // its own settings for a shorter time (keepAreasUntil: the Sprint's
-    // as long as its settings, the Backlog's until backlogUntil); either
-    // view's forget drops it.
-    async areasOf(c, view = null) {
-      const held = keptValue(areasKey(c));
-      if (held) return held.value;
-      const value = parseAreas(await az(azAreasArgs(c), what(view, "areas")));
-      keep(areasKey(c), value, Date.now() + TEAM_KEEP_MS);
-      return value;
-    },
-    keepAreasUntil(c, until) {
-      const entry = kept.get(areasKey(c));
-      if (entry) entry.until = Math.min(entry.until, until);
-    },
-    forgetAreas: (c) => kept.delete(areasKey(c)),
     keep,
     drop: (key) => kept.delete(key),
     noViewerOf(data) {

@@ -70,12 +70,14 @@
 // taskboard's column of each work item, and one WIQL query for their fields;
 // for a sprint the sprint picker chose, by its id and path; none while the
 // team has no sprint running and none is chosen) and one WIQL query more
-// where its items have parents outside the sprint that it does not keep yet
-// (parentTitles), its Backlog two, one after the other (the level's work
-// items in their list by az rest, then one WIQL query for their fields; one
-// for an empty backlog), and one more for the project's work item types
-// (their colors) while neither view keeps them; either one more while who az
-// is stays unknown. What the Sprint and the Backlog read once and keep, and
+// where its tasks have parents outside the sprint, or its other items have
+// parents outside it whose titles it does not keep (parentsOutside), beside
+// it, for the tasks' parents, one for the team's settings while neither view
+// keeps them; its Backlog two, one after the other (the level's work items
+// in their list by az rest, then one WIQL query for their fields; one for
+// an empty backlog); and one more for the project's work item types (their
+// colors) while neither view keeps them; either one more while who az is
+// stays unknown. What the Sprint and the Backlog read once and keep, and
 // for how long, makeAzure says. An assignment costs one gh or az call, and
 // the assignee picker one more per repo or team the first time it opens there
 // (GitHub's assignable users with who gh is; the team's members, and who az
@@ -102,13 +104,14 @@
 // once; it waits while any read runs, a write is under way or a dialog is
 // busy. After that a view not shown reads nothing. The Azure calls of a load
 // that need nothing of each other run side by side: the Sprint's settings
-// (iteration, areas, columns, types) and who az is; its taskboard once the
-// iteration came, its query once the areas came too; the Backlog's settings
-// (levels, configuration, team settings, areas), the types' colors and who az
-// is; its ids once the levels came, the query for their fields once the
-// configuration came too. What a view drew last, as read, is saved
-// (loading.js) and drawn after a restart with its age until its read replaces
-// it.
+// (iteration, areas, columns, types, backlog configuration) and who az is;
+// its taskboard once the iteration came, its query once the areas and the
+// configuration came too, its parents' query and the team's settings once
+// all that came; the Backlog's settings (levels, configuration, team
+// settings, areas), the types' colors and who az is; its ids once the
+// levels came, the query for their fields once the configuration came too.
+// What a view drew last, as read, is saved (loading.js) and drawn after a
+// restart with its age until its read replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -145,7 +148,7 @@ import { appHome, checking, exec, focused, home, knownAgents, layout, machines, 
 
 // What the board's modules share: its names, its error and how one is
 // shown, its lines for herdr's log, small checks and text helpers, an
-// item's key and type, and labels for times.
+// item's key, type and order, and labels for times.
 
 export const MOD = "board";
 // The config's base name; the extension is added where the path is built.
@@ -207,6 +210,10 @@ export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 // nothing there), else itemLabel. Its details, notices and toasts keep
 // itemLabel.
 export const cardLabel = (item) => (item.source === "azure" && item.kind === "workitem" ? String(item.number) : itemLabel(item));
+
+// A comparator of items by their `order` (an Azure backlog's order field,
+// lowest first), those without one after the rest, ties by `tie`.
+export const byOrder = (tie) => (a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || tie(a, b);
 
 // A person as the board names one, in every source alike: by name where
 // there is one, else by login; null for neither. Logins are kept apart
@@ -966,11 +973,12 @@ export const stateDone = (data, name) => data.meta.states.find((s) => s.name ===
 
 // ==== src/kinds/sprint.js ====
 
-// A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
-// whose story is not in the sprint), the items it holds, what shows and how the
-// keys walk it, a task's state as shown, a state change laid over the data, its
-// warnings (sprintWarnings), which folds hold (foldsOf) and its dates as
-// written. The data is a board's (kinds/board.js: its columns hold the tasks, so
+// A sprint's taskboard: its rows (one per story, one per task's parent
+// outside the sprint, and "Ohne Story" for tasks without a parent read),
+// the items it holds, what shows and how the keys walk it, a task's state
+// as shown, a state change laid over the data, its warnings
+// (sprintWarnings), which folds hold (foldsOf) and its dates as written.
+// The data is a board's (kinds/board.js: its columns hold the tasks, so
 // moves, their rollback and H/L work on it as on a board) plus its rows;
 // sprintBoard (sources/azure/sprint.js) builds it.
 
@@ -1007,12 +1015,14 @@ export function shownState(item, column) {
 
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
-// (a task moved in comes last in its column's data). withoutFolded leaves
-// the tasks of folded rows out of them.
+// and in a row by the backlog's order, as Azure's taskboard stacks them (a
+// task moved in comes last in its column's data). withoutFolded leaves the
+// tasks of folded rows out of them.
 export function sprintNav(data, filter, mine) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
-  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
+  const inRow = byOrder((a, b) => a.number - b.number);
+  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || inRow(a, b);
   return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
 }
 
@@ -1613,10 +1623,10 @@ export function startCommand({ on, folder, argv, task, name, space, spaceName })
 
 // Azure DevOps, what its two team views and a work item's related items
 // share: states and their categories, what az's failures mean, how az is
-// called, the work items' fields and how az's answers are read, who az is,
-// and a state change. The Sprint's own calls are in sprint.js, the
-// Backlog's in backlog.js, the related items' in related.js, the source as
-// the board uses it in index.js (makeAzure).
+// called, the work items' fields and how az's answers are read, a work
+// item's sprint, who az is, and a state change. The Sprint's own calls are
+// in sprint.js, the Backlog's in backlog.js, the related items' in
+// related.js, the source as the board uses it in index.js (makeAzure).
 
 // Theme colors and column order for Azure's state categories, and the
 // categories whose states count as done (a done related item is dimmed).
@@ -1725,11 +1735,17 @@ export const PRIORITY = "Microsoft.VSTS.Common.Priority";
 // The fields read of each work item.
 export const WORK_ITEM_FIELDS = [...["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f), PRIORITY];
 
-// One WIQL query for the fields of the work items `ids` (WORK_ITEM_FIELDS
-// and `extraFields`), in the order of their ids.
+// A WIQL query's SELECT list: WORK_ITEM_FIELDS and `extraFields`.
+export const wiqlFields = (extraFields = []) => [...WORK_ITEM_FIELDS, ...extraFields].map((f) => `[${f}]`).join(", ");
+
+// The extra fields that read a backlog's order field (parseBacklogConfig),
+// none where it names none.
+export const orderFields = (orderField) => (orderField ? [orderField] : []);
+
+// One WIQL query for the fields of the work items `ids` (wiqlFields), in
+// the order of their ids.
 export function idsWiql(ids, extraFields = []) {
-  const fields = [...WORK_ITEM_FIELDS, ...extraFields].map((f) => `[${f}]`).join(", ");
-  return `SELECT ${fields} FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
+  return `SELECT ${wiqlFields(extraFields)} FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
 }
 
 // az's JSON answer for `what`; `empty` stands for no output at all (az
@@ -1796,7 +1812,7 @@ export function azPriority(value) {
 // A work item of az boards query's answer as the board shows it, keyed as
 // itemKey names it; with an `orderField`, its value there as `order` (a
 // number, else null). az's answer holds no parent's title: the Sprint reads
-// it (parentTitles).
+// it (parentsOutside).
 export function azWorkItem(wi, c, orderField = null) {
   const f = (name) => fieldOf(wi, name) ?? null;
   const who = azPerson(f("AssignedTo"));
@@ -1822,8 +1838,17 @@ export function iterationUntil(finish, now) {
 // starts of days).
 export const dayEnd = (now) => (Math.floor(now / DAY_MS) + 1) * DAY_MS;
 
-// How long a team's settings that change rarely stay kept (ms): its areas,
-// and the Backlog's settings (BACKLOG_KEEP_MS).
+// The sprint a work item is in, as the views show it: the last part of its
+// iteration's path, or null for none, which is the team's backlog
+// iteration (the root of its iterations, parseTeamSettings) or the
+// project's root (a path without a level below).
+export function sprintName(path, backlogIteration) {
+  if (typeof path !== "string" || !path || path === backlogIteration || !path.includes("\\")) return null;
+  return path.split("\\").at(-1);
+}
+
+// How long a team's settings that change rarely stay kept (ms): those both
+// views read (makeAzure's teamRead), and the Backlog's (BACKLOG_KEEP_MS).
 export const TEAM_KEEP_MS = 4 * 3600000;
 
 // The most work items az boards query gives.
@@ -1900,6 +1925,49 @@ export function checkStateResult(stdout, state) {
   if (!json || fieldOf(json, "State") !== state) throw failure("Azure hat den Status nicht bestätigt", { write: true, unclear: true });
 }
 
+// ==== src/kinds/backlog.js ====
+
+// A team's backlog: its rows in backlog order, the item with a key, a state
+// change laid over the data, what a new work item may be, and the
+// backlog's warnings. backlogList (sources/azure/backlog.js) builds the data.
+
+// The work item with `key`, or null.
+export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
+
+// The data with the item `key` in `state`.
+export const withBacklogState = (data, key, state) => withBacklogItem(data, key, { state });
+
+// The data with the item `key`'s fields set to those of `patch`.
+export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
+
+// The rows that show, as one column (navigate walks a list as one).
+export const backlogNav = (data, filter, mine) => [{ id: "backlog", name: data.meta.level.name, shown: data.rows.filter((r) => shows(r, filter, mine, data.viewer)) }];
+
+// The types a new work item may have: the level's, its default first, then
+// with a selected item of the level (`parent`) the types of the level
+// below it, as its children (child: true).
+export function createTypes(data, parent) {
+  const { level, childLevel } = data.meta;
+  const own = [...new Set([level.defaultType, ...level.types].filter(Boolean))].map((name) => ({ name, child: false }));
+  const children = parent ? (childLevel?.types ?? []).filter((n) => !own.some((t) => t.name === n)).map((name) => ({ name, child: true })) : [];
+  return [...own, ...children];
+}
+
+// The warning of an order that cannot be checked (no order field), which
+// the Sprint gives too.
+export const ORDER_UNCHECKED = "Reihenfolge ungeprüft: Azure nannte kein Order-Feld";
+
+// The warnings of a backlog: an order it cannot check, ids its query did
+// not find, and a backlog longer than one query reads.
+export function backlogWarnings(data) {
+  const { missing } = data.meta;
+  return [
+    ...(data.meta.orderField ? [] : [ORDER_UNCHECKED]),
+    ...(missing > 0 ? [`${missing} ${missing === 1 ? "Eintrag" : "Einträge"} des Backlogs ohne Felder (nicht gefunden)`] : []),
+    ...(data.limited ? [`Nur die ersten ${data.limit} von ${data.total} Einträgen des Backlogs (so viele liest eine Abfrage)`] : []),
+  ];
+}
+
 // ==== src/sources/azure/sprint.js ====
 
 // The Azure Sprint: its calls, what they answer, the sprint as the sprint
@@ -1908,10 +1976,14 @@ export function checkStateResult(stdout, state) {
 
 // The Sprint view's calls for a team context `c` ({ org, project, team }):
 // its current iteration, its areas (azAreasArgs), its taskboard's columns,
-// the project's work item types with their states, and per refresh the
-// taskboard's column of each work item and the fields of the sprint's work
-// items (azQueryArgs); for the sprint picker, all the team's iterations
-// (azIterationsArgs without a timeframe).
+// the project's work item types with their states, the team's backlog
+// configuration for its order field (s.backlogConfig), and per refresh the
+// taskboard's column of each work item, the fields of the sprint's work
+// items (azQueryArgs), and in one query more those of its tasks' parents
+// outside the sprint and of its other items' parents whose titles are not
+// kept, where it has any, with the team's settings for the tasks' parents'
+// sprint where they are not kept (parentsOutside); for the sprint picker,
+// all the team's iterations (azIterationsArgs without a timeframe).
 export const azIterationsArgs = (c, timeframe = null) =>
   ["boards", "iteration", "team", "list", ...azOrg(c.org), "--project", c.project, "--team", c.team, ...(timeframe ? ["--timeframe", timeframe] : []), "-o", "json"];
 export const azIterationArgs = (c) => azIterationsArgs(c, "current");
@@ -1947,11 +2019,11 @@ export function parseAzureTypes(stdout) {
 // path, and in one of the team's area paths, those below it too where the
 // team includes them. az boards query takes no team or project for its
 // macros, so the paths are spelled out.
-export function sprintWiql(iteration, areas) {
+export function sprintWiql(iteration, areas, extraFields = []) {
   const field = `[${areas.field}]`;
   const tree = areas.field === AREA_PATH;
   const inArea = areas.values.map((a) => `${field} ${tree && a.includeChildren ? "UNDER" : "="} ${wiqlText(a.value)}`).join(" OR ");
-  return `SELECT ${WORK_ITEM_FIELDS.map((f) => `[${f}]`).join(", ")} FROM WorkItems WHERE [System.IterationPath] = ${wiqlText(iteration.path)} AND (${inArea}) ORDER BY [System.Id]`;
+  return `SELECT ${wiqlFields(extraFields)} FROM WorkItems WHERE [System.IterationPath] = ${wiqlText(iteration.path)} AND (${inArea}) ORDER BY [System.Id]`;
 }
 
 // An iteration as az lists one (the azure-devops extension's
@@ -2004,16 +2076,29 @@ export function parseTaskboard(stdout) {
   return new Map(placed.map((w) => [w.workItemId, { columnId: w.columnId, column: w.column, state: w.state }]));
 }
 
+// The work item types the taskboard's columns map: its tasks'.
+const taskTypesOf = (columns) => new Set(columns.flatMap((c) => c.mappings.map((m) => m.type)));
+
+// The numbers of the tasks of `items` the taskboard places (`places`,
+// parseTaskboard) in one of its `columns`: the cards sprintBoard shows.
+export function placedTasks(columns, items, places) {
+  const types = taskTypesOf(columns);
+  const known = new Set(columns.map((c) => c.id));
+  return new Set(items.filter((i) => types.has(i.type) && known.has(places.get(i.number)?.columnId)).map((i) => i.number));
+}
+
 // The sprint as the sprint shape shows it (kinds/sprint.js). Its tasks are
 // the work items of the types the taskboard's columns map; each goes to the
 // column the taskboard places it in (`places`, parseTaskboard). Every other
-// work item of the sprint is a story, one row each in the query's order,
-// after the row "Ohne Story" for tasks whose story is not in the sprint
-// (only where there is one). A task the taskboard does not place is left
-// out and counted (meta.unplaced), as is one placed in a column the columns
-// read do not list (meta.unknownColumns). A column's color is that of the
-// state its first mapping names; it takes the types it maps (types) and
-// says which state each gets (mappings).
+// work item of the sprint is a story with a row of its own, and so is a
+// placed task's parent outside the sprint (`parents`, parentsOutside), in
+// the backlog's order (byOrder, ties by id), after the row "Ohne Story" for
+// tasks without a parent or with one not read (only where there is one).
+// A task the taskboard does not place is left out and counted
+// (meta.unplaced), as is one placed in a column the columns read do not
+// list (meta.unknownColumns). A column's color is that of the state its
+// first mapping names; it takes the types it maps (types) and says which
+// state each gets (mappings).
 // meta.currentId is the team's current sprint's id (null where it has
 // none running; the shown one's by default), which sprintIs
 // (kinds/sprint.js) compares the shown one with; meta.gone ({ id, name })
@@ -2021,16 +2106,22 @@ export function parseTaskboard(stdout) {
 // where none runs, stands in for (sprintView). Without an `iteration` (the
 // team has no sprint running and none is chosen) it holds no work items,
 // and meta.iterationId, iteration and finish are null.
-export function sprintBoard({ iteration, currentId = iteration?.id ?? null, gone = null, columns, types, items, places, viewer }) {
+export function sprintBoard({ iteration, currentId = iteration?.id ?? null, gone = null, columns, types, items, parents = new Map(), places, viewer }) {
   const colors = new Map(types.states.map((s) => [s.name, s.color]));
   const cols = columns.map((c) => ({
     id: c.id, name: c.name, color: colors.get(c.mappings[0]?.state) ?? "muted", hidden: false, count: 0, target: true,
     types: c.mappings.map((m) => m.type), mappings: Object.fromEntries(c.mappings.map((m) => [m.type, m.state])), cards: [],
   }));
   const byId = new Map(cols.map((c) => [c.id, c]));
-  const taskTypes = new Set(cols.flatMap((c) => c.types));
-  const stories = items.filter((i) => !taskTypes.has(i.type));
-  const storyKeys = new Map(stories.map((s) => [s.number, s.key]));
+  const taskTypes = taskTypesOf(columns);
+  const stories = new Map(items.filter((i) => !taskTypes.has(i.type)).map((s) => [s.number, s]));
+  const outside = new Map();
+  const storyOf = (id) => {
+    if (stories.has(id)) return stories.get(id);
+    const parent = parents.get(id);
+    if (parent) outside.set(id, parent);
+    return parent ?? null;
+  };
   let unplaced = 0;
   let unknownColumns = 0;
   for (const item of items) {
@@ -2042,10 +2133,11 @@ export function sprintBoard({ iteration, currentId = iteration?.id ?? null, gone
       else unplaced++;
       continue;
     }
-    col.cards.push({ ...item, column: col.id, readColumn: col.id, row: storyKeys.get(item.parent) ?? NO_STORY });
+    col.cards.push({ ...item, column: col.id, readColumn: col.id, row: storyOf(item.parent)?.key ?? NO_STORY });
     col.count++;
   }
   const loose = cols.some((c) => c.cards.some((card) => card.row === NO_STORY));
+  const ranked = [...stories.values(), ...outside.values()].sort(byOrder((a, b) => a.number - b.number));
   return {
     shape: "sprint",
     meta: {
@@ -2053,7 +2145,7 @@ export function sprintBoard({ iteration, currentId = iteration?.id ?? null, gone
       typeStates: types.types, states: types.states, typeColors: types.colors, unplaced, unknownColumns,
     },
     columns: cols,
-    rows: [...(loose ? [{ key: NO_STORY, story: null }] : []), ...stories.map((s) => ({ key: s.key, story: s }))],
+    rows: [...(loose ? [{ key: NO_STORY, story: null }] : []), ...ranked.map((s) => ({ key: s.key, story: s }))],
     viewer,
     total: items.length,
     limited: items.length >= AZ_QUERY_LIMIT,
@@ -2104,52 +2196,97 @@ export function checkTaskboardMove(stdout, card, column) {
   }
 }
 
-export const PARENTS_UNREAD = "Titel der übergeordneten Work Items nicht gelesen";
-const parentsKey = (s, c) => `parents\n${s.teamKey(c)}`;
-
-// One query by id for the parents outside the sprint: az boards query reads no linked item (sources/azure/related.js).
-// `before` gets the items before that query, with the titles known so far.
-export async function parentTitles(s, c, items, view = null, before = null) {
-  const key = parentsKey(s, c);
-  const held = s.keptValue(key);
-  const titles = new Map(held?.value ?? []);
-  const own = new Map(items.map((i) => [i.number, i.title]));
-  const missing = [...new Set(items.map((i) => i.parent).filter((id) => Number.isInteger(id) && !own.has(id) && !titles.has(id)))];
-  const titleOf = (id) => own.get(id) ?? titles.get(id) ?? null;
-  const titled = () => items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent) } : i));
-  let warning = null;
-  if (missing.length) {
-    before?.(titled());
-    try {
-      const found = new Map(parseWorkItems(await s.az(azQueryArgs(c, idsWiql(missing)), what(view, "parents")), c).map((i) => [i.number, i.title]));
-      for (const id of missing) titles.set(id, found.get(id) ?? null);
-      s.keep(key, titles, held?.until ?? Date.now() + TEAM_KEEP_MS);
-    } catch (e) {
-      warning = `${PARENTS_UNREAD}: ${errorText(e)}`;
-    }
-  }
-  return { items: titled(), warning };
+export const PARENTS_UNREAD = "Übergeordnete Work Items außerhalb des Sprints nicht gelesen, ihre Tasks stehen unter „Ohne Story“";
+export const TITLES_UNREAD = "Titel der übergeordneten Work Items nicht gelesen";
+export function parentsLost(ids) {
+  const named = ids.map((id) => `#${id}`).join(", ");
+  return ids.length === 1
+    ? `Übergeordnetes Work Item ${named} nicht gefunden (gelöscht oder ohne Leserecht), seine Tasks stehen unter „Ohne Story“`
+    : `Übergeordnete Work Items ${named} nicht gefunden (gelöscht oder ohne Leserecht), ihre Tasks stehen unter „Ohne Story“`;
 }
+export const BACKLOG_ROOT_UNREAD = "Backlog-Iteration des Teams nicht gelesen, „ohne Sprint“ ungeprüft";
+export const ORDER_UNREAD = "Reihenfolge des Backlogs nicht gelesen, Zeilen nach Id";
+
+// The team's backlog iteration (parseTeamSettings, s.teamSettings, kept no
+// longer than `until`) → { path, warning }: a read that fails, or settings
+// that name none, give none and the warning that says so.
+async function backlogIterationOf(s, c, view, until) {
+  try {
+    const settings = await s.teamSettings.of(c, view);
+    s.teamSettings.keepUntil(c, until);
+    if (!settings.backlogIteration) throw new BoardError("Azure nannte keine Backlog-Iteration");
+    return { path: settings.backlogIteration, warning: null };
+  } catch (e) {
+    return { path: null, warning: `${BACKLOG_ROOT_UNREAD}: ${errorText(e)}` };
+  }
+}
+
+const titlesKey = (s, c) => `parent-titles\n${s.teamKey(c)}`;
+
+// The parents of `items` outside them, in one query by id (az boards query
+// reads no linked item, sources/azure/related.js): those of the `tasks`
+// (placedTasks), which get rows, at every call, with the team's backlog
+// iteration beside it (backlogIterationOf), which says their sprint
+// (sprintName); the other items' parents only for their titles, where those
+// are not kept, which are then kept TEAM_KEEP_MS. Without either it asks
+// nothing. `lost` are the tasks' parents the query did not find. `before`
+// gets the items and the parents of the last draw (`last`: id → its row's
+// story) before that query.
+export async function parentsOutside(s, c, items, { tasks = new Set(), orderField = null, view = null, last = new Map(), before = null, until = Infinity } = {}) {
+  const own = new Map(items.map((i) => [i.number, i]));
+  const outsideOf = (list) => [...new Set(list.map((i) => i.parent).filter((id) => Number.isInteger(id) && !own.has(id)))];
+  const rowIds = outsideOf(items.filter((i) => tasks.has(i.number)));
+  const held = s.keptValue(titlesKey(s, c));
+  const titles = new Map(held?.value ?? []);
+  const asked = outsideOf(items).filter((id) => rowIds.includes(id) || !titles.has(id));
+  const titleOf = (id, parents) => (own.get(id) ?? parents.get(id))?.title ?? titles.get(id) ?? null;
+  const withParents = (parents) => items.map((i) => (Number.isInteger(i.parent) ? { ...i, parentTitle: titleOf(i.parent, parents) } : i));
+  if (!asked.length) return { items: withParents(new Map()), parents: new Map(), lost: [], warnings: [] };
+  const drawn = new Map(rowIds.filter((id) => last.has(id)).map((id) => [id, last.get(id)]));
+  before?.(withParents(drawn), drawn);
+  const root = rowIds.length ? backlogIterationOf(s, c, view, until) : null;
+  let read;
+  try {
+    read = parseWorkItems(await s.az(azQueryArgs(c, idsWiql(asked, orderFields(orderField))), what(view, "parents")), c, orderField);
+  } catch (e) {
+    return { items: withParents(new Map()), parents: new Map(), lost: [], warnings: [`${rowIds.length ? PARENTS_UNREAD : TITLES_UNREAD}: ${errorText(e)}`] };
+  }
+  const found = new Map(read.map((p) => [p.number, p]));
+  const titled = asked.filter((id) => !rowIds.includes(id));
+  if (titled.length) {
+    for (const id of titled) titles.set(id, found.get(id)?.title ?? null);
+    s.keep(titlesKey(s, c), titles, held?.until ?? Date.now() + TEAM_KEEP_MS);
+  }
+  const { path, warning } = root ? await root : { path: null, warning: null };
+  const parents = new Map(rowIds.filter((id) => found.has(id)).map((id) => [id, { ...found.get(id), outside: true, sprint: sprintName(found.get(id).iteration, path) }]));
+  return { items: withParents(parents), parents, lost: rowIds.filter((id) => !found.has(id)), warnings: warning ? [warning] : [] };
+}
+
+// The stories of the rows the data `last` drew, by id.
+const lastStories = (last) => new Map((last?.shape === "sprint" ? last.rows : []).filter((r) => r.story).map((r) => [r.story.number, r.story]));
 
 // The Sprint as makeAzure uses it, on the source's shared parts `s` (see
 // makeAzure, which says what is kept and for how long): what it keeps per
-// team and project (settingsOf; the team's areas are the source's,
-// s.areasOf), how it loads and writes, the team's iterations for the
-// sprint picker (iterations: each with `current`, whether it is the
-// team's current iteration as the Sprint keeps it, so that a kept list
-// never names a sprint current that has ended), and what a refused write
-// or a task in a column the columns read do not know drops (forgetSettings:
-// the team's sprint, areas and columns, not the project's types); `r`
-// drops the team's iterations and its parent titles too (forget).
+// team and project (settingsOf; the team's areas and backlog configuration
+// are the source's, s.areas and s.backlogConfig), how it loads and writes,
+// the team's iterations for the sprint picker (iterations: each with
+// `current`, whether it is the team's current iteration as the Sprint
+// keeps it, so that a kept list never names a sprint current that has
+// ended), and what a refused write or a task in a column the columns read
+// do not know drops (forgetSettings: the team's sprint and columns and the
+// source's team reads, not the project's types); `r` drops the team's
+// iterations and the titles of its items' parents too (forget).
 //
-// load(view, { chosen }) shows the sprint `chosen` ({ id, name }; null:
-// the current one), looked up by its id among the team's iterations: its
-// taskboard and query by its id and path, the team's settings as for the
-// current one. Where the team no longer has it, the current sprint, or
-// none where none runs, shows, meta.gone names it and the load says so
-// (notice); a read of it that fails names it. Where the team has no sprint
-// running and none is chosen, it reads no work items (sprintBoard without
-// an iteration).
+// load(view, { chosen, last }) shows the sprint `chosen` ({ id, name };
+// null: the current one), looked up by its id among the team's
+// iterations: its taskboard and query by its id and path, the team's
+// settings as for the current one. Where the team no longer has it, the
+// current sprint, or none where none runs, shows, meta.gone names it and
+// the load says so (notice); a read of it that fails names it. Where the
+// team has no sprint running and none is chosen, it reads no work items
+// (sprintBoard without an iteration). `last` is the data the view showed
+// as the load began (null for none): what it draws before the parents'
+// query keeps their rows from there.
 export function sprintView(s) {
   const iterations = readMemo();
   const iterationsOf = (c, view) => iterations.get(s.teamKey(c), () => s.az(azIterationsArgs(c), what(view, "iterations")).then(parseIterations));
@@ -2159,24 +2296,29 @@ export function sprintView(s) {
     const [iteration, board] = [s.keptValue(currentKey(c)), s.keptValue(`board\n${team}`)];
     const parts = {
       iteration: iteration ? Promise.resolve(iteration.value) : s.az(azIterationArgs(c), what(view, "iteration")).then(parseIteration),
-      areas: s.areasOf(c, view),
+      areas: s.areas.of(c, view),
       columns: board ? Promise.resolve(board.value.columns) : s.az(azColumnsArgs(c), what(view, "columns")).then(parseColumns),
       types: s.typesOf(c, view),
+      order: s.backlogConfig.of(c, view).then(
+        ({ orderField }) => ({ field: orderField, warning: orderField ? null : ORDER_UNCHECKED }),
+        (e) => ({ field: null, warning: `${ORDER_UNREAD}: ${errorText(e)}` }),
+      ),
     };
-    const all = Promise.all([parts.iteration, parts.areas, parts.columns, parts.types]).then(([it, areas, columns, { types: ty, fresh }]) => {
+    const all = Promise.all([parts.iteration, parts.areas, parts.columns, parts.types, parts.order]).then(([it, areas, columns, { types: ty, fresh }, order]) => {
       const until = iteration?.until ?? (it ? iterationUntil(it.finish, Date.now()) : dayEnd(Date.now()));
-      s.keepAreasUntil(c, until);
+      s.areas.keepUntil(c, until);
+      s.backlogConfig.keepUntil(c, until);
       if (!iteration) s.keep(currentKey(c), it, until);
       if (!board) s.keep(`board\n${team}`, { columns }, until);
       if (fresh) s.keepTypesUntil(c, until);
-      return { iteration: it, areas, columns, types: ty };
+      return { iteration: it, areas, columns, types: ty, order, until };
     });
     return { ...parts, all };
   }
   const forgetSettings = (c) => {
     s.drop(currentKey(c));
     s.drop(`board\n${s.teamKey(c)}`);
-    s.forgetAreas(c);
+    s.forgetTeamReads(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forgetSettings, c);
   // The team's current iteration's id: as the Sprint keeps it, else read
@@ -2185,44 +2327,52 @@ export function sprintView(s) {
     const kept = s.keptValue(currentKey(c));
     return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c), what(view, "iteration"))))?.id ?? null;
   }
-  async function loadSprint(view, chosen, live) {
+  async function loadSprint(view, chosen, live, last) {
     const c = view.context;
     const me = s.whoAmI(view);
     const settings = settingsOf(c, view);
     const listed = chosen ? iterationsOf(c, view) : null;
     const shown = Promise.all([settings.iteration, listed]).then(([current, list]) => list?.find((i) => i.id === chosen.id) ?? current);
     const placesRead = shown.then((it) => (it ? s.az(azTaskboardArgs(c, it.id), what(view, "taskboard")) : null));
-    const itemsRead = Promise.all([shown, settings.areas]).then(([it, areas]) => (it ? s.az(azQueryArgs(c, sprintWiql(it, areas)), what(view, "sprint-items")) : null));
+    const itemsRead = Promise.all([shown, settings.areas, settings.order])
+      .then(([it, areas, order]) => (it ? s.az(azQueryArgs(c, sprintWiql(it, areas, orderFields(order.field))), what(view, "sprint-items")) : null));
     const [kept, list, iteration, places, items] = await Promise.all([settings.all, listed, shown, placesRead, itemsRead]);
     const found = list?.find((i) => i.id === chosen.id) ?? null;
     const gone = chosen && !found ? { id: chosen.id, name: chosen.name } : null;
     const currentId = kept.iteration?.id ?? null;
     const placed = places === null ? new Map() : parseTaskboard(places);
-    const board = (titled, viewer) => {
-      const data = sprintBoard({ ...kept, iteration, currentId, gone, items: titled, places: placed, viewer });
+    const orderField = kept.order.field;
+    const warnings = [...kept.types.warnings, ...(iteration && kept.order.warning ? [kept.order.warning] : [])];
+    const board = (withParents, parents, viewer) => {
+      const data = sprintBoard({ ...kept, iteration, currentId, gone, items: withParents, parents, places: placed, viewer });
       s.noViewerOf(data);
       return data;
     };
-    const drawn = (soFar) => void me.then((viewer) => live.partial(() => ({ data: board(soFar, viewer), warnings: [...kept.types.warnings] }))).catch(report);
-    const titled = await parentTitles(s, c, items === null ? [] : parseWorkItems(items, c), view, drawn);
-    const data = board(titled.items, await me);
+    const drawSoFar = (soFar, parents) => void me.then((viewer) => live.partial(() => ({ data: board(soFar, parents, viewer), warnings }))).catch(report);
+    const read = items === null ? [] : parseWorkItems(items, c, orderField);
+    const tasks = placedTasks(kept.columns, read, placed);
+    const outside = await parentsOutside(s, c, read, { tasks, orderField, view, last: lastStories(last), before: drawSoFar, until: kept.until });
+    const data = board(outside.items, outside.parents, await me);
     if (data.meta.unknownColumns) forgetSettings(c);
     const instead = currentId ? "der aktuelle Sprint wird gezeigt" : "das Team hat keinen laufenden Sprint";
-    return { data, warnings: [...kept.types.warnings, ...(titled.warning ? [titled.warning] : [])], notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null };
+    return {
+      data, warnings: [...warnings, ...(outside.lost.length ? [parentsLost(outside.lost)] : []), ...outside.warnings],
+      notice: gone ? `${gone.name} gibt es im Team nicht mehr: ${instead}` : null,
+    };
   }
   return {
     forget: (c) => {
       forgetSettings(c);
       iterations.drop(s.teamKey(c));
-      s.drop(parentsKey(s, c));
+      s.drop(titlesKey(s, c));
     },
     async iterations(view) {
       const c = view.context;
       const [list, current] = await Promise.all([iterationsOf(c, view), currentIdOf(c, view)]);
       return list.map((i) => ({ ...i, current: i.id === current }));
     },
-    load: (view, { chosen = null, live = NO_LIVE }) =>
-      loadSprint(view, chosen, live).catch((e) => {
+    load: (view, { chosen = null, live = NO_LIVE, last = null }) =>
+      loadSprint(view, chosen, live, last).catch((e) => {
         throw chosen && e instanceof BoardError ? new BoardError(`${chosen.name} ließ sich nicht lesen: ${e.message}`, e) : e;
       }),
     async move(view, data, card, column) {
@@ -2241,13 +2391,14 @@ export function sprintView(s) {
 // the view as makeAzure uses it (backlogView).
 
 // The Backlog view's calls for a team context `c`: the team's backlog
-// levels, its backlog configuration (the order field, each type's states
-// and their categories), its settings (default and backlog iteration; its
-// default area comes from azAreasArgs' defaultValue), and per refresh the
-// level's work items in their list (az rest: az devops invoke picks a
-// location by area and resource, the first that fits, which does not
-// reliably reach backlogs/{id}/workItems) and one WIQL query for their
-// fields (azQueryArgs).
+// levels; its backlog configuration (the order field, each type's states
+// and their categories) and its settings (default and backlog iteration;
+// its default area comes from azAreasArgs' defaultValue), both of which the
+// Sprint reads too (makeAzure's teamRead); and per refresh the level's work
+// items in their list (az rest: az devops invoke picks a location by area
+// and resource, the first that fits, which does not reliably reach
+// backlogs/{id}/workItems) and one WIQL query for their fields
+// (azQueryArgs).
 export const azLevelsArgs = (c) => azInvokeArgs(c, "work", "backlogs", { project: c.project, team: c.team });
 export const azBacklogConfigArgs = (c) => azInvokeArgs(c, "work", "backlogconfiguration", { project: c.project, team: c.team });
 export const azTeamSettingsArgs = (c) =>
@@ -2348,15 +2499,6 @@ export function parseBacklogIds(stdout) {
   return [...new Set(list.map((l) => l?.target?.id).filter(Number.isInteger))];
 }
 
-// The sprint a work item is in, as the Backlog shows it: the last part of
-// its iteration's path, or null for none, which is the backlog's own
-// iteration (the root of the team's iterations) or the project's root (a
-// path without a level below).
-export function sprintName(path, backlogIteration) {
-  if (typeof path !== "string" || !path || path === backlogIteration || !path.includes("\\")) return null;
-  return path.split("\\").at(-1);
-}
-
 // The backlog as the backlog shape shows it (kinds/backlog.js): one row
 // per work item of the level (`items`, parseWorkItems on the ids' query
 // with the order field: each item's `order`), each with its sprint
@@ -2370,11 +2512,10 @@ export function sprintName(path, backlogIteration) {
 // they were not read.
 export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer, typeColors = {} }) {
   const at = new Map(ids.map((id, i) => [id, i]));
-  const rank = (i) => i.order ?? Infinity;
   const rows = items
     .filter((i) => at.has(i.number))
     .map((i) => ({ ...i, sprint: sprintName(i.iteration, settings.backlogIteration) }))
-    .sort((a, b) => rank(a) - rank(b) || at.get(a.number) - at.get(b.number));
+    .sort(byOrder((a, b) => at.get(a.number) - at.get(b.number)));
   const read = Math.min(ids.length, AZ_QUERY_LIMIT);
   return {
     shape: "backlog",
@@ -2450,19 +2591,19 @@ export function backlogView(s) {
     const held = s.keptValue(key(c));
     if (held) return { level: Promise.resolve(held.value.level), config: Promise.resolve(held.value.config), all: Promise.resolve(held.value) };
     const levels = s.az(azLevelsArgs(c), what(view, "levels")).then(parseBacklogLevels);
-    const config = s.az(azBacklogConfigArgs(c), what(view, "backlog-config")).then(parseBacklogConfig);
-    const all = Promise.all([levels, config, s.az(azTeamSettingsArgs(c), what(view, "team-settings")).then(parseTeamSettings), s.areasOf(c, view)]).then(([lv, cf, settings, areas]) => {
+    const config = s.backlogConfig.of(c, view);
+    const all = Promise.all([levels, config, s.teamSettings.of(c, view), s.areas.of(c, view)]).then(([lv, cf, settings, areas]) => {
       const value = { ...backlogLevels(lv, cf), config: cf, settings, area: areas.default };
       const until = backlogUntil(settings, Date.now());
       s.keep(key(c), value, until);
-      s.keepAreasUntil(c, until);
+      for (const read of [s.backlogConfig, s.teamSettings, s.areas]) read.keepUntil(c, until);
       return value;
     });
     return { level: levels.then(requirementLevel), config, all };
   }
   const forget = (c) => {
     s.drop(key(c));
-    s.forgetAreas(c);
+    s.forgetTeamReads(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
   // The colors of the project's work item types (s.typesOf, which keeps
@@ -2487,7 +2628,7 @@ export function backlogView(s) {
       const idsRead = settings.level.then((level) => s.az(azBacklogIdsArgs(c, level.id), { failure: azRestFailure, ...what(view, "backlog-ids") })).then(parseBacklogIds);
       const outRead = Promise.all([idsRead, settings.config]).then(([ids, config]) => {
         const read = ids.slice(0, AZ_QUERY_LIMIT);
-        return read.length ? s.az(azQueryArgs(c, idsWiql(read, config.orderField ? [config.orderField] : [])), what(view, "backlog-items")) : "";
+        return read.length ? s.az(azQueryArgs(c, idsWiql(read, orderFields(config.orderField))), what(view, "backlog-items")) : "";
       });
       const [kept, ids, out] = await Promise.all([settings.all, idsRead, outRead]);
       const viewer = await me;
@@ -2722,10 +2863,12 @@ export const azureRelated = (az) => ({
 // (iterationUntil), or, where the team has no sprint running, until that day
 // ends (dayEnd; one that fails keeps nothing): per team, by organisation,
 // project and team, its current sprint (or that none runs) and taskboard
-// columns. The titles of its items' parents outside the sprint are read
-// after its work items, only for those not kept yet, and kept TEAM_KEEP_MS
-// (parentTitles). The team's iterations, which the sprint picker lists, are
-// read when it first opens and kept while the board runs (one that fails
+// columns. Its tasks' parents outside the sprint are read with each refresh,
+// after its work items, and not kept; its other items' parents outside it
+// only for their titles, where those are not kept yet (in the tasks'
+// parents' query where there is one), and kept TEAM_KEEP_MS
+// (parentsOutside). The team's iterations, which the sprint picker lists,
+// are read when it first opens and kept while the board runs (one that fails
 // keeps nothing); which of them is current, the kept current sprint says.
 // The project's work item types, one entry for both views (typesOf), are
 // kept TEAM_KEEP_MS from their read (even where another read of the Sprint's
@@ -2736,7 +2879,7 @@ export const azureRelated = (az) => ({
 // settings (not the project's types) are dropped, so that they are read
 // again, by `r` on the Sprint (forget), by a task in a column the columns
 // read do not know, and by a move or state change Azure refuses; its
-// iterations and parent titles only by `r`.
+// iterations and its parents' titles only by `r`.
 //
 // What the Backlog keeps, per team, read at the same time once and kept
 // for BACKLOG_KEEP_MS (one that fails keeps nothing), or until the
@@ -2751,9 +2894,11 @@ export const azureRelated = (az) => ({
 // them TEAM_KEEP_MS (typesOf); one that fails is a warning, keeps nothing
 // and is read again with the next refresh.
 //
-// Both views read the team's areas (the Backlog for its default area) and
-// keep them as one, for the shorter of their times (areasOf); `r` on
-// either, or a refusal there, drops them.
+// Both views read the team's areas (the Backlog for its default area), its
+// backlog configuration (the Sprint for its order field) and its settings
+// (the Sprint for its backlog iteration, only where its tasks have parents
+// outside the sprint), and keep each as one, for the shorter of their times
+// (teamRead); `r` on either, or a refusal there, drops them.
 //
 // Who az is signed in as is read beside all that, with its own short
 // timeout (AZ_ME_TIMEOUT), and kept once read; while that fails it is
@@ -2795,11 +2940,40 @@ export function makeAzure(paths) {
   const teamKey = (c) => `${c.org}\n${c.project}\n${c.team}`;
   // The key of a project's work item types, which both views keep.
   const typesKey = (c) => `types\n${c.org}\n${c.project}`;
-  const areasKey = (c) => `areas\n${teamKey(c)}`;
+  // A team's part both views read, `name` (its key's start and its log
+  // line's): of(c, view) gives it, read where it is not kept and kept
+  // TEAM_KEEP_MS; keepUntil(c, until) keeps it shorter where a view keeps
+  // its own settings for a shorter time (the Sprint's as long as its
+  // settings, the Backlog's until backlogUntil).
+  const teamRead = (name, args, parse) => {
+    const key = (c) => `${name}\n${teamKey(c)}`;
+    return {
+      async of(c, view = null) {
+        const held = keptValue(key(c));
+        if (held) return held.value;
+        const value = parse(await az(args(c), what(view, name)));
+        keep(key(c), value, Date.now() + TEAM_KEEP_MS);
+        return value;
+      },
+      keepUntil(c, until) {
+        const entry = kept.get(key(c));
+        if (entry) entry.until = Math.min(entry.until, until);
+      },
+      forget: (c) => kept.delete(key(c)),
+    };
+  };
+  const teamReads = {
+    areas: teamRead("areas", azAreasArgs, parseAreas),
+    backlogConfig: teamRead("backlog-config", azBacklogConfigArgs, parseBacklogConfig),
+    teamSettings: teamRead("team-settings", azTeamSettingsArgs, parseTeamSettings),
+  };
   // What the views share: az, what is kept, who az is (and the data's words
-  // for why it is not known), a project's work item types (typesOf), and a
-  // state change.
+  // for why it is not known), a project's work item types (typesOf), the
+  // team's parts both read (teamReads; either view's forget drops them all:
+  // forgetTeamReads), and a state change.
   const shared = {
+    ...teamReads,
+    forgetTeamReads: (c) => Object.values(teamReads).forEach((read) => read.forget(c)),
     az, keptValue, whoAmI, teamKey,
     // The project's work item types (parseAzureTypes), one entry for both
     // views: read where it is not kept and kept TEAM_KEEP_MS from their read
@@ -2817,23 +2991,6 @@ export function makeAzure(paths) {
       const entry = kept.get(typesKey(c));
       if (entry) entry.until = until;
     },
-    // The team's areas (parseAreas), one entry for both views: read where
-    // it is not kept, kept TEAM_KEEP_MS, and shorter where a view keeps
-    // its own settings for a shorter time (keepAreasUntil: the Sprint's
-    // as long as its settings, the Backlog's until backlogUntil); either
-    // view's forget drops it.
-    async areasOf(c, view = null) {
-      const held = keptValue(areasKey(c));
-      if (held) return held.value;
-      const value = parseAreas(await az(azAreasArgs(c), what(view, "areas")));
-      keep(areasKey(c), value, Date.now() + TEAM_KEEP_MS);
-      return value;
-    },
-    keepAreasUntil(c, until) {
-      const entry = kept.get(areasKey(c));
-      if (entry) entry.until = Math.min(entry.until, until);
-    },
-    forgetAreas: (c) => kept.delete(areasKey(c)),
     keep,
     drop: (key) => kept.delete(key),
     noViewerOf(data) {
@@ -4973,45 +5130,6 @@ export function progressLine(t, progress, end) {
     : div().id("progress-bar").flex_1().min_w(40).h(6).rounded(1).bg(t.border).child(div().h(6).w(`${((100 * done) / total).toFixed(2)}%`).rounded(1).bg(on));
   const number = (text) => div().flex_none().text_size(11).text_color(t.muted).child(text);
   return h_flex().id("card-progress").gap(8).items_center().child(number(`${done} / ${total}`)).child(bar).child(number(`${Math.floor((100 * done) / total)} %`)).children(end);
-}
-
-// ==== src/kinds/backlog.js ====
-
-// A team's backlog: its rows in backlog order, the item with a key, a state
-// change laid over the data, what a new work item may be, and the
-// backlog's warnings. backlogList (sources/azure/backlog.js) builds the data.
-
-// The work item with `key`, or null.
-export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
-
-// The data with the item `key` in `state`.
-export const withBacklogState = (data, key, state) => withBacklogItem(data, key, { state });
-
-// The data with the item `key`'s fields set to those of `patch`.
-export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
-
-// The rows that show, as one column (navigate walks a list as one).
-export const backlogNav = (data, filter, mine) => [{ id: "backlog", name: data.meta.level.name, shown: data.rows.filter((r) => shows(r, filter, mine, data.viewer)) }];
-
-// The types a new work item may have: the level's, its default first, then
-// with a selected item of the level (`parent`) the types of the level
-// below it, as its children (child: true).
-export function createTypes(data, parent) {
-  const { level, childLevel } = data.meta;
-  const own = [...new Set([level.defaultType, ...level.types].filter(Boolean))].map((name) => ({ name, child: false }));
-  const children = parent ? (childLevel?.types ?? []).filter((n) => !own.some((t) => t.name === n)).map((name) => ({ name, child: true })) : [];
-  return [...own, ...children];
-}
-
-// The warnings of a backlog: an order it cannot check (no order field),
-// ids its query did not find, and a backlog longer than one query reads.
-export function backlogWarnings(data) {
-  const { missing } = data.meta;
-  return [
-    ...(data.meta.orderField ? [] : ["Reihenfolge ungeprüft: Azure nannte kein Order-Feld"]),
-    ...(missing > 0 ? [`${missing} ${missing === 1 ? "Eintrag" : "Einträge"} des Backlogs ohne Felder (nicht gefunden)`] : []),
-    ...(data.limited ? [`Nur die ersten ${data.limit} von ${data.total} Einträgen des Backlogs (so viele liest eine Abfrage)`] : []),
-  ];
 }
 
 // ==== src/actions/write.js ====
@@ -7827,15 +7945,17 @@ function scrollToRow(b, view, key) {
 
 // The sprint shape: a team's sprint (its current one, or one the sprint picker
 // chose) as a taskboard. One row per story (storyCell at the left), its tasks
-// as cards in the team's taskboard columns (drawTask); tasks whose story is
-// not in the sprint stand in the row "Ohne Story". H/L move a task to the next
-// column (through the taskboard's own column, not the state: two columns may
-// map to one state), s changes a story's or a task's state from its type's
-// states (the status menu), Enter shows the details; both write at once
-// (actions/move.js, actions/write.js). z (while the board has the keyboard),
-// or a click on the triangle in a story's row, folds its tasks away and back
-// (toggleStoryFold; foldsOf says where that is kept). Keys walk the stories,
-// then each column's tasks but the folded ones (sprintNav, withoutFolded).
+// as cards in the team's taskboard columns (drawTask); a task's parent
+// outside the sprint has a row too, its sprint beside its type, and tasks
+// without a parent read stand in the row "Ohne Story". H/L move a task to
+// the next column (through the taskboard's own column, not the state: two
+// columns may map to one state), s changes a story's or a task's state from
+// its type's states (the status menu), Enter shows the details; both write
+// at once (actions/move.js, actions/write.js). z (while the board has the
+// keyboard), or a click on the triangle in a story's row, folds its tasks
+// away and back (toggleStoryFold; foldsOf says where that is kept). Keys walk
+// the stories, then each column's tasks but the folded ones (sprintNav,
+// withoutFolded).
 // Another sprint of the team shows through the sprint picker
 // (ui/modals/sprints.js says what opens it; pickSprint, showSprint), and says
 // so in the head ("nicht aktuell"); with no sprint running and none chosen the
@@ -7845,9 +7965,9 @@ function scrollToRow(b, view, key) {
 // current sprint's, null with none running), gone ({ id, name } of a
 // chosen sprint the team no longer has, or null), typeStates, states,
 // typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
-// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
-// viewer, noViewer, total, limited, limit } (sprintBoard,
-// sources/azure/sprint.js).
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story
+// (outside and sprint for a parent outside the sprint) }], viewer,
+// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js).
 // View fields it reads: id, source, layout (as writeAtOnce does).
 
 // How wide the stories' column is.
@@ -8108,6 +8228,7 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     ...fold,
     div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)),
     ...(story.type ? [div().text_size(11).text_color(t.dim).child(story.type)] : []),
+    ...(story.outside ? [toneChip(t, story.sprint ?? "ohne Sprint", NOTE_TONES.warning).flex_none()] : []),
   ];
   return cell
     .id(`story-${story.key}`)
@@ -9022,7 +9143,7 @@ export default class Board extends View {
         },
       };
       try {
-        const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live });
+        const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live, last: before.data });
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);

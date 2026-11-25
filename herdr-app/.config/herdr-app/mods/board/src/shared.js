@@ -1,6 +1,6 @@
 // What the board's modules share: its names, its error and how one is
 // shown, its lines for herdr's log, small checks and text helpers, an
-// item's key and type, and labels for times.
+// item's key, type and order, and labels for times.
 
 
 
@@ -64,6 +64,10 @@ export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 // nothing there), else itemLabel. Its details, notices and toasts keep
 // itemLabel.
 export const cardLabel = (item) => (item.source === "azure" && item.kind === "workitem" ? String(item.number) : itemLabel(item));
+
+// A comparator of items by their `order` (an Azure backlog's order field,
+// lowest first), those without one after the rest, ties by `tie`.
+export const byOrder = (tie) => (a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || tie(a, b);
 
 // A person as the board names one, in every source alike: by name where
 // there is one, else by login; null for neither. Logins are kept apart

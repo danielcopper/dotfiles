@@ -392,21 +392,31 @@ by that run. Which files of the package git tracks is set in the root
   reviewed, with checks, review state and whether I have to act on them). A
   team's Sprint shows its current sprint the way Azure's taskboard does: one row
   per story (its id, title, own state and assignee), its tasks as cards in the
-  team's taskboard columns, each with its own state, assignee and id, and the
-  tasks whose story is not in the sprint in a row "Ohne Story" at the top; it
-  holds the work items of the sprint in the team's areas, and its tasks are the
-  work items of the types the taskboard's columns map. What it reads per
-  refresh, the header of `mods/board/src/main.js` says, and makeAzure (in
+  team's taskboard columns, each with its own state, assignee and id; a task
+  whose story is not in the sprint (one left in the sprint before, say) shows
+  under that story's own row, marked with its sprint ("Sprint 11", or "ohne
+  Sprint" where it is in the team's backlog iteration or the project's root),
+  and the tasks without a story, or whose story could not be read or was not
+  found, stand in a row "Ohne Story" at the top; a warning says when a story
+  could not be read, and names one that was not found. The rows, and the tasks
+  within a cell, follow the team's backlog order (the order field its backlog
+  configuration names: Stack Rank, or Backlog Priority in Scrum), those without
+  a value after the rest by id; where the configuration cannot be read, a
+  warning says so and they go by id. "N Stories" above them counts every story
+  row, those from other sprints too. It holds the work items of the sprint in
+  the team's areas, and its tasks are the work items of the types the
+  taskboard's columns map. What it reads per refresh, the header of
+  `mods/board/src/main.js` says, and makeAzure (in
   `mods/board/src/sources/azure/index.js`) what it keeps; `r` reads the team's
-  sprint, areas and columns again. The command menu's "Sprint wählen…", or a
-  click on the sprint's name above the stories, opens a picker of the team's
-  sprints, past, current and future, in Azure's order, each with its dates;
-  the current one is marked "aktuell", and marked as the picker opens. It
-  filters and moves as the command menu does, and `Enter` or a click shows
-  the sprint picked. A sprint other than the current one says "nicht
-  aktuell" beside its name, and the menu's "Aktueller Sprint" goes back. The
-  choice is the Sprint view's while the board runs and is stored nowhere, so
-  after a restart the Sprint shows the current sprint again. A refresh keeps
+  sprint, areas, columns, backlog configuration and settings again. The command
+  menu's "Sprint wählen…", or a click on the sprint's name above the stories,
+  opens a picker of the team's sprints, past, current and future, in Azure's
+  order, each with its dates; the current one is marked "aktuell", and marked as
+  the picker opens. It filters and moves as the command menu does, and `Enter`
+  or a click shows the sprint picked. A sprint other than the current one says
+  "nicht aktuell" beside its name, and the menu's "Aktueller Sprint" goes back.
+  The choice is the Sprint view's while the board runs and is stored nowhere,
+  so after a restart the Sprint shows the current sprint again. A refresh keeps
   it; `r` reads the team's sprints again too, and where the team no longer
   has the chosen one, the Sprint shows the current one (or that none runs) and
   says so. Where the team has no sprint running, the Sprint says "kein laufender
@@ -452,8 +462,9 @@ by that run. Which files of the package git tracks is set in the root
   draws each page as it comes, the "Nur die ersten" note after the last;
   the PR list draws before the follow-up for pull requests with many review
   threads, their rows marked "…" until it came ("?" stays for what could
-  not be read); the Sprint draws before its parents' titles, the Backlog
-  before its types' colors. A read over data read since the start shows
+  not be read); the Sprint draws before its parents outside it (their tasks
+  where its saved state drew them, else in "Ohne Story"), the Backlog before
+  its types' colors. A read over data read since the start shows
   its result only once whole, so the selection and open details stay. The
   top right says which page a board reads ("lädt … Seite 2 von 3"). After
   each read of `views.json`, once the shown view is read, the board reads
@@ -606,12 +617,14 @@ by that run. Which files of the package git tracks is set in the root
   written, and its assignees end its progress line, or its chips' line where it
   has no progress. On the Sprint a story's progress counts the tasks in its row,
   done by the state their column shows, and a task names its parent only in
-  "Ohne Story" (its story's row names it otherwise); the Sprint reads the titles
-  of parents outside it in one query more and keeps them for four hours (`r`
-  reads them again). The board's query reads priority, milestone and parent at
-  no extra cost; the header's "Calls:" says why. Where `project.priorityField`
-  names a field the project does not have as a single-select field, a warning
-  above the columns says so; the default "Priority" may be missing without one.
+  "Ohne Story" (its story's row names it otherwise); the Sprint reads, in one
+  query more, its tasks' parents outside it with each refresh and the titles of
+  its stories' parents where it does not keep them; it keeps those for four
+  hours (`r` reads them again). The board's query reads priority, milestone and
+  parent at no extra cost; the header's "Calls:" says why. Where
+  `project.priorityField` names a field the project does not have as a
+  single-select field, a warning above the columns says so; the default
+  "Priority" may be missing without one.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,

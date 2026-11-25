@@ -1,12 +1,13 @@
-// A sprint's taskboard: its rows (one per story, and "Ohne Story" for tasks
-// whose story is not in the sprint), the items it holds, what shows and how the
-// keys walk it, a task's state as shown, a state change laid over the data, its
-// warnings (sprintWarnings), which folds hold (foldsOf) and its dates as
-// written. The data is a board's (kinds/board.js: its columns hold the tasks, so
+// A sprint's taskboard: its rows (one per story, one per task's parent
+// outside the sprint, and "Ohne Story" for tasks without a parent read),
+// the items it holds, what shows and how the keys walk it, a task's state
+// as shown, a state change laid over the data, its warnings
+// (sprintWarnings), which folds hold (foldsOf) and its dates as written.
+// The data is a board's (kinds/board.js: its columns hold the tasks, so
 // moves, their rollback and H/L work on it as on a board) plus its rows;
 // sprintBoard (sources/azure/sprint.js) builds it.
 
-import { lastDayOver } from "../shared.js";
+import { byOrder, lastDayOver } from "../shared.js";
 import { navigate, shows } from "../select.js";
 import { findCard, shownColumns } from "./board.js";
 import { stateDone } from "./states.js";
@@ -44,12 +45,14 @@ export function shownState(item, column) {
 
 // The columns keyboard movement and selection walk: the stories that show,
 // then the taskboard's columns with the tasks that show, each in row order
-// (a task moved in comes last in its column's data). withoutFolded leaves
-// the tasks of folded rows out of them.
+// and in a row by the backlog's order, as Azure's taskboard stacks them (a
+// task moved in comes last in its column's data). withoutFolded leaves the
+// tasks of folded rows out of them.
 export function sprintNav(data, filter, mine) {
   const order = new Map(data.rows.map((r, i) => [r.key, i]));
   const stories = { id: STORY_COLUMN, name: "Story", shown: sprintStories(data).filter((s) => shows(s, filter, mine, data.viewer)) };
-  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || a.number - b.number;
+  const inRow = byOrder((a, b) => a.number - b.number);
+  const byRow = (a, b) => order.get(rowOf(a)) - order.get(rowOf(b)) || inRow(a, b);
   return [stories, ...shownColumns(data, filter, mine).map((c) => ({ ...c, shown: [...c.shown].sort(byRow) }))];
 }
 

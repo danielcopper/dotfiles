@@ -1,9 +1,9 @@
 // Azure DevOps, what its two team views and a work item's related items
 // share: states and their categories, what az's failures mean, how az is
-// called, the work items' fields and how az's answers are read, who az is,
-// and a state change. The Sprint's own calls are in sprint.js, the
-// Backlog's in backlog.js, the related items' in related.js, the source as
-// the board uses it in index.js (makeAzure).
+// called, the work items' fields and how az's answers are read, a work
+// item's sprint, who az is, and a state change. The Sprint's own calls are
+// in sprint.js, the Backlog's in backlog.js, the related items' in
+// related.js, the source as the board uses it in index.js (makeAzure).
 
 import { BoardError, DAY_MS, failure, isObject, itemKey, lastDayEnd, personName } from "../../shared.js";
 
@@ -114,11 +114,17 @@ export const PRIORITY = "Microsoft.VSTS.Common.Priority";
 // The fields read of each work item.
 export const WORK_ITEM_FIELDS = [...["Id", "Title", "WorkItemType", "State", "AssignedTo", "Parent", "AreaPath", "IterationPath"].map((f) => SYSTEM + f), PRIORITY];
 
-// One WIQL query for the fields of the work items `ids` (WORK_ITEM_FIELDS
-// and `extraFields`), in the order of their ids.
+// A WIQL query's SELECT list: WORK_ITEM_FIELDS and `extraFields`.
+export const wiqlFields = (extraFields = []) => [...WORK_ITEM_FIELDS, ...extraFields].map((f) => `[${f}]`).join(", ");
+
+// The extra fields that read a backlog's order field (parseBacklogConfig),
+// none where it names none.
+export const orderFields = (orderField) => (orderField ? [orderField] : []);
+
+// One WIQL query for the fields of the work items `ids` (wiqlFields), in
+// the order of their ids.
 export function idsWiql(ids, extraFields = []) {
-  const fields = [...WORK_ITEM_FIELDS, ...extraFields].map((f) => `[${f}]`).join(", ");
-  return `SELECT ${fields} FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
+  return `SELECT ${wiqlFields(extraFields)} FROM WorkItems WHERE [${SYSTEM}Id] IN (${ids.join(", ")}) ORDER BY [${SYSTEM}Id]`;
 }
 
 // az's JSON answer for `what`; `empty` stands for no output at all (az
@@ -185,7 +191,7 @@ export function azPriority(value) {
 // A work item of az boards query's answer as the board shows it, keyed as
 // itemKey names it; with an `orderField`, its value there as `order` (a
 // number, else null). az's answer holds no parent's title: the Sprint reads
-// it (parentTitles).
+// it (parentsOutside).
 export function azWorkItem(wi, c, orderField = null) {
   const f = (name) => fieldOf(wi, name) ?? null;
   const who = azPerson(f("AssignedTo"));
@@ -211,8 +217,17 @@ export function iterationUntil(finish, now) {
 // starts of days).
 export const dayEnd = (now) => (Math.floor(now / DAY_MS) + 1) * DAY_MS;
 
-// How long a team's settings that change rarely stay kept (ms): its areas,
-// and the Backlog's settings (BACKLOG_KEEP_MS).
+// The sprint a work item is in, as the views show it: the last part of its
+// iteration's path, or null for none, which is the team's backlog
+// iteration (the root of its iterations, parseTeamSettings) or the
+// project's root (a path without a level below).
+export function sprintName(path, backlogIteration) {
+  if (typeof path !== "string" || !path || path === backlogIteration || !path.includes("\\")) return null;
+  return path.split("\\").at(-1);
+}
+
+// How long a team's settings that change rarely stay kept (ms): those both
+// views read (makeAzure's teamRead), and the Backlog's (BACKLOG_KEEP_MS).
 export const TEAM_KEEP_MS = 4 * 3600000;
 
 // The most work items az boards query gives.

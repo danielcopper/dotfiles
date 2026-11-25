@@ -68,12 +68,14 @@
 // taskboard's column of each work item, and one WIQL query for their fields;
 // for a sprint the sprint picker chose, by its id and path; none while the
 // team has no sprint running and none is chosen) and one WIQL query more
-// where its items have parents outside the sprint that it does not keep yet
-// (parentTitles), its Backlog two, one after the other (the level's work
-// items in their list by az rest, then one WIQL query for their fields; one
-// for an empty backlog), and one more for the project's work item types
-// (their colors) while neither view keeps them; either one more while who az
-// is stays unknown. What the Sprint and the Backlog read once and keep, and
+// where its tasks have parents outside the sprint, or its other items have
+// parents outside it whose titles it does not keep (parentsOutside), beside
+// it, for the tasks' parents, one for the team's settings while neither view
+// keeps them; its Backlog two, one after the other (the level's work items
+// in their list by az rest, then one WIQL query for their fields; one for
+// an empty backlog); and one more for the project's work item types (their
+// colors) while neither view keeps them; either one more while who az is
+// stays unknown. What the Sprint and the Backlog read once and keep, and
 // for how long, makeAzure says. An assignment costs one gh or az call, and
 // the assignee picker one more per repo or team the first time it opens there
 // (GitHub's assignable users with who gh is; the team's members, and who az
@@ -100,13 +102,14 @@
 // once; it waits while any read runs, a write is under way or a dialog is
 // busy. After that a view not shown reads nothing. The Azure calls of a load
 // that need nothing of each other run side by side: the Sprint's settings
-// (iteration, areas, columns, types) and who az is; its taskboard once the
-// iteration came, its query once the areas came too; the Backlog's settings
-// (levels, configuration, team settings, areas), the types' colors and who az
-// is; its ids once the levels came, the query for their fields once the
-// configuration came too. What a view drew last, as read, is saved
-// (loading.js) and drawn after a restart with its age until its read replaces
-// it.
+// (iteration, areas, columns, types, backlog configuration) and who az is;
+// its taskboard once the iteration came, its query once the areas and the
+// configuration came too, its parents' query and the team's settings once
+// all that came; the Backlog's settings (levels, configuration, team
+// settings, areas), the types' colors and who az is; its ids once the
+// levels came, the query for their fields once the configuration came too.
+// What a view drew last, as read, is saved (loading.js) and drawn after a
+// restart with its age until its read replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), contexts.js (the top bar's
@@ -565,7 +568,7 @@ export default class Board extends View {
         },
       };
       try {
-        const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live });
+        const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live, last: before.data });
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);

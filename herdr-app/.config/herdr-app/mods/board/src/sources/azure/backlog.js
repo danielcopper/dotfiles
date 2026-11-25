@@ -2,19 +2,23 @@
 // backlog shape shows it (backlogList), a create and a parent link, and
 // the view as makeAzure uses it (backlogView).
 
-import { BoardError, errorText, failure, isObject } from "../../shared.js";
+import { BoardError, byOrder, errorText, failure, isObject } from "../../shared.js";
 import { NO_LIVE } from "../../loading.js";
 import { what } from "../../tools.js";
-import { AZ_QUERY_LIMIT, TEAM_KEEP_MS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, idsWiql, iterationUntil, jsonOrNull, parseWorkItems, wiqlText } from "./common.js";
+import {
+  AZ_QUERY_LIMIT, TEAM_KEEP_MS, azFailure, azInvokeArgs, azJson, azList, azOrg, azQueryArgs, azSaid, categoryStates, idsWiql, iterationUntil, jsonOrNull, orderFields,
+  parseWorkItems, sprintName, wiqlText,
+} from "./common.js";
 
 // The Backlog view's calls for a team context `c`: the team's backlog
-// levels, its backlog configuration (the order field, each type's states
-// and their categories), its settings (default and backlog iteration; its
-// default area comes from azAreasArgs' defaultValue), and per refresh the
-// level's work items in their list (az rest: az devops invoke picks a
-// location by area and resource, the first that fits, which does not
-// reliably reach backlogs/{id}/workItems) and one WIQL query for their
-// fields (azQueryArgs).
+// levels; its backlog configuration (the order field, each type's states
+// and their categories) and its settings (default and backlog iteration;
+// its default area comes from azAreasArgs' defaultValue), both of which the
+// Sprint reads too (makeAzure's teamRead); and per refresh the level's work
+// items in their list (az rest: az devops invoke picks a location by area
+// and resource, the first that fits, which does not reliably reach
+// backlogs/{id}/workItems) and one WIQL query for their fields
+// (azQueryArgs).
 export const azLevelsArgs = (c) => azInvokeArgs(c, "work", "backlogs", { project: c.project, team: c.team });
 export const azBacklogConfigArgs = (c) => azInvokeArgs(c, "work", "backlogconfiguration", { project: c.project, team: c.team });
 export const azTeamSettingsArgs = (c) =>
@@ -115,15 +119,6 @@ export function parseBacklogIds(stdout) {
   return [...new Set(list.map((l) => l?.target?.id).filter(Number.isInteger))];
 }
 
-// The sprint a work item is in, as the Backlog shows it: the last part of
-// its iteration's path, or null for none, which is the backlog's own
-// iteration (the root of the team's iterations) or the project's root (a
-// path without a level below).
-export function sprintName(path, backlogIteration) {
-  if (typeof path !== "string" || !path || path === backlogIteration || !path.includes("\\")) return null;
-  return path.split("\\").at(-1);
-}
-
 // The backlog as the backlog shape shows it (kinds/backlog.js): one row
 // per work item of the level (`items`, parseWorkItems on the ids' query
 // with the order field: each item's `order`), each with its sprint
@@ -137,11 +132,10 @@ export function sprintName(path, backlogIteration) {
 // they were not read.
 export function backlogList({ level, childLevel, config, settings, area, ids, items, viewer, typeColors = {} }) {
   const at = new Map(ids.map((id, i) => [id, i]));
-  const rank = (i) => i.order ?? Infinity;
   const rows = items
     .filter((i) => at.has(i.number))
     .map((i) => ({ ...i, sprint: sprintName(i.iteration, settings.backlogIteration) }))
-    .sort((a, b) => rank(a) - rank(b) || at.get(a.number) - at.get(b.number));
+    .sort(byOrder((a, b) => at.get(a.number) - at.get(b.number)));
   const read = Math.min(ids.length, AZ_QUERY_LIMIT);
   return {
     shape: "backlog",
@@ -217,19 +211,19 @@ export function backlogView(s) {
     const held = s.keptValue(key(c));
     if (held) return { level: Promise.resolve(held.value.level), config: Promise.resolve(held.value.config), all: Promise.resolve(held.value) };
     const levels = s.az(azLevelsArgs(c), what(view, "levels")).then(parseBacklogLevels);
-    const config = s.az(azBacklogConfigArgs(c), what(view, "backlog-config")).then(parseBacklogConfig);
-    const all = Promise.all([levels, config, s.az(azTeamSettingsArgs(c), what(view, "team-settings")).then(parseTeamSettings), s.areasOf(c, view)]).then(([lv, cf, settings, areas]) => {
+    const config = s.backlogConfig.of(c, view);
+    const all = Promise.all([levels, config, s.teamSettings.of(c, view), s.areas.of(c, view)]).then(([lv, cf, settings, areas]) => {
       const value = { ...backlogLevels(lv, cf), config: cf, settings, area: areas.default };
       const until = backlogUntil(settings, Date.now());
       s.keep(key(c), value, until);
-      s.keepAreasUntil(c, until);
+      for (const read of [s.backlogConfig, s.teamSettings, s.areas]) read.keepUntil(c, until);
       return value;
     });
     return { level: levels.then(requirementLevel), config, all };
   }
   const forget = (c) => {
     s.drop(key(c));
-    s.forgetAreas(c);
+    s.forgetTeamReads(c);
   };
   const onRefusal = (c) => s.dropOnRefusal(forget, c);
   // The colors of the project's work item types (s.typesOf, which keeps
@@ -254,7 +248,7 @@ export function backlogView(s) {
       const idsRead = settings.level.then((level) => s.az(azBacklogIdsArgs(c, level.id), { failure: azRestFailure, ...what(view, "backlog-ids") })).then(parseBacklogIds);
       const outRead = Promise.all([idsRead, settings.config]).then(([ids, config]) => {
         const read = ids.slice(0, AZ_QUERY_LIMIT);
-        return read.length ? s.az(azQueryArgs(c, idsWiql(read, config.orderField ? [config.orderField] : [])), what(view, "backlog-items")) : "";
+        return read.length ? s.az(azQueryArgs(c, idsWiql(read, orderFields(config.orderField))), what(view, "backlog-items")) : "";
       });
       const [kept, ids, out] = await Promise.all([settings.all, idsRead, outRead]);
       const viewer = await me;

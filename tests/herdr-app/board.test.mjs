@@ -86,8 +86,8 @@
 //   azure-sprint-taskboard.json (taskboardWorkItems, with
 //   one work item the query does not find), azure-sprint-items.json (az
 //   boards query), azure-sprint-account.json (az account show --query
-//   user) and azure-sprint-parents.json (az boards query for the titles of
-//   the work items' parents outside the sprint, by their ids);
+//   user) and azure-sprint-parents.json (az boards query for the work
+//   items' parents outside the sprint, by their ids);
 // - written the same way for the Backlog's calls (the REST reference at
 //   api-version 7.1 and the extension's vendored SDK models), with made-up
 //   names, not recorded: azure-backlog-levels.json (backlogs),
@@ -5535,9 +5535,11 @@ const AZ = {
   areas: (a) => a[0] === "boards" && a[1] === "area",
   columns: (a) => a.includes("taskboardColumns"),
   types: (a) => a.includes("workitemtypes"),
+  config: (a) => a.includes("backlogconfiguration"),
+  teamSettings: (a) => a.includes("show-default-iteration"),
   places: (a) => a.includes("taskboardWorkItems") && !a.includes("PATCH"),
   query: (a) => a[0] === "boards" && a[1] === "query",
-  // The query for the titles of the items' parents outside the sprint.
+  // The query for the items' parents outside the sprint.
   parents: (a) => a[0] === "boards" && a[1] === "query" && a.some((x) => String(x).includes("[System.Id] IN (")),
   me: (a) => a[0] === "account",
   move: (a) => a.includes("PATCH"),
@@ -5545,6 +5547,8 @@ const AZ = {
 };
 const openAz = (host, kind) => host.open("az").filter((c) => AZ[kind](c.args));
 const SETTINGS = ["iteration", "areas", "columns", "types"];
+// The order field the backlog configuration fixture names.
+const STACK_RANK = "Microsoft.VSTS.Common.StackRank";
 const openCounts = (host, kinds) => kinds.map((k) => openAz(host, k).length);
 // The fixture's taskboard columns' ids.
 const COLUMN = { todo: "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c01", prog: "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c02", pr: "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c03", done: "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c04" };
@@ -5561,7 +5565,10 @@ function taskboardAnswer(places = {}, drop = []) {
 const azRefused = (text) => ({ code: 1, stdout: "", stderr: `ERROR: ${text}\n` });
 // Answers the settings calls that are open (the types may be kept).
 async function answerSettings(host, iteration = iterationAnswer()) {
-  const answers = { iteration, areas: fixture("azure-sprint-areas.json"), columns: fixture("azure-sprint-columns.json"), types: fixture("azure-sprint-types.json") };
+  const answers = {
+    iteration, areas: fixture("azure-sprint-areas.json"), columns: fixture("azure-sprint-columns.json"), types: fixture("azure-sprint-types.json"),
+    config: fixture("azure-backlog-config.json"),
+  };
   for (const [kind, out] of Object.entries(answers)) if (openAz(host, kind).length) await host.answer("az", ok(out), AZ[kind]);
 }
 // A refresh of the shown Sprint, as its timer starts one (not r, which
@@ -5571,12 +5578,17 @@ async function refreshSprint(b, cx) {
   await settle();
 }
 // One refresh's answers; `me`: the account's answer (true: the fixture's,
-// false: none is asked); `parents`: the answer for the parents' titles,
-// where the Sprint asks for them.
-async function answerRefresh(host, { me = true, items = fixture("azure-sprint-items.json"), places = fixture("azure-sprint-taskboard.json"), parents = ok(fixture("azure-sprint-parents.json")) } = {}) {
+// false: none is asked); `parents`: the answer for the parents outside the
+// sprint and `teamSettings` the team's settings beside it, where the Sprint
+// asks for them.
+async function answerRefresh(host, {
+  me = true, items = fixture("azure-sprint-items.json"), places = fixture("azure-sprint-taskboard.json"), parents = ok(fixture("azure-sprint-parents.json")),
+  teamSettings = ok(fixture("azure-backlog-settings.json")),
+} = {}) {
   await host.answer("az", ok(places), AZ.places);
   await host.answer("az", ok(items), AZ.query);
   if (openAz(host, "parents").length) await host.answer("az", parents, AZ.parents);
+  if (openAz(host, "teamSettings").length) await host.answer("az", teamSettings, AZ.teamSettings);
   if (me) await host.answer("az", me === true ? ok(fixture("azure-sprint-account.json")) : me, AZ.me);
 }
 // A Board on the Azure team's Sprint, read from the fixtures (az found).
@@ -5671,14 +5683,14 @@ test("the Sprint's answers: the current sprint, the team's areas, the columns in
   assert.deepEqual([board.parseViewer(fixture("azure-sprint-account.json")), board.parseViewer(""), board.parseViewer('"x@example.com"')], ["alex.sample@example.com", null, null]);
 });
 
-test("the sprint's taskboard: a row per story in the query's order after „Ohne Story“, the tasks in their taskboard columns, each column the types it maps", () => {
+test("the sprint's taskboard: a row per story, by id where none has an order value, after „Ohne Story“, the tasks in their taskboard columns, each column the types it maps", () => {
   const data = sprintData();
   assert.equal(data.shape, "sprint");
   assert.deepEqual(data.rows.map((r) => r.key), ["none", "AB#301", "AB#302"]);
   assert.deepEqual(data.columns.map((c) => [c.name, c.cards.map((k) => k.number)]), [["To Do", [311, 331]], ["In Progress", [312, 332]], ["In PR/Work done", [313]], ["Done", [321]]],
     "a work item the query did not find (399) is left out");
   const rowOfCard = (n) => data.columns.flatMap((c) => c.cards).find((k) => k.number === n).row;
-  assert.deepEqual([311, 321, 331, 332].map(rowOfCard), ["AB#301", "AB#302", "none", "none"], "a story not in the sprint, or none, is „Ohne Story“");
+  assert.deepEqual([311, 321, 331, 332].map(rowOfCard), ["AB#301", "AB#302", "none", "none"], "a parent outside the sprint not read, or none, is „Ohne Story“");
   assert.deepEqual(data.columns.map((c) => [c.color, c.types]), [["muted", ["Task", "Bug"]], ["ansi4", ["Task", "Bug"]], ["ansi4", ["Task"]], ["ansi2", ["Task", "Bug"]]]);
   assert.deepEqual(data.columns[1].mappings, { Task: "In Progress", Bug: "Committed" });
   assert.deepEqual([data.meta.iterationId, data.meta.iteration, data.meta.typeStates["User Story"].length, data.viewer, data.total, data.limited],
@@ -5693,6 +5705,50 @@ test("the sprint's taskboard: a row per story in the query's order after „Ohne
   assert.equal(board.sprintBoard({ ...sprintParts(), items: many }).limited, true, "as many as az boards query gives: maybe cut");
   assert.deepEqual([board.iterationUntil("2026-11-27T00:00:00Z", 0), board.iterationUntil(null, 1000), board.iterationUntil("soon", 1000)],
     [Date.parse("2026-11-28T00:00:00Z"), 1000 + DAY / 2, 1000 + DAY / 2], "the end of the last day, else half a day");
+});
+
+// The fixture's parents outside the sprint (299, in Sprint 11) by id, as
+// parentsOutside gives them; `orders`: id → order value.
+function outsideParents(orders = {}) {
+  const read = board.parseWorkItems(fixture("azure-sprint-parents.json"), sprintTeam());
+  return new Map(read.map((i) => [i.number, { ...i, order: orders[i.number] ?? null, outside: true, sprint: "Sprint 11" }]));
+}
+// sprintParts' items with order values (id → value; none: null).
+const rankedItems = (orders) => sprintParts().items.map((i) => ({ ...i, order: orders[i.number] ?? null }));
+
+test("the sprint's taskboard: a placed task's parent outside the sprint has a row of its own, marked with its sprint; the rows go by the backlog's order, those without one after, by id; „Ohne Story“ stays first for tasks without a parent", () => {
+  const parents = outsideParents();
+  const data = board.sprintBoard({ ...sprintParts(), parents });
+  assert.deepEqual(data.rows.map((r) => r.key), ["none", "AB#299", "AB#301", "AB#302"], "no order values: by id");
+  const rowOfCard = (d, n) => d.columns.flatMap((c) => c.cards).find((k) => k.number === n).row;
+  assert.deepEqual([331, 332].map((n) => rowOfCard(data, n)), ["AB#299", "none"], "a task under its parent's row; one without a parent in „Ohne Story“");
+  const leftover = data.rows[1].story;
+  assert.deepEqual([leftover.number, leftover.title, leftover.outside, leftover.sprint, leftover.state], [299, "Clean up the old exports", true, "Sprint 11", "Active"]);
+  assert.deepEqual(data.rows.slice(2).map((r) => [r.story.outside, r.story.sprint]), [[undefined, undefined], [undefined, undefined]], "the sprint's own stories are not marked");
+  const ranked = board.sprintBoard({ ...sprintParts(), items: rankedItems({ 301: 30, 302: 10 }), parents: outsideParents({ 299: 20 }) });
+  assert.deepEqual(ranked.rows.map((r) => r.key), ["none", "AB#302", "AB#299", "AB#301"], "by the order field, the parent among the sprint's stories");
+  const some = board.sprintBoard({ ...sprintParts(), items: rankedItems({ 302: 5 }), parents });
+  assert.deepEqual(some.rows.map((r) => r.key), ["none", "AB#302", "AB#299", "AB#301"], "those without an order value after those with one, by id");
+  const unplaced = board.parseTaskboard(fixture("azure-sprint-taskboard.json"));
+  unplaced.delete(331);
+  assert.equal(board.sprintBoard({ ...sprintParts(), parents, places: unplaced }).rows.some((r) => r.key === "AB#299"), false, "no row for the parent of a task the taskboard does not place");
+  const feature = { ...parents.get(299), key: "AB#290", number: 290, type: "Feature" };
+  const storyParent = board.sprintBoard({ ...sprintParts(), items: sprintParts().items.map((i) => (i.number === 301 ? { ...i, parent: 290 } : i)), parents: new Map([...parents, [290, feature]]) });
+  assert.equal(storyParent.rows.some((r) => r.key === "AB#290"), false, "a story's parent gets no row");
+  assert.deepEqual([data.total, sprintData().total], [8, 8], "the total counts the sprint's work items");
+});
+
+test("the Sprint's query reads the backlog's order field where one is given; the order values come with the items", () => {
+  const iteration = board.parseIteration(iterationAnswer());
+  const areas = board.parseAreas(fixture("azure-sprint-areas.json"));
+  const plain = board.sprintWiql(iteration, areas);
+  const ordered = board.sprintWiql(iteration, areas, [STACK_RANK]);
+  assert.equal(ordered, plain.replace("[Microsoft.VSTS.Common.Priority] FROM", "[Microsoft.VSTS.Common.Priority], [Microsoft.VSTS.Common.StackRank] FROM"));
+  assert.notEqual(ordered, plain);
+  const answer = json("azure-sprint-items.json");
+  answer[1].fields["Microsoft.VSTS.Common.StackRank"] = 1500.5;
+  const [first, second] = board.parseWorkItems(JSON.stringify(answer), sprintTeam(), "Microsoft.VSTS.Common.StackRank");
+  assert.deepEqual([first.order, second.order], [null, 1500.5]);
 });
 
 test("H/L step a task to the next column that maps its type; a moved task shows the state its column maps it to until a refresh reads it", () => {
@@ -5746,12 +5802,14 @@ test("the Sprint's keys walk the stories, then each column in row order; h/l sta
 
 test("UI: the Sprint reads its settings once, all at the same time, then the taskboard and the query per refresh; who az is once; a new sprint's settings once it ended", async () => {
   const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found });
-  assert.deepEqual(openCounts(host, [...SETTINGS, "me"]), [1, 1, 1, 1, 1], "who az is beside them");
-  assert.equal(host.open("az").length, 5);
+  assert.deepEqual(openCounts(host, [...SETTINGS, "config", "me"]), [1, 1, 1, 1, 1, 1], "the backlog configuration and who az is beside them");
+  assert.equal(host.open("az").length, 6);
+  assert.deepEqual(openAz(host, "config")[0].args, board.azBacklogConfigArgs(sprintTeam()));
   await answerSettings(host);
   assert.deepEqual(["places", "query", "me"].map((k) => openAz(host, k).length), [1, 1, 1], "at the same time");
   assert.ok(openAz(host, "places")[0].args.includes(`iterationId=${ITERATION_ID}`));
-  assert.ok(openAz(host, "query")[0].args.includes(board.sprintWiql(board.parseIteration(iterationAnswer()), board.parseAreas(fixture("azure-sprint-areas.json")))));
+  assert.ok(openAz(host, "query")[0].args.includes(board.sprintWiql(board.parseIteration(iterationAnswer()), board.parseAreas(fixture("azure-sprint-areas.json")), [STACK_RANK])),
+    "with the order field the configuration names");
   await answerRefresh(host);
   assert.equal(b.state(b.view().id).data.shape, "sprint");
   assert.ok(host.calls.every((c) => c.tool === found("az") && c.options.on === null && c.options.timeout === (AZ.me(c.args) ? board.AZ_ME_TIMEOUT : board.AZ_TIMEOUT)),
@@ -5759,20 +5817,22 @@ test("UI: the Sprint reads its settings once, all at the same time, then the tas
   await refreshSprint(b, cx);
   assert.deepEqual(["places", "query"].map((k) => openAz(host, k).length), [1, 1]);
   assert.equal(host.open("az").length, 2, "a refresh is two az calls");
+  assert.match(openAz(host, "query")[0].args.join(" "), /\[Microsoft\.VSTS\.Common\.StackRank\]/, "the order field kept with the settings");
   await answerRefresh(host, { me: false });
   const end = Date.parse(JSON.parse(iterationAnswer())[0].attributes.finishDate) + DAY;
   advance(end - Date.now() - 60000);
   await refreshSprint(b, cx);
-  assert.deepEqual(openCounts(host, SETTINGS), [0, 1, 0, 0], "still the sprint's last day: only the team's areas, kept for both views as long as the Backlog keeps its settings");
+  assert.deepEqual(openCounts(host, [...SETTINGS, "config"]), [0, 1, 0, 0, 1],
+    "still the sprint's last day: only the team's areas and backlog configuration, kept for both views as long as the Backlog keeps its settings");
   await answerSettings(host);
   assert.equal(host.open("az").length, 2);
   await answerRefresh(host, { me: false });
   advance(2 * 60000);
   await refreshSprint(b, cx);
-  assert.deepEqual(openCounts(host, [...SETTINGS, "me"]), [1, 1, 1, 1, 0], "the sprint ended: its settings again, not who az is");
+  assert.deepEqual(openCounts(host, [...SETTINGS, "config", "me"]), [1, 1, 1, 1, 1, 0], "the sprint ended: its settings again, not who az is");
 });
 
-test("UI: the Sprint shows a row per story, its tasks as cards with state, assignee, id and session in the taskboard's columns, and „Ohne Story“ first", async () => {
+test("UI: the Sprint shows a row per story and per task's parent outside the sprint, that one marked with its sprint, its tasks as cards with state, assignee, id and session in the taskboard's columns, and „Ohne Story“ first", async () => {
   const { b, host } = await openSprint();
   host.spaceList = [...host.spaceList, { id: "s9", name: "z", folder: "/r/x", machine: null, branch: "main", active: false, status: null,
     tabs: [{ id: "t9", name: "AB#311 Parse the sample file", status: "working" }] }];
@@ -5783,23 +5843,130 @@ test("UI: the Sprint shows a row per story, its tasks as cards with state, assig
   // year where that is another than this one.
   const end = new Date(Date.now() + 3 * DAY);
   const year = end.getUTCFullYear() === new Date(Date.now()).getUTCFullYear() ? "" : end.getUTCFullYear();
-  assert.ok(head.includes("Sprint 12") && head.includes(`· bis ${end.getUTCDate()}.${end.getUTCMonth() + 1}.${year} · 2 Stories`), head.join("|"));
+  assert.ok(head.includes("Sprint 12") && head.includes(`· bis ${end.getUTCDate()}.${end.getUTCMonth() + 1}.${year} · 3 Stories`), `the parent's row counts: ${head.join("|")}`);
   assert.equal(head.includes("nicht aktuell"), false, "the current sprint is not marked");
   assert.ok(texts(byId(root, "card-AB#311")).includes("arbeitet"), "the card's session");
   assert.equal(texts(byId(root, "card-AB#312")).includes("arbeitet"), false);
-  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301", "row-AB#302"]);
+  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#299", "row-AB#301", "row-AB#302"]);
   assert.ok(texts(byId(root, "row-none")).includes("Ohne Story"));
   const story = texts(byId(root, "story-AB#301"));
   for (const s of ["301", "User Story", "Import the sample catalogue", "In Progress"]) assert.ok(story.includes(s), s);
+  assert.equal(story.includes("Sprint 12"), false, "a story of the sprint names no sprint");
+  const leftover = texts(byId(root, "story-AB#299"));
+  for (const s of ["299", "User Story", "Sprint 11", "Clean up the old exports", "Active"]) assert.ok(leftover.includes(s), s);
+  assert.deepEqual(rowCells(root, "AB#299"), [["card-AB#331"], [], [], []]);
   assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], ["card-AB#312"], ["card-AB#313"], []]);
-  assert.deepEqual(rowCells(root, "none"), [["card-AB#331"], ["card-AB#332"], [], []]);
+  assert.deepEqual(rowCells(root, "none"), [[], ["card-AB#332"], [], []]);
   assert.deepEqual(rowCells(root, "AB#302"), [[], [], [], ["card-AB#321"]]);
   const card = texts(byId(root, "card-AB#311"));
   for (const s of ["311", "Parse the sample file", "To Do", "Alex Sample"]) assert.ok(card.includes(s), s);
   assert.equal([...story, ...card].some((s) => s.includes("AB#")), false, "a story and a task show their number alone");
   assert.ok(texts(byId(root, "card-AB#332")).includes("Committed"), "a card shows its own state");
   assert.equal(texts(root).some((s) => s.includes("undefined")), false);
-  assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "8", "the tab counts stories and tasks");
+  assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "9", "the tab counts stories and tasks, the parent's row too");
+});
+
+test("UI: the Sprint's rows follow the backlog's order field, as its query and its parents' query read it", async () => {
+  const items = json("azure-sprint-items.json");
+  const rank = { 301: 300, 302: 100 };
+  for (const wi of items) if (rank[wi.id]) wi.fields[STACK_RANK] = rank[wi.id];
+  const parents = json("azure-sprint-parents.json");
+  parents[0].fields[STACK_RANK] = 200;
+  const { b, st } = await openSprint({ items: JSON.stringify(items), parents: ok(JSON.stringify(parents)) });
+  assert.deepEqual(drawnRows(b.render()), ["row-none", "row-AB#302", "row-AB#299", "row-AB#301"]);
+  assert.deepEqual(board.sprintNav(st().data, "", false)[0].shown.map((i) => i.number), [302, 299, 301], "the keys walk the stories in that order");
+});
+
+test("UI: the tasks in a Sprint's cell stand in the backlog's order, those without a value after the rest, as Azure's taskboard stacks them; the keys walk them so", async () => {
+  const items = json("azure-sprint-items.json");
+  const rank = { 311: 5, 313: 1 };
+  for (const wi of items) if (rank[wi.id]) wi.fields[STACK_RANK] = rank[wi.id];
+  const places = taskboardAnswer({ 312: ["todo", "To Do"], 313: ["todo", "To Do"] });
+  const { b } = await openSprint({ items: JSON.stringify(items), places });
+  assert.deepEqual(rowCells(b.render(), "AB#301")[0], ["card-AB#313", "card-AB#311", "card-AB#312"], "by the order field, 312 without one last");
+  assert.deepEqual(navTasks(b)[0], ["AB#331", "AB#313", "AB#311", "AB#312"], "„Ohne Story“ first, then the row's tasks in that order");
+  const ties = [{ number: 9, order: 2 }, { number: 3, order: 2 }, { number: 1, order: null }, { number: 7, order: 1 }].sort(board.byOrder((x, y) => x.number - y.number));
+  assert.deepEqual(ties.map((i) => i.number), [7, 3, 9, 1], "ties by id, none after the rest");
+});
+
+test("UI: a parent outside the sprint names its sprint in a warning chip; „ohne Sprint“ where it is in the team's backlog iteration or the project's root", async () => {
+  const items = json("azure-sprint-items.json");
+  items.find((wi) => wi.id === 332).fields["System.Parent"] = 298;
+  items.find((wi) => wi.id === 312).fields["System.Parent"] = 297;
+  const parents = json("azure-sprint-parents.json");
+  const parentAt = (id, iteration) => ({ ...parents[0], id, fields: { ...parents[0].fields, "System.Id": id, "System.IterationPath": iteration } });
+  parents.push(parentAt(298, "Example Project\\Example Team"), parentAt(297, "Example Project"));
+  const settings = json("azure-backlog-settings.json");
+  settings.backlogIteration.path = "Example Project\\Example Team";
+  const { b, host } = await openSprint({ items: JSON.stringify(items), parents: ok(JSON.stringify(parents)), teamSettings: ok(JSON.stringify(settings)) });
+  const t = copperTheme("light");
+  host.theme = () => t;
+  const root = b.render();
+  assert.deepEqual(drawnRows(root), ["row-AB#297", "row-AB#298", "row-AB#299", "row-AB#301", "row-AB#302"]);
+  const chip = (key, text) => pathTo(byId(root, `story-${key}`), (x) => x === text)?.at(-1) ?? null;
+  const look = (tone) => [board.toneColor(t, tone), board.chipBg(t, tone)];
+  for (const [key, text] of [["AB#299", "Sprint 11"], ["AB#298", "ohne Sprint"], ["AB#297", "ohne Sprint"]]) assert.deepEqual(chipLook(chip(key, text)), look("ansi3"), `${key}: ${text}`);
+  assert.equal(chip("AB#298", "Example Team"), null, "the backlog iteration is no sprint");
+  assert.equal(texts(byId(root, "story-AB#301")).some((x) => x.includes("Sprint")), false, "a story of the sprint has no chip");
+});
+
+test("UI: a Sprint whose backlog configuration cannot be read shows its rows by id and says so, and reads it again with the next refresh; one that names no order field says the order is unchecked, as the Backlog does", async () => {
+  const items = json("azure-sprint-items.json");
+  for (const wi of items) if (wi.id === 302) wi.fields[STACK_RANK] = 1;
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found });
+  const st = () => b.state(b.view().id);
+  await host.answer("az", azRefused("Operation returned a 403 status code."), AZ.config);
+  await answerSettings(host);
+  assert.ok(openAz(host, "query")[0].args.includes(board.sprintWiql(board.parseIteration(iterationAnswer()), board.parseAreas(fixture("azure-sprint-areas.json")))),
+    "the query without an order field");
+  const unread = ["Reihenfolge des Backlogs nicht gelesen, Zeilen nach Id: Operation returned a 403 status code."];
+  await host.answer("az", ok(fixture("azure-sprint-taskboard.json")), AZ.places);
+  await host.answer("az", ok(JSON.stringify(items)), AZ.query);
+  await host.answer("az", ok(fixture("azure-sprint-account.json")), AZ.me);
+  assert.deepEqual([st().loading, st().warnings], [true, unread], "drawn before its parents' query, with the warning");
+  await host.answer("az", ok(fixture("azure-sprint-parents.json")), AZ.parents);
+  await host.answer("az", ok(fixture("azure-backlog-settings.json")), AZ.teamSettings);
+  assert.deepEqual([st().loading, st().error, drawnRows(b.render())], [false, null, ["row-none", "row-AB#299", "row-AB#301", "row-AB#302"]], "the Sprint shows, by id");
+  assert.deepEqual(st().warnings, unread);
+  await refreshSprint(b, cx);
+  assert.equal(openAz(host, "config").length, 1, "read again");
+  const unnamed = json("azure-backlog-config.json");
+  delete unnamed.backlogFields.typeFields.Order;
+  await host.answer("az", ok(JSON.stringify(unnamed)), AZ.config);
+  await answerRefresh(host, { me: false, items: JSON.stringify(items) });
+  assert.deepEqual([st().warnings, drawnRows(b.render())[2]], [["Reihenfolge ungeprüft: Azure nannte kein Order-Feld"], "row-AB#301"]);
+  const idle = await bootBoard({ stored: { source: "azure" }, which: found });
+  await idle.host.answer("az", azRefused("Operation returned a 403 status code."), AZ.config);
+  await answerSettings(idle.host, "[]");
+  await idle.host.answer("az", ok(fixture("azure-sprint-account.json")), AZ.me);
+  const none = idle.b.state(idle.b.view().id);
+  assert.deepEqual([board.sprintIs(none.data), none.warnings], ["none", []], "no sprint running: no word on an order");
+});
+
+test("UI: the Sprint and the Backlog of a team read its backlog configuration and settings once for both; r on either reads them again", async () => {
+  const { b, cx, host } = await openSprint();
+  assert.deepEqual([host.calls.filter((c) => AZ.config(c.args)).length, host.calls.filter((c) => AZ.teamSettings(c.args)).length], [1, 1]);
+  await press(b, cx, "v");
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 0, 0, 0], "the Sprint's reads serve the Backlog");
+  await answerBacklogSettings(host);
+  await answerBacklog(host, { me: false });
+  await press(b, cx, "v");
+  await press(b, cx, "r");
+  assert.deepEqual(openCounts(host, ["config", "teamSettings"]), [1, 0], "r on the Sprint: its configuration again, its settings with its parents");
+  await answerSettings(host);
+  await answerRefresh(host, { me: false });
+  assert.equal(host.calls.filter((c) => AZ.teamSettings(c.args)).length, 2);
+  await press(b, cx, "v");
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [0, 0, 0, 0], "the Backlog keeps its own");
+  await press(b, cx, "r");
+  assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1]);
+  await answerBacklogSettings(host);
+  await answerBacklog(host, { me: false });
+  await press(b, cx, "v");
+  await refreshSprint(b, cx);
+  assert.deepEqual(openCounts(host, ["config"]), [0], "the Backlog's reads serve the Sprint");
+  await answerRefresh(host, { me: false });
+  assert.equal(host.calls.filter((c) => AZ.teamSettings(c.args)).length, 3, "nor its settings");
 });
 
 test("UI: H/L move a task through the taskboard's columns with the column's name as newColumn; a story stays and says why", async () => {
@@ -5939,7 +6106,7 @@ test("UI: „nur meine“ keeps the stories and tasks assigned to the account az
   const { b, cx } = await openSprint();
   await press(b, cx, "m");
   const root = b.render();
-  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301"]);
+  assert.deepEqual(drawnRows(root), ["row-AB#299", "row-AB#301"], "„Ohne Story“ holds none of mine");
   assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], [], ["card-AB#313"], []]);
   const { b: robin, cx: rcx } = await openSprint({ me: ok('{ "name": "robin.example@example.com", "type": "user" }\n') });
   await press(robin, rcx, "m");
@@ -5979,19 +6146,19 @@ test("UI: z on a story folds its tasks away: its triangle closes, its row says h
   assert.deepEqual(texts(byId(root, "fold-AB#301")), ["▸"]);
   assert.deepEqual(["card-AB#311", "card-AB#312", "card-AB#313"].map((id) => byId(root, id)), [null, null, null], "its tasks are not drawn");
   assert.deepEqual(texts(byId(root, "folded-AB#301")), ["3 Tasks"]);
-  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#301", "row-AB#302"]);
+  assert.deepEqual(drawnRows(root), ["row-none", "row-AB#299", "row-AB#301", "row-AB#302"]);
   assert.deepEqual(rowCells(root, "AB#302"), [[], [], [], ["card-AB#321"]], "another row keeps its tasks");
   assert.deepEqual(st().sel, { col: 0, key: "AB#301" });
   assert.deepEqual(navTasks(b), [["AB#331"], ["AB#332"], [], ["AB#321"]]);
   await press(b, cx, "l");
   assert.equal(st().sel.key, "AB#301", "no task of its row to go to");
   assert.deepEqual(byId(root, "sprint-head").kids.slice(1).map((h) => texts(h).at(-1)), ["2", "2", "1", "1"], "folding is no filter");
-  assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "8");
+  assert.equal(texts(byId(root, `tab-${b.context().id}`)).at(-1), "9");
   await press(b, cx, "z");
   root = b.render();
   assert.deepEqual([texts(byId(root, "fold-AB#301")), byId(root, "folded-AB#301")], [["▾"], null]);
   assert.deepEqual(rowCells(root, "AB#301"), [["card-AB#311"], ["card-AB#312"], ["card-AB#313"], []]);
-  assert.deepEqual(navTasks(b), [["AB#331", "AB#311"], ["AB#332", "AB#312"], ["AB#313"], ["AB#321"]], "in row order, „Ohne Story“ first");
+  assert.deepEqual(navTasks(b), [["AB#331", "AB#311"], ["AB#332", "AB#312"], ["AB#313"], ["AB#321"]], "in row order, „Ohne Story“ first, then the parent outside the sprint");
 });
 
 test("UI: a click on a row's triangle folds or unfolds it and chooses nothing; z on a task folds its row and chooses its story; „Ohne Story“ and a story without tasks have no triangle, and z there says so", async () => {
@@ -6009,10 +6176,10 @@ test("UI: a click on a row's triangle folds or unfolds it and chooses nothing; z
   assert.deepEqual([st().sel, st().picked], [{ col: 0, key: "AB#301" }, "AB#301"], "its story, chosen");
   const root = b.render();
   assert.deepEqual([byId(root, "fold-none"), byId(root, "fold-AB#302")], [null, null], "no tasks in the row of AB#302");
-  await click(b, cx, "card-AB#331");
+  await click(b, cx, "card-AB#332");
   await press(b, cx, "z");
   assert.equal(b.notice.text, "Die Zeile „Ohne Story“ lässt sich nicht zuklappen");
-  assert.ok(byId(b.render(), "card-AB#331"));
+  assert.ok(byId(b.render(), "card-AB#332"));
   await click(b, cx, "story-AB#302");
   await press(b, cx, "z");
   assert.equal(b.notice.text, "AB#302 hat keine Tasks zum Zuklappen");
@@ -6083,10 +6250,15 @@ test("UI: on the Sprint h/l j/k walk stories and tasks by row, and the chosen it
   await press(b, cx, "k");
   assert.equal(st().sel.key, "AB#332");
   await press(b, cx, "h");
-  assert.equal(st().sel.key, "AB#331");
+  assert.equal(st().sel.key, "AB#332", "„Ohne Story“ holds nothing further left: it stays");
+  await click(b, cx, "card-AB#311");
+  await press(b, cx, "k");
+  assert.equal(st().sel.key, "AB#331", "up into the parent's row outside the sprint");
+  await press(b, cx, "h");
+  assert.equal(st().sel.key, "AB#299", "onto that row's story");
   host.scrolled.length = 0;
   await click(b, cx, "card-AB#321");
-  assert.equal(host.scrolled.at(-1).row, 2, "the third row shown");
+  assert.equal(host.scrolled.at(-1).row, 3, "the fourth row shown");
 });
 
 test("UI: a Sprint with as many work items as az boards query gives says it may be cut", async () => {
@@ -6458,11 +6630,11 @@ test("UI: a past sprint picked shows its own work items, read by its id and path
   assert.deepEqual(openCounts(host, SETTINGS), [0, 0, 0, 0], "the team's settings are kept");
   assert.equal(openIterations(host).length, 0, "and its iterations");
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)]);
-  assert.ok(openAz(host, "query")[0].args.includes(board.sprintWiql({ path: "Example Project\\Sprint 11" }, board.parseAreas(fixture("azure-sprint-areas.json")))));
+  assert.ok(openAz(host, "query")[0].args.includes(board.sprintWiql({ path: "Example Project\\Sprint 11" }, board.parseAreas(fixture("azure-sprint-areas.json")), [STACK_RANK])));
   await answerRefresh(host, { me: false });
   assert.deepEqual([st().data.meta.iterationId, st().data.meta.iteration, board.sprintIs(st().data)], [SPRINT_11, "Sprint 11", "chosen"]);
   let head = sprintHead(b);
-  assert.ok(head.includes("Sprint 11") && head.includes("nicht aktuell") && head.includes("· bis 13.11.2020 · 2 Stories"), head.join("|"));
+  assert.ok(head.includes("Sprint 11") && head.includes("nicht aktuell") && head.includes("· bis 13.11.2020 · 3 Stories"), head.join("|"));
   const names = await menuNames(b, cx);
   assert.deepEqual(names.slice(names.indexOf("Sprint wählen…"), names.indexOf("Sprint wählen…") + 3), ["Sprint wählen…", "Aktueller Sprint", "Ansicht wechseln: Backlog"]);
   await runCommand(b, cx, "Aktueller Sprint");
@@ -6707,7 +6879,7 @@ test("UI: with no sprint running the Sprint says „kein laufender Sprint“, re
   assert.deepEqual(openAz(host, "places").map((c) => c.args), [board.azTaskboardArgs(sprintTeam(), SPRINT_11)]);
   await answerRefresh(host, { me: false });
   root = b.render();
-  assert.deepEqual([st().data.meta.iterationId, board.sprintIs(st().data), drawnRows(root)], [SPRINT_11, "chosen", ["row-none", "row-AB#301", "row-AB#302"]]);
+  assert.deepEqual([st().data.meta.iterationId, board.sprintIs(st().data), drawnRows(root)], [SPRINT_11, "chosen", ["row-none", "row-AB#299", "row-AB#301", "row-AB#302"]]);
   assert.ok(sprintHead(b).includes("Sprint 11") && sprintHead(b).includes("nicht aktuell"));
   assert.equal((await menuNames(b, cx)).includes("Aktueller Sprint"), false, "still none to go back to");
   await press(b, cx, "r");
@@ -7752,7 +7924,8 @@ test("UI: the Sprint and the Backlog say where the project's work item types nam
   for (const type of types.value) type.color = "rgb(1, 2, 3)";
   const warning = "Farben der Work-Item-Typen in unbekannter Form: rgb(1, 2, 3)";
   const { b, host } = await bootBoard({ stored: { source: "azure" }, which: found });
-  for (const [kind, out] of [["iteration", iterationAnswer()], ["areas", fixture("azure-sprint-areas.json")], ["columns", fixture("azure-sprint-columns.json")], ["types", JSON.stringify(types)]]) {
+  for (const [kind, out] of [["iteration", iterationAnswer()], ["areas", fixture("azure-sprint-areas.json")], ["columns", fixture("azure-sprint-columns.json")], ["types", JSON.stringify(types)],
+    ["config", fixture("azure-backlog-config.json")]]) {
     await host.answer("az", ok(out), AZ[kind]);
   }
   await answerRefresh(host);
@@ -11605,23 +11778,34 @@ test("a story's progress: its row's tasks in every column, whatever the filter s
   assert.equal(board.storyProgress(data, "AB#999"), null);
 });
 
-// The source's shared parts parentTitles takes, with what it keeps in
-// `kept` and the az calls it made in `asked`; `answer` is what az prints
-// (an Error: az fails).
-function parentParts(answer) {
-  const parts = { kept: new Map(), asked: [], answer };
+// The source's shared parts parentsOutside takes: az, which prints
+// `answer` (an Error: az fails), with the calls it made in `asked`; what is
+// kept (`kept`: key → { value, until }); and the team's settings,
+// `settings` (an Error: their read fails), with the time they were last
+// kept until in `settingsUntil` and their reads in `settingsRead`.
+function parentParts(answer, settings = board.parseTeamSettings(fixture("azure-backlog-settings.json"))) {
+  const parts = { asked: [], answer, settings, settingsUntil: null, settingsRead: 0, kept: new Map() };
   Object.assign(parts, {
     teamKey: (c) => `${c.org}\n${c.project}\n${c.team}`,
-    // As the source's: an entry past its time is none.
-    keptValue: (k) => {
-      const entry = parts.kept.get(k);
+    keep: (key, value, until) => parts.kept.set(key, { value, until }),
+    keptValue: (key) => {
+      const entry = parts.kept.get(key);
       return entry && Date.now() < entry.until ? entry : null;
     },
-    keep: (k, value, until) => parts.kept.set(k, { value, until }),
     az: async (args) => {
       parts.asked.push(args);
       if (parts.answer instanceof Error) throw parts.answer;
       return parts.answer;
+    },
+    teamSettings: {
+      of: async () => {
+        parts.settingsRead++;
+        if (parts.settings instanceof Error) throw parts.settings;
+        return parts.settings;
+      },
+      keepUntil: (c, until) => {
+        parts.settingsUntil = until;
+      },
     },
   });
   return parts;
@@ -11633,60 +11817,211 @@ function itemsUnder290() {
   return JSON.stringify(answer);
 }
 
-test("the Sprint's parent titles: one query by id for the parents neither in the sprint nor kept, kept per team; a parent in the sprint gives its own; one the query does not find is kept without a title; a failure keeps nothing, leaves the titles out and is a warning", async () => {
+// The tasks the fixture's taskboard places, as parentsOutside takes them.
+const placedOf = (items) => board.placedTasks(sprintParts().columns, items, sprintParts().places);
+
+test("the Sprint's placed tasks: those of a type its taskboard's columns map, in one of its columns", () => {
+  const items = board.parseWorkItems(fixture("azure-sprint-items.json"), sprintTeam());
+  assert.deepEqual([...placedOf(items)], [311, 312, 313, 321, 331, 332]);
+  const elsewhere = board.parseTaskboard(taskboardAnswer({}, [312]).replaceAll(COLUMN.todo, "5b0c1e2a-0d4f-4a8e-9c31-7e6f2a9b1c99"));
+  assert.deepEqual([...board.placedTasks(sprintParts().columns, items, elsewhere)], [313, 321, 332], "neither one not placed nor one in a column not read");
+  const withStory = board.parseTaskboard(taskboardAnswer({ 399: ["todo", "To Do"] }).replace('"workItemId":399', '"workItemId":301'));
+  assert.equal(withStory.has(301), true);
+  assert.equal(board.placedTasks(sprintParts().columns, items, withStory).has(301), false, "a story the taskboard lists: no task");
+});
+
+test("the Sprint's parents outside it: one query by id for the placed tasks' parents not in the sprint, with the order field, at every call; each marked with its sprint by the team's backlog iteration; a parent in the sprint gives its own title; the tasks' parents the query does not find are lost; a failure leaves them out and is a warning", async () => {
   const c = sprintTeam();
   // 332 shares 331's parent 299, outside the sprint.
   const answer = JSON.parse(itemsUnder290());
   answer.find((wi) => wi.id === 332).fields["System.Parent"] = 299;
   const items = board.parseWorkItems(JSON.stringify(answer), c);
-  const s = parentParts(fixture("azure-sprint-parents.json"));
-  const before = Date.now();
-  const first = await board.parentTitles(s, c, items);
-  const after = Date.now();
-  assert.deepEqual(s.asked, [board.azQueryArgs(c, board.idsWiql([290, 299]))], "one query, each parent outside the sprint once");
+  const tasks = placedOf(items);
+  const parentsAnswer = json("azure-sprint-parents.json");
+  parentsAnswer[0].fields[STACK_RANK] = 7;
+  const s = parentParts(JSON.stringify(parentsAnswer));
+  const first = await board.parentsOutside(s, c, items, { tasks, orderField: STACK_RANK, until: 5 });
+  assert.deepEqual(s.asked, [board.azQueryArgs(c, board.idsWiql([290, 299], [STACK_RANK]))], "one query, each parent outside the sprint once, with the order field");
   const title = (r, n) => r.items.find((i) => i.number === n).parentTitle;
-  assert.deepEqual([title(first, 301), title(first, 311), title(first, 321), title(first, 331), title(first, 332), title(first, 302), first.warning],
-    [null, "Import the sample catalogue", "Export the weekly report", "Clean up the old exports", "Clean up the old exports", null, null]);
-  const [entry] = s.kept.values();
-  const { until } = entry;
-  assert.ok(until >= before + board.TEAM_KEEP_MS && until <= after + board.TEAM_KEEP_MS, `kept for TEAM_KEEP_MS: ${until - before}`);
-  assert.deepEqual([...entry.value], [[290, null], [299, "Clean up the old exports"]], "290 not found: kept without a title");
-  const again = await board.parentTitles(s, c, items);
-  assert.deepEqual([s.asked.length, title(again, 331)], [1, "Clean up the old exports"], "kept: no second query");
-  s.answer = JSON.stringify([{ id: 298, fields: { "System.Id": 298, "System.Title": "Another feature" } }]);
-  advance(60000);
-  const more = await board.parentTitles(s, c, [...items, { ...items[0], key: "AB#340", number: 340, parent: 298 }]);
-  advance(-60000);
-  assert.deepEqual([s.asked.length, s.asked[1], title(more, 340)], [2, board.azQueryArgs(c, board.idsWiql([298])), "Another feature"], "a new parent: asked alone");
-  const [later] = s.kept.values();
-  assert.deepEqual([later.until, [...later.value.keys()]], [until, [290, 299, 298]], "added, kept until the first read's time");
+  assert.deepEqual([title(first, 301), title(first, 311), title(first, 321), title(first, 331), title(first, 332), title(first, 302)],
+    [null, "Import the sample catalogue", "Export the weekly report", "Clean up the old exports", "Clean up the old exports", null]);
+  assert.deepEqual([...first.parents.keys()], [299], "the parents found");
+  const parent = first.parents.get(299);
+  assert.deepEqual([parent.key, parent.title, parent.state, parent.order, parent.outside, parent.sprint], ["AB#299", "Clean up the old exports", "Active", 7, true, "Sprint 11"]);
+  assert.deepEqual([first.lost, first.warnings], [[], []], "a story's parent not found is no task's: not lost");
+  assert.deepEqual([s.settingsRead, s.settingsUntil], [1, 5], "the team's settings beside the query, kept no longer than the Sprint's");
+  const again = await board.parentsOutside(s, c, items, { tasks, orderField: STACK_RANK });
+  assert.deepEqual([s.asked[1], again.parents.get(299).title], [board.azQueryArgs(c, board.idsWiql([299], [STACK_RANK])), "Clean up the old exports"],
+    "asked again for the tasks' parent, not for the story's, whose title (none found) is kept");
+  await board.parentsOutside(s, c, items, { tasks });
+  assert.deepEqual(s.asked[2], board.azQueryArgs(c, board.idsWiql([299])), "without an order field, none asked");
+  const lost = await board.parentsOutside(parentParts("[]"), c, items, { tasks });
+  assert.deepEqual([lost.lost, lost.parents.size], [[299], 0], "a task's parent not found is lost");
+  const sprintOf = async (iteration, backlogIteration) => {
+    const at = parentParts(JSON.stringify([{ ...json("azure-sprint-parents.json")[0], fields: { ...parentsAnswer[0].fields, "System.IterationPath": iteration } }]),
+      { ...board.parseTeamSettings(fixture("azure-backlog-settings.json")), backlogIteration });
+    return (await board.parentsOutside(at, c, items, { tasks })).parents.get(299).sprint;
+  };
+  assert.deepEqual(await Promise.all([sprintOf("Example Project\\Example Team", "Example Project\\Example Team"), sprintOf("Example Project", "Example Project\\Example Team"),
+    sprintOf("Example Project\\Other Team\\Sprint 3", "Example Project\\Example Team")]), [null, null, "Sprint 3"],
+  "none in the team's backlog iteration or the project's root; another team's sprint by its name");
+  const inTeam = JSON.stringify([{ ...parentsAnswer[0], fields: { ...parentsAnswer[0].fields, "System.IterationPath": "Example Project\\Example Team" } }]);
+  const unsure = parentParts(inTeam, new board.BoardError("Operation returned a 403 status code."));
+  const guessed = await board.parentsOutside(unsure, c, items, { tasks });
+  assert.deepEqual([guessed.parents.get(299).sprint, guessed.warnings, unsure.settingsUntil],
+    ["Example Team", [`${board.BACKLOG_ROOT_UNREAD}: Operation returned a 403 status code.`], null], "settings not read: only the project's root is none, and a warning says so");
+  assert.equal(board.BACKLOG_ROOT_UNREAD, "Backlog-Iteration des Teams nicht gelesen, „ohne Sprint“ ungeprüft");
+  for (const backlogIteration of [null, ""]) {
+    const unnamed = parentParts(inTeam, { ...board.parseTeamSettings(fixture("azure-backlog-settings.json")), backlogIteration });
+    const read = await board.parentsOutside(unnamed, c, items, { tasks });
+    assert.deepEqual([read.parents.get(299).sprint, read.warnings], ["Example Team", [`${board.BACKLOG_ROOT_UNREAD}: Azure nannte keine Backlog-Iteration`]],
+      "settings that name no backlog iteration: as not read");
+  }
   const fresh = parentParts(new board.BoardError("Azure nicht erreichbar (az): x"));
-  const failed = await board.parentTitles(fresh, c, items);
-  assert.deepEqual([title(failed, 331), title(failed, 311), failed.warning, fresh.kept.size],
-    [null, "Import the sample catalogue", `${board.PARENTS_UNREAD}: Azure nicht erreichbar (az): x`, 0]);
-  fresh.answer = fixture("azure-sprint-parents.json");
-  await board.parentTitles(fresh, c, items);
-  assert.equal(fresh.asked.length, 2, "asked again after a failure");
+  const failed = await board.parentsOutside(fresh, c, items, { tasks });
+  assert.deepEqual([title(failed, 331), title(failed, 311), failed.parents.size, failed.lost, failed.warnings],
+    [null, "Import the sample catalogue", 0, [], [`${board.PARENTS_UNREAD}: Azure nicht erreichbar (az): x`]]);
+  assert.equal(board.PARENTS_UNREAD, "Übergeordnete Work Items außerhalb des Sprints nicht gelesen, ihre Tasks stehen unter „Ohne Story“");
   const none = parentParts("");
-  await board.parentTitles(none, c, items.filter((i) => [302, 321].includes(i.number)));
-  assert.deepEqual(none.asked, [], "every parent in the sprint: no query");
+  const inside = await board.parentsOutside(none, c, items.filter((i) => [302, 321].includes(i.number)), { tasks, before: () => assert.fail("nothing to draw before") });
+  assert.deepEqual([none.asked, none.settingsRead, inside.warnings], [[], 0, []], "every parent in the sprint: no query, no settings");
 });
 
-test("UI: the Sprint asks for its parents' titles after its work items, then keeps them: a refresh asks none, r again; a failure is a warning and the cards name their parents' numbers alone", async () => {
+test("the Sprint's parents outside it that no placed task has: read for their titles only where those are not kept, no settings beside them, kept TEAM_KEEP_MS; a failure is a warning and keeps nothing", async () => {
+  const c = sprintTeam();
+  const items = board.parseWorkItems(itemsUnder290(), c).filter((i) => i.number !== 331);
+  const tasks = placedOf(items);
+  const feature = JSON.stringify([{ id: 290, fields: { "System.Id": 290, "System.Title": "Sample feature" } }]);
+  const s = parentParts(feature);
+  const first = await board.parentsOutside(s, c, items, { tasks, orderField: STACK_RANK, before: () => {} });
+  assert.deepEqual([s.asked, s.settingsRead, first.parents.size, first.lost, first.warnings], [[board.azQueryArgs(c, board.idsWiql([290], [STACK_RANK]))], 0, 0, [], []]);
+  assert.equal(first.items.find((i) => i.number === 301).parentTitle, "Sample feature");
+  const kept = await board.parentsOutside(s, c, items, { tasks, before: () => assert.fail("nothing to draw before") });
+  assert.deepEqual([s.asked.length, kept.items.find((i) => i.number === 301).parentTitle], [1, "Sample feature"], "kept: no query");
+  const withTask = board.parseWorkItems(itemsUnder290(), c);
+  await board.parentsOutside(s, c, withTask, { tasks: placedOf(withTask) });
+  assert.deepEqual([s.asked[1], s.settingsRead], [board.azQueryArgs(c, board.idsWiql([299])), 1], "a task's parent outside: only it, the title kept");
+  advance(board.TEAM_KEEP_MS);
+  try {
+    await board.parentsOutside(s, c, items, { tasks });
+  } finally {
+    advance(-board.TEAM_KEEP_MS);
+  }
+  assert.equal(s.asked.length, 3, "read again once TEAM_KEEP_MS passed");
+  const fresh = parentParts(new board.BoardError("Azure nicht erreichbar (az): x"));
+  const failed = await board.parentsOutside(fresh, c, items, { tasks });
+  assert.deepEqual([failed.items.find((i) => i.number === 301).parentTitle, failed.warnings, fresh.settingsRead], [null, [`${board.TITLES_UNREAD}: Azure nicht erreichbar (az): x`], 0]);
+  await board.parentsOutside(fresh, c, items, { tasks });
+  assert.equal(fresh.asked.length, 2, "nothing kept: asked again");
+  assert.equal(board.TITLES_UNREAD, "Titel der übergeordneten Work Items nicht gelesen");
+});
+
+test("the Sprint's parents' titles read while others are kept: only those asked, kept beside them until the first read's TEAM_KEEP_MS ends", async () => {
+  const c = sprintTeam();
+  const feature = (id, title) => ({ id, fields: { "System.Id": id, "System.Title": title } });
+  const s = parentParts(JSON.stringify([feature(290, "Sample feature")]));
+  const keptUntil = () => [...s.kept.values()].map((entry) => entry.until);
+  const items = board.parseWorkItems(itemsUnder290(), c).filter((i) => i.number !== 331);
+  await board.parentsOutside(s, c, items, { tasks: placedOf(items) });
+  const [until] = keptUntil();
+  const answer = JSON.parse(itemsUnder290());
+  answer.find((wi) => wi.id === 302).fields["System.Parent"] = 288;
+  const more = board.parseWorkItems(JSON.stringify(answer), c).filter((i) => i.number !== 331);
+  const title = (r, n) => r.items.find((i) => i.number === n).parentTitle;
+  advance(3600000);
+  try {
+    s.answer = JSON.stringify([feature(288, "Second feature")]);
+    await board.parentsOutside(s, c, more, { tasks: placedOf(more) });
+    assert.deepEqual([s.asked.slice(1), keptUntil()], [[board.azQueryArgs(c, board.idsWiql([288]))], [until]], "only the title not kept, kept no longer than the first");
+    const served = await board.parentsOutside(s, c, more, { tasks: placedOf(more), before: () => assert.fail("nothing to draw before") });
+    assert.deepEqual([s.asked.length, title(served, 301), title(served, 302)], [2, "Sample feature", "Second feature"], "both kept: no query");
+    advance(board.TEAM_KEEP_MS - 3600000);
+    s.answer = JSON.stringify([feature(290, "Sample feature"), feature(288, "Second feature")]);
+    await board.parentsOutside(s, c, more, { tasks: placedOf(more) });
+    assert.deepEqual(s.asked.slice(2), [board.azQueryArgs(c, board.idsWiql([290, 288]))], "both read again once the first read's TEAM_KEEP_MS passed");
+  } finally {
+    advance(-board.TEAM_KEEP_MS);
+  }
+});
+
+test("the Sprint's parents outside it before their query: those of the last draw, the rest none", async () => {
+  const c = sprintTeam();
+  const items = board.parseWorkItems(itemsUnder290(), c);
+  const drawn = { ...outsideParents().get(299), title: "As drawn last" };
+  let seen = null;
+  await board.parentsOutside(parentParts(fixture("azure-sprint-parents.json")), c, items, {
+    tasks: placedOf(items), last: new Map([[299, drawn], [298, { ...drawn, number: 298 }]]),
+    before: (soFar, parents) => (seen = { soFar, parents }),
+  });
+  assert.deepEqual([...seen.parents], [[299, drawn]], "only those still asked for");
+  assert.deepEqual([seen.soFar.find((i) => i.number === 331).parentTitle, seen.soFar.find((i) => i.number === 301).parentTitle], ["As drawn last", null]);
+});
+
+test("UI: the Sprint asks for its parents outside it after its work items with every refresh; a failure is a warning, their tasks stand in „Ohne Story“ and name their parents' numbers alone", async () => {
   const { b, cx, host, st } = await openSprint();
   const queries = () => host.calls.filter((c) => AZ.parents(c.args));
-  assert.deepEqual(queries().map((c) => c.args), [board.azQueryArgs(sprintTeam(), board.idsWiql([299]))]);
-  assert.equal(board.findSprintItem(st().data, "AB#331").parentTitle, "Clean up the old exports");
+  assert.deepEqual(queries().map((c) => c.args), [board.azQueryArgs(sprintTeam(), board.idsWiql([299], [STACK_RANK]))]);
+  assert.deepEqual([board.findSprintItem(st().data, "AB#331").parentTitle, board.findSprintItem(st().data, "AB#331").row], ["Clean up the old exports", "AB#299"]);
   await refreshSprint(b, cx);
-  await answerRefresh(host, { me: false });
-  assert.equal(queries().length, 1, "a refresh asks none");
+  const changed = json("azure-sprint-parents.json");
+  changed[0].fields["System.State"] = "Resolved";
+  await answerRefresh(host, { me: false, parents: ok(JSON.stringify(changed)) });
+  assert.deepEqual([queries().length, board.findSprintItem(st().data, "AB#299").state], [2, "Resolved"], "a refresh asks again and shows what changed");
+  assert.equal(host.calls.filter((c) => AZ.teamSettings(c.args)).length, 1, "the team's settings are kept");
+  await refreshSprint(b, cx);
+  await answerRefresh(host, { me: false, parents: azRefused("Operation returned a 403 status code.") });
+  assert.equal(queries().length, 3);
+  assert.deepEqual(st().warnings, [`${board.PARENTS_UNREAD}: Operation returned a 403 status code.`]);
+  assert.deepEqual([board.findSprintItem(st().data, "AB#331").parentTitle, board.findSprintItem(st().data, "AB#331").row], [null, "none"]);
+  assert.equal(st().data.rows.some((r) => r.key === "AB#299"), false, "no row for a parent not read");
+  assert.deepEqual(lineParts(cardLine(b.render(), "card-AB#331", "card-meta")), ["Teil von 299"]);
+});
+
+test("UI: a task's parent the query does not find is a warning that names it; its task stands in „Ohne Story“; a story's parent not found is none", async () => {
+  const items = json("azure-sprint-items.json");
+  items[0].fields["System.Parent"] = 290;
+  const { st } = await openSprint({ items: JSON.stringify(items), parents: ok("[]") });
+  assert.deepEqual(st().warnings, ["Übergeordnetes Work Item #299 nicht gefunden (gelöscht oder ohne Leserecht), seine Tasks stehen unter „Ohne Story“"]);
+  assert.deepEqual([board.findCard(st().data, "AB#331").card.row, st().data.rows.map((r) => r.key)], ["none", ["none", "AB#301", "AB#302"]]);
+  assert.equal(board.parentsLost([1, 2]), "Übergeordnete Work Items #1, #2 nicht gefunden (gelöscht oder ohne Leserecht), ihre Tasks stehen unter „Ohne Story“");
+});
+
+test("UI: a Sprint refresh without tasks whose parents are outside the sprint asks no parents' query, its stories' parents' titles kept; one with such tasks asks for their parents alone, with the team's settings; r reads the titles again", async () => {
+  const answer = JSON.parse(itemsUnder290());
+  answer.find((wi) => wi.id === 331).fields["System.Parent"] = 301;
+  const noLeftovers = JSON.stringify(answer);
+  const { b, cx, host, st } = await openSprint({ items: noLeftovers, parents: parentsWith290() });
+  const queries = () => host.calls.filter((c) => AZ.parents(c.args)).map((c) => c.args);
+  const settingsReads = () => host.calls.filter((c) => AZ.teamSettings(c.args)).length;
+  const featureTitle = () => board.findSprintItem(st().data, "AB#301").parentTitle;
+  assert.deepEqual([queries(), settingsReads()], [[board.azQueryArgs(sprintTeam(), board.idsWiql([290], [STACK_RANK]))], 0], "the story's parent for its title, no settings");
+  assert.equal(featureTitle(), "Sample feature with a long name that will not fit");
+  await refreshSprint(b, cx);
+  await answerRefresh(host, { me: false, items: noLeftovers });
+  assert.deepEqual([queries().length, host.open("az").length, featureTitle()], [1, 0, "Sample feature with a long name that will not fit"],
+    "no task's parent outside the sprint: no parents' query, the title kept");
+  await refreshSprint(b, cx);
+  await answerRefresh(host, { me: false, items: itemsUnder290() });
+  assert.deepEqual([queries()[1], settingsReads()], [board.azQueryArgs(sprintTeam(), board.idsWiql([299], [STACK_RANK])), 1], "a task's parent outside: it alone, with the team's settings");
+  assert.deepEqual([st().data.rows.some((r) => r.key === "AB#299"), featureTitle()], [true, "Sample feature with a long name that will not fit"]);
   await press(b, cx, "r");
   await answerSettings(host);
-  await answerRefresh(host, { me: false, parents: azRefused("Operation returned a 403 status code.") });
-  assert.equal(queries().length, 2, "r asks again");
-  assert.deepEqual(st().warnings, [`${board.PARENTS_UNREAD}: Operation returned a 403 status code.`]);
-  assert.equal(board.findSprintItem(st().data, "AB#331").parentTitle, null);
-  assert.deepEqual(lineParts(cardLine(b.render(), "card-AB#331", "card-meta")), ["Teil von 299"]);
+  await answerRefresh(host, { me: false, items: noLeftovers, parents: parentsWith290() });
+  assert.deepEqual(queries()[2], board.azQueryArgs(sprintTeam(), board.idsWiql([290], [STACK_RANK])), "r: the titles again");
+});
+
+test("UI: the team's settings the Sprint reads beside its parents' query are kept no longer than its sprint", async () => {
+  const { b, cx, host } = await bootBoard({ stored: { source: "azure" }, which: found });
+  advance(board.dayEnd(Date.now()) - 2 * 3600000 - Date.now());
+  await answerSettings(host, iterationAnswer(0));
+  await answerRefresh(host);
+  const settingsReads = () => host.calls.filter((c) => AZ.teamSettings(c.args)).length;
+  assert.equal(settingsReads(), 1);
+  advance(2 * 3600000 + 60000);
+  await refreshSprint(b, cx);
+  await answerSettings(host);
+  await answerRefresh(host, { me: false });
+  assert.equal(settingsReads(), 2, "the sprint ended within TEAM_KEEP_MS: read again");
 });
 
 test("UI: a GitHub card's lines: its key with its priority at the right; its title; its milestone as a muted chip and its parent, cut short; its type and labels; its progress with a bar and the share done, then its session, „speichert …“ and its assignees, which end the chips' line where it has no progress; a card without them as compact as before", async () => {
@@ -11775,7 +12110,7 @@ function prioritySprintItems() {
 }
 const parentsWith290 = () => ok(JSON.stringify([...json("azure-sprint-parents.json"), { id: 290, fields: { "System.Id": 290, "System.Title": "Sample feature with a long name that will not fit" } }]));
 
-test("UI: the Sprint's story and task in a card's lines: the priority at the right of the key; a story's parent, and a task's only in „Ohne Story“; a story's tasks' progress, which its assignee ends, or its state's line where it has none; a task's state, which its session, „speichert …“ and assignee end", async () => {
+test("UI: the Sprint's story and task in a card's lines: the priority at the right of the key; a story's parent, and a task's only in „Ohne Story“ (its parent's row names it otherwise); a story's tasks' progress, which its assignee ends, or its state's line where it has none; a task's state, which its session, „speichert …“ and assignee end", async () => {
   const { b, cx, host, st } = await openSprint({ items: prioritySprintItems(), parents: parentsWith290() });
   const t = copperTheme("light");
   host.theme = () => t;
@@ -11809,8 +12144,8 @@ test("UI: the Sprint's story and task in a card's lines: the priority at the rig
   assert.deepEqual(chipLook(byId(task[0], "priority")), look("ansi1"));
   assert.deepEqual(chipLook(byId(byId(root, "card-AB#311"), "priority")), [t["copper-orange-text"], t["copper-orange-3"]], "Azure's 2 in copper's orange");
   assert.deepEqual(lineParts(task[2]), ["In Progress", "arbeitet", "Robin Example"]);
-  // A task in „Ohne Story“ names its parent; one without a parent has none.
-  assert.deepEqual(lineParts(cardLine(root, "card-AB#331", "card-meta")), ["Teil von 299 Clean up the old exports"]);
+  // A task in its parent's row outside the sprint names no parent, nor does one without a parent.
+  assert.equal(cardLine(root, "card-AB#331", "card-meta"), null);
   assert.equal(cardLine(root, "card-AB#332", "card-meta"), null);
   assert.deepEqual(chipLook(byId(byId(root, "card-AB#332"), "priority")), look("muted"), "4 muted");
   assert.equal(byId(byId(root, "card-AB#313"), "priority"), null, "no priority: none");
@@ -13015,33 +13350,62 @@ test("UI: each tab shows the age of what it draws: two saved tabs their own, a p
   assert.deepEqual([again.state("mine").saved, ageOf(again.render())], [true, "Stand vor 3 min"], "after a restart: the saved read's age");
 });
 
-test("UI: the Azure Sprint asks for the taskboard once the sprint is known and the query once its areas are too, in any order of answers; it draws before its parents' titles", async () => {
+test("UI: the Azure Sprint asks for the taskboard once the sprint is known and the query once its areas and the backlog's order field are too, in any order of answers; it draws before its parents outside it and the team's settings beside them", async () => {
   const datas = [];
-  for (const order of [["iteration", "areas", "columns", "types"], ["types", "columns", "areas", "iteration"]]) {
+  for (const order of [["iteration", "areas", "columns", "types", "config"], ["config", "types", "columns", "areas", "iteration"], ["iteration", "areas", "types", "columns", "config"]]) {
     const { b, host } = await bootBoard({ stored: { source: "azure" }, which: found });
-    assert.deepEqual(openCounts(host, [...SETTINGS, "me"]), [1, 1, 1, 1, 1]);
-    const answers = { iteration: iterationAnswer(), areas: fixture("azure-sprint-areas.json"), columns: fixture("azure-sprint-columns.json"), types: fixture("azure-sprint-types.json") };
+    assert.deepEqual(openCounts(host, [...SETTINGS, "config", "me"]), [1, 1, 1, 1, 1, 1]);
+    const answers = {
+      iteration: iterationAnswer(), areas: fixture("azure-sprint-areas.json"), columns: fixture("azure-sprint-columns.json"), types: fixture("azure-sprint-types.json"),
+      config: fixture("azure-backlog-config.json"),
+    };
     const seen = [];
     for (const kind of order) {
       await host.answer("az", ok(answers[kind]), AZ[kind]);
       seen.push([kind, openAz(host, "places").length, openAz(host, "query").length]);
     }
-    const iterationAt = order.indexOf("iteration");
-    const areasAt = order.indexOf("areas");
+    const [iterationAt, areasAt, configAt] = ["iteration", "areas", "config"].map((k) => order.indexOf(k));
     assert.deepEqual(seen.map(([, places]) => places), order.map((_, i) => Number(i >= iterationAt)), `${order}: the taskboard once the sprint is known`);
-    assert.deepEqual(seen.map(([, , query]) => query), order.map((_, i) => Number(i >= Math.max(iterationAt, areasAt))), `${order}: the query once its areas are known too`);
+    assert.deepEqual(seen.map(([, , query]) => query), order.map((_, i) => Number(i >= Math.max(iterationAt, areasAt, configAt))), `${order}: the query once its areas and order field are known too`);
     const st = b.state(b.view().id);
     await host.answer("az", ok(fixture("azure-sprint-taskboard.json")), AZ.places);
     await host.answer("az", ok(fixture("azure-sprint-items.json")), AZ.query);
     await host.answer("az", ok(fixture("azure-sprint-account.json")), AZ.me);
-    assert.equal(openAz(host, "parents").length, 1, "its parents' titles under way");
+    assert.deepEqual(openCounts(host, ["parents", "teamSettings"]), [1, 1], "its parents outside it under way, the team's settings beside them");
     const titles = () => board.sprintItems(st.data).filter((i) => Number.isInteger(i.parent)).map((i) => i.parentTitle);
-    assert.deepEqual([st.loading, st.data.shape, titles().includes(null)], [true, "sprint", true], "drawn before them");
+    assert.deepEqual([st.loading, st.data.shape, titles().includes(null), board.findCard(st.data, "AB#331").card.row], [true, "sprint", true, "none"],
+      "drawn before them, a task under one of them in „Ohne Story“ meanwhile: nothing drew before");
     await host.answer("az", ok(fixture("azure-sprint-parents.json")), AZ.parents);
-    assert.deepEqual([st.loading, titles().includes(null)], [false, false]);
+    assert.equal(st.loading, true, "the team's settings still under way");
+    await host.answer("az", ok(fixture("azure-backlog-settings.json")), AZ.teamSettings);
+    assert.deepEqual([st.loading, titles().includes(null), board.findCard(st.data, "AB#331").card.row], [false, false, "AB#299"]);
     datas.push(st.data);
   }
   assert.deepEqual(datas[0], datas[1], "the same sprint either way");
+});
+
+test("UI: after a restart the Sprint draws its saved state, and what it draws before its parents' query keeps their rows as the saved state drew them", async () => {
+  const { st: first, view } = await openSprint();
+  assert.ok(first().data.rows.some((r) => r.key === "AB#299"), "read with the parent's row");
+  const saved = board.savedText(view, board.hiddenColumns(view, null), { data: first().data, warnings: [] }, Date.now() - MIN);
+  const { b, host } = await bootBoard({ stored: { source: "azure" }, which: found, raw: { [board.savedKey(view.id)]: saved } });
+  const st = () => b.state(b.view().id);
+  assert.deepEqual([st().saved, board.findCard(st().data, "AB#331").card.row], [true, "AB#299"], "the saved state");
+  await answerSettings(host);
+  const items = json("azure-sprint-items.json");
+  items.find((wi) => wi.id === 331).fields["System.Title"] = "Clean up the exports, read again";
+  await host.answer("az", ok(fixture("azure-sprint-taskboard.json")), AZ.places);
+  await host.answer("az", ok(JSON.stringify(items)), AZ.query);
+  await host.answer("az", ok(fixture("azure-sprint-account.json")), AZ.me);
+  assert.equal(openAz(host, "parents").length, 1, "its parents' query under way");
+  const task = () => board.findCard(st().data, "AB#331").card;
+  const leftover = st().data.rows.find((r) => r.key === "AB#299")?.story;
+  assert.deepEqual([st().loading, task().title, task().row, leftover?.sprint], [true, "Clean up the exports, read again", "AB#299", "Sprint 11"],
+    "drawn in steps, the task in its parent's row as drawn last");
+  assert.equal(drawnRows(b.render()).includes("row-AB#299"), true);
+  await host.answer("az", ok(fixture("azure-sprint-parents.json")), AZ.parents);
+  await host.answer("az", ok(fixture("azure-backlog-settings.json")), AZ.teamSettings);
+  assert.deepEqual([st().loading, st().saved, task().row], [false, false, "AB#299"]);
 });
 
 test("UI: the Azure Backlog asks for the level's ids once its levels came and for their fields once its configuration came too; the rows draw before the types' colors", async () => {

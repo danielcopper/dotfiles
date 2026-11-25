@@ -1,14 +1,16 @@
 // The sprint shape: a team's sprint (its current one, or one the sprint picker
 // chose) as a taskboard. One row per story (storyCell at the left), its tasks
-// as cards in the team's taskboard columns (drawTask); tasks whose story is
-// not in the sprint stand in the row "Ohne Story". H/L move a task to the next
-// column (through the taskboard's own column, not the state: two columns may
-// map to one state), s changes a story's or a task's state from its type's
-// states (the status menu), Enter shows the details; both write at once
-// (actions/move.js, actions/write.js). z (while the board has the keyboard),
-// or a click on the triangle in a story's row, folds its tasks away and back
-// (toggleStoryFold; foldsOf says where that is kept). Keys walk the stories,
-// then each column's tasks but the folded ones (sprintNav, withoutFolded).
+// as cards in the team's taskboard columns (drawTask); a task's parent
+// outside the sprint has a row too, its sprint beside its type, and tasks
+// without a parent read stand in the row "Ohne Story". H/L move a task to
+// the next column (through the taskboard's own column, not the state: two
+// columns may map to one state), s changes a story's or a task's state from
+// its type's states (the status menu), Enter shows the details; both write
+// at once (actions/move.js, actions/write.js). z (while the board has the
+// keyboard), or a click on the triangle in a story's row, folds its tasks
+// away and back (toggleStoryFold; foldsOf says where that is kept). Keys walk
+// the stories, then each column's tasks but the folded ones (sprintNav,
+// withoutFolded).
 // Another sprint of the team shows through the sprint picker
 // (ui/modals/sprints.js says what opens it; pickSprint, showSprint), and says
 // so in the head ("nicht aktuell"); with no sprint running and none chosen the
@@ -18,9 +20,9 @@
 // current sprint's, null with none running), gone ({ id, name } of a
 // chosen sprint the team no longer has, or null), typeStates, states,
 // typeColors, unplaced, unknownColumns }, columns: [{ id, name, color,
-// hidden, count, target, types, mappings, cards }], rows: [{ key, story }],
-// viewer, noViewer, total, limited, limit } (sprintBoard,
-// sources/azure/sprint.js).
+// hidden, count, target, types, mappings, cards }], rows: [{ key, story
+// (outside and sprint for a parent outside the sprint) }], viewer,
+// noViewer, total, limited, limit } (sprintBoard, sources/azure/sprint.js).
 // View fields it reads: id, source, layout (as writeAtOnce does).
 
 import { div } from "gpui-kit";
@@ -302,6 +304,7 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     ...fold,
     div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(story)),
     ...(story.type ? [div().text_size(11).text_color(t.dim).child(story.type)] : []),
+    ...(story.outside ? [toneChip(t, story.sprint ?? "ohne Sprint", NOTE_TONES.warning).flex_none()] : []),
   ];
   return cell
     .id(`story-${story.key}`)

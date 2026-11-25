@@ -26,12 +26,16 @@ export function createTypes(data, parent) {
   return [...own, ...children];
 }
 
-// The warnings of a backlog: an order it cannot check (no order field),
-// ids its query did not find, and a backlog longer than one query reads.
+// The warning of an order that cannot be checked (no order field), which
+// the Sprint gives too.
+export const ORDER_UNCHECKED = "Reihenfolge ungeprüft: Azure nannte kein Order-Feld";
+
+// The warnings of a backlog: an order it cannot check, ids its query did
+// not find, and a backlog longer than one query reads.
 export function backlogWarnings(data) {
   const { missing } = data.meta;
   return [
-    ...(data.meta.orderField ? [] : ["Reihenfolge ungeprüft: Azure nannte kein Order-Feld"]),
+    ...(data.meta.orderField ? [] : [ORDER_UNCHECKED]),
     ...(missing > 0 ? [`${missing} ${missing === 1 ? "Eintrag" : "Einträge"} des Backlogs ohne Felder (nicht gefunden)`] : []),
     ...(data.limited ? [`Nur die ersten ${data.limit} von ${data.total} Einträgen des Backlogs (so viele liest eine Abfrage)`] : []),
   ];
