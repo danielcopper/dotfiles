@@ -12,6 +12,7 @@
   "sources": {
     "azure": {
       "org": "https://dev.azure.com/l-p-a",
+      "repoFolders": ["~/Projects", "~/Repos"],
       "contexts": [
         { "team": { "project": "VC", "team": "VC Core Team" }, "views": ["sprint", "backlog"] },
         { "prs": { "project": "VC" } },
