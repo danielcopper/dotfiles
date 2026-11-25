@@ -5,7 +5,7 @@ import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { layout, notify, panes, settings, spaces } from "herdr";
 import { MOD, cardType, firstLine } from "../shared.js";
 import { githubContextId } from "../contexts.js";
-import { AGENT_STATUS } from "../actions/start.js";
+import { AGENT_STATUS, placed } from "../sessions.js";
 import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 import { stateColor } from "../kinds/states.js";
@@ -530,8 +530,15 @@ export function typeChip(t, item) {
   return tone ? toneChip(t, type, tone) : chip(t, type, t.foreground);
 }
 
-// A card's chip for its session (linkedSession): what its agent does.
-export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);
+export const CANDIDATE = "Kandidat";
+export const CANDIDATE_CHIP = `○ ${CANDIDATE}`;
+export const sessionChip = (t, session) =>
+  session.sure ? chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle) : chip(t, CANDIDATE_CHIP);
+
+// A Claude session's name is its label where it is in no terminal, so not
+// again among its reasons.
+export const sessionReasons = (s) =>
+  [...s.reasons.filter((r) => r !== s.label), ...(placed(s) ? [] : ["kein Terminal gefunden"])].join(" · ");
 
 export function priorityChip(t, item) {
   if (!item.priority) return null;

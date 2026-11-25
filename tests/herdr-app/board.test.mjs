@@ -124,7 +124,7 @@
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -392,10 +392,17 @@ test("no person-specific value of views.json appears in main.js", () => {
     add(repo.split("/")[0]);
     Object.values(entry).forEach(add);
   }
-  for (const key of ["message", "review", "agent", "machine"]) add(raw.start?.[key]);
+  for (const key of ["message", "review", "machine"]) add(raw.start?.[key]);
   const code = readFileSync(mainPath, "utf8");
-  assert.ok(values.size >= 8, "the config names the person's values");
+  assert.ok(values.size >= 7, "the config names the person's values");
   for (const value of values) assert.ok(!code.includes(value), `main.js holds ${JSON.stringify(value)}`);
+  // The agent as a value of the code, alone or first in a string; Claude
+  // Code's folder (~/.claude), which the board reads, may stand in it.
+  const agent = raw.start.agent;
+  const statements = code.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
+  for (const quote of ['"', "'", "`"]) {
+    for (const form of [`${quote}${agent}${quote}`, `${quote}${agent} `]) assert.ok(!statements.includes(form), `main.js holds ${form}`);
+  }
 });
 
 test("readConfig reports a missing file and invalid JSON", () => {
@@ -2124,27 +2131,29 @@ test("a session is named after its item, the title cut to fit", () => {
   assert.equal(board.sessionName(board.findCard(casesBoard(), "PVTI_case2").card), "Draft: sort the release notes");
 });
 
-test("an item's session is the tab or space named after it; a branch with its number is the fallback", () => {
+test("an item's session the second Enter goes to is the most urgent tab or space that names it, or on GitHub a space on a branch with its number in its repo", () => {
   const card = board.findCard(githubBoard(), "PVTI_rec1").card;
   const tab = (id, name, status = null) => ({ id, name, status });
+  const linked = (item, spaces) => board.linkedSession(item, board.sessionIndex({ spaces }));
   const spaces = [
     { id: "s1", name: "atlas", folder: "/r/atlas", branch: "main", status: "blocked", tabs: [tab("t1", "atlas#3000 other")] },
     { id: "s2", name: "work", folder: "/r/tender", branch: "main", status: "working", tabs: [tab("t2", "1"), tab("t3", "tender#3000 sample…", "working")] },
   ];
-  assert.deepEqual(board.linkedSession(card, spaces), { space: "s2", tab: "t3", status: "working", label: "tender#3000 sample…" });
+  assert.deepEqual(linked(card, spaces), { sure: true, place: { space: "s2", tab: "t3", pane: null }, claudePid: null, label: "tender#3000 sample…", status: "working", paneNumber: null, reasons: ["Tab-Name"] });
   const two = [{ id: "s7", name: "x", folder: "/r/tender", branch: "main", status: null,
     tabs: [tab("t7", "tender#3000 a", "idle"), tab("t8", "tender#3000 b", "blocked"), tab("t9", "tender#30001 c", "blocked")] }];
-  assert.equal(board.linkedSession(card, two).tab, "t8", "the most urgent first; tender#30001 is another item");
-  assert.equal(board.linkedSession(card, [{ ...two[0], tabs: [two[0].tabs[2]] }]), null);
+  assert.equal(linked(card, two).place.tab, "t8", "the most urgent first; tender#30001 is another item");
+  assert.equal(linked(card, [{ ...two[0], tabs: [two[0].tabs[2]] }]), null);
   const named = [{ id: "s3", name: "tender#3000 sample…", folder: "/r/tender", branch: "main", status: "done", tabs: [tab("t4", "1", "done")] }];
-  assert.deepEqual(board.linkedSession(card, named), { space: "s3", tab: null, status: "done", label: "tender#3000 sample…" });
+  assert.deepEqual(linked(card, named), { sure: true, place: { space: "s3", tab: null, pane: null }, claudePid: null, label: "tender#3000 sample…", status: "done", paneNumber: null, reasons: ["Space-Name"] });
   const branch = [{ id: "s4", name: "x", folder: "/r/tender.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [tab("t5", "1")] }];
-  assert.deepEqual(board.linkedSession(card, branch), { space: "s4", tab: null, status: "idle", label: "feat/3000-x" });
+  assert.deepEqual(linked(card, branch), { sure: true, place: { space: "s4", tab: null, pane: null }, claudePid: null, label: "x", status: "idle", paneNumber: null, reasons: ["Branch feat/3000-x"] });
   const elsewhere = [{ id: "s5", name: "x", folder: "/r/atlas.worktrees/feat/3000-x", branch: "feat/3000-x", status: "idle", tabs: [] }];
-  assert.equal(board.linkedSession(card, elsewhere), null, "the same number in another repo is not this item's");
-  assert.equal(board.linkedSession(azureItem(), [{ id: "s6", name: "w", folder: "/w", branch: null, status: null, tabs: [tab("t6", "AB#101 Write the sample importer", "blocked")] }]).tab, "t6");
+  assert.equal(linked(card, elsewhere), null, "the same number in another repo is not this item's");
+  assert.equal(linked(azureItem(), [{ id: "s6", name: "w", folder: "/w", branch: null, status: null, tabs: [tab("t6", "AB#101 Write the sample importer", "blocked")] }]).place.tab, "t6");
   const pr = board.parseGithubList(json("github-list.json"), listView()).sections[0].rows[0];
-  assert.equal(board.linkedSession(pr, [{ id: "p", name: "p", folder: "/x", branch: "pr/summary-card", status: "idle", tabs: [] }]).space, "p");
+  assert.equal(linked(pr, [{ id: "p", name: "p", folder: "/r/tender", branch: "pr/summary-card", status: "idle", tabs: [] }]).place.space, "p", "a pull request's head branch in its repo");
+  assert.equal(linked(pr, [{ id: "p", name: "p", folder: "/r/atlas", branch: "pr/summary-card", status: "idle", tabs: [] }]), null, "the same branch in another repo is not its");
 });
 
 test("templates take the item's number, title, url, owner, repo and key", () => {
@@ -2399,7 +2408,7 @@ const SAMPLE_LOGIN = { code: 0, stdout: JSON.stringify({ data: { viewer: { login
 const NO_NOTIFICATIONS = { code: 0, stdout: "[]", stderr: "" };
 function fakeHost({
   config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false, oldMouse = false, viewerAnswer = SAMPLE_LOGIN,
-  notificationsAnswer = NO_NOTIFICATIONS,
+  notificationsAnswer = NO_NOTIFICATIONS, claudeHome = null, claudeAnswer = null,
 } = {}) {
   const calls = [];
   const lacked = oldMouse ? ["on_window_mouse_up"] : [];
@@ -2480,6 +2489,18 @@ function fakeHost({
       if (args.includes(board.NOTIFICATIONS_PATH) && host.notificationsAnswer !== null) {
         return host.notificationsAnswer instanceof Error ? Promise.reject(host.notificationsAnswer) : Promise.resolve(host.notificationsAnswer);
       }
+      // The Claude sessions' reads (readClaude) are answered at once and
+      // apart from `calls`: by `claudeAnswer` where it answers, else by the
+      // scripts themselves under `claudeHome` as HOME, where a test sets
+      // one, else with no session (the end record alone).
+      if (tool === "sh" && (args[1] === board.CLAUDE_SESSIONS_SCRIPT || args[1] === board.CLAUDE_TASKS_SCRIPT)) {
+        host.claudeReads.push(args.slice(3));
+        const given = host.claudeAnswer?.(args);
+        if (given) return given;
+        if (!host.claudeHome) return Promise.resolve({ code: 0, stdout: "\x1eZ\n", stderr: "" });
+        const r = spawnSync("sh", args, { encoding: "utf8", env: { PATH: process.env.PATH, HOME: host.claudeHome } });
+        return Promise.resolve({ code: r.status, stdout: r.stdout, stderr: r.stderr });
+      }
       if (tool === "sh" && args[1] === board.WHICH_SCRIPT) {
         host.asked.push({ tool: args[3], on: options.on, timeout: options.timeout });
         const a = host.which(args[3], options.on);
@@ -2514,7 +2535,13 @@ function fakeHost({
     },
     notify: (n) => host.notes.push(n),
     run: (name, args) => host.runs.push([name, args]),
-    panes: () => (shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []),
+    panes: () => [...(shown ? [{ pane: "p1", mod: "board", tab: "t1" }] : []), ...host.paneList],
+    paneList: [],
+    terminals: () => host.terminalList,
+    terminalList: [],
+    claudeHome,
+    claudeAnswer,
+    claudeReads: [],
     tree,
     layout: () => host.tree,
     sharedValues: {},
@@ -2774,6 +2801,10 @@ async function press(b, cx, k, extra) {
   await settle();
 }
 const shiftL = { char: "L", modifiers: { shift: true } };
+// The index of the details panel's selected line among its lines now
+// (null for none, or one not among them), and marking line `n`.
+const lineOf = (b) => board.lineIndex(b.linesOf(b.view()), b.panel.line);
+const markLine = (b, n) => (b.panel.line = board.lineId(board.lineAt(b.linesOf(b.view()), n)));
 const shiftH = { char: "H", modifiers: { shift: true } };
 // A gh call for a board view's items, and one for an issue's related items.
 const isBoardCall = (args) => args.some((a) => String(a).includes("projectV2(number"));
@@ -9885,16 +9916,16 @@ test("UI: Tab moves the keyboard into the details panel and back; there j/k walk
   layOut(b, cx, 120);
   await press(b, cx, "j");
   await press(b, cx, "down");
-  assert.deepEqual([b.panel.line, marked(), st().sel.key], [1, [1], "PVTI_rec4"], "the lines move, the board's selection stays");
+  assert.deepEqual([lineOf(b), marked(), st().sel.key], [1, [1], "PVTI_rec4"], "the lines move, the board's selection stays");
   assert.equal(offsetOf(b), 6, "scrolled to the second sub-issue's line, below the description's two rows");
   for (let i = 0; i < 6; i++) await press(b, cx, "j");
-  assert.equal(b.panel.line, 4, "the last stays");
+  assert.equal(lineOf(b), 4, "the last stays");
   assert.equal(offsetOf(b), 102, "scrolled to the last pull request's line, at the block's bottom");
   await press(b, cx, "k", { modifiers: { control: true } });
   await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
-  assert.equal(b.panel.line, 4, "with Control or Shift a key is not the panel's");
+  assert.equal(lineOf(b), 4, "with Control or Shift a key is not the panel's");
   for (let i = 0; i < 5; i++) await press(b, cx, i % 2 ? "up" : "k");
-  assert.equal(b.panel.line, null, "k above the first: no line");
+  assert.equal(lineOf(b), null, "k above the first: no line");
   await action(b, cx, "board_shift_tab");
   assert.equal(b.panelOf(b.view()), null, "shift-Tab gives it back");
   await press(b, cx, "j");
@@ -9925,23 +9956,23 @@ test("UI: with no line selected j scrolls the block a line until the first line 
   // „keine“, the pull requests' head, the line: it ends at 150.
   assert.equal(layOut(b, cx, 100), 162);
   await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 18], "a line down");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 18], "a line down");
   await press(b, cx, "j");
   await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 54], "until the line shows whole");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 54], "until the line shows whole");
   await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [0, 54], "then it is selected, nothing moves");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [0, 54], "then it is selected, nothing moves");
   await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [0, 54], "the last line stays");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [0, 54], "the last line stays");
   await press(b, cx, "k");
   await press(b, cx, "k");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 36], "k: to no line, then a line up");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 36], "k: to no line, then a line up");
   for (let i = 0; i < 4; i++) await press(b, cx, "up");
   assert.equal(offsetOf(b), 0, "not above the top");
   // A description row of 100 pixels moves the line down to end at 232.
   layOut(b, cx, 100, { heights: { "related-row-1": 100 } });
   for (let i = 0; i < 4; i++) await press(b, cx, "j");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 72], "the line does not show yet: measured rows count");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 72], "the line does not show yet: measured rows count");
 });
 
 test("UI: the details panel has the keyboard only for the item and view it took it in, with the details open", async () => {
@@ -10035,7 +10066,7 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   await reloadBoard(b, cx, host);
   await press(b, cx, "enter");
   await press(b, cx, "o");
-  assert.deepEqual([b.modal, cx.opened, b.panelOf(b.view())?.line], [null, undefined, 0]);
+  assert.deepEqual([b.modal, cx.opened, b.panelOf(b.view())?.line], [null, undefined, { related: "github:issue:example/tender#3001" }], "the line stays selected");
   await answerRelated(host, ok(fixture("github-related.json")));
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
@@ -10147,7 +10178,7 @@ test("UI: an Azure work item's parent shows under „ÜBERGEORDNET“, read in i
 // ---- Going down into a related item in the details panel ----
 
 // The details panel's levels: each level's item number, and its line.
-const levelsNow = (b) => [b.panelOf(b.view())?.levels.map((l) => l.item.number) ?? null, b.panelOf(b.view())?.line ?? null];
+const levelsNow = (b) => [b.panelOf(b.view())?.levels.map((l) => l.item.number) ?? null, b.panelOf(b.view()) ? lineOf(b) : null];
 const topText = (b) => texts(byId(detailPanel(b), "detail-top"))[0];
 const readRelatedOf = (number) => (a) => isRelatedCall(a) && a.includes(`number=${number}`);
 
@@ -10297,6 +10328,8 @@ test("UI: on a level „Zeile auf dem Board“ selects the line's item from the 
   cx.call((own) => b.readRelated(own));
   await settle();
   await answerRelated(host, ok(JSON.stringify(sub)));
+  assert.equal(byId(detailPanel(b), "act-line-board"), null, "its marked line gone: no button");
+  await press(b, cx, "j");
   b.modal = { kind: "status", view: b.view(), key: "PVTI_rec4", targets: [], at: 0 };
   await click(b, cx, "act-line-board");
   assert.deepEqual([st().sel.key, levelsNow(b)], ["PVTI_rec4", [[3010], 0]], "a dialog is open: nothing");
@@ -10654,7 +10687,7 @@ test("UI: r shows a level as its line above says now: a sub-issue that opened ag
   assert.deepEqual([levelsNow(b)[0], Boolean(chipOf(detailPanel(b), "offen")), chipOf(detailPanel(b), "geschlossen")], [[3010], true, null]);
 });
 
-test("UI: Enter on a line whose item the panel cannot read says so and opens nothing; o opens it", async () => {
+test("UI: Enter on a line whose item the panel cannot read says so and opens nothing; o opens it; a click on it says so too and marks it", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "enter");
   await answerRelated(host, rootAnswer((i) => {
@@ -10666,6 +10699,10 @@ test("UI: Enter on a line whose item the panel cannot read says so and opens not
   assert.deepEqual([levelsNow(b), cx.opened, b.notice?.text, host.open("gh").length], [[[], 0], undefined, "#5000 lässt sich hier nicht zeigen", 0]);
   await press(b, cx, "o");
   assert.deepEqual(cx.opened, ["https://github.com/example/gone/issues/5000"]);
+  await press(b, cx, "escape");
+  b.notice = null;
+  await click(b, cx, "related-line-0");
+  assert.deepEqual([levelsNow(b), b.notice?.text, b.panel?.line], [[[], 0], "#5000 lässt sich hier nicht zeigen", { related: "github:issue:#5000" }]);
 });
 
 test("UI: Esc back up marks the line it came from where a re-read moved it, and the remembered line while the level above is still being read", async () => {
@@ -10678,7 +10715,7 @@ test("UI: Esc back up marks the line it came from where a re-read moved it, and 
   const loading = await onLevel();
   await reloadBoard(loading.b, loading.cx, loading.host);
   await press(loading.b, loading.cx, "escape");
-  assert.deepEqual(levelsNow(loading.b), [[], 1], "still being read: the line it was on");
+  assert.deepEqual([levelsNow(loading.b)[0], loading.b.panel.line], [[], { related: "github:issue:example/tender#3010" }], "still being read: the line it was on");
 });
 
 test("UI: the hint line on a level: with no line marked Enter and o are the level's item's, with one the line's; a pull request's level names no lines", async () => {
@@ -10699,17 +10736,22 @@ test("UI: the hint line on a level: with no line marked Enter and o are the leve
   once("a pull request's level");
 });
 
-test("UI: the command menu runs a line's action only on the line it opened on: where a re-read moved the lines it says so and opens nothing", async () => {
-  const { b, cx, host } = await onFirstLine();
-  await openMenu(b, cx);
-  b.modal.input.type("Zeile im Browser");
-  b.reload(cx);
-  await settle();
-  await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
-  await host.answer("gh", rootAnswer((i) => (i.parent = parentNode(2900))), readRelatedOf(3004));
-  cx.call((own) => b.modal.input.submit(own));
-  await settle();
-  assert.deepEqual([b.modal, b.notice?.text, cx.opened], [null, "tender#3001 ist nicht mehr markiert", undefined]);
+test("UI: the command menu runs a line's action only on the line it opened on, wherever a re-read moved it; where the re-read took it away it says so and opens nothing", async () => {
+  const menuAfter = async (patch) => {
+    const { b, cx, host } = await onFirstLine();
+    await openMenu(b, cx);
+    b.modal.input.type("Zeile im Browser");
+    b.reload(cx);
+    await settle();
+    await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
+    await host.answer("gh", rootAnswer(patch), readRelatedOf(3004));
+    cx.call((own) => b.modal.input.submit(own));
+    await settle();
+    return [b.modal, b.notice?.text, cx.opened];
+  };
+  assert.deepEqual(await menuAfter((i) => (i.parent = parentNode(2900))), [null, undefined, ["https://github.com/example/tender/issues/3001"]], "a parent before it: still its line");
+  const without3001 = (i) => (i.subIssues.nodes = i.subIssues.nodes.filter((n) => n.number !== 3001));
+  assert.deepEqual(await menuAfter(without3001), [null, "tender#3001 ist nicht mehr markiert", undefined]);
 });
 
 test("UI: on a level the command menu still lists the board item's actions under its heading, without their keys", async () => {
@@ -11061,7 +11103,7 @@ test("UI: a Sprint story's details read its related items: its description as HT
   await host.answer("az", ok(JSON.stringify({ id: 311, fields: {}, relations: null })), (a) => a.includes("relations"));
   assert.deepEqual([host.open("az").length, descriptionTexts(b), sectionTexts(b)], [0, ["BESCHREIBUNG", "keine Beschreibung"], ["UNTERAUFGABEN", "keine"]], "no children: no query");
   await press(b, cx, "escape");
-  assert.deepEqual([b.panelOf(b.view())?.levels.length, b.panelOf(b.view())?.line, host.open("az").length], [0, 1, 0], "back on the story: its line again, nothing read again");
+  assert.deepEqual([b.panelOf(b.view())?.levels.length, b.panelOf(b.view()) && lineOf(b), host.open("az").length], [0, 1, 0], "back on the story: its line again, nothing read again");
   await press(b, cx, ...SHIFT_G);
   await press(b, cx, "o");
   assert.equal(cx.opened.at(-1), `${ORG}/0f3c6a1e-8b2d-4e7f-a915-3c2d1b0a9e88/_git/6a1d0c3e-2f4b-4e8a-b7c9-1d2e3f4a5b6c/pullrequest/57`, "the pull request's page");
@@ -12150,7 +12192,7 @@ test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its windo
   layOut(b, cx, 20);
   await press(b, cx, "d", { modifiers: { control: true } });
   assert.equal(offsetOf(b), 18, "a window of 20 pixels: one line, not half of it");
-  assert.equal(b.panel.line, null, "the lines stay as they were");
+  assert.equal(lineOf(b), null, "the lines stay as they were");
 });
 
 // The transitions of top the details block's content and thumb draw with
@@ -12208,17 +12250,17 @@ test("UI: the way back up from a level (Esc, or a re-read that takes its line aw
   layOut(b, cx, 100);
   await tab(b, cx);
   await press(b, cx, "end");
-  assert.deepEqual([b.panel.line, offsetOf(b), glidesOf(b)], [4, 134, GLIDING]);
-  b.panel.line = 3;
+  assert.deepEqual([lineOf(b), offsetOf(b), glidesOf(b)], [4, 134, GLIDING]);
+  markLine(b, 3);
   await press(b, cx, "enter");
   await host.answer("gh", ok(pullRequestAnswer()), isPullRequestCall);
   assert.deepEqual([b.panel.levels.length, byId(detailPanel(b), "related-lines")], [1, null], "a pull request's level, which draws no block");
   await press(b, cx, "escape");
-  assert.deepEqual([b.panel.levels.length, b.panel.line, offsetOf(b), glidesOf(b)], [0, 3, 134, STILL], "the scroll it had, without a glide");
+  assert.deepEqual([b.panel.levels.length, lineOf(b), offsetOf(b), glidesOf(b)], [0, 3, 134, STILL], "the scroll it had, without a glide");
   // Where a re-read takes the line away, the way back up marks none and
   // scrolls no line into view: the restored scroll alone moves the block.
   await press(b, cx, "end");
-  b.panel.line = 3;
+  markLine(b, 3);
   await press(b, cx, "enter");
   assert.deepEqual([b.panel.levels.length, glidesOf(b)[0]], [1, null], "the pull request's level again, read before");
   await press(b, cx, "r");
@@ -12228,7 +12270,7 @@ test("UI: the way back up from a level (Esc, or a re-read that takes its line aw
   prs.nodes = prs.nodes.filter((n) => n.number !== 3020);
   prs.totalCount = prs.nodes.length;
   await host.answer("gh", ok(JSON.stringify(without)), readRelatedOf(3004));
-  assert.deepEqual([b.panel.levels.length, b.panel.line, offsetOf(b), glidesOf(b)], [0, null, 134, STILL], "no line marked: the scroll it had, without a glide");
+  assert.deepEqual([b.panel.levels.length, lineOf(b), offsetOf(b), glidesOf(b)], [0, null, 134, STILL], "no line marked: the scroll it had, without a glide");
 });
 
 test("the details block's glide belongs to the move a page or end key made: another item's offset, a restored one and any other move drop it (motionOf)", () => {
@@ -12438,18 +12480,18 @@ test("UI: while the details panel has the keyboard gg and Home go to its top wit
   assert.equal(hintKeys(b).includes("gg/G"), false, "no hint for the panel's edges");
   const content = layOut(b, cx, 60);
   await press(b, cx, ...SHIFT_G);
-  assert.deepEqual([b.panel.line, offsetOf(b), st().sel.key], [4, content - 60, "PVTI_rec4"], "the last line, the block's bottom; the board's selection stays");
+  assert.deepEqual([lineOf(b), offsetOf(b), st().sel.key], [4, content - 60, "PVTI_rec4"], "the last line, the block's bottom; the board's selection stays");
   await press(b, cx, "g");
   await press(b, cx, "g");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 0]);
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 0]);
   await press(b, cx, "end");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [4, content - 60]);
+  assert.deepEqual([lineOf(b), offsetOf(b)], [4, content - 60]);
   await press(b, cx, "home");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 0]);
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 0]);
   await press(b, cx, "r");
   assert.equal(layOut(b, cx, 60), 114);
   await press(b, cx, "end");
-  assert.deepEqual([b.panel.line, offsetOf(b)], [null, 54], "while the related items load: no line, the block's bottom");
+  assert.deepEqual([lineOf(b), offsetOf(b)], [null, 54], "while the related items load: no line, the block's bottom");
 });
 
 // ---- The command menu (`:`) and the action table ----
@@ -12489,7 +12531,7 @@ test("UI: the command menu in the details and in their panel: the second Enter's
   await tab(b, cx);
   layOut(b, cx, 400);
   await press(b, cx, "j");
-  assert.equal(b.panel.line, 0);
+  assert.equal(lineOf(b), 0);
   const entries = await openMenu(b, cx);
   assert.deepEqual(entries.slice(0, 10), [
     ["Agent starten…", null], ["Status ändern…", "s"], ["Zuweisen…", "a"], ["Nach links verschieben", "H"], ["Nach rechts verschieben", "L"], ["Im Browser öffnen", null],
@@ -12695,6 +12737,16 @@ async function onLevel() {
   await answerRelated(opened.host, ok(relatedAnswer({ n: 2 })));
   return opened;
 }
+// The details panel with the keyboard on the line of the first card's
+// session (sessionSpace), below the related items it has not read yet.
+async function onSessionLine() {
+  const opened = await openBoard();
+  opened.host.spaceList.push(sessionSpace);
+  await press(opened.b, opened.cx, "enter");
+  await tab(opened.b, opened.cx);
+  await press(opened.b, opened.cx, "j");
+  return opened;
+}
 // Each action the menu lists that has a key: where it can run, and its
 // key as pressed.
 const KEYED = {
@@ -12726,6 +12778,7 @@ const KEYED = {
     },
     key: ["z"],
   },
+  "line-session": { open: onSessionLine, key: ["enter"] },
   "line-details": { open: onFirstLine, key: ["enter"] },
   "line-open": { open: onFirstLine, key: ["o"] },
   "level-start": { open: onLevel, key: ["enter"] },
@@ -12934,7 +12987,7 @@ test("UI: the hint line while the details panel has the keyboard: each key once 
     ["Tab", "Board"], ["m", "nur meine"], ["r", "neu laden"], [":", "Befehle"], ["Esc", "zurück"],
   ], "the panel with no line selected: Enter and o act on the board's item, and say so");
   await press(b, cx, "j");
-  assert.equal(b.panel.line, 0);
+  assert.equal(lineOf(b), 0);
   assert.deepEqual(pairs(), [
     ["1 2 3 [ ]", "Tab"], ["H/L", "verschieben"], ["s", "Status"], ["a", "zuweisen"], ["Tab", "Board"],
     ["Enter", "Zeile zeigen"], ["o", "Zeile öffnen"], ["m", "nur meine"], ["r", "neu laden"], [":", "Befehle"], ["Esc", "zurück"],
@@ -14204,10 +14257,827 @@ test("UI: each draw takes its colors from the theme it draws in, after a switch 
 
 test("a space on a branch is an item's session where a part of the branch is the item's number followed by „-“, or its last part is the number", () => {
   const card = board.findCard(githubBoard(), "PVTI_rec1").card;
-  const on = (branch) => Boolean(board.linkedSession(card, [{ id: "s", name: "x", folder: "/r/tender.worktrees/x", branch, status: "idle", tabs: [] }]));
+  const on = (branch) => Boolean(board.linkedSession(card, board.sessionIndex({ spaces: [{ id: "s", name: "x", folder: "/r/tender.worktrees/x", branch, status: "idle", tabs: [] }] })));
   const branches = ["feat/3000-x", "3000", "3000-x", "feat/3000", "a/b/3000-y", "feat/3000-x/more", "feat/30001-x", "feat/13000-x", "feat/3000x", "feat/3000/x", "feat/x3000", "feat-3000"];
   assert.deepEqual(branches.map((br) => [br, on(br)]), branches.map((br) => [br, /(^|\/)3000(-|$)/.test(br)]));
   assert.deepEqual(branches.filter(on), ["feat/3000-x", "3000", "3000-x", "feat/3000", "a/b/3000-y", "feat/3000-x/more"]);
+});
+
+// ---- An item's sessions: herdr's panes and the Claude sessions ----
+
+// A pane of herdr's (panes()) in tab `tab`, a terminal's (`term-<id>`), in
+// the sample repo's folder, running a shell.
+const paneOf = (id, tab, fields = {}) => ({
+  pane: id, terminal: `term-${id}`, tab, title: "", name: null, cwd: "/r/tender", branch: null, status: null,
+  program: { key: "shell", name: "zsh", agent: false }, ...fields,
+});
+const workSpace = (tabs, fields = {}) => ({ id: "s1", name: "work", folder: "/r/tender", machine: null, branch: "main", status: null, tabs, ...fields });
+// The Claude sessions' scripts' output (sessions.js, RS records): sessions'
+// files and ps's processes (null: ps failed), a task list's files, each
+// whole (its end record).
+const RS = "\x1e";
+const END = `${RS}Z\n`;
+const sessionsOut = (sessions, processes = "") =>
+  sessions.map((s) => `${RS}S\t${s.pid}\n${JSON.stringify(s)}\n`).join("") + (processes === null ? `${RS}X\n` : `${RS}P\n${processes}\n`) + END;
+const taskRecords = (list, tasks) => tasks.map((t) => `${RS}T\t${list}\t${t.id}\n${JSON.stringify(t)}\n`).join("");
+const tasksOut = (list, tasks) => taskRecords(list, tasks) + END;
+// A session's file as Claude Code writes it (its keys as one shows them),
+// with made-up values; its task list is the first eight characters of its
+// id.
+const claudeFile = (pid, fields = {}) => ({
+  pid, sessionId: `${String(pid).padStart(8, "0")}-0000-4000-8000-000000000000`, cwd: "/r/tender", startedAt: 1, version: "x", kind: "interactive",
+  name: null, nameSource: "derived", status: "busy", ...fields,
+});
+const listOf = (pid) => String(pid).padStart(8, "0");
+const claudeTask = (id, subject, fields = {}) => ({ id, subject, description: "", status: "pending", blocks: [], blockedBy: [], ...fields });
+const claudeOf = (sessions, processes = "", tasks = "") =>
+  board.claudeSnapshot(board.parseClaudeSessions(sessionsOut(sessions, processes)), board.parseClaudeTasks(tasks));
+
+test("the items a text names: <name>#<n> and !<n> as keys, in lower case, and a bare #<n> as a number; a number ends where no letter, digit or _ follows, so #12 is not in #123", () => {
+  const r = (text) => board.references(text);
+  assert.deepEqual(r("tender#3000 sample"), { keys: ["tender#3000"], bare: [] });
+  assert.deepEqual(r("see example/Tender#3000, AB#101 and !7."), { keys: ["tender#3000", "ab#101", "!7"], bare: [] });
+  assert.deepEqual(r("fix #12 and #123-x"), { keys: [], bare: ["12", "123"] });
+  assert.deepEqual(r("#12a x#12_ #12x # ! #- this!1 a.b#"), { keys: [], bare: [] });
+  assert.deepEqual(r("a!5 (!6) #7"), { keys: ["!6"], bare: ["7"] });
+  assert.deepEqual(r("romm-tender#2845, my.repo#3 and a_b#4"), { keys: ["romm-tender#2845", "my.repo#3", "a_b#4"], bare: [] }, "a repo's name holds - . and _");
+  assert.deepEqual(r(null), { keys: [], bare: [] });
+});
+
+test("an item's sessions in panes: its key, or its bare number in a folder of its repo, in a pane's name, and on GitHub its number in any pane's branch or worktree folder in its repo are sure; a terminal's title that names it so is likely", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const spaces = [workSpace([{ id: "t1", name: "1", status: null }, { id: "t2", name: "2", status: "working" }])];
+  const of = (...panes) => board.itemSessions(board.sessionIndex({ spaces, panes }), card).map((s) => [s.sure, s.place.pane, s.reasons.join(" · ")]);
+  assert.deepEqual(of(paneOf("p1", "t1", { name: "tender#3000 review" })), [[true, "p1", "Pane-Name"]]);
+  assert.deepEqual(of(paneOf("p1", "t1", { name: "review #3000" })), [[true, "p1", "Pane-Name"]], "a bare number in its repo");
+  assert.deepEqual(of(paneOf("p1", "t1", { name: "#3000", cwd: "/r/atlas" })), [], "in another repo");
+  assert.deepEqual(of(paneOf("p1", "t1", { name: "#3000", cwd: "/r/tender-old" })), [], "a repo whose name only starts with its name");
+  assert.deepEqual(of(paneOf("p1", "t1", { name: "#30001 #300 atlas#3000 romm-tender#3000" })), []);
+  assert.deepEqual(of(paneOf("p1", "t2", { branch: "feat/3000-x" })), [[true, "p1", "Branch feat/3000-x"]]);
+  assert.deepEqual(of(paneOf("p1", "t2", { branch: "feat/3000-x", cwd: "/r/atlas" })), []);
+  assert.deepEqual(of(paneOf("p1", "t1", { cwd: "/r/tender.worktrees/feat/3000-x/src" })), [[true, "p1", "Worktree feat/3000-x"]]);
+  assert.deepEqual(of(paneOf("p1", "t1", { cwd: "/r/tender/docs/3000-notes" })), [], "a numbered folder outside a worktree");
+  assert.deepEqual(of(paneOf("p1", "t1", { cwd: "/3000-archive/tender" })), [], "a numbered folder above the repo");
+  assert.deepEqual(of(paneOf("p1", "t1", { cwd: "/r/tender.worktrees/feat/x/3000-notes" })), [], "below the worktree's own two parts");
+  assert.deepEqual(of(paneOf("p1", "t1", { cwd: "/r/tender/.worktrees/3000-x" })), [], "a folder named .worktrees alone is no repo's worktrees");
+  assert.deepEqual(of(paneOf("p1", "t1", { title: "✳ Fix tender#3000" })), [[false, "p1", "Terminal-Titel „✳ Fix tender#3000“"]]);
+  assert.deepEqual(of(paneOf("p1", "t1", { title: "#3000" })), [[false, "p1", "Terminal-Titel „#3000“"]]);
+  assert.deepEqual(of(paneOf("p1", "t1", { title: "#3000", cwd: "/r/atlas" })), []);
+  assert.deepEqual(of({ pane: "p9", terminal: null, mod: "board", tab: "t1", title: "tender#3000", name: "tender#3000" }), [], "a mod's pane");
+  assert.deepEqual(of(paneOf("p1", "t9", { name: "tender#3000" })), [], "a pane of no known tab");
+  const azure = (...panes) => board.itemSessions(board.sessionIndex({ spaces, panes }), azureItem()).map((s) => s.reasons.join(" · "));
+  assert.deepEqual(azure(paneOf("p1", "t1", { name: "AB#101 x" })), ["Pane-Name"]);
+  assert.deepEqual(azure(paneOf("p1", "t1", { name: "#101", branch: "feat/101-x", title: "101" })), [], "an Azure work item only by its whole key");
+  const azurePr = { ...azureItem(), kind: "pr", branch: "feature/importer" };
+  assert.deepEqual(board.itemSessions(board.sessionIndex({ spaces, panes: [paneOf("p1", "t1", { branch: "feature/importer" })] }), azurePr), [], "nor an Azure pull request by its branch");
+});
+
+test("an item's sessions are one per place with every reason found there and its narrowest part to go to; the sure ones first, the most urgent first, then the likely ones", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const spaces = [
+    workSpace([{ id: "t1", name: "tender#3000 work", status: "idle" }, { id: "t2", name: "2", status: "blocked" }, { id: "t3", name: "3", status: "done" }]),
+    { id: "s2", name: "other", folder: "/r/tender", machine: null, branch: null, status: null, tabs: [{ id: "t4", name: "#3000 later", status: null }] },
+  ];
+  const panes = [
+    paneOf("p1", "t1", { branch: "feat/3000-x", status: "idle" }),
+    paneOf("p2", "t2", { title: "tender#3000", status: "blocked" }),
+    paneOf("p3", "t3", { branch: "3000-y", status: "done", program: { key: "claude", name: "Claude Code", agent: true } }),
+  ];
+  const index = board.sessionIndex({ spaces, panes });
+  const listed = board.itemSessions(index, card);
+  assert.deepEqual(listed.map((s) => [s.sure, s.label, s.reasons.join(" · "), s.status, s.place]), [
+    [true, "3 · Claude Code", "Branch 3000-y", "done", { space: "s1", tab: "t3", pane: "p3" }],
+    [true, "tender#3000 work · zsh", "Tab-Name · Branch feat/3000-x", "idle", { space: "s1", tab: "t1", pane: "p1" }],
+    [true, "#3000 later", "Tab-Name", null, { space: "s2", tab: "t4", pane: null }],
+    [false, "2 · zsh", "Terminal-Titel „tender#3000“", "blocked", { space: "s1", tab: "t2", pane: "p2" }],
+  ]);
+  assert.equal(board.linkedSession(card, index), listed[0], "the second Enter's: the most urgent sure one");
+  const both = board.itemSessions(board.sessionIndex({ spaces: [workSpace([{ id: "t2", name: "2" }])], panes: [paneOf("p2", "t2", { title: "tender#3000", branch: "feat/3000-z" })] }), card);
+  assert.deepEqual(both.map((s) => [s.sure, s.reasons.join(" · ")]), [[true, "Terminal-Titel „tender#3000“ · Branch feat/3000-z"]], "a likely reason beside a sure one at one place");
+  assert.equal(board.itemSessions(index, card), listed, "looked up once per index");
+  const likely = board.sessionIndex({ spaces: [workSpace([{ id: "t2", name: "2", status: "blocked" }])], panes: [panes[1]] });
+  assert.equal(board.linkedSession(card, likely), null, "a likely one alone is none to go to");
+  assert.deepEqual(board.itemSessions(board.sessionIndex({}), card), []);
+  assert.deepEqual(board.itemSessions(index, board.findCard(casesBoard(), "PVTI_case2").card), [], "a draft has none");
+});
+
+test("a selected line that held a Claude session is the line that holds it now, before one whose place fits: its pane lost, the tab it shared stays a line of its own", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const spaces = [workSpace([{ id: "t1", name: "tender#3000 work" }])];
+  const claude = claudeOf([claudeFile(500, { name: "tender#3000 fix" })], "500 1");
+  const lines = (terminals) => ({ related: [], sessions: board.itemSessions(board.sessionIndex({ spaces, panes: [paneOf("p1", "t1")], terminals, claude }), card) });
+  const keys = (ls) => ls.sessions.map((s) => [board.placeKey(s), s.claudePid]);
+  const inPane = lines([{ address: "term-p1", pid: 500 }]);
+  assert.deepEqual(keys(inPane), [["p1", 500]], "the tab's and Claude's one line, in its pane");
+  const lost = lines([]);
+  assert.deepEqual(keys(lost), [["claude:500", 500], ["t1", null]]);
+  assert.equal(board.placeKey(board.pickedLine(lost, board.lineId(board.lineAt(inPane, 0))).session), "claude:500");
+});
+
+test("a running Claude session that names the item is sure, in the pane whose terminal runs it or one of its parents, else in the one local Claude Code pane in its folder that no other session runs in; one in no pane is listed without a place, and the second Enter passes it by; in a pane it shows the pane's status, Claude Code's where the pane has none", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const spaces = [workSpace([{ id: "t1", name: "1" }, { id: "t2", name: "2" }, { id: "t3", name: "3" }])];
+  const claudeCode = { app: "claude-code", program: { key: "claude", name: "Claude Code", agent: true } };
+  const panes = [paneOf("p1", "t1"), paneOf("p2", "t2", { status: "blocked" }), paneOf("p3", "t3", { terminal: "server/t9" })];
+  const terminals = [{ address: "term-p1", pid: 100 }, { address: "term-p2", pid: 200, foreground: { pid: 210, name: "x" } }, { address: "server/t9", pid: 500 }];
+  const of = (claude, more = {}) => board.itemSessions(board.sessionIndex({ spaces, panes, terminals, claude, ...more }), card)
+    .map((s) => [s.place.pane ?? null, s.label, s.reasons.join(" · "), s.status]);
+  const named = (pid, name, fields) => claudeFile(pid, { name, ...fields });
+  assert.deepEqual(of(claudeOf([named(500, "tender#3000 fix")], "500 450\n450 100\n100 1")), [["p1", "1 · zsh", "Claude-Sitzung „tender#3000 fix“", "working"]], "by its parents up to a terminal's shell; the pane has no status: Claude Code's");
+  assert.deepEqual(of(claudeOf([named(210, "review #3000")], null)), [["p2", "2 · zsh", "Claude-Sitzung „review #3000“", "blocked"]], "the terminal's foreground; the pane's status, not Claude Code's busy");
+  const titled = [paneOf("p1", "t1", { title: "tender#3000" }), ...panes.slice(1)];
+  assert.deepEqual(of(claudeOf([named(500, "tender#3000 fix")], "500 100"), { panes: titled }), [["p1", "1 · zsh", "Terminal-Titel „tender#3000“ · Claude-Sitzung „tender#3000 fix“", "working"]], "found there by its title first");
+  assert.deepEqual(of(claudeOf([named(210, "review #3000", { cwd: "/r/atlas" })], "210 200")), [], "a bare number in another repo's session");
+  assert.deepEqual(of(claudeOf([named(210, "atlas#3000")], "210 200")), []);
+  const lost = of(claudeOf([named(500, "tender#3000 fix", { status: "idle" })], "500 1"));
+  assert.deepEqual(lost, [[null, "Claude-Sitzung „tender#3000 fix“", "Claude-Sitzung „tender#3000 fix“", "idle"]], "a pid on another machine means nothing here");
+  const index = board.sessionIndex({ spaces, panes, terminals, claude: claudeOf([named(500, "tender#3000 fix")], "500 1") });
+  assert.equal(board.itemSessions(index, card)[0].sure, true);
+  assert.equal(board.linkedSession(card, index), null, "none with a place to go to");
+  assert.deepEqual(of(claudeOf([named(500, "tender#3000 a"), named(501, "tender#3000 b")], "")).map((s) => s[1]), ["Claude-Sitzung „tender#3000 a“", "Claude-Sitzung „tender#3000 b“"], "two sessions without a place: two");
+  assert.deepEqual(of(claudeOf([named(510, "tender#3000 fix")], "510 100")).map((s) => s[0]), ["p1"]);
+  assert.deepEqual(of(claudeOf([named(510, "tender#3000 fix")], null)), [[null, "Claude-Sitzung „tender#3000 fix“", "Claude-Sitzung „tender#3000 fix“", "working"]], "without ps only its own process");
+  const agentPanes = (...more) => [paneOf("p1", "t1", claudeCode), paneOf("p2", "t2"), ...more];
+  const byFolder = (claude, ps = agentPanes(), more = {}) => of(claude, { panes: ps, terminals: [], ...more });
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix")])), [["p1", "1 · Claude Code", "Claude-Sitzung „tender#3000 fix“", "working"]], "the one Claude Code pane in its folder");
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix")]), agentPanes(paneOf("p3", "t3", claudeCode))).map((s) => s[0]), [null], "two Claude Code panes there");
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix"), named(701, "other")])).map((s) => s[0]), [null], "two sessions there");
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix", { cwd: "/r/tender/sub" })])).map((s) => s[0]), [null], "another folder");
+  const claimed = claudeOf([named(700, "tender#3000 fix"), named(800, "other")], "800 100\n100 1\n700 1");
+  assert.deepEqual(byFolder(claimed, agentPanes(), { terminals: [{ address: "term-p1", pid: 100 }] }).map((s) => s[0]), [null], "the pane another session runs in");
+  const remote = [paneOf("p3", "t3", { terminal: "server/t9", ...claudeCode }), paneOf("p2", "t2")];
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix")]), remote).map((s) => s[0]), [null], "a pane on another machine");
+  const codex = [paneOf("p1", "t1", { app: "codex", program: { key: "codex", name: "Codex", agent: true } })];
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix")]), codex).map((s) => s[0]), [null], "another agent's pane");
+  const unreported = [paneOf("p1", "t1", { program: { key: "claude", name: "Claude Code", agent: false } })];
+  assert.deepEqual(byFolder(claudeOf([named(700, "tender#3000 fix")]), unreported).map((s) => s[0]), [null], "a pane whose agent does not report itself");
+});
+
+test("the second Enter on an item goes to its most urgent sure session with a place, else asks where it has other sessions, else starts one", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const index = (more = {}) => board.sessionIndex({ spaces: [workSpace([{ id: "t1", name: "1" }])], ...more });
+  const sure = index({ spaces: [workSpace([{ id: "t1", name: "tender#3000 work", status: "idle" }, { id: "t2", name: "tender#3000 more", status: "blocked" }])] });
+  assert.deepEqual(board.secondEnter(sure, card), { go: board.itemSessions(sure, card)[0] });
+  assert.equal(board.secondEnter(sure, card).go.place.tab, "t2", "the most urgent");
+  const likely = index({ panes: [paneOf("p1", "t1", { title: "tender#3000" })] });
+  assert.deepEqual(board.secondEnter(likely, card), { ask: board.itemSessions(likely, card) });
+  const lost = index({ claude: claudeOf([claudeFile(5, { name: "tender#3000" })], "5 1") });
+  assert.deepEqual(board.secondEnter(lost, card).ask.map((s) => [s.sure, s.label]), [[true, "Claude-Sitzung „tender#3000“"]], "a sure one in no terminal: asked");
+  assert.deepEqual(board.secondEnter(index(), card), { start: true });
+});
+
+test("an open task of a running Claude session that names the item makes that session likely; a done task does not, nor a bare number in a session of another repo", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const of = (file, tasks) => board.itemSessions(board.sessionIndex({ claude: claudeOf([file], "", tasksOut(listOf(file.pid), tasks)) }), card)
+    .map((s) => [s.sure, s.reasons.join(" · ")]);
+  const tasks = [
+    claudeTask("1", "Review tender#3000"),
+    claudeTask("2", "Follow up", { description: "see #3000 there", status: "in_progress" }),
+    claudeTask("3", "tender#3000 again", { status: "completed" }),
+    claudeTask("4", "tender#30001"),
+  ];
+  assert.deepEqual(of(claudeFile(42), tasks), [[false, "offene Aufgabe: Review tender#3000 · offene Aufgabe: Follow up"]]);
+  assert.deepEqual(of(claudeFile(42, { name: "tender#3000" }), tasks), [[true, "Claude-Sitzung „tender#3000“ · offene Aufgabe: Review tender#3000 · offene Aufgabe: Follow up"]]);
+  assert.deepEqual(of(claudeFile(42, { cwd: "/r/atlas" }), tasks), [[false, "offene Aufgabe: Review tender#3000"]], "#3000 in a session of another repo");
+  const other = board.claudeSnapshot(board.parseClaudeSessions(sessionsOut([claudeFile(42)])), board.parseClaudeTasks(tasksOut(listOf(43), tasks)));
+  assert.deepEqual(board.itemSessions(board.sessionIndex({ claude: other }), card), [], "another session's list");
+});
+
+test("a Claude session's or task's file that cannot be read, or is not in the shape Claude Code writes, is left out and a note says so", () => {
+  const good = JSON.stringify(claudeFile(5));
+  const read = board.parseClaudeSessions([
+    `${RS}S\t5\n${good}\n`, `${RS}S\t6\n{not json\n`, `${RS}S\t7\n${JSON.stringify(claudeFile(8))}\n`, `${RS}S\t9\n${JSON.stringify({ ...claudeFile(9), sessionId: "abc" })}\n`,
+    `${RS}S\t11\n${JSON.stringify({ ...claudeFile(11), cwd: 3 })}\n`, `${RS}S\t12\n${JSON.stringify({ ...claudeFile(12), name: 1 })}\n`, `${RS}S\t13\n[]\n`,
+    `${RS}U\t10\n`, `${RS}N\tnotes\n`, `${RS}D\n`, `${RS}X\n`, END,
+  ].join(""));
+  assert.deepEqual(read.sessions, [{ pid: 5, sessionId: "00000005-0000-4000-8000-000000000000", cwd: "/r/tender", name: null, status: "busy" }]);
+  assert.equal(read.parents, null);
+  assert.deepEqual(read.notes, [
+    ...[6, 7, 9, 11, 12, 13].map((n) => `Claude: sessions/${n}.json in unerwarteter Form, übersprungen`),
+    "Claude: sessions/10.json nicht lesbar, übersprungen",
+    "Claude: sessions/notes.json in unerwarteter Form, übersprungen",
+    "Claude: Ordner sessions nicht lesbar, Sitzungen übersprungen",
+    "Claude: Prozessliste (ps) nicht gelesen, Sitzungen ohne Prüfung ihres Programms übernommen und nur über ihren eigenen Prozess oder den Ordner zugeordnet",
+  ]);
+  assert.deepEqual([...board.parseClaudeSessions(`${RS}P\n  5   1\nx y\n 7 5\n${END}`).parents], [[5, 1], [7, 5]]);
+  const tasks = board.parseClaudeTasks([
+    taskRecords("abcdefgh", [claudeTask("1", "ok"), claudeTask("2", "odd", { status: "deleted" }), claudeTask("3", 3), claudeTask("4", "x", { description: 4 })]),
+    `${RS}T\tabcdefgh\t5\n{\n`, `${RS}V\tabcdefgh\t6\n`, `${RS}E\tzzzzzzzz\n`, END,
+  ].join(""));
+  assert.deepEqual([...tasks.tasks], [["abcdefgh", [{ id: "1", subject: "ok", description: "", status: "pending" }]]]);
+  assert.deepEqual(tasks.notes, [
+    ...[2, 3, 4, 5].map((n) => `Claude: tasks/session-abcdefgh/${n}.json in unerwarteter Form, übersprungen`),
+    "Claude: tasks/session-abcdefgh/6.json nicht lesbar, übersprungen",
+    "Claude: Ordner tasks/session-zzzzzzzz nicht lesbar, Aufgaben übersprungen",
+  ]);
+  const snapshot = board.claudeSnapshot(read, tasks);
+  assert.deepEqual(snapshot.notes, [...read.notes, ...tasks.notes], "the snapshot keeps them all");
+  assert.deepEqual(board.sessionIndex({ claude: snapshot }).notes, snapshot.notes, "and the index hands them on");
+});
+
+test("a Claude session's status, one of the four Claude Code writes, is herdr's agent status: busy and shell working, waiting blocked, idle idle; another keeps the session without a status, and a note names it", () => {
+  const card = board.findCard(githubBoard(), "PVTI_rec1").card;
+  const statusOf = (status) => {
+    const read = board.parseClaudeSessions(sessionsOut([claudeFile(42, { name: "tender#3000", status })]));
+    const listed = board.itemSessions(board.sessionIndex({ claude: board.claudeSnapshot(read, null) }), card);
+    return [listed.map((s) => s.status), read.notes];
+  };
+  assert.deepEqual(["busy", "shell", "waiting", "idle", null, undefined].map(statusOf), [
+    [["working"], []], [["working"], []], [["blocked"], []], [["idle"], []], [[null], []], [[null], []],
+  ]);
+  assert.deepEqual(statusOf("thinking"), [[null], ["Claude: sessions/42.json mit unbekanntem Status „thinking“, Status übergangen"]]);
+  assert.deepEqual(statusOf("constructor"), [[null], ["Claude: sessions/42.json mit unbekanntem Status „constructor“, Status übergangen"]], "no name of an object's own");
+});
+
+test("an output of the Claude scripts without its end record (herdr cuts one at 8 MiB) keeps the records before its last, which may be cut too, and a note says it was cut", () => {
+  const whole = sessionsOut([claudeFile(5), claudeFile(6)], "5 1\n6 1");
+  const cut = (text) => board.parseClaudeSessions(text);
+  const inList = cut(whole.slice(0, whole.indexOf(`${RS}P`) + 6));
+  assert.deepEqual([inList.sessions.map((s) => s.pid), inList.parents, inList.notes], [[5, 6], null, ["Claude: Ausgabe abgeschnitten, Rest übersprungen"]], "cut in the processes");
+  const inFile = cut(whole.slice(0, whole.indexOf(`${RS}S\t6`) + 20));
+  assert.deepEqual([inFile.sessions.map((s) => s.pid), inFile.notes], [[5], ["Claude: Ausgabe abgeschnitten, Rest übersprungen"]], "cut in a file: that one goes without a note of its own");
+  assert.deepEqual(cut("").notes, ["Claude: Ausgabe abgeschnitten, Rest übersprungen"], "nothing at all");
+  assert.deepEqual(cut(whole).notes, [], "whole");
+  const tasks = board.parseClaudeTasks(taskRecords("abcdefgh", [claudeTask("1", "a"), claudeTask("2", "b")]));
+  assert.deepEqual([tasks.tasks.get("abcdefgh").map((t) => t.id), tasks.notes], [["1"], ["Claude: Ausgabe der Aufgaben abgeschnitten, Rest übersprungen"]]);
+});
+
+// A folder standing in for a home with Claude Code's folder: `files` by
+// their path below .claude (text, or [text, mode]).
+function claudeHome(files) {
+  const home = mkdtempSync(join(tmpdir(), "claude-home-"));
+  for (const [path, file] of Object.entries(files)) {
+    const [text, mode] = Array.isArray(file) ? file : [file];
+    const full = join(home, ".claude", path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, text);
+    if (mode !== undefined) chmodSync(full, mode);
+  }
+  return home;
+}
+const runClaude = (args, env) => spawnSync("sh", args, { encoding: "utf8", env: { PATH: process.env.PATH, ...env } });
+
+// A process whose comm is `name` (sh started by a link of that name) and
+// whose arguments end in `args`, standing in for Claude Code (by default)
+// or another program for the sessions script. It ends when `stop` ends it,
+// else at most a second after this test process: a root `after` hook runs
+// here while a test still awaits; the link goes once it runs.
+async function claudeProcess(name = "claude", args = []) {
+  const dir = mkdtempSync(join(tmpdir(), "stand-in-"));
+  const path = join(dir, name);
+  let child = null;
+  try {
+    // ln: node's permission model allows no symlink.
+    assert.equal(spawnSync("ln", ["-s", "/bin/sh", path]).status, 0);
+    child = spawn(path, ["-c", "while kill -0 $PPID 2>/dev/null; do sleep 1; done", "sh", ...args], { stdio: "ignore" });
+    child.unref();
+    for (let i = 0; spawnSync("ps", ["-o", "comm=", "-p", String(child.pid)], { encoding: "utf8" }).stdout.trim() !== name; i++) {
+      if (i === 200) {
+        child.kill();
+        throw new Error(`the stand-in ${name} did not start`);
+      }
+      await new Promise((done) => setTimeout(done, 10));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return { pid: child.pid, stop: () => child.kill() };
+}
+// One for the whole file, started where a test first needs it.
+let sharedClaude = null;
+const runningClaude = async () => (sharedClaude ??= await claudeProcess()).pid;
+
+test("the sessions script prints the files of the sessions whose Claude Code process runs, never a .key file, names one it cannot read or whose name is no pid, and lists the processes with their parents; a pid that runs another program, or none, is a session that ended", async () => {
+  const live = await runningClaude();
+  const hidden = await claudeProcess();
+  const reused = process.pid;
+  const home = claudeHome({
+    [`sessions/${live}.json`]: JSON.stringify(claudeFile(live, { name: "tender#3000" })),
+    [`sessions/${live}.0123abcd.key`]: "SECRET-KEY",
+    [`sessions/${hidden.pid}.json`]: ["{}", 0o000],
+    [`sessions/${reused}.json`]: JSON.stringify(claudeFile(reused, { name: "tender#3001" })),
+    "sessions/999999999.json": JSON.stringify(claudeFile(999999999)),
+    "sessions/notes.json": "{}",
+  });
+  try {
+    const r = runClaude(board.claudeSessionsArgs(), { HOME: home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.stdout.includes("SECRET") && !r.stdout.includes(".key"), "no key file");
+    assert.ok(r.stdout.endsWith(END), "its end record last");
+    const read = board.parseClaudeSessions(r.stdout);
+    assert.deepEqual(read.sessions.map((s) => [s.pid, s.name]), [[live, "tender#3000"]], "Claude Code's process; this test's own (node) and 999999999 (none) are not");
+    const own = spawnSync("ps", ["-o", "comm=", "-p", String(reused)], { encoding: "utf8" }).stdout.trim();
+    assert.deepEqual(read.notes.sort(), [
+      `Claude: sessions/${hidden.pid}.json nicht lesbar, übersprungen`,
+      `Claude: sessions/${reused}.json gehört zu Prozess „${own}“, übersprungen`,
+      "Claude: sessions/notes.json in unerwarteter Form, übersprungen",
+    ].sort(), "one of another program is named; one of no process is not");
+    assert.equal(read.parents.get(live), process.pid);
+    const moved = runClaude(board.claudeSessionsArgs(), { HOME: "/nonexistent", CLAUDE_CONFIG_DIR: join(home, ".claude") });
+    assert.deepEqual(board.parseClaudeSessions(moved.stdout).sessions.map((s) => s.pid), [live], "CLAUDE_CONFIG_DIR where it is set");
+    chmodSync(join(home, ".claude/sessions"), 0o000);
+    assert.deepEqual(board.parseClaudeSessions(runClaude(board.claudeSessionsArgs(), { HOME: home }).stdout).notes, ["Claude: Ordner sessions nicht lesbar, Sitzungen übersprungen"]);
+    chmodSync(join(home, ".claude/sessions"), 0o755);
+    const none = runClaude(board.claudeSessionsArgs(), { HOME: join(home, "nothing") });
+    assert.deepEqual([none.status, none.stdout], [0, END], "no Claude Code: its end record alone");
+  } finally {
+    hidden.stop();
+    chmodSync(join(home, ".claude/sessions"), 0o755);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the sessions script takes Claude Code by each name its process has: claude, claude.exe from npm, its version from the native install, or node's with Claude Code in its arguments; another program, node's with other arguments too, is named and left out", async () => {
+  const forms = [
+    ["claude.exe", []],
+    ["2.1.332", []],
+    ["node", ["/usr/local/bin/claude", "--resume"]],
+    ["node", ["/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"]],
+    ["MainThread", ["/home/x/.npm-global/bin/claude"]],
+    ["node", ["/srv/app/server.js", "--name", "claude-bot"]],
+    ["MainThread", ["/srv/claude-tools/run.js"]],
+    ["python3", ["/usr/local/bin/claude"]],
+    ["claude-helper", []],
+  ];
+  const procs = [];
+  try {
+    for (const [name, args] of forms) procs.push(await claudeProcess(name, args));
+    const home = claudeHome(Object.fromEntries(procs.map((p, i) => [`sessions/${p.pid}.json`, JSON.stringify(claudeFile(p.pid, { name: `form ${i}` }))])));
+    try {
+      const read = board.parseClaudeSessions(runClaude(board.claudeSessionsArgs(), { HOME: home }).stdout);
+      assert.deepEqual(read.sessions.map((s) => s.name).sort(), ["form 0", "form 1", "form 2", "form 3", "form 4"]);
+      assert.deepEqual(read.notes.sort(), [5, 6, 7, 8].map((i) => `Claude: sessions/${procs[i].pid}.json gehört zu Prozess „${forms[i][0]}“, übersprungen`).sort());
+      const bin = mkdtempSync(join(tmpdir(), "odd-ps-"));
+      try {
+        writeFileSync(join(bin, "ps"), "#!/bin/sh\ncase \"$*\" in *comm=*) printf 'x\\036S\\t1\\ty\\n' ;; *args=*) echo x ;; *) echo '1 0' ;; esac\n");
+        chmodSync(join(bin, "ps"), 0o755);
+        const odd = board.parseClaudeSessions(runClaude(board.claudeSessionsArgs(), { HOME: home, PATH: `${bin}:${process.env.PATH}` }).stdout);
+        assert.deepEqual([odd.sessions, odd.notes.filter((n) => !n.includes("„xS1y“"))], [[], []], "a name with a record's mark or a tab in it breaks no record");
+      } finally {
+        rmSync(bin, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  } finally {
+    for (const p of procs) p.stop();
+  }
+});
+
+test("without ps the sessions script takes every file whose pid runs, says so with no processes, and still ends whole", async () => {
+  const live = await runningClaude();
+  const bin = mkdtempSync(join(tmpdir(), "no-ps-"));
+  writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n");
+  chmodSync(join(bin, "ps"), 0o755);
+  const home = claudeHome({
+    [`sessions/${live}.json`]: JSON.stringify(claudeFile(live, { name: "tender#3000" })),
+    [`sessions/${process.pid}.json`]: JSON.stringify(claudeFile(process.pid, { name: "tender#3001" })),
+    "sessions/999999999.json": JSON.stringify(claudeFile(999999999)),
+  });
+  try {
+    const r = runClaude(board.claudeSessionsArgs(), { HOME: home, PATH: `${bin}:${process.env.PATH}` });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(`${RS}X\n`) && !r.stdout.includes(`${RS}P`) && !r.stdout.includes(`${RS}O`), "no processes, and no program named");
+    assert.ok(r.stdout.endsWith(END), "its end record last");
+    const read = board.parseClaudeSessions(r.stdout);
+    assert.deepEqual(read.sessions.map((s) => s.pid).sort((a, b) => a - b), [live, process.pid].sort((a, b) => a - b), "each whose pid runs, whatever its program");
+    assert.equal(read.parents, null);
+    assert.deepEqual(read.notes, ["Claude: Prozessliste (ps) nicht gelesen, Sitzungen ohne Prüfung ihres Programms übernommen und nur über ihren eigenen Prozess oder den Ordner zugeordnet"]);
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the tasks script prints the task files of the lists given, names one it cannot read and a list it cannot list, and skips a session without a list", () => {
+  const home = claudeHome({
+    "tasks/session-abcdefgh/1.json": JSON.stringify(claudeTask("1", "Review tender#3000")),
+    "tasks/session-abcdefgh/2.json": [JSON.stringify(claudeTask("2", "hidden")), 0o000],
+    "tasks/session-abcdefgh/.lock": "LOCKED",
+    "tasks/session-abcdefgh/.highwatermark": "77",
+    "tasks/session-abcdefgh/notes.txt": "PLAIN",
+    "tasks/session-cccccccc/1.json": JSON.stringify(claudeTask("1", "closed")),
+    "tasks/session-dddddddd/1.json": JSON.stringify(claudeTask("1", "not asked")),
+  });
+  chmodSync(join(home, ".claude/tasks/session-cccccccc"), 0o000);
+  try {
+    const r = runClaude(board.claudeTasksArgs(["abcdefgh", "cccccccc", "zzzzzzzz"]), { HOME: home });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.endsWith(END), "its end record last");
+    assert.ok(!r.stdout.includes("LOCKED") && !r.stdout.includes("77") && !r.stdout.includes("PLAIN") && !r.stdout.includes("not asked"));
+    const read = board.parseClaudeTasks(r.stdout);
+    assert.deepEqual([...read.tasks], [["abcdefgh", [{ id: "1", subject: "Review tender#3000", description: "", status: "pending" }]]]);
+    assert.deepEqual(read.notes, ["Claude: tasks/session-abcdefgh/2.json nicht lesbar, übersprungen", "Claude: Ordner tasks/session-cccccccc nicht lesbar, Aufgaben übersprungen"]);
+    assert.equal(board.taskList(claudeFile(42).sessionId), "00000042");
+  } finally {
+    chmodSync(join(home, ".claude/tasks/session-cccccccc"), 0o755);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// A home whose Claude Code folder holds a session of the running stand-in
+// for Claude Code (runningClaude) in the sample repo, named `name`, and a
+// session file whose name is no pid; `more(pid)` adds files.
+async function ownClaude(name, more = () => ({})) {
+  const pid = await runningClaude();
+  return claudeHome({ [`sessions/${pid}.json`]: JSON.stringify(claudeFile(pid, { name })), "sessions/notes.json": "{}", ...more(pid) });
+}
+// The texts of the details' session `i` (its place, its reasons, its
+// agent's status) and its mark.
+const sessionRow = (b, i) => byId(detailPanel(b), `session-${i}`);
+const sessionTexts = (b, i) => texts(sessionRow(b, i));
+const isRing = (row) => Boolean(row.kids[0].with.border_color) && !row.kids[0].with.bg;
+
+test("UI: the details list under SITZUNG every session of the item, the sure ones first with their agent's status and a dot, then the likely ones as „Kandidat“ with a ring, each with its place and reasons; a Claude session in no terminal says so, its name, its label there, not again among its reasons, and the Claude read's notes follow", async () => {
+  const tasks = (pid) => `tasks/session-${listOf(pid)}`;
+  const home = await ownClaude("tender#3004 review", (pid) => ({
+    [`${tasks(pid)}/1.json`]: JSON.stringify(claudeTask("1", "Review tender#3004")),
+    [`${tasks(pid)}/2.json`]: JSON.stringify(claudeTask("2", "tender#3004 earlier", { status: "completed" })),
+  }));
+  try {
+    const { b, cx, host } = await openBoard({ claudeHome: home });
+    host.spaceList.push(sessionSpace);
+    host.paneList.push(paneOf("p7", "t1", { title: "✳ tender#3004" }));
+    await press(b, cx, "enter");
+    assert.deepEqual([0, 1, 2].map((i) => sessionTexts(b, i)), [
+      ["tender#3004 feat(api): page through long lists", "Tab-Name", "arbeitet"],
+      ["Claude-Sitzung „tender#3004 review“", "offene Aufgabe: Review tender#3004 · kein Terminal gefunden", "arbeitet"],
+      ["Board · zsh", "Terminal-Titel „✳ tender#3004“", "Kandidat"],
+    ]);
+    assert.equal(sessionRow(b, 3), null);
+    assert.deepEqual([0, 1, 2].map((i) => isRing(sessionRow(b, i))), [false, false, true]);
+    assert.deepEqual(texts(byId(detailPanel(b), "session-note-0")), ["Claude: sessions/notes.json in unerwarteter Form, übersprungen"]);
+    assert.equal(pathTo(detailPanel(b), "Enter startet"), null, "the second Enter goes to the first");
+    host.spaceList.pop();
+    assert.ok(pathTo(detailPanel(b), "Enter fragt: zu einer davon springen oder eine neue Sitzung starten"), "with none sure to go to, what Enter does");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("UI: where the Claude sessions' task lists cannot be read the sessions still show, and SITZUNG says so; where the sessions cannot be read it says that", async () => {
+  const home = await ownClaude("tender#3004 review");
+  try {
+    const broken = (args) => (args[1] === board.CLAUDE_TASKS_SCRIPT ? Promise.reject(new Error("sh broke")) : null);
+    const { b, cx, host } = await openBoard({ claudeHome: home, claudeAnswer: broken });
+    await press(b, cx, "enter");
+    assert.equal(sessionTexts(b, 0)[0], "Claude-Sitzung „tender#3004 review“");
+    assert.ok(texts(detailPanel(b)).includes("Claude-Aufgaben nicht gelesen: sh ließ sich nicht starten: sh broke"));
+    host.claudeAnswer = () => Promise.resolve({ code: 2, stdout: "", stderr: "sh: bad\nmore" });
+    for (const fn of cx.every.filter((f) => f.ms === board.CLAUDE_MS)) fn(cx);
+    await settle();
+    assert.equal(sessionRow(b, 0), null);
+    assert.ok(texts(detailPanel(b)).includes("Claude-Sitzungen nicht gelesen: sh endete mit 2: sh: bad"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("UI: the details show at most three of the Claude read's notes, and how many more there are", async () => {
+  const notesOf = async (count) => {
+    const home = claudeHome(Object.fromEntries(Array.from({ length: count }, (_, i) => [`sessions/n${i + 1}.json`, "{}"])));
+    try {
+      const { b, cx } = await openBoard({ claudeHome: home });
+      await press(b, cx, "enter");
+      return [0, 1, 2, 3, 4].map((i) => texts(byId(detailPanel(b), `session-note-${i}`))[0] ?? null);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  };
+  const note = (n) => `Claude: sessions/n${n}.json in unerwarteter Form, übersprungen`;
+  assert.deepEqual(await notesOf(5), [note(1), note(2), note(3), "… und 2 weitere", null]);
+  assert.deepEqual(await notesOf(3), [note(1), note(2), note(3), null, null], "three: all, and no count");
+});
+
+test("UI: a click on a session goes there, to its pane where it has one, and one without a place says so; in the details panel j walks onto the sessions after the related items, and Enter on one goes there, as the hint line says", async () => {
+  const home = await ownClaude("tender#3004 review");
+  try {
+    const { b, cx, host } = await openBoard({ claudeHome: home });
+    host.theme = () => ({ accent: "#accent", border: "#border" });
+    host.spaceList.push(sessionSpace);
+    host.paneList.push(paneOf("p7", "t1", { title: "✳ tender#3004" }));
+    await press(b, cx, "enter");
+    await click(b, cx, "session-2");
+    assert.deepEqual(host.runs, [["space.select", { id: "s1" }], ["tab.select", { id: "t1" }], ["pane.focus", { pane: "p7" }]]);
+    host.runs.length = 0;
+    await click(b, cx, "session-1");
+    assert.deepEqual([host.runs, b.notice?.text], [[], "Claude-Sitzung „tender#3004 review“: kein Terminal gefunden"]);
+    await tab(b, cx);
+    await press(b, cx, "j");
+    assert.equal(lineOf(b), 0, "no related items read yet: the first session");
+    const marks = () => [0, 1, 2].map((i) => sessionRow(b, i).with.border_color[0]);
+    assert.deepEqual(marks(), ["#accent", "#border", "#border"], "and it is marked");
+    assert.ok(texts(b.render().kids.at(-1)).includes("zur Sitzung"));
+    assert.equal(byId(detailPanel(b), "act-line-board"), null, "no „Zeile auf dem Board“ for a session");
+    await press(b, cx, "enter");
+    assert.deepEqual(host.runs, [["space.select", { id: "s5" }], ["tab.select", { id: "t5" }]]);
+    host.runs.length = 0;
+    await answerRelated(host, ok(fixture("github-related.json")));
+    await press(b, cx, "g", { char: "G", modifiers: { shift: true } });
+    const lines = b.linesOf(b.view());
+    assert.equal(lineOf(b), board.lineCount(lines) - 1, "G: the last line");
+    assert.deepEqual(lines.sessions.map((s) => s.label), ["tender#3004 feat(api): page through long lists", "Claude-Sitzung „tender#3004 review“", "Board · zsh"], "after the related items");
+    assert.ok(lines.related.length > 0);
+    assert.deepEqual(marks(), ["#border", "#border", "#accent"], "the last session marked");
+    await press(b, cx, "enter");
+    assert.deepEqual(host.runs, [["space.select", { id: "s1" }], ["tab.select", { id: "t1" }], ["pane.focus", { pane: "p7" }]]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("UI: the details panel keeps its selected session by its place: the related items coming, the sessions sorted anew and the Claude sessions read again leave the mark on it, and Enter goes there", async () => {
+  const home = await ownClaude("tender#3004 review");
+  try {
+    const { b, cx, host } = await openBoard({ claudeHome: home });
+    host.theme = () => ({ accent: "#accent", border: "#border" });
+    const tab5 = { ...sessionSpace.tabs[0] };
+    host.spaceList.push({ ...sessionSpace, tabs: [tab5] });
+    host.paneList.push(paneOf("p7", "t1", { title: "✳ tender#3004" }));
+    await press(b, cx, "enter");
+    await tab(b, cx);
+    await press(b, cx, "j");
+    await press(b, cx, "j");
+    const marked = () => [0, 1, 2].filter((i) => sessionRow(b, i)?.with.border_color[0] === "#accent").map((i) => sessionTexts(b, i)[0]);
+    assert.deepEqual(marked(), ["Claude-Sitzung „tender#3004 review“"], "the second session, Claude's");
+    tab5.status = "idle";
+    assert.deepEqual(sessionTexts(b, 0)[0], "Claude-Sitzung „tender#3004 review“", "the tab's agent idle: Claude's sorts first now");
+    assert.deepEqual(marked(), ["Claude-Sitzung „tender#3004 review“"], "and stays marked");
+    await press(b, cx, "enter");
+    assert.deepEqual([host.runs, b.notice?.text], [[], "Claude-Sitzung „tender#3004 review“: kein Terminal gefunden"], "Enter on it, not on the tab");
+    await press(b, cx, "j");
+    await press(b, cx, "j");
+    assert.deepEqual(marked(), ["Board · zsh"]);
+    host.claudeAnswer = (args) => (args[1] === board.CLAUDE_SESSIONS_SCRIPT ? Promise.resolve({ code: 0, stdout: END, stderr: "" }) : null);
+    for (const fn of cx.every.filter((f) => f.ms === board.CLAUDE_MS)) fn(cx);
+    await settle();
+    assert.deepEqual([sessionRow(b, 2), marked()], [null, ["Board · zsh"]], "Claude's gone: the terminal's line moved up, still marked");
+    await answerRelated(host, ok(fixture("github-related.json")));
+    assert.deepEqual(marked(), ["Board · zsh"], "below the related items now");
+    await press(b, cx, "enter");
+    assert.deepEqual(host.runs, [["space.select", { id: "s1" }], ["tab.select", { id: "t1" }], ["pane.focus", { pane: "p7" }]]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("UI: on a session's line the command menu offers going there and none of a related item's line, and o opens the item, as the hint line says", async () => {
+  const { b, cx } = await onSessionLine();
+  const names = (await openMenu(b, cx)).map(([name]) => name);
+  assert.ok(names.includes("Zur markierten Sitzung"));
+  assert.deepEqual(["Zeile im Detailfenster zeigen", "Zeile auf dem Board", "Zeile im Browser öffnen"].filter((n) => names.includes(n)), []);
+  await press(b, cx, "escape");
+  assert.ok(texts(b.render().kids.at(-1)).includes("öffnen"));
+  await press(b, cx, "o");
+  assert.deepEqual([cx.opened, b.notice], [["https://github.com/example/tender/issues/3004"], null]);
+});
+
+test("UI: on a pull request, whose details read no related items, Tab takes the keyboard into the details once it has a session, and Enter on that line goes there", async () => {
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  await press(b, cx, "enter");
+  await tab(b, cx);
+  assert.equal(b.panel, null, "without a session Tab stays herdr's");
+  host.spaceList.push({ id: "p", name: "p", folder: "/r/tender", machine: null, branch: "pr/summary-card", active: false, status: "idle", tabs: [] });
+  assert.ok(texts(b.render().kids.at(-1)).includes("Details"), "the hint line names Tab");
+  await tab(b, cx);
+  assert.ok(b.panel);
+  await press(b, cx, "j");
+  await press(b, cx, "enter");
+  assert.deepEqual(host.runs, [["space.select", { id: "p" }]]);
+});
+
+test("UI: where the item has sessions but none sure in a terminal, the second Enter asks first, as its action, its button and SITZUNG say: it names them, goes to one in a terminal, starts a new session anyway, or cancels (Esc too); one in no terminal has no row to go to", async () => {
+  const home = await ownClaude("tender#3004 review");
+  try {
+    const { b, cx, host } = await openBoard({ claudeHome: home });
+    host.paneList.push(paneOf("p7", "t1", { title: "✳ tender#3004" }));
+    await press(b, cx, "enter");
+    assert.deepEqual([b.actionName("start"), texts(byId(detailPanel(b), "act-start"))], ["Sitzung wählen…", ["Sitzung wählen ↵"]]);
+    assert.ok(pathTo(detailPanel(b), "Enter fragt: zu einer davon springen oder eine neue Sitzung starten"));
+    await press(b, cx, "enter");
+    const panel = () => byId(b.render(), "sessions-menu");
+    const rows = () => [0, 1, 2, 3].map((i) => byId(panel(), `sessions-${i}`)).filter(Boolean).map((r) => texts(r));
+    assert.equal(b.modal?.kind, "sessions");
+    assert.deepEqual([0, 1].map((i) => texts(byId(panel(), `sessions-found-${i}`))[0]), [
+      "● Claude-Sitzung „tender#3004 review“ · kein Terminal gefunden",
+      "○ Kandidat: Board · zsh · Terminal-Titel „✳ tender#3004“",
+    ]);
+    assert.deepEqual(rows(), [["1", "Zur Sitzung springen", "Board · zsh"], ["2", "Trotzdem neue Sitzung starten", ""], ["3", "Abbrechen", ""]], "a row to go to only for the one in a terminal");
+    await press(b, cx, "enter");
+    assert.deepEqual([b.modal, host.runs], [null, [["space.select", { id: "s1" }], ["tab.select", { id: "t1" }], ["pane.focus", { pane: "p7" }]]]);
+    host.runs.length = 0;
+    await press(b, cx, "enter");
+    await press(b, cx, "2");
+    assert.equal(b.modal?.kind, "start", "the start dialog, as without sessions");
+    await press(b, cx, "escape");
+    await press(b, cx, "enter");
+    b.notice = null;
+    await press(b, cx, "3");
+    assert.deepEqual([b.modal, host.runs, b.notice], [null, [], null], "Abbrechen");
+    await press(b, cx, "enter");
+    await press(b, cx, "escape");
+    assert.deepEqual([b.modal, host.runs, b.notice], [null, [], null], "Esc");
+    host.paneList.length = 0;
+    assert.deepEqual([pathTo(detailPanel(b), "Enter fragt: zu einer davon"), b.actionName("start"), texts(byId(detailPanel(b), "act-start"))], [null, "Agent starten…", ["Agent starten ↵"]],
+      "no row to go to: named as the start it confirms");
+    assert.ok(texts(detailPanel(b)).some((x) => x.startsWith("Keine davon in einem Terminal. Enter fragt, bevor es eine neue Sitzung") && x.endsWith(" startet.")), "none of them in a terminal: no going there");
+    await press(b, cx, "enter");
+    assert.deepEqual([b.modal?.kind, rows()], ["sessions", [["1", "Trotzdem neue Sitzung starten", ""], ["2", "Abbrechen", ""]]], "a sure one in no terminal alone: asked too");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+  const none = await openBoard();
+  await press(none.b, none.cx, "enter");
+  await press(none.b, none.cx, "enter");
+  assert.equal(none.b.modal?.kind, "start", "no session: the start dialog at once");
+});
+
+test("UI: the second Enter's question tells rows to go to apart where they would read the same: by their reasons, and where those match too by the pane's number in its tab", async () => {
+  const { b, cx, host } = await openBoard();
+  host.spaceList[0].tabs.push({ id: "t2", name: "Other" });
+  host.paneList.push(
+    paneOf("p6", "t2"),
+    paneOf("p7", "t1", { title: "✳ tender#3004" }),
+    paneOf("p8", "t1", { title: "✳ tender#3004 b" }),
+    paneOf("p9", "t1", { name: "notes", title: "tender#3004" }),
+  );
+  const rows = async () => {
+    await press(b, cx, "enter");
+    const panel = byId(b.render(), "sessions-menu");
+    const found = [0, 1, 2].map((i) => texts(byId(panel, `sessions-${i}`))[2]);
+    await press(b, cx, "escape");
+    return found;
+  };
+  await press(b, cx, "enter");
+  assert.deepEqual(await rows(), ["Board · zsh · Terminal-Titel „✳ tender#3004“", "Board · zsh · Terminal-Titel „✳ tender#3004 b“", "Board · notes"]);
+  host.paneList[2].title = "✳ tender#3004";
+  assert.deepEqual(await rows(), ["Board · zsh · Terminal-Titel „✳ tender#3004“ · Pane 1", "Board · zsh · Terminal-Titel „✳ tender#3004“ · Pane 2", "Board · notes"]);
+});
+
+test("UI: a marked session whose place comes to name a pane, or no longer names it, stays marked, now by that place, and Enter goes there; where two sessions now fit the place it had, none is marked", async () => {
+  const { b, cx, host } = await openBoard();
+  host.theme = () => ({ accent: "#accent", border: "#border" });
+  host.spaceList.push(sessionSpace);
+  await press(b, cx, "enter");
+  await tab(b, cx);
+  await press(b, cx, "j");
+  assert.deepEqual(b.panel.line, { session: "t5", place: { space: "s5", tab: "t5", pane: null }, claudePid: null });
+  host.paneList.push(paneOf("p8", "t5", { title: "✳ tender#3004" }));
+  assert.deepEqual([sessionTexts(b, 0)[0], sessionRow(b, 0).with.border_color[0], sessionRow(b, 1)], ["tender#3004 feat(api): page through long lists · zsh", "#accent", null], "a terminal's title there: the tab's session, in that pane now");
+  assert.deepEqual(b.panel.line, { session: "p8", place: { space: "s5", tab: "t5", pane: "p8" }, claudePid: null });
+  await press(b, cx, "enter");
+  assert.deepEqual(host.runs, [["space.select", { id: "s5" }], ["tab.select", { id: "t5" }], ["pane.focus", { pane: "p8" }]]);
+  host.runs.length = 0;
+  host.paneList.length = 0;
+  assert.equal(sessionRow(b, 0).with.border_color[0], "#accent", "the pane's title gone: the tab again");
+  assert.equal(b.panel.line.session, "t5");
+  host.paneList.push(paneOf("p8", "t5", { title: "✳ tender#3004" }), paneOf("p9", "t5", { title: "tender#3004 too" }));
+  assert.deepEqual([0, 1].map((i) => sessionRow(b, i).with.border_color[0]), ["#border", "#border"], "two panes there: neither");
+  assert.equal(b.panel.line, null);
+});
+
+test("UI: a marked Claude session stays marked as its pane is found, there merged with the pane's title, and as it is lost again, and Enter goes where it is", async () => {
+  const pid = await runningClaude();
+  const home = await ownClaude("tender#3004 review");
+  try {
+    const { b, cx, host } = await openBoard({ claudeHome: home });
+    host.spaceList.push(sessionSpace);
+    await press(b, cx, "enter");
+    await tab(b, cx);
+    await press(b, cx, "j");
+    await press(b, cx, "j");
+    assert.deepEqual(b.panel.line, { session: `claude:${pid}`, place: { claude: pid }, claudePid: pid });
+    host.paneList.push(paneOf("p7", "t1", { title: "✳ tender#3004" }));
+    host.terminalList.push({ address: "term-p7", pid });
+    await press(b, cx, "enter");
+    assert.deepEqual([b.panel.line, host.runs], [{ session: "p7", place: { space: "s1", tab: "t1", pane: "p7" }, claudePid: pid },
+      [["space.select", { id: "s1" }], ["tab.select", { id: "t1" }], ["pane.focus", { pane: "p7" }]]], "its pane found: still marked, in that pane");
+    host.runs.length = 0;
+    host.terminalList.length = 0;
+    host.paneList[0].title = "zsh";
+    await press(b, cx, "enter");
+    assert.deepEqual([b.panel.line?.session, host.runs, b.notice?.text], [`claude:${pid}`, [], "Claude-Sitzung „tender#3004 review“: kein Terminal gefunden"], "its pane lost: still marked, in no terminal");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("UI: the command menu's „Zur markierten Sitzung“ goes to the session it opened on where a read moved it into a pane; where the session went, or another line is marked, it says so and goes nowhere", async () => {
+  const opened = await onSessionLine();
+  const { b, cx, host } = opened;
+  const submit = async (o) => {
+    o.cx.call((own) => o.b.modal.input.submit(own));
+    await settle();
+  };
+  await openMenu(b, cx);
+  b.modal.input.type("Zur markierten Sitzung");
+  host.paneList.push(paneOf("p8", "t5", { title: "✳ tender#3004" }));
+  await submit(opened);
+  assert.deepEqual([b.notice?.text, host.runs, b.panel.line.session], [undefined, [["space.select", { id: "s5" }], ["tab.select", { id: "t5" }], ["pane.focus", { pane: "p8" }]], "p8"]);
+  host.runs.length = 0;
+  await openMenu(b, cx);
+  b.modal.input.type("Zur markierten Sitzung");
+  host.spaceList.pop();
+  host.paneList.length = 0;
+  await submit(opened);
+  assert.deepEqual([b.notice?.text, host.runs], ["tender#3004 feat(api): page through long lists · zsh ist nicht mehr markiert", []]);
+  const other = await onSessionLine();
+  await answerRelated(other.host, ok(fixture("github-related.json")));
+  await openMenu(other.b, other.cx);
+  other.b.modal.input.type("Zur markierten Sitzung");
+  markLine(other.b, 0);
+  await submit(other);
+  assert.deepEqual([other.b.notice?.text, other.host.runs], ["tender#3004 feat(api): page through long lists ist nicht mehr markiert", []]);
+});
+
+test("UI: a marked session that a read of the Claude sessions takes away is marked no more, and Enter is the item's second Enter again: at the top the board item's, on a level that item's", async () => {
+  const pid = await runningClaude();
+  const gone = (host) => {
+    host.claudeAnswer = (args) => (args[1] === board.CLAUDE_SESSIONS_SCRIPT ? Promise.resolve({ code: 0, stdout: END, stderr: "" }) : null);
+  };
+  const reread = async (cx) => {
+    for (const fn of cx.every.filter((f) => f.ms === board.CLAUDE_MS)) fn(cx);
+    await settle();
+  };
+  const home = await ownClaude("tender#3004 review");
+  const levelHome = await ownClaude("tender#3010 fix");
+  try {
+    const { b, cx, host } = await openBoard({ claudeHome: home });
+    await press(b, cx, "enter");
+    await tab(b, cx);
+    await press(b, cx, "j");
+    assert.equal(b.panel.line.session, `claude:${pid}`);
+    gone(host);
+    await reread(cx);
+    await press(b, cx, "enter");
+    assert.deepEqual([b.panel?.line ?? null, b.modal?.kind, b.modal && board.itemLabel(b.modal.item), host.runs], [null, "start", "tender#3004", []], "no session left: the start dialog");
+    const level = await onLevel();
+    level.host.claudeHome = levelHome;
+    await reread(level.cx);
+    await press(level.b, level.cx, "g", { char: "G", modifiers: { shift: true } });
+    assert.equal(level.b.panel.line.session, `claude:${pid}`, "the level's item's Claude session, below its lines");
+    gone(level.host);
+    await reread(level.cx);
+    await press(level.b, level.cx, "enter");
+    assert.deepEqual([level.b.panel?.line ?? null, level.b.modal?.kind, level.b.modal && board.itemLabel(level.b.modal.item), level.host.runs], [null, "start", "tender#3010", []], "the level's item's start dialog, nothing gone to or started");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(levelHome, { recursive: true, force: true });
+  }
+});
+
+test("UI: a card shows its first session as a chip: a sure one by its agent's status, a likely one alone as „○ Kandidat“", async () => {
+  const { b, host } = await openBoard();
+  host.paneList.push(paneOf("p7", "t1", { title: "✳ tender#3004" }));
+  assert.ok(texts(byId(b.render(), "card-PVTI_rec4")).includes("○ Kandidat"));
+  assert.ok(!texts(byId(b.render(), "card-PVTI_rec5")).includes("○ Kandidat"));
+  host.spaceList.push(sessionSpace);
+  const card = texts(byId(b.render(), "card-PVTI_rec4"));
+  assert.deepEqual([card.includes("arbeitet"), card.includes("○ Kandidat")], [true, false]);
+});
+
+test("UI: the board reads the Claude sessions when it starts, every CLAUDE_MS while it shows, when it comes to show and when the focus or a space's tabs change, not while hidden; a render reads none and makes the sessions index once, whatever its cards", async () => {
+  const { b, cx, host } = await openBoard({ answer: largeBoardAnswer(300) });
+  const reads = () => host.claudeReads.length;
+  const claudeTimer = async () => {
+    for (const fn of cx.every.filter((f) => f.ms === board.CLAUDE_MS)) fn(cx);
+    await settle();
+  };
+  assert.equal(reads(), 1, "at the start");
+  await cx.look();
+  assert.equal(reads(), 1, "nothing changed");
+  host.focus = { ...host.focus, pane: "p2" };
+  await cx.look();
+  assert.equal(reads(), 2, "the focus moved");
+  host.spaceList[0].tabs.push({ id: "t2", name: "2", active: false });
+  await cx.look();
+  assert.equal(reads(), 3, "a tab came");
+  await claudeTimer();
+  assert.equal(reads(), 4, "the timer");
+  host.spaceList[0].tabs[0].active = false;
+  await cx.look();
+  await claudeTimer();
+  host.focus = { ...host.focus, pane: "p3" };
+  await cx.look();
+  assert.equal(reads(), 4, "hidden: none");
+  host.focus = { ...host.focus, pane: "p2" };
+  host.spaceList[0].tabs[0].active = true;
+  cx.call((own) => b.render(own));
+  await settle();
+  assert.equal(reads(), 4, "a render that sees it show again reads none");
+  await cx.fire();
+  assert.equal(reads(), 5, "the read comes after it");
+  await cx.look();
+  assert.equal(reads(), 5, "and the next look sees nothing new");
+  let asked = 0;
+  const live = host.terminals;
+  host.terminals = () => (asked++, live());
+  const calls = host.calls.length;
+  b.render();
+  b.render();
+  assert.deepEqual([asked, reads(), host.calls.length], [2, 5, calls]);
 });
 
 test("a progress bar is 6 high, each of its segments as high by the bar's stretch, and a continuous one too", () => {
@@ -14873,7 +15743,8 @@ test("UI: the Azure Backlog asks for the level's ids once its levels came and fo
 test("each gh, az and sh run logs one line: what it ran for, its view and how long it took, how it ended; no argument, so no query text and no token; finding gh and az too", async () => {
   logged.length = 0;
   const { host } = await bootBoard();
-  assert.match(logged[0], /^board: sh which-gh \d+ ms ok view=-$/, "finding gh first");
+  assert.ok(logged.some((l) => /^board: sh claude-sessions \d+ ms ok view=-$/.test(l)), "the Claude sessions' read");
+  assert.match(logged.filter((l) => !l.includes(" claude-"))[0], /^board: sh which-gh \d+ ms ok view=-$/, "finding gh first");
   logged.length = 0;
   advance(1234);
   await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);

@@ -104,7 +104,12 @@
 // team's settings first, one call more. The PR tabs read nothing yet. The
 // start dialog's Repo field costs one sh call when it opens and one per
 // machine chosen in it (its repos; none without repoFolders). Finding gh and
-// az costs one sh call now and then (toolPaths says when). A view refreshes
+// az costs one sh call now and then (toolPaths says when). The Claude Code
+// sessions on this machine cost one sh call (their files and ps), and one
+// more where any of them runs (their task lists), each with its log line:
+// when the board starts, after a look that sees it come to show, every
+// CLAUDE_MS while it shows, and when the focus or a space's count of tabs
+// changes (readClaude, followSessions); never in a render. A view refreshes
 // when its tab first shows (unless it has data the prefetch tried within
 // refreshMinutes), on `r` (which first drops what its source keeps of it: its
 // source's forget), after a column is hidden or shown (the command menu's
@@ -142,22 +147,24 @@
 // common.js, sprint.js, backlog.js, related.js, index.js), tools.js
 // (running gh and az, a log line each), loading.js (the saved state, what a
 // load draws before its end, the prefetch's order, the top bar's words for a
-// read), actions/ (starting a session, writing a change at once, moving a
-// card, changing a state, creating a work item, assigning an item),
+// read), sessions.js (an item's sessions: the places in herdr and the
+// Claude Code sessions that name it), actions/ (starting a session, writing
+// a change at once, moving a card, changing a state, creating a work item,
+// assigning an item),
 // ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
 // ui/tones.js (the tones of labels and types, the selected background, the
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
 // drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
 // (how a view's data is drawn and worked: board, prs, sprint, backlog,
 // placeholder), ui/modals/ (the dialogs: start, status, columns, create,
-// assign, commands, sprints) and this one, the Board, which looks the shape
-// up.
+// assign, commands, sprints, sessions) and this one, the Board, which looks
+// the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { appHome, checking, exec, focused, layout, nextCommand, notify, props, readTextFile, run, settings, spaces, theme } from "herdr";
+import { appHome, checking, exec, focused, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme } from "herdr";
 import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
 import { readConfig, startSettings } from "./config.js";
 import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
@@ -165,18 +172,19 @@ import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, shownIndex, stepIndex, teamViewAfter } from "./contexts.js";
-import { toolPaths } from "./tools.js";
+import { call, toolPaths, what } from "./tools.js";
 import { SAVED_MAX, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
-import { linkedSession, AGENT_STATUS, renderTemplate, templateVars } from "./actions/start.js";
+import { renderTemplate, templateVars } from "./actions/start.js";
+import { AGENT_STATUS, itemSessions, placeKey, placed, readClaudeSessions, secondEnter, sessionIndex } from "./sessions.js";
 import { makeSources } from "./sources/index.js";
-import { keptRelated, pathLabel, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
-import { store, migrateShownView, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
+import { keptRelated, lineAt, lineCount, lineId, lineIndex, lineNow, pathLabel, pickedLine, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
+import { store, migrateShownView, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
 import { descriptionFolds, levelParts, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
-import { actionFor, actionName, aimOf, groupAimOf, hintsOf, keyName, keyShown } from "./commands.js";
+import { actionFor, actionName, aimOf, groupAimOf, hintsOf, keyName, keyShown, startName } from "./commands.js";
 import { LINE_PX, keptScroll, restoreScroll, scrollBy, scrollPage, scrollToEnd } from "./scroll.js";
 import { shownDescription, webUrl } from "./description.js";
 export * from "./shared.js";
@@ -201,6 +209,7 @@ export * from "./sources/azure/index.js";
 export * from "./tools.js";
 export * from "./loading.js";
 export * from "./actions/start.js";
+export * from "./sessions.js";
 export * from "./actions/write.js";
 export * from "./actions/move.js";
 export * from "./actions/state.js";
@@ -226,6 +235,7 @@ export * from "./ui/modals/assign.js";
 export * from "./ui/modals/commands.js";
 export * from "./ui/modals/sprints.js";
 export * from "./ui/modals/start.js";
+export * from "./ui/modals/sessions.js";
 export * from "./ui/modals/status.js";
 
 const TICK_MS = 30000;
@@ -242,6 +252,10 @@ const OUTSIDE_BUTTONS = ["left", "right", "middle", "back", "forward"];
 // render sees the copy be hidden, and none may come when it comes to show:
 // this timer sees both, and a render that comes first sees the show too.
 export const WATCH_MS = 250;
+// How often a copy that shows reads the Claude sessions again (readClaude),
+// and how long each run of sh for them may take.
+export const CLAUDE_MS = 15000;
+const CLAUDE_TIMEOUT_MS = 10000;
 // How often a copy that shows asks its shape's bandsLeft (shapes/index.js),
 // from the look that sees it show to the one that sees it hidden
 // (watchShown): herdr tells a script of no drag of a scrollbar's thumb.
@@ -336,6 +350,10 @@ export default class Board extends View {
     this.panel = null;
     // Whether the last key was a `g`, the first of gg (edgeKey).
     this.afterG = false;
+    this.claude = null;
+    this.claudeReading = false;
+    this.claudeSeen = null;
+    this.drawnSessions = null;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -381,8 +399,11 @@ export default class Board extends View {
       // A safety net: details that came to show by a way that did not read
       // their related items (readRelated) are read here.
       this.guarded("Details", () => boardShown(this.isLayer()) && this.readRelated(cx));
+      this.guarded("Sitzungen", () => boardShown(this.isLayer()) && this.followSessions(cx));
     });
+    cx.timer.every(CLAUDE_MS, (cx) => this.guarded("Sitzungen", () => boardShown(this.isLayer()) && this.readClaude(cx)));
     this.reload(cx);
+    this.readClaude(cx);
   }
 
   // At init, and again after a load of keys.json dropped the bindings (the
@@ -415,7 +436,7 @@ export default class Board extends View {
   // carries the board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
-    return !this.filtering && this.readsRelated(this.detailsRoot());
+    return !this.filtering && this.panelTakes(this.detailsRoot());
   }
 
   // Tab and shift-Tab (`back`), while the board takes them (takesTab): the
@@ -755,6 +776,10 @@ export default class Board extends View {
     return Boolean(item && this.sources[item.source]?.related?.reads(item));
   }
 
+  panelTakes(item) {
+    return this.readsRelated(item) || (Boolean(item) && itemSessions(this.sessionsNow(), item).length > 0);
+  }
+
   // Whether the item is a pull request whose details its source reads for
   // the panel to go down to (its pullRequest.reads, related.js).
   readsPullRequest(item) {
@@ -864,10 +889,11 @@ export default class Board extends View {
 
   // The details panel's keyboard while it has it in `view`, for the item
   // whose details show there; else null, when the board has it: { view,
-  // key (the item's), line (the line selected, null for none), levels (the
-  // levels it went down to: drillLine) }. Once it is not theirs (another
-  // view or item, one without related items, or the details closed) it is
-  // dropped, so that it does not come back with them, nor do its levels.
+  // key (the item's), line (the line selected, by what it is: lineId; null
+  // for none), levels (the levels it went down to: drillLine) }. Once it is
+  // not theirs (another view or item, one without related items or
+  // sessions, or the details closed) it is dropped, so that it does not
+  // come back with them, nor do its levels.
   panelOf(view) {
     const p = this.panelIn(view);
     if (!p) this.panel = null;
@@ -880,24 +906,27 @@ export default class Board extends View {
   panelIn(view) {
     const p = this.panel;
     const st = this.state(view.id);
-    return p && p.view === view.id && st.detail && st.sel?.key === p.key && this.readsRelated(this.selected(view)) ? p : null;
+    return p && p.view === view.id && st.detail && st.sel?.key === p.key && this.panelTakes(this.selected(view)) ? p : null;
   }
 
   // Tab, where the board takes it for the panel (takesTab: the details of
-  // an item with related items to read show): the keyboard into the details
-  // panel, no line selected, or back to the board where the panel has it,
-  // which closes the levels it went down to: the board's keys act on its
-  // selected item, whose details then show again.
+  // an item with related items to read or with sessions show): the
+  // keyboard into the details panel, no line selected, or back to the board
+  // where the panel has it, which closes the levels it went down to: the
+  // board's keys act on its selected item, whose details then show again.
   togglePanel(view) {
     const item = this.detailsRoot();
     this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null, levels: [] };
   }
 
-  // The lines of the related items that show in `view` (relatedLines), of
-  // the level the panel shows; none on a pull request's.
+  // The lines of the level the panel shows (a pull request's has no related
+  // items).
   linesOf(view) {
     const item = this.levelItem(view);
-    return relatedLines(this.readsRelated(item) ? this.relatedOf(view, item)?.data : null);
+    return {
+      related: relatedLines(this.readsRelated(item) ? this.relatedOf(view, item)?.data : null),
+      sessions: itemSessions(this.sessionsNow(), item),
+    };
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
@@ -909,15 +938,18 @@ export default class Board extends View {
   // line are actions (commands.js: line-details, line-open).
   panelKey(view, panel, k) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
-    const lines = this.linesOf(view);
     if (dir) {
+      const lines = this.linesOf(view);
+      const at = lineIndex(lines, panel.line);
       const item = this.levelItem(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
-      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
+      // A session's line stands below the block, always in view.
+      if (at === null && (dir < 0 || !lineCount(lines) || (lines.related.length && !lineShows(ui, item, entry, 0)))) scrollBy(ui, dir * LINE_PX);
       else {
-        panel.line = stepLine(panel.line, dir, lines.length);
-        if (panel.line !== null) revealLine(ui, item, entry, panel.line);
+        const next = stepLine(at, dir, lineCount(lines));
+        panel.line = next === null ? null : lineId(lineAt(lines, next));
+        if (next !== null) revealLine(ui, item, entry, next);
       }
       return true;
     }
@@ -966,11 +998,10 @@ export default class Board extends View {
     // window's too, which takes its height from the content.
     restoreScroll(ui, item.key, back);
     ui.unfolded = back.unfolded;
-    if (entry?.data) {
-      const at = relatedLines(entry.data).findIndex((l) => sameItem(l, from));
-      panel.line = at < 0 ? null : at;
-    } else panel.line = back.line;
-    if (panel.line !== null) revealLine(ui, item, entry, panel.line);
+    if (entry?.data) panel.line = relatedLines(entry.data).some((l) => sameItem(l, from)) ? lineId({ related: from }) : null;
+    else panel.line = back.line;
+    const at = lineIndex(this.linesOf(view), panel.line);
+    if (at !== null) revealLine(ui, item, entry, at);
   }
 
   // "Zeile auf dem Board" (commands.js, line-board; the panel's button):
@@ -983,17 +1014,17 @@ export default class Board extends View {
     const place = placeOf(this.navColumns(view), line);
     if (!place) return this.say(`${itemLabel(line)} ist nicht auf dem Board`, "info", cx);
     this.choose(view, place, cx);
-    this.panel = this.readsRelated(this.selected(view)) ? { view: view.id, key: place.key, line: null, levels: [] } : null;
+    this.panel = this.panelTakes(this.selected(view)) ? { view: view.id, key: place.key, line: null, levels: [] } : null;
   }
 
   // A click on line `at` of the related items: the keyboard into the panel
   // on that line (at the level it shows), and Enter on it.
   pickLine(view, at, cx) {
     const item = this.detailsRootOf(view);
-    const line = this.linesOf(view)[at];
+    const line = this.linesOf(view).related[at];
     if (!item || !line) return;
     this.panel = this.panelOf(view) ?? { view: view.id, key: item.key, line: null, levels: [] };
-    this.panel.line = at;
+    this.panel.line = lineId({ related: line });
     this.handle.focus();
     this.drillLine(view, line, cx);
     cx.notify();
@@ -1003,8 +1034,9 @@ export default class Board extends View {
   // its top, with no line selected, or its bottom, on its last line where it
   // has lines.
   panelEdge(view, panel, end) {
-    const count = this.linesOf(view).length;
-    panel.line = end === "bottom" && count ? count - 1 : null;
+    const lines = this.linesOf(view);
+    const count = lineCount(lines);
+    panel.line = end === "bottom" && count ? lineId(lineAt(lines, count - 1)) : null;
     scrollToEnd(this.relatedUi, end);
   }
 
@@ -1084,6 +1116,14 @@ export default class Board extends View {
 
   keepSelection(view) {
     this.reselect(view, selectionAfter(this.navColumns(view), this.state(view.id).sel));
+  }
+
+  // The details panel's selected line as it stands now: it follows its
+  // session, or goes with it (lineNow). A draw takes it before its hint
+  // line reads the line, as each action's key does (keptContext).
+  keepLine(view) {
+    const panel = this.panelOf(view);
+    if (panel) panel.line = lineNow(this.linesOf(view), panel.line);
   }
 
   // A selection the board sets by itself, which is no choice (clickItem).
@@ -1214,7 +1254,7 @@ export default class Board extends View {
     if (col >= 0) this.choose(view, { col, key }, cx);
   }
 
-  // Enter: details first, then the item's session (go to it, or start one).
+  // Enter: details first, then the item's session (startSession).
   enter(view, cx) {
     const st = this.state(view.id);
     const item = this.selected(view);
@@ -1227,26 +1267,61 @@ export default class Board extends View {
     this.startSession(view, item, cx);
   }
 
-  // The session of `item` (the selected one, or the one the details panel
-  // went down to): go to it, or start one.
+  // `item`: the selected one, or the one the details panel went down to.
   startSession(view, item, cx) {
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
-    const session = linkedSession(item, spaces());
-    if (!session) return MODALS.start.open(this, view, item, cx);
+    const enter = secondEnter(this.sessionsNow(), item);
+    if (enter.go) return this.goToSession(enter.go, cx);
+    if (enter.ask) return MODALS.sessions.open(this, view, item, enter.ask, cx);
+    MODALS.start.open(this, view, item, cx);
+  }
+
+  goToSession(session, cx) {
+    if (!placed(session)) return this.say(`${session.label}: kein Terminal gefunden`, "info", cx);
+    const { space: id, tab: tabId, pane } = session.place;
     // The session may be the tab behind the board layer, which selecting
     // it does not show; leaving the layer first keeps its pane.focus from
     // undoing the selection. (A copy in a tab gets keys only while the
     // layer does not cover it, so there this does nothing.)
     layers.leaveLayer();
     try {
-      run("space.select", { id: session.space });
-      if (session.tab) run("tab.select", { id: session.tab });
+      run("space.select", { id });
+      if (tabId) run("tab.select", { id: tabId });
+      if (pane) run("pane.focus", { pane });
     } catch (e) {
-      const space = spaces().find((s) => s.id === session.space);
-      const tab = space?.tabs.find((t) => t.id === session.tab);
-      const named = `Space „${space?.name ?? session.space}“, Tab „${tab?.name ?? session.tab ?? "–"}“`;
+      const space = spaces().find((s) => s.id === id);
+      const tab = space?.tabs.find((t) => t.id === tabId);
+      const named = `Space „${space?.name ?? id}“, Tab „${tab?.name ?? tabId ?? "–"}“`;
       notify({ title: `Sitzung nicht gezeigt: ${named}`, body: errorText(e), level: "error" });
     }
+  }
+
+  sessionsNow() {
+    return this.drawnSessions ?? sessionIndex({ spaces: spaces(), panes: panes(), terminals: terminals(), claude: this.claude });
+  }
+
+  sessionsSeen() {
+    const f = focused();
+    return JSON.stringify([f?.space ?? null, f?.tab ?? null, f?.pane ?? null, spaces().map((s) => s.tabs?.length ?? 0)]);
+  }
+
+  followSessions(cx) {
+    if (!this.claudeReading && this.sessionsSeen() !== this.claudeSeen) this.readClaude(cx);
+  }
+
+  readClaude(cx) {
+    if (this.claudeReading || checking()) return;
+    this.claudeReading = true;
+    this.claudeSeen = this.sessionsSeen();
+    const runSh = (args, kind) => call("sh", args, null, CLAUDE_TIMEOUT_MS, what(null, kind));
+    cx.spawn(async (cx) => {
+      try {
+        this.claude = await readClaudeSessions(runSh);
+      } finally {
+        this.claudeReading = false;
+        cx.notify();
+      }
+    });
   }
 
   // Whether this copy is the board layer's: its block's props say so.
@@ -1322,7 +1397,8 @@ export default class Board extends View {
 
   // At every look (a render or the WATCH_MS timer, see there): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
-  // after the look and only where it still shows; it starts its BAND_MS
+  // after the look and only where it still shows, and reads the Claude
+  // sessions after the look (never in a render); it starts its BAND_MS
   // timer and the prefetch at once. While hidden, the timer stops and the
   // layer's board forgets the focus it compared with (followFocus), so it
   // starts anew when it shows.
@@ -1339,6 +1415,7 @@ export default class Board extends View {
     if (was !== false) return;
     this.followBandsWhile(true, cx);
     this.schedulePrefetch(cx);
+    cx.timer.after(0, (cx) => this.guarded("Sitzungen", () => this.readClaude(cx)));
     cx.timer.after(0, () => this.guarded("Tastatur", () => {
       if (boardShown(this.isLayer())) this.takeKeyboard();
     }));
@@ -1379,19 +1456,23 @@ export default class Board extends View {
     const panel = view ? this.panelOf(view) : null;
     const details = view ? this.levelItem(view) : null;
     const levels = panel?.levels ?? [];
+    const lines = panel ? this.linesOf(view) : null;
     return {
       b: this, view, st, shape: view ? this.shape(view) : null, item: view ? this.selected(view) : null, details,
-      related: this.readsRelated(details), panel, line: panel?.line ?? null, lines: panel ? this.linesOf(view) : [],
+      related: this.readsRelated(details), sessions: details ? itemSessions(this.sessionsNow(), details).length : 0,
+      panel, lines, line: panel?.line ?? null, picked: panel ? pickedLine(lines, panel.line) : null,
       drilled: levels.length > 0, trail: details ? [this.detailsRootOf(view).key, ...levels.map((l) => l.item.key)] : null,
     };
   }
 
   // The moment an action runs in as its key runs it, the step the keys
   // (key), the menu's opening (openCommands) and its actions (runAction)
-  // share: the board keeps its selection first (keepSelection).
+  // share: the board keeps its selection first (keepSelection), and the
+  // panel its line (keepLine).
   keptContext() {
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);
+    if (view) this.keepLine(view);
     return this.actionContext();
   }
 
@@ -1404,7 +1485,7 @@ export default class Board extends View {
   // column), the menu says so and runs nothing.
   runAction(entry, cx) {
     const c = entry.action.bar ? this.actionContext() : this.keptContext();
-    if (aimOf(entry.action, c) !== entry.aim) this.say(groupAimOf(entry.action, c) === entry.groupAim ? entry.gone : entry.groupGone, "info", cx);
+    if (aimOf(entry.action, c, entry.line) !== entry.aim) this.say(groupAimOf(entry.action, c) === entry.groupAim ? entry.gone : entry.groupGone, "info", cx);
     else if (!entry.action.when(c)) this.say(`„${entry.name}“ geht hier nicht mehr`, "info", cx);
     else entry.action.run(this, c, cx);
     cx.notify();
@@ -1525,14 +1606,23 @@ export default class Board extends View {
 
   // ---- drawing ----
 
-  // When herdr renders a copy, and why the WATCH_MS timer looks too: see
-  // WATCH_MS.
   render(cx) {
+    this.drawnSessions = null;
+    this.drawnSessions = this.sessionsNow();
+    try {
+      return this.drawAll(cx);
+    } finally {
+      this.drawnSessions = null;
+    }
+  }
+
+  drawAll(cx) {
     this.watchShown(cx);
     this.followFocus(cx);
     const t = theme();
     const mono = settings().font_family ?? "JetBrains Mono";
     const view = this.view();
+    if (view) this.keepLine(view);
     const st = view ? this.state(view.id) : null;
     const item = st?.detail && view ? this.selected(view) : null;
     let out = v_flex().id("board").track_focus(this.handle);
@@ -1781,17 +1871,15 @@ export default class Board extends View {
     const panel = this.panelOf(view);
     const levels = panel?.levels ?? [];
     const item = levels.length ? this.levelItem(view) : root;
-    const session = linkedSession(item, spaces());
-    // The rows of its own beside the header: the shape's (chips beside the
-    // author, sections, buttons), or a level's (levelParts).
+    const sessions = this.sessionsNow();
+    const enter = secondEnter(sessions, item);
     const parts = (levels.length ? levelParts(this, t, view, item, this.relatedOf(view, item)) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
-    const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
-    // The panel's selected line, where it has one.
-    const line = panel && panel.line !== null ? this.linesOf(view)[panel.line] ?? null : null;
-    // The way down where the panel went down, else the item's label; and
-    // its branch, as the PR list's details name a pull request's.
+    const startLabel = `${startName(enter, item)} ↵`;
+    const lines = panel ? this.linesOf(view) : null;
+    const picked = panel ? pickedLine(lines, panel.line) : null;
+    const listed = itemSessions(sessions, item);
     const top = `${levels.length ? pathLabel(root, levels.map((l) => l.item)) : itemLabel(item)}${item.branch ? ` · ${item.branch}` : ""}`;
     return v_flex()
       .id("detail")
@@ -1834,28 +1922,8 @@ export default class Board extends View {
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
       .children(parts.sections ?? [])
-      .when(this.readsRelated(item), (el) => el.child(relatedSections(this, t, mono, view, item, this.relatedOf(view, item), panel?.line ?? null)))
-      .child(
-        detailSection(
-          t,
-          "SITZUNG",
-          session
-            ? h_flex()
-              .gap(8)
-              .items_center()
-              .px(10)
-              .py(8)
-              .rounded(8)
-              .border_1()
-              .border_color(t.border)
-              .bg(t.background)
-              .child(div().size(8).flex_none().rounded(4).bg(t[session.status] ?? t.idle))
-              .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(12).child(session.label))
-              .child(div().text_size(12).text_color(t.muted).child(AGENT_STATUS[session.status] ?? ""))
-            : div().text_size(12).text_color(t.muted).line_height("18px")
-              .child(firstMessage ? `Noch keine Sitzung. Enter startet eine mit „${firstMessage}“.` : "Noch keine Sitzung. Enter startet eine."),
-        ),
-      )
+      .when(this.readsRelated(item), (el) => el.child(relatedSections(this, t, mono, view, item, this.relatedOf(view, item), picked?.related ? lineIndex(lines, panel.line) : null)))
+      .child(this.sessionSection(t, mono, listed, picked?.session ? placeKey(picked.session) : null, enter, firstMessage, sessions.notes))
       .child(div().flex_1())
       .child(
         h_flex()
@@ -1872,13 +1940,50 @@ export default class Board extends View {
             this.enter(view, cx);
           }))
           .children(parts.buttons ?? [])
-          .when(Boolean(line), (el) => el.child(button(t, "act-line-board", "Zeile auf dem Board", false, (cx) => {
-            if (!this.modal) this.enterLine(view, line, cx);
+          .when(Boolean(picked?.related), (el) => el.child(button(t, "act-line-board", "Zeile auf dem Board", false, (cx) => {
+            if (!this.modal) this.enterLine(view, picked.related, cx);
           })))
           .child(button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
             if (!this.modal) this.open(item, cx);
           })),
       );
+  }
+
+  sessionSection(t, mono, listed, markedKey, enter, firstMessage, notes) {
+    const row = (s, i) => h_flex()
+      .id(`session-${i}`)
+      .gap(8)
+      .items_center()
+      .px(10)
+      .py(8)
+      .rounded(8)
+      .border_1()
+      .map(selectedLook(t, placeKey(s) === markedKey, t.border, t.background))
+      .cursor_pointer()
+      .hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => {
+        if (!this.modal) this.goToSession(s, cx);
+      })
+      .child(s.sure ? div().size(8).flex_none().rounded(4).bg(t[s.status] ?? t.idle) : div().size(8).flex_none().rounded(4).border_1().border_color(t.muted))
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(div().truncate().font_family(mono).text_size(12).child(s.label))
+        .child(div().truncate().text_size(11).text_color(t.muted).child(sessionReasons(s))))
+      .child(div().flex_none().text_size(12).text_color(t.muted).child(s.sure ? AGENT_STATUS[s.status] ?? "" : CANDIDATE));
+    const withMessage = firstMessage ? ` mit „${firstMessage}“` : "";
+    const start = !enter.ask
+      ? `Noch keine Sitzung. Enter startet eine${withMessage}.`
+      : enter.ask.some(placed)
+        ? `Enter fragt: zu einer davon springen oder eine neue Sitzung starten${withMessage}.`
+        : `Keine davon in einem Terminal. Enter fragt, bevor es eine neue Sitzung${withMessage} startet.`;
+    const note = (text, i) => div().id(`session-note-${i}`).text_size(11).text_color(toneColor(t, NOTE_TONES.warning)).child(text);
+    const more = notes.length > 3 ? [`… und ${notes.length - 3} weitere`] : [];
+    return detailSection(
+      t,
+      "SITZUNG",
+      ...listed.map(row),
+      ...(enter.go ? [] : [div().text_size(12).text_color(t.muted).line_height("18px").child(start)]),
+      ...[...notes.slice(0, 3), ...more].map(note),
+    );
   }
 
   // The hint line: the keys of what shows now, as the action table says

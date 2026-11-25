@@ -26,14 +26,13 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { spaces } from "herdr";
 import { cardLabel, itemLabel, partOfText } from "../../shared.js";
 import { applyMoves, findCard, hasStep, stepTarget } from "../../kinds/board.js";
 import {
   NO_STORY, dayText, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintIs, sprintItems, sprintNav, sprintNavigate, sprintStories,
   sprintWarnings, storyProgress, toggledFolds, withItemState, withSprintItem, withoutFolded,
 } from "../../kinds/sprint.js";
-import { linkedSession } from "../../actions/start.js";
+import { itemSessions } from "../../sessions.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
@@ -231,7 +230,7 @@ function drawSprint(b, t, mono, view, st) {
   const rows = shownRows(data, open);
   const counts = rowCounts(data, open);
   const stories = sprintStories(data);
-  const allSpaces = spaces();
+  const sessions = b.sessionsNow();
   const none = sprintIs(data) === "none";
   const head = h_flex()
     .id("sprint-head")
@@ -267,7 +266,7 @@ function drawSprint(b, t, mono, view, st) {
       .flex_1()
       .min_w(0)
       .gap(6)
-      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces))))));
+      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, sessions))))));
   return v_flex()
     .flex_1()
     .min_h(0)
@@ -325,10 +324,10 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
-function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
+function drawTask(b, t, mono, view, st, card, ci, col, sessions) {
   const selected = st.sel?.key === card.key;
   const line = typeLine(t, card, st.data.meta.typeColors?.[card.type], 6);
-  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  const end = cardEnd(t, card, itemSessions(sessions, card)[0] ?? null, Boolean(st.pending[card.key]));
   // In its story's row the row names the parent.
   const meta = cardMeta(t, card, card.row === NO_STORY ? partOfText(card) : null);
   return h_flex()

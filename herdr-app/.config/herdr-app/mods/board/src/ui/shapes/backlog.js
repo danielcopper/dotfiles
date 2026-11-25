@@ -14,10 +14,9 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { spaces } from "herdr";
 import { cardLabel, report } from "../../shared.js";
 import { backlogNav, backlogWarnings, findBacklogItem, withBacklogItem, withBacklogState } from "../../kinds/backlog.js";
-import { linkedSession } from "../../actions/start.js";
+import { itemSessions } from "../../sessions.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/state.js";
@@ -95,7 +94,7 @@ export const backlogShape = {
 function drawBacklog(b, t, mono, view, st) {
   const data = st.data;
   const [col] = backlogColumns(b, st);
-  const allSpaces = spaces();
+  const sessions = b.sessionsNow();
   const cell = (w, text, color = t.muted) => div().w(w).flex_none().truncate().text_size(12).text_color(color).child(text);
   const head = v_flex()
     .id("backlog-head")
@@ -118,7 +117,7 @@ function drawBacklog(b, t, mono, view, st) {
   }
   const row = (r) => {
     const selected = st.sel?.key === r.key;
-    const session = linkedSession(r, allSpaces);
+    const session = itemSessions(sessions, r)[0] ?? null;
     const line = typeLine(t, r, data.meta.typeColors?.[r.type]);
     return h_flex()
       .id(`row-${r.key}`)

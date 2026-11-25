@@ -106,7 +106,12 @@
 // team's settings first, one call more. The PR tabs read nothing yet. The
 // start dialog's Repo field costs one sh call when it opens and one per
 // machine chosen in it (its repos; none without repoFolders). Finding gh and
-// az costs one sh call now and then (toolPaths says when). A view refreshes
+// az costs one sh call now and then (toolPaths says when). The Claude Code
+// sessions on this machine cost one sh call (their files and ps), and one
+// more where any of them runs (their task lists), each with its log line:
+// when the board starts, after a look that sees it come to show, every
+// CLAUDE_MS while it shows, and when the focus or a space's count of tabs
+// changes (readClaude, followSessions); never in a render. A view refreshes
 // when its tab first shows (unless it has data the prefetch tried within
 // refreshMinutes), on `r` (which first drops what its source keeps of it: its
 // source's forget), after a column is hidden or shown (the command menu's
@@ -144,22 +149,24 @@
 // common.js, sprint.js, backlog.js, related.js, index.js), tools.js
 // (running gh and az, a log line each), loading.js (the saved state, what a
 // load draws before its end, the prefetch's order, the top bar's words for a
-// read), actions/ (starting a session, writing a change at once, moving a
-// card, changing a state, creating a work item, assigning an item),
+// read), sessions.js (an item's sessions: the places in herdr and the
+// Claude Code sessions that name it), actions/ (starting a session, writing
+// a change at once, moving a card, changing a state, creating a work item,
+// assigning an item),
 // ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
 // ui/tones.js (the tones of labels and types, the selected background, the
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
 // drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
 // (how a view's data is drawn and worked: board, prs, sprint, backlog,
 // placeholder), ui/modals/ (the dialogs: start, status, columns, create,
-// assign, commands, sprints) and this one, the Board, which looks the shape
-// up.
+// assign, commands, sprints, sessions) and this one, the Board, which looks
+// the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
 import { View, div, svg } from "gpui-kit";
 import { Input, InputState, Popup, ScrollHandle, TextView, Textarea, TextareaState, h_flex, v_flex } from "gpui-base";
-import { appHome, checking, exec, focused, home, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, theme, writeTextFile } from "herdr";
+import { appHome, checking, exec, focused, home, knownAgents, layout, machines, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
 
 // ==== src/shared.js ====
 
@@ -199,6 +206,14 @@ export const PAGE = 100;
 
 export const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
 export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
+
+export function jsonOrNull(text) {
+  try {
+    return JSON.parse(String(text ?? "").trim());
+  } catch {
+    return null;
+  }
+}
 
 // The message to show for an error: a BoardError's own, else marked as
 // unexpected.
@@ -1561,50 +1576,14 @@ export function readLabels(st, now) {
 
 // ==== src/actions/start.js ====
 
-// Starting an item's session: its name, finding it again, the first
-// message, the checkout and the command that opens it.
-
 const NAME_MAX = 60;
 
-// The name of the tab a session starts in: the item's key and title, cut to
-// NAME_MAX characters. linkedSession finds the session by it.
+// The tab's name, by which itemSessions (sessions.js) finds the session again.
 export function sessionName(item) {
   const key = itemKey(item);
   const full = key ? `${key} ${item.title}` : item.title;
   return full.length <= NAME_MAX ? full : `${full.slice(0, NAME_MAX - 1)}…`;
 }
-
-const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
-
-// An item's session: a tab or space whose name starts with its key, the most
-// urgent first; failing that, on GitHub a space on its branch (a pull
-// request's head branch, or one with a part that starts with `<number>-` or
-// whose last part is `<number>`, in a folder of its repo).
-// → { space, tab (null for a space), status, label } or null.
-export function linkedSession(item, allSpaces) {
-  const key = itemKey(item);
-  const named = (name) => Boolean(key) && (name === key || String(name ?? "").startsWith(`${key} `));
-  let hits = [];
-  for (const s of allSpaces) {
-    for (const t of s.tabs ?? []) if (named(t.name)) hits.push({ space: s.id, tab: t.id, status: t.status ?? null, label: t.name });
-    if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
-  }
-  if (!hits.length && item.source === "github" && key) {
-    hits = allSpaces
-      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : numberedBranch(s.branch, item.number) && (s.folder ?? "").includes(item.repoShort)))
-      .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
-  }
-  hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
-  return hits[0] ?? null;
-}
-
-// No RegExp: one would be compiled per card on every render.
-function numberedBranch(branch, number) {
-  const parts = String(branch).split("/");
-  return parts.some((part, i) => part.startsWith(`${number}-`) || (i === parts.length - 1 && part === String(number)));
-}
-
-export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
 
 // `{name}` placeholders filled from vars; unknown ones stay.
 export function renderTemplate(template, vars) {
@@ -1687,6 +1666,409 @@ export function startCommand({ on, folder, argv, task, name, space, spaceName })
   const common = { folder, argv, ...(task ? { task } : {}) };
   if (space) return ["tab.new", { name, space, ...common }];
   return ["space.new", { name: spaceName, tab: name, machine: on ?? "", ...common }];
+}
+
+// ==== src/sessions.js ====
+
+// Nothing here reads a file in a draw: Claude Code's files are read off it
+// (readClaudeSessions), and a draw builds one index (sessionIndex) that
+// each card looks itself up in.
+
+export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
+const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
+const urgencyOf = (status) => URGENCY[status] ?? 4;
+
+const isDigit = (c) => c >= 48 && c <= 57;
+const isLetter = (c) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+// What GitHub allows in a repo's name.
+const isNameChar = (c) => isDigit(c) || isLetter(c) || c === 45 || c === 46 || c === 95;
+
+// No RegExp: this runs for each name at every draw.
+export function references(text) {
+  const s = String(text ?? "");
+  const keys = [];
+  const bare = [];
+  for (let at = s.indexOf("#"), bang = s.indexOf("!"); at >= 0 || bang >= 0; ) {
+    const i = at < 0 ? bang : bang < 0 ? at : Math.min(at, bang);
+    let end = i + 1;
+    while (end < s.length && isDigit(s.charCodeAt(end))) end++;
+    const next = end < s.length ? s.charCodeAt(end) : 0;
+    let start = i;
+    while (start > 0 && isNameChar(s.charCodeAt(start - 1))) start--;
+    if (end > i + 1 && !isLetter(next) && !isDigit(next) && next !== 95) {
+      const number = s.slice(i + 1, end);
+      if (s[i] === "!") {
+        if (start === i) keys.push(`!${number}`);
+      } else if (start === i) bare.push(number);
+      else keys.push(`${s.slice(start, i).toLowerCase()}#${number}`);
+    }
+    if (i === at) at = s.indexOf("#", i + 1);
+    else bang = s.indexOf("!", i + 1);
+  }
+  return { keys, bare };
+}
+
+export function branchNumbers(branch) {
+  const parts = String(branch ?? "").split("/");
+  const numbers = [];
+  parts.forEach((part, i) => {
+    let end = 0;
+    while (end < part.length && isDigit(part.charCodeAt(end))) end++;
+    if (end > 0 && (part[end] === "-" || (end === part.length && i === parts.length - 1))) numbers.push(part.slice(0, end));
+  });
+  return numbers;
+}
+
+// The worktree a folder is in, below `<repo>.worktrees/`: its first two
+// parts there (`feat/3000-x`, the way the worktrees are laid out), or null.
+export function worktreeOf(folder) {
+  const parts = String(folder ?? "").split("/");
+  const at = parts.findIndex((p) => p.endsWith(".worktrees") && p.length > ".worktrees".length);
+  if (at < 0 || at === parts.length - 1) return null;
+  return parts.slice(at + 1, at + 3).filter(Boolean).join("/") || null;
+}
+
+export function inRepo(folder, repo) {
+  const name = String(repo ?? "").toLowerCase();
+  if (!name || !folder) return false;
+  return String(folder).toLowerCase().split("/").some((p) => p === name || p === `${name}.worktrees`);
+}
+
+// ---- Claude Code's sessions on this machine ----
+
+// A record's mark in the scripts' output: no JSON text holds it unescaped.
+const RS = "\x1e";
+
+// Never reads the `.key` files beside the sessions' `<pid>.json`. Where
+// ps runs, a file whose pid now runs another program than Claude Code is
+// one of a session that ended, named by `RS O`. Claude Code's comm:
+// `claude`, npm's `bin/claude.exe` (its copy of the native binary)
+// started by that path, its version (the native install's `versions/<v>`,
+// likewise), or node's (`node`, or `MainThread` as node 24.16 calls its
+// main thread) with Claude Code in its arguments: an npm install from
+// before the native binary, which names itself `claude` unless
+// CLAUDE_CODE_DISABLE_TERMINAL_TITLE is set. herdr cuts a program's
+// output at 8 MiB without a sign: only the end record `RS Z` tells the
+// output came whole.
+export const CLAUDE_SESSIONS_SCRIPT = [
+  'dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"',
+  "end() { printf '\\036Z\\n'; exit 0; }",
+  "other() { printf '\\036O\\t%s\\t%s\\n' \"$pid\" \"$(printf %s \"$comm\" | tr -d '\\036\\t\\n')\"; }",
+  '[ -d "$dir" ] || end',
+  "if list=$(ps -A -o pid= -o ppid= 2>/dev/null); then ps=1; else ps=; fi",
+  "if [ -r \"$dir\" ] && [ -x \"$dir\" ]; then",
+  '  for f in "$dir"/*.json; do',
+  '    [ -e "$f" ] || continue',
+  '    pid=${f##*/}; pid=${pid%.json}',
+  '    case $pid in ""|*[!0-9]*) printf \'\\036N\\t%s\\n\' "$pid"; continue ;; esac',
+  '    kill -0 "$pid" 2>/dev/null || continue',
+  '    if [ -n "$ps" ]; then',
+  '      comm=$(ps -o comm= -p "$pid" 2>/dev/null) || continue',
+  '      comm=${comm##*/}',
+  '      case $comm in',
+  '        claude|claude.exe|[0-9]*.[0-9]*.[0-9]*) ;;',
+  '        node|MainThread) case $(ps -o args= -p "$pid" 2>/dev/null) in',
+  '            */claude|*/claude\\ *|*@anthropic-ai/claude-code*) ;;',
+  '            *) other; continue ;;',
+  '          esac ;;',
+  '        *) other; continue ;;',
+  '      esac',
+  '    fi',
+  '    if text=$(cat "$f" 2>/dev/null); then printf \'\\036S\\t%s\\n%s\\n\' "$pid" "$text"; else printf \'\\036U\\t%s\\n\' "$pid"; fi',
+  "  done",
+  "else printf '\\036D\\n'; fi",
+  "if [ -n \"$ps\" ]; then printf '\\036P\\n%s\\n' \"$list\"; else printf '\\036X\\n'; fi",
+  "end",
+].join("\n");
+
+export const claudeSessionsArgs = () => ["-c", CLAUDE_SESSIONS_SCRIPT, "board-claude"];
+
+export const CLAUDE_TASKS_SCRIPT = [
+  'base="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/tasks"',
+  'for id in "$@"; do',
+  '  dir="$base/session-$id"',
+  '  [ -d "$dir" ] || continue',
+  '  if [ ! -r "$dir" ] || [ ! -x "$dir" ]; then printf \'\\036E\\t%s\\n\' "$id"; continue; fi',
+  '  for f in "$dir"/*.json; do',
+  '    [ -e "$f" ] || continue',
+  '    n=${f##*/}; n=${n%.json}',
+  '    if text=$(cat "$f" 2>/dev/null); then printf \'\\036T\\t%s\\t%s\\n%s\\n\' "$id" "$n" "$text"; else printf \'\\036V\\t%s\\t%s\\n\' "$id" "$n"; fi',
+  "  done",
+  "done",
+  "printf '\\036Z\\n'",
+].join("\n");
+
+export const claudeTasksArgs = (lists) => ["-c", CLAUDE_TASKS_SCRIPT, "board-claude-tasks", ...lists];
+
+// An output without its end record was cut: its last record may be cut
+// too, so it goes with the rest, and `cut` says so in `notes`.
+function records(stdout, notes, cut) {
+  const all = String(stdout ?? "")
+    .split(RS)
+    .slice(1)
+    .map((chunk) => {
+      const nl = chunk.indexOf("\n");
+      const [kind, ...fields] = (nl < 0 ? chunk : chunk.slice(0, nl)).split("\t");
+      return { kind, fields, text: nl < 0 ? "" : chunk.slice(nl + 1) };
+    });
+  if (all.at(-1)?.kind === "Z") return all.slice(0, -1);
+  notes.push(cut);
+  return all.slice(0, -1);
+}
+
+const optionalText = (v) => v === undefined || v === null || typeof v === "string";
+
+// A task list's folder: `session-` and the first eight characters of the
+// session's id.
+export const taskList = (sessionId) => sessionId.slice(0, 8);
+
+// The states Claude Code writes into a session's file (its own reader of
+// them takes these four, 2.1.332), as herdr's agent status: `shell` is a
+// turn that ended with a shell still running in the background, `waiting`
+// a question to the person (a permission, a dialog).
+const CLAUDE_STATUS = { busy: "working", shell: "working", waiting: "blocked", idle: "idle" };
+
+export function parseClaudeSessions(stdout) {
+  const sessions = [];
+  const notes = [];
+  let parents = null;
+  for (const r of records(stdout, notes, "Claude: Ausgabe abgeschnitten, Rest übersprungen")) {
+    const file = `sessions/${r.fields[0]}.json`;
+    if (r.kind === "D") notes.push("Claude: Ordner sessions nicht lesbar, Sitzungen übersprungen");
+    else if (r.kind === "U") notes.push(`Claude: ${file} nicht lesbar, übersprungen`);
+    else if (r.kind === "N") notes.push(`Claude: ${file} in unerwarteter Form, übersprungen`);
+    else if (r.kind === "X") notes.push("Claude: Prozessliste (ps) nicht gelesen, Sitzungen ohne Prüfung ihres Programms übernommen und nur über ihren eigenen Prozess oder den Ordner zugeordnet");
+    else if (r.kind === "O") notes.push(`Claude: ${file} gehört zu Prozess „${String(r.fields[1] ?? "").slice(0, 40)}“, übersprungen`);
+    else if (r.kind === "P") {
+      parents = new Map();
+      for (const line of r.text.split("\n")) {
+        const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+        if (Number.isInteger(pid) && Number.isInteger(ppid)) parents.set(pid, ppid);
+      }
+    } else if (r.kind === "S") {
+      const s = jsonOrNull(r.text);
+      const shaped = isObject(s) && s.pid === Number(r.fields[0]) && typeof s.sessionId === "string" && s.sessionId.length >= 8
+        && typeof s.cwd === "string" && optionalText(s.name) && optionalText(s.status);
+      if (!shaped) {
+        notes.push(`Claude: ${file} in unerwarteter Form, übersprungen`);
+        continue;
+      }
+      const known = s.status === undefined || s.status === null || Object.hasOwn(CLAUDE_STATUS, s.status);
+      if (!known) notes.push(`Claude: ${file} mit unbekanntem Status „${s.status.slice(0, 40)}“, Status übergangen`);
+      sessions.push({ pid: s.pid, sessionId: s.sessionId, cwd: s.cwd, name: s.name ?? null, status: known ? s.status ?? null : null });
+    }
+  }
+  return { sessions, parents, notes };
+}
+
+const TASK_STATES = ["pending", "in_progress", "completed"];
+
+// Claude Code sets a task's id, subject and status; its description may be
+// missing.
+export function parseClaudeTasks(stdout) {
+  const tasks = new Map();
+  const notes = [];
+  for (const r of records(stdout, notes, "Claude: Ausgabe der Aufgaben abgeschnitten, Rest übersprungen")) {
+    const [list, n] = r.fields;
+    const file = `tasks/session-${list}/${n}.json`;
+    if (r.kind === "E") notes.push(`Claude: Ordner tasks/session-${list} nicht lesbar, Aufgaben übersprungen`);
+    else if (r.kind === "V") notes.push(`Claude: ${file} nicht lesbar, übersprungen`);
+    else if (r.kind === "T") {
+      const t = jsonOrNull(r.text);
+      const shaped = isObject(t) && typeof t.id === "string" && typeof t.subject === "string" && TASK_STATES.includes(t.status) && optionalText(t.description);
+      if (!shaped) notes.push(`Claude: ${file} in unerwarteter Form, übersprungen`);
+      else {
+        if (!tasks.has(list)) tasks.set(list, []);
+        tasks.get(list).push({ id: t.id, subject: t.subject, description: t.description ?? "", status: t.status });
+      }
+    }
+  }
+  return { tasks, notes };
+}
+
+export function claudeSnapshot(read, tasks) {
+  const sessions = read.sessions.map((s) => {
+    const chain = [s.pid];
+    for (let p = read.parents?.get(s.pid); p > 1 && chain.length < 64 && !chain.includes(p); p = read.parents.get(p)) chain.push(p);
+    const open = (tasks?.tasks.get(taskList(s.sessionId)) ?? []).filter((t) => t.status !== "completed");
+    return {
+      pid: s.pid, cwd: s.cwd, name: s.name, agentStatus: CLAUDE_STATUS[s.status] ?? null, chain,
+      refs: references(s.name), tasks: open.map((t) => ({ subject: t.subject, refs: references(`${t.subject}\n${t.description}`) })),
+    };
+  });
+  return { sessions, notes: [...read.notes, ...(tasks?.notes ?? [])] };
+}
+
+// `run(args, kind)` runs sh with `args` and resolves to its result (the
+// Board's: tools.js call, which logs it and words a failure to start).
+export async function readClaudeSessions(run) {
+  const failed = (r) => (r.code === 0 ? null : `sh endete mit ${r.code}${r.stderr ? `: ${firstLine(r.stderr)}` : ""}`);
+  try {
+    const listed = await run(claudeSessionsArgs(), "claude-sessions");
+    if (failed(listed)) throw new Error(failed(listed));
+    const read = parseClaudeSessions(listed.stdout);
+    let tasks = null;
+    if (read.sessions.length) {
+      try {
+        const r = await run(claudeTasksArgs(read.sessions.map((s) => taskList(s.sessionId))), "claude-tasks");
+        if (failed(r)) throw new Error(failed(r));
+        tasks = parseClaudeTasks(r.stdout);
+      } catch (e) {
+        tasks = { tasks: new Map(), notes: [`Claude-Aufgaben nicht gelesen: ${firstLine(e?.message ?? e)}`] };
+      }
+    }
+    return claudeSnapshot(read, tasks);
+  } catch (e) {
+    return { sessions: [], notes: [`Claude-Sitzungen nicht gelesen: ${firstLine(e?.message ?? e)}`] };
+  }
+}
+
+// ---- the index ----
+
+// What herdr gives a pane whose agent reports itself as Claude Code.
+const CLAUDE_APP = "claude-code";
+
+// An entry's or hit's place: { space, tab, pane } (tab and pane null where
+// it names none), or { claude: pid } for a Claude session in no terminal.
+// claudePid: the pid of the Claude session an entry holds, wherever that
+// is (null for none); a Claude hit carries its own.
+export const placed = (s) => s.place.claude === undefined;
+export const placeKey = (s) => (placed(s) ? s.place.pane ?? s.place.tab ?? s.place.space : `claude:${s.place.claude}`);
+
+const add = (map, key, hit) => {
+  const list = map.get(key);
+  if (list) list.push(hit);
+  else map.set(key, [hit]);
+};
+
+export function sessionIndex({ spaces = [], panes = [], terminals = [], claude = null } = {}) {
+  const index = { byKey: new Map(), byBare: new Map(), byNumber: new Map(), byBranch: new Map(), places: new Map(), cache: new Map(), notes: claude?.notes ?? [] };
+  const spaceOfTab = new Map();
+  const named = (text, hit, folder) => {
+    const { keys, bare } = references(text);
+    for (const k of keys) add(index.byKey, k, hit);
+    for (const n of bare) add(index.byBare, n, { ...hit, folder });
+  };
+  const branched = (branch, hit, folder) => {
+    if (!branch) return;
+    add(index.byBranch, branch, { ...hit, folder });
+    for (const n of branchNumbers(branch)) add(index.byNumber, n, { ...hit, why: `Branch ${branch}`, folder });
+  };
+  for (const s of spaces) {
+    index.places.set(s.id, { label: s.name, placeStatus: s.status ?? null });
+    const place = { space: s.id, tab: null, pane: null };
+    named(s.name, { sure: true, why: "Space-Name", place }, s.folder);
+    branched(s.branch, { sure: true, why: "", place }, s.folder);
+    for (const t of s.tabs ?? []) {
+      spaceOfTab.set(t.id, s.id);
+      index.places.set(t.id, { label: t.name, placeStatus: t.status ?? null });
+      named(t.name, { sure: true, why: "Tab-Name", place: { space: s.id, tab: t.id, pane: null } }, s.folder);
+    }
+  }
+  const paneOfTerminal = new Map();
+  const panesIn = new Map();
+  for (const p of panes) {
+    const space = spaceOfTab.get(p.tab);
+    if (!p.terminal || !space) continue;
+    paneOfTerminal.set(p.terminal, p);
+    const tab = index.places.get(p.tab);
+    const label = `${tab.label} · ${p.name ?? p.program?.name ?? p.title}`;
+    const nth = (panesIn.get(p.tab) ?? 0) + 1;
+    panesIn.set(p.tab, nth);
+    index.places.set(p.pane, { label, placeStatus: p.status ?? null, nth });
+    const place = { space, tab: p.tab, pane: p.pane };
+    named(p.name, { sure: true, why: "Pane-Name", place }, p.cwd);
+    branched(p.branch, { sure: true, why: "", place }, p.cwd);
+    const worktree = worktreeOf(p.cwd);
+    for (const n of branchNumbers(worktree)) add(index.byNumber, n, { sure: true, why: `Worktree ${worktree}`, place, folder: p.cwd });
+    named(p.title, { sure: false, why: `Terminal-Titel „${p.title}“`, place }, p.cwd);
+  }
+  const local = (terminal) => !String(terminal).includes("/");
+  const paneOfPid = new Map();
+  for (const t of terminals) {
+    const pane = paneOfTerminal.get(t.address);
+    if (!pane || !local(t.address)) continue;
+    for (const pid of [t.pid, t.foreground?.pid]) if (Number.isInteger(pid)) paneOfPid.set(pid, pane);
+  }
+  const sessions = claude?.sessions ?? [];
+  const byProcess = new Map(sessions.map((c) => [c, c.chain.map((pid) => paneOfPid.get(pid)).find(Boolean) ?? null]));
+  const claimed = new Set(byProcess.values());
+  const claudePanes = panes.filter((p) => paneOfTerminal.get(p.terminal) === p && local(p.terminal) && !claimed.has(p) && p.app === CLAUDE_APP);
+  for (const c of sessions) {
+    const lost = sessions.filter((o) => o.cwd === c.cwd && !byProcess.get(o));
+    const there = claudePanes.filter((p) => p.cwd === c.cwd);
+    const pane = byProcess.get(c) ?? (lost.length === 1 && there.length === 1 ? there[0] : null);
+    const place = pane ? { space: spaceOfTab.get(pane.tab), tab: pane.tab, pane: pane.pane } : { claude: c.pid };
+    const label = `Claude-Sitzung „${c.name ?? c.pid}“`;
+    const own = { place, label, agentStatus: c.agentStatus, claudePid: c.pid };
+    for (const k of c.refs.keys) add(index.byKey, k, { ...own, sure: true, why: label });
+    for (const n of c.refs.bare) add(index.byBare, n, { ...own, sure: true, why: label, folder: c.cwd });
+    for (const task of c.tasks) {
+      const why = `offene Aufgabe: ${task.subject}`;
+      for (const k of task.refs.keys) add(index.byKey, k, { ...own, sure: false, why });
+      for (const n of task.refs.bare) add(index.byBare, n, { ...own, sure: false, why, folder: c.cwd });
+    }
+  }
+  return index;
+}
+
+// Whether hit `h` is at entry `e`'s place, or `e` at `h`'s: a tab or pane
+// that one names and the other does not is no difference.
+export function fits(e, h) {
+  if (!placed(e) || !placed(h)) return !placed(e) && !placed(h) && e.place.claude === h.place.claude;
+  const same = (a, b) => a === null || b === null || a === b;
+  return e.place.space === h.place.space && same(e.place.tab, h.place.tab) && same(e.place.pane, h.place.pane);
+}
+
+export function itemSessions(index, item) {
+  const key = itemKey(item);
+  if (!key) return [];
+  const branch = item.kind === "pr" && item.branch ? item.branch : null;
+  const cacheKey = `${item.source}\n${key}\n${branch ?? ""}`;
+  const kept = index.cache.get(cacheKey);
+  if (kept) return kept;
+  const hits = [...(index.byKey.get(key.toLowerCase()) ?? [])];
+  if (item.source === "github") {
+    const number = String(item.number);
+    const ours = (h) => inRepo(h.folder, item.repoShort);
+    for (const h of index.byBare.get(number) ?? []) if (ours(h)) hits.push(h);
+    const byBranch = branch ? (index.byBranch.get(branch) ?? []).map((h) => ({ ...h, why: `Branch ${branch}` })) : index.byNumber.get(number) ?? [];
+    for (const h of byBranch) if (ours(h)) hits.push(h);
+  }
+  const entries = [];
+  for (const h of hits) {
+    const e = entries.find((x) => fits(x, h));
+    if (!e) {
+      entries.push({ sure: h.sure, place: { ...h.place }, claudePid: h.claudePid ?? null, label: h.label ?? null, status: h.agentStatus ?? null, paneNumber: null, reasons: [h.why] });
+      continue;
+    }
+    e.sure ||= h.sure;
+    e.status ??= h.agentStatus ?? null;
+    e.claudePid ??= h.claudePid ?? null;
+    if (!e.reasons.includes(h.why)) e.reasons.push(h.why);
+    if (placed(e)) e.place = { space: e.place.space, tab: e.place.tab ?? h.place.tab, pane: e.place.pane ?? h.place.pane };
+  }
+  for (const e of entries) {
+    if (!placed(e)) continue;
+    const place = index.places.get(placeKey(e));
+    e.label = place?.label ?? e.place.space;
+    e.status = place?.placeStatus ?? e.status;
+    e.paneNumber = place?.nth ?? null;
+  }
+  const sorted = entries.map((e, i) => ({ e, i })).sort((a, b) => b.e.sure - a.e.sure || urgencyOf(a.e.status) - urgencyOf(b.e.status) || a.i - b.i).map(({ e }) => e);
+  index.cache.set(cacheKey, sorted);
+  return sorted;
+}
+
+export const linkedSession = (item, index) => itemSessions(index, item).find((s) => s.sure && placed(s)) ?? null;
+
+// What the second Enter on an item does: go to its linkedSession, else ask
+// where it has other sessions (ui/modals/sessions.js), else start one.
+export function secondEnter(index, item) {
+  const go = linkedSession(item, index);
+  if (go) return { go };
+  const listed = itemSessions(index, item);
+  return listed.length ? { ask: listed } : { start: true };
 }
 
 // ==== src/sources/azure/common.js ====
@@ -1829,16 +2211,6 @@ export function azJson(stdout, what, empty) {
     return JSON.parse(text);
   } catch {
     throw new BoardError(`az lieferte für ${what} kein lesbares JSON`);
-  }
-}
-
-// az's answer as JSON, or null for anything else: an answer the reader
-// (who az is) or the checks of a write take for one that says nothing.
-export function jsonOrNull(stdout) {
-  try {
-    return JSON.parse(String(stdout ?? "").trim());
-  } catch {
-    return null;
   }
 }
 
@@ -4271,6 +4643,55 @@ export function stepLine(line, dir, count) {
   return next < 0 ? null : Math.min(next, count - 1);
 }
 
+// The details panel's lines are { related (relatedLines), sessions
+// (itemSessions) }, walked in that order. The panel keeps its selected line
+// by what it is (lineId), not by where it stands: the lines move when the
+// related items come, the sessions sort anew or the Claude sessions are
+// read again. A session's place may name a tab or pane more or less while
+// it stays (a pane's title comes to name the item, a Claude session's
+// pane is found or lost): its line is then the one still at its place,
+// else the one that holds the Claude session it held, else the one
+// session whose place fits the one it had.
+export const lineCount = (lines) => lines.related.length + lines.sessions.length;
+
+export function lineAt(lines, n) {
+  if (n === null) return null;
+  if (n < lines.related.length) return { related: lines.related[n] };
+  const session = lines.sessions[n - lines.related.length];
+  return session ? { session } : null;
+}
+
+export const lineId = (line) =>
+  line.session ? { session: placeKey(line.session), place: line.session.place, claudePid: line.session.claudePid } : { related: lineKey(line.related) };
+
+export function lineIndex(lines, id) {
+  if (!id) return null;
+  if (id.session === undefined) {
+    const i = lines.related.findIndex((l) => lineKey(l) === id.related);
+    return i < 0 ? null : i;
+  }
+  const i = lines.sessions.findIndex((s) => placeKey(s) === id.session);
+  if (i >= 0) return lines.related.length + i;
+  const held = id.claudePid === null ? -1 : lines.sessions.findIndex((s) => s.claudePid === id.claudePid);
+  if (held >= 0) return lines.related.length + held;
+  const fitting = lines.sessions.flatMap((s, j) => (fits(s, id) ? [j] : []));
+  return fitting.length === 1 ? lines.related.length + fitting[0] : null;
+}
+
+// The selected line `id` as it stands among `lines` now: a session's by its
+// place there, or none where it went, so that Enter is the item's again;
+// a related item's line keeps its id while it is gone, until a read brings
+// it again.
+export function lineNow(lines, id) {
+  if (!id || id.session === undefined) return id;
+  const at = lineIndex(lines, id);
+  return at === null ? null : lineId(lineAt(lines, at));
+}
+
+// The line `id` names among `lines` ({ related } or { session }), or null
+// where it is not among them.
+export const pickedLine = (lines, id) => lineAt(lines, lineIndex(lines, id));
+
 // " · erste <sent> von <count>" for a section with more than it sent.
 const cutNote = (section) => (section.cut ? ` · erste ${section.sent} von ${section.count}` : "");
 
@@ -5221,8 +5642,15 @@ export function typeChip(t, item) {
   return tone ? toneChip(t, type, tone) : chip(t, type, t.foreground);
 }
 
-// A card's chip for its session (linkedSession): what its agent does.
-export const sessionChip = (t, session) => chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle);
+export const CANDIDATE = "Kandidat";
+export const CANDIDATE_CHIP = `○ ${CANDIDATE}`;
+export const sessionChip = (t, session) =>
+  session.sure ? chip(t, AGENT_STATUS[session.status] ?? "Sitzung", t.background, t[session.status] ?? t.idle) : chip(t, CANDIDATE_CHIP);
+
+// A Claude session's name is its label where it is in no terminal, so not
+// again among its reasons.
+export const sessionReasons = (s) =>
+  [...s.reasons.filter((r) => r !== s.label), ...(placed(s) ? [] : ["kein Terminal gefunden"])].join(" · ");
 
 export function priorityChip(t, item) {
   if (!item.priority) return null;
@@ -6234,11 +6662,15 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // `c` is what the Board says of the moment (Board.actionContext): { b,
 // view, st, shape, item (the selected one), details (the item whose details
 // show: where the panel went down into a related item, that one), related
-// (whether those read related items), panel (the details panel's keyboard,
-// or null), line (its selected line's index, or null), lines (the related
-// items' lines), drilled (whether the panel shows a related item rather
-// than the board's selected one), trail (the keys of the items on the
-// panel's way down, the board's selected one first) }.
+// (whether those read related items), sessions (how many sessions they
+// list: itemSessions), panel (the details panel's keyboard, or null), lines
+// (its lines now: Board.linesOf; null without it), line (its selected line
+// by what it is, related.js lineId, or null), picked
+// (that line among the panel's lines now: { related } or { session }, null
+// where it is not there, as a related item's line until a read brings it
+// again), drilled (whether the panel shows a related item rather than the
+// board's selected one), trail (the keys of the items on the panel's way
+// down, the board's selected one first) }.
 
 // What a key event names (an action's key), or null for one no action has:
 // [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
@@ -6307,13 +6739,13 @@ const GROUPS = {
   board: { title: () => "Board", aim: () => [], gone: () => "" },
 };
 
-// The command menu's entries now: { action, name, key, group, head, aim,
-// gone, groupAim, groupGone } for each action the menu lists that can run,
-// in the menu's order, with its key where that key runs it now
-// (actionFor), else none; its group's heading; and what it aims at and
-// what is said where that has gone (GROUPS; an action may aim closer, as
-// "Spalte ausblenden" at its column, and what its group aims at, and says,
-// apart: where that has gone, the menu says so first).
+// The command menu's entries now: { action, name, key, group, head, aim, gone,
+// groupAim, groupGone, line (the marked line) } for each action the menu lists
+// that can run, in the menu's order, with its key where that key runs it now
+// (actionFor), else none; its group's heading; and what it aims at and what is
+// said where that has gone (GROUPS; an action may aim closer, as "Spalte
+// ausblenden" at its column, and what its group aims at, and says, apart:
+// where that has gone, the menu says so first).
 export function menuActions(c) {
   return ACTIONS.filter((a) => a.menu != null && a.when(c))
     .sort((x, y) => x.menu - y.menu)
@@ -6321,14 +6753,14 @@ export function menuActions(c) {
       const group = GROUPS[a.group];
       return {
         action: a, name: nameOf(a, c), key: keyShown(a.id, c), group: a.group, head: group.title(c),
-        aim: aimOf(a, c), gone: a.gone?.(c) ?? group.gone(c), groupAim: groupAimOf(a, c), groupGone: group.gone(c),
+        aim: aimOf(a, c), gone: a.gone?.(c) ?? group.gone(c), groupAim: groupAimOf(a, c), groupGone: group.gone(c), line: c.line,
       };
     });
 }
 
 // What the action `a` acts on now, as a text to compare (menuActions), and
-// what its group does.
-export const aimOf = (a, c) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.aim?.(c) ?? [])]);
+// what its group does; `line`: the line marked when the menu opened.
+export const aimOf = (a, c, line = c.line) => JSON.stringify([...GROUPS[a.group].aim(c), ...(a.aim?.(c, line) ?? [])]);
 export const groupAimOf = (a, c) => JSON.stringify(GROUPS[a.group].aim(c));
 
 // The hint line's entries now: [key, text], in the table's order, each key
@@ -6355,24 +6787,29 @@ const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context(
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
-// takes Enter and o while one is, and the panel shows that item's details
-// (held while drilled).
+// takes Enter while one is, and the panel shows that item's details (held
+// while drilled).
 const onItem = (c) => Boolean(c.item) && c.line === null;
+// Whether a related item's line is selected, there or not: its actions take
+// Enter and o.
+const relatedChosen = (c) => c.line?.related !== undefined;
 // Whether the panel shows a related item it went down to, and whether no
-// line of it is selected, when Enter and o act on that item.
+// line of it is selected, when Enter acts on that item.
 const onLevel = (c) => Boolean(c.details) && Boolean(c.drilled);
 const onLevelItem = (c) => onLevel(c) && c.line === null;
-// Whether the line hints name the line's keys: the panel has the keyboard
-// and a line is selected (else Enter and o are the item's the panel shows:
-// at the top the board's, on a level that item's; a pull request's level
-// has no lines).
-const lineHints = (c) => Boolean(c.panel) && c.line !== null;
-// What the marked line's actions aim at: that line's item, so that a read
-// that shifts the lines while the menu is open runs none on another.
-const lineAim = (c) => [c.lines[c.line] ? lineKey(c.lines[c.line]) : null];
-const lineGone = (c) => `${itemLabel(c.lines[c.line])} ist nicht mehr markiert`;
-// Whether a line of the details panel is selected and still there.
-const onLine = (c) => Boolean(c.details) && c.line !== null && Boolean(c.lines[c.line]);
+const sessionLine = (c) => c.picked?.session ?? null;
+// Whether the line hints name a related item's line's keys (else Enter and
+// o are the item's the panel shows: at the top the board's, on a level that
+// item's; on a session's line Enter goes to the session).
+const lineHints = (c) => Boolean(c.panel) && relatedChosen(c);
+// What the marked line's actions aim at: whether the line marked when the
+// menu opened (`line`) is the marked one still, found among the lines as
+// the panel finds it, so that one a read took away while the menu is open
+// runs nothing, and one whose place a read changed still runs.
+const lineAim = (c, line) => [Boolean(c.picked) && lineIndex(c.lines, line) === lineIndex(c.lines, c.line)];
+const lineGone = (c) => `${c.picked.session?.label ?? itemLabel(c.picked.related)} ist nicht mehr markiert`;
+const onLine = (c) => Boolean(c.details) && Boolean(c.picked?.related);
+const onSession = (c) => Boolean(c.details) && Boolean(sessionLine(c));
 // Whether a view shows, its data is read, and its shape has `what`.
 const has = (c, what) => Boolean(c.view && c.st?.data && c.shape?.[what]);
 
@@ -6384,10 +6821,18 @@ function hideableColumn(c) {
   return col && c.shape.canHide(col) ? col : null;
 }
 
-// What the second Enter does with the item: go to its session, or start one.
-function startName(item) {
-  if (linkedSession(item, spaces())) return "Zur Sitzung";
-  return item.kind === "pr" ? "Review starten…" : "Agent starten…";
+// The second Enter's name (secondEnter's `enter`) on its action and its
+// button: where its question has no session to go to, it only confirms a
+// start.
+export function startName(enter, item) {
+  if (enter.go) return "Zur Sitzung";
+  if (enter.ask?.some(placed)) return "Sitzung wählen";
+  return item.kind === "pr" ? "Review starten" : "Agent starten";
+}
+
+function startAction(c, item) {
+  const enter = secondEnter(c.b.sessionsNow(), item);
+  return `${startName(enter, item)}${enter.go ? "" : "…"}`;
 }
 
 // The digit keys' tabs; the first carries the hint for them all.
@@ -6478,49 +6923,54 @@ export const ACTIONS = [
     hint: (c) => (walks(c) ? c.shape.enterHint ?? "Detail · Agent" : null),
   },
   {
-    id: "start", group: "item", name: (c) => startName(c.item), key: "enter", menu: 2,
+    id: "start", group: "item", name: (c) => startAction(c, c.item), key: "enter", menu: 2,
     when: (c) => Boolean(c.item) && c.st.detail, takes: (c) => onItem(c) && c.st.detail,
     run: (b, c, cx) => b.enter(c.view, cx),
   },
   {
     id: "open", group: "item", name: "Im Browser öffnen", key: "o", menu: 7,
-    when: (c) => Boolean(c.item), takes: onItem,
+    when: (c) => Boolean(c.item), takes: (c) => Boolean(c.item) && !relatedChosen(c),
     run: (b, c, cx) => b.open(c.item, cx),
     hint: (c) => (walks(c) ? "öffnen" : null),
   },
-  // On a pull request's level, which reads no related items, the panel
-  // still has the keyboard.
-  { id: "tab-hint", hint: (c) => (c.related || c.panel ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
+  { id: "tab-hint", hint: (c) => (c.related || c.sessions || c.panel ? (c.panel ? "Board" : "Details") : null), hintKey: "Tab" },
   {
     id: "fold-description", group: "details", key: "z", menu: 9,
     name: (c) => (c.b.relatedUi.unfolded === c.details.key ? "Beschreibung weniger" : "Beschreibung mehr"),
     when: (c) => Boolean(c.details) && c.related && descriptionFolds(c.b.relatedUi, c.details),
     run: (b, c, cx) => b.toggleFold(cx),
   },
-  // The details panel's selected line (a line selected before `r` read the
-  // related items again is gone until they come: its key does nothing).
+  // The details panel's selected line: a session's goes there; a related
+  // item's (a line selected before `r` read the related items again is
+  // gone until they come: its key does nothing) shows its item.
+  {
+    id: "line-session", group: "details", name: "Zur markierten Sitzung", key: "enter", menu: 10,
+    when: onSession, takes: (c) => c.line !== null && !relatedChosen(c), aim: lineAim, gone: lineGone,
+    run: (b, c, cx) => onSession(c) && b.goToSession(sessionLine(c), cx),
+    hint: (c) => (c.panel && sessionLine(c) ? "zur Sitzung" : null),
+  },
   {
     id: "line-details", group: "details", name: "Zeile im Detailfenster zeigen", key: "enter", menu: 10,
-    when: onLine, takes: (c) => c.line !== null, aim: lineAim, gone: lineGone,
-    run: (b, c, cx) => c.lines[c.line] && b.drillLine(c.view, c.lines[c.line], cx),
+    when: onLine, takes: relatedChosen, aim: lineAim, gone: lineGone,
+    run: (b, c, cx) => onLine(c) && b.drillLine(c.view, c.picked.related, cx),
     hint: (c) => (lineHints(c) ? "Zeile zeigen" : null),
   },
   {
     id: "line-board", group: "details", name: "Zeile auf dem Board", key: null, menu: 11,
     when: onLine, aim: lineAim, gone: lineGone,
-    run: (b, c, cx) => b.enterLine(c.view, c.lines[c.line], cx),
+    run: (b, c, cx) => b.enterLine(c.view, c.picked.related, cx),
   },
   {
     id: "line-open", group: "details", name: "Zeile im Browser öffnen", key: "o", menu: 12,
-    when: onLine, takes: (c) => c.line !== null, aim: lineAim, gone: lineGone,
-    run: (b, c, cx) => c.lines[c.line] && b.open(c.lines[c.line], cx),
+    when: onLine, takes: relatedChosen, aim: lineAim, gone: lineGone,
+    run: (b, c, cx) => onLine(c) && b.open(c.picked.related, cx),
     hint: (c) => (lineHints(c) ? "Zeile öffnen" : null),
   },
-  // The item the panel went down to: Enter and o act on it where no line
-  // is selected (the line's actions come first in the table and take them
-  // while one is).
+  // The item the panel went down to: Enter acts on it where no line is
+  // selected, o where no related item's line is (the line's actions come
+  // first in the table and take them while one is).
   {
-    id: "level-start", group: "details", name: (c) => startName(c.details), key: "enter", menu: 13,
+    id: "level-start", group: "details", name: (c) => startAction(c, c.details), key: "enter", menu: 13,
     when: onLevel,
     run: (b, c, cx) => b.startSession(c.view, c.details, cx),
     hint: (c) => (onLevelItem(c) ? (c.details.kind === "pr" ? "Review" : "Agent") : null),
@@ -6529,7 +6979,7 @@ export const ACTIONS = [
     id: "level-open", group: "details", name: "Im Browser öffnen", key: "o", menu: 14,
     when: onLevel,
     run: (b, c, cx) => b.open(c.details, cx),
-    hint: (c) => (onLevelItem(c) ? "öffnen" : null),
+    hint: (c) => (onLevel(c) && !relatedChosen(c) ? "öffnen" : null),
   },
   {
     id: "hide-column", group: "view", name: (c) => `Spalte ausblenden: ${hideableColumn(c).name}`, key: null, menu: 21,
@@ -7560,6 +8010,73 @@ function watchSession(b, name, before, cx, at = 0) {
   });
 }
 
+// ==== src/ui/modals/sessions.js ====
+
+// What the second Enter asks before the start dialog where the item has
+// sessions but none sure in a terminal (Board.startSession, secondEnter's
+// ask): it names them, and offers to go to each one in a terminal, to
+// start a new session anyway (the start dialog) or to cancel (Esc too);
+// one in no terminal has no row to go to. Opened as b.modal = { kind:
+// "sessions", view, item, sessions, at }; j/k and Enter, a digit or a click
+// pick a row.
+
+const goText = (s, depth) =>
+  [s.label, ...(depth > 0 ? [sessionReasons(s)] : []), ...(depth > 1 && s.paneNumber ? [`Pane ${s.paneNumber}`] : [])].filter(Boolean).join(" · ");
+
+function goDetail(s, all) {
+  let depth = 0;
+  while (depth < 2 && all.some((o) => o !== s && goText(o, depth) === goText(s, depth))) depth++;
+  return goText(s, depth);
+}
+
+function choicesOf(m) {
+  const there = m.sessions.filter(placed);
+  return [
+    ...there.map((session) => ({ go: session, name: "Zur Sitzung springen", detail: goDetail(session, there) })),
+    { start: true, name: "Trotzdem neue Sitzung starten", detail: "" },
+    { name: "Abbrechen", detail: "" },
+  ];
+}
+
+function pickChoice(b, m, i, cx) {
+  const choice = choicesOf(m)[i];
+  if (!choice) return;
+  b.closeModal(cx);
+  if (choice.go) b.goToSession(choice.go, cx);
+  else if (choice.start) startModal.open(b, m.view, m.item, cx);
+}
+
+const foundLine = (s) => [`${s.sure ? "●" : `${CANDIDATE_CHIP}:`} ${s.label}`, sessionReasons(s)].filter(Boolean).join(" · ");
+
+export const sessionsModal = {
+  open(b, view, item, sessions, cx) {
+    b.modal = { kind: "sessions", view, item, sessions, at: 0 };
+    cx.notify();
+  },
+
+  render(b, t) {
+    const m = b.modal;
+    return menu(t, {
+      id: "sessions",
+      rowId: "sessions",
+      width: 460,
+      title: `Sitzung zu ${itemLabel(m.item)}`,
+      head: [
+        menuNote(t, "Keine Sitzung, die sicher daran arbeitet, in einem Terminal. Gefunden:", t.muted),
+        ...m.sessions.map((s, i) => div().id(`sessions-found-${i}`).px(8).truncate().text_size(12).text_color(t.foreground).child(foundLine(s))),
+      ],
+      at: m.at,
+      pick: (i, cx) => pickChoice(b, m, i, cx),
+      rows: choicesOf(m).map((c) => [
+        div().flex_none().child(c.name),
+        div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(c.detail),
+      ]),
+    });
+  },
+
+  key: (b, e, cx) => menuKey(e, cx, b.modal, choicesOf(b.modal).length, (i, cx) => pickChoice(b, b.modal, i, cx)),
+};
+
 // ==== src/ui/modals/status.js ====
 
 // The status menu: the columns a card may go to, or the states an item may
@@ -7612,7 +8129,7 @@ export const statusModal = {
 // keyboard before its fields (Board.takeKeyboard). A new dialog is a module
 // here and its entry in MODALS.
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, sessions: sessionsModal };
 
 // ==== src/ui/shapes/backlog.js ====
 
@@ -7699,7 +8216,7 @@ export const backlogShape = {
 function drawBacklog(b, t, mono, view, st) {
   const data = st.data;
   const [col] = backlogColumns(b, st);
-  const allSpaces = spaces();
+  const sessions = b.sessionsNow();
   const cell = (w, text, color = t.muted) => div().w(w).flex_none().truncate().text_size(12).text_color(color).child(text);
   const head = v_flex()
     .id("backlog-head")
@@ -7722,7 +8239,7 @@ function drawBacklog(b, t, mono, view, st) {
   }
   const row = (r) => {
     const selected = st.sel?.key === r.key;
-    const session = linkedSession(r, allSpaces);
+    const session = itemSessions(sessions, r)[0] ?? null;
     const line = typeLine(t, r, data.meta.typeColors?.[r.type]);
     return h_flex()
       .id(`row-${r.key}`)
@@ -8040,7 +8557,7 @@ function cardMeasure(b, kept, layout, card, i) {
 
 function drawBoard(b, t, mono, view, st) {
   const cols = b.navColumns(view);
-  const allSpaces = spaces();
+  const sessions = b.sessionsNow();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const { windowed } = boardState(b);
   const states = columnsKept(b, cols.map((c) => c.id));
@@ -8054,7 +8571,7 @@ function drawBoard(b, t, mono, view, st) {
     const at = windowed ? scrollOf(kept.scroll) : null;
     const layout = at && columnLayout(b, col, kept, at.width);
     if (at) placeBand(kept.band, layout.content, at);
-    const whole = (card, measure) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure);
+    const whole = (card, measure) => drawCard(b, t, mono, view, st, card, col, ci, sessions, measure);
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -8185,13 +8702,13 @@ export function cardHeightGuess(card, width) {
   return 2 * (CARD.py + CARD.border) + rowTops(lines, CARD.lineGap).content;
 }
 
-function drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure) {
+function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const type = typeChip(t, card);
   const labels = cardLabels(card);
   const line = typeLine(t, card, null, 6);
-  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  const end = cardEnd(t, card, itemSessions(sessions, card)[0] ?? null, Boolean(st.pending[card.key]));
   const chips = [...(type ? [type] : []), ...labels.slice(0, 3).map((l) => labelChip(t, card, l)), ...(labels.length > 3 ? [chip(t, `+${labels.length - 3}`)] : [])];
   const meta = cardMeta(t, card, partOfText(card));
   return h_flex()
@@ -8622,7 +9139,7 @@ function drawSprint(b, t, mono, view, st) {
   const rows = shownRows(data, open);
   const counts = rowCounts(data, open);
   const stories = sprintStories(data);
-  const allSpaces = spaces();
+  const sessions = b.sessionsNow();
   const none = sprintIs(data) === "none";
   const head = h_flex()
     .id("sprint-head")
@@ -8658,7 +9175,7 @@ function drawSprint(b, t, mono, view, st) {
       .flex_1()
       .min_w(0)
       .gap(6)
-      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, allSpaces))))));
+      .children(col.shown.filter((card) => card.row === r.key).map((card) => drawTask(b, t, mono, view, st, card, ci + 1, col, sessions))))));
   return v_flex()
     .flex_1()
     .min_h(0)
@@ -8716,10 +9233,10 @@ function storyCell(b, t, mono, view, st, r, nav, folded, counts) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
-function drawTask(b, t, mono, view, st, card, ci, col, allSpaces) {
+function drawTask(b, t, mono, view, st, card, ci, col, sessions) {
   const selected = st.sel?.key === card.key;
   const line = typeLine(t, card, st.data.meta.typeColors?.[card.type], 6);
-  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  const end = cardEnd(t, card, itemSessions(sessions, card)[0] ?? null, Boolean(st.pending[card.key]));
   // In its story's row the row names the parent.
   const meta = cardMeta(t, card, card.row === NO_STORY ? partOfText(card) : null);
   return h_flex()
@@ -9268,6 +9785,10 @@ const OUTSIDE_BUTTONS = ["left", "right", "middle", "back", "forward"];
 // render sees the copy be hidden, and none may come when it comes to show:
 // this timer sees both, and a render that comes first sees the show too.
 export const WATCH_MS = 250;
+// How often a copy that shows reads the Claude sessions again (readClaude),
+// and how long each run of sh for them may take.
+export const CLAUDE_MS = 15000;
+const CLAUDE_TIMEOUT_MS = 10000;
 // How often a copy that shows asks its shape's bandsLeft (shapes/index.js),
 // from the look that sees it show to the one that sees it hidden
 // (watchShown): herdr tells a script of no drag of a scrollbar's thumb.
@@ -9362,6 +9883,10 @@ export default class Board extends View {
     this.panel = null;
     // Whether the last key was a `g`, the first of gg (edgeKey).
     this.afterG = false;
+    this.claude = null;
+    this.claudeReading = false;
+    this.claudeSeen = null;
+    this.drawnSessions = null;
     this.filterInput = InputState.new({ placeholder: "Filter: Text in Titel, Schlüssel, Labels …" });
     this.filterInput.on("change", (_e, cx) => {
       this.filterText = this.filterInput.value();
@@ -9407,8 +9932,11 @@ export default class Board extends View {
       // A safety net: details that came to show by a way that did not read
       // their related items (readRelated) are read here.
       this.guarded("Details", () => boardShown(this.isLayer()) && this.readRelated(cx));
+      this.guarded("Sitzungen", () => boardShown(this.isLayer()) && this.followSessions(cx));
     });
+    cx.timer.every(CLAUDE_MS, (cx) => this.guarded("Sitzungen", () => boardShown(this.isLayer()) && this.readClaude(cx)));
     this.reload(cx);
+    this.readClaude(cx);
   }
 
   // At init, and again after a load of keys.json dropped the bindings (the
@@ -9441,7 +9969,7 @@ export default class Board extends View {
   // carries the board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
-    return !this.filtering && this.readsRelated(this.detailsRoot());
+    return !this.filtering && this.panelTakes(this.detailsRoot());
   }
 
   // Tab and shift-Tab (`back`), while the board takes them (takesTab): the
@@ -9781,6 +10309,10 @@ export default class Board extends View {
     return Boolean(item && this.sources[item.source]?.related?.reads(item));
   }
 
+  panelTakes(item) {
+    return this.readsRelated(item) || (Boolean(item) && itemSessions(this.sessionsNow(), item).length > 0);
+  }
+
   // Whether the item is a pull request whose details its source reads for
   // the panel to go down to (its pullRequest.reads, related.js).
   readsPullRequest(item) {
@@ -9890,10 +10422,11 @@ export default class Board extends View {
 
   // The details panel's keyboard while it has it in `view`, for the item
   // whose details show there; else null, when the board has it: { view,
-  // key (the item's), line (the line selected, null for none), levels (the
-  // levels it went down to: drillLine) }. Once it is not theirs (another
-  // view or item, one without related items, or the details closed) it is
-  // dropped, so that it does not come back with them, nor do its levels.
+  // key (the item's), line (the line selected, by what it is: lineId; null
+  // for none), levels (the levels it went down to: drillLine) }. Once it is
+  // not theirs (another view or item, one without related items or
+  // sessions, or the details closed) it is dropped, so that it does not
+  // come back with them, nor do its levels.
   panelOf(view) {
     const p = this.panelIn(view);
     if (!p) this.panel = null;
@@ -9906,24 +10439,27 @@ export default class Board extends View {
   panelIn(view) {
     const p = this.panel;
     const st = this.state(view.id);
-    return p && p.view === view.id && st.detail && st.sel?.key === p.key && this.readsRelated(this.selected(view)) ? p : null;
+    return p && p.view === view.id && st.detail && st.sel?.key === p.key && this.panelTakes(this.selected(view)) ? p : null;
   }
 
   // Tab, where the board takes it for the panel (takesTab: the details of
-  // an item with related items to read show): the keyboard into the details
-  // panel, no line selected, or back to the board where the panel has it,
-  // which closes the levels it went down to: the board's keys act on its
-  // selected item, whose details then show again.
+  // an item with related items to read or with sessions show): the
+  // keyboard into the details panel, no line selected, or back to the board
+  // where the panel has it, which closes the levels it went down to: the
+  // board's keys act on its selected item, whose details then show again.
   togglePanel(view) {
     const item = this.detailsRoot();
     this.panel = this.panelOf(view) ? null : { view: view.id, key: item.key, line: null, levels: [] };
   }
 
-  // The lines of the related items that show in `view` (relatedLines), of
-  // the level the panel shows; none on a pull request's.
+  // The lines of the level the panel shows (a pull request's has no related
+  // items).
   linesOf(view) {
     const item = this.levelItem(view);
-    return relatedLines(this.readsRelated(item) ? this.relatedOf(view, item)?.data : null);
+    return {
+      related: relatedLines(this.readsRelated(item) ? this.relatedOf(view, item)?.data : null),
+      sessions: itemSessions(this.sessionsNow(), item),
+    };
   }
 
   // A key while the details panel has the keyboard: j/k or the arrows walk
@@ -9935,15 +10471,18 @@ export default class Board extends View {
   // line are actions (commands.js: line-details, line-open).
   panelKey(view, panel, k) {
     const dir = { j: 1, down: 1, k: -1, up: -1 }[k];
-    const lines = this.linesOf(view);
     if (dir) {
+      const lines = this.linesOf(view);
+      const at = lineIndex(lines, panel.line);
       const item = this.levelItem(view);
       const entry = this.relatedOf(view, item);
       const ui = this.relatedUi;
-      if (panel.line === null && (dir < 0 || !lines.length || !lineShows(ui, item, entry, 0))) scrollBy(ui, dir * LINE_PX);
+      // A session's line stands below the block, always in view.
+      if (at === null && (dir < 0 || !lineCount(lines) || (lines.related.length && !lineShows(ui, item, entry, 0)))) scrollBy(ui, dir * LINE_PX);
       else {
-        panel.line = stepLine(panel.line, dir, lines.length);
-        if (panel.line !== null) revealLine(ui, item, entry, panel.line);
+        const next = stepLine(at, dir, lineCount(lines));
+        panel.line = next === null ? null : lineId(lineAt(lines, next));
+        if (next !== null) revealLine(ui, item, entry, next);
       }
       return true;
     }
@@ -9992,11 +10531,10 @@ export default class Board extends View {
     // window's too, which takes its height from the content.
     restoreScroll(ui, item.key, back);
     ui.unfolded = back.unfolded;
-    if (entry?.data) {
-      const at = relatedLines(entry.data).findIndex((l) => sameItem(l, from));
-      panel.line = at < 0 ? null : at;
-    } else panel.line = back.line;
-    if (panel.line !== null) revealLine(ui, item, entry, panel.line);
+    if (entry?.data) panel.line = relatedLines(entry.data).some((l) => sameItem(l, from)) ? lineId({ related: from }) : null;
+    else panel.line = back.line;
+    const at = lineIndex(this.linesOf(view), panel.line);
+    if (at !== null) revealLine(ui, item, entry, at);
   }
 
   // "Zeile auf dem Board" (commands.js, line-board; the panel's button):
@@ -10009,17 +10547,17 @@ export default class Board extends View {
     const place = placeOf(this.navColumns(view), line);
     if (!place) return this.say(`${itemLabel(line)} ist nicht auf dem Board`, "info", cx);
     this.choose(view, place, cx);
-    this.panel = this.readsRelated(this.selected(view)) ? { view: view.id, key: place.key, line: null, levels: [] } : null;
+    this.panel = this.panelTakes(this.selected(view)) ? { view: view.id, key: place.key, line: null, levels: [] } : null;
   }
 
   // A click on line `at` of the related items: the keyboard into the panel
   // on that line (at the level it shows), and Enter on it.
   pickLine(view, at, cx) {
     const item = this.detailsRootOf(view);
-    const line = this.linesOf(view)[at];
+    const line = this.linesOf(view).related[at];
     if (!item || !line) return;
     this.panel = this.panelOf(view) ?? { view: view.id, key: item.key, line: null, levels: [] };
-    this.panel.line = at;
+    this.panel.line = lineId({ related: line });
     this.handle.focus();
     this.drillLine(view, line, cx);
     cx.notify();
@@ -10029,8 +10567,9 @@ export default class Board extends View {
   // its top, with no line selected, or its bottom, on its last line where it
   // has lines.
   panelEdge(view, panel, end) {
-    const count = this.linesOf(view).length;
-    panel.line = end === "bottom" && count ? count - 1 : null;
+    const lines = this.linesOf(view);
+    const count = lineCount(lines);
+    panel.line = end === "bottom" && count ? lineId(lineAt(lines, count - 1)) : null;
     scrollToEnd(this.relatedUi, end);
   }
 
@@ -10110,6 +10649,14 @@ export default class Board extends View {
 
   keepSelection(view) {
     this.reselect(view, selectionAfter(this.navColumns(view), this.state(view.id).sel));
+  }
+
+  // The details panel's selected line as it stands now: it follows its
+  // session, or goes with it (lineNow). A draw takes it before its hint
+  // line reads the line, as each action's key does (keptContext).
+  keepLine(view) {
+    const panel = this.panelOf(view);
+    if (panel) panel.line = lineNow(this.linesOf(view), panel.line);
   }
 
   // A selection the board sets by itself, which is no choice (clickItem).
@@ -10240,7 +10787,7 @@ export default class Board extends View {
     if (col >= 0) this.choose(view, { col, key }, cx);
   }
 
-  // Enter: details first, then the item's session (go to it, or start one).
+  // Enter: details first, then the item's session (startSession).
   enter(view, cx) {
     const st = this.state(view.id);
     const item = this.selected(view);
@@ -10253,26 +10800,61 @@ export default class Board extends View {
     this.startSession(view, item, cx);
   }
 
-  // The session of `item` (the selected one, or the one the details panel
-  // went down to): go to it, or start one.
+  // `item`: the selected one, or the one the details panel went down to.
   startSession(view, item, cx) {
     if (!itemKey(item)) return this.say("Entwurf ohne Repo: erst in ein Issue umwandeln", "info", cx);
-    const session = linkedSession(item, spaces());
-    if (!session) return MODALS.start.open(this, view, item, cx);
+    const enter = secondEnter(this.sessionsNow(), item);
+    if (enter.go) return this.goToSession(enter.go, cx);
+    if (enter.ask) return MODALS.sessions.open(this, view, item, enter.ask, cx);
+    MODALS.start.open(this, view, item, cx);
+  }
+
+  goToSession(session, cx) {
+    if (!placed(session)) return this.say(`${session.label}: kein Terminal gefunden`, "info", cx);
+    const { space: id, tab: tabId, pane } = session.place;
     // The session may be the tab behind the board layer, which selecting
     // it does not show; leaving the layer first keeps its pane.focus from
     // undoing the selection. (A copy in a tab gets keys only while the
     // layer does not cover it, so there this does nothing.)
     layers.leaveLayer();
     try {
-      run("space.select", { id: session.space });
-      if (session.tab) run("tab.select", { id: session.tab });
+      run("space.select", { id });
+      if (tabId) run("tab.select", { id: tabId });
+      if (pane) run("pane.focus", { pane });
     } catch (e) {
-      const space = spaces().find((s) => s.id === session.space);
-      const tab = space?.tabs.find((t) => t.id === session.tab);
-      const named = `Space „${space?.name ?? session.space}“, Tab „${tab?.name ?? session.tab ?? "–"}“`;
+      const space = spaces().find((s) => s.id === id);
+      const tab = space?.tabs.find((t) => t.id === tabId);
+      const named = `Space „${space?.name ?? id}“, Tab „${tab?.name ?? tabId ?? "–"}“`;
       notify({ title: `Sitzung nicht gezeigt: ${named}`, body: errorText(e), level: "error" });
     }
+  }
+
+  sessionsNow() {
+    return this.drawnSessions ?? sessionIndex({ spaces: spaces(), panes: panes(), terminals: terminals(), claude: this.claude });
+  }
+
+  sessionsSeen() {
+    const f = focused();
+    return JSON.stringify([f?.space ?? null, f?.tab ?? null, f?.pane ?? null, spaces().map((s) => s.tabs?.length ?? 0)]);
+  }
+
+  followSessions(cx) {
+    if (!this.claudeReading && this.sessionsSeen() !== this.claudeSeen) this.readClaude(cx);
+  }
+
+  readClaude(cx) {
+    if (this.claudeReading || checking()) return;
+    this.claudeReading = true;
+    this.claudeSeen = this.sessionsSeen();
+    const runSh = (args, kind) => call("sh", args, null, CLAUDE_TIMEOUT_MS, what(null, kind));
+    cx.spawn(async (cx) => {
+      try {
+        this.claude = await readClaudeSessions(runSh);
+      } finally {
+        this.claudeReading = false;
+        cx.notify();
+      }
+    });
   }
 
   // Whether this copy is the board layer's: its block's props say so.
@@ -10348,7 +10930,8 @@ export default class Board extends View {
 
   // At every look (a render or the WATCH_MS timer, see there): a copy that
   // was not shown and now shows takes the keyboard once, whoever showed it,
-  // after the look and only where it still shows; it starts its BAND_MS
+  // after the look and only where it still shows, and reads the Claude
+  // sessions after the look (never in a render); it starts its BAND_MS
   // timer and the prefetch at once. While hidden, the timer stops and the
   // layer's board forgets the focus it compared with (followFocus), so it
   // starts anew when it shows.
@@ -10365,6 +10948,7 @@ export default class Board extends View {
     if (was !== false) return;
     this.followBandsWhile(true, cx);
     this.schedulePrefetch(cx);
+    cx.timer.after(0, (cx) => this.guarded("Sitzungen", () => this.readClaude(cx)));
     cx.timer.after(0, () => this.guarded("Tastatur", () => {
       if (boardShown(this.isLayer())) this.takeKeyboard();
     }));
@@ -10405,19 +10989,23 @@ export default class Board extends View {
     const panel = view ? this.panelOf(view) : null;
     const details = view ? this.levelItem(view) : null;
     const levels = panel?.levels ?? [];
+    const lines = panel ? this.linesOf(view) : null;
     return {
       b: this, view, st, shape: view ? this.shape(view) : null, item: view ? this.selected(view) : null, details,
-      related: this.readsRelated(details), panel, line: panel?.line ?? null, lines: panel ? this.linesOf(view) : [],
+      related: this.readsRelated(details), sessions: details ? itemSessions(this.sessionsNow(), details).length : 0,
+      panel, lines, line: panel?.line ?? null, picked: panel ? pickedLine(lines, panel.line) : null,
       drilled: levels.length > 0, trail: details ? [this.detailsRootOf(view).key, ...levels.map((l) => l.item.key)] : null,
     };
   }
 
   // The moment an action runs in as its key runs it, the step the keys
   // (key), the menu's opening (openCommands) and its actions (runAction)
-  // share: the board keeps its selection first (keepSelection).
+  // share: the board keeps its selection first (keepSelection), and the
+  // panel its line (keepLine).
   keptContext() {
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);
+    if (view) this.keepLine(view);
     return this.actionContext();
   }
 
@@ -10430,7 +11018,7 @@ export default class Board extends View {
   // column), the menu says so and runs nothing.
   runAction(entry, cx) {
     const c = entry.action.bar ? this.actionContext() : this.keptContext();
-    if (aimOf(entry.action, c) !== entry.aim) this.say(groupAimOf(entry.action, c) === entry.groupAim ? entry.gone : entry.groupGone, "info", cx);
+    if (aimOf(entry.action, c, entry.line) !== entry.aim) this.say(groupAimOf(entry.action, c) === entry.groupAim ? entry.gone : entry.groupGone, "info", cx);
     else if (!entry.action.when(c)) this.say(`„${entry.name}“ geht hier nicht mehr`, "info", cx);
     else entry.action.run(this, c, cx);
     cx.notify();
@@ -10551,14 +11139,23 @@ export default class Board extends View {
 
   // ---- drawing ----
 
-  // When herdr renders a copy, and why the WATCH_MS timer looks too: see
-  // WATCH_MS.
   render(cx) {
+    this.drawnSessions = null;
+    this.drawnSessions = this.sessionsNow();
+    try {
+      return this.drawAll(cx);
+    } finally {
+      this.drawnSessions = null;
+    }
+  }
+
+  drawAll(cx) {
     this.watchShown(cx);
     this.followFocus(cx);
     const t = theme();
     const mono = settings().font_family ?? "JetBrains Mono";
     const view = this.view();
+    if (view) this.keepLine(view);
     const st = view ? this.state(view.id) : null;
     const item = st?.detail && view ? this.selected(view) : null;
     let out = v_flex().id("board").track_focus(this.handle);
@@ -10807,17 +11404,15 @@ export default class Board extends View {
     const panel = this.panelOf(view);
     const levels = panel?.levels ?? [];
     const item = levels.length ? this.levelItem(view) : root;
-    const session = linkedSession(item, spaces());
-    // The rows of its own beside the header: the shape's (chips beside the
-    // author, sections, buttons), or a level's (levelParts).
+    const sessions = this.sessionsNow();
+    const enter = secondEnter(sessions, item);
     const parts = (levels.length ? levelParts(this, t, view, item, this.relatedOf(view, item)) : this.shape(view).detailParts?.(this, t, view, item)) ?? {};
     const settings = startSettings(this.config, view, item.repo);
     const firstMessage = renderTemplate(item.kind === "pr" ? settings.review : settings.message, templateVars(item));
-    const startLabel = session ? "Zur Sitzung ↵" : item.kind === "pr" ? "Review starten ↵" : "Agent starten ↵";
-    // The panel's selected line, where it has one.
-    const line = panel && panel.line !== null ? this.linesOf(view)[panel.line] ?? null : null;
-    // The way down where the panel went down, else the item's label; and
-    // its branch, as the PR list's details name a pull request's.
+    const startLabel = `${startName(enter, item)} ↵`;
+    const lines = panel ? this.linesOf(view) : null;
+    const picked = panel ? pickedLine(lines, panel.line) : null;
+    const listed = itemSessions(sessions, item);
     const top = `${levels.length ? pathLabel(root, levels.map((l) => l.item)) : itemLabel(item)}${item.branch ? ` · ${item.branch}` : ""}`;
     return v_flex()
       .id("detail")
@@ -10860,28 +11455,8 @@ export default class Board extends View {
           .when((item.assignees ?? []).length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`zugewiesen: ${item.assignees.join(", ")}`))),
       )
       .children(parts.sections ?? [])
-      .when(this.readsRelated(item), (el) => el.child(relatedSections(this, t, mono, view, item, this.relatedOf(view, item), panel?.line ?? null)))
-      .child(
-        detailSection(
-          t,
-          "SITZUNG",
-          session
-            ? h_flex()
-              .gap(8)
-              .items_center()
-              .px(10)
-              .py(8)
-              .rounded(8)
-              .border_1()
-              .border_color(t.border)
-              .bg(t.background)
-              .child(div().size(8).flex_none().rounded(4).bg(t[session.status] ?? t.idle))
-              .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(12).child(session.label))
-              .child(div().text_size(12).text_color(t.muted).child(AGENT_STATUS[session.status] ?? ""))
-            : div().text_size(12).text_color(t.muted).line_height("18px")
-              .child(firstMessage ? `Noch keine Sitzung. Enter startet eine mit „${firstMessage}“.` : "Noch keine Sitzung. Enter startet eine."),
-        ),
-      )
+      .when(this.readsRelated(item), (el) => el.child(relatedSections(this, t, mono, view, item, this.relatedOf(view, item), picked?.related ? lineIndex(lines, panel.line) : null)))
+      .child(this.sessionSection(t, mono, listed, picked?.session ? placeKey(picked.session) : null, enter, firstMessage, sessions.notes))
       .child(div().flex_1())
       .child(
         h_flex()
@@ -10898,13 +11473,50 @@ export default class Board extends View {
             this.enter(view, cx);
           }))
           .children(parts.buttons ?? [])
-          .when(Boolean(line), (el) => el.child(button(t, "act-line-board", "Zeile auf dem Board", false, (cx) => {
-            if (!this.modal) this.enterLine(view, line, cx);
+          .when(Boolean(picked?.related), (el) => el.child(button(t, "act-line-board", "Zeile auf dem Board", false, (cx) => {
+            if (!this.modal) this.enterLine(view, picked.related, cx);
           })))
           .child(button(t, "act-open", `${this.sources[item.source].site} o`, false, (cx) => {
             if (!this.modal) this.open(item, cx);
           })),
       );
+  }
+
+  sessionSection(t, mono, listed, markedKey, enter, firstMessage, notes) {
+    const row = (s, i) => h_flex()
+      .id(`session-${i}`)
+      .gap(8)
+      .items_center()
+      .px(10)
+      .py(8)
+      .rounded(8)
+      .border_1()
+      .map(selectedLook(t, placeKey(s) === markedKey, t.border, t.background))
+      .cursor_pointer()
+      .hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => {
+        if (!this.modal) this.goToSession(s, cx);
+      })
+      .child(s.sure ? div().size(8).flex_none().rounded(4).bg(t[s.status] ?? t.idle) : div().size(8).flex_none().rounded(4).border_1().border_color(t.muted))
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(div().truncate().font_family(mono).text_size(12).child(s.label))
+        .child(div().truncate().text_size(11).text_color(t.muted).child(sessionReasons(s))))
+      .child(div().flex_none().text_size(12).text_color(t.muted).child(s.sure ? AGENT_STATUS[s.status] ?? "" : CANDIDATE));
+    const withMessage = firstMessage ? ` mit „${firstMessage}“` : "";
+    const start = !enter.ask
+      ? `Noch keine Sitzung. Enter startet eine${withMessage}.`
+      : enter.ask.some(placed)
+        ? `Enter fragt: zu einer davon springen oder eine neue Sitzung starten${withMessage}.`
+        : `Keine davon in einem Terminal. Enter fragt, bevor es eine neue Sitzung${withMessage} startet.`;
+    const note = (text, i) => div().id(`session-note-${i}`).text_size(11).text_color(toneColor(t, NOTE_TONES.warning)).child(text);
+    const more = notes.length > 3 ? [`… und ${notes.length - 3} weitere`] : [];
+    return detailSection(
+      t,
+      "SITZUNG",
+      ...listed.map(row),
+      ...(enter.go ? [] : [div().text_size(12).text_color(t.muted).line_height("18px").child(start)]),
+      ...[...notes.slice(0, 3), ...more].map(note),
+    );
   }
 
   // The hint line: the keys of what shows now, as the action table says

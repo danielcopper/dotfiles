@@ -475,8 +475,9 @@ by that run. Which files of the package git tracks is set in the root
   busy, so a switch to such a tab shows it at once. After that a view
   refreshes only while it shows, as above. While a read of the shown view
   runs, `↻` turns, and an empty view shows a spinner before "Lädt …". Each
-  gh, az and sh run (checkout, the Repo field's repos, finding gh and az) writes
-  one line to herdr's log (console.log), without its arguments: `board:
+  gh, az and sh run (checkout, the Repo field's repos, finding gh and az, the
+  Claude Code sessions and their task lists) writes one line to herdr's log
+  (console.log), without its arguments: `board:
   <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `v` a team's Sprint and Backlog, `m`
   turns "nur meine" on and off (the source toggle, the tabs, the switch and
@@ -641,18 +642,19 @@ by that run. Which files of the package git tracks is set in the root
   the parent lives in another repo; on Azure its id and title), its type and
   labels (or a work item's state), and its progress: "14 / 25", a bar of one
   segment per sub-issue (one continuous bar above 30), its done part green, and
-  "56 %", rounded down. Its session, "speichert …" while a change of it is
-  written, and its assignees end its progress line, or its chips' line where it
-  has no progress. On the Sprint a story's progress counts the tasks in its row,
-  done by the state their column shows, and a task names its parent only in
-  "Ohne Story" (its story's row names it otherwise); the Sprint reads, in one
-  query more, its tasks' parents outside it with each refresh and the titles of
-  its stories' parents where it does not keep them; it keeps those for four
-  hours (`r` reads them again). The board's query reads priority, milestone and
-  parent at no extra cost; the header's "Calls:" says why. Where
-  `project.priorityField` names a field the project does not have as a
-  single-select field, a warning above the columns says so; the default
-  "Priority" may be missing without one.
+  "56 %", rounded down. Its session (a sure one by what its agent does, in that
+  status's color; "○ Kandidat" where it has only likely ones), "speichert …"
+  while a change of it is written, and its assignees end its progress line, or
+  its chips' line where it has no progress. On the Sprint a story's progress
+  counts the tasks in its row, done by the state their column shows, and a
+  task names its parent only in "Ohne Story" (its story's row names it
+  otherwise); the Sprint reads, in one query more, its tasks' parents outside
+  it with each refresh and the titles of its stories' parents where it does
+  not keep them; it keeps those for four hours (`r` reads them again). The
+  board's query reads priority, milestone and parent at no extra cost; the
+  header's "Calls:" says why. Where `project.priorityField` names a field the
+  project does not have as a single-select field, a warning above the columns
+  says so; the default "Priority" may be missing without one.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,
@@ -729,10 +731,11 @@ by that run. Which files of the package git tracks is set in the root
   there, the description on a view that folds nothing of its own. What reading
   them costs and what a refresh keeps of them, the header of
   `mods/board/src/main.js` says; `r` reads them again while they are open.
-  While they show, `Tab` moves the keyboard into the details panel and back
-  (`Esc` gives it back too; elsewhere, and while the filter is typed, `Tab`
-  stays herdr's): there
-  `j/k` walk those lines, each scrolled into view; with no line selected they
+  While they show, or the details list a session (on any item), `Tab` moves
+  the keyboard into the details panel and back (`Esc` gives it back too;
+  elsewhere, and while the filter is typed, `Tab` stays herdr's): there
+  `j/k` walk those lines, each scrolled into view, and then the sessions'
+  lines under "SITZUNG", which always show; with no line selected they
   scroll the details a line, `j` until the first line shows whole, which it
   then selects. `ctrl-d` and `ctrl-u` scroll half the details' height, `gg`
   and `Home` go to the panel's top with no line selected, `G` and `End` to
@@ -765,11 +768,19 @@ by that run. Which files of the package git tracks is set in the root
   again; a level whose item is no longer among the lines of the level above
   goes, and the board says so, where those lines came whole (lines that could
   not all be read, or were cut short, decide nothing). `Enter` opens the
-  details, a second `Enter` goes to the item's session or starts one: a new tab
-  on the chosen machine, in the repo's checkout (for an item without a repo, in
-  the repo chosen under "Repo"), whose agent gets the first message views.json
-  sets (`/implement <n>`, `/pr-review <n>` for a pull request) and makes its own
-  worktree. In the start dialog `Enter` starts the session from every field. The
+  details, a second `Enter` goes to the item's most urgent sure session that
+  has a place to go to (blocked, done, working, idle); where it has none but
+  other sessions (sure ones in no terminal, likely ones), it first names them
+  and offers "Zur Sitzung springen" for each in a terminal, "Trotzdem neue
+  Sitzung starten" and "Abbrechen" (`j/k` and `Enter`, a digit or a click;
+  `Esc` cancels); its action and button say "Sitzung wählen" where one of
+  them is in a terminal, else "Agent starten" ("Review starten" for a pull
+  request), as the question then only confirms a start. With no session at all, or "Trotzdem neue Sitzung
+  starten", it starts one: a new tab on the chosen machine, in the repo's
+  checkout (for an item without a repo, in the repo chosen under "Repo"),
+  whose agent gets the first message views.json sets (`/implement <n>`,
+  `/pr-review <n>` for a pull request) and makes its own worktree. In the
+  start dialog `Enter` starts the session from every field. The
   first message grows with its text up to six lines and then scrolls
   (`PageUp`/`PageDown`, herdr's own keys there); shift-`Enter` breaks the line.
   The board binds `Enter` in the message's own key context (why: the comment
@@ -818,7 +829,42 @@ by that run. Which files of the package git tracks is set in the root
   title too: the board binds them in its own key context, as the leader does
   (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
   The tab is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
-  item), which is how the board finds it again. A status change shows at once
+  item), which is one way the board finds it again. The details' "SITZUNG"
+  lists every session of the item, the sure ones (a dot in their agent's
+  status color, and that status) before the likely ones (a ring and
+  "Kandidat"), one per place with every reason it was found by; a click, or
+  `Enter` on its line in the details panel, goes there (its space, tab and
+  pane). Sure: the item's key (`tender#3000`, `AB#101`, `!57`) in a
+  space's, tab's or pane's name, or a bare `#3000` there in a folder of the
+  item's repo; on GitHub its number in the branch of any terminal in a folder
+  of its repo (a part that starts with `3000-`, or a last part `3000`; a pull
+  request's own head branch) or in a worktree's folder below
+  `<repo>.worktrees/` (its first two parts there); the name of a Claude Code
+  session running on this machine that names the item so. Likely: an open
+  task in such a session's task list, or a terminal's title, that names it
+  so. A number stands alone (`#12` is not in `#123`), and an Azure work item
+  counts only by its whole key. A Claude session shows in the pane whose
+  terminal runs its process or one of that process's parents; else, where it
+  is the only Claude session in its folder not found by its process, in the
+  one pane on this machine in that folder whose agent reports itself as
+  Claude Code and runs no other session; where neither is found, it is
+  listed with "kein Terminal gefunden". A Claude session in no terminal
+  shows the status Claude Code writes (busy and shell: "arbeitet", waiting:
+  "wartet auf dich", idle: "bereit"); one in a pane shows that pane's, like
+  any place, and Claude Code's where the pane has none. "SITZUNG" names a
+  status Claude Code does not write. The board reads the files of the
+  sessions whose process runs (`~/.claude/sessions/<pid>.json`, or under
+  `CLAUDE_CONFIG_DIR`; never the `.key` files beside them) and, where `ps`
+  runs, is Claude Code's by `ps`'s name for it (`claude`, `claude.exe`, a
+  version number as the native install's binary is named, or node's with
+  Claude Code in its arguments; "SITZUNG" names a file of another program's
+  process, and without `ps` that every file is taken unchecked), `ps`'s
+  processes and those sessions' task lists (`tasks/session-<the id's first
+  eight characters>/`) with sh, off the draw (when, and what it costs: the
+  header of `mods/board/src/main.js`); a draw looks each card up in an index
+  it makes once. A file it cannot read, or not in the shape Claude Code
+  writes, is left out, as is the rest of an output herdr cut short, and
+  "SITZUNG" says so. A status change shows at once
   and is written to GitHub or Azure; a refusal moves the card back (or sets the
   state back) with the error, and a write without a clear answer refreshes the
   board and then says where the card is, or which state the work item has. A

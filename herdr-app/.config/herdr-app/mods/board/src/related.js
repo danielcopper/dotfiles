@@ -40,7 +40,8 @@
 // list's details do; the Board keeps them as { pr } beside the related
 // items.
 
-import { cardLabel, relativeLabel } from "./shared.js";
+import { cardLabel, lineKey, relativeLabel } from "./shared.js";
+import { fits, placeKey } from "./sessions.js";
 
 // What a view keeps of its related items after a refresh starts: only
 // those of the item whose details show (`openKey`, null when none) and of
@@ -84,6 +85,55 @@ export function stepLine(line, dir, count) {
   const next = line + dir;
   return next < 0 ? null : Math.min(next, count - 1);
 }
+
+// The details panel's lines are { related (relatedLines), sessions
+// (itemSessions) }, walked in that order. The panel keeps its selected line
+// by what it is (lineId), not by where it stands: the lines move when the
+// related items come, the sessions sort anew or the Claude sessions are
+// read again. A session's place may name a tab or pane more or less while
+// it stays (a pane's title comes to name the item, a Claude session's
+// pane is found or lost): its line is then the one still at its place,
+// else the one that holds the Claude session it held, else the one
+// session whose place fits the one it had.
+export const lineCount = (lines) => lines.related.length + lines.sessions.length;
+
+export function lineAt(lines, n) {
+  if (n === null) return null;
+  if (n < lines.related.length) return { related: lines.related[n] };
+  const session = lines.sessions[n - lines.related.length];
+  return session ? { session } : null;
+}
+
+export const lineId = (line) =>
+  line.session ? { session: placeKey(line.session), place: line.session.place, claudePid: line.session.claudePid } : { related: lineKey(line.related) };
+
+export function lineIndex(lines, id) {
+  if (!id) return null;
+  if (id.session === undefined) {
+    const i = lines.related.findIndex((l) => lineKey(l) === id.related);
+    return i < 0 ? null : i;
+  }
+  const i = lines.sessions.findIndex((s) => placeKey(s) === id.session);
+  if (i >= 0) return lines.related.length + i;
+  const held = id.claudePid === null ? -1 : lines.sessions.findIndex((s) => s.claudePid === id.claudePid);
+  if (held >= 0) return lines.related.length + held;
+  const fitting = lines.sessions.flatMap((s, j) => (fits(s, id) ? [j] : []));
+  return fitting.length === 1 ? lines.related.length + fitting[0] : null;
+}
+
+// The selected line `id` as it stands among `lines` now: a session's by its
+// place there, or none where it went, so that Enter is the item's again;
+// a related item's line keeps its id while it is gone, until a read brings
+// it again.
+export function lineNow(lines, id) {
+  if (!id || id.session === undefined) return id;
+  const at = lineIndex(lines, id);
+  return at === null ? null : lineId(lineAt(lines, at));
+}
+
+// The line `id` names among `lines` ({ related } or { session }), or null
+// where it is not among them.
+export const pickedLine = (lines, id) => lineAt(lines, lineIndex(lines, id));
 
 // " · erste <sent> von <count>" for a section with more than it sent.
 const cutNote = (section) => (section.cut ? ` · erste ${section.sent} von ${section.count}` : "");

@@ -5,7 +5,7 @@
 // in sprint.js, the Backlog's in backlog.js, the related items' in
 // related.js, the source as the board uses it in index.js (makeAzure).
 
-import { BoardError, DAY_MS, failure, isObject, itemKey, lastDayEnd, personName } from "../../shared.js";
+import { BoardError, DAY_MS, failure, isObject, itemKey, jsonOrNull, lastDayEnd, personName } from "../../shared.js";
 
 // Theme colors and column order for Azure's state categories, and the
 // categories whose states count as done (a done related item is dimmed).
@@ -138,16 +138,6 @@ export function azJson(stdout, what, empty) {
     return JSON.parse(text);
   } catch {
     throw new BoardError(`az lieferte für ${what} kein lesbares JSON`);
-  }
-}
-
-// az's answer as JSON, or null for anything else: an answer the reader
-// (who az is) or the checks of a write take for one that says nothing.
-export function jsonOrNull(stdout) {
-  try {
-    return JSON.parse(String(stdout ?? "").trim());
-  } catch {
-    return null;
   }
 }
 

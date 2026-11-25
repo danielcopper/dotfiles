@@ -11,10 +11,9 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { spaces } from "herdr";
 import { cardLabel, cardType, epicLabel, partOfText } from "../../shared.js";
 import { applyMoves, canDrop, findCard, hasStep, hideable, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
-import { linkedSession } from "../../actions/start.js";
+import { itemSessions } from "../../sessions.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
@@ -163,7 +162,7 @@ function cardMeasure(b, kept, layout, card, i) {
 
 function drawBoard(b, t, mono, view, st) {
   const cols = b.navColumns(view);
-  const allSpaces = spaces();
+  const sessions = b.sessionsNow();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const { windowed } = boardState(b);
   const states = columnsKept(b, cols.map((c) => c.id));
@@ -177,7 +176,7 @@ function drawBoard(b, t, mono, view, st) {
     const at = windowed ? scrollOf(kept.scroll) : null;
     const layout = at && columnLayout(b, col, kept, at.width);
     if (at) placeBand(kept.band, layout.content, at);
-    const whole = (card, measure) => drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure);
+    const whole = (card, measure) => drawCard(b, t, mono, view, st, card, col, ci, sessions, measure);
     // The row's full height (the row lines its columns up at the top), in
     // which a long column scrolls its cards.
     return v_flex()
@@ -308,13 +307,13 @@ export function cardHeightGuess(card, width) {
   return 2 * (CARD.py + CARD.border) + rowTops(lines, CARD.lineGap).content;
 }
 
-function drawCard(b, t, mono, view, st, card, col, ci, allSpaces, measure) {
+function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
   const selected = st.sel?.key === card.key;
   const dragging = b.drag?.key === card.key;
   const type = typeChip(t, card);
   const labels = cardLabels(card);
   const line = typeLine(t, card, null, 6);
-  const end = cardEnd(t, card, linkedSession(card, allSpaces), Boolean(st.pending[card.key]));
+  const end = cardEnd(t, card, itemSessions(sessions, card)[0] ?? null, Boolean(st.pending[card.key]));
   const chips = [...(type ? [type] : []), ...labels.slice(0, 3).map((l) => labelChip(t, card, l)), ...(labels.length > 3 ? [chip(t, `+${labels.length - 3}`)] : [])];
   const meta = cardMeta(t, card, partOfText(card));
   return h_flex()

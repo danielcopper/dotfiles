@@ -37,6 +37,14 @@ export const PAGE = 100;
 export const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
 export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 
+export function jsonOrNull(text) {
+  try {
+    return JSON.parse(String(text ?? "").trim());
+  } catch {
+    return null;
+  }
+}
+
 // The message to show for an error: a BoardError's own, else marked as
 // unexpected.
 export const errorText = (e) => (e instanceof BoardError ? e.message : `Unerwarteter Fehler: ${firstLine(e?.message ?? e)}`);

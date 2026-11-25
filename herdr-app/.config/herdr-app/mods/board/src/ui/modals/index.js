@@ -17,6 +17,7 @@ import { commandsModal } from "./commands.js";
 import { createModal } from "./create.js";
 import { sprintsModal } from "./sprints.js";
 import { startModal } from "./start.js";
+import { sessionsModal } from "./sessions.js";
 import { statusModal } from "./status.js";
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, sessions: sessionsModal };

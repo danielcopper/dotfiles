@@ -1,49 +1,13 @@
-// Starting an item's session: its name, finding it again, the first
-// message, the checkout and the command that opens it.
-
 import { itemKey } from "../shared.js";
 
 const NAME_MAX = 60;
 
-// The name of the tab a session starts in: the item's key and title, cut to
-// NAME_MAX characters. linkedSession finds the session by it.
+// The tab's name, by which itemSessions (sessions.js) finds the session again.
 export function sessionName(item) {
   const key = itemKey(item);
   const full = key ? `${key} ${item.title}` : item.title;
   return full.length <= NAME_MAX ? full : `${full.slice(0, NAME_MAX - 1)}…`;
 }
-
-const URGENCY = { blocked: 0, done: 1, working: 2, idle: 3 };
-
-// An item's session: a tab or space whose name starts with its key, the most
-// urgent first; failing that, on GitHub a space on its branch (a pull
-// request's head branch, or one with a part that starts with `<number>-` or
-// whose last part is `<number>`, in a folder of its repo).
-// → { space, tab (null for a space), status, label } or null.
-export function linkedSession(item, allSpaces) {
-  const key = itemKey(item);
-  const named = (name) => Boolean(key) && (name === key || String(name ?? "").startsWith(`${key} `));
-  let hits = [];
-  for (const s of allSpaces) {
-    for (const t of s.tabs ?? []) if (named(t.name)) hits.push({ space: s.id, tab: t.id, status: t.status ?? null, label: t.name });
-    if (named(s.name)) hits.push({ space: s.id, tab: null, status: s.status ?? null, label: s.name });
-  }
-  if (!hits.length && item.source === "github" && key) {
-    hits = allSpaces
-      .filter((s) => s.branch && (item.kind === "pr" && item.branch ? s.branch === item.branch : numberedBranch(s.branch, item.number) && (s.folder ?? "").includes(item.repoShort)))
-      .map((s) => ({ space: s.id, tab: null, status: s.status ?? null, label: s.branch }));
-  }
-  hits.sort((a, b) => (URGENCY[a.status] ?? 4) - (URGENCY[b.status] ?? 4));
-  return hits[0] ?? null;
-}
-
-// No RegExp: one would be compiled per card on every render.
-function numberedBranch(branch, number) {
-  const parts = String(branch).split("/");
-  return parts.some((part, i) => part.startsWith(`${number}-`) || (i === parts.length - 1 && part === String(number)));
-}
-
-export const AGENT_STATUS = { working: "arbeitet", blocked: "wartet auf dich", done: "fertig", idle: "bereit" };
 
 // `{name}` placeholders filled from vars; unknown ones stay.
 export function renderTemplate(template, vars) {
