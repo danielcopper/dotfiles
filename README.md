@@ -584,39 +584,48 @@ by that run. Which files of the package git tracks is set in the root
   decides them, the row is not wholly read (its details say "deine letzten
   Reviews nicht ganz gelesen"). Where GitHub sends no time for the comment or
   the review, the comment counts. One I reviewed that asks nothing of me says
-  "wartet auf Autor".
+  "wartet auf Autor", unless it says "ungelesen" (below).
   On my own: changes requested ("Änderungen gewünscht"), unresolved threads
   whose last comment is someone else's ("2 offene Threads"), failing checks
   ("Checks rot"), a merge conflict ("Konflikt"), and with none of these:
   "bereit zum Mergen", where it is no draft, no review is still required
   (approved, or a repo that asks for none), its checks passed or it has none,
   and it merges without conflict (not while GitHub still works that out).
-  Comments as such are no reason. It reads each pull request's first 10 review
-  threads in its one request and, for those with more, the first 50 in one
-  more per 100 of them, and of each thread the authors of its last 10 comments
-  (a thread I took part in only before its last 10 comments counts as one I
-  did not), and my last 5 reviews; it asks gh for my login until it knows it,
-  which the reviews need before the list's answer names it. Where it could not
-  read all it needs (an error at the pull request, a part GitHub did not send,
-  more than 50 threads, reviews it cannot tell apart where that decides, or
-  reviews read for another login than the answer names), nothing says
-  "wartet auf Autor" or "bereit zum Mergen": the row says "? nicht ganz
-  gelesen" where it names no reason and adds "· ?" after its reasons where it
-  names some, checks GitHub sent an error for show "?", and the details list
-  what is missing as warnings after the checks. Where it has more threads than
-  it read (more than 50, or more than 10 where the second request failed), a
-  count of my threads gets a "+" ("3+ offene Threads"). A pull request GitHub
-  sent as nothing for an error is named among the list's notes above it ("1
-  Treffer in „Meine“ nicht gelesen: …"). The shipped `views.json` has three
-  sections: "Zu prüfen" (review asked of me), "Meine" (opened by me) and
-  "Geprüft" (open pull requests I reviewed and did not open, `reviewed-by:@me
-  -author:@me`): GitHub drops a review request once the review is given, so
-  without it a reviewed pull request would leave the list. A pull request that
-  asks my review again shows in "Zu prüfen", the first section that finds it.
-  A `views.json` of my own without that search keeps working and shows no
-  reviewed pull requests. Without the login gh runs as nothing is marked. The
-  header of `mods/board/src/main.js` says how many of GitHub's points an hour
-  the list's requests cost.
+  Comments as such are no reason, except through "ungelesen": on mine and
+  others' alike, it comes first among the reasons where GitHub's own unread list
+  for me holds the pull request: my unread notifications, as the bell on
+  github.com shows them, which the list reads once per refresh. Opening the pull
+  request on GitHub marks it read there, and the mark goes with the next
+  refresh. Only a classic token or gh's own login (`gh auth login`) may read
+  them. Where they cannot be read, no row says "ungelesen" and the list's notes
+  above it say why; an unread one about a pull request whose address the board
+  cannot read marks no row and is counted there. Where the rows show before the
+  notifications are in, a grey line above says they are still being read. It
+  reads each pull request's first 10 review threads in its one request and, for
+  those with more, the first 50 in one more per 100 of them, and of each thread
+  the authors of its last 10 comments (a thread I took part in only before its
+  last 10 comments counts as one I did not), and my last 5 reviews; it asks gh
+  for my login until it knows it, which the reviews need before the list's
+  answer names it. Where it could not read all it needs (an error at the pull
+  request, a part GitHub did not send, more than 50 threads, reviews it cannot
+  tell apart where that decides, or reviews read for another login than the
+  answer names), nothing says "wartet auf Autor" or "bereit zum Mergen": the row
+  says "? nicht ganz gelesen" where it names no reason and adds "· ?" after its
+  reasons where it names some, checks GitHub sent an error for show "?", and the
+  details list what is missing as warnings after the checks. Where it has more
+  threads than it read (more than 50, or more than 10 where the second request
+  failed), a count of my threads gets a "+" ("3+ offene Threads"). A pull
+  request GitHub sent as nothing for an error is named among the list's notes
+  above it ("1 Treffer in „Meine“ nicht gelesen: …"). The shipped `views.json`
+  has three sections: "Zu prüfen" (review asked of me), "Meine" (opened by me)
+  and "Geprüft" (open pull requests I reviewed and did not open,
+  `reviewed-by:@me -author:@me`): GitHub drops a review request once the review
+  is given, so without it a reviewed pull request would leave the list. A pull
+  request that asks my review again shows in "Zu prüfen", the first section that
+  finds it. A `views.json` of my own without that search keeps working and shows
+  no reviewed pull requests. Without the login gh runs as nothing is marked but
+  "ungelesen". The header of `mods/board/src/main.js` says how many of GitHub's
+  points and REST requests an hour the list's requests cost.
   A card, on a GitHub board and on the Sprint's taskboard, shows one line per
   topic, each only where it has something, so a card without them stays as
   compact as before: its key with its priority at the right ("P1": on GitHub the

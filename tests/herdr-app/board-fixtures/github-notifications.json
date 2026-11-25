@@ -1,0 +1,184 @@
+[
+ {
+  "id": "9001",
+  "repository": {
+   "id": 101,
+   "node_id": "R_sample1",
+   "name": "tender",
+   "full_name": "example/tender",
+   "owner": {
+    "login": "example"
+   },
+   "private": false,
+   "html_url": "https://github.com/example/tender"
+  },
+  "subject": {
+   "title": "build(ui): draw the summary card",
+   "url": "https://api.github.com/repos/example/tender/pulls/2820",
+   "latest_comment_url": "https://api.github.com/repos/example/tender/issues/comments/501",
+   "type": "PullRequest"
+  },
+  "reason": "review_requested",
+  "unread": true,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9001",
+  "subscription_url": "https://api.github.com/notifications/threads/9001/subscription"
+ },
+ {
+  "id": "9002",
+  "repository": {
+   "id": 102,
+   "node_id": "R_sample2",
+   "name": "Atlas",
+   "full_name": "Example/Atlas",
+   "owner": {
+    "login": "Example"
+   },
+   "private": false,
+   "html_url": "https://github.com/Example/Atlas"
+  },
+  "subject": {
+   "title": "chore: release 1.2.0",
+   "url": "https://api.github.com/repos/Example/Atlas/pulls/808",
+   "latest_comment_url": null,
+   "type": "PullRequest"
+  },
+  "reason": "author",
+  "unread": true,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9002",
+  "subscription_url": "https://api.github.com/notifications/threads/9002/subscription"
+ },
+ {
+  "id": "9003",
+  "repository": {
+   "id": 103,
+   "node_id": "R_sample3",
+   "name": "tender",
+   "full_name": "example/tender",
+   "owner": {
+    "login": "example"
+   },
+   "private": false,
+   "html_url": "https://github.com/example/tender"
+  },
+  "subject": {
+   "title": "Summary card misses its title",
+   "url": "https://api.github.com/repos/example/tender/issues/77",
+   "latest_comment_url": null,
+   "type": "Issue"
+  },
+  "reason": "mention",
+  "unread": true,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9003",
+  "subscription_url": "https://api.github.com/notifications/threads/9003/subscription"
+ },
+ {
+  "id": "9004",
+  "repository": {
+   "id": 104,
+   "node_id": "R_sample4",
+   "name": "other",
+   "full_name": "example/other",
+   "owner": {
+    "login": "example"
+   },
+   "private": false,
+   "html_url": "https://github.com/example/other"
+  },
+  "subject": {
+   "title": "fix: keep the cache",
+   "url": "https://api.github.com/repos/example/other/pulls/1921",
+   "latest_comment_url": null,
+   "type": "PullRequest"
+  },
+  "reason": "subscribed",
+  "unread": true,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9004",
+  "subscription_url": "https://api.github.com/notifications/threads/9004/subscription"
+ },
+ {
+  "id": "9005",
+  "repository": {
+   "id": 105,
+   "node_id": "R_sample5",
+   "name": "tender",
+   "full_name": "example/tender",
+   "owner": {
+    "login": "example"
+   },
+   "private": false,
+   "html_url": "https://github.com/example/tender"
+  },
+  "subject": {
+   "title": "chore: release 2.0.0",
+   "url": "https://api.github.com/repos/example/tender/pulls/1921",
+   "latest_comment_url": null,
+   "type": "PullRequest"
+  },
+  "reason": "subscribed",
+  "unread": false,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9005",
+  "subscription_url": "https://api.github.com/notifications/threads/9005/subscription"
+ },
+ {
+  "id": "9006",
+  "repository": {
+   "id": 106,
+   "node_id": "R_sample6",
+   "name": "tender",
+   "full_name": "example/tender",
+   "owner": {
+    "login": "example"
+   },
+   "private": false,
+   "html_url": "https://github.com/example/tender"
+  },
+  "subject": {
+   "title": "CI workflow run failed for main branch",
+   "url": null,
+   "latest_comment_url": null,
+   "type": "CheckSuite"
+  },
+  "reason": "ci_activity",
+  "unread": true,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9006",
+  "subscription_url": "https://api.github.com/notifications/threads/9006/subscription"
+ },
+ {
+  "id": "9007",
+  "repository": {
+   "id": 107,
+   "node_id": "R_sample7",
+   "name": "tender",
+   "full_name": "example/tender",
+   "owner": {
+    "login": "example"
+   },
+   "private": false,
+   "html_url": "https://github.com/example/tender"
+  },
+  "subject": {
+   "title": "v1.0.0",
+   "url": "https://api.github.com/repos/example/tender/releases/42",
+   "latest_comment_url": null,
+   "type": "Release"
+  },
+  "reason": "subscribed",
+  "unread": true,
+  "updated_at": "2026-11-18T09:00:00Z",
+  "last_read_at": null,
+  "url": "https://api.github.com/notifications/threads/9007",
+  "subscription_url": "https://api.github.com/notifications/threads/9007/subscription"
+ }
+]

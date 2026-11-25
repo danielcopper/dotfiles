@@ -2,7 +2,7 @@
 // parsing, the status mutation, what gh's answers and failures mean, and the
 // source as the board uses it (makeGithub).
 
-import { CONFIG_NAME, BoardError, DRAFT_REVIEW, PAGE, STATE_LOOKS, errorText, failure, firstLine, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
+import { CONFIG_NAME, BoardError, DRAFT_REVIEW, NOTIFIED, PAGE, STATE_LOOKS, errorText, failure, firstLine, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
 import { NO_LIVE } from "../loading.js";
 import { GH_TIMEOUT, call, what } from "../tools.js";
 
@@ -409,17 +409,20 @@ const lastGiven = (reviews) => reviews.reduce((last, r) => (last && Date.parse(r
 // read; `asked`: whether a search that asks for one's review, or a team's
 // one is in, found it; `errors`: GitHub's errors at its path): { attention,
 // waiting, unread }. attention: the reasons, as the row names them (the
-// README's GitHub PR list paragraph lists them); none where the viewer has
-// nothing to do, or is unknown. waiting: someone else's pull request one
-// reviewed, all of it read, that asks nothing of one ("wartet auf Autor").
+// README's GitHub PR list paragraph lists them), NOTIFIED first where
+// `notified` (an unread notification of gh's own user names it), also where
+// the viewer is unknown; none else where the viewer has nothing to do, or
+// is unknown. waiting: someone else's pull request one reviewed, all of it
+// read, that asks nothing of one and is not notified ("wartet auf Autor").
 // unread: what of it the list could not read whole, so that no reason, nor
 // "nothing to do", can be told for sure: those errors' first lines (also
 // where the viewer is unknown) and UNREAD's parts. `pending`: its follow-up
 // for more threads is still to come, which leaves it unsure but not unread.
 // `login`: whose reviews the request asked for, none for anyone's.
-function prAttention(pr, row, viewer, asked, errors, pending = false, login = null) {
+function prAttention(pr, row, viewer, asked, errors, { pending = false, login = null, notified = false } = {}) {
   const unread = errors.map((e) => firstLine(e.message)).filter(Boolean);
-  if (!viewer) return { attention: [], waiting: false, unread };
+  const acts = (reasons, waiting) => ({ attention: notified ? [NOTIFIED, ...reasons] : reasons, waiting: waiting && !notified, unread });
+  if (!viewer) return acts([], false);
   const threads = pr.reviewThreads;
   const nodes = Array.isArray(threads?.nodes) ? threads.nodes : null;
   if (!nodes || nodes.some((t) => !Array.isArray(t?.comments?.nodes))) unread.push(UNREAD.threads);
@@ -438,7 +441,7 @@ function prAttention(pr, row, viewer, asked, errors, pending = false, login = nu
     if (pr.mergeable === "CONFLICTING") reasons.push("Konflikt");
     const ready = !pr.isDraft && [null, "APPROVED"].includes(pr.reviewDecision ?? null) && ["passed", "none"].includes(row.checks.state) && pr.mergeable === "MERGEABLE";
     if (!reasons.length && sure() && ready) reasons.push("bereit zum Mergen");
-    return { attention: reasons, waiting: false, unread };
+    return acts(reasons, false);
   }
   // The reviews of `login`, anyone's without it: unread where they may be
   // another's than the viewer's.
@@ -467,7 +470,7 @@ function prAttention(pr, row, viewer, asked, errors, pending = false, login = nu
   reasons.push(...reasonsBy(review));
   const told = (r, said) => JSON.stringify([said, Boolean(r) && !said.length]);
   if (told(review, reasons) !== told(sureReview, reasonsBy(sureReview))) unread.push(UNREAD.reviewKind);
-  return { attention: reasons, waiting: Boolean(review) && !requested && !reasons.length && sure(), unread };
+  return acts(reasons, Boolean(review) && !requested && !reasons.length && sure());
 }
 
 // One GraphQL request for a list view: one search per section (`s0`, `s1`,
@@ -479,6 +482,31 @@ export function githubListArgs(view, login) {
   const doc = `query(${vars}) {\nviewer { login }\n${searches.join("\n")}\n}`;
   return ["api", "graphql", "-f", `query=${doc}`, ...(login ? ["-f", `login=${login}`] : []), ...view.sections.flatMap((s, i) => ["-f", `q${i}=${s.query}`])];
 }
+
+// Unread ones only without `all`; 50 a page is GitHub's most; gh's --paginate joins the pages.
+export const NOTIFICATIONS_PATH = "notifications?per_page=50";
+export const githubNotificationsArgs = () => ["api", "--paginate", NOTIFICATIONS_PATH];
+
+// GitHub's owner and repo names ignore case.
+const notifiedKey = (repo, number) => `${repo.toLowerCase()}#${number}`;
+const PULL_URL = /\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/;
+
+export function notifiedPrs(json) {
+  if (!Array.isArray(json)) throw new BoardError("GitHub schickte keine Liste von Benachrichtigungen");
+  const keys = new Set();
+  let unnamed = 0;
+  for (const entry of json) {
+    if (entry?.unread !== true || entry.subject?.type !== "PullRequest") continue;
+    const m = typeof entry.subject.url === "string" ? entry.subject.url.match(PULL_URL) : null;
+    if (m) keys.add(notifiedKey(`${m[1]}/${m[2]}`, Number(m[3])));
+    else unnamed++;
+  }
+  return { keys, unnamed };
+}
+
+export const notifiedUnknown = (why) => `GitHub-Benachrichtigungen nicht abgerufen, keine Markierung „${NOTIFIED}“: ${why}`;
+export const notifiedUnnamed = (n) =>
+  n === 1 ? "1 ungelesene Benachrichtigung zu einem Pull Request ohne lesbare Adresse" : `${n} ungelesene Benachrichtigungen zu Pull Requests ohne lesbare Adresse`;
 
 // One GraphQL request for the login gh runs as, which a list's request
 // needs before its answer names it (githubListArgs).
@@ -588,24 +616,7 @@ export const ownSearch = (query) => setsMe(query, ["author", "assignee", "review
 // search; the answer names no person for it.
 export const askingSearch = (query) => setsMe(query, ASKING);
 
-// gh's answer for githubListArgs (and the GraphQL errors that came with its
-// data) → { shape: "prs", sections: [{ name, color, count, fetched,
-// limited, skipped, notRead, rows }], viewer, warnings } (color: the
-// section's tone as a theme name, SECTION_TONES; muted for a section
-// without one).
-// A pull request found by two sections shows in the first only; a result
-// that is no pull request is counted in skipped; one GitHub sent as null
-// for an error at its path is not read, and that error's first line is in
-// notRead. A row carries whether the viewer has to act (prAttention), with
-// the errors at its path; it is asked for one's review where any search
-// that asks for it (askingSearch) found it, not only the one that holds it.
-// A duplicate's errors stay warnings: its row is another node's. A
-// section's rows on which the viewer has to act come first, in GitHub's
-// order, then the others in theirs. A search missing from the answer is
-// explained by the error at its alias. `login`: whose reviews the request
-// asked for (githubListArgs).
-// warnings: the first lines of the errors neither a row nor notRead holds.
-export function parseGithubList(json, view, errors = [], pending = null, login = null) {
+export function parseGithubList(json, view, errors = [], { pending = null, login = null, notified = null } = {}) {
   const seen = new Set();
   const viewer = json?.data?.viewer?.login ?? null;
   const shown = new Set();
@@ -635,12 +646,11 @@ export function parseGithubList(json, view, errors = [], pending = null, login =
       at.forEach((e) => shown.add(e));
       const row = prRow(pr, Boolean(errorAt(at, [...path, "commits"])));
       const waits = Boolean(pending?.has(pr.id));
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...prAttention(pr, row, viewer, asking.has(pr.id), at, waits, login), ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
+      const acts = prAttention(pr, row, viewer, asking.has(pr.id), at, { pending: waits, login, notified: Boolean(notified?.has(notifiedKey(row.repo, row.number))) });
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...acts, ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
     });
     // Array's sort keeps the order of rows it ranks alike.
     rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
-    // count: how many GitHub found; fetched: how many it sent; rows: those
-    // held, each pull request once (in its first section), no other result.
     return {
       name: s.name, color: SECTION_TONES[s.tone] ?? "muted", count: found.issueCount, fetched: found.nodes.length, limited: found.issueCount > found.nodes.length,
       skipped, notRead, rows,
@@ -881,20 +891,14 @@ const NOT_SENT = /^error connecting to |dial tcp/im;
 const SENT_FAILURE = /connection reset|i\/o timeout|Client\.Timeout|\bEOF\b|http2|stream error|context deadline exceeded/i;
 // GitHub's words for a request it did not finish in time (GraphQL and REST).
 const SERVER_TIMEOUT = /This may be the result of a timeout|couldn't respond to your request in time/i;
+const NEEDS_SCOPE = /This API operation needs the "([^"]+)" scope/;
+// GitHub's refusal to a fine-grained or app token; its notifications take only a classic token or gh's own login.
+const TOKEN_KIND = /Resource not accessible by (personal access token|integration)/;
+const missingScope = (scope) => new BoardError(`Dem gh-Token fehlt der Scope „${scope}“: gh auth refresh -s ${scope}`);
 
-// A gh call that ran, { code, stdout, stderr } → { json, warnings, errors },
-// or a BoardError. gh exits 1 whenever GraphQL's answer holds errors, even
-// next to data, and prints them as "gh: <message>", without their type.
-// Errors that make the answer useless (login, scope, rate limit) throw; with
-// data, the others come back as warnings, and the raw errors for the parser
-// to explain a missing part.
-// With `write` (`path`: where the mutation's own errors point), a GraphQL
-// error with a type or code is a refusal carrying its message, the mutation's
-// own first; an error without either, a server timeout, a connection that
-// broke after it was made, HTTP 5xx, an unreadable answer and any failure gh
-// does not explain are unclear. A request that never left (NOT_SENT) and
-// HTTP 4xx are refusals.
-export function readGh({ code, stdout, stderr }, { write = false, path = null } = {}) {
+// gh exits 1 whenever GraphQL's answer holds errors, even next to data, and prints them as "gh: <message>", without their type.
+// gh hints at a missing scope only after a 4xx other than 422, to a token that names its scopes (api.ScopesSuggestion).
+export function readGh({ code, stdout, stderr }, { write = false, path = null, rest = false } = {}) {
   const err = String(stderr ?? "");
   const said = firstLine(err.replace(/^gh: /gm, ""));
   let json = null;
@@ -904,12 +908,14 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null } 
     // Not JSON: what went wrong is on stderr.
   }
   if (code === 0 && json === null) throw failure("gh antwortete ohne lesbares JSON", { write, unclear: true });
+  if (rest && code === 0) return { json, warnings: [], errors: [] };
+  const scope = rest ? err.match(NEEDS_SCOPE)?.[1] : null;
+  if (scope) throw missingScope(scope);
+  if (rest && TOKEN_KIND.test(err)) throw new BoardError("Benachrichtigungen liest nur ein klassisches Token oder die Anmeldung von gh selbst: gh auth login");
   const errors = Array.isArray(json?.errors) ? json.errors : [];
   const types = errors.map((e) => e.type);
   if (code === 4 || /gh auth login/.test(err)) throw new BoardError("gh ist nicht angemeldet: gh auth login");
-  if (types.includes("INSUFFICIENT_SCOPES") || /required scopes|has not been granted/i.test(err)) {
-    throw new BoardError("Dem gh-Token fehlt der Scope „project“: gh auth refresh -s project");
-  }
+  if (types.includes("INSUFFICIENT_SCOPES") || /required scopes|has not been granted/i.test(err)) throw missingScope("project");
   if (types.includes("RATE_LIMITED") || /rate limit/i.test(err)) {
     throw new BoardError("GitHub-Ratenlimit erreicht; es geht nach dem nächsten Zurücksetzen weiter");
   }
@@ -999,23 +1005,26 @@ export function makeGithub(paths) {
         },
       },
       list: {
-        // The login gh runs as, where it is not known yet (a question that
-        // fails leaves it unknown); the list's request; then, for its pull
-        // requests with more than FIRST_THREADS threads, the follow-up for
-        // them, one call per THREAD_IDS of them (addThreads; one that fails
-        // leaves its rows unread). The errors a row or a section shows are
-        // not warnings too.
         async load(view, { live = NO_LIVE }) {
+          let notified = null;
+          const notifications = gh(paths, githubNotificationsArgs(), { rest: true, ...what(view, "notifications") })
+            .then(({ json }) => notifiedPrs(json))
+            .catch((e) => ({ keys: null, unnamed: 0, why: errorText(e) }))
+            .then((n) => (notified = n));
           login ??= await gh(paths, githubViewerArgs(), what(view, "login")).then((r) => r.json?.data?.viewer?.login ?? null, () => null);
           const asked = login;
           const { json, errors } = await gh(paths, githubListArgs(view, asked), what(view, "list"));
           login = json?.data?.viewer?.login ?? login;
+          const notes = () => {
+            if (notified?.keys === null) return [notifiedUnknown(notified.why)];
+            return notified?.unnamed ? [notifiedUnnamed(notified.unnamed)] : [];
+          };
           const result = (pending = null) => {
-            const data = parseGithubList(json, view, errors, pending, asked);
-            return { data, warnings: data.warnings };
+            const data = parseGithubList(json, view, errors, { pending, login: asked, notified: notified?.keys ?? null });
+            return { data: notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
           };
           const ids = moreThreadIds(json, view);
-          if (ids.length) live.partial(() => result(new Set(ids)));
+          if (ids.length || !notified) live.partial(() => result(ids.length ? new Set(ids) : null));
           for (let at = 0; at < ids.length; at += THREAD_IDS) {
             const chunk = ids.slice(at, at + THREAD_IDS);
             let page = null;
@@ -1027,6 +1036,8 @@ export function makeGithub(paths) {
             }
             errors.push(...addThreads(json, view, chunk, page?.json ?? null, page?.errors ?? [], failed));
           }
+          if (ids.length && !notified) live.partial(() => result());
+          await notifications;
           return result();
         },
       },

@@ -67,6 +67,13 @@
 // - written from GitHub's GraphQL reference (Repository's assignableUsers,
 //   Query's viewer), with made-up names, not recorded:
 //   github-assignable.json (one person without a name);
+// - written from GitHub's REST reference (List notifications for the
+//   authenticated user, its threads' unread, reason, repository and
+//   subject: title, url, latest_comment_url, type), with made-up names, not
+//   recorded: github-notifications.json (pull requests of
+//   github-list.json's repos, one by its url in another case; one of
+//   another repo, one read, an issue, a release and a check suite without
+//   a url; its null urls go beyond the reference's schema);
 // - written from the azure-devops extension's az devops team list-member
 //   (core's TeamMember: identity, isTeamAdmin), with made-up names, not
 //   recorded: azure-team-members.json (one group among the members);
@@ -1349,7 +1356,7 @@ test("what the list could not read whole on someone else's pull request is unrea
 test("reviews read for another login than the answer names are unread on someone else's pull request, also where that login gave none; one's own keep theirs, and the login the answer names or none reads them", () => {
   const data = json("github-list-attention.json");
   ["s0", "s1", "s2"].forEach((s) => data.data[s].nodes.forEach((pr) => (pr.reviews.nodes = [])));
-  const rows = (login) => board.parseGithubList(structuredClone(data), shippedListView(), [], null, login).sections.flatMap((s) => s.rows);
+  const rows = (login) => board.parseGithubList(structuredClone(data), shippedListView(), [], { login }).sections.flatMap((s) => s.rows);
   const switched = rows("sample-other");
   assert.deepEqual(switched.filter((r) => r.author !== "sample-user").map((r) => [r.number, r.unread, r.waiting]).sort(([a], [b]) => a - b),
     [101, 102, 103, 104, 105, 106, 301, 302, 303].map((n) => [n, [UNREAD.reviews], false]));
@@ -1580,6 +1587,80 @@ test("where the follow-up for more threads fails, or does not send a pull reques
     assert.deepEqual(row.unread, [message, UNREAD.moreThreads(10)], why);
     assert.deepEqual(list.warnings, [], `${why}: no warning`);
   }
+});
+
+// ---- PR list: unread notifications ----
+
+const notified = () => board.notifiedPrs(json("github-notifications.json")).keys;
+const notifiedOf = (repo, ...numbers) => board.notifiedPrs(numbers.map((n) => ({ unread: true, subject: { type: "PullRequest", url: `https://api.github.com/repos/${repo}/pulls/${n}` } }))).keys;
+
+test("the unread notifications are one REST call of gh for all their pages, 50 a page, GitHub's own unread list", () => {
+  assert.deepEqual(board.githubNotificationsArgs(), ["api", "--paginate", "notifications?per_page=50"], "no `all`: unread only");
+});
+
+test("of the notifications, only unread ones whose subject is a pull request name one, by the repo and number of the subject's url, whatever its case; an unread pull request whose url names none is counted", () => {
+  assert.deepEqual([...notified()].sort(), ["example/atlas#808", "example/other#1921", "example/tender#2820"],
+    "not the issue, the release, the check suite without a url, nor the one read");
+  assert.equal(board.notifiedPrs(json("github-notifications.json")).unnamed, 0, "a check suite without a url is no pull request");
+  const entry = (subject, unread = true) => ({ unread, subject: { type: "PullRequest", ...subject } });
+  const skipped = [
+    null, {}, { unread: true }, { unread: true, subject: null }, entry({ url: null }), entry({ url: 5 }), entry({ url: "https://api.github.com/repos/example/tender/pulls/9" }, "true"),
+    entry({ url: "https://api.github.com/repos/example/tender/pulls/9/files" }), entry({ url: "https://api.github.com/repos/example/tender/issues/9" }),
+    entry({ url: "https://api.github.com/repos/example/pulls/9" }), entry({ url: "https://api.github.com/repos/example/tender/pulls/x9" }),
+    { unread: true, subject: { type: "Issue", url: "https://api.github.com/repos/example/tender/pulls/9" } },
+  ];
+  const none = board.notifiedPrs(skipped);
+  assert.deepEqual([...none.keys], [], "an entry of another shape names none");
+  assert.equal(none.unnamed, 6, "the unread pull requests whose url is none, or names none");
+  assert.deepEqual([...board.notifiedPrs([...skipped, entry({ url: "https://ghe.example/api/v3/repos/example/tender/pulls/9" })]).keys], ["example/tender#9"], "the others still count");
+  assert.equal(board.notifiedUnnamed(1), "1 ungelesene Benachrichtigung zu einem Pull Request ohne lesbare Adresse");
+  assert.equal(board.notifiedUnnamed(6), "6 ungelesene Benachrichtigungen zu Pull Requests ohne lesbare Adresse");
+  for (const reply of [{}, null, { message: "x" }, "[]"]) {
+    assert.throws(() => board.notifiedPrs(reply), { message: "GitHub schickte keine Liste von Benachrichtigungen" }, JSON.stringify(reply));
+  }
+});
+
+test("a pull request with an unread notification has „ungelesen“ as its first reason, in its row wherever it shows, mine or another's, and ranks with the rows that have one", () => {
+  const plain = board.parseGithubList(json("github-list.json"), listView());
+  const list = board.parseGithubList(json("github-list.json"), listView(), [], { notified: notified() });
+  const rows = (l) => l.sections.map((s) => s.rows.map((r) => [r.number, r.attention]));
+  assert.deepEqual(rows(plain), [[[2820, ["Review angefragt"]]], [[77, ["Änderungen gewünscht", "Checks rot"]], [1921, []], [808, []]]]);
+  assert.deepEqual(rows(list), [[[2820, ["ungelesen", "Review angefragt"]]], [[808, ["ungelesen"]], [77, ["Änderungen gewünscht", "Checks rot"]], [1921, []]]],
+    "808 by its url's other case; 2820 once, where it shows; not 1921 of another repo, nor 77 by its issue");
+  assert.equal(board.NOTIFIED, "ungelesen");
+  assert.deepEqual(list.sections.flatMap((s) => s.rows.map((r) => r.unread)), [[], [], [], []], "nothing read less of it");
+  const nameless = json("github-list.json");
+  nameless.data.viewer = null;
+  assert.deepEqual(rows(board.parseGithubList(nameless, listView(), [], { notified: notified() })),
+    [[[2820, ["ungelesen"]]], [[808, ["ungelesen"]], [1921, []], [77, []]]], "without the viewer, the other reasons go, not it");
+  const ready = attentionList(json("github-list-attention.json"), shippedListView()).sections[1].rows.find((r) => r.attention.includes("bereit zum Mergen"));
+  const both = board.parseGithubList(json("github-list-attention.json"), shippedListView(), [], { notified: notifiedOf("example/tender", ready.number) });
+  assert.deepEqual(both.sections[1].rows.find((r) => r.number === ready.number).attention, ["ungelesen", "bereit zum Mergen"], "beside the others");
+  const waits = attentionList().sections.flatMap((s) => s.rows).find((r) => r.waiting);
+  const marked = board.parseGithubList(json("github-list-attention.json"), shippedListView(), [], { notified: notifiedOf("example/tender", waits.number) })
+    .sections.flatMap((s) => s.rows).find((r) => r.number === waits.number);
+  assert.deepEqual([marked.attention, marked.waiting], [["ungelesen"], false], "in place of waiting for its author");
+});
+
+const TOKEN_KIND = "Benachrichtigungen liest nur ein klassisches Token oder die Anmeldung von gh selbst: gh auth login";
+
+test("a REST answer of gh is its JSON, whatever its shape; a token without a scope the call needs is named by gh's hint, a fine-grained or app token says which it takes, another failure by gh's words", () => {
+  const rest = { rest: true };
+  assert.deepEqual(board.readGh({ code: 0, stdout: fixture("github-notifications.json"), stderr: "" }, rest).json, json("github-notifications.json"));
+  assert.deepEqual(board.readGh({ code: 0, stdout: "[]", stderr: "" }, rest), { json: [], warnings: [], errors: [] });
+  assert.throws(() => board.readGh({ code: 0, stdout: "[]", stderr: "" }), { message: "gh endete mit 0" }, "not without `rest`");
+  const scope = 'gh: Missing required scope (HTTP 403)\ngh: This API operation needs the "notifications" scope. To request it, run:  gh auth refresh -h github.com -s notifications';
+  assert.throws(() => board.readGh({ code: 1, stdout: '{"message":"Missing required scope"}', stderr: scope }, rest),
+    { message: "Dem gh-Token fehlt der Scope „notifications“: gh auth refresh -s notifications" });
+  assert.throws(() => board.readGh({ code: 1, stdout: '{"message":"Missing required scope"}', stderr: scope }), { message: "Missing required scope (HTTP 403)" }, "a GraphQL call's as before");
+  for (const by of ["personal access token", "integration"]) {
+    const said = `gh: Resource not accessible by ${by} (HTTP 403)`;
+    const reply = JSON.stringify({ message: `Resource not accessible by ${by}` });
+    assert.throws(() => board.readGh({ code: 1, stdout: reply, stderr: said }, rest), { message: TOKEN_KIND }, by);
+    assert.throws(() => board.readGh({ code: 1, stdout: reply, stderr: said }), { message: `Resource not accessible by ${by} (HTTP 403)` }, `${by}: a GraphQL call's as before`);
+  }
+  assert.throws(() => board.readGh({ code: 1, stdout: '[{"id":"1"}', stderr: "gh: Server Error (HTTP 502)" }, rest), { message: "GitHub antwortete mit Server Error (HTTP 502)" },
+    "a later page that failed: no part of the list");
 });
 
 // ---- Tools that cannot run ----
@@ -2223,7 +2304,11 @@ function textView(format, id, text) {
 // which(tool, on) (a path, "" for not found, an Error, or exec's result;
 // by default gh is found and az is not) and recorded in asked; and gh's
 // question for the login it runs as (githubViewerArgs), answered at once
-// with `viewerAnswer` (by default sample-user) and counted in viewerAsks.
+// with `viewerAnswer` (by default sample-user) and counted in viewerAsks;
+// and gh's request for the unread notifications (githubNotificationsArgs),
+// answered at once with `notificationsAnswer` (by default none; an Error
+// rejects it; null leaves it to the test, as any other call), which a test
+// may change, and counted in notificationsAsks.
 // spaces() is spaceList, which a test may change.
 // layout() is `tree` (the shown layout; none by default), focused() is
 // `focus`, props() is `copyProps` (the copy's own props, as herdr gives
@@ -2232,7 +2317,11 @@ function textView(format, id, text) {
 // hands the copy a command (board.<name>).
 const found = (tool) => `/opt/fake/bin/${tool}`;
 const SAMPLE_LOGIN = { code: 0, stdout: JSON.stringify({ data: { viewer: { login: "sample-user" } } }), stderr: "" };
-function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false, oldMouse = false, viewerAnswer = SAMPLE_LOGIN } = {}) {
+const NO_NOTIFICATIONS = { code: 0, stdout: "[]", stderr: "" };
+function fakeHost({
+  config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false, oldMouse = false, viewerAnswer = SAMPLE_LOGIN,
+  notificationsAnswer = NO_NOTIFICATIONS,
+} = {}) {
   const calls = [];
   const lacked = oldMouse ? ["on_window_mouse_up"] : [];
   const waiting = [];
@@ -2301,10 +2390,16 @@ function fakeHost({ config = testConfig(), shown = true, tree = null, props = {}
     spaceList: [{ id: "s1", name: "x", folder: "/r/tender", machine: null, branch: "main", active: true, status: null, tabs: [{ id: "t1", name: "Board", active: true }] }],
     spaces: () => host.spaceList,
     viewerAsks: 0,
+    notificationsAnswer,
+    notificationsAsks: 0,
     exec: (tool, args, options) => {
       if (args.includes(`query=${board.VIEWER_QUERY}`)) {
         host.viewerAsks++;
         return Promise.resolve(viewerAnswer);
+      }
+      if (args.includes(board.NOTIFICATIONS_PATH)) host.notificationsAsks++;
+      if (args.includes(board.NOTIFICATIONS_PATH) && host.notificationsAnswer !== null) {
+        return host.notificationsAnswer instanceof Error ? Promise.reject(host.notificationsAnswer) : Promise.resolve(host.notificationsAnswer);
       }
       if (tool === "sh" && args[1] === board.WHICH_SCRIPT) {
         host.asked.push({ tool: args[3], on: options.on, timeout: options.timeout });
@@ -11244,6 +11339,139 @@ test("UI: a pull request the list could not read whole says so in its row: \"? n
   assert.equal(notes.at(-1).with.px[0], 18);
 });
 
+// gh's answer for the unread notifications: one per pull request `numbers`
+// of example/tender.
+const notificationsOf = (...numbers) => ok(JSON.stringify(numbers.map((n) => ({
+  id: String(n), unread: true, reason: "comment", repository: { full_name: "example/tender" },
+  subject: { title: "x", url: `https://api.github.com/repos/example/tender/pulls/${n}`, latest_comment_url: null, type: "PullRequest" },
+}))));
+
+test("UI: a pull request with an unread notification says „ungelesen“ first in its row's mark, in copper's orange, and among its details' reasons; where the notifications cannot be read, no row says it and a note above the list says why; each read of the list asks for them once", async () => {
+  const t = copperTheme("dark");
+  const { b, cx, host } = await openBoard({ config: attentionConfig(), notificationsAnswer: notificationsOf(202, 301) });
+  host.theme = () => t;
+  await press(b, cx, "2");
+  await host.answer("gh", ok(fixture("github-list-attention.json")), isListCall);
+  assert.equal(host.notificationsAsks, 1);
+  let root = b.render();
+  const mark = rowCell(root, 202, "● ungelesen · Änderungen gewünscht · 2 offene Threads · Checks rot · Konflikt");
+  assert.ok(mark, "first, beside the other reasons");
+  assert.equal(mark.with.text_color[0], t["copper-orange-text"]);
+  assert.ok(rowCell(root, 301, "● ungelesen"), "where it is the only one");
+  assert.equal(rowCell(root, 301, "wartet auf Autor"), null);
+  await click(b, cx, "row-PR_sample301");
+  await click(b, cx, "row-PR_sample301");
+  const shown = texts(detailPanel(b));
+  assert.deepEqual(shown.slice(shown.indexOf("DU BIST DRAN"), shown.indexOf("DU BIST DRAN") + 2), ["DU BIST DRAN", "ungelesen (GitHub-Benachrichtigung)"]);
+  const fails = [
+    [{ code: 1, stdout: '{"message":"Resource not accessible by personal access token"}', stderr: "gh: Resource not accessible by personal access token (HTTP 403)" }, TOKEN_KIND],
+    [ok('{"message":"x"}'), "GitHub schickte keine Liste von Benachrichtigungen"],
+    [stopped(found("gh")), "gh antwortete nicht in 30 s"],
+  ];
+  for (const [answer, why] of fails) {
+    host.notificationsAnswer = answer;
+    b.refresh(b.view(), cx);
+    await settle();
+    await host.answer("gh", ok(fixture("github-list-attention.json")), isListCall);
+    root = b.render();
+    assert.equal(b.state("prs").error ?? null, null, `${why}: the list shows`);
+    assert.ok(texts(root).includes(`GitHub-Benachrichtigungen nicht abgerufen, keine Markierung „ungelesen“: ${why}`), why);
+    assert.deepEqual(b.state("prs").data.sections.flatMap((s) => s.rows).filter((r) => r.attention.includes("ungelesen")), [], `${why}: no row`);
+    assert.ok(rowCell(root, 301, "wartet auf Autor"), why);
+  }
+  assert.equal(host.notificationsAsks, 4);
+  host.notificationsAnswer = notificationsOf(301);
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(fixture("github-list-attention.json")), isListCall);
+  assert.equal(texts(b.render()).some((s) => String(s).startsWith("GitHub-Benachrichtigungen")), false, "read again: the note goes");
+  assert.ok(rowCell(b.render(), 301, "● ungelesen"));
+  const nameless = [1, 2].map((n) => ({ id: `u${n}`, unread: true, subject: { title: "x", url: null, latest_comment_url: null, type: "PullRequest" } }));
+  host.notificationsAnswer = ok(JSON.stringify([...JSON.parse(notificationsOf(301).stdout), ...nameless]));
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(fixture("github-list-attention.json")), isListCall);
+  assert.ok(texts(b.render()).includes("2 ungelesene Benachrichtigungen zu Pull Requests ohne lesbare Adresse"), "those it cannot place are counted");
+  assert.ok(rowCell(b.render(), 301, "● ungelesen"), "the others still mark theirs");
+});
+
+test("UI: a pull request unread on GitHub and not read whole says „● ungelesen · ?“ in its row; its details name the notification among its reasons and what is missing as a warning", async () => {
+  const t = copperTheme("dark");
+  const data = json("github-list-attention.json");
+  data.data.s2.nodes[0].reviews = null;
+  data.errors = [{ path: ["s2", "nodes", 0, "reviews"], message: "Reviews are hidden" }];
+  const { b, cx, host } = await openBoard({ config: attentionConfig(), notificationsAnswer: notificationsOf(301) });
+  host.theme = () => t;
+  await press(b, cx, "2");
+  await host.answer("gh", ok(JSON.stringify(data)), isListCall);
+  assert.ok(rowCell(b.render(), 301, "● ungelesen · ?"));
+  await click(b, cx, "row-PR_sample301");
+  await click(b, cx, "row-PR_sample301");
+  const shown = texts(detailPanel(b));
+  assert.deepEqual(shown.slice(shown.indexOf("DU BIST DRAN"), shown.indexOf("DU BIST DRAN") + 2), ["DU BIST DRAN", "ungelesen (GitHub-Benachrichtigung)"]);
+  assert.ok(shown.includes(board.UNREAD.reviews));
+  assert.ok(shown.includes("Reviews are hidden"));
+});
+
+test("UI: the PR list draws its rows as soon as the list answers, unmarked while the notifications are still read and with a note above them that says so, in the info tone and not among the warnings, and the follow-up for more threads too; the notifications mark the rows once they come, and what is saved has no note; over rows it already shows, it waits for them", async () => {
+  const pending = "GitHub-Benachrichtigungen werden noch gelesen …";
+  const t = copperTheme("dark");
+  const boot = () => bootBoard({ config: shippedConfig(), stored: { source: "github", "tab:github": "github:prs" }, notificationsAnswer: null });
+  const plain = await boot();
+  plain.host.theme = () => t;
+  await plain.host.answer("gh", ok(fixture("github-list-attention.json")), isListCall);
+  assert.ok(rowCell(plain.b.render(), 301, "wartet auf Autor"), "without a follow-up too");
+  const chain = chainTo(plain.b.render(), hasId("notified-pending"));
+  const note = chain.at(-1);
+  assert.deepEqual(texts(note), [pending]);
+  assert.equal(chain.some(hasId("rows")), false, "outside the rows' scroll list");
+  const beside = chain.at(-2).kids;
+  assert.ok(beside.indexOf(note) >= 0 && beside.indexOf(note) < beside.findIndex(hasId("rows")), "above the rows");
+  assert.equal(note.with.text_color[0], board.toneColor(t, board.NOTE_TONES.info), "a loading state, not a problem");
+  assert.notEqual(board.toneColor(t, board.NOTE_TONES.info), board.toneColor(t, board.NOTE_TONES.warning));
+  assert.equal(plain.b.state("prs").warnings.includes(pending), false);
+  await plain.host.answer("gh", notificationsOf(301), board.NOTIFICATIONS_PATH);
+  assert.ok(rowCell(plain.b.render(), 301, "● ungelesen"));
+  assert.equal(texts(plain.b.render()).includes(pending), false);
+  assert.equal(byId(plain.b.render(), "notified-pending"), null);
+  await plain.cx.fire();
+  const saved = JSON.parse(memory.get("board:data:prs"));
+  assert.ok(saved.data.sections.length, "saved");
+  assert.equal("notifiedPending" in saved.data, false);
+  assert.equal(saved.warnings.includes(pending), false);
+  const { b, cx, host } = await boot();
+  const data = json("github-list-attention.json");
+  const node = cutThreads(data, 102, 12, [...resolvedThreads(11), waitingThread]);
+  const threads = ok(JSON.stringify({ data: { nodes: [node] } }));
+  const marked = () => b.state("prs").data.sections.flatMap((s) => s.rows).filter((r) => r.attention.includes("ungelesen")).map((r) => r.number).sort();
+  await host.answer("gh", ok(JSON.stringify(data)), isListCall);
+  let root = b.render();
+  assert.ok(rowCell(root, 301, "wartet auf Autor"), "the rows show");
+  assert.deepEqual(marked(), []);
+  assert.ok(texts(root).includes(pending));
+  assert.equal(b.state("prs").loading, true);
+  await host.answer("gh", threads, isThreadsCall);
+  root = b.render();
+  assert.ok(rowCell(root, 102, "● neue Commits seit deinem Review · Antwort erwartet"), "the follow-up draws before them");
+  assert.ok(texts(root).includes(pending));
+  assert.equal(b.state("prs").loading, true);
+  await host.answer("gh", notificationsOf(301, 102), board.NOTIFICATIONS_PATH);
+  root = b.render();
+  assert.ok(rowCell(root, 301, "● ungelesen"));
+  assert.ok(rowCell(root, 102, "● ungelesen · neue Commits seit deinem Review · Antwort erwartet"));
+  assert.equal(texts(root).includes(pending), false);
+  assert.equal(b.state("prs").loading, false);
+  b.refresh(b.view(), cx);
+  await settle();
+  await host.answer("gh", ok(JSON.stringify(data)), isListCall);
+  await host.answer("gh", threads, isThreadsCall);
+  assert.deepEqual(marked(), [102, 301], "the rows it shows stay until the notifications are in");
+  assert.equal(texts(b.render()).includes(pending), false);
+  await host.answer("gh", ok("[]"), board.NOTIFICATIONS_PATH);
+  assert.deepEqual(marked(), []);
+  assert.equal(b.state("prs").loading, false);
+});
+
 test("UI: a row whose reasons hang on whether one's last review is one says \"? nicht ganz gelesen\", never \"wartet auf Autor\", and its details say why", async () => {
   const t = copperTheme("dark");
   const data = json("github-list-attention.json");
@@ -13896,7 +14124,7 @@ test("a pull request whose more threads are still to come is pending: no „mehr
   const waits = plain.sections.flatMap((x) => x.rows).find((r) => r.waiting);
   attentionPr(data, 201).reviewThreads.totalCount = 12;
   attentionPr(data, waits.number).reviewThreads.totalCount = 12;
-  const pending = board.parseGithubList(data, view, [], new Set(["PR_sample201", waits.key]));
+  const pending = board.parseGithubList(data, view, [], { pending: new Set(["PR_sample201", waits.key]) });
   assert.deepEqual([row(pending, 201).attention, row(pending, 201).unread, row(pending, 201).threadsPending], [[], [], true]);
   assert.deepEqual([row(pending, waits.number).waiting, row(pending, waits.number).threadsPending], [false, true]);
   assert.deepEqual(row(board.parseGithubList(data, view), 201).unread, [UNREAD.moreThreads(1)], "without the follow-up to come: unread");

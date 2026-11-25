@@ -43,8 +43,11 @@
 // milestone and parent, with its title and repo, and the first page's look
 // at the priority field add no connection and so no points; see below); a
 // list view one, one more per THREAD_IDS (100) pull requests in it with
-// more than FIRST_THREADS (10) review threads, and, until the board knows
-// it, one more for the login gh runs as (githubViewerArgs, one point).
+// more than FIRST_THREADS (10) review threads, one for the unread
+// notifications of the user gh runs as (githubNotificationsArgs: a REST
+// request per page of up to 50, counted against GitHub's REST limit of 5000
+// requests an hour, not against GraphQL's points), and, until the board
+// knows it, one more for the login gh runs as (githubViewerArgs, one point).
 // GitHub prices a request by its connections, each counted as full: the
 // list's per section one search, then per pull request of its limit (50
 // by default) its assignees, review requests, review threads, last commit
@@ -55,9 +58,9 @@
 // points (a hundred requests each) of GitHub's 5000 an hour, 32 for the
 // shipped three sections; the follow-up (githubThreadsArgs) 51 per such
 // pull request (REVIEW_THREADS threads and their comments), about one
-// point for two. An issue's related items (its description,
-// parent, sub-issues and linked pull requests) cost one more when its
-// details open, again on `r` while they are open, and again after a refresh
+// point for two. An issue's related items (its description, parent,
+// sub-issues and linked pull requests) cost one more when its details
+// open, again on `r` while they are open, and again after a refresh
 // where their last read failed (readRelated; what a refresh keeps of them
 // keptRelated says); an item the details panel went down to (Enter on a
 // line, related.js) costs the same when it shows, a pull request one gh or

@@ -101,6 +101,8 @@ export const otherLook = (state) => ({ state: String(state ?? "?").toLowerCase()
 // yet.
 export const DRAFT_REVIEW = "Entwurf";
 
+export const NOTIFIED = "ungelesen";
+
 // copper's hues by its names, each as the theme name the board draws it in
 // (ui/tones.js takes those to copper's colors and says who takes orange's
 // ansi11).

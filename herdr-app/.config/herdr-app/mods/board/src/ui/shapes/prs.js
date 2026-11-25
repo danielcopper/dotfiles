@@ -6,9 +6,9 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { ageLabel, cardLabel } from "../../shared.js";
+import { NOTIFIED, ageLabel, cardLabel } from "../../shared.js";
 import { checkColor, checksSection, detailNote, detailSection, selectedLook, shownOf } from "../helpers.js";
-import { headBg, markColor, toneColor } from "../tones.js";
+import { NOTE_TONES, headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -44,13 +44,15 @@ export const prsShape = {
   // its own (levelParts, ui/related.js).
   detailParts(b, t, view, item) {
     const sections = [];
-    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(markColor(t)).child(reason))));
+    if (item.attention?.length) sections.push(detailSection(t, "DU BIST DRAN", ...item.attention.map((reason) => div().text_color(markColor(t)).child(reason === NOTIFIED ? `${NOTIFIED} (GitHub-Benachrichtigung)` : reason))));
     if (item.checks) sections.push(checksSection(t, item.checks));
     sections.push(...(item.unread ?? []).map((text) => detailNote(t, "unread-note", text, "warning")));
     if (item.threadsPending) sections.push(detailNote(t, "pending-note", "Review-Threads werden noch gelesen …", "info"));
     return sections.length ? { sections } : {};
   },
 };
+
+export const NOTIFIED_PENDING = "GitHub-Benachrichtigungen werden noch gelesen …";
 
 // Every row keeps the cell, so the cells after it line up.
 export const THREADS_PENDING = "… Threads laden";
@@ -111,7 +113,10 @@ function drawPrs(b, t, mono, view, st) {
     );
     children.push(...rows.map((r) => row(r, tone)));
   }
-  return v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
+  const list = v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
+  if (!st.data.notifiedPending) return list;
+  const note = div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING);
+  return v_flex().flex_1().min_h(0).child(note).child(list);
 }
 
 function scrollToRow(b, view, key) {
