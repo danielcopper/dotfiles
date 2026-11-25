@@ -2808,7 +2808,7 @@ test("UI: herdr's props() say which copy is the layer's; the props init got stan
   assert.equal(tab.b.isLayer(), false);
 });
 
-test("UI: the board's keyboard goes to the start dialog's message, else the filter being typed, else the board, whose keys a status menu takes", async () => {
+test("UI: the board's keyboard goes to the start dialog's open list or message or to a menu's filter, else the filter being typed, else the board, whose keys a status menu takes", async () => {
   const { b, cx } = await openBoard();
   const taken = () => (b.handle.held ? "board" : b.modal?.inputFocused ? "message" : b.filtering ? "filter" : "none");
   await press(b, cx, "s");
@@ -2823,6 +2823,12 @@ test("UI: the board's keyboard goes to the start dialog's message, else the filt
   await press(b, cx, "tab");
   b.takeKeyboard();
   assert.deepEqual([b.modal.field, taken()], ["agent", "board"], "the start dialog on another field");
+  await press(b, cx, "space");
+  b.handle.focus();
+  b.takeKeyboard();
+  assert.deepEqual([b.modal.field, b.modal.focusedField, taken()], ["agent", "filter", "message"], "the filter of its open list");
+  await press(b, cx, "escape");
+  assert.deepEqual([b.modal.list, taken()], [null, "board"]);
   await press(b, cx, "tab", { modifiers: { shift: true } });
   assert.deepEqual([b.modal.field, taken()], ["message", "message"], "Tab back to the message gives it the keys");
   b.modal = null;
@@ -2833,6 +2839,10 @@ test("UI: the board's keyboard goes to the start dialog's message, else the filt
   b.filterInput.blur();
   b.takeKeyboard();
   assert.equal(taken(), "board");
+  await openMenu(b, cx);
+  b.handle.focus();
+  b.takeKeyboard();
+  assert.equal(taken(), "message", "the command menu's filter");
 });
 
 test("UI: a copy that comes to show takes the keyboard once, after its timer or its render saw it, whoever showed it, never rendered while hidden", async () => {
