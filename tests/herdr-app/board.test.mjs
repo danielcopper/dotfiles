@@ -13967,7 +13967,9 @@ function prioritySprintItems() {
   Object.assign(story.fields, { "System.Id": 303, "System.Title": "Plan the next import", "System.State": "New", "System.Parent": undefined });
   return JSON.stringify([...answer, story]);
 }
-const parentsWith290 = () => ok(JSON.stringify([...json("azure-sprint-parents.json"), { id: 290, fields: { "System.Id": 290, "System.Title": "Sample feature with a long name that will not fit" } }]));
+function parentsWith290() {
+  return ok(JSON.stringify([...json("azure-sprint-parents.json"), { id: 290, fields: { "System.Id": 290, "System.Title": "Sample feature with a long name that will not fit" } }]));
+}
 
 test("UI: the Sprint's story and task in a card's lines: the priority at the right of the key; a story's parent, and a task's only in „Ohne Story“ (its parent's row names it otherwise); a story's tasks' progress, which its assignee ends, or its state's line where it has none; a task's state, which its session, „speichert …“ and assignee end", async () => {
   const { b, cx, host, st } = await openSprint({ items: prioritySprintItems(), parents: parentsWith290() });
