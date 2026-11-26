@@ -56,9 +56,11 @@
 #    conflict/<machine>-<date>.
 #
 # Unfinished work, a refused fetch, commit or push, and a conflict each send
-# one ntfy notification; it is not sent again until a sync gets through. Any
-# other failure (no clone, a worktree that cannot be added) ends the run with
-# a non-zero exit and only a message in the journal. The notification needs
+# one ntfy notification. While the failure lasts, a run sends it again once a
+# day, as a reminder that says since when it fails; a sync that gets through
+# ends that, and the next failure notifies at once. Any other failure (no
+# clone, a worktree that cannot be added) ends the run with a non-zero exit and
+# only a message in the journal. The notification needs
 # ~/.config/memex/ntfy_url (the full topic URL) and
 # ~/.config/memex/ntfy_token; when either file is missing, none is sent.
 # MEMEX_DIR overrides the clone (default ~/memex).
@@ -68,7 +70,9 @@ repo=${MEMEX_DIR:-$HOME/memex}
 config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/memex
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/memex-sync
 # One marker per kind of failure, present while it is unresolved and already
-# notified. The conflict marker holds the name of the conflict branch.
+# notified; its modification time is that of the last notification, and
+# <marker>.since holds the time of the first. The conflict marker holds the
+# name of the conflict branch.
 busy_marker=$state_dir/operation-in-progress
 fetch_marker=$state_dir/fetch-refused
 conflict_marker=$state_dir/conflict
@@ -76,6 +80,7 @@ refused_marker=$state_dir/push-refused
 commit_marker=$state_dir/commit-refused
 lock=${XDG_RUNTIME_DIR:-/tmp}/memex-sync.lock
 net_timeout=30
+remind_after=$((24 * 60 * 60))
 
 export GIT_TERMINAL_PROMPT=0
 # An empty GIT_ASKPASS keeps git from falling back to SSH_ASKPASS, which the
@@ -138,11 +143,19 @@ notify() { # notify <title> <message>
   fi
 }
 
-notify_once() { # notify_once <marker> <title> <message>
-  [ ! -e "$1" ] || return 0
-  mkdir -p "$state_dir"
-  : >"$1"
-  notify "$2" "$3"
+notify_failure() { # notify_failure <marker> <title> <message>
+  local since
+  if [ ! -e "$1" ]; then
+    mkdir -p "$state_dir"
+    : >"$1"
+    date '+%F %R' >"$1.since"
+    notify "$2" "$3"
+    return
+  fi
+  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0
+  since=$(cat "$1.since" 2>/dev/null) || since=$(date -r "$1" '+%F %R')
+  touch "$1"
+  notify "$2" "Still failing since $since: $3"
 }
 
 # Prints what was left unfinished in the clone, if anything.
@@ -183,10 +196,9 @@ fetch_refused() {
   grep -qiE "Authentication failed|could not read (Username|Password)|returned error: (401|403|404)|repository '.*' not found|Permission denied \(publickey" <<<"$fetch_error"
 }
 
-# A refused push is reported once, until a push gets through.
 report_refused() { # report_refused <ref>
   log "push to $1 was refused" >&2
-  notify_once "$refused_marker" "memex-sync ($Machine): push refused" \
+  notify_failure "$refused_marker" "memex-sync ($Machine): push refused" \
     "The $Machine's push to $1 was refused. Check journalctl --user -u memex-sync."
   exit 1
 }
@@ -203,9 +215,9 @@ on_conflict() {
     report_refused "$branch"
   rm -f "$refused_marker"
   log "local HEAD is on $branch"
-  notify_once "$conflict_marker" "memex-sync ($Machine): conflict" \
+  notify_failure "$conflict_marker" "memex-sync ($Machine): conflict" \
     "The $Machine could not rebase onto origin/main. Its state is on the branch $branch."
-  printf '%s\n' "$branch" >"$conflict_marker"
+  [ -s "$conflict_marker" ] || printf '%s\n' "$branch" >"$conflict_marker"
   exit 1
 }
 
@@ -263,7 +275,7 @@ fetch_origin || fetched=false
 # while the fetch waited on the network is caught too.
 if unfinished=$(unfinished_work); then
   log "found $unfinished in $repo; nothing done" >&2
-  notify_once "$busy_marker" "memex-sync ($Machine): git operation in progress" \
+  notify_failure "$busy_marker" "memex-sync ($Machine): git operation in progress" \
     "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."
   exit 1
 fi
@@ -283,7 +295,7 @@ if [ "$staged" -gt 0 ]; then
   if ! commit_output=$(commit_message | git commit --quiet --no-verify --file=- 2>&1); then
     commit_output=$(one_line <<<"$commit_output")
     log "git refused the commit: $commit_output" >&2
-    notify_once "$commit_marker" "memex-sync ($Machine): commit refused" \
+    notify_failure "$commit_marker" "memex-sync ($Machine): commit refused" \
       "The $Machine could not commit in $repo: $commit_output. Check journalctl --user -u memex-sync."
     exit 1
   fi
@@ -293,7 +305,7 @@ fi
 if [ "$fetched" = false ]; then
   if fetch_refused; then
     log "origin refused the fetch: $fetch_error" >&2
-    notify_once "$fetch_marker" "memex-sync ($Machine): fetch refused" \
+    notify_failure "$fetch_marker" "memex-sync ($Machine): fetch refused" \
       "Origin refused the $Machine's fetch: $fetch_error. Check journalctl --user -u memex-sync."
     exit 1
   fi
@@ -345,3 +357,4 @@ if [ "$ahead" -gt 0 ]; then
   log "pushed $ahead commits"
 fi
 rm -f "$busy_marker" "$fetch_marker" "$commit_marker" "$conflict_marker" "$refused_marker"
+rm -f "$state_dir"/*.since

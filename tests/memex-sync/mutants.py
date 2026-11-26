@@ -58,7 +58,7 @@ GUARD_COMMENT = ("# Checked after the fetch, right before the commit: an operati
                  "# while the fetch waited on the network is caught too.\n")
 GUARD = ('if unfinished=$(unfinished_work); then\n'
          '  log "found $unfinished in $repo; nothing done" >&2\n'
-         '  notify_once "$busy_marker" "memex-sync ($Machine): git operation in progress" \\\n'
+         '  notify_failure "$busy_marker" "memex-sync ($Machine): git operation in progress" \\\n'
          '    "memex-sync found $unfinished in $repo and leaves it alone until that is finished or aborted."\n'
          '  exit 1\n'
          'fi\n')
@@ -78,8 +78,8 @@ MUTANTS = [
     ("s4_origin_ahead", "merge instead of rebase",
      '(cd "$rebase_tree" && git rebase --quiet origin/main 2>&1)',
      '(cd "$rebase_tree" && git merge --quiet --no-edit origin/main 2>&1)'),
-    ("s5_conflict", "notify_once notifies every time",
-     '  [ ! -e "$1" ] || return 0\n', ""),
+    ("s5_conflict", "a reminder on every run",
+     '  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0\n', ""),
     ("s5_conflict", "drop the Authorization header",
      "--header @<(printf 'Authorization: Bearer %s\\n' \"$token\") \\\n    ", ""),
     ("s12_second_conflict_same_day", "conflict branch without --force",
@@ -103,8 +103,8 @@ MUTANTS = [
     ("s13_push_refused_by_pre_push_hook", "take every failed push for a race",
      "if has_origin_main && ! git merge-base --is-ancestor origin/main HEAD; then\n    log",
      "if true; then\n    log"),
-    ("s13_push_refused_by_pre_push_hook", "notify_once notifies every time",
-     '  [ ! -e "$1" ] || return 0\n', ""),
+    ("s13_push_refused_by_pre_push_hook", "a reminder on every run",
+     '  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0\n', ""),
     ("s13_push_refused_by_pre_push_hook", "keep the refusal marker after a good sync",
      ' "$conflict_marker" "$refused_marker"\n', ' "$conflict_marker"\n'),
     ("s14_push_lost_race", "take every failed push for a refusal",
@@ -119,8 +119,8 @@ MUTANTS = [
      "if unfinished=$(unfinished_work); then", "if false; then"),
     ("s16_rebase_in_progress", "rebase-merge not checked",
      "rebase-merge:rebase ", ""),
-    ("s16_rebase_in_progress", "notify_once notifies every time",
-     '  [ ! -e "$1" ] || return 0\n', ""),
+    ("s16_rebase_in_progress", "a reminder on every run",
+     '  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0\n', ""),
     ("s16_rebase_in_progress", "keep the in-progress marker after a good sync",
      'rm -f "$busy_marker" "$fetch_marker"', 'rm -f "$fetch_marker"'),
     ("s17_rebase_apply_in_progress", "rebase-apply not checked",
@@ -140,8 +140,8 @@ MUTANTS = [
      "fetch_refused() {\n  grep", "fetch_refused() {\n  false && grep"),
     ("s23_fetch_401", "'could not read Username' not a refusal",
      "could not read (Username|Password)|", ""),
-    ("s23_fetch_401", "notify_once notifies every time",
-     '  [ ! -e "$1" ] || return 0\n', ""),
+    ("s23_fetch_401", "a reminder on every run",
+     '  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0\n', ""),
     ("s23_fetch_401", "keep the fetch marker after a good sync",
      'rm -f "$busy_marker" "$fetch_marker"', 'rm -f "$busy_marker"'),
     ("s24_fetch_bad_credentials", "'Authentication failed' not a refusal",
@@ -172,7 +172,7 @@ MUTANTS = [
      FETCH + "\n" + GUARD_COMMENT + GUARD, GUARD + "\n" + FETCH),
     ("s25_fetch_403", "a refused fetch exits before the commit",
      "fetched=true\nfetch_origin || fetched=false\n",
-     "fetched=true\nfetch_origin || fetched=false\nif [ \"$fetched\" = false ] && fetch_refused; then\n  log \"origin refused the fetch: $fetch_error\" >&2\n  notify_once \"$fetch_marker\" \"memex-sync ($Machine): fetch refused\" \"Origin refused the $Machine's fetch: $fetch_error.\"\n  exit 1\nfi\n"),
+     "fetched=true\nfetch_origin || fetched=false\nif [ \"$fetched\" = false ] && fetch_refused; then\n  log \"origin refused the fetch: $fetch_error\" >&2\n  notify_failure \"$fetch_marker\" \"memex-sync ($Machine): fetch refused\" \"Origin refused the $Machine's fetch: $fetch_error.\"\n  exit 1\nfi\n"),
     # Commit messages.
     ("s34_message_one_file", "an added file is taken for an update",
      '      A) lines+=("create $path") ;;\n', ""),
@@ -245,11 +245,34 @@ MUTANTS = [
     ("s57_commit_refused", "a refused commit carries on",
      '    exit 1\n  fi\n  log "committed', '  fi\n  log "committed'),
     ("s57_commit_refused", "a refused commit not notified",
-     '    notify_once "$commit_marker"', '    : notify_once "$commit_marker"'),
-    ("s57_commit_refused", "notify_once notifies every time",
-     '  [ ! -e "$1" ] || return 0\n', ""),
+     '    notify_failure "$commit_marker"', '    : notify_failure "$commit_marker"'),
+    ("s57_commit_refused", "a reminder on every run",
+     '  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0\n', ""),
     ("s57_commit_refused", "keep the commit marker after a good sync",
      ' "$commit_marker" "$conflict_marker"', ' "$conflict_marker"'),
+    # A failure that persists, reminded of once a day.
+    ("s58_reminder_not_yet_due", "the conflict marker rewritten on every run",
+     '  [ -s "$conflict_marker" ] || printf', '  printf'),
+    ("s58_reminder_not_yet_due", "a reminder after half a day",
+     "remind_after=$((24 * 60 * 60))", "remind_after=$((12 * 60 * 60))"),
+    ("s59_reminder_after_a_day", "no reminder",
+     '  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0\n', "  return 0\n"),
+    ("s59_reminder_after_a_day", "a reminder only after two days",
+     "remind_after=$((24 * 60 * 60))", "remind_after=$((48 * 60 * 60))"),
+    ("s59_reminder_after_a_day", "a reminder leaves the marker's age",
+     '  touch "$1"\n', ""),
+    ("s59_reminder_after_a_day", "a reminder that does not say so",
+     '"Still failing since $since: $3"', '"$3"'),
+    ("s59_reminder_after_a_day", "a reminder names its own time",
+     "since=$(cat \"$1.since\" 2>/dev/null) || since=$(date -r \"$1\" '+%F %R')", "since=$(date '+%F %R')"),
+    ("s59_reminder_after_a_day", "the first notification's time not kept",
+     "    date '+%F %R' >\"$1.since\"\n", ""),
+    ("s60_reminder_keeps_conflict_branch", "the branch not written into a new conflict marker",
+     '  [ -s "$conflict_marker" ] || printf', '  [ -e "$conflict_marker" ] || printf'),
+    ("s61_sync_after_reminder", "the first notification's time kept after a good sync",
+     'rm -f "$state_dir"/*.since\n', ""),
+    ("s62_reminder_without_since", "a marker without its first time breaks the reminder",
+     " || since=$(date -r \"$1\" '+%F %R')", ""),
 ]
 
 # memex-watch: (scenario, what, old, new), applied to memex-watch.

@@ -31,6 +31,8 @@ CASES=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_co
   s48_write_in_the_way s49_watch_clone_deleted s50_watch_clone_moved s51_commit_hooks_skipped
   s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
   s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused
+  s58_reminder_not_yet_due s59_reminder_after_a_day s60_reminder_keeps_conflict_branch
+  s61_sync_after_reminder s62_reminder_without_since
   a1_scenarios_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
@@ -66,9 +68,11 @@ WATCH_PATH=$(sed -n 's/^Environment=PATH=//p' "$REPO/memex/.config/systemd/user/
 [ -n "$WATCH_PATH" ] || { echo "no PATH found in memex-watch.service" >&2; exit 2; }
 # memex-watch's wait for quiet, in seconds.
 WATCH_DELAY=3
-# The real git and uname, for the wrappers some scenarios put in front of them.
+# The real git, uname and date, for the wrappers some scenarios put in front
+# of them.
 REAL_GIT=$(command -v git)
 REAL_UNAME=$(command -v uname)
+REAL_DATE=$(command -v date)
 
 # Isolate git from the real user: no global config, no global hooks.
 export GIT_CONFIG_NOSYSTEM=1
@@ -1220,6 +1224,135 @@ s57_commit_refused() {
   check "exit 0 once git commits (got $RC)" eq "$RC" 0
   check "the change on origin" eq "$(git -C "$T/origin.git" show main:unsigned.md)" x
   check "marker gone" test ! -e "$T/state/memex-sync/commit-refused"
+}
+
+# --- A failure that persists is notified again once a day. ---
+
+mtime() { stat -c %Y "$1"; }
+# age_marker <marker> <hours>: the marker as if last notified that long ago.
+age_marker() { touch -d "$2 hours ago" "$T/state/memex-sync/$1"; }
+# A pre-push hook that refuses every push.
+refuse_pushes() {
+  printf '#!/bin/sh\necho "pre-push: refused for test" >&2\nexit 1\n' >"$T/memex/.git/hooks/pre-push"
+  chmod +x "$T/memex/.git/hooks/pre-push"
+}
+# with_date_at <time>: a date first on the script's PATH that tells that time,
+# except for the modification time of a file (-r).
+with_date_at() {
+  mkdir -p "$T/bin"
+  cat >"$T/bin/date" <<EOF
+#!/bin/sh
+case " \$* " in *" -r "*) exec "$REAL_DATE" "\$@" ;; esac
+exec "$REAL_DATE" -d '$1' "\$@"
+EOF
+  chmod +x "$T/bin/date"
+  SUT_ENV+=(PATH="$T/bin:$SERVICE_PATH")
+}
+
+# A conflict notified 23 hours ago: the next run sends nothing and leaves the
+# marker's time as it is.
+s58_reminder_not_yet_due() {
+  with_ntfy_files
+  make_conflict
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  age_marker conflict 23
+  local aged
+  aged=$(mtime "$T/state/memex-sync/conflict")
+  run_sut
+  check "second run exit 1 (got $RC)" eq "$RC" 1
+  check "still one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  check "marker's time unchanged" eq "$(mtime "$T/state/memex-sync/conflict")" "$aged"
+}
+
+# A refused push first notified at 2026-11-18 09:30: a run a day after each
+# notification sends one reminder that names that time, and resets the
+# marker's age.
+s59_reminder_after_a_day() {
+  with_ntfy_files
+  refuse_pushes
+  printf 'x\n' >"$T/memex/secret.md"
+  with_date_at '2026-11-18 09:30'
+  run_sut
+  SUT_ENV=()
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  local first
+  first=$(last_ntfy body)
+  check "first message without the reminder" eq "$first" \
+    "The Deck's push to main was refused. Check journalctl --user -u memex-sync."
+  age_marker push-refused 25
+  run_sut
+  check "reminder run exit 1 (got $RC)" eq "$RC" 1
+  check "one reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 2
+  check "title unchanged" eq "$(last_ntfy title)" "memex-sync (Deck): push refused"
+  check "reminder names the first notification's time" eq "$(last_ntfy body)" \
+    "Still failing since 2026-11-18 09:30: $first"
+  check "marker fresh" test "$(($(date +%s) - $(mtime "$T/state/memex-sync/push-refused")))" -lt 60
+  run_sut
+  check "run after the reminder exit 1 (got $RC)" eq "$RC" 1
+  check "no request right after the reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 2
+  age_marker push-refused 25
+  run_sut
+  check "a day later another reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 3
+  check "it still names the first notification's time" eq "$(last_ntfy body)" \
+    "Still failing since 2026-11-18 09:30: $first"
+}
+
+s60_reminder_keeps_conflict_branch() {
+  with_ntfy_files
+  make_conflict
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "marker holds the branch" eq "$(cat "$T/state/memex-sync/conflict")" "conflict/deck-$today"
+  age_marker conflict 25
+  run_sut
+  check "reminder run exit 1 (got $RC)" eq "$RC" 1
+  check "one reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 2
+  check "reminder names the branch" grep -qE \
+    "^Still failing since [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: The Deck could not rebase onto origin/main\. Its state is on the branch conflict/deck-$today\.$" \
+    <(last_ntfy body)
+  check "marker still holds the branch" eq "$(cat "$T/state/memex-sync/conflict")" "conflict/deck-$today"
+  check "conflict branch on origin = local HEAD" eq "$(origin_sha "conflict/deck-$today")" "$(local_sha)"
+}
+
+# After a reminder a sync gets through: nothing is left in the state
+# directory, and the next refusal notifies at once, as a first notification.
+s61_sync_after_reminder() {
+  with_ntfy_files
+  refuse_pushes
+  printf 'x\n' >"$T/memex/secret.md"
+  run_sut
+  age_marker push-refused 25
+  run_sut
+  check "reminder sent" eq "$(($(ntfy_count) - NTFY_BEFORE))" 2
+  check "it is the reminder" grep -q '^Still failing since ' <(last_ntfy body)
+  rm "$T/memex/.git/hooks/pre-push"
+  run_sut
+  check "exit 0 once the hook lets it through (got $RC)" eq "$RC" 0
+  check "state directory empty" eq "$(ls -A "$T/state/memex-sync")" ""
+  refuse_pushes
+  printf 'y\n' >"$T/memex/more.md"
+  run_sut
+  check "exit 1 when refused again (got $RC)" eq "$RC" 1
+  check "notified at once" eq "$(($(ntfy_count) - NTFY_BEFORE))" 3
+  check "as a first notification" eq "$(last_ntfy body)" \
+    "The Deck's push to main was refused. Check journalctl --user -u memex-sync."
+}
+
+# A marker without the time of its first notification, as written before that
+# time was kept: the reminder names the marker's own time.
+s62_reminder_without_since() {
+  with_ntfy_files
+  git -C "$T/memex" remote set-url origin "$(http_origin 403)"
+  mkdir -p "$T/state/memex-sync"
+  touch -d '2026-11-18 09:30' "$T/state/memex-sync/fetch-refused"
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "one reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  check "it names the marker's time" grep -q "^Still failing since 2026-11-18 09:30: Origin refused the Deck's fetch: " \
+    <(last_ntfy body)
 }
 
 # expect_case_beside_file <case> [arg ...]: this suite, run again from a
