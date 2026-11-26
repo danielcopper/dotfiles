@@ -58,13 +58,13 @@
         },
         "number": 4001,
         "title": "fix(view): keep the sample colors",
-        "url": "https://github.com/example/tender/issues/4001",
+        "url": "https://github.com/sample-user/tender/issues/4001",
         "issueType": {
          "name": "Bug",
          "color": "RED"
         },
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [
@@ -105,13 +105,13 @@
         },
         "number": 4002,
         "title": "chore: sort the sample list",
-        "url": "https://github.com/example/tender/issues/4002",
+        "url": "https://github.com/sample-user/tender/issues/4002",
         "issueType": {
          "name": "Task",
          "color": "ORANGE"
         },
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [
@@ -151,10 +151,10 @@
         },
         "number": 4003,
         "title": "[Epic] sample color rollout",
-        "url": "https://github.com/example/tender/issues/4003",
+        "url": "https://github.com/sample-user/tender/issues/4003",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [
@@ -191,10 +191,10 @@
         },
         "number": 4004,
         "title": "[Epic] plain sample rollout",
-        "url": "https://github.com/example/tender/issues/4004",
+        "url": "https://github.com/sample-user/tender/issues/4004",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": []
@@ -222,13 +222,13 @@
         },
         "number": 4005,
         "title": "[Epic] typed sample rollout",
-        "url": "https://github.com/example/tender/issues/4005",
+        "url": "https://github.com/sample-user/tender/issues/4005",
         "issueType": {
          "name": "Epic",
          "color": "GREEN"
         },
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [

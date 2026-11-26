@@ -71,10 +71,10 @@
         },
         "number": 3050,
         "title": "feat(api): retry a failed request once",
-        "url": "https://github.com/example/tender/pull/3050",
+        "url": "https://github.com/sample-user/tender/pull/3050",
         "headRefName": "feat/3000-retry-once",
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": []
@@ -122,12 +122,12 @@
         "author": null,
         "number": 3060,
         "title": "chore: an item in an option that no longer exists",
-        "url": "https://github.com/example/tender/issues/3060",
+        "url": "https://github.com/sample-user/tender/issues/3060",
         "issueType": {
          "name": "Task"
         },
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": []

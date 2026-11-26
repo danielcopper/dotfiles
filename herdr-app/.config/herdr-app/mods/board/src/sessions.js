@@ -13,6 +13,13 @@ const isLetter = (c) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
 // What GitHub allows in a repo's name.
 const isNameChar = (c) => isDigit(c) || isLetter(c) || c === 45 || c === 46 || c === 95;
 
+function ownerStart(s, start) {
+  if (s[start - 1] !== "/") return start;
+  let at = start - 1;
+  while (at > 0 && isNameChar(s.charCodeAt(at - 1))) at--;
+  return at < start - 1 ? at : start;
+}
+
 // No RegExp: this runs for each name at every draw.
 export function references(text) {
   const s = String(text ?? "");
@@ -30,7 +37,11 @@ export function references(text) {
       if (s[i] === "!") {
         if (start === i) keys.push(`!${number}`);
       } else if (start === i) bare.push(number);
-      else keys.push(`${s.slice(start, i).toLowerCase()}#${number}`);
+      else {
+        // Azure's "AB#4711" names no repo, so nothing before it is an owner.
+        const from = s.slice(start, i).toLowerCase() === "ab" ? start : ownerStart(s, start);
+        keys.push(`${s.slice(from, i).toLowerCase()}#${number}`);
+      }
     }
     if (i === at) at = s.indexOf("#", i + 1);
     else bang = s.indexOf("!", i + 1);
@@ -350,14 +361,22 @@ export function fits(e, h) {
   return e.place.space === h.place.space && same(e.place.tab, h.place.tab) && same(e.place.pane, h.place.pane);
 }
 
-export function itemSessions(index, item) {
+// A bare "repo#n" in a session's text never names an item of a foreign repo.
+function sessionKeys(item) {
   const key = itemKey(item);
   if (!key) return [];
+  if (item.source !== "github") return [key.toLowerCase()];
+  return [`${item.repo}#${item.number}`, ...(item.foreign ? [] : [`${item.repoShort}#${item.number}`])].map((k) => k.toLowerCase());
+}
+
+export function itemSessions(index, item) {
+  const keys = sessionKeys(item);
+  if (!keys.length) return [];
   const branch = item.kind === "pr" && item.branch ? item.branch : null;
-  const cacheKey = `${item.source}\n${key}\n${branch ?? ""}`;
+  const cacheKey = `${item.source}\n${keys.join(" ")}\n${branch ?? ""}`;
   const kept = index.cache.get(cacheKey);
   if (kept) return kept;
-  const hits = [...(index.byKey.get(key.toLowerCase()) ?? [])];
+  const hits = keys.flatMap((k) => index.byKey.get(k) ?? []);
   if (item.source === "github") {
     const number = String(item.number);
     const ours = (h) => inRepo(h.folder, item.repoShort);

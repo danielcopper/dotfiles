@@ -10,14 +10,14 @@
      "id": "PR_sample103",
      "number": 103,
      "title": "feat(api): asked again, nothing new",
-     "url": "https://github.com/example/tender/pull/103",
+     "url": "https://github.com/sample-user/tender/pull/103",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/103-sample",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -84,14 +84,14 @@
      "id": "PR_sample101",
      "number": 101,
      "title": "feat(api): asked for a first review",
-     "url": "https://github.com/example/tender/pull/101",
+     "url": "https://github.com/sample-user/tender/pull/101",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/101-sample",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -147,14 +147,14 @@
      "id": "PR_sample102",
      "number": 102,
      "title": "fix(api): pushed after the review",
-     "url": "https://github.com/example/tender/pull/102",
+     "url": "https://github.com/sample-user/tender/pull/102",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/102-sample",
      "reviewDecision": "CHANGES_REQUESTED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -221,14 +221,14 @@
      "id": "PR_sample104",
      "number": 104,
      "title": "feat(api): asked of a team",
-     "url": "https://github.com/example/tender/pull/104",
+     "url": "https://github.com/sample-user/tender/pull/104",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/104-sample",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -277,14 +277,14 @@
      "id": "PR_sample105",
      "number": 105,
      "title": "feat(api): a team asked again",
-     "url": "https://github.com/example/tender/pull/105",
+     "url": "https://github.com/sample-user/tender/pull/105",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/105-sample",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -349,14 +349,14 @@
      "id": "PR_sample106",
      "number": 106,
      "title": "feat(api): a review dismissed",
-     "url": "https://github.com/example/tender/pull/106",
+     "url": "https://github.com/sample-user/tender/pull/106",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/106-sample",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -428,14 +428,14 @@
      "id": "PR_sample203",
      "number": 203,
      "title": "docs: nothing to do yet",
-     "url": "https://github.com/example/tender/pull/203",
+     "url": "https://github.com/sample-user/tender/pull/203",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/203-sample",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-user"
@@ -490,14 +490,14 @@
      "id": "PR_sample201",
      "number": 201,
      "title": "feat(ui): approved and green",
-     "url": "https://github.com/example/tender/pull/201",
+     "url": "https://github.com/sample-user/tender/pull/201",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/201-sample",
      "reviewDecision": "APPROVED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-user"
@@ -564,14 +564,14 @@
      "id": "PR_sample202",
      "number": 202,
      "title": "feat(ui): much to do",
-     "url": "https://github.com/example/tender/pull/202",
+     "url": "https://github.com/sample-user/tender/pull/202",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/202-sample",
      "reviewDecision": "CHANGES_REQUESTED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-user"
@@ -703,14 +703,14 @@
      "id": "PR_sample301",
      "number": 301,
      "title": "refactor(api): reviewed, waiting",
-     "url": "https://github.com/example/tender/pull/301",
+     "url": "https://github.com/sample-user/tender/pull/301",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/301-sample",
      "reviewDecision": "CHANGES_REQUESTED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -811,14 +811,14 @@
      "id": "PR_sample102",
      "number": 102,
      "title": "fix(api): pushed after the review",
-     "url": "https://github.com/example/tender/pull/102",
+     "url": "https://github.com/sample-user/tender/pull/102",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/102-sample",
      "reviewDecision": "CHANGES_REQUESTED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -885,14 +885,14 @@
      "id": "PR_sample302",
      "number": 302,
      "title": "fix(ui): new commits since the review",
-     "url": "https://github.com/example/tender/pull/302",
+     "url": "https://github.com/sample-user/tender/pull/302",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/302-sample",
      "reviewDecision": "APPROVED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -953,14 +953,14 @@
      "id": "PR_sample303",
      "number": 303,
      "title": "feat(ui): an answer in a thread",
-     "url": "https://github.com/example/tender/pull/303",
+     "url": "https://github.com/sample-user/tender/pull/303",
      "isDraft": false,
      "createdAt": "2026-11-18T09:00:00Z",
      "updatedAt": "2026-11-20T09:00:00Z",
      "headRefName": "feat/303-sample",
      "reviewDecision": "CHANGES_REQUESTED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"

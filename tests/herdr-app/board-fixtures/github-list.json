@@ -10,14 +10,14 @@
      "id": "PR_sample1",
      "number": 2820,
      "title": "build(ui): draw the summary card",
-     "url": "https://github.com/example/tender/pull/2820",
+     "url": "https://github.com/sample-user/tender/pull/2820",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
      "headRefName": "pr/summary-card",
      "reviewDecision": "REVIEW_REQUIRED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -84,14 +84,14 @@
      "id": "PR_sample2",
      "number": 1921,
      "title": "chore(main): release sample 1.0.0",
-     "url": "https://github.com/example/tender/pull/1921",
+     "url": "https://github.com/sample-user/tender/pull/1921",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
      "headRefName": "release-please--branches--main",
      "reviewDecision": null,
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-release-bot"
@@ -140,14 +140,14 @@
      "id": "PR_sample3",
      "number": 808,
      "title": "chore(main): release 0.35.1",
-     "url": "https://github.com/example/atlas/pull/808",
+     "url": "https://github.com/sample-user/atlas/pull/808",
      "isDraft": true,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
      "headRefName": "feat/x",
      "reviewDecision": null,
      "repository": {
-      "nameWithOwner": "example/atlas"
+      "nameWithOwner": "sample-user/atlas"
      },
      "author": {
       "login": "sample-release-bot"
@@ -189,14 +189,14 @@
      "id": "PR_sample1",
      "number": 2820,
      "title": "build(ui): draw the summary card",
-     "url": "https://github.com/example/tender/pull/2820",
+     "url": "https://github.com/sample-user/tender/pull/2820",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
      "headRefName": "pr/summary-card",
      "reviewDecision": null,
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-contributor"
@@ -250,14 +250,14 @@
      "id": "PR_sample4",
      "number": 77,
      "title": "fix: a check that fails",
-     "url": "https://github.com/example/tender/pull/77",
+     "url": "https://github.com/sample-user/tender/pull/77",
      "isDraft": false,
      "createdAt": "2026-11-10T09:00:00Z",
      "updatedAt": "2026-11-17T09:00:00Z",
      "headRefName": "feat/x",
      "reviewDecision": "CHANGES_REQUESTED",
      "repository": {
-      "nameWithOwner": "example/tender"
+      "nameWithOwner": "sample-user/tender"
      },
      "author": {
       "login": "sample-user"

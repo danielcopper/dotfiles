@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { layout, notify, panes, settings, spaces } from "herdr";
-import { MOD, cardType, firstLine } from "../shared.js";
+import { COPPER_HUES, MOD, cardType, firstLine } from "../shared.js";
 import { AGENT_STATUS, placed } from "../sessions.js";
 import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
@@ -504,6 +504,20 @@ export const stateChip = (t, data, state, color = null) =>
 // A chip in a `tone` (a theme name): `text` in the tone's color
 // (toneColor) on the tone's chip background (chipBg).
 export const toneChip = (t, text, tone) => chip(t, text, toneColor(t, tone), chipBg(t, tone));
+
+export const foreignChip = (t) => toneChip(t, "fremd", COPPER_HUES.yellow);
+
+// A switch such as „nur meine“: on, on the theme's `selected` as a chosen
+// tab is, with the accent border of its own; not as a primary button
+// (solid), which it is not. „nur meine“ keeps its text and weight, so its
+// size never changes.
+export const toggleSwitch = (b, t, id, on, toggle) =>
+  h_flex().id(id).flex_none().gap(6).px(10).py(5).rounded(6).text_size(12).cursor_pointer()
+    .border_1().border_color(on ? t.accent : t.border).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+    .hover((s) => s.bg(t.hover))
+    .on_click((_e, cx) => {
+      if (!b.modal) toggle(cx);
+    });
 
 // A card's chip for its label `name`, in the label's color brought onto the
 // theme (hueTone).

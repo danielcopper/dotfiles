@@ -2,37 +2,56 @@
 // Its data is parseGithubList's; a row's author, draft mark and checks show
 // where it has them, and whether the viewer has to act on it. Each section
 // is drawn in its color, a theme name: its head on a band of it, each row
-// with a stripe of it at its left. View fields it reads: id.
+// with a stripe of it at its left. Within a section the rows stand grouped
+// by repo (kinds/list.js, repoGroups says which groups have a repo row),
+// and nothing selects a repo row. The „Repos:“ line above the sections,
+// and the repo menu (modals/repos.js), turn a repo off and on; a repo
+// turned off shows none of its pull requests. View fields it reads: id,
+// settingsPath, hideRepos.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { NOTIFIED, ageLabel, cardLabel } from "../../shared.js";
-import { checkColor, checksSection, detailNote, detailSection, selectedLook, shownOf } from "../helpers.js";
+import { repoHidePath } from "../../config.js";
+import { sameNames } from "../../kinds/board.js";
+import { keptRows, repoGroups, repoSwitches, toggledRepos } from "../../kinds/list.js";
+import { checkColor, checksSection, detailNote, detailSection, foreignChip, selectedLook, shownOf, toggleSwitch } from "../helpers.js";
 import { NOTE_TONES, headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
 const prsState = (b) => b.shapeState.prs;
 
-// The rows that show, as one column.
-const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => s.rows.filter((r) => b.visible(r, st.data))) }];
+const sectionGroups = (b, data, s) => repoGroups(data, keptRows(data, s), (r) => b.visible(r, data));
+
+const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => sectionGroups(b, st.data, s).flatMap((g) => g.rows)) }];
+
+const keptAll = (data) => data.sections.flatMap((s) => keptRows(data, s));
+
+function withView(data, view) {
+  return sameNames(data.hideRepos ?? [], view.hideRepos) ? data : { ...data, hideRepos: [...view.hideRepos] };
+}
 
 export const prsShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
   nav: prsRows,
   selected: (b, st) => prsRows(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
   scrollTo: (b, view, sel) => scrollToRow(b, view, sel.key),
-  // All items, whatever the filter: every section's rows.
-  items: (data) => data.sections.flatMap((s) => s.rows),
+  items: keptAll,
   count(b, data) {
-    const rows = data.sections.flatMap((s) => s.rows);
+    const rows = keptAll(data);
     return { shown: rows.filter((r) => b.visible(r, data)).length, total: rows.length };
   },
   render: (b, t, mono, view, st) => drawPrs(b, t, mono, view, st),
   dirs: ["up", "down"],
   loads: true,
   enterHint: "Detail · Review",
-  received: (data) => data,
+  received: (data, _st, view) => withView(data, view),
+  withView,
+  toggleRepo(b, view, repo, cx) {
+    const now = b.viewById(view.id) ?? view;
+    b.changeSetting(repoHidePath(now), toggledRepos(now.hideRepos, repo), cx);
+  },
   warnings: (_view, data) =>
     data.sections.flatMap((s) => [
       ...(s.skipped ? [`${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`] : []),
@@ -64,12 +83,11 @@ function attentionCell(t, r) {
 }
 
 // A section's count: the rows it holds (each pull request once, in its first
-// section; results that are no pull request, and those GitHub sent as null
-// for an error, left out), "<shown>/<held>"
-// while the filter or "nur meine" hides some; a section GitHub cut adds how
-// many it sent of how many it found.
-export function sectionCount(section, shown) {
-  const held = section.rows.length;
+// section; results that are no pull request, those GitHub sent as null for
+// an error, and those of repos turned off left out: `held`),
+// "<shown>/<held>" while the filter or "nur meine" hides some; a section
+// GitHub cut adds how many it sent of how many it found.
+export function sectionCount(section, shown, held) {
   const cut = section.limited ? ` · erste ${section.fetched} von ${section.count}` : "";
   return `${shownOf(shown, held)}${cut}`;
 }
@@ -105,18 +123,40 @@ function drawPrs(b, t, mono, view, st) {
   };
   const children = [];
   for (const [i, s] of st.data.sections.entries()) {
-    const rows = s.rows.filter((r) => b.visible(r, st.data));
+    const kept = keptRows(st.data, s);
+    const groups = sectionGroups(b, st.data, s);
     const tone = s.color;
     children.push(
       div().id(`section-${i}`).flex_none().mt(8).px(20).py(3).bg(headBg(t, tone, t.background)).text_size(11).font_semibold().text_color(toneColor(t, tone))
-        .child(`${s.name.toUpperCase()} · ${sectionCount(s, rows.length)}`),
+        .child(`${s.name.toUpperCase()} · ${sectionCount(s, groups.reduce((n, g) => n + g.rows.length, 0), kept.length)}`),
     );
-    children.push(...rows.map((r) => row(r, tone)));
+    for (const g of groups) {
+      if (g.headed) children.push(repoRow(t, mono, `repo-head-${i}-${g.repo}`, g));
+      children.push(...g.rows.map((r) => row(r, tone)));
+    }
   }
   const list = v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
-  if (!st.data.notifiedPending) return list;
-  const note = div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING);
-  return v_flex().flex_1().min_h(0).child(note).child(list);
+  const above = [repoLine(b, t, view, st), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
+  return above.length ? v_flex().flex_1().min_h(0).children(above).child(list) : list;
+}
+
+function repoRow(t, mono, id, group) {
+  return h_flex().id(id).flex_none().gap(8).px(20).pt(6).pb(2).items_center()
+    .child(div().font_family(mono).text_size(11).text_color(t.muted).child(group.name))
+    .child(div().text_size(11).text_color(t.dim).child(shownOf(group.rows.length, group.held)))
+    .when(group.foreign, (el) => el.child(foreignChip(t)));
+}
+
+function repoLine(b, t, view, st) {
+  const switches = repoSwitches(st.data, (r) => b.visible(r, st.data));
+  if (!switches.length) return null;
+  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
+    .child(div().text_color(t.muted).child("Repos:"))
+    .children(switches.map((e) =>
+      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
+        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
+        .child(div().text_color(t.muted).child(shownOf(e.shown, e.held)))
+        .when(e.foreign, (el) => el.child(foreignChip(t)))));
 }
 
 function scrollToRow(b, view, key) {
@@ -124,9 +164,12 @@ function scrollToRow(b, view, key) {
   let child = 0;
   for (const s of st.data.sections) {
     child++; // the section's heading
-    for (const r of s.rows.filter((row) => b.visible(row, st.data))) {
-      if (r.key === key) return prsState(b).scroll.scroll_to_item(child);
-      child++;
+    for (const g of sectionGroups(b, st.data, s)) {
+      if (g.headed) child++;
+      for (const r of g.rows) {
+        if (r.key === key) return prsState(b).scroll.scroll_to_item(child);
+        child++;
+      }
     }
   }
 }

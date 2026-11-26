@@ -394,8 +394,19 @@ by that run. Which files of the package git tracks is set in the root
   tab per project board, as "Meine Aufgaben" (my issues on the Tender project's
   board, in the columns of its Status field), then "PRs" (pull requests I am
   asked to review, I opened, or I reviewed, with checks, review state and
-  whether I have to act on them). A GitHub context's PR tab runs its searches as
-  `views.json` writes them, so it is not limited to the owner's repos. A
+  whether I have to act on them). The PR tabs of all GitHub contexts share
+  their sections, `sources.github.prs` in `views.json` (`sections`, and the
+  `limit` of each search), read once for all of them, so each tab sees what
+  the others see and a pull request cannot fall between them; a refresh of
+  one PR tab refreshes them all. A context's own `prs` holds its tab alone
+  (`id`, `name`, `hideRepos`, `start`); a `sections` or `limit` there is the
+  older form: the board names where they stand now and leaves that PR tab out.
+  The searches run as `views.json` writes them, and a context's PR tab shows
+  what they find in the owner's repos and in foreign ones, whose owner is no
+  GitHub context the board reads with a PR tab; a pull request in a repo of
+  another such context shows in that context's PR tab only (owners compare in
+  any case, and two contexts whose owners differ only in case are one owner: the
+  second is left out). A
   team's Sprint shows its current sprint the way Azure's taskboard does: one row
   per story (its id, title, own state and assignee), its tasks as cards in the
   team's taskboard columns, each with its own state, assignee and id; a task
@@ -481,33 +492,37 @@ by that run. Which files of the package git tracks is set in the root
   applies. Settings from before the contexts, a GitHub view's entry under
   `sources.github.views` by its id, move into its tab at a read of `views.json`,
   once: into `sources.github.contexts.<owner>.projects.<id>`, or `.prs` for the
-  PR list, a project's `number`, `field` and `priorityField` out of its
+  PR list (its `sections` and `limit` into `sources.github.prs`, one place for
+  all PR tabs), a project's `number`, `field` and `priorityField` out of its
   `project`, what the context says (`source`, `layout`, the project's `owner`)
   left out. The board writes that at once and says what moved where. Where any
   value has no place there (an id `views.json` has no tab for, a whole list of
   views, the Azure teams in the old form, a project of another owner, a key the
-  tab does not take, or a tab the file sets already) nothing moves: the board
-  names each such value and shows `views.json` alone until the file is changed
-  by hand. Nor does anything move while `views.json` has a problem: the board
-  says to fix that first. A write that fails, or finds the file changed since it
-  was read, is said (a move that finds the settings moved meanwhile takes them
-  without a word), the file is read again, and the next read (`r`) tries
-  again. Settings that cannot be read, are no JSON object, or give `views.json`
-  a problem it does not have on its own, are not applied: the board names the
-  file with each problem, in the words it uses for `views.json`, says that
-  it shows `views.json` alone, and does, and it changes nothing in the file
-  until a read finds it fit again. Removing a value from the file (a reset)
-  lets `views.json`'s apply again. The board reads the file whenever it
-  reads `views.json` (the start, `r`), and a change it makes is written at
-  once, over what the file holds at that moment, one after the other.
-  Where the file no longer holds, at a value the change sets, what the board
-  made the change over (another copy of the board, or a hand, changed it
-  since), or changes while it is written, the board does not save, says that
+  tab does not take, a tab the file sets already, or two values for one place
+  that differ) nothing moves: the board names each such value and shows
+  `views.json` alone until the file is changed by hand. Nor does anything move
+  while `views.json` has a problem: the board says to fix that first. A write
+  that fails, or finds the file changed since it was read, is said (a move that
+  finds the settings moved meanwhile takes them without a word), the file is
+  read again, and the next read (`r`) tries again. Settings that cannot be read,
+  are no JSON object, or give `views.json` a problem it does not have on its
+  own, are not applied: the board names the file with each problem, in the words
+  it uses for `views.json`, says that it shows `views.json` alone, and does, and
+  it changes nothing in the file until a read finds it fit again. Removing a
+  value from the file (a reset) lets `views.json`'s apply again. The board reads
+  the file whenever it reads `views.json` (the start, `r`), and a change it
+  makes is written at once, over what the file holds at that moment, one after
+  the other. Where the file no longer holds, at a value the change sets, what
+  the board made the change over (another copy of the board, or a hand, changed
+  it since), or changes while it is written, the board does not save, says that
   the file changed and the change has to be made again, reads the file again
   and shows what it holds; where it cannot write the file, it says so with
   herdr's reason, the same way. Hidden columns are such a setting: hiding or
   showing a column writes the view's whole hidden list there, which replaces
-  the view's `hide` from `views.json` on this machine until it is reset. The
+  the view's `hide` from `views.json` on this machine until it is reset. A
+  GitHub PR tab's repos turned off are another: its `hideRepos` (repos with
+  their owner, "owner/repo"), which a switch writes there as a whole list
+  the same way. The
   hidden columns an older board kept in herdr's localStorage move into the
   file at a read of `views.json` once the write succeeds, and leave the
   localStorage; where the file sets that view's hidden columns already, the
@@ -541,15 +556,16 @@ by that run. Which files of the package git tracks is set in the root
   tried within `refreshMinutes` and none whose own last read since then found az
   unavailable; it waits while another read runs, something is written or a
   dialog is busy, so a switch to such a tab shows it at once. After that a view
-  refreshes only while it shows, as above. While a read of the shown view
-  runs, `↻` turns, and an empty view shows a spinner before "Lädt …". Each
-  gh, az and sh run (checkout, the Repo field's repos, finding gh and az, the
-  Claude Code sessions and their task lists) writes one line to herdr's log
-  (console.log), without its arguments: `board:
-  <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
+  refreshes only while it shows, as above, a GitHub PR tab also with the
+  others. While a read of the shown view runs, `↻` turns, and an empty view
+  shows a spinner before "Lädt …". Each gh, az and sh run (checkout, the Repo
+  field's repos, finding gh and az, the Claude Code sessions and their task
+  lists) writes one line to herdr's log (console.log), without its arguments:
+  `board: <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `{ }` the context (also as AltGr types
   them, on a German layout AltGr+7 and AltGr+0), `g` and a digit go to that
-  context, `v` a team's Sprint and Backlog, `m` turns "nur meine" on and off
+  context, `v` a team's Sprint and Backlog, `R` opens a PR tab's repo menu
+  (below), `m` turns "nur meine" on and off
   (the contexts, the tabs, the switch and "nur meine" take clicks too), `/`
   filters, `r` refreshes (the shown view also refreshes every few minutes while
   the board shows), `Esc` closes, `gg` and `Home` go to the first card of the
@@ -636,6 +652,25 @@ by that run. Which files of the package git tracks is set in the root
   The details take a third of the board's width, half of it beside a single
   column, but never less than 420 or more than 720 pixels (detailWidth in
   `mods/board/src/ui/helpers.js` has the rule).
+  In each section of a GitHub PR tab the rows stand grouped by repo, each
+  group where its first row would stand (so the rows that ask something of
+  me still lead), under a repo row with the repo's name and how many of its
+  rows show, where the section shows more than one group; a group of a
+  foreign repo always has its row, named "owner/repo" with a chip
+  "fremd". Repo rows are not selected: `j/k`, the details and every action
+  go over the pull requests alone, and a section's count is theirs. The key
+  of an issue or pull request of a foreign repo names its owner too
+  ("owner/repo#12") wherever it shows: in a PR row, on a board, in the
+  details and their lines, the notices and the start dialog. A line
+  "Repos:" above the sections has a switch per repo with pull requests in
+  the tab and per repo turned off there, the owner's first, each with how
+  many of its pull requests the filter and "nur meine" let through, a
+  foreign one marked "fremd", a turned-on one marked "✓"; a click turns it
+  off or on on this machine (`hideRepos`, above), at once and without a
+  read. A turned-off repo's pull requests show nowhere in the tab, and the
+  counts of its sections and of the tab leave them out. `R`, or "Repos…" in
+  the command menu, opens a menu of the same switches, where `Enter`, a
+  digit or a click turns one off or on.
   The GitHub PR list says whether I have to act on a pull request: such a row
   carries a mark with the reasons ("● Review angefragt"), its details list
   them under "DU BIST DRAN", and in each section those rows come first, in
@@ -692,8 +727,8 @@ by that run. Which files of the package git tracks is set in the root
   failed), a count of my threads gets a "+" ("3+ offene Threads"). A pull
   request GitHub sent as nothing for an error is named among the list's notes
   above it ("1 Treffer in „Meine“ nicht gelesen: …"). The shipped `views.json`
-  has three sections: "Zu prüfen" (review asked of me), "Meine" (opened by me)
-  and "Geprüft" (open pull requests I reviewed and did not open,
+  has three shared sections: "Zu prüfen" (review asked of me), "Meine" (opened
+  by me) and "Geprüft" (open pull requests I reviewed and did not open,
   `reviewed-by:@me -author:@me`): GitHub drops a review request once the review
   is given, so without it a reviewed pull request would leave the list. A pull
   request that asks my review again shows in "Zu prüfen", the first section that
@@ -904,11 +939,13 @@ by that run. Which files of the package git tracks is set in the root
   status color, and that status) before the likely ones (a ring and
   "Kandidat"), one per place with every reason it was found by; a click, or
   `Enter` on its line in the details panel, goes there (its space, tab and
-  pane). Sure: the item's key (`tender#3000`, `AB#101`, `!57`) in a
-  space's, tab's or pane's name, or a bare `#3000` there in a folder of the
-  item's repo; on GitHub its number in the branch of any terminal in a folder
-  of its repo (a part that starts with `3000-`, or a last part `3000`; a pull
-  request's own head branch) or in a worktree's folder below
+  pane). Sure: the item's key (`tender#3000`, `AB#101`, `!57`; on GitHub
+  also with its repo's owner, `owner/tender#3000`, the only key that names an
+  item of a foreign repo) in a space's, tab's or pane's name, or a bare `#3000`
+  there in a folder of the item's repo; on GitHub its number in the branch
+  of any terminal in a folder of its repo (a part that starts with `3000-`,
+  or a last part `3000`; a pull request's own head branch) or in a
+  worktree's folder below
   `<repo>.worktrees/` (its first two parts there); the name of a Claude Code
   session running on this machine that names the item so. Likely: an open
   task in such a session's task list, or a terminal's title, that names it

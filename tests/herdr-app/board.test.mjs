@@ -64,6 +64,12 @@
 //   names, and rows that name none); and, the same way, each pull request's
 //   mergeable, reviews and review threads (none) and its head commit's oid
 //   in github-list.json;
+// - built the same way from github-list.json's pull requests, with
+//   made-up names, not recorded: github-list-contexts.json (the two searches
+//   of testConfig's PR view for sample-user: pull requests in its own repos,
+//   in repos of another context's owner, sample-org, one in upper case, and
+//   in a foreign repo, by two cases of its name; one found by both
+//   searches, one whose checks fail);
 // - written from GitHub's GraphQL reference (Repository's assignableUsers,
 //   Query's viewer), with made-up names, not recorded:
 //   github-assignable.json (one person without a name);
@@ -226,7 +232,7 @@ function shippedOnPrs() {
 function sampleConfig() {
   const { config, errors } = board.validateConfig({
     start: { message: "/work {number}", review: "/look {number}" },
-    repos: { "example/tender": { checkout: "~/src/tender", machine: "server" } },
+    repos: { "sample-user/tender": { checkout: "~/src/tender", machine: "server" } },
     sources: {
       azure: { org: "https://dev.azure.com/example-org", contexts: [{ project: "Example Project", teams: [{ team: "Example Team" }] }] },
       github: {
@@ -236,14 +242,18 @@ function sampleConfig() {
             { id: "mine", name: "Mine", number: 7, filter: "assignee:@me", hide: ["Backlog", "Done"] },
             { id: "other", name: "Other", number: 8, start: { checkout: "~/src/work", message: "OT {number}" } },
           ],
-          prs: { id: "prs", name: "PRs", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
+          prs: { id: "prs", name: "PRs" },
         }],
+        prs: { sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
       },
     },
   });
   assert.deepEqual(errors, []);
   return config;
 }
+
+// The PR sections of a views.json of the tests' own.
+const SHARED_PRS = { sections: [{ name: "S", query: "is:pr" }] };
 
 const sampleGithubView = (id) => board.githubViews(sampleConfig()).find((v) => v.id === id);
 const githubView = () => sampleGithubView("mine");
@@ -420,6 +430,9 @@ test("the shipped views.json is valid: Azure projects, each with a team with Spr
   assert.deepEqual(mine.hide, ["Backlog", "Done"]);
   assert.match(prs.sections.map((s) => s.query).join(" "), /author:@me/);
   assert.match(prs.sections.map((s) => s.query).join(" "), /review-requested:@me/);
+  const raw = JSON.parse(shippedConfig()).sources.github;
+  assert.deepEqual([raw.contexts[0].prs, raw.prs.sections.map((s) => s.name)], [{ id: "prs", name: "PRs" }, ["Zu prüfen", "Meine", "Geprüft"]],
+    "its PR tab keeps the id prs, the sections stand shared in sources.github.prs");
 });
 
 test("no person-specific value of views.json appears in main.js", () => {
@@ -462,12 +475,12 @@ test("readConfig reports a missing file and invalid JSON", () => {
 });
 
 test("validateConfig keeps the valid tabs of each GitHub context and names each problem of the others", () => {
-  const list = { sections: [{ name: "A", query: "is:pr" }] };
+  const list = {};
   const { config, errors } = board.validateConfig({
     refreshMinutes: 0,
     colour: "blue",
     start: { colour: "x", open: "window" },
-    sources: { github: { contexts: [
+    sources: { github: { prs: SHARED_PRS, contexts: [
       { owner: "o", projects: [
         { id: "ok", name: "Ok", number: 1 },
         { id: "ok", name: "Twice", number: 2 },
@@ -519,30 +532,32 @@ test("validateConfig keeps the valid tabs of each GitHub context and names each 
     "GitHub-Kontext 1 („o“), Project 10 („Field“): „field“ muss Text sein",
     "GitHub-Kontext 1 („o“), Project 11: muss ein Objekt sein",
     "GitHub-Kontext 3 („q“), PR-Tab: „name“ muss Text sein",
-    "GitHub-Kontext 3 („q“), PR-Tab: „sections“ braucht Einträge mit „name“ und „query“",
     "GitHub-Kontext 4 („o“): „owner“ o gibt es schon",
     "GitHub-Kontext 5: „owner“ fehlt: der Benutzer oder die Organisation auf GitHub, der die Projects gehören",
     "GitHub-Kontext 6 („r“): „colour“ gibt es nicht",
     "GitHub-Kontext 7 („s“): „projects“ ist eine Liste von Projects",
-    "GitHub-Kontext 8 („t“): „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“ und „sections“",
+    "GitHub-Kontext 8 („t“): „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“",
     "GitHub-Kontext 9 („u“), Project 1 („U“): „id“ prs gibt es schon",
     "GitHub-Kontext 10: muss ein Objekt sein",
   ]);
 });
 
 test("a GitHub context's tabs are views as the board knows them: a project's board of the context's owner with its defaults, then the PR list", () => {
-  const { config } = board.validateConfig({ sources: { github: { contexts: [{
+  const { config } = board.validateConfig({ sources: { github: { prs: { ...SHARED_PRS, limit: 20 }, contexts: [{
     owner: "o",
     projects: [{ id: "a", name: "A", number: 3, field: "Stage", priorityField: "Prio", filter: "label:x", hide: ["Done"], limit: 200, start: { message: "m" } }, { id: "b", name: "B", number: 4 }],
-    prs: { id: "p", sections: [{ name: "S", query: "is:pr" }], limit: 20 },
+    prs: { id: "p" },
   }] } } });
   const [a, b, p] = config.github.contexts[0].views;
   assert.deepEqual(a, {
     hide: ["Done"], start: { message: "m" }, id: "a", name: "A", source: "github", layout: "board", settingsPath: ["sources", "github", "contexts", "o", "projects", "a"],
-    project: { owner: "o", number: 3, field: "Stage", priorityField: "Prio", priorityGiven: true }, filter: "label:x", limit: 200,
+    project: { owner: "o", number: 3, field: "Stage", priorityField: "Prio", priorityGiven: true }, filter: "label:x", limit: 200, owners: { tabOwner: "o", otherOwners: [] },
   });
   assert.deepEqual([b.project, b.filter, b.limit, b.hide], [{ owner: "o", number: 4, field: "Status", priorityField: "Priority", priorityGiven: false }, "", 1000, []]);
-  assert.deepEqual(p, { hide: [], start: {}, id: "p", name: "PRs", source: "github", layout: "list", settingsPath: ["sources", "github", "contexts", "o", "prs"], sections: [{ name: "S", query: "is:pr", tone: "blue" }], limit: 20 });
+  assert.deepEqual(p, {
+    hide: [], start: {}, id: "p", name: "PRs", source: "github", layout: "list", settingsPath: ["sources", "github", "contexts", "o", "prs"], sections: [{ name: "S", query: "is:pr", tone: "blue" }], limit: 20,
+    hideRepos: [], owners: { tabOwner: "o", otherOwners: [] },
+  });
   assert.deepEqual(board.githubViews(config).map((v) => v.id), ["a", "b", "p"]);
   assert.deepEqual([board.hidePath(a), board.hidePath(p)], [["sources", "github", "contexts", "o", "projects", "a", "hide"], ["sources", "github", "contexts", "o", "prs", "hide"]]);
 });
@@ -635,10 +650,10 @@ test("without a valid org or any context nothing of sources.azure is used, and t
   assert.deepEqual(board.validateConfig({ sources: { azure: [] } }).errors, ["„sources.azure“ muss ein Objekt sein", none]);
   assert.deepEqual(board.validateConfig({ sources: { github: "x" } }).errors, ["„sources.github“ muss ein Objekt sein", none]);
   for (const bad of [undefined, [], "x"]) {
-    assert.deepEqual(board.validateConfig({ sources: { github: { contexts: bad } } }).errors, ["„sources.github.contexts“ braucht mindestens einen Kontext: { \"owner\", \"projects\": [...], \"prs\": { \"id\", \"sections\" } }", none]);
+    assert.deepEqual(board.validateConfig({ sources: { github: { contexts: bad } } }).errors, ["„sources.github.contexts“ braucht mindestens einen Kontext: { \"owner\", \"projects\": [...], \"prs\": { \"id\" } }", none]);
   }
-  const prs = { id: "a", sections: [{ name: "A", query: "is:pr" }] };
-  assert.deepEqual(board.validateConfig({ sources: { github: { contexts: [{ owner: "o", prs }], colour: 1 } } }).errors, ["„sources.github.colour“ gibt es nicht"]);
+  const prs = { id: "a" };
+  assert.deepEqual(board.validateConfig({ sources: { github: { contexts: [{ owner: "o", prs }], prs: SHARED_PRS, colour: 1 } } }).errors, ["„sources.github.colour“ gibt es nicht"]);
 });
 
 test("an old views.json with its views at the top is not read; the board says where they go now", () => {
@@ -659,7 +674,7 @@ test("the old part of a views.json from before the contexts is not read, the res
   const before = board.validateConfig({ sources: { github, azure } });
   assert.equal(before.config, null, "no fallback to the old form");
   assert.equal(before.errors.length, 2);
-  assert.match(before.errors[0], /^views\.json hat noch die Form vor den Kontexten: die GitHub-Ansichten stehen jetzt je Besitzer in „sources\.github\.contexts“ \(\{ "owner", "projects": \[die Boards, ohne „source“ und „layout“, „number“, „field“ und „priorityField“ statt „project“\], "prs": die PR-Liste, ohne „source“ und „layout“ \}\), die Azure-Teams je Projekt in „sources\.azure\.contexts“ \(\{ "project", "teams": \[\{ "team", "views" \}\] \}; den PR-Tab hat jedes Projekt von selbst\)/);
+  assert.match(before.errors[0], /^views\.json hat noch die Form vor den Kontexten: die GitHub-Ansichten stehen jetzt je Besitzer in „sources\.github\.contexts“ \(\{ "owner", "projects": \[die Boards, ohne „source“ und „layout“, „number“, „field“ und „priorityField“ statt „project“\], "prs": der PR-Tab, ohne „source“, „layout“, „sections“ und „limit“, die für alle PR-Tabs in „sources\.github\.prs“ stehen \}\), die Azure-Teams je Projekt in „sources\.azure\.contexts“ \(\{ "project", "teams": \[\{ "team", "views" \}\] \}; den PR-Tab hat jedes Projekt von selbst\)/);
   assert.equal(before.errors[1], none);
   for (const sources of [{ github }, { azure }]) assert.deepEqual(board.validateConfig({ sources }).errors, [before.errors[0], none], Object.keys(sources)[0]);
   const beside = board.validateConfig({ sources: { github, azure: { org: azure.org, contexts: [{ project: "P" }] } } });
@@ -702,7 +717,7 @@ test("validateConfig without any usable tab gives no config", () => {
   const { config, errors } = board.validateConfig({ sources: { github: { contexts: [{ owner: "o", projects: [] }] } } });
   assert.equal(config, null);
   assert.deepEqual(errors, [
-    "GitHub-Kontext 1 („o“): „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“ und „sections“",
+    "GitHub-Kontext 1 („o“): „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“",
     "„sources“ braucht mindestens einen Kontext: in „sources.github.contexts“ oder „sources.azure.contexts“",
   ]);
 });
@@ -716,11 +731,11 @@ test("tabs carry their names from views.json: a team's, a project's, or PRs; tea
 test("start settings: defaults < start < the view's start < the repo's entry", () => {
   const config = sampleConfig();
   const [mine, other] = config.github.contexts[0].views;
-  const s = board.startSettings(config, mine, "example/tender");
+  const s = board.startSettings(config, mine, "sample-user/tender");
   assert.deepEqual([s.message, s.review, s.checkout, s.machine], ["/work {number}", "/look {number}", "~/src/tender", "server"]);
   assert.equal(board.startSettings(config, other, "other/repo").checkout, "~/src/work");
   assert.equal(board.startSettings(config, other, "other/repo").message, "OT {number}");
-  assert.equal(board.startSettings(config, other, "example/tender").checkout, "~/src/tender", "the repo's entry wins over the view's start");
+  assert.equal(board.startSettings(config, other, "sample-user/tender").checkout, "~/src/tender", "the repo's entry wins over the view's start");
   assert.equal(board.startSettings(config, mine, "other/repo").checkout, null);
 });
 
@@ -738,9 +753,9 @@ const viewHide = (read, id) => board.githubViews(read.config).find((v) => v.id =
 const ALONE = "settings.json gilt nicht: das Board zeigt views.json allein";
 const sampleView = (id, extra = {}) => ({ id, name: id, layout: "board", project: { owner: "o", number: 1 }, ...extra });
 const sampleProject = (id, extra = {}) => ({ id, name: id, number: 1, ...extra });
-const SAMPLE_PRS = { id: "prs", sections: [{ name: "S", query: "is:pr" }] };
+const SAMPLE_PRS = { id: "prs" };
 // A views.json of one GitHub context, sample-user's, with these projects.
-const projectsConfig = (projects) => JSON.stringify({ sources: { github: { contexts: [{ owner: "sample-user", projects, prs: SAMPLE_PRS }] } } });
+const projectsConfig = (projects) => JSON.stringify({ sources: { github: { contexts: [{ owner: "sample-user", projects, prs: SAMPLE_PRS }], prs: SHARED_PRS } } });
 
 test("this machine's settings lie in herdr's app folder, in board/settings.json", () => {
   assert.equal(board.settingsFileIn("/x/herdr-app"), "/x/herdr-app/board/settings.json");
@@ -994,8 +1009,9 @@ test("whether the file still holds at each changed path what the change was made
 
 const OLD_PATH = (id) => ["sources", "github", "views", id];
 const CONTEXT_PATH = (...rest) => ["sources", "github", "contexts", "sample-user", ...rest];
+const SHARED_PATH = (key) => ["sources", "github", "prs", key];
 
-test("settings from before the contexts move into them: a GitHub view's entry by id into its context's project or PR tab, the project's fields flat, what the context says dropped; the rest stays", () => {
+test("settings from before the contexts move into them: a GitHub view's entry by id into its context's project or PR tab, the project's fields flat, a list's sections and limit into sources.github.prs, a board's limit into its project, what the context says dropped; the rest stays", () => {
   const sections = [{ name: "S", query: "is:pr" }];
   const settings = {
     refreshMinutes: 4,
@@ -1014,25 +1030,67 @@ test("settings from before the contexts move into them: a GitHub view's entry by
       refreshMinutes: 4,
       sources: {
         azure: { org: "https://dev.azure.com/x" },
-        github: { contexts: { "sample-user": {
-          projects: { mine: { hide: ["Ready"], number: 9, field: "Stage", priorityField: "P", start: { agent: "codex" } }, other: {} },
-          prs: { sections, limit: 10, name: "Reviews" },
-        } } },
+        github: {
+          contexts: { "sample-user": {
+            projects: { mine: { hide: ["Ready"], number: 9, field: "Stage", priorityField: "P", start: { agent: "codex" } }, other: {} },
+            prs: { name: "Reviews" },
+          } },
+          prs: { sections, limit: 10 },
+        },
       },
     },
-    moved: [[OLD_PATH("mine"), CONTEXT_PATH("projects", "mine")], [OLD_PATH("prs"), CONTEXT_PATH("prs")], [OLD_PATH("other"), CONTEXT_PATH("projects", "other")]],
+    moved: [
+      [OLD_PATH("mine"), CONTEXT_PATH("projects", "mine")], [OLD_PATH("prs"), CONTEXT_PATH("prs")],
+      [[...OLD_PATH("prs"), "sections"], SHARED_PATH("sections")], [[...OLD_PATH("prs"), "limit"], SHARED_PATH("limit")], [OLD_PATH("other"), CONTEXT_PATH("projects", "other")],
+    ],
   });
   assert.deepEqual(settings, before, "the settings given stay as they were");
   const beside = { sources: { github: { views: { mine: { hide: [] } }, contexts: { "sample-user": { prs: { name: "X" } } } } } };
   assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), beside).settings, { sources: { github: { contexts: { "sample-user": { prs: { name: "X" }, projects: { mine: { hide: [] } } } } } } }, "beside what the contexts hold here already");
   for (const none of [{}, { refreshMinutes: 4 }, mineHidden([]), { sources: { github: {} } }, { sources: "x" }, null]) assert.equal(board.settingsForContexts(JSON.parse(testConfig()), none), null, JSON.stringify(none));
   assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), { refreshMinutes: 4, sources: { github: { views: {} } } }), { settings: { refreshMinutes: 4 }, moved: [] }, "an empty entry goes, and what it leaves empty");
+  assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), { sources: { github: { views: { mine: { layout: "board", limit: 30 } } } } }), {
+    settings: { sources: { github: { contexts: { "sample-user": { projects: { mine: { limit: 30 } } } } } } },
+    moved: [[OLD_PATH("mine"), CONTEXT_PATH("projects", "mine")]],
+  }, "a board's limit is its own, not the PR tabs'");
+  assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), { sources: { github: { views: { mine: { sections } } } } }), {
+    problems: [`„${OLD_PATH("mine").join(".")}“ lässt sich nicht auf die Kontexte umstellen: „sections“ hat im Kontext sample-user keinen Platz`],
+  }, "nor are sections a board's");
+});
+
+test("settings from before the contexts move the sections and limit of every list tab to one place, sources.github.prs: equal ones once, the tab's entry only where more is left; differing ones are named and nothing moves; the moved settings apply", () => {
+  const raw = twoContexts();
+  const sections = [{ name: "S", query: "is:pr" }];
+  const old = (prs, org) => ({ sources: { github: { views: { prs, ...(org && { "org-prs": org }) } } } });
+  assert.deepEqual(board.settingsForContexts(raw, old({ sections, limit: 20 }, { layout: "list", limit: 20, sections })), {
+    settings: { sources: { github: { prs: { sections, limit: 20 } } } },
+    moved: [
+      [[...OLD_PATH("prs"), "sections"], SHARED_PATH("sections")], [[...OLD_PATH("prs"), "limit"], SHARED_PATH("limit")],
+      [[...OLD_PATH("org-prs"), "limit"], SHARED_PATH("limit")], [[...OLD_PATH("org-prs"), "sections"], SHARED_PATH("sections")],
+    ],
+  }, "no empty tab entry is left");
+  const other = [{ name: "T", query: "is:pr author:@me" }];
+  const cannot = (path, why) => `„${path.join(".")}“ lässt sich nicht auf die Kontexte umstellen: ${why}`;
+  assert.deepEqual(board.settingsForContexts(raw, old({ sections, name: "R" }, { sections: other })), {
+    problems: [cannot([...OLD_PATH("org-prs"), "sections"], "„sources.github.prs.sections“ steht hier schon anders")],
+  });
+  assert.deepEqual(board.settingsForContexts(raw, { sources: { github: { views: { prs: { limit: 5 } }, prs: { limit: 9 } } } }), {
+    problems: [cannot([...OLD_PATH("prs"), "limit"], "„sources.github.prs.limit“ steht hier schon anders")],
+  }, "one the settings hold there already");
+  const move = board.settingsForContexts(raw, old({ sections: other, limit: 20, name: "R" }));
+  assert.equal(move.problems, undefined);
+  const read = board.readConfig(JSON.stringify(raw), settingsRead(move.settings));
+  assert.deepEqual(read.errors, []);
+  assert.notEqual(read.settings, null, "the moved settings apply");
+  assert.deepEqual(board.githubViews(read.config).filter((v) => v.layout === "list").map((v) => [v.id, v.name, v.sections.map((x) => x.query), v.limit]), [
+    ["prs", "R", ["is:pr author:@me"], 20], ["org-prs", "PRs", ["is:pr author:@me"], 20],
+  ]);
 });
 
 test("settings from before the contexts move nothing while views.json has problems: its contexts are not yet what they will be", () => {
-  const prs = (id) => ({ id, sections: [{ name: "S", query: "is:pr" }] });
-  const unnamed = { sources: { github: { contexts: [{ projects: [], prs: prs("p") }, { owner: "o", prs: prs("q") }] } } };
-  const twice = { sources: { github: { contexts: [{ owner: "o", projects: [sampleProject("b")], prs: prs("p") }, { owner: "o", prs: prs("z") }] } } };
+  const prs = (id) => ({ id });
+  const unnamed = { sources: { github: { contexts: [{ projects: [], prs: prs("p") }, { owner: "o", prs: prs("q") }], prs: SHARED_PRS } } };
+  const twice = { sources: { github: { contexts: [{ owner: "o", projects: [sampleProject("b")], prs: prs("p") }, { owner: "o", prs: prs("z") }], prs: SHARED_PRS } } };
   const refused = { problems: ["noch in der Form vor den Kontexten; erst views.json berichtigen, dann werden die Einstellungen umgestellt"] };
   for (const [label, raw, id] of [["a context without owner", unnamed, "p"], ["a second context of one owner", twice, "z"]]) {
     assert.deepEqual(board.settingsForContexts(raw, { sources: { github: { views: { [id]: { limit: 20 } } } } }), refused, label);
@@ -1101,7 +1159,7 @@ test("the contexts come grouped by source, GitHub first, each source's in views.
   ]);
   const raw = { sources: {
     azure: { org: "https://dev.azure.com/o", contexts: [{ project: "Z" }, { project: "A" }] },
-    github: { contexts: [{ owner: "zed", prs: SAMPLE_PRS }, { owner: "abe", prs: { ...SAMPLE_PRS, id: "p2" } }] },
+    github: { contexts: [{ owner: "zed", prs: SAMPLE_PRS }, { owner: "abe", prs: { ...SAMPLE_PRS, id: "p2" } }], prs: SHARED_PRS },
   } };
   assert.deepEqual(board.contextsOf(board.validateConfig(raw).config).map((a) => a.id), ["github:zed", "github:abe", "azure:Z", "azure:A"]);
   assert.deepEqual(board.contextsOf({ ...config, azure: null }).map((a) => a.source), ["github"]);
@@ -1249,7 +1307,7 @@ test("a card carries repo, number, title, labels, assignees, author, parent and 
   const b = githubBoard();
   const epic = board.findCard(b, "PVTI_rec1").card;
   assert.deepEqual([epic.repo, epic.repoShort, epic.labels, epic.assignees, epic.author, epic.sub],
-    ["example/tender", "tender", ["enhancement", "area:architecture", "epic"], ["sample-user"], "sample-contributor", { total: 22, done: 15 }]);
+    ["sample-user/tender", "tender", ["enhancement", "area:architecture", "epic"], ["sample-user"], "sample-contributor", { total: 22, done: 15 }]);
   assert.equal(board.findCard(b, "PVTI_rec2").card.parent, 3002);
   const cases = casesBoard();
   assert.deepEqual(["PVTI_case1", "PVTI_case2"].map((k) => board.findCard(cases, k).card.author), ["sample-contributor", "sample-contributor"], "a pull request's author, a draft's creator");
@@ -1375,19 +1433,21 @@ test("a board's pages add up: each item once, the last page's pageInfo; the next
     { message: "Projekt „Sample“: project gone" }, "an item's error lies past the items, not on the way to them");
 });
 
-test("validateConfig: a board's limit is the most items it reads, 1000 by default and at most; a list's at most 100, 50 by default", () => {
+test("validateConfig: a board's limit is the most items it reads, 1000 by default and at most; the PR sections' at most 100, 50 by default, for every PR tab", () => {
   assert.equal(board.PAGE, 100, "a page of GitHub's");
   const board1 = (limit) => ({ id: `b${limit}`, name: "B", number: 1, ...(limit === undefined ? {} : { limit }) });
-  const list = (limit) => ({ prs: { id: `l${limit}`, name: "L", sections: [{ name: "A", query: "is:pr" }], ...(limit === undefined ? {} : { limit }) } });
   const projects = [board1(undefined), board1(1000), board1(1001)];
-  const contexts = [{ owner: "o", projects, ...list(undefined) }, { owner: "p", ...list(100) }, { owner: "q", projects: [board1(0)], ...list(101) }];
-  const { config, errors } = board.validateConfig({ sources: { github: { contexts } } });
-  assert.deepEqual(board.githubViews(config).map((v) => [v.id, v.limit]), [["bundefined", 1000], ["b1000", 1000], ["lundefined", 50], ["l100", 100]]);
-  assert.deepEqual(errors, [
+  const contexts = [{ owner: "o", projects, prs: { id: "lo" } }, { owner: "p", prs: { id: "lp" } }, { owner: "q", projects: [board1(0)], prs: { id: "lq" } }];
+  const read = (limit) => board.validateConfig({ sources: { github: { contexts, prs: { ...SHARED_PRS, ...(limit === undefined ? {} : { limit }) } } } });
+  const { config, errors } = read(undefined);
+  assert.deepEqual(board.githubViews(config).map((v) => [v.id, v.limit]), [["bundefined", 1000], ["b1000", 1000], ["lo", 50], ["lp", 50], ["lq", 50]]);
+  assert.deepEqual(errors.filter((e) => /limit/.test(e)), [
     "GitHub-Kontext 1 („o“), Project 3 („B“): „limit“ ist eine ganze Zahl von 1 bis 1000",
     "GitHub-Kontext 3 („q“), Project 1 („B“): „limit“ ist eine ganze Zahl von 1 bis 1000",
-    "GitHub-Kontext 3 („q“), PR-Tab: „limit“ ist eine ganze Zahl von 1 bis 100",
   ]);
+  assert.deepEqual(board.githubViews(read(100).config).filter((v) => v.layout === "list").map((v) => v.limit), [100, 100, 100]);
+  assert.deepEqual([read(101).errors.filter((e) => /prs/.test(e)), board.githubViews(read(101).config).filter((v) => v.layout === "list")], [["„sources.github.prs.limit“ ist eine ganze Zahl von 1 bis 100"], []],
+    "without valid sections no PR tab");
 });
 
 // ---- gh's answers ----
@@ -1725,7 +1785,7 @@ test("the PR list reads what tells whether the viewer has to act: mergeable, the
   assert.deepEqual(args.slice(4, 6), ["-f", "login=sample-user"]);
   assert.deepEqual(board.githubListArgs(shippedListView(), null).slice(4, 6), ["-f", `q0=${shippedListView().sections[0].query}`], "without a login, no variable for it");
   assert.deepEqual(board.githubViewerArgs(), ["api", "graphql", "-f", "query=query { viewer { login } }"]);
-  const level = board.githubPullRequestArgs({ repo: "example/tender", number: 1 })[3];
+  const level = board.githubPullRequestArgs({ repo: "sample-user/tender", number: 1 })[3];
   assert.doesNotMatch(level, /mergeable| reviews\(|reviewThreads/);
   assert.match(level.replace(/\s+/g, " "), /commit \{ oid statusCheckRollup/);
 });
@@ -1969,7 +2029,7 @@ test("on one's own pull request the viewer has to act on changes requested, thre
   assert.deepEqual(reasonsWith(201, () => {}, counts), [[], false, ["Counts are hidden"]], "a rollup kept with its counts lost: not ready");
   const level = JSON.parse(pullRequestAnswer());
   level.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup = null;
-  const item = { repo: "example/tender", number: 3020 };
+  const item = { repo: "sample-user/tender", number: 3020 };
   assert.equal(board.parseGithubPullRequest(level, item, [{ path: ["repository", "pullRequest", "commits"], message: "x" }]).checks.short, "?", "a pull request a level down too");
   assert.equal(board.parseGithubPullRequest(level, item, [{ path: ["repository", "pullRequest", "assignees"], message: "x" }]).checks.short, "—");
   for (const [why, change] of [
@@ -2024,7 +2084,7 @@ test("a pull request a search that asks for one's review found is asked for it, 
   assert.deepEqual([row.attention, row.waiting, row.unread], [["Review erneut angefragt"], false, []], "asked by a team after sample-user's comment");
   assert.equal(list.sections[1].rows.some((r) => r.number === 105), false, "held by Geprüft only");
   assert.deepEqual(list.warnings, ["A duplicate's error"]);
-  assert.equal(board.parseGithubList({ data: { viewer: data.data.viewer, s0: { issueCount: 1, nodes: [team] } } }, { sections: [view.sections[0]] }).sections[0].rows[0].waiting, true,
+  assert.equal(board.parseGithubList({ data: { viewer: data.data.viewer, s0: { issueCount: 1, nodes: [team] } } }, { ...view, sections: [view.sections[0]] }).sections[0].rows[0].waiting, true,
     "where no search asks: waiting on its author");
 });
 
@@ -2067,7 +2127,7 @@ test("the shipped views.json's PR view searches what one is asked to review, one
 });
 
 test("a list section takes the tone views.json gives it, one of copper's hues but orange, else the next by its place of blue, violet, teal, green, yellow, red that no other section sets; any other tone, and any other key, is named as an error", () => {
-  const list = (sections) => board.validateConfig({ sources: { github: { contexts: [{ owner: "o", prs: { id: "l", name: "L", sections } }] } } });
+  const list = (sections) => board.validateConfig({ sources: { github: { contexts: [{ owner: "o", prs: { id: "l", name: "L" } }], prs: { sections } } } });
   const s = (name, tone) => ({ name, query: "is:pr", ...(tone === undefined ? {} : { tone }) });
   const tones = (sections) => board.githubViews(list(sections).config)[0].sections.map((x) => x.tone);
   const { config, errors } = list([s("A"), s("B", "violet"), s("C"), s("D", "red")]);
@@ -2085,9 +2145,9 @@ test("a list section takes the tone views.json gives it, one of copper's hues bu
   const bad = list([s("A", "Blue"), s("B", 4), s("C", "constructor"), s("D", "orange"), { ...s("E", "teal"), tones: "blue" }]);
   const why = '„tone“ ist "red", "green", "yellow", "blue", "violet" oder "teal"';
   assert.deepEqual(bad.errors.slice(0, 5), [
-    ...["A", "B", "C", "D"].map((n) => `GitHub-Kontext 1 („o“), PR-Tab: Abschnitt „${n}“: ${why}`), "GitHub-Kontext 1 („o“), PR-Tab: Abschnitt „E“: „tones“ gibt es nicht",
+    ...["A", "B", "C", "D"].map((n) => `„sources.github.prs“: Abschnitt „${n}“: ${why}`), "„sources.github.prs“: Abschnitt „E“: „tones“ gibt es nicht",
   ]);
-  assert.equal(bad.config, null, "the view is left out");
+  assert.equal(bad.config, null, "no PR tab without valid sections");
 });
 
 // The list answer with pull request `n`'s threads cut to the first ten of
@@ -2170,20 +2230,20 @@ test("the unread notifications are one REST call of gh for all their pages, 50 a
 });
 
 test("of the notifications, only unread ones whose subject is a pull request name one, by the repo and number of the subject's url, whatever its case; an unread pull request whose url names none is counted", () => {
-  assert.deepEqual([...notified()].sort(), ["example/atlas#808", "example/other#1921", "example/tender#2820"],
+  assert.deepEqual([...notified()].sort(), ["sample-user/atlas#808", "sample-user/other#1921", "sample-user/tender#2820"],
     "not the issue, the release, the check suite without a url, nor the one read");
   assert.equal(board.notifiedPrs(json("github-notifications.json")).unnamed, 0, "a check suite without a url is no pull request");
   const entry = (subject, unread = true) => ({ unread, subject: { type: "PullRequest", ...subject } });
   const skipped = [
-    null, {}, { unread: true }, { unread: true, subject: null }, entry({ url: null }), entry({ url: 5 }), entry({ url: "https://api.github.com/repos/example/tender/pulls/9" }, "true"),
-    entry({ url: "https://api.github.com/repos/example/tender/pulls/9/files" }), entry({ url: "https://api.github.com/repos/example/tender/issues/9" }),
-    entry({ url: "https://api.github.com/repos/example/pulls/9" }), entry({ url: "https://api.github.com/repos/example/tender/pulls/x9" }),
-    { unread: true, subject: { type: "Issue", url: "https://api.github.com/repos/example/tender/pulls/9" } },
+    null, {}, { unread: true }, { unread: true, subject: null }, entry({ url: null }), entry({ url: 5 }), entry({ url: "https://api.github.com/repos/sample-user/tender/pulls/9" }, "true"),
+    entry({ url: "https://api.github.com/repos/sample-user/tender/pulls/9/files" }), entry({ url: "https://api.github.com/repos/sample-user/tender/issues/9" }),
+    entry({ url: "https://api.github.com/repos/example/pulls/9" }), entry({ url: "https://api.github.com/repos/sample-user/tender/pulls/x9" }),
+    { unread: true, subject: { type: "Issue", url: "https://api.github.com/repos/sample-user/tender/pulls/9" } },
   ];
   const none = board.notifiedPrs(skipped);
   assert.deepEqual([...none.keys], [], "an entry of another shape names none");
   assert.equal(none.unnamed, 6, "the unread pull requests whose url is none, or names none");
-  assert.deepEqual([...board.notifiedPrs([...skipped, entry({ url: "https://ghe.example/api/v3/repos/example/tender/pulls/9" })]).keys], ["example/tender#9"], "the others still count");
+  assert.deepEqual([...board.notifiedPrs([...skipped, entry({ url: "https://ghe.example/api/v3/repos/sample-user/tender/pulls/9" })]).keys], ["sample-user/tender#9"], "the others still count");
   assert.equal(board.notifiedUnnamed(1), "1 ungelesene Benachrichtigung zu einem Pull Request ohne lesbare Adresse");
   assert.equal(board.notifiedUnnamed(6), "6 ungelesene Benachrichtigungen zu Pull Requests ohne lesbare Adresse");
   for (const reply of [{}, null, { message: "x" }, "[]"]) {
@@ -2205,10 +2265,10 @@ test("a pull request with an unread notification has „ungelesen“ as its firs
   assert.deepEqual(rows(board.parseGithubList(nameless, listView(), [], { notified: notified() })),
     [[[2820, ["ungelesen"]]], [[808, ["ungelesen"]], [1921, []], [77, []]]], "without the viewer, the other reasons go, not it");
   const ready = attentionList(json("github-list-attention.json"), shippedListView()).sections[1].rows.find((r) => r.attention.includes("bereit zum Mergen"));
-  const both = board.parseGithubList(json("github-list-attention.json"), shippedListView(), [], { notified: notifiedOf("example/tender", ready.number) });
+  const both = board.parseGithubList(json("github-list-attention.json"), shippedListView(), [], { notified: notifiedOf("sample-user/tender", ready.number) });
   assert.deepEqual(both.sections[1].rows.find((r) => r.number === ready.number).attention, ["ungelesen", "bereit zum Mergen"], "beside the others");
   const waits = attentionList().sections.flatMap((s) => s.rows).find((r) => r.waiting);
-  const marked = board.parseGithubList(json("github-list-attention.json"), shippedListView(), [], { notified: notifiedOf("example/tender", waits.number) })
+  const marked = board.parseGithubList(json("github-list-attention.json"), shippedListView(), [], { notified: notifiedOf("sample-user/tender", waits.number) })
     .sections.flatMap((s) => s.rows).find((r) => r.number === waits.number);
   assert.deepEqual([marked.attention, marked.waiting], [["ungelesen"], false], "in place of waiting for its author");
 });
@@ -2703,7 +2763,7 @@ test("an item's session the second Enter goes to is the most urgent tab or space
 test("templates take the item's number, title, url, owner, repo and key", () => {
   const card = board.findCard(githubBoard(), "PVTI_rec4").card;
   const vars = board.templateVars(card);
-  assert.deepEqual(vars, { number: 3004, title: card.title, url: "https://github.com/example/tender/issues/3004", owner: "example", repo: "tender", key: "tender#3004" });
+  assert.deepEqual(vars, { number: 3004, title: card.title, url: "https://github.com/sample-user/tender/issues/3004", owner: "sample-user", repo: "tender", key: "tender#3004" });
   assert.equal(board.renderTemplate("/implement {number} {nope}", vars), "/implement 3004 {nope}");
 });
 
@@ -2853,7 +2913,7 @@ function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "D
   return JSON.stringify({
     refreshMinutes: 3,
     start: { agent: "claude", message: "/work {number}", review: "/look {number}", ...start },
-    repos: { "example/tender": { checkout: "~/src/tender" }, ...repos },
+    repos: { "sample-user/tender": { checkout: "~/src/tender" }, ...repos },
     sources: {
       azure: { org: "https://dev.azure.com/example-org", contexts: [{ project: "Example Project", teams: [{ team: "Example Team" }] }] },
       github: {
@@ -2863,8 +2923,9 @@ function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "D
             { id: "mine", name: "Mine", number: 7, filter, hide },
             { id: "other", name: "Other", number: 8, hide: ["Done"] },
           ],
-          prs: { id: "prs", name: "PRs", sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
+          prs: { id: "prs", name: "PRs" },
         }],
+        prs: { sections: [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }] },
       },
     },
   });
@@ -3356,6 +3417,14 @@ async function openBoard(options = {}) {
   return { b, cx, host, st: () => b.views.mine };
 }
 
+// The board on its PR tab, read as github-list.json answers (`list`).
+async function openPrList(options = {}) {
+  const opened = await openBoard(options);
+  await press(opened.b, opened.cx, "3");
+  await opened.host.answer("gh", ok(options.list ?? fixture("github-list.json")));
+  return { ...opened, st: () => opened.b.views.prs };
+}
+
 const key = (k, extra = {}) => ({ key: k, key_char: extra.char ?? (k.length === 1 ? k : undefined), keystroke: k, modifiers: extra.modifiers ?? {} });
 async function press(b, cx, k, extra) {
   cx.call((own) => b.key(key(k, extra), own));
@@ -3729,12 +3798,12 @@ test("UI: Esc closes the details, then the notice, then clears the filter, and t
   const { b, cx, host } = await openBoard({ props: { layer: true }, shown: false, tree: layerLayout("board") });
   await press(b, cx, "enter");
   b.notice = { text: "x", level: "info" };
-  b.filterInput.set_value("x");
-  b.filterText = "x";
+  b.filterInput.set_value("tender");
+  b.filterText = "tender";
   await press(b, cx, "escape");
   assert.deepEqual([host.runs.splice(0), b.views.mine.detail, b.notice?.text], [[], false, "x"], "the details");
   await press(b, cx, "escape");
-  assert.deepEqual([host.runs.splice(0), b.notice, b.filterText], [[], null, "x"], "the notice");
+  assert.deepEqual([host.runs.splice(0), b.notice, b.filterText], [[], null, "tender"], "the notice");
   await press(b, cx, "escape");
   assert.deepEqual([host.runs.splice(0), b.filterText], [[], ""], "the filter");
   await press(b, cx, "escape");
@@ -5435,7 +5504,7 @@ test("UI: a card whose repo has no checkout names where to set one", async () =>
   await press(b, cx, "enter");
   await press(b, cx, "enter");
   assert.equal(b.modal, null);
-  assert.equal(b.notice.text, "Für example/tender steht kein „checkout“ in views.json: „repos“ → „example/tender“ oder „start.checkout“ der Ansicht „Mine“");
+  assert.equal(b.notice.text, "Für sample-user/tender steht kein „checkout“ in views.json: „repos“ → „sample-user/tender“ oder „start.checkout“ der Ansicht „Mine“");
 });
 
 test("UI: Enter on a draft says it needs an issue first", async () => {
@@ -6047,7 +6116,7 @@ test("UI: the GitHub tabs keep their keys and hints: a board's, a list's", async
   assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "{ }", "H/L", "s", "a", "Enter", "o", "m", "r", ":", "Esc"]);
   await press(b, cx, "3");
   await host.answer("gh", ok(fixture("github-list.json")));
-  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "{ }", "Enter", "o", "m", "r", ":", "Esc"]);
+  assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "{ }", "Enter", "o", "R", "m", "r", ":", "Esc"]);
 });
 
 // Fires the left button's `event` ("on_mouse_down" or "on_mouse_up") on the
@@ -6298,7 +6367,7 @@ test("UI: m shows only one's own items on a board and a list, without reading ag
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "someone-else" }];
   // The list's second section searches without @me: its rows count one by one.
   const config = JSON.parse(testConfig());
-  ghContext(config).prs.sections[1] = { name: "Mine", query: "is:pr repo:example/tender" };
+  config.sources.github.prs.sections[1] = { name: "Mine", query: "is:pr repo:sample-user/tender" };
   const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(data), config: JSON.stringify(config) });
   const cards = () => b.navColumns(b.view()).flatMap((c) => c.shown.map((x) => x.number));
   assert.equal(cards().length, 6);
@@ -6339,10 +6408,10 @@ test("a list section counts the rows it holds: each pull request once; GitHub's 
   const list = board.parseGithubList(json("github-list.json"), listView());
   const mine = list.sections[1];
   assert.deepEqual([mine.count, mine.fetched, mine.rows.length, mine.limited], [4, 4, 3, false], "one pull request is the first section's");
-  assert.equal(board.sectionCount(mine, 3), "3");
-  assert.equal(board.sectionCount(mine, 1), "1/3");
+  assert.equal(board.sectionCount(mine, 3, 3), "3");
+  assert.equal(board.sectionCount(mine, 1, 3), "1/3");
   const cut = { ...mine, count: 120, limited: true };
-  assert.deepEqual([board.sectionCount(cut, 3), board.sectionCount(cut, 2)], ["3 · erste 4 von 120", "2/3 · erste 4 von 120"]);
+  assert.deepEqual([board.sectionCount(cut, 3, 3), board.sectionCount(cut, 2, 3)], ["3 · erste 4 von 120", "2/3 · erste 4 von 120"]);
 });
 
 test("a board pull request asking only for one's review counts as one's own; an empty review request node names no one", () => {
@@ -6358,7 +6427,7 @@ test("a board pull request asking only for one's review counts as one's own; an 
 test("„nur meine“ counts a search of one's own whole, and a pull request on a board that asks one's review", () => {
   const list = board.parseGithubList(json("github-list.json"), listView());
   assert.deepEqual(list.sections.map((s) => s.rows.map((r) => r.ownByQuery)), [[true], [true, true, true]], "review-requested:@me, author:@me");
-  const other = { ...listView(), sections: [{ name: "A", query: "is:pr repo:example/tender" }, { name: "B", query: "is:pr repo:example/atlas" }] };
+  const other = { ...listView(), sections: [{ name: "A", query: "is:pr repo:sample-user/tender" }, { name: "B", query: "is:pr repo:sample-user/atlas" }] };
   const rows = board.parseGithubList(json("github-list.json"), other).sections.flatMap((s) => s.rows);
   assert.deepEqual(rows.map((r) => [r.number, r.ownByQuery, board.isMine(r, "sample-user")]), [[2820, false, true], [77, false, true], [1921, false, false], [808, false, true]]);
   assert.deepEqual(rows.find((r) => r.number === 808).reviewers, [], "a reviewer that is gone names no one");
@@ -6400,7 +6469,7 @@ test("UI: without the viewer's login, „nur meine“ on a list still shows a se
   await press(b, cx, "3");
   await host.answer("gh", ok(JSON.stringify(data)));
   await press(b, cx, "m");
-  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 808, 77]);
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 1921, 77, 808], "in GitHub's order, grouped by repo");
   assert.equal(texts(b.render()).some((s) => s.startsWith("„nur meine“ zeigt nichts")), false);
 });
 
@@ -6408,7 +6477,7 @@ test("UI: without the viewer's login, „nur meine“ says what it cannot tell w
   const data = json("github-list.json");
   delete data.data.viewer;
   const config = JSON.parse(testConfig());
-  ghContext(config).prs.sections[1] = { name: "Mine", query: "is:pr repo:example/tender" };
+  config.sources.github.prs.sections[1] = { name: "Mine", query: "is:pr repo:sample-user/tender" };
   const { b, cx, host } = await openBoard({ config: JSON.stringify(config) });
   await press(b, cx, "3");
   await host.answer("gh", ok(JSON.stringify(data)));
@@ -6519,13 +6588,385 @@ test("UI: a capped list section keeps its true total while the filter or „nur 
   const data = json("github-list.json");
   data.data.s1.issueCount = 120;
   const config = JSON.parse(testConfig());
-  ghContext(config).prs.sections[1] = { name: "Mine", query: "is:pr repo:example/tender" };
+  config.sources.github.prs.sections[1] = { name: "Mine", query: "is:pr repo:sample-user/tender" };
   const { b, cx, host } = await openBoard({ config: JSON.stringify(config) });
   await press(b, cx, "3");
   await host.answer("gh", ok(JSON.stringify(data)));
   assert.ok(texts(b.render()).includes("MINE · 3 · erste 4 von 120"), "held (each pull request once), and sent of found");
   await press(b, cx, "m");
   assert.ok(texts(b.render()).includes("MINE · 2/3 · erste 4 von 120"), "shown of held, and sent of found");
+});
+
+// testConfig with a second GitHub context, of the owner sample-org (named
+// in another case than its repos), whose PR tab searches as sample-user's.
+function twoContexts(extra = {}) {
+  const config = JSON.parse(testConfig());
+  ghContext(config).prs = { ...ghContext(config).prs, ...extra };
+  config.sources.github.contexts.push({ owner: "Sample-Org", prs: { id: "org-prs" } });
+  return config;
+}
+const contextList = () => fixture("github-list-contexts.json");
+const ORG_FOREIGN = "Other-Owner/lib";
+
+test("a GitHub context's PR tab holds the pull requests of its owner's repos and of foreign repos, not those of another context's repos, owners in any case; its searches run as written, each pull request once", () => {
+  const { config, errors } = board.readConfig(JSON.stringify(twoContexts()));
+  assert.deepEqual(errors, []);
+  const [user, org] = ["prs", "org-prs"].map((id) => board.githubViews(config).find((v) => v.id === id));
+  assert.deepEqual([user.owners, org.owners], [{ tabOwner: "sample-user", otherOwners: ["sample-org"] }, { tabOwner: "sample-org", otherOwners: ["sample-user"] }], "folded");
+  const rows = (view) => board.parseGithubList(json("github-list-contexts.json"), view).sections.map((s) => s.rows.map((r) => [board.itemKey(r), r.foreign === true]));
+  assert.deepEqual(rows(user), [
+    [["tender#10", false], [`${ORG_FOREIGN}#30`, true]],
+    [["tender#11", false], ["atlas#40", false], ["other-owner/lib#31", true]],
+  ], "sample-org's api and web are its own tab's; the foreign one found twice shows once, in the first section");
+  assert.deepEqual(rows(org), [
+    [["api#20", false], [`${ORG_FOREIGN}#30`, true]],
+    [["other-owner/lib#31", true], ["web#21", false]],
+  ], "foreign ones show in every PR tab; SAMPLE-ORG/web is Sample-Org's");
+  const single = board.parseGithubList(json("github-list-contexts.json"), listView()).sections.flatMap((s) => s.rows).map((r) => r.number);
+  assert.deepEqual(single, [10, 20, 30, 11, 40, 31, 21], "with no other context, none is another's");
+  assert.deepEqual(board.githubListArgs(user, "sample-user").filter((a) => /^q\d=/.test(a)), ["q0=is:pr review-requested:@me", "q1=is:pr author:@me"], "no owner added to a search");
+});
+
+test("a PR tab's repos turned off: hideRepos, a list of repos with their owner, in views.json or this machine's settings, which set it as a whole", () => {
+  for (const hideRepos of [["tender"], ["sample-user/tender", 5], ["a/b/c"], "sample-user/tender"]) {
+    assert.deepEqual(board.readConfig(JSON.stringify(twoContexts({ hideRepos }))).errors,
+      ["GitHub-Kontext 1 („sample-user“), PR-Tab: „hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"], JSON.stringify(hideRepos));
+  }
+  const both = twoContexts({ hideRepos: ["tender"], sections: [] });
+  assert.deepEqual(board.readConfig(JSON.stringify(both)).errors.filter((e) => e.startsWith("GitHub-Kontext 1")), [
+    "GitHub-Kontext 1 („sample-user“), PR-Tab: „sections“ steht jetzt in „sources.github.prs“, für die PR-Tabs aller Kontexte gleich (Kopf von mods/board/src/main.js)",
+    "GitHub-Kontext 1 („sample-user“), PR-Tab: „hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]",
+  ], "beside the sections' problem");
+  const bad = twoContexts({ hideRepos: ["tender", 5] });
+  assert.ok(board.readConfig(JSON.stringify(bad)).errors.includes("GitHub-Kontext 1 („sample-user“), PR-Tab: „hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"));
+  const base = twoContexts({ hideRepos: ["sample-user/tender"] });
+  const path = ["sources", "github", "contexts", "sample-user", "prs", "hideRepos"];
+  const plain = board.readConfig(JSON.stringify(base));
+  assert.deepEqual([board.viewsOf(plain.config).find((v) => v.id === "prs").hideRepos, plain.origin(path)], [["sample-user/tender"], "views.json"]);
+  const here = board.readConfig(JSON.stringify(base), { name: "settings.json", text: JSON.stringify({ sources: { github: { contexts: { "sample-user": { prs: { hideRepos: ["Other-Owner/lib"] } } } } } }) });
+  assert.deepEqual([board.viewsOf(here.config).find((v) => v.id === "prs").hideRepos, here.origin(path)], [["Other-Owner/lib"], "dieser Rechner"], "the list replaces views.json's");
+  assert.equal(board.repoHidePath(board.viewsOf(here.config).find((v) => v.id === "prs")).join("."), path.join("."));
+  const data = { hideRepos: ["Sample-User/Tender"], sections: [{ rows: [{ number: 1, repo: "sample-user/tender" }, { number: 2, repo: "sample-user/atlas" }] }] };
+  assert.deepEqual([board.hidesRepo(data, "sample-user/TENDER"), board.keptRows(data, data.sections[0]).map((r) => r.number)], [true, [2]], "turned off whatever the case");
+  assert.deepEqual(board.toggledRepos(["a/x", "B/Y"], "b/y"), ["a/x"], "on again, whatever the case");
+  assert.deepEqual(board.toggledRepos(["a/x"], "b/y"), ["a/x", "b/y"]);
+});
+
+test("whose a repo is, for a tab: its owner's own, another context's with a PR tab, else foreign; the repo's owner in any case", () => {
+  const owners = { tabOwner: "sample-user", otherOwners: ["sample-org"] };
+  assert.deepEqual(["Sample-User/a", "SAMPLE-ORG/b", "x/c", "sample-user-x/d"].map((r) => board.repoOwnership(r, owners)), ["own", "other", "foreign", "foreign"]);
+});
+
+test("two GitHub contexts whose owners differ only in case are one owner: the second is left out and said, and the first's PR tab keeps its own pull requests", () => {
+  const config = twoContexts();
+  config.sources.github.contexts[1].owner = "SAMPLE-USER";
+  const read = board.readConfig(JSON.stringify(config));
+  assert.deepEqual(read.errors, ["GitHub-Kontext 2 („SAMPLE-USER“): „owner“ SAMPLE-USER gibt es schon als „sample-user“"]);
+  const user = board.githubViews(read.config).find((v) => v.id === "prs");
+  assert.deepEqual(user.owners, { tabOwner: "sample-user", otherOwners: [] }, "its own owner is none of its others");
+  const keys = board.parseGithubList(json("github-list-contexts.json"), user).sections.flatMap((s) => s.rows.map((r) => board.itemKey(r)));
+  assert.deepEqual(keys.filter((k) => !k.includes("/")), ["tender#10", "tender#11", "atlas#40"]);
+});
+
+test("the PR tabs leave out the repos of the contexts the board reads with a PR tab only: where a context has none, or one with problems, its repos' pull requests are foreign in the others", () => {
+  const cases = [
+    ["no PR tab", (c) => Object.assign(c, { prs: undefined, projects: [{ id: "org-board", name: "Org", number: 1 }] })],
+    ["a PR tab with problems", (c) => (c.prs.hideRepos = ["api"])],
+  ];
+  for (const [why, change] of cases) {
+    const config = twoContexts();
+    change(config.sources.github.contexts[1]);
+    const read = board.readConfig(JSON.stringify(config));
+    assert.equal(read.errors.length, 1, why);
+    const user = board.githubViews(read.config).find((v) => v.id === "prs");
+    assert.deepEqual(user.owners.otherOwners, [], why);
+    const foreign = board.parseGithubList(json("github-list-contexts.json"), user).sections.flatMap((s) => s.rows.filter((r) => r.foreign).map((r) => board.itemKey(r)));
+    assert.deepEqual(foreign.filter((k) => /sample-org/i.test(k)), ["sample-org/api#20", "SAMPLE-ORG/web#21"], why);
+  }
+});
+
+test("a context's PR tab with its own sections or limit has the older form: the board names where they stand now and leaves the tab out; settings that set them are not applied; without sources.github.prs there is no PR tab", () => {
+  const moved = (n, owner, key) => `GitHub-Kontext ${n} („${owner}“), PR-Tab: „${key}“ steht jetzt in „sources.github.prs“, für die PR-Tabs aller Kontexte gleich (Kopf von mods/board/src/main.js)`;
+  const config = twoContexts();
+  config.sources.github.contexts[1].prs = { id: "org-prs", sections: [{ name: "S", query: "is:pr" }], limit: 5 };
+  const read = board.readConfig(JSON.stringify(config));
+  assert.deepEqual(read.errors, [moved(2, "Sample-Org", "sections"), moved(2, "Sample-Org", "limit")]);
+  assert.deepEqual(board.githubViews(read.config).map((v) => v.id), ["mine", "other", "prs"]);
+  const here = board.readConfig(testConfig(), settingsRead({ sources: { github: { contexts: { "sample-user": { prs: { sections: [{ name: "X", query: "is:pr" }] } } } } } }));
+  assert.deepEqual([here.settings, here.errors], [null, [`settings.json: ${moved(1, "sample-user", "sections")}`, ALONE]], "named, not applied");
+  const none = JSON.parse(testConfig());
+  delete none.sources.github.prs;
+  const without = board.readConfig(JSON.stringify(none));
+  assert.deepEqual([without.errors, board.githubViews(without.config).map((v) => v.id)],
+    [["„sources.github.prs“ fehlt: die Abschnitte der PR-Tabs aller Kontexte, { \"sections\": [{ \"name\", \"query\" }] }"], ["mine", "other"]]);
+  const odd = JSON.parse(testConfig());
+  odd.sources.github.prs.colour = 1;
+  assert.deepEqual(board.readConfig(JSON.stringify(odd)).errors, ["„sources.github.prs.colour“ gibt es nicht"]);
+  odd.sources.github.prs = [];
+  assert.deepEqual(board.readConfig(JSON.stringify(odd)).errors, ["„sources.github.prs“ muss ein Objekt sein"]);
+});
+
+test("the errors GitHub sent at a pull request of another context's repo stay warnings of the list: no row shows them", () => {
+  const user = board.githubViews(board.readConfig(JSON.stringify(twoContexts())).config).find((v) => v.id === "prs");
+  const errors = [{ path: ["s0", "nodes", 1, "reviews"], message: "Reviews of api are hidden" }, { path: ["s0", "nodes", 0, "reviews"], message: "Reviews of tender are hidden" }];
+  assert.deepEqual(board.parseGithubList(json("github-list-contexts.json"), user, errors).warnings, ["Reviews of api are hidden"]);
+});
+
+test("a section's rows group by repo, each group where its first row stands; a group has its repo row where the section shows more than one group, a foreign one always", () => {
+  const data = { owners: { tabOwner: "sample-user", otherOwners: ["sample-org"] } };
+  const row = (n, repo) => ({ number: n, repo });
+  const all = () => true;
+  const groups = (rows, visible = all) => board.repoGroups(data, rows, visible).map((g) => [g.name, g.foreign, g.headed, g.rows.map((r) => r.number), g.held]);
+  assert.deepEqual(groups([row(1, "sample-user/a"), row(2, "x/lib"), row(3, "sample-user/a")]), [["a", false, true, [1, 3], 2], ["x/lib", true, true, [2], 1]]);
+  assert.deepEqual(groups([row(1, "sample-user/a"), row(2, "SAMPLE-USER/A")]), [["a", false, false, [1, 2], 2]], "one own repo alone: no repo row; names in any case");
+  assert.deepEqual(groups([row(2, "x/lib")]), [["x/lib", true, true, [2], 1]], "a foreign one alone keeps its repo row");
+  assert.deepEqual(groups([row(4, "Sample-Org/x")]), [["Sample-Org/x", false, false, [4], 1]], "another context's repo is named with its owner, not foreign");
+  assert.deepEqual(groups([row(1, "sample-user/a"), row(2, "sample-user/b"), row(3, "sample-user/b")], (r) => r.number !== 2), [["a", false, true, [1], 1], ["b", false, true, [3], 2]], "what the filter hides counts as held");
+  assert.deepEqual(groups([row(1, "sample-user/a"), row(2, "sample-user/b")], (r) => r.number === 2), [["b", false, false, [2], 1]], "a group the filter empties is none");
+});
+
+test("UI: the PR tabs of all contexts share one read of the PR sections: opening one reads them once and draws every tab from it, so a pull request in another context's repo shows in that context's tab; r reads them once more for all", async () => {
+  const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  const lists = () => host.calls.filter((c) => isListCall(c.args)).length;
+  const keys = (id) => b.views[id].data.sections.map((s) => s.rows.map((r) => board.itemKey(r)));
+  assert.equal(lists(), 1);
+  assert.deepEqual(keys("prs"), [["tender#10", `${ORG_FOREIGN}#30`], ["tender#11", "atlas#40", "other-owner/lib#31"]]);
+  assert.deepEqual(keys("org-prs"), [["api#20", `${ORG_FOREIGN}#30`], ["other-owner/lib#31", "web#21"]], "sample-org's own, though sample-user's tab read them");
+  const before = b.views["org-prs"].at;
+  advance(MIN);
+  await press(b, cx, "r");
+  while (host.open("gh").some((c) => isListCall(c.args))) await host.answer("gh", ok(contextList()), isListCall);
+  await settle();
+  assert.equal(lists(), 2, "one more for both tabs");
+  assert.ok(b.views["org-prs"].at > before, "the other tab read again with it");
+});
+
+const RATE_LIMITED = () => ({ code: 1, stdout: "", stderr: "API rate limit exceeded" });
+const openListCalls = (host) => host.open("gh").filter((c) => isListCall(c.args)).length;
+// contextList with sample-org/api#20 holding more review threads than the
+// list reads, and the follow-up's answer for them.
+function contextListWithThreads() {
+  const data = json("github-list-contexts.json");
+  const pr = data.data.s0.nodes.find((n) => n.number === 20);
+  pr.reviewThreads = { totalCount: 12, nodes: resolvedThreads(10) };
+  return { list: JSON.stringify(data), threads: ok(JSON.stringify({ data: { nodes: [{ id: pr.id, reviewThreads: { totalCount: 12, nodes: resolvedThreads(12) } }] } })) };
+}
+
+test("UI: r twice while the PR tabs' shared read runs reads them all once more when it ends, then nothing, neither tab loading; the same where GitHub answers with its rate limit, which both tabs then say with no call open; r on a PR tab reads no board", async () => {
+  for (const [what, answer] of [["ok", () => ok(contextList())], ["rate limit", RATE_LIMITED]]) {
+    const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+    const lists = () => host.calls.filter((c) => isListCall(c.args)).length;
+    const boards = () => host.calls.filter((c) => isBoardCall(c.args)).length;
+    const before = boards();
+    advance(MIN);
+    await press(b, cx, "r");
+    await press(b, cx, "r");
+    assert.deepEqual([lists(), openListCalls(host), boards()], [2, 1, before], `${what}: one read runs, no board`);
+    await host.answer("gh", answer(), isListCall);
+    const error = what === "ok" ? null : "GitHub-Ratenlimit erreicht; es geht nach dem nächsten Zurücksetzen weiter";
+    assert.deepEqual([lists(), openListCalls(host), b.views.prs.loading, b.views["org-prs"].loading], [3, 1, true, true], `${what}: one more, for both tabs`);
+    assert.deepEqual([b.views.prs.error, b.views["org-prs"].error], [error, error], `${what}: the first read's error shows while the next runs`);
+    await host.answer("gh", answer(), isListCall);
+    await settle();
+    assert.deepEqual([lists(), host.open("gh").length, b.views.prs.loading, b.views["org-prs"].loading], [3, 0, false, false], `${what}: then none`);
+    assert.deepEqual([b.views.prs.error, b.views["org-prs"].error], [error, error], what);
+  }
+});
+
+test("UI: r while one PR tab reads and another, new in views.json, does not: both read once more together when that read ends, and show that read", async () => {
+  const { b, cx, host } = await openPrList({ list: contextList() });
+  const lists = () => host.calls.filter((c) => isListCall(c.args)).length;
+  advance(MIN);
+  await press(b, cx, "r");
+  host.config = JSON.stringify(twoContexts());
+  await press(b, cx, "r");
+  assert.deepEqual([lists(), openListCalls(host), b.views.prs.loading, b.state("org-prs").loading], [2, 1, true, false], "the new tab waits for the read to end");
+  await host.answer("gh", ok(contextList()), isListCall);
+  assert.deepEqual([lists(), openListCalls(host), b.views.prs.loading, b.views["org-prs"].loading], [3, 1, true, true]);
+  const fresh = json("github-list-contexts.json");
+  for (const n of fresh.data.s0.nodes) n.title = `Fresh ${n.number}`;
+  await host.answer("gh", ok(JSON.stringify(fresh)), isListCall);
+  await settle();
+  const titles = (id) => b.views[id].data.sections[0].rows.map((r) => r.title);
+  assert.deepEqual([titles("prs"), titles("org-prs")], [["Fresh 10", "Fresh 30"], ["Fresh 20", "Fresh 30"]]);
+  assert.deepEqual([lists(), host.open("gh").length, b.views.prs.loading, b.views["org-prs"].loading], [3, 0, false, false]);
+});
+
+test("UI: a failed shared read fails every PR tab with GitHub's answer; the next r reads them again and brings them back", async () => {
+  const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  const keys = (id) => b.views[id].data.sections.map((s) => s.rows.map((r) => board.itemKey(r)));
+  const before = [keys("prs"), keys("org-prs")];
+  advance(MIN);
+  await press(b, cx, "r");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isListCall);
+  const failed = "GitHub antwortete mit HTTP 502: Bad Gateway";
+  assert.deepEqual([b.views.prs.error, b.views["org-prs"].error, b.views.prs.loading, b.views["org-prs"].loading], [failed, failed, false, false]);
+  advance(MIN);
+  await press(b, cx, "r");
+  assert.equal(openListCalls(host), 1, "a new read");
+  await host.answer("gh", ok(contextList()), isListCall);
+  assert.deepEqual([b.views.prs.error, b.views["org-prs"].error], [null, null]);
+  assert.deepEqual([keys("prs"), keys("org-prs")], before);
+});
+
+test("UI: a PR tab that joined the shared read draws its rows before the read's follow-up for more threads, those that wait for it marked", async () => {
+  const { list, threads } = contextListWithThreads();
+  const { b, cx, host } = await openBoard({ config: JSON.stringify(twoContexts()) });
+  await press(b, cx, "3");
+  await host.answer("gh", ok(list), isListCall);
+  const api = () => b.views["org-prs"].data?.sections.flatMap((s) => s.rows).find((r) => r.number === 20);
+  assert.deepEqual([b.views["org-prs"].loading, api()?.threadsPending], [true, true], "drawn while the follow-up runs");
+  await host.answer("gh", threads, isThreadsCall);
+  assert.deepEqual([b.views["org-prs"].loading, api().threadsPending], [false, undefined]);
+});
+
+test("UI: sections changed in views.json while the shared read runs are read once it ends, for every PR tab", async () => {
+  const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  advance(MIN);
+  await press(b, cx, "r");
+  const changed = twoContexts();
+  changed.sources.github.prs.sections[0].query = "is:pr label:changed";
+  host.config = JSON.stringify(changed);
+  await press(b, cx, "r");
+  await host.answer("gh", ok(contextList()), isListCall);
+  const open = host.open("gh").filter((c) => isListCall(c.args));
+  assert.equal(open.length, 1);
+  assert.ok(open[0].args.some((a) => String(a).includes("label:changed")), "with the new query");
+  await host.answer("gh", ok(contextList()), isListCall);
+  await settle();
+  assert.deepEqual([openListCalls(host), b.views.prs.loading, b.views["org-prs"].loading], [0, false, false]);
+});
+
+test("the PR tabs' loads share a running read only for the same sections and limit; a tab whose step throws fails alone, the others draw and end", async () => {
+  const { b, host } = await bootBoard({ config: JSON.stringify(twoContexts()) });
+  const loader = b.sources.github.views.list;
+  const [prs, org] = ["prs", "org-prs"].map((id) => b.viewById(id));
+  const { list, threads } = contextListWithThreads();
+  const drawn = [];
+  const broken = assert.rejects(loader.load(prs, { live: { partial: () => { throw new Error("boom"); }, page() {} } }), /boom/);
+  const joined = loader.load(org, { live: { partial: (result) => drawn.push(result().data.sections.length), page() {} } });
+  await settle();
+  assert.equal(openListCalls(host), 1, "one read for both");
+  const sectioned = loader.load({ ...org, sections: org.sections.map((s, i) => (i ? s : { ...s, query: "is:pr label:x" })) }, {});
+  await settle();
+  const open = host.open("gh").filter((c) => isListCall(c.args));
+  assert.equal(open.length, 2, "other sections read on their own");
+  assert.ok(open[1].args.some((a) => String(a).includes("label:x")), "with their query");
+  const own = loader.load({ ...org, limit: 7 }, {});
+  await settle();
+  assert.equal(openListCalls(host), 3, "another limit reads on its own");
+  await host.answer("gh", ok(list), isListCall);
+  assert.deepEqual(drawn, [2], "the step after the list, drawn though another tab's step threw");
+  await host.answer("gh", threads, isThreadsCall);
+  await broken;
+  assert.equal((await joined).data.sections.length, 2);
+  await host.answer("gh", ok(contextList()), isListCall);
+  assert.equal((await sectioned).data.sections.length, 2);
+  await host.answer("gh", ok(contextList()), isListCall);
+  assert.equal((await own).data.sections.length, 2);
+});
+
+test("UI: a PR tab groups each section's rows by repo under repo rows, a foreign one named with its owner and marked „fremd“; j/k, the details and the counts go by the pull requests alone", async () => {
+  const { b, cx, st, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  const list = () => byId(b.render(), "rows");
+  assert.deepEqual(list().kids.map((k) => texts(k).join(" ")), [
+    "REVIEW · 2",
+    "tender 1", `tender#10 feat(tender): own repo, review asked ● Review angefragt sample-contributor  ✓ 2 ${board.ageLabel("2026-11-17T09:00:00Z", Date.now())}`,
+    `${ORG_FOREIGN} 1 fremd`, `${ORG_FOREIGN}#30 fix(lib): a foreign repo, review asked ● Review angefragt other-contributor  ✓ 2 ${board.ageLabel("2026-11-17T09:00:00Z", Date.now())}`,
+    "MINE · 3",
+    "tender 1", texts(byId(b.render(), "row-PR_ctx6")).join(" "),
+    "atlas 1", texts(byId(b.render(), "row-PR_ctx4")).join(" "),
+    "other-owner/lib 1 fremd", texts(byId(b.render(), "row-PR_ctx5")).join(" "),
+  ], "the group with the row that asks something comes first, as its row would");
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const [name, count, chip] = byId(b.render(), `repo-head-0-${ORG_FOREIGN}`).kids;
+  assert.deepEqual([name.styles.includes("font_family"), name.with.text_size[0], name.with.text_color[0], count.with.text_color[0]], [true, 11, t.muted, t.dim], "the name in mono, muted; its count dim");
+  assert.deepEqual([chip.with.text_color[0], chip.with.bg[0]], [board.toneColor(t, "ansi3"), board.chipBg(t, "ansi3")], "„fremd“ a chip in copper's yellow");
+  assert.equal(texts(byId(b.render(), "row-PR_ctx3"))[0], `${ORG_FOREIGN}#30`, "a foreign key names its owner");
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [10, 30, 11, 40, 31]);
+  assert.equal(st().sel.key, "PR_ctx1");
+  for (const [k, at] of [["j", "PR_ctx3"], ["j", "PR_ctx6"], ["j", "PR_ctx4"], ["k", "PR_ctx6"]]) {
+    await press(b, cx, k);
+    assert.equal(st().sel.key, at, `${k} goes past the repo rows`);
+  }
+  await press(b, cx, "k");
+  await press(b, cx, "enter");
+  const top = texts(byId(b.render(), "detail"))[0];
+  assert.equal(top, `${ORG_FOREIGN}#30 · pr/ctx-30`, "the details name it by its key with its owner");
+  assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "5", "the tab counts pull requests");
+  b.filterText = "lib";
+  assert.deepEqual(byId(b.render(), "rows").kids.map((k) => texts(k)[0]), ["REVIEW · 1/2", ORG_FOREIGN, `${ORG_FOREIGN}#30`, "MINE · 1/3", "other-owner/lib", "other-owner/lib#31"]);
+});
+
+test("UI: a section of one own repo has no repo row; the rows scroll to their place among the repo rows", async () => {
+  const { b, cx, host } = await openPrList();
+  assert.deepEqual(byId(b.render(), "rows").kids.map((k) => k.with.id[0]), [
+    "section-0", "row-PR_sample1", "section-1", "repo-head-1-sample-user/tender", "row-PR_sample4", "row-PR_sample2", "repo-head-1-sample-user/atlas", "row-PR_sample3",
+  ], "Review holds tender alone; Mine tender and atlas");
+  host.scrolled.length = 0;
+  for (let i = 0; i < 3; i++) await press(b, cx, "j");
+  assert.equal(b.views.prs.sel.key, "PR_sample3");
+  assert.deepEqual(host.scrolled.map((s) => s.row), [4, 5, 7], "each row's place counts the section and repo rows above it");
+});
+
+test("UI: the „Repos:“ line names the PR tab's repos with their pull requests, own ones first, foreign ones marked; a click turns one off on this machine at once, its rows and counts gone, and on again", async () => {
+  const { b, cx, host, st } = await openPrList({ config: JSON.stringify(twoContexts({ hideRepos: ["sample-user/gone"] })), list: contextList() });
+  const line = () => byId(b.render(), "repo-line");
+  const switches = () => line().kids.slice(1).map((k) => texts(k).join(" "));
+  assert.deepEqual(texts(line())[0], "Repos:");
+  assert.deepEqual(switches(), ["✓ tender 2", "✓ atlas 1", `✓ ${ORG_FOREIGN} 2 fremd`, "gone 0"], "one turned off in views.json, though it has none");
+  b.filterText = "lib";
+  assert.deepEqual(switches(), ["✓ tender 0/2", "✓ atlas 0/1", `✓ ${ORG_FOREIGN} 2 fremd`, "gone 0"], "what the filter hides is said");
+  b.filterText = "";
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const look = (id) => { const el = byId(b.render(), id); return [el.with.bg[0], el.with.text_color[0], el.with.border_color[0]]; };
+  assert.deepEqual([look("repo-switch-sample-user/tender"), look("repo-switch-sample-user/gone")], [[t.selected, t.foreground, t.accent], [t.chrome, t.muted, t.border]], "on and off as „nur meine“");
+  const reads = host.open("gh").length;
+  await click(b, cx, "repo-switch-sample-user/tender");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { sources: { github: { contexts: { "sample-user": { prs: { hideRepos: ["sample-user/gone", "sample-user/tender"] } } } } } });
+  assert.equal(b.origin(["sources", "github", "contexts", "sample-user", "prs", "hideRepos"]), "dieser Rechner");
+  assert.equal(host.open("gh").length, reads, "nothing read again");
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [30, 40, 31]);
+  assert.deepEqual(byId(b.render(), "rows").kids.map((k) => texts(k)[0]), ["REVIEW · 1", ORG_FOREIGN, `${ORG_FOREIGN}#30`, "MINE · 2", "atlas", "atlas#40", "other-owner/lib", "other-owner/lib#31"]);
+  assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3", "the tab counts what shows");
+  assert.equal(st().sel.key, "PR_ctx3", "the selection leaves the rows turned off");
+  assert.deepEqual(switches(), ["tender 2", "✓ atlas 1", `✓ ${ORG_FOREIGN} 2 fremd`, "gone 0"], "it stays in the line, with its count");
+  await click(b, cx, "repo-switch-sample-user/tender");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { sources: { github: { contexts: { "sample-user": { prs: { hideRepos: ["sample-user/gone"] } } } } } });
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [10, 30, 11, 40, 31]);
+  assert.equal(byId((await openPrList({ list: JSON.stringify({ data: { viewer: { login: "sample-user" }, s0: { issueCount: 0, nodes: [] }, s1: { issueCount: 0, nodes: [] } } }) })).b.render(), "repo-line"), null, "no repo: no line");
+});
+
+test("UI: a click on a repo switch while a dialog is open turns nothing off", async () => {
+  const { b, cx } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  await click(b, cx, "repo-switch-sample-user/tender");
+  assert.deepEqual(b.viewById("prs").hideRepos, []);
+});
+
+test("UI: R opens the repo menu: the PR tab's repos as its „Repos:“ line names them; Enter, a digit or a click turns one off or on, and it stays open until Esc", async () => {
+  const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  assert.equal(b.modal?.kind, "repos");
+  assert.ok(texts(byId(b.render(), "repos-menu")).includes("Repos zeigen · Enter · Esc"));
+  const rows = () => [0, 1, 2].map((i) => texts(byId(b.render(), `repo-${i}`)).filter(Boolean));
+  assert.deepEqual(rows(), [["1", "✓", "tender", "2", "gezeigt"], ["2", "✓", "atlas", "1", "gezeigt"], ["3", "✓", ORG_FOREIGN, "fremd", "2", "gezeigt"]]);
+  await press(b, cx, "enter");
+  assert.deepEqual(b.viewById("prs").hideRepos, ["sample-user/tender"]);
+  assert.deepEqual(rows()[0], ["1", "tender", "2", "ausgeblendet"]);
+  await press(b, cx, "3");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]).sources.github.contexts["sample-user"].prs.hideRepos, ["sample-user/tender", ORG_FOREIGN]);
+  byId(b.render(), "repo-0").with.on_click[0]({}, cx);
+  await settle();
+  assert.deepEqual(b.viewById("prs").hideRepos, [ORG_FOREIGN], "a click turns it on again");
+  assert.equal(b.modal?.kind, "repos", "the menu stays open");
+  await press(b, cx, "escape");
+  assert.equal(b.modal, null);
+  const board1 = await openBoard();
+  await press(board1.b, board1.cx, "r", { char: "R", modifiers: { shift: true } });
+  assert.equal(board1.b.modal, null, "a board has no repos to turn off");
 });
 
 test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {
@@ -9394,7 +9835,7 @@ test("the assignee picker's calls: GitHub's assignable users of the item's repo 
   assert.deepEqual(q.slice(0, 3), ["api", "graphql", "-f"]);
   assert.match(q[3], /viewer \{ id login name \}/);
   assert.match(q[3], /assignableUsers\(first: 100\) \{ totalCount nodes \{ id login name \} \}/);
-  assert.deepEqual(q.slice(4), ["-f", "owner=example", "-f", "name=tender"]);
+  assert.deepEqual(q.slice(4), ["-f", "owner=sample-user", "-f", "name=tender"]);
   const robin = { id: "U_sample2", login: "robin-example", name: "Robin Example" };
   const m = board.githubAssignArgs(issue, robin);
   assert.match(m[3], /updateIssue\(input: \{ id: \$id, assigneeIds: \$assignees \}\)/);
@@ -9421,7 +9862,7 @@ test("the picker's people: GitHub's viewer as me and the others by name, how man
   assert.equal(board.parseAssignable(more, issue).note, "erste 3 von 140");
   assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue, [{ path: ["repository"], message: "Could not resolve to a Repository" }]),
     /^Error: GitHub: Could not resolve to a Repository$/);
-  assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue), /GitHub kennt example\/tender nicht/);
+  assert.throws(() => board.parseAssignable({ data: { viewer: null, repository: null } }, issue), /GitHub kennt sample-user\/tender nicht/);
   const az = board.membersFor(board.parseMemberList(fixture("azure-team-members.json")), "alex.sample@example.com");
   assert.deepEqual(az.me, { login: "alex.sample@example.com", name: "Alex Sample", me: true });
   assert.deepEqual(az.people, [{ login: "kim.sample@example.com", name: "Kim Sample" }, { login: "robin.example@example.com", name: "Robin Example" }], "no group");
@@ -10466,7 +10907,7 @@ async function reloadBoard(b, cx, host) {
 // through: `more`), pull requests as `prs` (nodes) of `prCount`.
 function relatedAnswer({ n = 0, count = n, more = false, prs = [], prCount = prs.length } = {}) {
   const nodes = Array.from({ length: n }, (_, i) => ({
-    number: 4000 + i, title: `step ${i}`, state: "OPEN", url: `https://github.com/example/tender/issues/${4000 + i}`, repository: { nameWithOwner: "example/tender" },
+    number: 4000 + i, title: `step ${i}`, state: "OPEN", url: `https://github.com/sample-user/tender/issues/${4000 + i}`, repository: { nameWithOwner: "sample-user/tender" },
   }));
   const issue = {
     subIssues: { totalCount: count, pageInfo: { hasNextPage: more }, nodes },
@@ -10474,7 +10915,7 @@ function relatedAnswer({ n = 0, count = n, more = false, prs = [], prCount = prs
   };
   return JSON.stringify({ data: { repository: { issue } } });
 }
-const prNode = (number, state = "OPEN") => ({ number, title: `pr ${number}`, state, isDraft: false, url: `https://github.com/example/tender/pull/${number}`, repository: { nameWithOwner: "example/tender" } });
+const prNode = (number, state = "OPEN") => ({ number, title: `pr ${number}`, state, isDraft: false, url: `https://github.com/sample-user/tender/pull/${number}`, repository: { nameWithOwner: "sample-user/tender" } });
 // A Board whose first card's (tender#3004) details are open, its related
 // items read from github-related.json.
 async function openRelated() {
@@ -10534,7 +10975,7 @@ function layOutIn(b, cx, space, opts) {
 test("an issue's related items are one GraphQL query: its first 50 sub-issues and its first 20 linked pull requests, merged and closed ones too, each with whether there are more", () => {
   const args = board.githubRelatedArgs(issueItem());
   assert.deepEqual(args.slice(0, 3), ["api", "graphql", "-f"]);
-  assert.deepEqual(args.slice(4), ["-f", "owner=example", "-f", "name=tender", "-F", "number=3004"]);
+  assert.deepEqual(args.slice(4), ["-f", "owner=sample-user", "-f", "name=tender", "-F", "number=3004"]);
   const query = args[3].replace(/\s+/g, " ");
   assert.match(query, /repository\(owner: \$owner, name: \$name\) \{ issue\(number: \$number\) \{/);
   assert.match(query, /subIssues\(first: 50\) \{ totalCount pageInfo \{ hasNextPage \} nodes \{ number title state url repository \{ nameWithOwner \} \} \}/);
@@ -10545,28 +10986,28 @@ test("an issue's related items are one GraphQL query: its first 50 sub-issues an
 });
 
 test("an issue's related items: lines with key, state label, color, done and draft; counts, the cut by GitHub's page, nodes without access", () => {
-  const d = board.parseGithubRelated(json("github-related.json"), issueItem());
+  const d = board.parseGithubRelated(json("github-related.json"), issueItem(), githubView().owners);
   assert.deepEqual(d.subIssues.lines.map((l) => [board.itemLabel(l), l.kind, l.state, l.color, l.done, l.draft]), [
     ["tender#3001", "issue", "offen", "ansi2", false, false], ["tender#3010", "issue", "geschlossen", "muted", true, false], ["other-tool#12", "issue", "offen", "ansi2", false, false],
   ]);
-  assert.equal(d.subIssues.lines[2].url, "https://github.com/example/other-tool/issues/12");
+  assert.equal(d.subIssues.lines[2].url, "https://github.com/sample-user/other-tool/issues/12");
   assert.deepEqual(d.prs.lines.map((l) => [board.itemLabel(l), l.kind, l.state, l.color, l.done, l.draft, l.repo]), [
-    ["tender#3020", "pr", "offen", "ansi2", false, true, "example/tender"], ["tender#3015", "pr", "gemerged", "ansi5", true, false, "example/tender"],
+    ["tender#3020", "pr", "offen", "ansi2", false, true, "sample-user/tender"], ["tender#3015", "pr", "gemerged", "ansi5", true, false, "sample-user/tender"],
   ]);
   assert.deepEqual([d.subIssues, d.prs].map(({ count, sent, cut, hidden, error }) => [count, sent, cut, hidden, error]), [[3, 3, false, 0, null], [2, 2, false, 0, null]]);
   assert.deepEqual(d.warnings, []);
-  const page = board.parseGithubRelated(JSON.parse(relatedAnswer({ n: 50, count: 60, more: true })), issueItem());
+  const page = board.parseGithubRelated(JSON.parse(relatedAnswer({ n: 50, count: 60, more: true })), issueItem(), githubView().owners);
   assert.deepEqual([page.subIssues.count, page.subIssues.sent, page.subIssues.cut], [60, 50, true]);
-  const odd = board.parseGithubRelated(JSON.parse(relatedAnswer({ n: 1, count: 3 })), issueItem());
+  const odd = board.parseGithubRelated(JSON.parse(relatedAnswer({ n: 1, count: 3 })), issueItem(), githubView().owners);
   assert.equal(odd.subIssues.cut, false, "a count beyond what was sent is no cut where GitHub says there is no next page");
-  const strange = board.parseGithubRelated(JSON.parse(relatedAnswer({ prs: [prNode(1, "LOCKED")] })), issueItem());
+  const strange = board.parseGithubRelated(JSON.parse(relatedAnswer({ prs: [prNode(1, "LOCKED")] })), issueItem(), githubView().owners);
   assert.deepEqual([strange.prs.lines[0].state, strange.prs.lines[0].color, strange.prs.lines[0].done], ["locked", "muted", false], "a state it does not know");
 });
 
 test("an issue's related items: a missing issue throws why; a section GitHub did not send carries its error; a null node counts as without access; other errors are warnings", () => {
   const missing = json("github-related-not-found.json");
-  assert.throws(() => board.parseGithubRelated(missing, issueItem(), missing.errors), /^Error: GitHub: Could not resolve to an Issue with the number of 3004\.$/);
-  assert.throws(() => board.parseGithubRelated({ data: { repository: null } }, issueItem()), /^Error: GitHub kennt example\/tender#3004 nicht$/);
+  assert.throws(() => board.parseGithubRelated(missing, issueItem(), githubView().owners, missing.errors), /^Error: GitHub: Could not resolve to an Issue with the number of 3004\.$/);
+  assert.throws(() => board.parseGithubRelated({ data: { repository: null } }, issueItem(), githubView().owners), /^Error: GitHub kennt sample-user\/tender#3004 nicht$/);
   const answer = JSON.parse(relatedAnswer({ n: 1, count: 2 }));
   answer.data.repository.issue.subIssues.nodes.push(null);
   answer.data.repository.issue.closedByPullRequestsReferences = null;
@@ -10575,17 +11016,17 @@ test("an issue's related items: a missing issue throws why; a section GitHub did
     { type: "FORBIDDEN", path: ["repository", "issue", "closedByPullRequestsReferences"], message: "Pull requests are hidden\nmore" },
     { message: "Something else went wrong\nmore" },
   ];
-  const d = board.parseGithubRelated(answer, issueItem(), errors);
+  const d = board.parseGithubRelated(answer, issueItem(), githubView().owners, errors);
   assert.deepEqual([d.subIssues.lines.length, d.subIssues.sent, d.subIssues.hidden, d.subIssues.error], [1, 2, 1, null]);
   assert.deepEqual([d.prs.count, d.prs.lines, d.prs.error], [null, [], "GitHub: Pull requests are hidden"]);
   assert.deepEqual(d.warnings, ["Resource not accessible by integration", "Something else went wrong"], "only an error a section shows is its own");
   const nodeless = JSON.parse(relatedAnswer({ n: 1, count: 4 }));
   nodeless.data.repository.issue.subIssues.nodes = null;
   const atNodes = [{ type: "FORBIDDEN", path: ["repository", "issue", "subIssues", "nodes"], message: "Sub-issues are hidden\nmore" }];
-  const nodes = board.parseGithubRelated(nodeless, issueItem(), atNodes);
+  const nodes = board.parseGithubRelated(nodeless, issueItem(), githubView().owners, atNodes);
   assert.deepEqual([nodes.subIssues.count, nodes.subIssues.lines, nodes.subIssues.error, nodes.warnings], [4, [], "GitHub: Sub-issues are hidden", []], "nodes not sent: the error at their path");
-  assert.equal(board.parseGithubRelated(nodeless, issueItem(), []).subIssues.error, "GitHub schickte sie nicht");
-  const silent = board.parseGithubRelated(answer, issueItem(), []);
+  assert.equal(board.parseGithubRelated(nodeless, issueItem(), githubView().owners, []).subIssues.error, "GitHub schickte sie nicht");
+  const silent = board.parseGithubRelated(answer, issueItem(), githubView().owners, []);
   assert.equal(silent.prs.error, "GitHub schickte sie nicht");
 });
 
@@ -10599,7 +11040,7 @@ test("GitHub has related items to read for an issue with a number and a repo onl
 });
 
 test("the related lines: sub-issues first; a step from none goes to the first, up from the first to none, the last stays; a refresh keeps the open item's read unless it failed; the heads", () => {
-  const d = board.parseGithubRelated(json("github-related.json"), issueItem());
+  const d = board.parseGithubRelated(json("github-related.json"), issueItem(), githubView().owners);
   assert.deepEqual(board.relatedLines(d).map((l) => l.number), [3001, 3010, 12, 3020, 3015]);
   assert.deepEqual(board.relatedLines(null), []);
   assert.deepEqual(
@@ -10621,14 +11062,14 @@ test("the related lines: sub-issues first; a step from none goes to the first, u
 });
 
 test("an item is found on the board in its shown columns only: the same source, kind, repo and number", () => {
-  const d = board.parseGithubRelated(json("github-related.json"), issueItem());
+  const d = board.parseGithubRelated(json("github-related.json"), issueItem(), githubView().owners);
   const columns = board.shownColumns(githubBoard(), "", false);
   const col = columns.findIndex((c) => c.shown.some((i) => i.number === 3001));
   assert.ok(col > 0);
   const line = d.subIssues.lines[0];
   assert.deepEqual(board.placeOf(columns, line), { col, key: "PVTI_rec2" });
   assert.equal(board.placeOf(columns, d.subIssues.lines[1]), null, "not on the board");
-  assert.equal(board.placeOf(columns, { ...line, repo: "example/other-tool" }), null, "the same number in another repo");
+  assert.equal(board.placeOf(columns, { ...line, repo: "sample-user/other-tool" }), null, "the same number in another repo");
   assert.equal(board.placeOf(columns, { ...line, kind: "pr" }), null, "a pull request of the same number");
   assert.equal(board.placeOf(columns, { ...line, source: "azure" }), null, "another source");
   assert.equal(board.placeOf(board.shownColumns(githubBoard(), "BUG input", false), line), null, "one the filter hides");
@@ -10972,7 +11413,7 @@ test("UI: in the details panel o opens a line; „Zeile auf dem Board“ selects
   await press(b, cx, "j");
   await press(b, cx, "j");
   await press(b, cx, "o");
-  assert.equal(cx.opened.at(-1), "https://github.com/example/tender/issues/3010");
+  assert.equal(cx.opened.at(-1), "https://github.com/sample-user/tender/issues/3010");
   await runCommand(b, cx, "Zeile auf dem Board");
   assert.deepEqual([cx.opened.length, st().sel.key, b.notice?.text], [2, "PVTI_rec4", "tender#3010 ist nicht auf dem Board"], "not on the board: said, nothing opened");
   await press(b, cx, "k");
@@ -10992,7 +11433,7 @@ test("UI: „Zeile auf dem Board“ on a pull request's line whose card is on th
   cx.call((own) => b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), issue), key: issue }, own));
   await press(b, cx, "enter");
   assert.equal(readsOf(host, 3060).length, 1);
-  await answerRelated(host, ok(relatedAnswer({ prs: [{ ...prNode(3050), repository: { nameWithOwner: "example/tender" } }] })));
+  await answerRelated(host, ok(relatedAnswer({ prs: [{ ...prNode(3050), repository: { nameWithOwner: "sample-user/tender" } }] })));
   await tab(b, cx);
   await press(b, cx, "j");
   await runCommand(b, cx, "Zeile auf dem Board");
@@ -11027,28 +11468,49 @@ test("UI: Enter and o on a line that r took away until the related items come ag
   await reloadBoard(b, cx, host);
   await press(b, cx, "enter");
   await press(b, cx, "o");
-  assert.deepEqual([b.modal, cx.opened, b.panelOf(b.view())?.line], [null, undefined, { related: "github:issue:example/tender#3001" }], "the line stays selected");
+  assert.deepEqual([b.modal, cx.opened, b.panelOf(b.view())?.line], [null, undefined, { related: "github:issue:sample-user/tender#3001" }], "the line stays selected");
   await answerRelated(host, ok(fixture("github-related.json")));
   await press(b, cx, "o");
-  assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3001"], "back once they came");
+  assert.deepEqual(cx.opened, ["https://github.com/sample-user/tender/issues/3001"], "back once they came");
 });
 
 // An issue's parent as GitHub's related query sends it.
-const parentNode = (number = 3000, repo = "example/tender") => ({ number, title: `parent ${number}`, state: "OPEN", url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo } });
+const parentNode = (number = 3000, repo = "sample-user/tender") => ({ number, title: `parent ${number}`, state: "OPEN", url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo } });
+
+test("an issue or pull request of a foreign repo is named with its owner wherever the board builds it: a card, a card's parent, a related item's line and the parent's line", () => {
+  const data = json("github-board.json");
+  const nodes = data.data.repositoryOwner.projectV2.items.nodes;
+  nodes.find((n) => n.id === "PVTI_rec2").content.repository = { nameWithOwner: "Other-Owner/lib" };
+  nodes.find((n) => n.id === "PVTI_rec5").content.parent.repository = { nameWithOwner: "Other-Owner/epics" };
+  const columns = board.parseGithubBoard(data, githubView(), HIDDEN).columns;
+  const card = (id) => columns.flatMap((c) => c.cards).find((c) => c.key === id);
+  const names = (c) => [board.itemKey(c), board.parentLabel(c), board.partOfText(c)?.split(" ").slice(0, 3).join(" ")];
+  assert.deepEqual(names(card("PVTI_rec2")), ["Other-Owner/lib#3001", "Other-Owner/lib#3002", `Teil von #3002`], "its parent in its own repo");
+  assert.deepEqual(names(card("PVTI_rec5")), ["tender#3005", "Other-Owner/epics#3006", "Teil von Other-Owner/epics#3006"], "an own card's foreign parent");
+  assert.equal(board.itemKey(card("PVTI_rec1")), "tender#3000");
+  nodes.find((n) => n.id === "PVTI_rec1").content.repository = { nameWithOwner: "Sample-Org/api" };
+  const withOrg = board.githubViews(board.readConfig(JSON.stringify(twoContexts())).config).find((v) => v.id === "mine");
+  assert.equal(board.itemKey(board.parseGithubBoard(data, withOrg, HIDDEN).columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec1")), "api#3000",
+    "one of another context's repo is not foreign");
+  const answer = JSON.parse(relatedAnswer({ prs: [prNode(3050), { ...prNode(3051), repository: { nameWithOwner: "Other-Owner/lib" } }] }));
+  answer.data.repository.issue.parent = parentNode(2900, "Other-Owner/epics");
+  const d = board.parseGithubRelated(answer, issueItem(), githubView().owners);
+  assert.deepEqual(board.relatedLines(d).map((l) => board.itemLabel(l)), ["Other-Owner/epics#2900", "tender#3050", "Other-Owner/lib#3051"]);
+});
 
 test("an issue's parent is a section of one line before its sub-issues; none for none; an error at its path is the section's, not a warning", () => {
   const answer = json("github-related.json");
   answer.data.repository.issue.parent = parentNode(3000);
-  const d = board.parseGithubRelated(answer, issueItem());
+  const d = board.parseGithubRelated(answer, issueItem(), githubView().owners);
   assert.deepEqual(d.parents.lines.map((l) => [board.itemLabel(l), l.kind, l.state, l.title, l.url]),
-    [["tender#3000", "issue", "offen", "parent 3000", "https://github.com/example/tender/issues/3000"]]);
+    [["tender#3000", "issue", "offen", "parent 3000", "https://github.com/sample-user/tender/issues/3000"]]);
   assert.deepEqual([d.parents.count, d.parents.error, d.parents.hidden], [1, null, 0]);
   assert.deepEqual(board.relatedLines(d).map((l) => l.number), [3000, 3001, 3010, 12, 3020, 3015], "the parent first");
-  const none = board.parseGithubRelated(json("github-related.json"), issueItem());
+  const none = board.parseGithubRelated(json("github-related.json"), issueItem(), githubView().owners);
   assert.deepEqual([none.parents.count, none.parents.lines, none.parents.error], [0, [], null]);
   answer.data.repository.issue.parent = null;
   const errors = [{ type: "FORBIDDEN", path: ["repository", "issue", "parent"], message: "Resource not accessible\nmore" }];
-  const hidden = board.parseGithubRelated(answer, issueItem(), errors);
+  const hidden = board.parseGithubRelated(answer, issueItem(), githubView().owners, errors);
   assert.deepEqual([hidden.parents.lines, hidden.parents.error, hidden.parents.count, hidden.warnings], [[], "GitHub: Resource not accessible", null, []],
     "no count: GitHub did not send it");
 });
@@ -11145,12 +11607,12 @@ const readRelatedOf = (number) => (a) => isRelatedCall(a) && a.includes(`number=
 
 test("the details panel's levels: a line's item is named by its source, kind, repo and number; the path names the board's item, then each level, by number in its repo and on Azure", () => {
   const root = issueItem();
-  const sub = { source: "github", kind: "issue", repo: "example/tender", repoShort: "tender", number: 2217 };
-  const other = { ...sub, repo: "example/other-tool", repoShort: "other-tool", number: 12 };
+  const sub = { source: "github", kind: "issue", repo: "sample-user/tender", repoShort: "tender", number: 2217 };
+  const other = { ...sub, repo: "sample-user/other-tool", repoShort: "other-tool", number: 12 };
   const pr = { ...sub, kind: "pr", number: 3020 };
   const samePr = { ...sub, kind: "pr" };
   assert.deepEqual([board.lineKey(sub), board.lineKey(pr), board.lineKey({ source: "azure", kind: "workitem", number: 311 })],
-    ["github:issue:example/tender#2217", "github:pr:example/tender#3020", "azure:workitem:#311"]);
+    ["github:issue:sample-user/tender#2217", "github:pr:sample-user/tender#3020", "azure:workitem:#311"]);
   assert.equal(board.pathLabel(root, []), "tender#3004");
   assert.equal(board.pathLabel(root, [sub, other, pr]), "tender#3004 › #2217 › other-tool#12 › #3020");
   const story = { source: "azure", kind: "workitem", number: 301 };
@@ -11176,7 +11638,7 @@ test("UI: Enter on a sub-issue's line shows its details in the panel, a level do
   assert.deepEqual(levelsNow(b), [[3010], null], "a level down, no line there yet");
   assert.deepEqual([st().sel.key, st().detail, cx.opened], ["PVTI_rec4", true, undefined], "the board's selection stays, nothing opened");
   assert.equal(readsOf(host, 3010).length, 1, "its related items: one read, by repo and number");
-  assert.ok(readsOf(host, 3010)[0].args.includes("owner=example") && readsOf(host, 3010)[0].args.includes("name=tender"));
+  assert.ok(readsOf(host, 3010)[0].args.includes("owner=sample-user") && readsOf(host, 3010)[0].args.includes("name=tender"));
   assert.deepEqual([topText(b), texts(detailPanel(b)).includes("Esc zurück")], ["tender#3004 › #3010", true], "the path at the top; Esc goes back");
   assert.ok(texts(detailPanel(b)).includes("chore(ci): drop the old runner"), "its title");
   const state = chipOf(detailPanel(b), "geschlossen");
@@ -11189,14 +11651,14 @@ test("UI: Enter on a sub-issue's line shows its details in the panel, a level do
   await answerRelated(host, ok(JSON.stringify(answer)));
   assert.deepEqual(drawnLines(b).map((l) => l[0]), ["tender#4000", "tender#4001"], "its own sub-issues");
   assert.equal(textViewOf(b).source, "Drop the **old** runner.", "its description");
-  assert.equal(textViewOf(b).viewId, "description-github:issue:example/tender#3010");
+  assert.equal(textViewOf(b).viewId, "description-github:issue:sample-user/tender#3010");
   await press(b, cx, "j");
   assert.deepEqual(levelsNow(b), [[3010], 0], "j walks its lines");
   b.refresh(b.view(), cx);
   await settle();
   await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
   assert.deepEqual([host.open("gh").length, levelsNow(b)], [0, [[3010], 0]], "a refresh keeps its read and the level");
-  const level = "github:issue:example/tender#3010";
+  const level = "github:issue:sample-user/tender#3010";
   cx.call((own) => byId(detailPanel(b), `description-size-${level}`).with.on_size_change[0]({ width: 400, height: 500 }, own));
   await press(b, cx, "z");
   assert.equal(b.relatedUi.unfolded, level, "z unfolds the level's description");
@@ -11243,10 +11705,10 @@ test("UI: two levels down and back with Esc: each level its line again, marked a
 test("UI: on a level o opens the marked line, and with none the level's item; Enter with none starts that item's session, not the board's; s, a and H/L are not taken there; Tab back to the board closes the levels", async () => {
   const { b, cx, st, host } = await onLevel();
   await press(b, cx, "o");
-  assert.deepEqual(cx.opened, ["https://github.com/example/tender/issues/3010"], "no line: the level's item");
+  assert.deepEqual(cx.opened, ["https://github.com/sample-user/tender/issues/3010"], "no line: the level's item");
   await press(b, cx, "j");
   await press(b, cx, "o");
-  assert.equal(cx.opened.at(-1), "https://github.com/example/tender/issues/4000", "the marked line");
+  assert.equal(cx.opened.at(-1), "https://github.com/sample-user/tender/issues/4000", "the marked line");
   await press(b, cx, "k");
   const before = cx.stopped;
   for (const k of ["s", "a"]) await press(b, cx, k);
@@ -11370,8 +11832,8 @@ test("UI: the command menu runs a level's action only on that level: after a ref
 // GitHub's GraphQL reference, PullRequest, as the PR list's rows are).
 function pullRequestAnswer({ state = "OPEN", draft = true, decision = null } = {}) {
   const pullRequest = {
-    id: "PR_sample3020", number: 3020, title: "feat(api): page through long lists", url: "https://github.com/example/tender/pull/3020", state, isDraft: draft,
-    createdAt: "2026-11-18T09:00:00Z", updatedAt: "2026-11-19T09:00:00Z", repository: { nameWithOwner: "example/tender" }, headRefName: "feat/3004-pages", reviewDecision: decision, author: { login: "alex-sample" }, assignees: { nodes: [{ login: "robin-example", name: "Robin Example" }] },
+    id: "PR_sample3020", number: 3020, title: "feat(api): page through long lists", url: "https://github.com/sample-user/tender/pull/3020", state, isDraft: draft,
+    createdAt: "2026-11-18T09:00:00Z", updatedAt: "2026-11-19T09:00:00Z", repository: { nameWithOwner: "sample-user/tender" }, headRefName: "feat/3004-pages", reviewDecision: decision, author: { login: "alex-sample" }, assignees: { nodes: [{ login: "robin-example", name: "Robin Example" }] },
     reviewRequests: { nodes: [{ requestedReviewer: { login: "robin-example" } }] },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS", contexts: { checkRunCountsByState: [{ state: "SUCCESS", count: 2 }], statusContextCountsByState: [] } } } }] },
   };
@@ -11380,9 +11842,9 @@ function pullRequestAnswer({ state = "OPEN", draft = true, decision = null } = {
 const isPullRequestCall = (args) => args.some((a) => String(a).includes("pullRequest(number"));
 
 test("a pull request the panel goes down to is one GraphQL query by repo and number for what the PR list shows of it, and its state", () => {
-  const pr = { source: "github", kind: "pr", repo: "example/tender", repoShort: "tender", number: 3020, title: "line title", url: "u" };
+  const pr = { source: "github", kind: "pr", repo: "sample-user/tender", repoShort: "tender", number: 3020, title: "line title", url: "u" };
   const args = board.githubPullRequestArgs(pr);
-  assert.deepEqual(args.slice(4), ["-f", "owner=example", "-f", "name=tender", "-F", "number=3020"]);
+  assert.deepEqual(args.slice(4), ["-f", "owner=sample-user", "-f", "name=tender", "-F", "number=3020"]);
   const query = args[3].replace(/\s+/g, " ");
   assert.match(query, /repository\(owner: \$owner, name: \$name\) \{ pullRequest\(number: \$number\) \{ state id number title url isDraft createdAt updatedAt headRefName reviewDecision repository \{ nameWithOwner \} author \{ login \}/);
   const list = board.githubListArgs({ sections: [{ query: "is:pr" }], limit: 5 })[3].replace(/\s+/g, " ");
@@ -11391,7 +11853,7 @@ test("a pull request the panel goes down to is one GraphQL query by repo and num
   assert.deepEqual([d.title, d.state, d.color, d.done, d.draft, d.author, d.review, d.branch, d.checks.text, d.assignees, d.assigneeLogins, d.reviewers, d.warnings], [
     "feat(api): page through long lists", "offen", "ansi2", false, true, "alex-sample", "Entwurf", "feat/3004-pages", "2 bestanden", ["Robin Example"], ["robin-example"], ["robin-example"], [],
   ]);
-  const row = board.parseGithubList({ data: { s0: { issueCount: 1, nodes: [JSON.parse(pullRequestAnswer()).data.repository.pullRequest] } } }, { sections: [{ name: "S", query: "is:pr" }] }).sections[0].rows[0];
+  const row = board.parseGithubList({ data: { s0: { issueCount: 1, nodes: [JSON.parse(pullRequestAnswer()).data.repository.pullRequest] } } }, { ...listView(), sections: [{ name: "S", query: "is:pr" }] }).sections[0].rows[0];
   // What only a list's row holds: whether the viewer has to act (prAttention).
   const listOnly = ["key", "source", "kind", "ownByQuery", "attention", "waiting", "unread"];
   assert.deepEqual(Object.fromEntries(Object.keys(row).filter((k) => !listOnly.includes(k)).map((k) => [k, d[k]])),
@@ -11401,7 +11863,7 @@ test("a pull request the panel goes down to is one GraphQL query by repo and num
   assert.deepEqual(partial.warnings, ["Checks are hidden"], "a part GitHub did not send: a warning");
   const merged = board.parseGithubPullRequest(JSON.parse(pullRequestAnswer({ state: "MERGED", draft: false, decision: "APPROVED" })), pr);
   assert.deepEqual([merged.state, merged.done, merged.review], ["gemerged", true, "freigegeben"]);
-  assert.throws(() => board.parseGithubPullRequest({ data: { repository: { pullRequest: null } } }, pr), /^Error: GitHub kennt example\/tender#3020 nicht$/);
+  assert.throws(() => board.parseGithubPullRequest({ data: { repository: { pullRequest: null } } }, pr), /^Error: GitHub kennt sample-user\/tender#3020 nicht$/);
   const errors = [{ type: "NOT_FOUND", path: ["repository", "pullRequest"], message: "Could not resolve to a PullRequest\nmore" }];
   assert.throws(() => board.parseGithubPullRequest({ data: { repository: null } }, pr, errors), /^Error: GitHub: Could not resolve to a PullRequest$/);
   const { reads } = board.makeGithub(null).pullRequest;
@@ -11427,7 +11889,7 @@ test("UI: Enter on a pull request's line shows it a level down as the PR list's 
   await press(b, cx, "j");
   assert.deepEqual(levelsNow(b), [[3020], null], "no lines to walk");
   await press(b, cx, "o");
-  assert.deepEqual(cx.opened, ["https://github.com/example/tender/pull/3020"]);
+  assert.deepEqual(cx.opened, ["https://github.com/sample-user/tender/pull/3020"]);
   await press(b, cx, "enter");
   assert.deepEqual([b.modal?.kind, b.modal.item.kind, board.itemLabel(b.modal.item)], ["start", "pr", "tender#3020"], "its review");
   await press(b, cx, "escape");
@@ -11669,14 +12131,14 @@ test("UI: Enter on a line whose item the panel cannot read says so and opens not
 test("UI: Esc back up marks the line it came from where a re-read moved it, and the remembered line while the level above is still being read", async () => {
   const { b, cx, host } = await onLevel();
   await reloadBoard(b, cx, host);
-  await host.answer("gh", rootAnswer((i) => i.subIssues.nodes.unshift({ number: 2999, title: "new", state: "OPEN", url: "u", repository: { nameWithOwner: "example/tender" } })),
+  await host.answer("gh", rootAnswer((i) => i.subIssues.nodes.unshift({ number: 2999, title: "new", state: "OPEN", url: "u", repository: { nameWithOwner: "sample-user/tender" } })),
     readRelatedOf(3004));
   await press(b, cx, "escape");
   assert.deepEqual(levelsNow(b), [[], 2], "tender#3010 now the third line");
   const loading = await onLevel();
   await reloadBoard(loading.b, loading.cx, loading.host);
   await press(loading.b, loading.cx, "escape");
-  assert.deepEqual([levelsNow(loading.b)[0], loading.b.panel.line], [[], { related: "github:issue:example/tender#3010" }], "still being read: the line it was on");
+  assert.deepEqual([levelsNow(loading.b)[0], loading.b.panel.line], [[], { related: "github:issue:sample-user/tender#3010" }], "still being read: the line it was on");
 });
 
 test("UI: the hint line on a level: with no line marked Enter and o are the level's item's, with one the line's; a pull request's level names no lines", async () => {
@@ -11710,7 +12172,7 @@ test("UI: the command menu runs a line's action only on the line it opened on, w
     await settle();
     return [b.modal, b.notice?.text, cx.opened];
   };
-  assert.deepEqual(await menuAfter((i) => (i.parent = parentNode(2900))), [null, undefined, ["https://github.com/example/tender/issues/3001"]], "a parent before it: still its line");
+  assert.deepEqual(await menuAfter((i) => (i.parent = parentNode(2900))), [null, undefined, ["https://github.com/sample-user/tender/issues/3001"]], "a parent before it: still its line");
   const without3001 = (i) => (i.subIssues.nodes = i.subIssues.nodes.filter((n) => n.number !== 3001));
   assert.deepEqual(await menuAfter(without3001), [null, "tender#3001 ist nicht mehr markiert", undefined]);
 });
@@ -11928,7 +12390,7 @@ test("UI: the details draw the description with TextView, Markdown for an issue'
   answer.data.repository.issue.body = body;
   await answerRelated(host, ok(JSON.stringify(answer)));
   assert.equal(readsOf(host).length, 0, "one call for all of it");
-  assert.equal(board.parseGithubRelated(answer, issueItem()).description, body, "the issue's body, as GitHub sends it");
+  assert.equal(board.parseGithubRelated(answer, issueItem(), githubView().owners).description, body, "the issue's body, as GitHub sends it");
   const view = textViewOf(b);
   assert.deepEqual([view.format, view.viewId, view.source], ["markdown", "description-PVTI_rec4", board.shownDescription(body, "markdown")]);
   assert.doesNotMatch(view.source, /!\[|<img/i, "no image");
@@ -12675,8 +13137,8 @@ test("UI: a selected row of the Backlog and of a PR list, and a marked line of t
 // `third` (none: views.json's teal).
 function attentionConfig(third = undefined) {
   const config = JSON.parse(testConfig());
-  const sections = JSON.parse(shippedConfig()).sources.github.contexts[0].prs.sections;
-  ghContext(config).prs.sections = sections.map((s, i) => (i === 2 && third ? { ...s, tone: third } : s));
+  const sections = JSON.parse(shippedConfig()).sources.github.prs.sections;
+  config.sources.github.prs.sections = sections.map((s, i) => (i === 2 && third ? { ...s, tone: third } : s));
   return JSON.stringify(config);
 }
 // The PR tab of a board on `config`, read from `answer` (by default
@@ -12765,10 +13227,10 @@ test("UI: a pull request the list could not read whole says so in its row: \"? n
 });
 
 // gh's answer for the unread notifications: one per pull request `numbers`
-// of example/tender.
+// of sample-user/tender.
 const notificationsOf = (...numbers) => ok(JSON.stringify(numbers.map((n) => ({
-  id: String(n), unread: true, reason: "comment", repository: { full_name: "example/tender" },
-  subject: { title: "x", url: `https://api.github.com/repos/example/tender/pulls/${n}`, latest_comment_url: null, type: "PullRequest" },
+  id: String(n), unread: true, reason: "comment", repository: { full_name: "sample-user/tender" },
+  subject: { title: "x", url: `https://api.github.com/repos/sample-user/tender/pulls/${n}`, latest_comment_url: null, type: "PullRequest" },
 }))));
 
 test("UI: a pull request with an unread notification says „ungelesen“ first in its row's mark, in copper's orange, and among its details' reasons; where the notifications cannot be read, no row says it and a note above the list says why; each read of the list asks for them once", async () => {
@@ -13606,7 +14068,7 @@ test("UI: in the command menu ↑/↓, ctrl-j/k and ctrl-n/p mark a row, bare j 
   await press(b, cx, "escape");
   await openMenu(b, cx);
   await click(b, cx, "command-5");
-  assert.deepEqual([b.modal, cx.opened], [null, ["https://github.com/example/tender/issues/3004"]], "a click ran Im Browser öffnen");
+  assert.deepEqual([b.modal, cx.opened], [null, ["https://github.com/sample-user/tender/issues/3004"]], "a click ran Im Browser öffnen");
 });
 
 test("UI: the command menu shows ten rows, its window follows the mark and the mouse wheel moves it, in the script's pixels at herdr's zoom; a thumb and „↓ N weitere“ say there are more", async () => {
@@ -13680,7 +14142,8 @@ function effectOf(b, cx, host) {
 function nineTabs() {
   const config = JSON.parse(testConfig());
   ghContext(config).projects = Array.from({ length: 8 }, (_, i) => ({ id: `v${i + 1}`, name: `V${i + 1}`, number: i + 1 }));
-  ghContext(config).prs = { id: "v9", name: "V9", sections: [{ name: "S", query: "is:pr author:@me" }] };
+  ghContext(config).prs = { id: "v9", name: "V9" };
+  config.sources.github.prs.sections = [{ name: "S", query: "is:pr author:@me" }];
   return JSON.stringify(config);
 }
 // A board on nine tabs, `shown` the one shown.
@@ -13766,6 +14229,7 @@ const KEYED = {
   mine: { open: openBoard, key: ["m"] },
   filter: { open: openBoard, key: ["/"] },
   reload: { open: openBoard, key: ["r"] },
+  repos: { open: openPrList, key: ["r", { char: "R", modifiers: { shift: true } }] },
 };
 
 test("UI: every action of the action table the menu lists with a key runs from the menu what its key runs, and the menu shows that key beside it", async () => {
@@ -13875,7 +14339,7 @@ test("UI: the command menu opens on the selection the board keeps, as a key runs
   cx.call((own) => b.modal.input.submit(own));
   await settle();
   assert.deepEqual(cx.opened, byKey.cx.opened, "as o opens it");
-  assert.notDeepEqual(cx.opened, ["https://github.com/example/tender/issues/3004"]);
+  assert.notDeepEqual(cx.opened, ["https://github.com/sample-user/tender/issues/3004"]);
   await openMenu(b, cx);
   b.modal.input.type("Details zeigen");
   st().detail = true;
@@ -14168,8 +14632,8 @@ test("a GitHub card carries its priority as its option's name and its color's to
   const data = cardsBoard();
   const epic = cardOf(data, 2217);
   assert.deepEqual([epic.priority, epic.milestone, epic.parent, epic.parentTitle, epic.parentRepo],
-    [{ name: "P1", tone: "ansi11" }, "v1", 1735, "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver", "example/tender"]);
-  assert.deepEqual([cardOf(data, 2301).priority, cardOf(data, 2301).parentRepo], [{ name: "P0", tone: "ansi1" }, "example/atlas"]);
+    [{ name: "P1", tone: "ansi11" }, "v1", 1735, "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver", "sample-user/tender"]);
+  assert.deepEqual([cardOf(data, 2301).priority, cardOf(data, 2301).parentRepo], [{ name: "P0", tone: "ansi1" }, "sample-user/atlas"]);
   const plain = cardOf(data, 1467);
   assert.deepEqual([plain.priority, plain.milestone, plain.parent, plain.parentTitle, plain.parentRepo], [null, null, null, null, null]);
   assert.deepEqual([cardOf(data, 2310).kind, cardOf(data, 2310).milestone], ["pr", "v2"], "a pull request's milestone");
@@ -14667,15 +15131,15 @@ function largeBoardAnswer(n) {
     const number = 1000 + i;
     const labels = Array.from({ length: i % 6 }, (_, k) => ({ name: `label-${(i + 3 * k) % 24}`, color: LARGE_COLORS[(i + 5 * k) % LARGE_COLORS.length] }));
     const total = totals[i % totals.length];
-    const shared = { author: { login: "sample-user" }, number, repository: { nameWithOwner: "example/tender" }, milestone: i % 2 ? { title: `v${i % 3}` } : null };
+    const shared = { author: { login: "sample-user" }, number, repository: { nameWithOwner: "sample-user/tender" }, milestone: i % 2 ? { title: `v${i % 3}` } : null };
     const content = i % 17 === 5
-      ? { ...shared, __typename: "PullRequest", id: `PR_sample${number}`, title: `feat(sample): change number ${number}`, url: `https://github.com/example/tender/pull/${number}`,
+      ? { ...shared, __typename: "PullRequest", id: `PR_sample${number}`, title: `feat(sample): change number ${number}`, url: `https://github.com/sample-user/tender/pull/${number}`,
         headRefName: `feat/${number}-sample`, labels: { nodes: labels }, assignees: { nodes: [] }, reviewRequests: { nodes: [] } }
-      : { ...shared, __typename: "Issue", id: `I_sample${number}`, url: `https://github.com/example/tender/issues/${number}`,
+      : { ...shared, __typename: "Issue", id: `I_sample${number}`, url: `https://github.com/sample-user/tender/issues/${number}`,
         title: i % 11 === 0 ? `[Epic] Sample topic number ${number}` : `fix(sample): make sample thing ${number} read as the resolver states it`,
         issueType: types[i % types.length], labels: { nodes: i % 11 === 0 ? [...labels, { name: "epic", color: "5319e7" }] : labels },
         assignees: { nodes: i % 4 ? [{ login: "sample-user" }] : [] },
-        parent: i % 3 ? { number: 900 + (i % 9), title: `[Epic] Sample parent ${900 + (i % 9)} with a title long enough to be cut short`, repository: { nameWithOwner: i % 5 ? "example/tender" : "example/atlas" } } : null,
+        parent: i % 3 ? { number: 900 + (i % 9), title: `[Epic] Sample parent ${900 + (i % 9)} with a title long enough to be cut short`, repository: { nameWithOwner: i % 5 ? "sample-user/tender" : "sample-user/atlas" } } : null,
         subIssuesSummary: { total, completed: Math.floor(total * ((i % 5) / 4)) } };
     return { id: `PVTI_large${i}`, fieldValueByName: { optionId: LARGE_SHOWN[i % 3], name: "x" }, priority: priorities[i % priorities.length], content };
   });
@@ -15279,7 +15743,7 @@ const claudeOf = (sessions, processes = "", tasks = "") =>
 test("the items a text names: <name>#<n> and !<n> as keys, in lower case, and a bare #<n> as a number; a number ends where no letter, digit or _ follows, so #12 is not in #123", () => {
   const r = (text) => board.references(text);
   assert.deepEqual(r("tender#3000 sample"), { keys: ["tender#3000"], bare: [] });
-  assert.deepEqual(r("see example/Tender#3000, AB#101 and !7."), { keys: ["tender#3000", "ab#101", "!7"], bare: [] });
+  assert.deepEqual(r("see example/Tender#3000, AB#101 and !7."), { keys: ["example/tender#3000", "ab#101", "!7"], bare: [] });
   assert.deepEqual(r("fix #12 and #123-x"), { keys: [], bare: ["12", "123"] });
   assert.deepEqual(r("#12a x#12_ #12x # ! #- this!1 a.b#"), { keys: [], bare: [] });
   assert.deepEqual(r("a!5 (!6) #7"), { keys: ["!6"], bare: ["7"] });
@@ -15313,6 +15777,21 @@ test("an item's sessions in panes: its key, or its bare number in a folder of it
   assert.deepEqual(azure(paneOf("p1", "t1", { name: "#101", branch: "feat/101-x", title: "101" })), [], "an Azure work item only by its whole key");
   const azurePr = { ...azureItem(), kind: "pr", branch: "feature/importer" };
   assert.deepEqual(board.itemSessions(board.sessionIndex({ spaces, panes: [paneOf("p1", "t1", { branch: "feature/importer" })] }), azurePr), [], "nor an Azure pull request by its branch");
+});
+
+test("a session's text names a GitHub item by its key with or without its repo's owner, a foreign one's only with it: own and foreign pull requests of the same name and number side by side; an Azure AB# key takes no owner", () => {
+  const own = { source: "github", kind: "pr", repo: "sample-user/romm", repoShort: "romm", number: 5, branch: null };
+  const fork = { ...own, repo: "Other-Owner/romm", foreign: true };
+  assert.deepEqual([board.itemKey(own), board.itemKey(fork), board.itemLabel(fork)], ["romm#5", "Other-Owner/romm#5", "Other-Owner/romm#5"]);
+  const spaces = [workSpace([{ id: "t1", name: "1", status: null }])];
+  const of = (name, item) => board.itemSessions(board.sessionIndex({ spaces, panes: [paneOf("p1", "t1", { name, cwd: "/r/elsewhere" })] }), item).length;
+  assert.deepEqual([of("other-owner/romm#5 review", own), of("other-owner/romm#5 review", fork)], [0, 1], "owner/repo#n names that pull request only");
+  assert.deepEqual([of("Sample-User/romm#5", own), of("Sample-User/romm#5", fork)], [1, 0], "the own one by its owner too, in any case");
+  assert.deepEqual([of("romm#5", own), of("romm#5", fork)], [1, 0], "a bare repo#n names the own one alone");
+  assert.deepEqual(board.references("a/b/romm#5 /romm#6"), { keys: ["b/romm#5", "romm#6"], bare: [] }, "an owner is the name right before the /");
+  assert.deepEqual(board.references("fix/AB#4711 feat/ab#12"), { keys: ["ab#4711", "ab#12"], bare: [] }, "Azure's AB# key has no owner before it");
+  const azure = board.itemSessions(board.sessionIndex({ spaces, panes: [paneOf("p1", "t1", { name: "fix/AB#101" })] }), azureItem());
+  assert.deepEqual(azure.map((s) => s.reasons.join(" · ")), ["Pane-Name"], "so a branch-like name finds the work item");
 });
 
 test("an item's sessions are one per place with every reason found there and its narrowest part to go to; the sure ones first, the most urgent first, then the likely ones", () => {
@@ -15812,7 +16291,7 @@ test("UI: on a session's line the command menu offers going there and none of a 
   await press(b, cx, "escape");
   assert.ok(texts(b.render().kids.at(-1)).includes("öffnen"));
   await press(b, cx, "o");
-  assert.deepEqual([cx.opened, b.notice], [["https://github.com/example/tender/issues/3004"], null]);
+  assert.deepEqual([cx.opened, b.notice], [["https://github.com/sample-user/tender/issues/3004"], null]);
 });
 
 test("UI: on a pull request, whose details read no related items, Tab takes the keyboard into the details once it has a session, and Enter on that line goes there", async () => {
@@ -16165,20 +16644,23 @@ test("the saved state: an entry is a view's only while its form and hidden colum
   assert.deepEqual(board.goneSaved(["board:data:mine", "board:data:gone", "data:gone", "source", "hidden:gone"], new Set(["mine"])), ["board:data:gone"]);
 });
 
-test("the saved state of a shipped GitHub view signs as before the contexts, so it is drawn at once after the update; every Azure view's signs anew once", () => {
+test("the saved state of each shipped view signs as SAVED_VERSION 2 has it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
   const sigs = board.viewsOf(board.readConfig(shippedConfig()).config).map((v) => {
     const text = board.savedText(v, board.hiddenColumns(v), { data: { shape: "board" }, warnings: [] }, 1);
     return [board.viewKind(v), createHash("sha256").update(JSON.parse(text).sig).digest("hex").slice(0, 16)];
   });
   assert.deepEqual(sigs, [
-    // GitHub's as at 8761f755, the last commit before the contexts; Azure's new.
-    ["github board", "81f62a16268f51f2"], ["github list", "b4f09547e379dd58"],
-    ["azure sprint", "0983a6e12d164f0b"], ["azure backlog", "bdc239d8ca2eeb14"], ["azure prs", "de86a97177e8a13f"],
-    ["azure sprint", "7baa5e90c8bc5193"], ["azure backlog", "98d5d8faac529b7a"], ["azure prs", "4e7ed869ef831821"],
+    ["github board", "c995e695b2e71e6f"], ["github list", "098435fa8999a710"],
+    ["azure sprint", "004ef2983447382d"], ["azure backlog", "a61d22581005819c"], ["azure prs", "4415b7935e74085e"],
+    ["azure sprint", "55745f95f598d4fc"], ["azure backlog", "27f11693b2ad59b3"], ["azure prs", "c655667baec66a6c"],
   ]);
   const view = githubView();
   const text = board.savedText(view, HIDDEN, { data: githubBoard(), warnings: [] }, 1);
   assert.ok(board.readSaved(text, { ...view, settingsPath: ["elsewhere"] }, HIDDEN), "where its settings lie is no form of it");
+  const list = listView();
+  const prs = board.savedText(list, new Set(), { data: board.parseGithubList(json("github-list.json"), list), warnings: [] }, 1);
+  assert.ok(board.readSaved(prs, { ...list, hideRepos: ["sample-user/tender"] }, new Set()), "nor the repos a PR tab turns off: it reads them all");
+  assert.equal(board.readSaved(prs, { ...list, owners: { ...list.owners, otherOwners: ["sample-org"] } }, new Set()), null, "another context's repos leave its data");
   const team = board.viewOf(azureTeam(), "sprint");
   const saved = board.savedText(team, new Set(), { data: { shape: "sprint" }, warnings: [] }, 1);
   assert.ok(board.readSaved(saved, { ...team, tab: { ...team.tab, repoFolders: ["~/elsewhere"], views: ["sprint"] } }, new Set()), "nor its tab's folders and views");
@@ -16200,7 +16682,22 @@ test("what each shape keeps in its saved data is the form SAVED_VERSION names: a
     board: githubBoard(), prs: board.parseGithubList(json("github-list.json"), testView("prs")), sprint: sprintData(), backlog: backlogData(),
   };
   assert.deepEqual({ version: board.SAVED_VERSION, ...Object.fromEntries(Object.entries(shapes).map(([k, d]) => [k, print(d)])) },
-    { version: 1, board: "180d63b68cc0", prs: "ec79f6598c09", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
+    { version: 2, board: "180d63b68cc0", prs: "a995da7f9b5f", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
+});
+
+test("UI: a PR tab's repos turned off apply to a saved state it draws and to a read that ends after the switch", async () => {
+  const at = realNow() - MIN;
+  const data = board.parseGithubList(json("github-list.json"), testView("prs"));
+  const { b, cx, host } = await bootBoard({ raw: { "board:data:prs": savedFor("prs", data, at) }, files: { [MACHINE_FILE]: JSON.stringify({ sources: { github: { contexts: { "sample-user": { prs: { hideRepos: ["sample-user/atlas"] } } } } } }) } });
+  await host.answer("gh", ok(fixture("github-board.json")));
+  await press(b, cx, "3");
+  assert.equal(b.views.prs.saved, true, "the saved state shows");
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 77, 1921], "without the repo turned off now");
+  await host.answer("gh", ok(fixture("github-list.json")));
+  await press(b, cx, "r");
+  await click(b, cx, "repo-switch-sample-user/tender");
+  while (host.open("gh").length) await host.answer("gh", ok(fixture("github-list.json")));
+  assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [], "the read that ends after the switch shows neither");
 });
 
 test("UI: on start the entries of views views.json no longer has are dropped; a saved state of another form of the view is not drawn; the other views' saved states come after the first draw; one too large to save drops the one before and says so in herdr's log", async () => {
@@ -16228,7 +16725,7 @@ test("UI: on start the entries of views views.json no longer has are dropped; a 
 test("UI: a views.json with problems drops no saved entry, not even those of the views it leaves out; read without them it drops the gone views' entries", async () => {
   const at = realNow() - MIN;
   const broken = JSON.parse(testConfig());
-  ghContext(broken).prs.sections = "none";
+  broken.sources.github.prs.sections = "none";
   const raw = { "board:data:gone": "{}", "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), at) };
   const { b, cx, host } = await bootBoard({ config: JSON.stringify(broken), raw });
   assert.ok(b.configErrors.length, "the problem is said");

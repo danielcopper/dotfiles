@@ -59,10 +59,10 @@
         },
         "number": 3000,
         "title": "[Epic] sample tool rollout",
-        "url": "https://github.com/example/tender/issues/3000",
+        "url": "https://github.com/sample-user/tender/issues/3000",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [
@@ -105,10 +105,10 @@
         },
         "number": 3001,
         "title": "fix(cache): keep the last entry when a refresh fails",
-        "url": "https://github.com/example/tender/issues/3001",
+        "url": "https://github.com/sample-user/tender/issues/3001",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": []
@@ -143,10 +143,10 @@
         },
         "number": 3003,
         "title": "feat(cli): add a dry-run flag",
-        "url": "https://github.com/example/tender/issues/3003",
+        "url": "https://github.com/sample-user/tender/issues/3003",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [
@@ -183,10 +183,10 @@
         },
         "number": 3004,
         "title": "feat(api): page through long lists",
-        "url": "https://github.com/example/tender/issues/3004",
+        "url": "https://github.com/sample-user/tender/issues/3004",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [
@@ -223,10 +223,10 @@
         },
         "number": 3005,
         "title": "docs(readme): say how the sample tool starts",
-        "url": "https://github.com/example/tender/issues/3005",
+        "url": "https://github.com/sample-user/tender/issues/3005",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": []
@@ -261,10 +261,10 @@
         },
         "number": 3007,
         "title": "fix(input): pass the key map to the viewer",
-        "url": "https://github.com/example/tender/issues/3007",
+        "url": "https://github.com/sample-user/tender/issues/3007",
         "issueType": null,
         "repository": {
-         "nameWithOwner": "example/tender"
+         "nameWithOwner": "sample-user/tender"
         },
         "labels": {
          "nodes": [

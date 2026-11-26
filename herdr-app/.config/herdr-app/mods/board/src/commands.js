@@ -388,6 +388,12 @@ export const ACTIONS = [
     when: (c) => has(c, "toggleColumn"),
     run: (b, c, cx) => b.openColumns(c.view, cx),
   },
+  {
+    id: "repos", group: "view", name: "Repos…", key: "R", menu: 22,
+    when: (c) => has(c, "toggleRepo"),
+    run: (b, c, cx) => b.openRepos(c.view, cx),
+    hint: (c) => (c.shape?.toggleRepo ? "Repos" : null),
+  },
   // The sprint a Sprint view shows: the sprint picker (no key; what else
   // opens it, ui/modals/sprints.js says), and back to the current sprint
   // where another shows and the team has one running.

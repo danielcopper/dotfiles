@@ -2,9 +2,10 @@
 // parsing, the status mutation, what gh's answers and failures mean, and the
 // source as the board uses it (makeGithub).
 
-import { CONFIG_NAME, BoardError, DRAFT_REVIEW, NOTIFIED, PAGE, STATE_LOOKS, errorText, failure, firstLine, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
+import { CONFIG_NAME, BoardError, DRAFT_REVIEW, NOTIFIED, PAGE, STATE_LOOKS, errorText, failure, firstLine, foldedName, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
 import { NO_LIVE } from "../loading.js";
 import { GH_TIMEOUT, call, what } from "../tools.js";
+import { repoOwnership } from "../kinds/list.js";
 
 // Theme colors for GitHub's named colors: a Projects v2 option's and an
 // issue type's (IssueTypeColor), which share the names.
@@ -175,7 +176,9 @@ function githubPriority(value) {
   return { name: value.name, tone: GITHUB_COLORS[value.color] ?? "muted" };
 }
 
-function githubCard(node) {
+const foreignMark = (owners, repo, flag = "foreign") => (repoOwnership(repo, owners) === "foreign" ? { [flag]: true } : {});
+
+function githubCard(node, owners) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
   return {
@@ -186,6 +189,7 @@ function githubCard(node) {
     number: c.number ?? null,
     repo,
     repoShort: repo.split("/").pop(),
+    ...foreignMark(owners, repo),
     title: c.title ?? "(kein Zugriff)",
     url: c.url ?? null,
     labels: (c.labels?.nodes ?? []).map((l) => l.name),
@@ -201,6 +205,7 @@ function githubCard(node) {
     parent: c.parent?.number ?? null,
     parentTitle: c.parent?.title ?? null,
     parentRepo: c.parent?.repository?.nameWithOwner ?? null,
+    ...(c.parent ? foreignMark(owners, c.parent.repository?.nameWithOwner ?? repo, "parentForeign") : {}),
     milestone: c.milestone?.title ?? null,
     priority: githubPriority(node.priority),
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
@@ -251,7 +256,7 @@ export function parseGithubBoard(json, view, hidden, errors = []) {
     cards: [],
   }));
   const byId = new Map(columns.map((c) => [c.id, c]));
-  const cards = project.items.nodes.map(githubCard).map((c) => (byId.has(c.column) ? c : { ...c, column: NO_STATUS }));
+  const cards = project.items.nodes.map((node) => githubCard(node, view.owners)).map((c) => (byId.has(c.column) ? c : { ...c, column: NO_STATUS }));
   if (cards.some((c) => c.column === NO_STATUS)) {
     const none = { id: NO_STATUS, name: "Ohne Status", color: "dim", hidden: false, count: 0, target: false, cards: [] };
     columns.unshift(none);
@@ -487,8 +492,7 @@ export function githubListArgs(view, login) {
 export const NOTIFICATIONS_PATH = "notifications?per_page=50";
 export const githubNotificationsArgs = () => ["api", "--paginate", NOTIFICATIONS_PATH];
 
-// GitHub's owner and repo names ignore case.
-const notifiedKey = (repo, number) => `${repo.toLowerCase()}#${number}`;
+const notifiedKey = (repo, number) => `${foldedName(repo)}#${number}`;
 const PULL_URL = /\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/;
 
 export function notifiedPrs(json) {
@@ -623,7 +627,7 @@ export function parseGithubList(json, view, errors = [], { pending = null, login
   const nodesOf = (i) => (Array.isArray(json?.data?.[`s${i}`]?.nodes) ? json.data[`s${i}`].nodes : []);
   const asking = new Set(view.sections.flatMap((s, i) => (askingSearch(s.query) ? nodesOf(i) : [])).map((pr) => pr?.id).filter(Boolean));
   const sections = view.sections.map((s, i) => {
-    const own = ownSearch(s.query);
+    const ownQuery = ownSearch(s.query);
     const found = json?.data?.[`s${i}`];
     if (!Array.isArray(found?.nodes)) {
       const e = errorAt(errors, [`s${i}`]);
@@ -643,11 +647,12 @@ export function parseGithubList(json, view, errors = [], { pending = null, login
       }
       if (seen.has(pr.id)) return;
       seen.add(pr.id);
-      at.forEach((e) => shown.add(e));
       const row = prRow(pr, Boolean(errorAt(at, [...path, "commits"])));
+      if (repoOwnership(row.repo, view.owners) === "other") return;
+      at.forEach((e) => shown.add(e));
       const waits = Boolean(pending?.has(pr.id));
       const acts = prAttention(pr, row, viewer, asking.has(pr.id), at, { pending: waits, login, notified: Boolean(notified?.has(notifiedKey(row.repo, row.number))) });
-      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...acts, ownByQuery: own, ...(waits ? { threadsPending: true } : {}) });
+      rows.push({ key: pr.id, source: "github", kind: "pr", ...row, ...acts, ownByQuery: ownQuery, ...foreignMark(view.owners, row.repo), ...(waits ? { threadsPending: true } : {}) });
     });
     // Array's sort keeps the order of rows it ranks alike.
     rows.sort((a, b) => Number(b.attention.length > 0) - Number(a.attention.length > 0));
@@ -656,7 +661,10 @@ export function parseGithubList(json, view, errors = [], { pending = null, login
       skipped, notRead, rows,
     };
   });
-  return { shape: "prs", sections, viewer, warnings: errors.filter((e) => !shown.has(e)).map((e) => firstLine(e.message)).filter(Boolean) };
+  return {
+    shape: "prs", sections, viewer, owners: view.owners,
+    warnings: errors.filter((e) => !shown.has(e)).map((e) => firstLine(e.message)).filter(Boolean),
+  };
 }
 
 // How many sub-issues and linked pull requests an issue's related items
@@ -713,8 +721,8 @@ function notFound(errors, item) {
   return new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt ${item.repo}#${item.number} nicht`);
 }
 
-// A sub-issue or a linked pull request as a line (related.js).
-function relatedLine(node, kind) {
+// A sub-issue, a linked pull request or the parent as a line (related.js).
+function relatedLine(node, kind, owners) {
   const repo = node.repository?.nameWithOwner ?? "";
   const state = lookOf(node.state);
   return {
@@ -722,6 +730,7 @@ function relatedLine(node, kind) {
     source: "github",
     repo,
     repoShort: repo.split("/").pop(),
+    ...foreignMark(owners, repo),
     number: node.number,
     title: node.title ?? "(kein Zugriff)",
     url: node.url ?? null,
@@ -738,13 +747,13 @@ const RELATED_PATHS = {
 // A connection of the answer as a section (related.js), and the error it
 // shows (`shown`, null for none). One GitHub did not send, or whose nodes
 // it did not send, shows the error at that path in their place.
-function relatedSection(conn, kind, path, errors) {
+function relatedSection(conn, kind, path, errors, owners) {
   if (!conn || !Array.isArray(conn.nodes)) {
     const shown = errorAt(errors, conn ? [...path, "nodes"] : path);
     const error = shown ? `GitHub: ${firstLine(shown.message)}` : "GitHub schickte sie nicht";
     return { section: { count: conn?.totalCount ?? null, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
   }
-  const lines = conn.nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind));
+  const lines = conn.nodes.filter((n) => Number.isInteger(n?.number)).map((n) => relatedLine(n, kind, owners));
   const section = {
     count: conn.totalCount ?? lines.length, sent: conn.nodes.length, cut: Boolean(conn.pageInfo?.hasNextPage), hidden: conn.nodes.length - lines.length,
     error: null, lines,
@@ -755,9 +764,9 @@ function relatedSection(conn, kind, path, errors) {
 // The issue's parent as a section of one line, or of none where it has
 // none; where GitHub sent none for an error at its path, that error, which
 // it shows (`shown`), and no count.
-function parentSection(issue, errors) {
+function parentSection(issue, errors, owners) {
   const node = issue.parent;
-  if (Number.isInteger(node?.number)) return { section: { count: 1, sent: 1, cut: false, hidden: 0, error: null, lines: [relatedLine(node, "issue")] }, shown: null };
+  if (Number.isInteger(node?.number)) return { section: { count: 1, sent: 1, cut: false, hidden: 0, error: null, lines: [relatedLine(node, "issue", owners)] }, shown: null };
   const shown = errorAt(errors, RELATED_PATHS.parent);
   const error = shown ? `GitHub: ${firstLine(shown.message)}` : null;
   return { section: { count: shown ? null : 0, sent: 0, cut: false, hidden: 0, error, lines: [] }, shown };
@@ -769,12 +778,12 @@ function parentSection(issue, errors) {
 // error is a section's own only where the section shows it, in place of what
 // GitHub did not send; all others are warnings (a node GitHub sent as null
 // counts as hidden, and its error is one of them).
-export function parseGithubRelated(json, item, errors = []) {
+export function parseGithubRelated(json, item, owners, errors = []) {
   const issue = json?.data?.repository?.issue;
   if (!issue) throw notFound(errors, item);
-  const parents = parentSection(issue, errors);
-  const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors);
-  const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors);
+  const parents = parentSection(issue, errors, owners);
+  const subIssues = relatedSection(issue.subIssues, "issue", RELATED_PATHS.subIssues, errors, owners);
+  const prs = relatedSection(issue.closedByPullRequestsReferences, "pr", RELATED_PATHS.prs, errors, owners);
   const shown = [parents.shown, subIssues.shown, prs.shown];
   return {
     description: typeof issue.body === "string" ? issue.body : "",
@@ -937,6 +946,8 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null, r
 
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
+const prsReadKey = (view) => JSON.stringify([view.sections, view.limit]);
+
 // The GitHub source for the board: the name of the site `o` opens, why "nur
 // meine" cannot tell one's own items when GitHub did not name the login, and
 // per layout of a GitHub view how it loads (`hiddenFor(view)` gives its
@@ -946,11 +957,54 @@ const gh = async (paths, args, options = {}) => readGh(await call("gh", args, nu
 // details (pullRequest, the same); and an item's assignment (assign:
 // actions/assign.js says what it holds), whose people are read once per repo
 // and kept while the board runs (one that fails is not kept). A list keeps
-// the login gh runs as while the board runs, as gh last named it.
+// the login gh runs as while the board runs, as gh last named it. The PR
+// tabs of all contexts read their shared sections together (together, and
+// readPrs: a tab's load joins the read that runs).
 // gh runs by the path `paths` (toolPaths) finds.
 export function makeGithub(paths) {
   const people = readMemo();
   let login = null;
+  let prsRead = null;
+
+  // One read of the PR sections, for `view` and every tab that joins it:
+  // its answer as it grows (json, errors, notified, pending: the ids whose
+  // threads are still read), each step told to `steps`, done when whole.
+  function readPrs(view) {
+    const read = { key: prsReadKey(view), json: null, errors: [], asked: null, notified: null, pending: null, steps: new Set() };
+    const step = () => read.steps.forEach((f) => f());
+    read.done = (async () => {
+      const notifications = gh(paths, githubNotificationsArgs(), { rest: true, ...what(view, "notifications") })
+        .then(({ json }) => notifiedPrs(json))
+        .catch((e) => ({ keys: null, unnamed: 0, why: errorText(e) }))
+        .then((n) => (read.notified = n));
+      login ??= await gh(paths, githubViewerArgs(), what(view, "login")).then((r) => r.json?.data?.viewer?.login ?? null, () => null);
+      read.asked = login;
+      const { json, errors } = await gh(paths, githubListArgs(view, read.asked), what(view, "list"));
+      Object.assign(read, { json, errors });
+      login = json?.data?.viewer?.login ?? login;
+      const ids = moreThreadIds(json, view);
+      read.pending = ids.length ? new Set(ids) : null;
+      if (ids.length || !read.notified) step();
+      for (let at = 0; at < ids.length; at += THREAD_IDS) {
+        const chunk = ids.slice(at, at + THREAD_IDS);
+        let page = null;
+        let failed = null;
+        try {
+          page = await gh(paths, githubThreadsArgs(chunk), what(view, "threads"));
+        } catch (e) {
+          failed = errorText(e);
+        }
+        errors.push(...addThreads(json, view, chunk, page?.json ?? null, page?.errors ?? [], failed));
+      }
+      read.pending = null;
+      if (ids.length && !read.notified) step();
+      await notifications;
+    })();
+    const forget = () => prsRead === read && (prsRead = null);
+    read.done.then(forget, forget);
+    return read;
+  }
+
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
@@ -958,7 +1012,7 @@ export function makeGithub(paths) {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
       async load(item, view) {
         const { json, errors } = await gh(paths, githubRelatedArgs(item), what(view, "related"));
-        return parseGithubRelated(json, item, errors);
+        return parseGithubRelated(json, item, view.owners, errors);
       },
     },
     pullRequest: {
@@ -1005,39 +1059,33 @@ export function makeGithub(paths) {
         },
       },
       list: {
+        together: (views) => views.filter((v) => v.source === "github" && v.layout === "list"),
         async load(view, { live = NO_LIVE }) {
-          let notified = null;
-          const notifications = gh(paths, githubNotificationsArgs(), { rest: true, ...what(view, "notifications") })
-            .then(({ json }) => notifiedPrs(json))
-            .catch((e) => ({ keys: null, unnamed: 0, why: errorText(e) }))
-            .then((n) => (notified = n));
-          login ??= await gh(paths, githubViewerArgs(), what(view, "login")).then((r) => r.json?.data?.viewer?.login ?? null, () => null);
-          const asked = login;
-          const { json, errors } = await gh(paths, githubListArgs(view, asked), what(view, "list"));
-          login = json?.data?.viewer?.login ?? login;
+          if (prsRead?.key !== prsReadKey(view)) prsRead = readPrs(view);
+          const read = prsRead;
           const notes = () => {
-            if (notified?.keys === null) return [notifiedUnknown(notified.why)];
-            return notified?.unnamed ? [notifiedUnnamed(notified.unnamed)] : [];
+            if (read.notified?.keys === null) return [notifiedUnknown(read.notified.why)];
+            return read.notified?.unnamed ? [notifiedUnnamed(read.notified.unnamed)] : [];
           };
-          const result = (pending = null) => {
-            const data = parseGithubList(json, view, errors, { pending, login: asked, notified: notified?.keys ?? null });
-            return { data: notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
+          const result = () => {
+            const data = parseGithubList(read.json, view, read.errors, { pending: read.pending, login: read.asked, notified: read.notified?.keys ?? null });
+            return { data: read.notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
           };
-          const ids = moreThreadIds(json, view);
-          if (ids.length || !notified) live.partial(() => result(ids.length ? new Set(ids) : null));
-          for (let at = 0; at < ids.length; at += THREAD_IDS) {
-            const chunk = ids.slice(at, at + THREAD_IDS);
-            let page = null;
-            let failed = null;
+          let failed = null;
+          const step = () => {
             try {
-              page = await gh(paths, githubThreadsArgs(chunk), what(view, "threads"));
+              live.partial(result);
             } catch (e) {
-              failed = errorText(e);
+              failed ??= e;
             }
-            errors.push(...addThreads(json, view, chunk, page?.json ?? null, page?.errors ?? [], failed));
+          };
+          read.steps.add(step);
+          try {
+            await read.done;
+          } finally {
+            read.steps.delete(step);
           }
-          if (ids.length && !notified) live.partial(() => result());
-          await notifications;
+          if (failed) throw failed;
           return result();
         },
       },

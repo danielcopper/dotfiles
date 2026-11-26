@@ -9,15 +9,16 @@
 export const SAVED_MAX = 1000000;
 export const SAVED_PREFIX = "board:data:";
 // Raised when what a shape draws from changes, so that no older data is drawn.
-export const SAVED_VERSION = 1;
+export const SAVED_VERSION = 2;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
 
 // Data read for other hidden columns, another form of the view or another
 // organisation, project or team of its tab is not its data; where its
-// settings lie and the rest of its tab are not its form. A GitHub view has
-// no tab and signs without one, so its data saved before the contexts holds.
+// settings lie, the rest of its tab and the repos a PR tab hides (it reads
+// them all) are not its form. A GitHub view has no tab and signs without
+// one.
 const savedSig = (view, hidden) => {
-  const { settingsPath, tab, ...form } = view;
+  const { settingsPath, tab, hideRepos, ...form } = view;
   const reads = tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
   return JSON.stringify([SAVED_VERSION, form, ...reads, [...hidden].sort()]);
 };

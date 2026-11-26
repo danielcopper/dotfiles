@@ -59,10 +59,10 @@
                 },
                 "number": 2217,
                 "title": "[Epic] Emulator sources and direct launch",
-                "url": "https://github.com/example/tender/issues/2217",
+                "url": "https://github.com/sample-user/tender/issues/2217",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": [
@@ -90,7 +90,7 @@
                   "number": 1735,
                   "title": "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver",
                   "repository": {
-                    "nameWithOwner": "example/tender"
+                    "nameWithOwner": "sample-user/tender"
                   }
                 },
                 "subIssuesSummary": {
@@ -114,10 +114,10 @@
                 },
                 "number": 2195,
                 "title": "refactor(atlas): take each catalogue entry and each file's launchability as the resolver states them",
-                "url": "https://github.com/example/tender/issues/2195",
+                "url": "https://github.com/sample-user/tender/issues/2195",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": [
@@ -141,7 +141,7 @@
                   "number": 2217,
                   "title": "[Epic] Emulator sources and direct launch",
                   "repository": {
-                    "nameWithOwner": "example/tender"
+                    "nameWithOwner": "sample-user/tender"
                   }
                 },
                 "subIssuesSummary": {
@@ -165,10 +165,10 @@
                 },
                 "number": 1467,
                 "title": "fix(ui): align game-info metadata rows with what RomM actually provides",
-                "url": "https://github.com/example/tender/issues/1467",
+                "url": "https://github.com/sample-user/tender/issues/1467",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": [
@@ -215,10 +215,10 @@
                 },
                 "number": 2301,
                 "title": "feat(launch): read the resolver's answer for every file",
-                "url": "https://github.com/example/tender/issues/2301",
+                "url": "https://github.com/sample-user/tender/issues/2301",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": [
@@ -240,7 +240,7 @@
                   "number": 12,
                   "title": "Resolver answers for every emulator",
                   "repository": {
-                    "nameWithOwner": "example/atlas"
+                    "nameWithOwner": "sample-user/atlas"
                   }
                 },
                 "subIssuesSummary": {
@@ -267,10 +267,10 @@
                 },
                 "number": 2302,
                 "title": "chore: sort the sample catalogue",
-                "url": "https://github.com/example/tender/issues/2302",
+                "url": "https://github.com/sample-user/tender/issues/2302",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": []
@@ -305,10 +305,10 @@
                 },
                 "number": 2303,
                 "title": "docs: name the sample folders",
-                "url": "https://github.com/example/tender/issues/2303",
+                "url": "https://github.com/sample-user/tender/issues/2303",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": []
@@ -339,10 +339,10 @@
                 },
                 "number": 2310,
                 "title": "feat(launch): retry once",
-                "url": "https://github.com/example/tender/pull/2310",
+                "url": "https://github.com/sample-user/tender/pull/2310",
                 "headRefName": "feat/2310-retry",
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": []
@@ -373,10 +373,10 @@
                 },
                 "number": 2304,
                 "title": "docs: name the import steps",
-                "url": "https://github.com/example/tender/issues/2304",
+                "url": "https://github.com/sample-user/tender/issues/2304",
                 "issueType": null,
                 "repository": {
-                  "nameWithOwner": "example/tender"
+                  "nameWithOwner": "sample-user/tender"
                 },
                 "labels": {
                   "nodes": []

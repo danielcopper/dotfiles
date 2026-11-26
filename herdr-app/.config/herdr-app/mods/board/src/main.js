@@ -9,21 +9,24 @@
 // - sources: what the board shows, in contexts by source; the top bar
 //   switches between the contexts and shows the tabs of one, its PR tab
 //   last.
-//   - github: { contexts: [{ owner, projects?: [...], prs: {...} }] }, a
-//     context per owner (a user or an organisation). A project is a tab with
+//   - github: { contexts: [{ owner, projects?: [...], prs: {...} }], prs: {
+//     sections, limit? } }, a context per owner (a user or an
+//     organisation). A project is a tab with
 //     its board: { id, name, number, field? ("Status"), priorityField?
 //     ("Priority"), filter? (a Projects filter such as "assignee:@me"),
 //     hide?: [column names], limit? (the most items it reads, 1000), start?
 //     }; its columns are the options of that single-select field, a card's
 //     priority its option of the single-select field priorityField names
 //     (none where the project has no such field; one views.json names that
-//     the project lacks is a warning). prs is the context's PR tab: { id,
-//     name? ("PRs"), sections: [{ name, query, tone? }], limit? (per search,
-//     50, at most 100), start? }, one GitHub search for pull requests per
-//     section, as written; tone is one of SECTION_TONES (shared.js), and
-//     without one a section takes the next of SECTION_TONE_ORDER by its place
-//     that no other section sets. A tab's id is its own among all contexts'
-//     (readGithub in config.js).
+//     the project lacks is a warning). A context's prs is its PR tab: { id,
+//     name? ("PRs"), hideRepos?: ["<owner>/<repo>"] (repos turned off),
+//     start? }. The PR tabs of all contexts share github's prs: sections:
+//     [{ name, query, tone? }], one GitHub search for pull requests per
+//     section, as written, read once for all of them; limit? (per search,
+//     50, at most 100); tone is one of SECTION_TONES (shared.js), and
+//     without one a section takes the next of SECTION_TONE_ORDER by its
+//     place that no other section sets. A tab's id is its own among all
+//     contexts' (readGithub in config.js).
 //   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
 //     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
 //     missing), repoFolders? }] }] }, a context per project: a tab per team,
@@ -47,7 +50,9 @@
 // This machine's settings (settings.js; README, "herdr app") lie over
 // views.json and are read with it. Hidden columns are a view's hide,
 // views.json's or this machine's settings'; hiding or showing one writes it
-// into the settings. They are left out of the query and of the board.
+// into the settings. They are left out of the query and of the board. A PR
+// tab's repos turned off (hideRepos) are written the same way; their pull
+// requests are read and not shown.
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
@@ -55,8 +60,9 @@
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
 // its limit take: ten for the 1000 by default (each item's priority,
 // milestone and parent, with its title and repo, and the first page's look
-// at the priority field add no connection and so no points; see below); a
-// list view one, one more per THREAD_IDS (100) pull requests in it with
+// at the priority field add no connection and so no points; see below); the
+// PR tabs of all contexts one together (a refresh of one refreshes them
+// all), one more per THREAD_IDS (100) pull requests in them with
 // more than FIRST_THREADS (10) review threads, one for the unread
 // notifications of the user gh runs as (githubNotificationsArgs: a REST
 // request per page of up to 50, counted against GitHub's REST limit of 5000
@@ -123,29 +129,32 @@
 // source's forget), after a column is hidden or shown (the command menu's
 // "Spalte ausblenden", a name in the hidden line, the column menu), when it is
 // shown again tried longer than refreshMinutes ago (not while a read of it
-// runs: that one shows), and every refreshMinutes while it shows. Besides,
+// runs: that one shows), and every refreshMinutes while it shows; a GitHub
+// PR tab also whenever another one refreshes (they share one read). Besides,
 // after each read of views.json (the start, `r`), while the board shows, the
 // prefetch reads each other view with a loader once, as its tab would
 // (prefetchOrder: one at a time, none tried within refreshMinutes, none whose
 // own last read since it found its source unavailable), so a start or an `r`
 // costs each other view's refresh at most once; it waits while any read runs,
 // a write is under way or a dialog is busy. After that a view not shown reads
-// nothing. The Azure calls of a load that need nothing of each other run side
-// by side: the Sprint's settings (iteration, area paths, columns, types,
-// backlog configuration) and who az is; its taskboard once the iteration
-// came, its query once the area paths and the configuration came too, its
-// parents' query and the team's settings once all that came; the Backlog's
-// settings (levels, configuration, team settings, area paths), the types'
-// colors and who az is; its ids once the levels came, the query for their
-// fields once the configuration came too. What a view drew last, as read, is
-// saved (loading.js) and drawn after a restart with its age until its read
-// replaces it.
+// nothing but the PR tabs' shared refresh above. The Azure calls of a load
+// that need nothing of each other run side by side: the Sprint's settings
+// (iteration, area paths, columns, types, backlog configuration) and who az
+// is; its taskboard once the iteration came, its query once the area paths
+// and the configuration came too, its parents' query and the team's settings
+// once all that came; the Backlog's settings (levels, configuration, team
+// settings, area paths), the types' colors and who az is; its ids once the
+// levels came, the query for their fields once the configuration came too.
+// What a view drew last, as read, is saved (loading.js) and drawn after a
+// restart with its age until its read replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), settings.js (this machine's
 // settings over it), contexts.js (the top bar's contexts, tabs and their
 // views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
+// kinds/board.js (a board's columns and cards), kinds/list.js (a PR tab's
+// repos: whose they are, those turned off, its rows grouped by repo),
+// kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
 // the menus that rank their rows by name), commands.js (the action table,
@@ -167,8 +176,8 @@
 // drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
 // (how a view's data is drawn and worked: board, prs, sprint, backlog,
 // placeholder), ui/modals/ (the dialogs: start, status, columns, create,
-// assign, commands, sprints, sessions) and this one, the Board, which looks
-// the shape up.
+// assign, commands, sprints, sessions, repos) and this one, the Board, which
+// looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -189,7 +198,7 @@ import { renderTemplate, templateVars } from "./actions/start.js";
 import { AGENT_STATUS, itemSessions, placeKey, placed, readClaudeSessions, secondEnter, sessionIndex } from "./sessions.js";
 import { makeSources } from "./sources/index.js";
 import { keptRelated, lineAt, lineCount, lineId, lineIndex, lineNow, pathLabel, pickedLine, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
-import { store, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
+import { store, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, toggleSwitch, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
@@ -204,6 +213,7 @@ export * from "./config.js";
 export * from "./settings.js";
 export * from "./contexts.js";
 export * from "./kinds/board.js";
+export * from "./kinds/list.js";
 export * from "./kinds/index.js";
 export * from "./kinds/sprint.js";
 export * from "./kinds/backlog.js";
@@ -243,6 +253,7 @@ export * from "./ui/shapes/backlog.js";
 export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
+export * from "./ui/modals/repos.js";
 export * from "./ui/modals/create.js";
 export * from "./ui/modals/assign.js";
 export * from "./ui/modals/commands.js";
@@ -360,6 +371,8 @@ export default class Board extends View {
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
+    // Loaders asked to refresh while one of their views (together) read; a per-view `again` would make the views restart one another.
+    this.againTogether = new Set();
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
@@ -633,7 +646,7 @@ export default class Board extends View {
     const built = read.text;
     c.settingsRead = { text: after.text };
     this.takeConfig();
-    this.followHidden(cx, before);
+    this.followSettings(cx, before);
     cx.notify();
     const words = { refused: (why) => `${name} nicht gespeichert: ${why}`, stale: CHANGED_MEANWHILE };
     return this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, built), words, cx), cx);
@@ -679,7 +692,7 @@ export default class Board extends View {
       this.say(words.refused(why), "error", cx);
       await this.readSettingsFile();
       this.takeConfig();
-      this.followHidden(cx);
+      this.followSettings(cx);
       cx.notify();
       return false;
     };
@@ -701,17 +714,24 @@ export default class Board extends View {
     }
     this.configState.settingsRead = { text: next.text };
     this.takeConfig();
-    this.followHidden(cx);
+    this.followSettings(cx);
     if (writes && words.done) this.say(words.done, "info", cx);
     cx.notify();
     return true;
   }
 
-  // Where a settings change by the board changes a view's hide, it shows it
-  // so and is read again; `before` as in changeSettings.
-  followHidden(cx, before = null) {
+  // After a settings change by the board: what of a view's settings its
+  // shape draws from without a read (withView) shows at once; a view whose
+  // hide changed shows it so and is read again; `before` as in
+  // changeSettings.
+  followSettings(cx, before = null) {
     for (const view of viewsOf(this.config ?? {})) {
       const st = this.views[view.id];
+      const settled = st?.data && SHAPES[st.data.shape].withView?.(st.data, view);
+      if (settled && settled !== st.data) {
+        st.data = settled;
+        this.keepSelection(view);
+      }
       if (!st?.hidden || !st.data) continue;
       const hidden = hiddenColumns(view);
       if (sameNames(hidden, st.hidden)) continue;
@@ -777,6 +797,22 @@ export default class Board extends View {
 
   refresh(view, cx) {
     const loader = this.loader(view);
+    const together = loader?.together?.(viewsOf(this.config ?? {}));
+    if (!together) return this.refreshView(view, cx);
+    if (together.some((v) => this.state(v.id).loading)) return void this.againTogether.add(loader);
+    for (const v of [view, ...together.filter((v) => v.id !== view.id)]) this.refreshView(v, cx);
+  }
+
+  followTogether(cx) {
+    for (const loader of [...this.againTogether]) {
+      this.againTogether.delete(loader);
+      const [first] = loader.together(viewsOf(this.config ?? {}));
+      if (first) this.refresh(first, cx);
+    }
+  }
+
+  refreshView(view, cx) {
+    const loader = this.loader(view);
     if (!loader) return;
     const st = this.state(view.id);
     // A refresh asked for while one runs (a column shown or hidden) follows it.
@@ -802,7 +838,7 @@ export default class Board extends View {
           if (ended || !inSteps) return;
           const { data, warnings } = result();
           drew = true;
-          st.data = SHAPES[data.shape].received(data, st);
+          st.data = SHAPES[data.shape].received(data, st, this.viewById(view.id) ?? view);
           st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
           this.keepSelection(view);
           cx.notify();
@@ -818,7 +854,7 @@ export default class Board extends View {
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
-        st.data = SHAPES[data.shape].received(data, st);
+        st.data = SHAPES[data.shape].received(data, st, this.viewById(view.id) ?? view);
         st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
         st.error = null;
         st.at = Date.now();
@@ -835,7 +871,7 @@ export default class Board extends View {
         // A failed read keeps what showed before it, not what it drew on its
         // way.
         if (drew) {
-          st.data = before.data && SHAPES[before.data.shape].received(before.data, st);
+          st.data = before.data && SHAPES[before.data.shape].received(before.data, st, this.viewById(view.id) ?? view);
           st.warnings = before.warnings;
           if (st.data) this.keepSelection(view);
           else Object.assign(st, { sel: null, picked: null, detail: false });
@@ -851,6 +887,7 @@ export default class Board extends View {
         // The follow-up refresh reads the view from the config as it is now.
         const fresh = this.viewById(view.id);
         if (st.again && fresh) this.refresh(fresh, cx);
+        else this.followTogether(cx);
         // Related items that waited for the refresh, or whose read failed
         // or wants a retry and so was not kept (keptRelated), are read now;
         // after a follow-up refresh, once it ended.
@@ -875,7 +912,7 @@ export default class Board extends View {
       const saved = readSaved(text, view, this.hiddenFor(view));
       const shape = SHAPES[saved?.data.shape];
       if (!shape?.loads) return;
-      const data = shape.received(saved.data, st);
+      const data = shape.received(saved.data, st, view);
       const warnings = [...saved.warnings, ...shape.warnings(view, saved.data)];
       Object.assign(st, { data, warnings, at: saved.at, saved: true });
       this.keepSelection(view);
@@ -1434,6 +1471,10 @@ export default class Board extends View {
     toggle(this, view, col, cx);
   }
 
+  toggleRepo(view, repo, cx) {
+    this.shape(view).toggleRepo(this, view, repo, cx);
+  }
+
   open(item, cx) {
     if (item?.url) cx.open_url(item.url);
     else this.say("Dazu gibt es keine Seite", "warning", cx);
@@ -1788,6 +1829,10 @@ export default class Board extends View {
     MODALS.columns.open(this, view, cx);
   }
 
+  openRepos(view, cx) {
+    MODALS.repos.open(this, view, cx);
+  }
+
   // The command menu (ui/modals/commands.js): the actions that can run now,
   // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
@@ -2007,27 +2052,8 @@ export default class Board extends View {
       );
   }
 
-  // "nur meine": when on, on the theme's `selected` as a chosen tab is,
-  // with the accent border of its own; not as a primary button (solid),
-  // which it is not. Its text and weight stay, so its size never changes.
   mineToggle(t) {
-    return div()
-      .id("mine")
-      .flex_none()
-      .px(10)
-      .py(5)
-      .rounded(6)
-      .text_size(12)
-      .cursor_pointer()
-      .border_1()
-      .border_color(this.mine ? t.accent : t.border)
-      .bg(this.mine ? t.selected : t.chrome)
-      .text_color(this.mine ? t.foreground : t.muted)
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => {
-        if (!this.modal) this.toggleMine(cx);
-      })
-      .child("nur meine");
+    return toggleSwitch(this, t, "mine", this.mine, (cx) => this.toggleMine(cx)).child("nur meine");
   }
 
   banner(t) {

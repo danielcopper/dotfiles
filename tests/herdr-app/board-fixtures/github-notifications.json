@@ -5,17 +5,17 @@
    "id": 101,
    "node_id": "R_sample1",
    "name": "tender",
-   "full_name": "example/tender",
+   "full_name": "sample-user/tender",
    "owner": {
-    "login": "example"
+    "login": "sample-user"
    },
    "private": false,
-   "html_url": "https://github.com/example/tender"
+   "html_url": "https://github.com/sample-user/tender"
   },
   "subject": {
    "title": "build(ui): draw the summary card",
-   "url": "https://api.github.com/repos/example/tender/pulls/2820",
-   "latest_comment_url": "https://api.github.com/repos/example/tender/issues/comments/501",
+   "url": "https://api.github.com/repos/sample-user/tender/pulls/2820",
+   "latest_comment_url": "https://api.github.com/repos/sample-user/tender/issues/comments/501",
    "type": "PullRequest"
   },
   "reason": "review_requested",
@@ -31,16 +31,16 @@
    "id": 102,
    "node_id": "R_sample2",
    "name": "Atlas",
-   "full_name": "Example/Atlas",
+   "full_name": "Sample-User/Atlas",
    "owner": {
-    "login": "Example"
+    "login": "Sample-User"
    },
    "private": false,
-   "html_url": "https://github.com/Example/Atlas"
+   "html_url": "https://github.com/Sample-User/Atlas"
   },
   "subject": {
    "title": "chore: release 1.2.0",
-   "url": "https://api.github.com/repos/Example/Atlas/pulls/808",
+   "url": "https://api.github.com/repos/Sample-User/Atlas/pulls/808",
    "latest_comment_url": null,
    "type": "PullRequest"
   },
@@ -57,16 +57,16 @@
    "id": 103,
    "node_id": "R_sample3",
    "name": "tender",
-   "full_name": "example/tender",
+   "full_name": "sample-user/tender",
    "owner": {
-    "login": "example"
+    "login": "sample-user"
    },
    "private": false,
-   "html_url": "https://github.com/example/tender"
+   "html_url": "https://github.com/sample-user/tender"
   },
   "subject": {
    "title": "Summary card misses its title",
-   "url": "https://api.github.com/repos/example/tender/issues/77",
+   "url": "https://api.github.com/repos/sample-user/tender/issues/77",
    "latest_comment_url": null,
    "type": "Issue"
   },
@@ -83,16 +83,16 @@
    "id": 104,
    "node_id": "R_sample4",
    "name": "other",
-   "full_name": "example/other",
+   "full_name": "sample-user/other",
    "owner": {
-    "login": "example"
+    "login": "sample-user"
    },
    "private": false,
-   "html_url": "https://github.com/example/other"
+   "html_url": "https://github.com/sample-user/other"
   },
   "subject": {
    "title": "fix: keep the cache",
-   "url": "https://api.github.com/repos/example/other/pulls/1921",
+   "url": "https://api.github.com/repos/sample-user/other/pulls/1921",
    "latest_comment_url": null,
    "type": "PullRequest"
   },
@@ -109,16 +109,16 @@
    "id": 105,
    "node_id": "R_sample5",
    "name": "tender",
-   "full_name": "example/tender",
+   "full_name": "sample-user/tender",
    "owner": {
-    "login": "example"
+    "login": "sample-user"
    },
    "private": false,
-   "html_url": "https://github.com/example/tender"
+   "html_url": "https://github.com/sample-user/tender"
   },
   "subject": {
    "title": "chore: release 2.0.0",
-   "url": "https://api.github.com/repos/example/tender/pulls/1921",
+   "url": "https://api.github.com/repos/sample-user/tender/pulls/1921",
    "latest_comment_url": null,
    "type": "PullRequest"
   },
@@ -135,12 +135,12 @@
    "id": 106,
    "node_id": "R_sample6",
    "name": "tender",
-   "full_name": "example/tender",
+   "full_name": "sample-user/tender",
    "owner": {
-    "login": "example"
+    "login": "sample-user"
    },
    "private": false,
-   "html_url": "https://github.com/example/tender"
+   "html_url": "https://github.com/sample-user/tender"
   },
   "subject": {
    "title": "CI workflow run failed for main branch",
@@ -161,16 +161,16 @@
    "id": 107,
    "node_id": "R_sample7",
    "name": "tender",
-   "full_name": "example/tender",
+   "full_name": "sample-user/tender",
    "owner": {
-    "login": "example"
+    "login": "sample-user"
    },
    "private": false,
-   "html_url": "https://github.com/example/tender"
+   "html_url": "https://github.com/sample-user/tender"
   },
   "subject": {
    "title": "v1.0.0",
-   "url": "https://api.github.com/repos/example/tender/releases/42",
+   "url": "https://api.github.com/repos/sample-user/tender/releases/42",
    "latest_comment_url": null,
    "type": "Release"
   },

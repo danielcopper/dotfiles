@@ -8,7 +8,8 @@
 // placeholder, leaves Enter, o and the arrows to herdr), count ({ shown,
 // total } items, or null), render, dirs (the arrow directions that move),
 // loads (false for the placeholder, which draws without data), received
-// (the data as kept after a refresh) and warnings; and where it has them,
+// (data, st, view: the data as kept after a refresh, `view` as the config
+// has it now) and warnings; and where it has them,
 // the actions it lends the action table (commands.js, which says their
 // keys and hints): move (b, view, st, by, cx: H/L) with canMove (st, item,
 // by: whether the item has a column that way) and moveHint, canHide (col:
@@ -22,7 +23,10 @@
 // has none), bandsLeft (b: whether a column scrolled past the cards it drew
 // whole, which the Board asks every BAND_MS), detailParts (its rows in the
 // detail panel), settle (b, view, due, data, cx: says how the unclear writes
-// of its items ended up), moveTo, toggleColumn, openStatusMenu, navigate
+// of its items ended up), withView (data, view: the data as the view's
+// settings show it now, the same data where they change nothing for it),
+// toggleRepo (b, view, repo, cx: turns a repo off or on, beside the repo
+// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu, navigate
 // (its own keyboard movement in place of navigate's, select.js), pickStatus
 // (what a pick in the status menu does in place of a move to that column),
 // and assign (how its items' assignees are found and changed: { find(data,

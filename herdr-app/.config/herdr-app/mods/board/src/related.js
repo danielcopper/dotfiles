@@ -25,11 +25,11 @@
 // be read), hiddenAs (what the details say of those: "ohne Zugriff" where it
 // is missing), error (why it sent none; null), lines (those that can be
 // read) }; a line { source, kind, number, title, url, state (its label),
-// draft, and on GitHub repo, repoShort, color (its chip's theme color) and
-// done (dimmed); on Azure type, its color and whether it is done coming from
-// the view's states when drawn }. warnings: what the source said besides,
-// one line each. retry: a part failed that is to be read again after the
-// next refresh.
+// draft, and on GitHub repo, repoShort, foreign (itemKey), color (its
+// chip's theme color) and done (dimmed); on Azure type, its color and
+// whether it is done coming from the view's states when drawn }. warnings:
+// what the source said besides, one line each. retry: a part failed that is
+// to be read again after the next refresh.
 //
 // A source whose pull requests the details panel can go down to gives
 // `pullRequest: { reads(item), load(item, view) }` the same way: load

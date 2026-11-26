@@ -1,0 +1,457 @@
+{
+ "data": {
+  "viewer": {
+   "login": "sample-user"
+  },
+  "s0": {
+   "issueCount": 3,
+   "nodes": [
+    {
+     "id": "PR_ctx1",
+     "number": 10,
+     "title": "feat(tender): own repo, review asked",
+     "url": "https://github.com/sample-user/tender/pull/10",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-10",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "sample-user/tender"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0010cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_ctx2",
+     "number": 20,
+     "title": "feat(api): another context's repo",
+     "url": "https://github.com/sample-org/api/pull/20",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-20",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "sample-org/api"
+     },
+     "author": {
+      "login": "sample-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0020cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_ctx3",
+     "number": 30,
+     "title": "fix(lib): a foreign repo, review asked",
+     "url": "https://github.com/Other-Owner/lib/pull/30",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-30",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "Other-Owner/lib"
+     },
+     "author": {
+      "login": "other-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0030cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    }
+   ]
+  },
+  "s1": {
+   "issueCount": 5,
+   "nodes": [
+    {
+     "id": "PR_ctx4",
+     "number": 40,
+     "title": "docs(atlas): own, first in GitHub's order",
+     "url": "https://github.com/sample-user/atlas/pull/40",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-40",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "sample-user/atlas"
+     },
+     "author": {
+      "login": "sample-user"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0040cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_ctx5",
+     "number": 31,
+     "title": "feat(lib): one's own in a foreign repo",
+     "url": "https://github.com/other-owner/lib/pull/31",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-31",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "other-owner/lib"
+     },
+     "author": {
+      "login": "sample-user"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0031cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_ctx6",
+     "number": 11,
+     "title": "fix(tender): checks fail",
+     "url": "https://github.com/sample-user/tender/pull/11",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-11",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "sample-user/tender"
+     },
+     "author": {
+      "login": "sample-user"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0011cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "FAILURE",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "FAILURE",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_ctx7",
+     "number": 21,
+     "title": "feat(web): another context's repo, its owner upper case",
+     "url": "https://github.com/SAMPLE-ORG/web/pull/21",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-21",
+     "reviewDecision": null,
+     "repository": {
+      "nameWithOwner": "SAMPLE-ORG/web"
+     },
+     "author": {
+      "login": "sample-user"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0021cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_ctx3",
+     "number": 30,
+     "title": "fix(lib): a foreign repo, review asked",
+     "url": "https://github.com/Other-Owner/lib/pull/30",
+     "isDraft": false,
+     "createdAt": "2026-11-10T09:00:00Z",
+     "updatedAt": "2026-11-17T09:00:00Z",
+     "headRefName": "pr/ctx-30",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "repository": {
+      "nameWithOwner": "Other-Owner/lib"
+     },
+     "author": {
+      "login": "other-contributor"
+     },
+     "assignees": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "login": "sample-user"
+        }
+       }
+      ]
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "oid": "0030cccccccccccccccccccccccccccccccccccc",
+         "statusCheckRollup": {
+          "state": "SUCCESS",
+          "contexts": {
+           "checkRunCountsByState": [
+            {
+             "state": "SUCCESS",
+             "count": 2
+            }
+           ],
+           "statusContextCountsByState": []
+          }
+         }
+        }
+       }
+      ]
+     },
+     "mergeable": "UNKNOWN",
+     "reviews": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    }
+   ]
+  }
+ }
+}

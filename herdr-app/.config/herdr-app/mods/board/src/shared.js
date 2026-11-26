@@ -58,14 +58,18 @@ export function report(e) {
   return errorText(e);
 }
 
-// An item's key: `<repo>#<number>` on GitHub; on Azure `AB#<id>` for a work
-// item (Azure Boards' own way to name one) and `!<id>` for a pull request
-// (Azure Repos' own); null for a draft.
+// An item's key: `<repo>#<number>` on GitHub, `<owner>/<repo>#<number>`
+// for one of a foreign repo (`foreign`, repoOwnership in kinds/list.js); on
+// Azure `AB#<id>` for a work item (Azure Boards' own way to name one) and
+// `!<id>` for a pull request (Azure Repos' own); null for a draft.
 export function itemKey(item) {
   if (item.number === null || item.number === undefined) return null;
   if (item.source === "azure") return item.kind === "pr" ? `!${item.number}` : `AB#${item.number}`;
-  return `${item.repoShort}#${item.number}`;
+  return `${item.foreign ? item.repo : item.repoShort}#${item.number}`;
 }
+
+// GitHub's owner and repo names ignore case.
+export const foldedName = (name) => name.toLowerCase();
 
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 
@@ -125,17 +129,23 @@ export const COPPER_HUES = { red: "ansi1", green: "ansi2", yellow: "ansi3", blue
 export const SECTION_TONES = Object.fromEntries(Object.entries(COPPER_HUES).filter(([name]) => name !== "orange"));
 export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", "red"];
 
-// The label of an item's parent, an issue or work item of the same source
-// and repo: "tender#3002", "AB#7".
-export const parentLabel = (item) => itemLabel({ ...item, kind: "issue", number: item.parent });
+// An item's parent, an issue or work item of the same source, in its own
+// repo where the item names one (parentRepo, parentForeign).
+function parentOf(item) {
+  const repo = item.parentRepo ?? item.repo;
+  return {
+    source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo?.split("/").pop(), foreign: item.parentForeign === true,
+  };
+}
+
+// "tender#3002", "AB#7".
+export const parentLabel = (item) => itemLabel(parentOf(item));
 
 export const relativeLabel = (root, item) => (item.source === "github" && item.repo === root.repo ? `#${item.number}` : cardLabel(item));
 
 export function partOfText(item) {
   if (!Number.isInteger(item.parent)) return null;
-  const repo = item.parentRepo ?? item.repo;
-  const parent = { source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo?.split("/").pop() };
-  return ["Teil von", relativeLabel(item, parent), item.parentTitle].filter(Boolean).join(" ");
+  return ["Teil von", relativeLabel(item, parentOf(item)), item.parentTitle].filter(Boolean).join(" ");
 }
 
 // An item that is an Epic by its title alone: "[Epic] …", the convention of
