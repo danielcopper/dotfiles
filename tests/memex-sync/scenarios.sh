@@ -32,7 +32,8 @@ CASES=(s1_no_changes s2_three_files s3_offline s4_origin_ahead s5_conflict s6_co
   s52_machine_from_address s53_machine_in_push_refused s54_machine_in_fetch_refused
   s55_machine_in_operation_in_progress s56_machine_from_host_name s57_commit_refused
   s58_reminder_not_yet_due s59_reminder_after_a_day s60_reminder_keeps_conflict_branch
-  s61_sync_after_reminder s62_reminder_without_since
+  s61_sync_after_reminder s62_reminder_without_since s63_reminder_send_fails s64_first_notification_send_fails
+  s65_since_not_written s66_no_ntfy_files_counts_as_sent
   a1_scenarios_case_beside_file)
 if [ "${1:-}" = --list ]; then
   printf '%s\n' "${CASES[@]}"
@@ -134,6 +135,11 @@ with_ntfy_files() {
   mkdir -p "$T/home/.config/memex"
   printf '%s\n' "$NTFY_URL" >"$T/home/.config/memex/ntfy_url"
   printf '%s\n' tok123 >"$T/home/.config/memex/ntfy_token"
+}
+ntfy_down() { printf '%s\n' "$(http_origin 403)" >"$T/home/.config/memex/ntfy_url"; }
+refuse_pushes() {
+  printf '#!/bin/sh\necho "pre-push: refused for test" >&2\nexit 1\n' >"$T/memex/.git/hooks/pre-push"
+  chmod +x "$T/memex/.git/hooks/pre-push"
 }
 
 # run_sut: runs the script as its unit would, output in $OUT, exit in $RC.
@@ -350,8 +356,7 @@ s11_push_refused_by_origin() {
 # notification, quiet while it stays refused, cleared by a good push.
 s13_push_refused_by_pre_push_hook() {
   with_ntfy_files
-  printf '#!/bin/sh\necho "pre-push: refused for test" >&2\nexit 1\n' >"$T/memex/.git/hooks/pre-push"
-  chmod +x "$T/memex/.git/hooks/pre-push"
+  refuse_pushes
   printf 'x\n' >"$T/memex/secret.md"
   local requests_before main_before
   requests_before=$(ntfy_count)
@@ -414,8 +419,7 @@ EOF
 # reported and the refusal marker cleared.
 s15_conflict_branch_push_refused() {
   with_ntfy_files
-  printf '#!/bin/sh\necho "pre-push: refused for test" >&2\nexit 1\n' >"$T/memex/.git/hooks/pre-push"
-  chmod +x "$T/memex/.git/hooks/pre-push"
+  refuse_pushes
   make_conflict
   local requests_before
   requests_before=$(ntfy_count)
@@ -434,6 +438,7 @@ s15_conflict_branch_push_refused() {
   check "conflict branch on origin" eq "$(origin_sha "conflict/deck-$today")" "$(local_sha)"
   check "conflict now notified" eq "$(($(ntfy_count) - requests_before))" 2
   check "refusal marker cleared" test ! -e "$T/state/memex-sync/push-refused"
+  check "its first time cleared too" test ! -e "$T/state/memex-sync/push-refused.since"
 }
 
 # --- An operation left in progress in the clone: the run touches nothing. ---
@@ -1231,11 +1236,6 @@ s57_commit_refused() {
 mtime() { stat -c %Y "$1"; }
 # age_marker <marker> <hours>: the marker as if last notified that long ago.
 age_marker() { touch -d "$2 hours ago" "$T/state/memex-sync/$1"; }
-# A pre-push hook that refuses every push.
-refuse_pushes() {
-  printf '#!/bin/sh\necho "pre-push: refused for test" >&2\nexit 1\n' >"$T/memex/.git/hooks/pre-push"
-  chmod +x "$T/memex/.git/hooks/pre-push"
-}
 # with_date_at <time>: a date first on the script's PATH that tells that time,
 # except for the modification time of a file (-r).
 with_date_at() {
@@ -1353,6 +1353,85 @@ s62_reminder_without_since() {
   check "one reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
   check "it names the marker's time" grep -q "^Still failing since 2026-11-18 09:30: Origin refused the Deck's fetch: " \
     <(last_ntfy body)
+  age_marker fetch-refused 25
+  run_sut
+  check "a day later another reminder" eq "$(($(ntfy_count) - NTFY_BEFORE))" 2
+  check "it still names the marker's first time" grep -q "^Still failing since 2026-11-18 09:30: " <(last_ntfy body)
+}
+
+# ntfy refuses a reminder that is due: the marker is not refreshed, and the
+# next run sends the reminder.
+s63_reminder_send_fails() {
+  with_ntfy_files
+  refuse_pushes
+  printf 'x\n' >"$T/memex/secret.md"
+  run_sut
+  check "one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  age_marker push-refused 25
+  ntfy_down
+  run_sut
+  check "exit 1 while ntfy is down (got $RC)" eq "$RC" 1
+  check "the failed send logged" grep -q '^memex-sync: notification failed$' <<<"$OUT"
+  check "nothing reached ntfy" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  with_ntfy_files
+  run_sut
+  check "exit 1 once ntfy is back (got $RC)" eq "$RC" 1
+  check "the reminder sent" eq "$(($(ntfy_count) - NTFY_BEFORE))" 2
+  check "it is the reminder" grep -q '^Still failing since ' <(last_ntfy body)
+  check "marker fresh" test "$(($(date +%s) - $(mtime "$T/state/memex-sync/push-refused")))" -lt 60
+}
+
+# ntfy refuses a conflict's first notification: the next run sends it, as a
+# reminder, and the marker still holds the branch.
+s64_first_notification_send_fails() {
+  with_ntfy_files
+  ntfy_down
+  make_conflict
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "the failed send logged" grep -q '^memex-sync: notification failed$' <<<"$OUT"
+  check "nothing reached ntfy" eq "$(ntfy_count)" "$NTFY_BEFORE"
+  check "marker holds the branch" eq "$(cat "$T/state/memex-sync/conflict")" "conflict/deck-$today"
+  with_ntfy_files
+  run_sut
+  check "exit 1 once ntfy is back (got $RC)" eq "$RC" 1
+  check "one ntfy request" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  check "it names the branch" grep -qE \
+    "^Still failing since [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: The Deck could not rebase onto origin/main\. Its state is on the branch conflict/deck-$today\.$" \
+    <(last_ntfy body)
+  check "marker still holds the branch" eq "$(cat "$T/state/memex-sync/conflict")" "conflict/deck-$today"
+}
+
+# The time of the first notification cannot be written: no marker is left, so
+# the next run notifies at once.
+s65_since_not_written() {
+  with_ntfy_files
+  refuse_pushes
+  printf 'x\n' >"$T/memex/secret.md"
+  mkdir -p "$T/state/memex-sync/push-refused.since"
+  run_sut
+  check "exit non-zero (got $RC)" not eq "$RC" 0
+  check "no marker" test ! -e "$T/state/memex-sync/push-refused"
+  rmdir "$T/state/memex-sync/push-refused.since"
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  check "notified" eq "$(($(ntfy_count) - NTFY_BEFORE))" 1
+  check "as a first notification" eq "$(last_ntfy body)" \
+    "The Deck's push to main was refused. Check journalctl --user -u memex-sync."
+}
+
+# A failure while the ntfy files are missing counts as notified: once they are
+# in place, the next run sends nothing before a day has passed.
+s66_no_ntfy_files_counts_as_sent() {
+  refuse_pushes
+  printf 'x\n' >"$T/memex/secret.md"
+  run_sut
+  check "exit 1 (got $RC)" eq "$RC" 1
+  with_ntfy_files
+  run_sut
+  check "exit 1 with the ntfy files (got $RC)" eq "$RC" 1
+  check "no ntfy request" eq "$(ntfy_count)" "$NTFY_BEFORE"
+  check "marker fresh" test "$(($(date +%s) - $(mtime "$T/state/memex-sync/push-refused")))" -lt 60
 }
 
 # expect_case_beside_file <case> [arg ...]: this suite, run again from a

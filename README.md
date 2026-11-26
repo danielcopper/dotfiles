@@ -1101,12 +1101,9 @@ stay as they are. A missing, wrong or revoked token shows up as a fetch that
 origin refuses: the run exits 1 and, with the ntfy files below in place, sends
 a `memex-sync (<Machine>): fetch refused` notification.
 
-Each of the failures that need a hand can also send an ntfy notification.
-While the failure lasts, a run sends it again once a day, its message
-starting with `Still failing since <time of the first notification>:`; a
-sync that gets through ends that, and the next failure notifies at once. Two
-files outside this repo switch notifications on; without them the script only
-logs:
+Each of the failures that need a hand can also send an ntfy notification,
+repeated daily while it lasts (see the script's header). Two files outside
+this repo switch notifications on; without them the script only logs:
 
 - `~/.config/memex/ntfy_url` — the full topic URL
 - `~/.config/memex/ntfy_token` — an access token, sent as a Bearer header

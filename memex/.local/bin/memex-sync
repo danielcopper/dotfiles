@@ -58,9 +58,11 @@
 # Unfinished work, a refused fetch, commit or push, and a conflict each send
 # one ntfy notification. While the failure lasts, a run sends it again once a
 # day, as a reminder that says since when it fails; a sync that gets through
-# ends that, and the next failure notifies at once. Any other failure (no
-# clone, a worktree that cannot be added) ends the run with a non-zero exit and
-# only a message in the journal. The notification needs
+# ends that, and the next failure notifies at once. A notification that does
+# not get through (ntfy down, say) is sent by the next run that hits the
+# failure, as a reminder. Any other failure (no clone, a worktree that cannot
+# be added) ends the run with a non-zero exit and only a message in the
+# journal. The notification needs
 # ~/.config/memex/ntfy_url (the full topic URL) and
 # ~/.config/memex/ntfy_token; when either file is missing, none is sent.
 # MEMEX_DIR overrides the clone (default ~/memex).
@@ -69,10 +71,11 @@ set -euo pipefail
 repo=${MEMEX_DIR:-$HOME/memex}
 config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/memex
 state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/memex-sync
-# One marker per kind of failure, present while it is unresolved and already
-# notified; its modification time is that of the last notification, and
-# <marker>.since holds the time of the first. The conflict marker holds the
-# name of the conflict branch.
+# One marker per kind of failure, present while it is unresolved; its
+# modification time is that of the last notification that got through or was
+# skipped for missing ntfy files, or the epoch after one that ntfy did not
+# take, and <marker>.since holds the time of the first. The conflict marker
+# holds the name of the conflict branch.
 busy_marker=$state_dir/operation-in-progress
 fetch_marker=$state_dir/fetch-refused
 conflict_marker=$state_dir/conflict
@@ -140,22 +143,31 @@ notify() { # notify <title> <message>
     log "notification sent"
   else
     log "notification failed"
+    return 1
   fi
 }
 
-notify_failure() { # notify_failure <marker> <title> <message>
-  local since
-  if [ ! -e "$1" ]; then
+notify_failure() { # notify_failure <marker> <title> <message> [<marker content>]
+  local message=$3
+  if [ -e "$1" ]; then
+    (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0
+    [ -e "$1.since" ] || date -r "$1" '+%F %R' >"$1.since"
+    message="Still failing since $(<"$1.since"): $3"
+  else
     mkdir -p "$state_dir"
-    : >"$1"
     date '+%F %R' >"$1.since"
-    notify "$2" "$3"
-    return
+    printf '%s' "${4-}" >"$1"
   fi
-  (($(date +%s) - $(stat -c %Y "$1") >= remind_after)) || return 0
-  since=$(cat "$1.since" 2>/dev/null) || since=$(date -r "$1" '+%F %R')
-  touch "$1"
-  notify "$2" "Still failing since $since: $3"
+  if notify "$2" "$message"; then
+    touch "$1"
+  else
+    touch -d @0 "$1"
+  fi
+}
+
+clear_failure() { # clear_failure <marker>...
+  local marker
+  for marker; do rm -f "$marker" "$marker.since"; done
 }
 
 # Prints what was left unfinished in the clone, if anything.
@@ -213,11 +225,10 @@ on_conflict() {
   log "rebase onto origin/main failed"
   timeout "$net_timeout" git push --quiet --force origin "HEAD:refs/heads/$branch" ||
     report_refused "$branch"
-  rm -f "$refused_marker"
+  clear_failure "$refused_marker"
   log "local HEAD is on $branch"
   notify_failure "$conflict_marker" "memex-sync ($Machine): conflict" \
-    "The $Machine could not rebase onto origin/main. Its state is on the branch $branch."
-  [ -s "$conflict_marker" ] || printf '%s\n' "$branch" >"$conflict_marker"
+    "The $Machine could not rebase onto origin/main. Its state is on the branch $branch." "$branch"
   exit 1
 }
 
@@ -356,5 +367,4 @@ if [ "$ahead" -gt 0 ]; then
   timeout "$net_timeout" git push --quiet origin HEAD:main || on_push_failure
   log "pushed $ahead commits"
 fi
-rm -f "$busy_marker" "$fetch_marker" "$commit_marker" "$conflict_marker" "$refused_marker"
-rm -f "$state_dir"/*.since
+clear_failure "$busy_marker" "$fetch_marker" "$commit_marker" "$conflict_marker" "$refused_marker"
