@@ -60,6 +60,10 @@ After round 5 the loop stops: every open finding goes on the user's list with th
 rules fix now gets one fix dispatch and one verify-only pass by `reviewer` alone; whatever that leaves open goes back on
 the list, and no round follows.
 
+When the loop ends after at least one fix round that changed production code, `architecture-reviewer` reads the whole
+change once more, base to head, with every earlier round's saved files: fix rounds see only deltas, and reshapes across
+them leave the change's design unread as a whole. Its findings go on the user's list.
+
 A PR re-review (`/pr-review`, after the author pushed fixes) is a fix round with the user's earlier threads as the
 findings to judge; N counts the user's earlier rounds on the PR (ask when unclear). After re-review 5 every open thread
 is a task with the lead's recommendation, and no re-review runs unless the user asks.
