@@ -46,7 +46,7 @@ export const sprintsModal = {
   // Opens the picker for the Sprint view `view`, then asks its source for
   // the team's iterations.
   open(b, view, cx) {
-    const m = { kind: "sprints", view, team: view.context?.team ?? view.name };
+    const m = { kind: "sprints", view, team: view.tab?.team ?? view.name };
     openReadMenu(b, m, {
       placeholder: "Filter: Name des Sprints",
       count: (m) => sprintRowsOf(m).length,

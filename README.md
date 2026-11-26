@@ -385,13 +385,17 @@ by that run. Which files of the package git tracks is set in the root
   "Board" tab or open one, except in the personal layout, where they say the
   layer is missing. A Board tab left open from before is best closed there: when
   the layer hides the board, that tab's board may take the keyboard if its tab
-  is the shown one. A top bar toggles between its sources, GitHub and Azure, and
-  shows one tab per context of the shown source, as `mods/board/views.json` sets
-  them: on Azure each of my teams, with a switch between its Sprint and its
-  Backlog, followed by the pull requests of its project; on GitHub "Meine
-  Aufgaben" (my issues on the Tender project's board, in the columns of its
-  Status field) and "PRs" (pull requests I am asked to review, I opened, or I
-  reviewed, with checks, review state and whether I have to act on them). A
+  is the shown one. A top bar switches between contexts ("Kontext"), as
+  `mods/board/views.json` sets them: one per GitHub owner (a user or an
+  organisation) and one per Azure project, grouped by source, the source's name
+  once before its contexts. Beside them stand the shown context's tabs, its PR
+  tab last: on Azure each of my teams, with a switch between its Sprint and its
+  Backlog in the row below, then the pull requests of its project; on GitHub one
+  tab per project board, as "Meine Aufgaben" (my issues on the Tender project's
+  board, in the columns of its Status field), then "PRs" (pull requests I am
+  asked to review, I opened, or I reviewed, with checks, review state and
+  whether I have to act on them). A GitHub context's PR tab runs its searches as
+  `views.json` writes them, so it is not limited to the owner's repos. A
   team's Sprint shows its current sprint the way Azure's taskboard does: one row
   per story (its id, title, own state and assignee), its tasks as cards in the
   team's taskboard columns, each with its own state, assignee and id; a task
@@ -406,48 +410,53 @@ by that run. Which files of the package git tracks is set in the root
   a value after the rest by id; where the configuration cannot be read, a
   warning says so and they go by id. "N Stories" above them counts every story
   row, those from other sprints too. It holds the work items of the sprint in
-  the team's areas, and its tasks are the work items of the types the
-  taskboard's columns map. What it reads per refresh, the header of
-  `mods/board/src/main.js` says, and makeAzure (in
+  the team's area paths ("Bereichspfad"), and its tasks are the work items of
+  the types the taskboard's columns map. What it reads per refresh, the header
+  of `mods/board/src/main.js` says, and makeAzure (in
   `mods/board/src/sources/azure/index.js`) what it keeps; `r` reads the team's
-  sprint, areas, columns, backlog configuration and settings again. The command
-  menu's "Sprint wählen…", or a click on the sprint's name above the stories,
-  opens a picker of the team's sprints, past, current and future, in Azure's
-  order, each with its dates; the current one is marked "aktuell", and marked as
-  the picker opens. It filters and moves as the command menu does, and `Enter`
-  or a click shows the sprint picked. A sprint other than the current one says
-  "nicht aktuell" beside its name, and the menu's "Aktueller Sprint" goes back.
-  The choice is the Sprint view's while the board runs and is stored nowhere,
-  so after a restart the Sprint shows the current sprint again. A refresh keeps
-  it; `r` reads the team's sprints again too, and where the team no longer
-  has the chosen one, the Sprint shows the current one (or that none runs) and
-  says so. Where the team has no sprint running, the Sprint says "kein laufender
-  Sprint" in place of a sprint's name and draws no taskboard; the picker opens
-  there the same way, with no sprint marked "aktuell" (it marks the next sprint
-  to start, else the last one that ended), a sprint picked shows, and "Aktueller
-  Sprint" is not offered; the first refresh on the day a sprint starts shows
-  that sprint as the team's current one. A team's Backlog lists its requirement
-  level (its Stories, and Bugs where the team keeps them there) in backlog
-  order, one row each with id, type, title, state, sprint ("—" for none) and
-  assignee. It needs `az login`: the level's work items come through
+  sprint, area paths, columns, backlog configuration and settings again. The
+  command menu's "Sprint wählen…", or a click on the sprint's name above the
+  stories, opens a picker of the team's sprints, past, current and future, in
+  Azure's order, each with its dates; the current one is marked "aktuell", and
+  marked as the picker opens. It filters and moves as the command menu does, and
+  `Enter` or a click shows the sprint picked. A sprint other than the current
+  one says "nicht aktuell" beside its name, and the menu's "Aktueller Sprint"
+  goes back. The choice is the Sprint view's while the board runs and is stored
+  nowhere, so after a restart the Sprint shows the current sprint again. A
+  refresh keeps it; `r` reads the team's sprints again too, and where the team
+  no longer has the chosen one, the Sprint shows the current one (or that none
+  runs) and says so. Where the team has no sprint running, the Sprint says "kein
+  laufender Sprint" in place of a sprint's name and draws no taskboard; the
+  picker opens there the same way, with no sprint marked "aktuell" (it marks the
+  next sprint to start, else the last one that ended), a sprint picked shows,
+  and "Aktueller Sprint" is not offered; the first refresh on the day a sprint
+  starts shows that sprint as the team's current one. A team's Backlog lists its
+  requirement level (its Stories, and Bugs where the team keeps them there) in
+  backlog order, one row each with id, type, title, state, sprint ("—" for none)
+  and assignee. It needs `az login`: the level's work items come through
   `az rest`, which takes no PAT, and the Backlog says so when the login is
   missing. What it keeps and for how long, makeAzure says; `r` reads that again
   (not the project's types). On the Sprint's cards and stories and the Backlog's
   rows a work item's id stands without its "AB#"; its details, the notices and
-  the toasts keep it. The pull request tabs read nothing yet; each says which
-  view it will hold.
+  the toasts keep it. Azure's pull request tabs read nothing yet; each says
+  which view it will hold.
   "nur meine" narrows whatever shows to my own items (on GitHub: assigned to
   me, opened by me, or asking for my review; a list section of my own search,
   whose query sets author, assignee, reviewed-by, review-requested or
   user-review-requested to @me, counts whole, so "Geprüft" stays; on Azure:
   assigned to the account az is signed in as, which needs `az login`, and a
   story stays dimmed for my tasks in it) without reading anything again. A
-  context or view added to `views.json` adds a tab, and `r` reads the file
-  again; the board remembers the source, tab and team view shown last, and
-  "nur meine". A count in a tab, a column or a list section that the filter or
+  context, a team or a project added to `views.json` adds a context or a tab,
+  and `r` reads the file again; the board remembers the context shown last, each
+  context's tab, each team's view and "nur meine". A board that kept the shown
+  source and each source's tab from before the contexts opens on their context
+  and tab, once. A count in a tab, a column or a list section that the filter or
   "nur meine" thins says so ("1/4"); a tab's count leaves the cards of hidden
   columns out. The code holds nothing of mine; the header of
-  `mods/board/src/main.js` describes the file's fields.
+  `mods/board/src/main.js` describes the file's fields. In a `views.json` from
+  before the contexts, with `sources.github.views` or an entry of
+  `sources.azure.contexts` with `team` or `prs`, their old part is not read: the
+  board says where its views and teams go now.
   `views.json` is the base; each machine's own settings lie over it in
   `~/.config/herdr-app/board/settings.json`, outside the dotfiles: no stow
   package has a `board/` there, `.stow-local-ignore` keeps every
@@ -456,18 +465,35 @@ by that run. Which files of the package git tracks is set in the root
   files). The file has the shape of `views.json`, holding only what this
   machine sets: a value there overrides the one in `views.json`, an object
   merges key by key down to its lists and values, and a list replaces the
-  `views.json` list whole. A list of entries with an `id`, the GitHub views,
-  can also be reached entry by entry: an object in its place, keyed by id,
-  merges into the entries with those ids, wherever `views.json` moves them,
-  so `{ "sources": { "github": { "views": { "mine": { "hide": ["Done"] } } } } }`
-  sets that one view's hidden columns, while an array there would replace
-  every view. Of two entries with one id the first has it, as for the
-  board's views, and entries without one leave the others reachable by
-  theirs. An id no entry of `views.json` has, or such an object for a list
-  without ids (the Azure contexts, set here only as a whole list), is an
-  error naming the file and the key, and the rest of the file applies.
-  Settings that cannot be read, are no JSON object, or give `views.json` a
-  problem it does not have on its own, are not applied: the board names the
+  `views.json` list whole. A list whose entries have a name of their own, the
+  GitHub contexts their `owner`, the Azure contexts their `project` and a
+  GitHub context's projects their `id`, can also be reached entry by entry: an
+  object in its place, keyed by those names, merges into the entries with them,
+  wherever `views.json` moves them, so `{ "sources": { "github": { "contexts": {
+  "<owner>": { "projects": { "mine": { "hide": ["Done"] } } } } } } }` sets that
+  one board's hidden columns, while an array in place of `projects` would
+  replace every project of the context. Of two entries with one name the first
+  has it, as for the board's views, and entries without one leave the others
+  reachable by theirs. A name no entry of `views.json` has, or such an object
+  for any other list (an Azure context's teams, set here only as a whole list),
+  is an error naming the file and the key, and the rest of the file applies; so
+  is a value there that changes an entry's own name, and the rest of the entry
+  applies. Settings from before the contexts, a GitHub view's entry under
+  `sources.github.views` by its id, move into its tab at a read of `views.json`,
+  once: into `sources.github.contexts.<owner>.projects.<id>`, or `.prs` for the
+  PR list, a project's `number`, `field` and `priorityField` out of its
+  `project`, what the context says (`source`, `layout`, the project's `owner`)
+  left out. The board writes that at once and says what moved where. Where any
+  value has no place there (an id `views.json` has no tab for, a whole list of
+  views, the Azure teams in the old form, a project of another owner, a key the
+  tab does not take, or a tab the file sets already) nothing moves: the board
+  names each such value and shows `views.json` alone until the file is changed
+  by hand. Nor does anything move while `views.json` has a problem: the board
+  says to fix that first. A write that fails, or finds the file changed since it
+  was read, is said (a move that finds the settings moved meanwhile takes them
+  without a word), the file is read again, and the next read (`r`) tries
+  again. Settings that cannot be read, are no JSON object, or give `views.json`
+  a problem it does not have on its own, are not applied: the board names the
   file with each problem, in the words it uses for `views.json`, says that
   it shows `views.json` alone, and does, and it changes nothing in the file
   until a read finds it fit again. Removing a value from the file (a reset)
@@ -510,38 +536,40 @@ by that run. Which files of the package git tracks is set in the root
   its result only once whole, so the selection and open details stay. The
   top right says which page a board reads ("lädt … Seite 2 von 3"). After
   each read of `views.json`, once the shown view is read, the board reads
-  each other view once, one at a time in the background, the shown
-  source's first, the oldest or never read first, none tried within
-  `refreshMinutes` and none whose own last read since then found az unavailable;
-  it waits while another read runs, something is written or a dialog is
-  busy, so a switch to such a tab shows it at once. After that a view
+  each other view once, one at a time in the background, the shown context's
+  first, then the rest of its source's, the oldest or never read first, none
+  tried within `refreshMinutes` and none whose own last read since then found az
+  unavailable; it waits while another read runs, something is written or a
+  dialog is busy, so a switch to such a tab shows it at once. After that a view
   refreshes only while it shows, as above. While a read of the shown view
   runs, `↻` turns, and an empty view shows a spinner before "Lädt …". Each
   gh, az and sh run (checkout, the Repo field's repos, finding gh and az, the
   Claude Code sessions and their task lists) writes one line to herdr's log
   (console.log), without its arguments: `board:
   <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
-  Keys: `1 2 3` or `[ ]` switch the tab, `v` a team's Sprint and Backlog, `m`
-  turns "nur meine" on and off (the source toggle, the tabs, the switch and
-  "nur meine" take clicks too), `/` filters, `r` refreshes (the shown view
-  also refreshes every few minutes while the board shows), `Esc` closes, `gg`
-  and `Home` go to the first card of the selected column (in a list, the first
-  row), `G` and `End` to its last, and `:` opens the command menu: the
-  actions that can run now, under a heading for what they act on (the
-  selected item, the details panel, the view, the board), each with its key
-  where that key runs it right then. Typing filters it: an entry stays where
-  it holds the typed letters in their order, those that hold them at a
-  word's start or one after another first, the letters in the accent color.
+  Keys: `1 2 3` or `[ ]` switch the tab, `{ }` the context (also as AltGr types
+  them, on a German layout AltGr+7 and AltGr+0), `g` and a digit go to that
+  context, `v` a team's Sprint and Backlog, `m` turns "nur meine" on and off
+  (the contexts, the tabs, the switch and "nur meine" take clicks too), `/`
+  filters, `r` refreshes (the shown view also refreshes every few minutes while
+  the board shows), `Esc` closes, `gg` and `Home` go to the first card of the
+  selected column (in a list, the first row), `G` and `End` to its last, and `:`
+  opens the command menu: the actions that can run now, under a heading for what
+  they act on (the selected item, the details panel, the view, the board), each
+  with its key where that key runs it right then. Typing filters it: an entry
+  stays where it holds the typed letters in their order, those that hold them at
+  a word's start or one after another first, the letters in the accent color.
   `↑`/`↓`, `ctrl-j/k` and `ctrl-n/p` mark an entry (a bare `j` or `k` is a
   letter for the filter, as in the assignee picker), `Enter` or a click runs
   it, `Esc` closes; it runs only on what it was opened for, and where a refresh
   took that away, or the action can no longer run on it, it says so instead.
   Ten rows show at a time: the window follows the mark, the mouse wheel moves
   it, and a thin mark at the right and "↓ N weitere" say there are more.
-  Switching the source (also a click on its name in the top bar), hiding the
-  selected column and the column menu have no key and run from the menu. A
-  letter key is the same with Caps Lock, and Shift makes it another key (`S` is
-  no `s`). The hint line names the keys of what shows, and `:`, each key once:
+  The menu names each other context of the first nine ("Kontext 2: …", `g2`);
+  hiding the selected column and the column menu have no key and run from the
+  menu alone. A letter key is the same with Caps Lock, and Shift makes it
+  another key (`S` is no `s`). The hint line names the keys of what shows, and
+  `:`, each key once:
   while the details panel has the keyboard its keys, and the board's keys that
   still act there. It leaves out the moves (`h/j/k/l`, `ctrl-d/u`, `gg/G`),
   `/`, which the filter field shows, and `z`: a description's fold says "… mehr
@@ -558,7 +586,7 @@ by that run. Which files of the package git tracks is set in the root
   that set a state reads the Sprint again, and where the state lands and the
   column does not, the notice says so and that read shows where the task stands.
   `s` sets a story's or task's state from its type's states, a click selects,
-  and `Enter` shows the details (parent, state, assignee, column, area and
+  and `Enter` shows the details (parent, state, assignee, column, area path and
   iteration). `z`, while the board and not the details panel has the keyboard,
   folds the selected story's tasks away and back; on a task it folds its
   story's, which it then selects where it shows. A click on the triangle in a
@@ -568,46 +596,45 @@ by that run. Which files of the package git tracks is set in the root
   stories per sprint, after a restart too (a new sprint starts unfolded); a
   chosen sprint's folds last while the board runs and leave the current sprint's
   alone. On a Backlog `j/k` move, `s` sets the state, `Enter` shows the details
-  (parent, state, assignee, area, iteration and sprint), `o` opens the item in
-  the browser, and `n` creates a work item: a dialog asks for its type (the
+  (parent, state, assignee, area path, iteration and sprint), `o` opens the item
+  in the browser, and `n` creates a work item: a dialog asks for its type (the
   level's, Story first; with a Story selected also Task, as its child) and its
   title; the type is a choice like the start dialog's (`←`/`→`, its list on
   space or a click), and `Enter` creates from either field. It is created in the
-  team's default area and iteration, assigned to me, and shows, selected, once
-  Azure has named its id and the Backlog is read again; a Task is linked to the
-  selected Story as its parent and, being no Story, does not show in the list.
-  Where Azure's answer to a create leaves open whether it landed, the board asks
-  Azure after the next refresh for work items of that project, type and title
-  that I created today (a Task only among those without a parent): exactly one
-  is taken as the new one, none means it did not land, several are named; the
-  header's "Calls:" says what that costs. A team whose default iteration follows
-  the current one has it read again for each create. A work item's session
-  starts in the repo chosen in the start dialog (below). On a GitHub view `h/l
-  j/k` move over the columns shown, `H/L` move a card one column, hidden ones
-  included (`s` picks from a menu, hidden ones too, or drag the card onto a
-  column; the notice
-  says when a card went to a hidden column), the command menu's "Spalte
-  ausblenden" hides the selected column (views.json sets which start hidden;
-  hiding or showing one writes this machine's settings, above),
-  `o` opens the item in the browser. A GitHub board reads its items in pages of
-  up to 100, one gh call each, up to views.json's `limit` (1000 by default) and
-  at most as many calls as full pages of it take; where that cuts them, a note
-  under the columns says how many it read. A hidden column is not drawn: the
-  line below the columns names the hidden ones ("ausgeblendet: Backlog, Done"),
-  a click on a name shows that column again, and the command menu's "Spalten…"
-  opens a menu of every column, shown or hidden, where `Enter`, a digit or a
-  click hides or shows one. A long column draws whole only the cards about what
-  it shows, half its height above and below; every other card is an empty frame
-  of the card's height until the column scrolls near it: at once by the wheel or
-  a key, within a tenth of a second by the scrollbar's thumb, wherever the
-  pointer is released (`mods/board/src/ui/band.js`). herdr before 0.1.18 tells a
-  mod no scroll position; there every card draws whole. A click on a card or a
-  list's row selects it; a click on one I chose (clicked before, moved to with
-  the keys or dragged onto another column; not one the board selected by
-  itself) opens its details. Where the board selects another item by itself (a
-  refresh, the filter, a hidden column), open details close. The details take a
-  third of the board's width, half of it beside a single column, but never less
-  than 420 or more than 720 pixels (detailWidth in
+  team's default area path and iteration, assigned to me, and shows, selected,
+  once Azure has named its id and the Backlog is read again; a Task is linked to
+  the selected Story as its parent and, being no Story, does not show in the
+  list. Where Azure's answer to a create leaves open whether it landed, the
+  board asks Azure after the next refresh for work items of that project, type
+  and title that I created today (a Task only among those without a parent):
+  exactly one is taken as the new one, none means it did not land, several are
+  named; the header's "Calls:" says what that costs. A team whose default
+  iteration follows the current one has it read again for each create. A work
+  item's session starts in the repo chosen in the start dialog (below). On a
+  GitHub view `h/l j/k` move over the columns shown, `H/L` move a card one
+  column, hidden ones included (`s` picks from a menu, hidden ones too, or drag
+  the card onto a column; the notice says when a card went to a hidden column),
+  the command menu's "Spalte ausblenden" hides the selected column (views.json
+  sets which start hidden; hiding or showing one writes this machine's settings,
+  above), `o` opens the item in the browser. A GitHub board reads its items in
+  pages of up to 100, one gh call each, up to views.json's `limit` (1000 by
+  default) and at most as many calls as full pages of it take; where that cuts
+  them, a note under the columns says how many it read. A hidden column is not
+  drawn: the line below the columns names the hidden ones ("ausgeblendet:
+  Backlog, Done"), a click on a name shows that column again, and the command
+  menu's "Spalten…" opens a menu of every column, shown or hidden, where
+  `Enter`, a digit or a click hides or shows one. A long column draws whole only
+  the cards about what it shows, half its height above and below; every other
+  card is an empty frame of the card's height until the column scrolls near it:
+  at once by the wheel or a key, within a tenth of a second by the scrollbar's
+  thumb, wherever the pointer is released (`mods/board/src/ui/band.js`). herdr
+  before 0.1.18 tells a mod no scroll position; there every card draws whole. A
+  click on a card or a list's row selects it; a click on one I chose (clicked
+  before, moved to with the keys or dragged onto another column; not one the
+  board selected by itself) opens its details. Where the board selects another
+  item by itself (a refresh, the filter, a hidden column), open details close.
+  The details take a third of the board's width, half of it beside a single
+  column, but never less than 420 or more than 720 pixels (detailWidth in
   `mods/board/src/ui/helpers.js` has the rule).
   The GitHub PR list says whether I have to act on a pull request: such a row
   carries a mark with the reasons ("● Review angefragt"), its details list
@@ -678,7 +705,7 @@ by that run. Which files of the package git tracks is set in the root
   topic, each only where it has something, so a card without them stays as
   compact as before: its key with its priority at the right ("P1": on GitHub the
   option of the project's single-select field "Priority", or the one
-  `project.priorityField` in `views.json` names, in that option's color; on
+  project's `priorityField` in `views.json` names, in that option's color; on
   Azure the work item's priority, 1 red, 2 orange, 3 and 4 grey), its title, its
   milestone as a grey chip and its parent ("Teil von #1735 [Epic] …", cut short
   with "…" where it does not fit; the repo's name before the number only where
@@ -695,9 +722,9 @@ by that run. Which files of the package git tracks is set in the root
   it with each refresh and the titles of its stories' parents where it does
   not keep them; it keeps those for four hours (`r` reads them again). The
   board's query reads priority, milestone and parent at no extra cost; the
-  header's "Calls:" says why. Where `project.priorityField` names a field the
-  project does not have as a single-select field, a warning above the columns
-  says so; the default "Priority" may be missing without one.
+  header's "Calls:" says why. Where a project's `priorityField` names a field
+  the project does not have as a single-select field, a warning above the
+  columns says so; the default "Priority" may be missing without one.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,

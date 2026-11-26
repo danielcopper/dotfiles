@@ -9,7 +9,7 @@
 // shape: "backlog", meta: { level, childLevel, typeStates, states,
 // typeColors, orderField, area, iteration, follows, missing }, rows, viewer,
 // noViewer, total, limited, limit } (backlogList, sources/azure/backlog.js).
-// View fields it reads: id, source, layout (as writeAtOnce does), context
+// View fields it reads: id, source, layout (as writeAtOnce does), tab
 // (the create dialog).
 
 import { div } from "gpui-kit";
@@ -86,7 +86,7 @@ export const backlogShape = {
   detailParts(b, t, view, item) {
     const st = b.state(view.id);
     if (!st.data) return {};
-    const rows = [["Sprint", item.sprint ?? "—"], ...(item.area ? [["Bereich", item.area]] : []), ...(item.iteration ? [["Iteration", item.iteration]] : [])];
+    const rows = [["Sprint", item.sprint ?? "—"], ...(item.area ? [["Bereichspfad", item.area]] : []), ...(item.iteration ? [["Iteration", item.iteration]] : [])];
     return workItemDetail(b, t, view, { state: item.state, color: stateColor(st.data, item.state), title: "BACKLOG", rows });
   },
 };

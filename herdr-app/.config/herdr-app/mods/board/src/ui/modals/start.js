@@ -125,7 +125,7 @@ function reposNotes(m) {
     ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
   ];
   if (!folders.length) {
-    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder im Kontext des Teams, etwa "repoFolders": ["~/Repos"]`);
+    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder beim Team, etwa "repoFolders": ["~/Repos"]`);
   } else if (!list.length) {
     notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen in ${CONFIG_NAME}.json unter „repoFolders“`);
   }
@@ -392,7 +392,7 @@ function loadRepos(b, cx) {
   const m = b.modal;
   if (!m.repos) return;
   const on = m.machines[m.machine];
-  const folders = m.view.context?.repoFolders ?? [];
+  const folders = m.view.tab?.repoFolders ?? [];
   const repos = reposLoading(on, folders);
   m.repos = repos;
   const listed = ({ repos: list, missing, unreadable }) => {

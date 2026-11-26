@@ -4,15 +4,14 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
 import { layout, notify, panes, settings, spaces } from "herdr";
 import { MOD, cardType, firstLine } from "../shared.js";
-import { githubContextId } from "../contexts.js";
 import { AGENT_STATUS, placed } from "../sessions.js";
 import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 import { stateColor } from "../kinds/states.js";
 
 // What lasts across reloads beside this machine's settings (settings.js):
-// the shown source ("source"), each source's tab ("tab:<source>"), each
-// team's view ("teamView:<context>"), "nur meine" ("mine"), a Sprint's
+// the shown context ("context"), each context's tab ("tab:<context>"),
+// each team's view ("teamView:<tab>"), "nur meine" ("mine"), a Sprint's
 // folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or
@@ -60,17 +59,6 @@ export const store = {
     }
   },
 };
-
-// The shown view a board before the top bar kept ("view": a GitHub view's
-// id) becomes the GitHub source and that tab, once; what is set already
-// stays.
-export function migrateShownView() {
-  const view = store.get("view");
-  if (typeof view !== "string") return;
-  if (store.get("source") === null) store.set("source", "github");
-  if (store.get("tab:github") === null) store.set("tab:github", githubContextId(view));
-  store.set("view", null);
-}
 
 export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.

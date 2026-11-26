@@ -15,9 +15,9 @@
 // - takes(c): whether its key is taken (when by default): a few keys are
 //   taken where they do nothing, or say why they do nothing;
 // - bar: an action of the whole board or of the top bar (the tabs, the
-//   source, the team view, nur meine, the filter, reload, the menu), which
-//   runs on the moment as it is, without the board keeping its selection
-//   first (Board.keptContext);
+//   contexts, the team view, nur meine, the filter, reload, the menu), which
+//   runs on the situation as it is, without the board keeping its selection
+//   first (Board.keptSituation);
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
@@ -27,35 +27,37 @@
 //   leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc).
-// `c` is what the Board says of the moment (Board.actionContext): { b,
-// view, st, shape, item (the selected one), details (the item whose details
-// show: where the panel went down into a related item, that one), related
+// `c` is the situation an action runs in (Board.situation): { b, view, st,
+// shape, item (the selected one), details (the item whose details show:
+// where the panel went down into a related item, that one), related
 // (whether those read related items), sessions (how many sessions they
 // list: itemSessions), panel (the details panel's keyboard, or null), lines
 // (its lines now: Board.linesOf; null without it), line (its selected line
-// by what it is, related.js lineId, or null), picked
-// (that line among the panel's lines now: { related } or { session }, null
-// where it is not there, as a related item's line until a read brings it
-// again), drilled (whether the panel shows a related item rather than the
-// board's selected one), trail (the keys of the items on the panel's way
-// down, the board's selected one first) }.
+// by what it is, related.js lineId, or null), picked (that line among the
+// panel's lines now: { related } or { session }, null where it is not
+// there, as a related item's line until a read brings it again), drilled
+// (whether the panel shows a related item rather than the board's selected
+// one), trail (the keys of the items on the panel's way down, the board's
+// selected one first) }.
 
 import { cardType, itemLabel } from "./shared.js";
-import { hasViewSwitch, shownIndex, sourceAfter, sourcesOf, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
+import { contextsOf, hasViewSwitch, shownIndex, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
 import { lineIndex } from "./related.js";
 import { placed, secondEnter } from "./sessions.js";
 import { descriptionFolds } from "./ui/related.js";
 import { sprintIs } from "./kinds/sprint.js";
 
 // What a key event names (an action's key), or null for one no action has:
-// [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
-// stays herdr's, and Alt alone is let through: a key herdr binds with Alt
-// never reaches a mod), else with no Control, Alt or platform key a digit,
-// Enter, or a letter: upper case with Shift alone, so that Caps Lock
-// changes no key, and an upper case letter is its own key (Shift+S is no s).
+// [ ] { } / and : as typed (with Shift, or with Control+Alt, as AltGr
+// types { } on a German layout; Control alone stays herdr's, and Alt alone
+// is let through: a key herdr binds with Alt never reaches a mod), else
+// with no Control, Alt or platform key a digit, Enter, or a letter: upper
+// case with Shift alone, so that Caps Lock changes no key, and an upper
+// case letter is its own key (Shift+S is no s). A digit after a g is the
+// key g and the digit (jumpKey, main.js).
 export function keyName(k, ch, mod) {
   const typed = !(mod.control && !mod.alt) && !mod.platform;
-  if (typed && ["[", "]", "/", ":"].includes(ch)) return ch;
+  if (typed && ["[", "]", "{", "}", "/", ":"].includes(ch)) return ch;
   if (mod.control || mod.alt || mod.platform) return null;
   if (/^[1-9]$/.test(ch)) return ch;
   if (k === "enter") return "enter";
@@ -151,13 +153,12 @@ export function hintsOf(c) {
   return shown.filter((h) => leads(h) || !named.has(h.key)).map((h) => [h.key, h.text]);
 }
 
-// The shown source's tabs, and the shown one's index.
-const tabsOf = (c) => c.b.contexts();
-const tabAt = (c) => shownIndex(tabsOf(c), c.b.context());
+const tabsOf = (c) => c.b.tabs();
+const tabAt = (c) => shownIndex(tabsOf(c), c.b.tab());
+const contextsNow = (c) => contextsOf(c.b.config);
+const contextAt = (c) => shownIndex(contextsNow(c), c.b.context());
 
-// The source after the shown one, and the shown team's next view.
-const nextSource = (c) => sourceAfter(sourcesOf(c.b.config), c.b.source());
-const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context()));
+const nextView = (c) => teamViewAfter(c.b.tab(), c.b.teamViewOf(c.b.tab()));
 
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
@@ -224,6 +225,18 @@ const tabAction = (n) => ({
   ...(n === 1 ? { hint: () => "Tab", hintKey: "1 2 3 [ ]" } : {}),
 });
 
+const contextAction = (n) => ({
+  id: `context-${n}`,
+  group: "board",
+  name: (c) => `Kontext ${n}: ${contextsNow(c)[n - 1].name}`,
+  key: `g${n}`,
+  menu: 42,
+  bar: true,
+  when: (c) => Boolean(contextsNow(c)[n - 1]) && n - 1 !== contextAt(c),
+  takes: () => true,
+  run: (b, c, cx) => b.switchContext(n - 1, cx),
+});
+
 // A move of the selected card or task one column on (`by` 1) or back (-1).
 const moveAction = (id, key, by, name) => ({
   id,
@@ -250,15 +263,22 @@ export const ACTIONS = [
     run: (b, c, cx) => b.stepTab(-1, cx),
   },
   {
-    id: "source", group: "board", name: (c) => `Quelle wechseln: ${nextSource(c).name}`, key: null, menu: 42, bar: true,
-    when: (c) => sourcesOf(c.b.config).length > 1,
-    run: (b, c, cx) => b.switchSource(nextSource(c).id, cx),
+    id: "context-next", group: "board", name: "Nächster Kontext", key: "}", menu: 43, bar: true,
+    when: (c) => contextsNow(c).length > 1, takes: () => true,
+    run: (b, c, cx) => b.stepContext(1, cx),
+    hint: (c) => (contextsNow(c).length > 1 ? "Kontext" : null), hintKey: "{ }",
   },
   {
+    id: "context-previous", group: "board", name: "Vorheriger Kontext", key: "{", menu: 44, bar: true,
+    when: (c) => contextsNow(c).length > 1, takes: () => true,
+    run: (b, c, cx) => b.stepContext(-1, cx),
+  },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(contextAction),
+  {
     id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 25, bar: true,
-    when: (c) => Boolean(c.view) && hasViewSwitch(c.b.context()), takes: () => true,
+    when: (c) => Boolean(c.view) && hasViewSwitch(c.b.tab()), takes: () => true,
     run: (b, c, cx) => b.nextTeamView(cx),
-    hint: (c) => (hasViewSwitch(c.b.context()) ? viewSwitchHint(c.b.context()) : null),
+    hint: (c) => (hasViewSwitch(c.b.tab()) ? viewSwitchHint(c.b.tab()) : null),
   },
   moveAction("move-left", "H", -1, "Nach links verschieben"),
   moveAction("move-right", "L", 1, "Nach rechts verschieben"),
@@ -383,9 +403,9 @@ export const ACTIONS = [
   },
   {
     id: "mine", group: "board", name: (c) => (c.b.mine ? "Nur meine aus" : "Nur meine an"), key: "m", menu: 26, bar: true,
-    when: (c) => Boolean(c.b.source()), takes: () => true,
+    when: (c) => Boolean(c.b.context()), takes: () => true,
     run: (b, c, cx) => b.toggleMine(cx),
-    hint: (c) => (c.b.source() ? "nur meine" : null),
+    hint: (c) => (c.b.context() ? "nur meine" : null),
   },
   {
     id: "filter", group: "board", name: "Filter", key: "/", menu: 27, bar: true,

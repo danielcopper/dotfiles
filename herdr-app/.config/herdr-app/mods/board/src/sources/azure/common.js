@@ -149,9 +149,9 @@ export const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json
 // values: [{ value, includeChildren }], default (the area a new work item
 // gets, or null) }.
 export function parseAreas(stdout) {
-  const json = azJson(stdout, "die Bereiche des Teams");
+  const json = azJson(stdout, "die Bereichspfade des Teams");
   const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
-  if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
+  if (!values.length) throw new BoardError("Azure nannte keine Bereichspfade des Teams");
   return {
     field: json.field?.referenceName ?? AREA_PATH,
     values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })),

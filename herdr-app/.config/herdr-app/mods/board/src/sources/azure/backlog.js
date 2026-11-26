@@ -10,7 +10,7 @@ import {
   parseWorkItems, sprintName, wiqlText,
 } from "./common.js";
 
-// The Backlog view's calls for a team context `c`: the team's backlog
+// The Backlog view's calls for a team tab `c`: the team's backlog
 // levels; its backlog configuration (the order field, each type's states
 // and their categories) and its settings (default and backlog iteration;
 // its default area comes from azAreasArgs' defaultValue), both of which the
@@ -240,7 +240,7 @@ export function backlogView(s) {
   return {
     forget,
     async load(view, { live = NO_LIVE }) {
-      const c = view.context;
+      const c = view.tab;
       const me = s.whoAmI(view);
       const settings = backlogSettingsOf(c, view);
       let types = null;
@@ -267,7 +267,7 @@ export function backlogView(s) {
     // that follows the current one (data.meta.follows) is read again first:
     // the one kept may have ended since, and Azure names no end for it.
     async create(view, data, { type, title }) {
-      const c = view.context;
+      const c = view.tab;
       let iteration = data.meta.iteration;
       if (data.meta.follows) {
         iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c), what(view, "team-settings"))).defaultIteration;
@@ -278,12 +278,12 @@ export function backlogView(s) {
     },
     // Makes the work item `id` a child of `parent`.
     async addParent(view, id, parent) {
-      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true, ...what(view, "parent-link") }), parent);
+      checkParentLink(await s.az(azParentArgs(view.tab, id, parent), { write: true, ...what(view, "parent-link") }), parent);
     },
     // The work items createdWiql finds for a create ({ type, title,
     // child }) in the view's project, as parseWorkItems reads them.
     async findCreated(view, { type, title, child }) {
-      const c = view.context;
+      const c = view.tab;
       return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child })), what(view, "created-items")), c);
     },
   };

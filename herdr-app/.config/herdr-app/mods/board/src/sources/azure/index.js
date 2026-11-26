@@ -163,7 +163,7 @@ export function makeAzure(paths) {
       throw e;
     },
     setState: (view, item, state, onRefusal) =>
-      az(azStateArgs(view.context, item.number, state), { write: true, ...what(view, "state") }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
+      az(azStateArgs(view.tab, item.number, state), { write: true, ...what(view, "state") }).catch(onRefusal(view.tab)).then((out) => checkStateResult(out, state)),
   };
   const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
   const members = readMemo();
@@ -179,17 +179,17 @@ export function makeAzure(paths) {
       // The team's members, kept (parseMemberList); who az is is asked
       // each time, so a viewer read since counts.
       async people(item, view) {
-        const c = view.context;
+        const c = view.tab;
         const [list, me] = await Promise.all([members.get(teamKey(c), () => az(azMembersArgs(c), what(view, "members")).then(parseMemberList)), whoAmI(view)]);
         return membersFor(list, me);
       },
       // Without the list, az still knows its own account: "me".
       fallbackMe: () => ({ login: viewer, name: null, me: true }),
-      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true, ...what(view, "assign") }), item.number, person),
+      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.tab, item.number, person), { write: true, ...what(view, "assign") }), item.number, person),
     },
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
-      if (view.context?.kind === "team") views[view.layout]?.forget(view.context);
+      if (view.tab?.kind === "team") views[view.layout]?.forget(view.tab);
     },
     views,
   };

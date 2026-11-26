@@ -93,7 +93,7 @@ const section = (count, lines, error = null) => ({
   count, sent: lines.length, cut: false, hidden: error ? 0 : count - lines.length, hiddenAs: "nicht gefunden", error, lines,
 });
 
-// The related items of the work item `item` in the team context `c`
+// The related items of the work item `item` in the team tab `c`
 // (related.js): one az call, and one query more where it has children or
 // a parent. A failed query shows its reason in the children's place and
 // the parent's and marks the read to be repeated after the next refresh
@@ -168,12 +168,12 @@ export function parseAzurePullRequest(stdout) {
 // id, read in the view's organisation.
 export const azurePullRequest = (az) => ({
   reads: (item) => item.kind === "pr" && Number.isInteger(item.number),
-  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number), what(view, "pull-request"))),
+  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.tab, item.number), what(view, "pull-request"))),
 });
 
 // The Azure source's `related` (related.js): a work item with an id has
 // some to read.
 export const azureRelated = (az) => ({
   reads: (item) => item.kind === "workitem" && Number.isInteger(item.number),
-  load: (item, view) => loadAzureRelated(az, view.context, item, view),
+  load: (item, view) => loadAzureRelated(az, view.tab, item, view),
 });

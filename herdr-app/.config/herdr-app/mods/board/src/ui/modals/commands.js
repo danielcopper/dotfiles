@@ -38,7 +38,7 @@ function runEntry(b, m, i, cx) {
 }
 
 export const commandsModal = {
-  // Opens the menu on the moment `c` (Board.openCommands).
+  // Opens the menu on the situation `c` (Board.openCommands).
   open(b, c, cx) {
     const m = { kind: "commands", view: c.view, entries: menuActions(c) };
     openFilterMenu(b, m, {

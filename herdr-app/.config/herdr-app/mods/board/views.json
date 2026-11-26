@@ -10,37 +10,37 @@
     "danielcopper/emu-atlas": { "checkout": "~/Repos/emu-atlas" }
   },
   "sources": {
+    "github": {
+      "contexts": [
+        {
+          "owner": "danielcopper",
+          "projects": [
+            {
+              "id": "mine",
+              "name": "Meine Aufgaben",
+              "number": 2,
+              "field": "Status",
+              "filter": "assignee:@me",
+              "hide": ["Backlog", "Done"]
+            }
+          ],
+          "prs": {
+            "id": "prs",
+            "name": "PRs",
+            "sections": [
+              { "name": "Zu prüfen", "query": "is:pr is:open archived:false review-requested:@me", "tone": "blue" },
+              { "name": "Meine", "query": "is:pr is:open archived:false author:@me", "tone": "violet" },
+              { "name": "Geprüft", "query": "is:pr is:open archived:false reviewed-by:@me -author:@me", "tone": "teal" }
+            ]
+          }
+        }
+      ]
+    },
     "azure": {
       "org": "https://dev.azure.com/l-p-a",
       "contexts": [
-        { "team": { "project": "VC", "team": "VC Core Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/VC"] },
-        { "prs": { "project": "VC" } },
-        { "team": { "project": "LPA Captano", "team": "LPA Captano Team" }, "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/Captano"] },
-        { "prs": { "project": "LPA Captano" } }
-      ]
-    },
-    "github": {
-      "views": [
-        {
-          "id": "mine",
-          "name": "Meine Aufgaben",
-          "source": "github",
-          "layout": "board",
-          "project": { "owner": "danielcopper", "number": 2, "field": "Status" },
-          "filter": "assignee:@me",
-          "hide": ["Backlog", "Done"]
-        },
-        {
-          "id": "prs",
-          "name": "PRs",
-          "source": "github",
-          "layout": "list",
-          "sections": [
-            { "name": "Zu prüfen", "query": "is:pr is:open archived:false review-requested:@me", "tone": "blue" },
-            { "name": "Meine", "query": "is:pr is:open archived:false author:@me", "tone": "violet" },
-            { "name": "Geprüft", "query": "is:pr is:open archived:false reviewed-by:@me -author:@me", "tone": "teal" }
-          ]
-        }
+        { "project": "VC", "teams": [{ "team": "VC Core Team", "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/VC"] }] },
+        { "project": "LPA Captano", "teams": [{ "team": "LPA Captano Team", "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/Captano"] }] }
       ]
     }
   }

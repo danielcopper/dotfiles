@@ -141,7 +141,7 @@ export const sprintShape = {
     const state = shownState(item, column);
     const rows = [
       ...(column ? [["Spalte", column.name]] : []),
-      ...(item.area ? [["Bereich", item.area]] : []),
+      ...(item.area ? [["Bereichspfad", item.area]] : []),
       ...(item.iteration ? [["Iteration", item.iteration]] : []),
     ];
     return workItemDetail(b, t, view, { state, color: stateColor(st.data, state), title: isTask(item) ? "TASK" : "STORY", rows });

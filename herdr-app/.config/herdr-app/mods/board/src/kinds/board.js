@@ -23,8 +23,8 @@ export function storedHiddenList(view, stored) {
 
 // `entryOf(view)`: what the store holds for the view, undefined for nothing.
 // → { moves: [{ view, list }], drop: [view] }: an entry is dropped where it
-// is no stored hide, this machine sets the view's hide already, or it
-// changes nothing.
+// is no stored hide, its view no board, this machine sets the view's hide
+// already, or it changes nothing.
 export function storedHiddenMoves(views, entryOf, originAt) {
   const moves = [];
   const drop = [];
@@ -32,7 +32,7 @@ export function storedHiddenMoves(views, entryOf, originAt) {
     const entry = entryOf(view);
     if (entry === undefined) continue;
     const stored = readStoredHidden(entry);
-    const list = stored && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
+    const list = stored && view.layout === "board" && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
     if (list && !sameNames(list, view.hide)) moves.push({ view, list });
     else drop.push(view);
   }

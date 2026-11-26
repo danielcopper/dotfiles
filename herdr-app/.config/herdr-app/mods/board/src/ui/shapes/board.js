@@ -113,7 +113,7 @@ export const boardShape = {
   warnings: (view, data) => [
     ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
     ...(view.project.priorityGiven && data.meta.lacksPriorityField
-      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ (project.priorityField): die Karten zeigen keine Priorität`]
+      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ („priorityField“ des Projects): die Karten zeigen keine Priorität`]
       : []),
   ],
   settle: (b, view, due, data, cx) =>

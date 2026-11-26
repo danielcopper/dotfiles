@@ -43,7 +43,7 @@ function whereText(m) {
   const meta = m.data.meta;
   const type = m.types[m.at];
   const place = type?.child ? `unter ${itemLabel(m.parent)} „${m.parent.title}“` : `in „${meta.level.name}“`;
-  return `Neu ${place}; Bereich ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
+  return `Neu ${place}; Bereichspfad ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
 }
 
 export const createModal = {
@@ -56,7 +56,7 @@ export const createModal = {
     const types = createTypes(data, parent);
     if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
     if (!data.meta.area || !data.meta.iteration) {
-      const missing = [!data.meta.area && "keinen Standardbereich", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
+      const missing = [!data.meta.area && "keinen Standard-Bereichspfad", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
       return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
@@ -124,7 +124,7 @@ export const createModal = {
         .shadow_lg()
         .child(
           v_flex().px(20).py(16).gap(4).border_b(1).border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.context.team}`))
+            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.tab.team}`))
             .child(div().text_size(12).text_color(t.muted).child(whereText(m))),
         )
         .child(

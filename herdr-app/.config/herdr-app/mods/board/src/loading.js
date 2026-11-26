@@ -12,9 +12,15 @@ export const SAVED_PREFIX = "board:data:";
 export const SAVED_VERSION = 1;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
 
-// Data read for other hidden columns or another form of the view is not
-// its data.
-const savedSig = (view, hidden) => JSON.stringify([SAVED_VERSION, view, [...hidden].sort()]);
+// Data read for other hidden columns, another form of the view or another
+// organisation, project or team of its tab is not its data; where its
+// settings lie and the rest of its tab are not its form. A GitHub view has
+// no tab and signs without one, so its data saved before the contexts holds.
+const savedSig = (view, hidden) => {
+  const { settingsPath, tab, ...form } = view;
+  const reads = tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
+  return JSON.stringify([SAVED_VERSION, form, ...reads, [...hidden].sort()]);
+};
 
 // The size the store measures `text` by.
 export function storeBytes(text) {
@@ -54,13 +60,13 @@ export const NO_LIVE = { partial() {}, page() {} };
 
 export const refreshDue = (st, now, every) => now - st.tried >= every;
 
-export function prefetchOrder(views, { shown, source, now, every, stateOf, loads }) {
+export function prefetchOrder(views, { shown, contextViewIds, source, now, every, stateOf, loads }) {
   const due = views.filter((v) => {
     if (v.id === shown?.id || !loads(v)) return false;
     const st = stateOf(v.id);
     return !st.loading && !st.unavailable && refreshDue(st, now, every);
   });
-  const rank = (v) => [v.source === source ? 0 : 1, stateOf(v.id).at];
+  const rank = (v) => [contextViewIds.has(v.id) ? 0 : v.source === source ? 1 : 2, stateOf(v.id).at];
   return due.sort((a, b) => {
     const [x, y] = [rank(a), rank(b)];
     return x[0] - y[0] || x[1] - y[1];

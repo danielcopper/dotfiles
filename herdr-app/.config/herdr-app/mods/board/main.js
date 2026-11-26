@@ -8,27 +8,31 @@
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
-// - sources: what the board shows, by source.
-//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts:
-//     [...] }, a context either { team: { project, team }, views?:
-//     ["sprint", "backlog"] (both when missing), repoFolders? } or { prs: {
-//     project } }. repoFolders: the folders (~ is a machine's home; each
-//     once, a trailing / aside) whose git repositories the start dialog
-//     offers for a team's items without a repo ("Repo"); a team's own in
-//     place of those for all.
-//   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
-//     names], limit? (a board: the most items it reads, 1000; a list: per
-//     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
-//     board has project { owner, number, field? ("Status"), priorityField?
-//     ("Priority") } and filter? (a Projects filter such as "assignee:@me");
-//     its columns are the options of that single-select field, a card's
+// - sources: what the board shows, in contexts by source; the top bar
+//   switches between the contexts and shows the tabs of one, its PR tab
+//   last.
+//   - github: { contexts: [{ owner, projects?: [...], prs: {...} }] }, a
+//     context per owner (a user or an organisation). A project is a tab with
+//     its board: { id, name, number, field? ("Status"), priorityField?
+//     ("Priority"), filter? (a Projects filter such as "assignee:@me"),
+//     hide?: [column names], limit? (the most items it reads, 1000), start?
+//     }; its columns are the options of that single-select field, a card's
 //     priority its option of the single-select field priorityField names
 //     (none where the project has no such field; one views.json names that
-//     the project lacks is a warning). A list has sections [{ name, query,
-//     tone? }], one GitHub search for pull requests each; tone is one of
-//     SECTION_TONES (shared.js), and without one a section takes the next
-//     of SECTION_TONE_ORDER by its place that no other section sets. A view
-//     may still say source: "github".
+//     the project lacks is a warning). prs is the context's PR tab: { id,
+//     name? ("PRs"), sections: [{ name, query, tone? }], limit? (per search,
+//     50, at most 100), start? }, one GitHub search for pull requests per
+//     section, as written; tone is one of SECTION_TONES (shared.js), and
+//     without one a section takes the next of SECTION_TONE_ORDER by its place
+//     that no other section sets. A tab's id is its own among all contexts'
+//     (readGithub in config.js).
+//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
+//     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
+//     missing), repoFolders? }] }] }, a context per project: a tab per team,
+//     then one for the project's pull requests. repoFolders: the folders (~
+//     is a machine's home; each once, a trailing / aside) whose git
+//     repositories the start dialog offers for a team's items without a repo
+//     ("Repo"); a team's own in place of those for all.
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, checkout (the folder the session starts in; ~ is that
 //   machine's home; an item without a repo (an Azure work item, or a pull
@@ -38,8 +42,9 @@
 //   {key}.
 // - repos: { "<owner>/<repo>": { any start field } }. startSettings says
 //   which start applies.
-// An older views.json with its views at the top is not read; the board says
-// where they go now.
+// In an older views.json, with its views at the top or its sources without
+// contexts (sources.github.views, an Azure context with team or prs), the
+// old part is not read: the board says where its views and teams go now.
 //
 // This machine's settings (settings.js; README, "herdr app") lie over
 // views.json and are read with it. Hidden columns are a view's hide,
@@ -106,7 +111,7 @@
 // write was refused, reads the Sprint again, a create the Backlog, and one
 // whose answer was unclear asks one WIQL query more after that refresh; a
 // create for a team whose default iteration follows the current one reads the
-// team's settings first, one call more. The PR tabs read nothing yet. The
+// team's settings first, one call more. Azure's PR tabs read nothing yet. The
 // start dialog's Repo field costs one sh call when it opens and one per
 // machine chosen in it (its repos; none without repoFolders). Finding gh and
 // az costs one sh call now and then (toolPaths says when). The Claude Code
@@ -128,18 +133,19 @@
 // costs each other view's refresh at most once; it waits while any read runs,
 // a write is under way or a dialog is busy. After that a view not shown reads
 // nothing. The Azure calls of a load that need nothing of each other run side
-// by side: the Sprint's settings (iteration, areas, columns, types, backlog
-// configuration) and who az is; its taskboard once the iteration came, its
-// query once the areas and the configuration came too, its parents' query and
-// the team's settings once all that came; the Backlog's settings (levels,
-// configuration, team settings, areas), the types' colors and who az is; its
-// ids once the levels came, the query for their fields once the configuration
-// came too. What a view drew last, as read, is saved (loading.js) and drawn
-// after a restart with its age until its read replaces it.
+// by side: the Sprint's settings (iteration, area paths, columns, types,
+// backlog configuration) and who az is; its taskboard once the iteration
+// came, its query once the area paths and the configuration came too, its
+// parents' query and the team's settings once all that came; the Backlog's
+// settings (levels, configuration, team settings, area paths), the types'
+// colors and who az is; its ids once the levels came, the query for their
+// fields once the configuration came too. What a view drew last, as read, is
+// saved (loading.js) and drawn after a restart with its age until its read
+// replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), settings.js (this machine's
-// settings over it), contexts.js (the top bar's sources, contexts and their
+// settings over it), contexts.js (the top bar's contexts, tabs and their
 // views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
@@ -400,28 +406,33 @@ export const kindOf = (view) => KINDS[viewKind(view)] ?? null;
 
 // This machine's settings over views.json; where they lie, how they merge
 // and how they are written: README, "herdr app". A path names keys from the
-// top, an entry of a list by its "id".
+// top, an entry of a list by its name: the value of the key `nameKeyAt(path
+// of the list)` names (config.js; null: settings set the list only as a
+// whole), which each function that walks a path takes.
 
 export const SETTINGS_FILE = "board/settings.json";
-export const settingsPath = (appHome) => `${appHome}/${SETTINGS_FILE}`;
+export const settingsFileIn = (appHome) => `${appHome}/${SETTINGS_FILE}`;
 
 export const ORIGIN = { machine: "dieser Rechner", base: `${CONFIG_NAME}.json`, builtin: "Standard" };
 
-const pathText = (path) => `„${path.join(".")}“`;
+export const pathText = (path) => `„${path.join(".")}“`;
 const pathKey = (path) => JSON.stringify(path);
-const hasId = (entry) => isObject(entry) && isText(entry.id);
+const hasName = (entry, key) => isObject(entry) && isText(entry[key]);
 
-export const entryById = (list, id) => list.find((e) => hasId(e) && e.id === id);
+export const entryByName = (list, name, key) => list.find((e) => hasName(e, key) && e[key] === name);
 
-function child(node, key) {
-  if (Array.isArray(node)) return entryById(node, key);
+function child(node, key, path, nameKeyAt) {
+  if (Array.isArray(node)) {
+    const nameKey = nameKeyAt(path);
+    return nameKey === null ? undefined : entryByName(node, key, nameKey);
+  }
   return isObject(node) ? node[key] : undefined;
 }
 
-function valueAt(node, keys) {
-  for (const key of keys) {
+export function valueAt(node, keys, nameKeyAt) {
+  for (const [i, key] of keys.entries()) {
     if (node === undefined) return undefined;
-    node = child(node, key);
+    node = child(node, key, keys.slice(0, i), nameKeyAt);
   }
   return node;
 }
@@ -448,43 +459,56 @@ function mergeAt(base, over, path, out) {
     for (const [key, value] of Object.entries(over)) merged[key] = mergeAt(merged[key], value, [...path, key], out);
     return merged;
   }
-  if (!base.some(hasId)) {
-    out.errors.push(`${pathText(path)} hat in ${ORIGIN.base} keinen Eintrag mit eigener „id“: hier nur als ganze Liste`);
+  const nameKey = out.nameKeyAt(path);
+  if (nameKey === null) {
+    out.errors.push(`${pathText(path)} lässt sich hier nur als ganze Liste setzen`);
+    return base;
+  }
+  if (!base.some((e) => hasName(e, nameKey))) {
+    out.errors.push(`${pathText(path)} hat in ${ORIGIN.base} keinen Eintrag mit eigenem Namen („${nameKey}“): hier nur als ganze Liste`);
     return base;
   }
   const merged = [...base];
-  for (const [id, value] of Object.entries(over)) {
-    const at = base.indexOf(entryById(base, id));
-    if (at < 0) out.errors.push(`${pathText([...path, id])}: einen Eintrag mit „id“ „${id}“ gibt es in ${ORIGIN.base} nicht`);
-    else merged[at] = mergeAt(base[at], value, [...path, id], out);
+  for (const [name, value] of Object.entries(over)) {
+    const at = base.indexOf(entryByName(base, name, nameKey));
+    if (at < 0) {
+      out.errors.push(`${pathText([...path, name])}: einen Eintrag mit „${nameKey}“ „${name}“ gibt es in ${ORIGIN.base} nicht`);
+      continue;
+    }
+    let own = value;
+    if (isObject(value) && Object.hasOwn(value, nameKey) && value[nameKey] !== name) {
+      out.errors.push(`${pathText([...path, name, nameKey])}: der Name des Eintrags ändert sich nur in ${ORIGIN.base}`);
+      own = Object.fromEntries(Object.entries(value).filter(([key]) => key !== nameKey));
+    }
+    merged[at] = mergeAt(base[at], own, [...path, name], out);
   }
   return merged;
 }
 
 // → { merged, errors, origin }: origin(path) is one of ORIGIN, never this
 // machine's where the merge refused what it set.
-export function mergeSettings(base, over) {
-  const out = { errors: [], set: new Map(), below: new Set() };
+export function mergeSettings(base, over, nameKeyAt) {
+  const out = { errors: [], set: new Map(), below: new Set(), nameKeyAt };
   const merged = mergeAt(base, over, [], out);
   const origin = (path) => {
     for (let i = 1; i <= path.length; i++) {
       const key = pathKey(path.slice(0, i));
-      if (out.set.has(key)) return valueAt(out.set.get(key), path.slice(i)) === undefined ? ORIGIN.builtin : ORIGIN.machine;
+      if (out.set.has(key)) return valueAt(out.set.get(key), path.slice(i), (rest) => nameKeyAt([...path.slice(0, i), ...rest])) === undefined ? ORIGIN.builtin : ORIGIN.machine;
     }
     if (out.below.has(pathKey(path))) return ORIGIN.machine;
-    return valueAt(base, path) === undefined ? ORIGIN.builtin : ORIGIN.base;
+    return valueAt(base, path, nameKeyAt) === undefined ? ORIGIN.builtin : ORIGIN.base;
   };
   return { merged, errors: out.errors, origin };
 }
 
 // An undefined `value` resets: it takes the value out, and the objects that
 // leaves empty.
-export function withSetting(settings, path, value) {
+export function withSetting(settings, path, value, nameKeyAt) {
   const top = structuredClone(settings);
   const parents = [top];
   for (const [i, key] of path.slice(0, -1).entries()) {
     const node = parents.at(-1);
-    let next = child(node, key);
+    let next = child(node, key, path.slice(0, i), nameKeyAt);
     if (next === undefined || (!isObject(next) && !Array.isArray(next))) {
       if (value === undefined) return top;
       if (next !== undefined) throw new BoardError(`${pathText(path)}: ${pathText(path.slice(0, i + 1))} ist auf diesem Rechner ein Wert, kein Objekt`);
@@ -512,17 +536,18 @@ export function withSetting(settings, path, value) {
 
 // herdr's refusals of a write whose expected text is stale (mod_files.rs).
 export const staleRefusal = (e) => /^The file changed (outside Herdr|while saving)\./.test(String(e?.message ?? e));
-export const CHANGED_MEANWHILE = "die Datei hat sich inzwischen geändert; bitte die Änderung noch einmal machen";
+export const CHANGED_SINCE = "die Datei hat sich inzwischen geändert";
+export const CHANGED_MEANWHILE = `${CHANGED_SINCE}; bitte die Änderung noch einmal machen`;
 
 export const settingsText = (settings) => `${JSON.stringify(settings, null, 2)}\n`;
 
 // The file's text (null: there is none) after `changes`, [path, value] each:
 // { text } (null: still none) or { error }.
-export function settingsAfter(text, changes, name) {
+export function settingsAfter(text, changes, name, nameKeyAt) {
   const { settings, errors } = readSettings(text, name);
   if (!settings) return { error: errors[0] };
   try {
-    const next = changes.reduce((s, [path, value]) => withSetting(s, path, value), settings);
+    const next = changes.reduce((s, [path, value]) => withSetting(s, path, value, nameKeyAt), settings);
     return { text: text === null && !Object.keys(next).length ? null : settingsText(next) };
   } catch (e) {
     if (!(e instanceof BoardError)) throw e;
@@ -530,11 +555,11 @@ export function settingsAfter(text, changes, name) {
   }
 }
 
-export function sameAtPaths(then, now, changes, name) {
+export function sameAtPaths(then, now, changes, name, nameKeyAt) {
   const before = readSettings(then, name).settings;
   const after = readSettings(now, name).settings;
   if (!before || !after) return false;
-  return changes.every(([path]) => JSON.stringify(valueAt(before, path)) === JSON.stringify(valueAt(after, path)));
+  return changes.every(([path]) => JSON.stringify(valueAt(before, path, nameKeyAt)) === JSON.stringify(valueAt(after, path, nameKeyAt)));
 }
 
 // ==== src/config.js ====
@@ -553,7 +578,13 @@ const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der 
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
 const OLD_SHAPE = "views.json hat noch die alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in " +
-  "„sources.github.views“, Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
+  "„sources.github.contexts“, Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
+// What a views.json from before the contexts is told.
+const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die GitHub-Ansichten stehen jetzt je Besitzer in " +
+  "„sources.github.contexts“ ({ \"owner\", \"projects\": [die Boards, ohne „source“ und „layout“, „number“, „field“ und „priorityField“ statt „project“], " +
+  "\"prs\": die PR-Liste, ohne „source“ und „layout“ }), " +
+  "die Azure-Teams je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\": [{ \"team\", \"views\" }] }; den PR-Tab hat jedes Projekt von selbst) " +
+  "(Kopf von mods/board/src/main.js)";
 
 function startProblems(start, where) {
   if (start === undefined) return [];
@@ -570,9 +601,8 @@ function startProblems(start, where) {
 
 const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
 
-// Keys every GitHub view may have; each kind adds its own (VIEW_KINDS).
-// "source" may stay from views.json's first form, as "github".
-const COMMON_KEYS = ["id", "name", "source", "layout", "hide", "limit", "start"];
+// Keys every GitHub tab may have; each kind adds its own (VIEW_KINDS).
+const COMMON_KEYS = ["id", "name", "hide", "limit", "start"];
 
 // The most items a board reads, and its default limit: ten of GitHub's
 // pages (PAGE).
@@ -594,30 +624,26 @@ function sectionsWithTones(sections) {
 }
 
 // Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
-// kinds/index.js, says how it shows): its own keys, what is wrong with them,
-// its fields with their defaults filled in, and the largest `limit` it takes:
-// a board's is the most items it reads, in pages of up to PAGE, one gh call
-// each, at most as many calls as full pages would take; a list's is each
-// search's `first`, one page.
+// kinds/index.js, says how it shows): the tab of a context it is (a
+// project's board, or the context's PR list), its own keys, what is wrong
+// with them, its fields with their defaults filled in (`owner`: the
+// context's), and the largest `limit` it takes: a board's is the most items
+// it reads, in pages of up to PAGE, one gh call each, at most as many calls
+// as full pages would take; a list's is each search's `first`, one page.
 const VIEW_KINDS = {
   "github board": {
-    keys: ["project", "filter"],
+    keys: ["number", "field", "priorityField", "filter"],
     maxLimit: BOARD_LIMIT,
     problems(v) {
-      const p = v.project;
-      const out = [];
-      if (!isObject(p) || !isText(p.owner) || !Number.isInteger(p.number) || p.number < 1) {
-        out.push("„project“ braucht „owner“ (Text) und „number“ (ganze Zahl)");
-      } else {
-        out.push(...["field", "priorityField"].filter((k) => p[k] !== undefined && !isText(p[k])).map((k) => `„project.${k}“ muss Text sein`));
-      }
+      const out = Number.isInteger(v.number) && v.number >= 1 ? [] : ["„number“ ist die Nummer des Projects, eine ganze Zahl ab 1"];
+      out.push(...["field", "priorityField"].filter((k) => v[k] !== undefined && !isText(v[k])).map((k) => `„${k}“ muss Text sein`));
       return [...out, ...textProblems(v, ["filter"])];
     },
-    defaults: (v) => ({
+    defaults: (v, owner) => ({
       project: {
-        owner: v.project.owner, number: v.project.number, field: v.project.field ?? "Status", priorityField: v.project.priorityField ?? "Priority",
+        owner, number: v.number, field: v.field ?? "Status", priorityField: v.priorityField ?? "Priority",
         // A project may lack the default one: only a named one it lacks is told.
-        priorityGiven: v.project.priorityField !== undefined,
+        priorityGiven: v.priorityField !== undefined,
       },
       filter: v.filter ?? "",
       limit: v.limit ?? BOARD_LIMIT,
@@ -639,17 +665,15 @@ const VIEW_KINDS = {
   },
 };
 
-// The layouts a GitHub view may have, from VIEW_KINDS.
-const GITHUB_LAYOUTS = Object.keys(VIEW_KINDS).map((k) => k.slice("github ".length));
+const PRS_NAME = "PRs";
 
-function viewProblems(v) {
+function tabProblems(v, layout) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
+  const kind = VIEW_KINDS[viewKind({ source: "github", layout })];
   const out = [];
   if (!isText(v.id)) out.push("„id“ fehlt");
-  if (!isText(v.name)) out.push("„name“ fehlt");
-  if (v.source !== undefined && v.source !== "github") out.push("„source“ ist hier \"github\" oder fehlt");
-  const kind = VIEW_KINDS[viewKind({ source: "github", layout: v.layout })];
-  if (!kind) return [...out, `„layout“ ist ${GITHUB_LAYOUTS.map((l) => `"${l}"`).join(" oder ")}`];
+  if (layout === "board" && !isText(v.name)) out.push("„name“ fehlt");
+  else if (v.name !== undefined && !isText(v.name)) out.push("„name“ muss Text sein");
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
@@ -659,31 +683,66 @@ function viewProblems(v) {
   return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 
-function normalizeView(v) {
-  const common = { ...viewDefaults(), id: v.id, name: v.name, source: "github", layout: v.layout };
+function normalizeView(v, layout, owner) {
+  const context = [...GITHUB_CONTEXTS, owner];
+  const settingsPath = layout === "board" ? [...context, "projects", v.id] : [...context, "prs"];
+  const common = { ...viewDefaults(), id: v.id, name: v.name ?? PRS_NAME, source: "github", layout, settingsPath };
   if (v.hide !== undefined) common.hide = v.hide;
   if (v.start !== undefined) common.start = v.start;
-  return { ...common, ...VIEW_KINDS[viewKind(common)].defaults(v) };
+  return { ...common, ...VIEW_KINDS[viewKind(common)].defaults(v, owner) };
 }
 
-// sources.github → { github: { views } or null, errors }. A view with
-// problems is left out and each problem is listed.
+const GITHUB_CONTEXT_KEYS = ["owner", "projects", "prs"];
+const GITHUB_CONTEXTS = ["sources", "github", "contexts"];
+const AZURE_CONTEXTS = ["sources", "azure", "contexts"];
+
+const LIST_NAMES = [[GITHUB_CONTEXTS, "owner"], [AZURE_CONTEXTS, "project"], [[...GITHUB_CONTEXTS, "*", "projects"], "id"]];
+export const nameKeyAt = (path) => LIST_NAMES.find(([at]) => at.length === path.length && at.every((k, i) => k === "*" || k === path[i]))?.[1] ?? null;
+
+// sources.github → { github: { contexts: [{ owner, views }] } or null,
+// errors }. A context or a tab with problems is left out and each problem is
+// listed; a tab's id is the first tab's of all contexts that has it.
 function readGithub(raw) {
   if (!isObject(raw)) return { github: null, errors: ["„sources.github“ muss ein Objekt sein"] };
-  const errors = Object.keys(raw).filter((k) => k !== "views").map((k) => `„sources.github.${k}“ gibt es nicht`);
-  if (!Array.isArray(raw.views) || !raw.views.length) errors.push("„sources.github.views“ braucht mindestens eine Ansicht");
-  const views = [];
-  (Array.isArray(raw.views) ? raw.views : []).forEach((v, i) => {
-    const where = `GitHub-Ansicht ${i + 1}${isText(v?.name) ? ` („${v.name}“)` : ""}`;
-    const problems = viewProblems(v);
-    if (!problems.length && entryById(raw.views, v.id) !== v) problems.push(`„id“ ${v.id} gibt es schon`);
+  const errors = Object.keys(raw).filter((k) => k !== "contexts" && k !== "views").map((k) => `„sources.github.${k}“ gibt es nicht`);
+  if ((!Array.isArray(raw.contexts) || !raw.contexts.length) && raw.views === undefined) {
+    errors.push("„sources.github.contexts“ braucht mindestens einen Kontext: { \"owner\", \"projects\": [...], \"prs\": { \"id\", \"sections\" } }");
+  }
+  const list = Array.isArray(raw.contexts) ? raw.contexts : [];
+  const ids = new Set();
+  const contexts = [];
+  list.forEach((a, i) => {
+    const where = `GitHub-Kontext ${i + 1}${isText(a?.owner) ? ` („${a.owner}“)` : ""}`;
+    const problems = contextProblems(a, list, GITHUB_CONTEXT_KEYS, nameKeyAt(GITHUB_CONTEXTS), "„owner“ fehlt: der Benutzer oder die Organisation auf GitHub, der die Projects gehören");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    views.push(normalizeView(v));
+    if (a.projects !== undefined && !Array.isArray(a.projects)) errors.push(`${where}: „projects“ ist eine Liste von Projects`);
+    if (a.prs === undefined) errors.push(`${where}: „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“ und „sections“`);
+    const tabs = [
+      ...(Array.isArray(a.projects) ? a.projects : []).map((p, j) => ({ v: p, layout: "board", at: `Project ${j + 1}${isText(p?.name) ? ` („${p.name}“)` : ""}` })),
+      ...(a.prs === undefined ? [] : [{ v: a.prs, layout: "list", at: "PR-Tab" }]),
+    ];
+    const views = [];
+    for (const { v, layout, at } of tabs) {
+      const tab = tabProblems(v, layout);
+      if (!tab.length && ids.has(v.id)) tab.push(`„id“ ${v.id} gibt es schon`);
+      if (isObject(v) && isText(v.id)) ids.add(v.id);
+      if (tab.length) errors.push(...tab.map((p) => `${where}, ${at}: ${p}`));
+      else views.push(normalizeView(v, layout, a.owner));
+    }
+    if (views.length) contexts.push({ owner: a.owner, views });
   });
-  return { github: views.length ? { views } : null, errors };
+  return { github: contexts.length ? { contexts } : null, errors };
 }
 
-// The views a team context may show, in the order of its switch: the id
+function contextProblems(a, list, keys, nameKey, missing) {
+  if (!isObject(a)) return ["muss ein Objekt sein"];
+  const out = Object.keys(a).filter((k) => !keys.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  if (!isText(a[nameKey])) out.push(missing);
+  else if (entryByName(list, a[nameKey], nameKey) !== a) out.push(`„${nameKey}“ ${a[nameKey]} gibt es schon`);
+  return out;
+}
+
+// The views a team tab may show, in the order of its switch: the id
 // views.json names, and the name the switch shows.
 export const TEAM_VIEWS = [
   { id: "sprint", name: "Sprint" },
@@ -696,49 +755,32 @@ const REPO_FOLDERS_TEXT = "ist eine Liste aus mindestens einem Ordner (Text), je
 const trimFolders = (v) => v.map((f) => f.replace(/(.)\/+$/, "$1"));
 const repoFoldersOk = (v) => v === undefined || (Array.isArray(v) && v.length > 0 && v.every(isText) && new Set(trimFolders(v)).size === v.length);
 
-// What is wrong with an entry of sources.azure.contexts: { "team": {
-// project, team }, "views"?: [...], "repoFolders"?: [...] } or { "prs": {
-// project } }.
-function contextProblems(c) {
-  if (!isObject(c)) return ["muss ein Objekt sein"];
-  const kinds = ["team", "prs"].filter((k) => c[k] !== undefined);
-  if (kinds.length !== 1) return ["braucht genau eins von „team“ und „prs“"];
-  const kind = kinds[0];
-  const keys = kind === "team" ? ["team", "views", "repoFolders"] : ["prs"];
-  const fields = kind === "team" ? ["project", "team"] : ["project"];
-  const out = Object.keys(c).filter((k) => !keys.includes(k)).map((k) => `„${k}“ gibt es nicht`);
-  const inner = c[kind];
-  if (!isObject(inner) || !fields.every((f) => isText(inner[f]))) out.push(`„${kind}“ braucht ${fields.map((f) => `„${f}“`).join(" und ")} (Text)`);
-  else out.push(...Object.keys(inner).filter((k) => !fields.includes(k)).map((k) => `„${kind}.${k}“ gibt es nicht`));
-  const views = c.views;
+const TEAM_KEYS = ["team", "views", "repoFolders"];
+
+// What is wrong with a team of an Azure context: { "team", "views"?: [...],
+// "repoFolders"?: [...] }.
+function teamProblems(t) {
+  if (!isObject(t)) return ["muss ein Objekt sein"];
+  const out = Object.keys(t).filter((k) => !TEAM_KEYS.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  if (!isText(t.team)) out.push("„team“ fehlt: der Name des Teams im Projekt");
+  const views = t.views;
   if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEW_IDS.includes(v)) && new Set(views).size === views.length)) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
-  if (kind === "team" && !repoFoldersOk(c.repoFolders)) out.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
+  if (!repoFoldersOk(t.repoFolders)) out.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
   return out;
 }
 
-// The name of a context's tab, from an entry of sources.azure.contexts as
-// it stands ("" when it names neither): the team, or "PRs · <project>".
-function contextName(c) {
-  if (isObject(c?.team) && isText(c.team.team)) return c.team.team;
-  return isObject(c?.prs) && isText(c.prs.project) ? `PRs · ${c.prs.project}` : "";
+// The tabs of an Azure context: { id, source: "azure", kind: "team", name,
+// org, project, team, views, repoFolders } per team, views in the switch's
+// order, then { id, source: "azure", kind: "prs", name, org, project } for
+// the project's pull requests; org the organisation's address (orgUrl).
+function teamTab(t, project, org, folders) {
+  const views = t.views ?? TEAM_VIEW_IDS;
+  const repoFolders = t.repoFolders ? trimFolders(t.repoFolders) : folders;
+  return { id: `azure:team:${project}/${t.team}`, source: "azure", kind: "team", name: t.team, org, project, team: t.team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)), repoFolders };
 }
-
-// A context as the board uses it: { id, source: "azure", kind: "team",
-// name, org, project, team, views, repoFolders } or { id, source: "azure",
-// kind: "prs", name, org, project }; views in the switch's order, org the
-// organisation's address (orgUrl).
-function normalizeContext(c, org, folders) {
-  const name = contextName(c);
-  if (c.team) {
-    const views = c.views ?? TEAM_VIEW_IDS;
-    const { project, team } = c.team;
-    const repoFolders = c.repoFolders ? trimFolders(c.repoFolders) : folders;
-    return { id: `azure:team:${project}/${team}`, source: "azure", kind: "team", name, org, project, team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)), repoFolders };
-  }
-  return { id: `azure:prs:${c.prs.project}`, source: "azure", kind: "prs", name, org, project: c.prs.project };
-}
+const prsTab = (project, org) => ({ id: `azure:prs:${project}`, source: "azure", kind: "prs", name: PRS_NAME, org, project });
 
 // An organisation's address: https://<host>/<organisation>, a trailing /
 // dropped; null for anything else.
@@ -747,9 +789,16 @@ function orgUrl(value) {
   return /^https:\/\/[^/\s]+\/[^/\s]+$/.test(url) ? url : null;
 }
 
-// sources.azure → { azure: { org, contexts } or null, errors }. Without a
-// valid org (orgUrl) nothing of it is usable; a context with problems is left out and
-// each problem is listed.
+const AZURE_CONTEXT_KEYS = ["project", "teams"];
+
+// An entry of sources.azure.contexts in the form before the contexts: { team:
+// { project, team }, … } or { prs: { project } }.
+const beforeContexts = (entry) => isObject(entry) && (Object.hasOwn(entry, "team") || Object.hasOwn(entry, "prs"));
+const holdsBeforeContexts = (contexts) => Array.isArray(contexts) && contexts.some(beforeContexts);
+
+// sources.azure → { azure: { org, contexts: [{ project, tabs }] } or null,
+// errors }. Without a valid org (orgUrl) nothing of it is usable; a context
+// or a team with problems is left out and each problem is listed.
 function readAzure(raw) {
   if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
   const errors = Object.keys(raw).filter((k) => !["org", "contexts", "repoFolders"].includes(k)).map((k) => `„sources.azure.${k}“ gibt es nicht`);
@@ -758,35 +807,39 @@ function readAzure(raw) {
   if (!foldersOk) errors.push(`„sources.azure.repoFolders“ ${REPO_FOLDERS_TEXT}`);
   const folders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
-  if (!Array.isArray(raw.contexts) || !raw.contexts.length) {
-    errors.push("„sources.azure.contexts“ braucht mindestens einen Eintrag: { \"team\": { \"project\", \"team\" } } oder { \"prs\": { \"project\" } }");
+  const list = Array.isArray(raw.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : [];
+  if (!list.length && !holdsBeforeContexts(raw.contexts)) {
+    errors.push("„sources.azure.contexts“ braucht mindestens einen Kontext: { \"project\", \"teams\": [{ \"team\" }] }");
   }
   const contexts = [];
-  (Array.isArray(raw.contexts) ? raw.contexts : []).forEach((c, i) => {
-    const name = contextName(c);
-    const where = `Azure-Kontext ${i + 1}${name ? ` („${name}“)` : ""}`;
-    const problems = contextProblems(c);
-    const context = problems.length ? null : normalizeContext(c, org, folders);
-    if (context && contexts.some((x) => x.id === context.id)) problems.push("gibt es schon");
+  list.forEach((a, i) => {
+    const where = `Azure-Kontext ${i + 1}${isText(a?.project) ? ` („${a.project}“)` : ""}`;
+    const problems = contextProblems(a, list, AZURE_CONTEXT_KEYS, nameKeyAt(AZURE_CONTEXTS), "„project“ fehlt: der Name des Projekts in der Organisation");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    contexts.push(context);
+    if (a.teams !== undefined && !Array.isArray(a.teams)) errors.push(`${where}: „teams“ ist eine Liste von Teams`);
+    const tabs = [];
+    (Array.isArray(a.teams) ? a.teams : []).forEach((t, j) => {
+      const at = `${where}, Team ${j + 1}${isText(t?.team) ? ` („${t.team}“)` : ""}`;
+      const team = teamProblems(t);
+      if (!team.length && tabs.some((c) => c.team === t.team)) team.push("gibt es schon");
+      if (team.length) return errors.push(...team.map((p) => `${at}: ${p}`));
+      tabs.push(teamTab(t, a.project, org, folders));
+    });
+    contexts.push({ project: a.project, tabs: [...tabs, prsTab(a.project, org)] });
   });
-  // Teams of one name in different projects: their tabs name the project.
-  for (const c of contexts) {
-    if (c.kind === "team" && contexts.some((x) => x !== c && x.kind === "team" && x.team === c.team)) c.name = `${c.team} · ${c.project}`;
-  }
   return { azure: org && contexts.length ? { org, contexts } : null, errors };
 }
 
 // views.json as text (null: there is none) and this machine's settings as
 // read (`settingsRead`: { name, text }, text null for no file, or { name,
-// error }) → { config, errors, settings, origin }: config is {
+// error }) → { config, errors, settings, origin, moving? }: config is {
 // refreshMinutes, start, repos, azure: { org, contexts } or null, github: {
-// views } or null }, settings those applied (null: none), origin
-// mergeSettings's. A view or context with problems is left out and each
-// problem is listed; config is null only when nothing usable is left.
+// contexts } or null }, settings those applied (null: none), origin
+// mergeSettings's, moving settingsForContexts's move where the settings can
+// move. A context or a tab with problems is left out and each problem is
+// listed; config is null only when nothing usable is left.
 export function readConfig(text, settingsRead = null) {
-  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}).origin });
+  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin });
   if (text === null || text === undefined) return none(`${CONFIG_NAME}.json fehlt im Ordner der Mod`);
   let raw;
   try {
@@ -794,7 +847,7 @@ export function readConfig(text, settingsRead = null) {
   } catch (e) {
     return none(`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`);
   }
-  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}).origin };
+  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}, nameKeyAt).origin };
   if (!settingsRead) return alone;
   const { name } = settingsRead;
   const named = (errors) => errors.map((e) => `${name}: ${e}`);
@@ -802,12 +855,17 @@ export function readConfig(text, settingsRead = null) {
   if (settingsRead.error !== undefined) return unused([`${name} ließ sich nicht lesen: ${settingsRead.error}`]);
   const { settings, errors } = readSettings(settingsRead.text, name);
   if (!settings) return unused(errors);
-  const { merged, errors: unmatched, origin } = mergeSettings(raw, settings);
+  const moving = settingsForContexts(raw, settings);
+  if (moving?.problems) return unused(named(moving.problems));
+  if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
+  const { merged, errors: unmatched, origin } = mergeSettings(raw, settings, nameKeyAt);
   const read = validateConfig(merged);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
   if (added.length) return unused(named([...unmatched, ...added]));
   return { ...read, errors: [...read.errors, ...named(unmatched)], settings, origin };
 }
+
+export const MOVE_AGAIN = "das nächste Lesen (r) versucht es noch einmal";
 
 export const settingsAlone = (subject) => `${subject} gilt nicht: das Board zeigt ${CONFIG_NAME}.json allein`;
 
@@ -835,6 +893,7 @@ export function validateConfig(raw) {
   let github = null;
   if (isObject(raw.sources)) {
     const sources = raw.sources;
+    if ((isObject(sources.github) && sources.github.views !== undefined) || (isObject(sources.azure) && holdsBeforeContexts(sources.azure.contexts))) errors.push(BEFORE_CONTEXTS);
     errors.push(...Object.keys(sources).filter((k) => k !== "azure" && k !== "github").map((k) => `„sources.${k}“ gibt es nicht (nur „azure“ und „github“)`));
     if (sources.azure !== undefined) {
       const read = readAzure(sources.azure);
@@ -846,17 +905,89 @@ export function validateConfig(raw) {
       github = read.github;
       errors.push(...read.errors);
     }
-    if (!azure && !github) errors.push("„sources“ braucht mindestens eine Ansicht: in „sources.azure.contexts“ oder „sources.github.views“");
+    if (!azure && !github) errors.push("„sources“ braucht mindestens einen Kontext: in „sources.github.contexts“ oder „sources.azure.contexts“");
   } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
   else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
   return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }
 
-// The GitHub views of a config (none without one).
-export const githubViews = (config) => config?.github?.views ?? [];
+export const githubViews = (config) => (config?.github?.contexts ?? []).flatMap((c) => c.views);
 
-export const hidePath = (view) => ["sources", "github", "views", view.id, "hide"];
+export const hidePath = (view) => [...view.settingsPath, "hide"];
+
+const viewPath = (...id) => ["sources", "github", "views", ...id];
+
+// The keys of a GitHub view of the form before the contexts that its tab
+// holds as they were, and those it says through its context: its source, its
+// layout and its project's owner.
+function tabSettings(value, layout, owner) {
+  if (!isObject(value)) return { problem: "ist kein Objekt" };
+  const kind = VIEW_KINDS[viewKind({ source: "github", layout })];
+  const out = {};
+  for (const [key, v] of Object.entries(value)) {
+    if ((key === "source" && v === "github") || (key === "layout" && v === layout)) continue;
+    if (key === "project" && layout === "board" && isObject(v)) {
+      for (const [inner, w] of Object.entries(v)) {
+        if (inner === "owner" && w === owner) continue;
+        if (!kind.keys.includes(inner) || inner === "filter") return { problem: `„project.${inner}“ hat im Kontext ${owner} keinen Platz` };
+        out[inner] = w;
+      }
+    } else if (COMMON_KEYS.includes(key) || kind.keys.includes(key)) out[key] = v;
+    else return { problem: `„${key}“ hat im Kontext ${owner} keinen Platz` };
+  }
+  return { value: out };
+}
+
+function partsBeforeContexts(settings) {
+  const sources = isObject(settings) && isObject(settings.sources) ? settings.sources : {};
+  return { sources, views: isObject(sources.github) ? sources.github.views : undefined, teams: isObject(sources.azure) && holdsBeforeContexts(sources.azure.contexts) };
+}
+
+export function settingsBeforeContexts(settings) {
+  const { views, teams } = partsBeforeContexts(settings);
+  return views !== undefined || teams;
+}
+
+// → null, { problems }, or { settings, moved: [[from, to]] }. Where any
+// value has no place in the contexts, or views.json has problems, nothing
+// moves.
+export function settingsForContexts(raw, settings) {
+  if (!settingsBeforeContexts(settings)) return null;
+  const { sources, views, teams } = partsBeforeContexts(settings);
+  const { config, errors } = validateConfig(raw);
+  if (errors.length) return { problems: [`noch in der Form vor den Kontexten; erst ${CONFIG_NAME}.json berichtigen, dann werden die Einstellungen umgestellt`] };
+  const cannot = (path, why) => `${pathText(path)} lässt sich nicht auf die Kontexte umstellen: ${why}`;
+  const problems = [];
+  if (teams) problems.push(cannot(AZURE_CONTEXTS, "die Teams stehen jetzt je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\" }); bitte von Hand übertragen"));
+  if (views !== undefined && !isObject(views)) problems.push(cannot(viewPath(), "hier eine ganze Liste; bitte von Hand nach „sources.github.contexts“ übertragen"));
+  if (sources.github?.contexts !== undefined && !isObject(sources.github.contexts)) problems.push(cannot(GITHUB_CONTEXTS, "hier eine ganze Liste"));
+  const tabs = new Map((config.github?.contexts ?? []).flatMap((c) => c.views.map((v) => [v.id, { view: v, owner: c.owner }])));
+  let next = isObject(views) ? withSetting(settings, viewPath(), undefined, nameKeyAt) : settings;
+  const moved = [];
+  for (const [id, value] of Object.entries(isObject(views) ? views : {})) {
+    const from = viewPath(id);
+    const tab = tabs.get(id);
+    if (!tab) {
+      problems.push(cannot(from, `${CONFIG_NAME}.json hat keinen Tab mit „id“ „${id}“`));
+      continue;
+    }
+    const to = tab.view.settingsPath;
+    const kept = tabSettings(value, tab.view.layout, tab.owner);
+    if (kept.problem) problems.push(cannot(from, kept.problem));
+    else if (valueAt(next, to, nameKeyAt) !== undefined) problems.push(cannot(from, `${pathText(to)} steht hier schon`));
+    else if (!problems.length) {
+      try {
+        next = withSetting(next, to, kept.value, nameKeyAt);
+        moved.push([from, to]);
+      } catch (e) {
+        if (!(e instanceof BoardError)) throw e;
+        problems.push(cannot(from, e.message));
+      }
+    }
+  }
+  return problems.length ? { problems } : { settings: next, moved };
+}
 
 // The start for an item: the defaults, then views.json's start, then the
 // view's start, then the repo's entry in repos; a later one wins.
@@ -1051,8 +1182,8 @@ export function storedHiddenList(view, stored) {
 
 // `entryOf(view)`: what the store holds for the view, undefined for nothing.
 // → { moves: [{ view, list }], drop: [view] }: an entry is dropped where it
-// is no stored hide, this machine sets the view's hide already, or it
-// changes nothing.
+// is no stored hide, its view no board, this machine sets the view's hide
+// already, or it changes nothing.
 export function storedHiddenMoves(views, entryOf, originAt) {
   const moves = [];
   const drop = [];
@@ -1060,7 +1191,7 @@ export function storedHiddenMoves(views, entryOf, originAt) {
     const entry = entryOf(view);
     if (entry === undefined) continue;
     const stored = readStoredHidden(entry);
-    const list = stored && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
+    const list = stored && view.layout === "board" && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
     if (list && !sameNames(list, view.hide)) moves.push({ view, list });
     else drop.push(view);
   }
@@ -1396,80 +1527,108 @@ export function startRow(rows, now) {
 
 // ==== src/contexts.js ====
 
-// The top bar's order of things: the sources it toggles between, the
-// contexts of each, one tab apiece, and the view a context shows. On Azure a
-// context is a team, with its views (Sprint, Backlog), or a project's pull
-// requests; on GitHub each view of views.json is one.
-
-// The sources in the toggle's order; with none remembered, the board shows
-// the first one there is.
-export const SOURCES = [
-  { id: "github", name: "GitHub" },
-  { id: "azure", name: "Azure" },
-];
+// The top bar's order of things: the contexts it switches between, grouped
+// by their source, the tabs of each, and the view a tab shows.
 
 // A team view's name, as the switch shows it.
 export const teamViewName = (id) => TEAM_VIEWS.find((v) => v.id === id)?.name ?? id;
 
-// The contexts of a source in a config, in views.json's order: { id, source,
-// kind: "team" | "prs" | "view", name, … } (a team's fields, a project's, or
-// the GitHub view as `view`).
-export function contextsOf(config, source) {
-  if (source === "azure") return config?.azure?.contexts ?? [];
-  if (source === "github") return githubViews(config).map((v) => ({ id: githubContextId(v.id), source: "github", kind: "view", name: v.name, view: v }));
-  return [];
-}
+// The id of a GitHub view's tab.
+export const githubTabId = (viewId) => `github:${viewId}`;
 
-// The id of a GitHub view's context (its tab).
-export const githubContextId = (viewId) => `github:${viewId}`;
+const githubTab = (v) => ({ id: githubTabId(v.id), source: "github", kind: "view", name: v.name, view: v });
 
-// Whether a context has a switch between views: a team with more than one.
-export const hasViewSwitch = (context) => context?.kind === "team" && context.views.length > 1;
+// The sources in the switch's order, each with its contexts in views.json's.
+export const SOURCES = [
+  {
+    id: "github",
+    name: "GitHub",
+    contexts: (config) => (config?.github?.contexts ?? []).map((c) => ({ id: `github:${c.owner}`, name: c.owner, tabs: c.views.map(githubTab) })),
+  },
+  {
+    id: "azure",
+    name: "Azure",
+    contexts: (config) => (config?.azure?.contexts ?? []).map((c) => ({ id: `azure:${c.project}`, name: c.project, tabs: c.tabs })),
+  },
+];
+
+// The contexts of a config, in the switch's order: { id, source, name,
+// tabs }, a tab { id, source, kind: "team" | "prs" | "view", name, … } (a
+// team's fields, a project's, or the GitHub view as `view`).
+export const contextsOf = (config) => SOURCES.flatMap((s) => s.contexts(config).map((c) => ({ ...c, source: s.id })));
+
+// Whether a tab has a switch between views: a team with more than one.
+export const hasViewSwitch = (tab) => tab?.kind === "team" && tab.views.length > 1;
 
 // The hint line's name for a team's switch: its views' names, "Sprint/Backlog".
-export const viewSwitchHint = (context) => context.views.map(teamViewName).join("/");
-
-// The sources of a config that have a context, in the toggle's order.
-export const sourcesOf = (config) => SOURCES.filter((s) => contextsOf(config, s.id).length);
+export const viewSwitchHint = (tab) => tab.views.map(teamViewName).join("/");
 
 // The index `by` places on from `at` in a list `length` long, round past
-// its end to its start and back: the next or previous tab, source or view.
+// its end to its start and back: the next or previous tab, context or view.
 export const stepIndex = (length, at, by) => (at + by + length) % length;
 
 // The index in `list` of `shown` (by its id), -1 for none: the shown tab
-// among the contexts, the shown source among the sources.
+// among the tabs, the shown context among the contexts.
 export const shownIndex = (list, shown) => list.findIndex((x) => x.id === shown?.id);
 
-// The source after `shown` among `sources`, in the toggle's order.
-export const sourceAfter = (sources, shown) => sources[stepIndex(sources.length, shownIndex(sources, shown), 1)];
-
-// The view a team context shows after `shown`, one of its views.
-export const teamViewAfter = (context, shown) => context.views[stepIndex(context.views.length, context.views.indexOf(shown), 1)];
+// The view a team tab shows after `shown`, one of its views.
+export const teamViewAfter = (tab, shown) => tab.views[stepIndex(tab.views.length, tab.views.indexOf(shown), 1)];
 
 // The entry of `list` whose id is `id`, else the first; null in an empty
 // list. A remembered choice that views.json no longer has falls back so.
 export const pick = (list, id) => list.find((x) => x.id === id) ?? list[0] ?? null;
 
-// The view a team context shows: the remembered one where it has it, else
-// its first.
-export const teamView = (context, remembered) => (context.views.includes(remembered) ? remembered : context.views[0]);
+// The view a team tab shows: the remembered one where it has it, else its
+// first.
+export const teamView = (tab, remembered) => (tab.views.includes(remembered) ? remembered : tab.views[0]);
 
-// The view a context shows (a team: its view `teamViewId`): a GitHub view
-// as views.json has it, an Azure one { id, source: "azure", layout:
-// "sprint" | "backlog" | "prs", name, context, hide, start }. Its kind is
-// viewKind(view).
-export function viewOf(context, teamViewId) {
-  if (context.kind === "view") return context.view;
-  if (context.kind === "team") {
-    return { id: `${context.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), context, ...viewDefaults() };
+// The view a tab shows (a team: its view `teamViewId`): a GitHub view as
+// views.json has it, an Azure one { id, source: "azure", layout: "sprint" |
+// "backlog" | "prs", name, tab, hide, start }. Its kind is viewKind(view).
+export function viewOf(tab, teamViewId) {
+  if (tab.kind === "view") return tab.view;
+  if (tab.kind === "team") {
+    return { id: `${tab.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), tab, ...viewDefaults() };
   }
-  return { id: context.id, source: "azure", layout: "prs", name: context.name, context, ...viewDefaults() };
+  return { id: tab.id, source: "azure", layout: "prs", name: tab.name, tab, ...viewDefaults() };
 }
 
-// Every view of a config: one per context, one per view of a team.
-export function viewsOf(config) {
-  const contexts = SOURCES.flatMap((s) => contextsOf(config, s.id));
-  return contexts.flatMap((c) => (c.kind === "team" ? c.views.map((v) => viewOf(c, v)) : [viewOf(c)]));
+// Every view of a context or a config: one per tab, one per view of a
+// team.
+export const contextViews = (context) => context.tabs.flatMap((t) => (t.kind === "team" ? t.views.map((v) => viewOf(t, v)) : [viewOf(t)]));
+export const viewsOf = (config) => contextsOf(config).flatMap(contextViews);
+
+// The first context of `source`, which a source alone names.
+export const firstContextOf = (contexts, source) => contexts.find((c) => c.source === source) ?? null;
+
+// While `complete` is false (views.json has problems), a key that names no
+// context stays, and so does a source whose tab names none.
+export function shownContextMoves(contexts, get, complete) {
+  const set = [];
+  const gone = new Set();
+  const view = get("view");
+  const before = typeof view === "string" ? { source: "github", "tab:github": githubTabId(view) } : {};
+  const old = (key) => get(key) ?? before[key] ?? null;
+  const contextOf = (tab) => contexts.find((c) => c.tabs.some((t) => t.id === tab)) ?? null;
+  const move = (key, context, to, value) => {
+    if (context && get(to) === null) set.push([to, value]);
+    if (context || complete) gone.add(key);
+  };
+  for (const s of SOURCES) {
+    const tab = old(`tab:${s.id}`);
+    const context = tab === null ? null : contextOf(tab);
+    if (tab !== null) move(`tab:${s.id}`, context, `tab:${context?.id}`, tab);
+  }
+  const source = old("source");
+  const tab = source === null ? null : old(`tab:${source}`);
+  const named = tab === null ? null : contextOf(tab);
+  if (source !== null && (complete || tab === null || named)) {
+    const context = (named?.source === source ? named : null) ?? firstContextOf(contexts, source);
+    move("source", context, "context", context?.id);
+  }
+  const remove = [...gone].filter((key) => get(key) !== null);
+  if (Object.keys(before).length && Object.keys(before).every((key) => get(key) !== null || gone.has(key))) remove.push("view");
+  return { set, remove };
 }
 
 // ==== src/tools.js ====
@@ -1685,9 +1844,15 @@ export const SAVED_PREFIX = "board:data:";
 export const SAVED_VERSION = 1;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
 
-// Data read for other hidden columns or another form of the view is not
-// its data.
-const savedSig = (view, hidden) => JSON.stringify([SAVED_VERSION, view, [...hidden].sort()]);
+// Data read for other hidden columns, another form of the view or another
+// organisation, project or team of its tab is not its data; where its
+// settings lie and the rest of its tab are not its form. A GitHub view has
+// no tab and signs without one, so its data saved before the contexts holds.
+const savedSig = (view, hidden) => {
+  const { settingsPath, tab, ...form } = view;
+  const reads = tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
+  return JSON.stringify([SAVED_VERSION, form, ...reads, [...hidden].sort()]);
+};
 
 // The size the store measures `text` by.
 export function storeBytes(text) {
@@ -1727,13 +1892,13 @@ export const NO_LIVE = { partial() {}, page() {} };
 
 export const refreshDue = (st, now, every) => now - st.tried >= every;
 
-export function prefetchOrder(views, { shown, source, now, every, stateOf, loads }) {
+export function prefetchOrder(views, { shown, contextViewIds, source, now, every, stateOf, loads }) {
   const due = views.filter((v) => {
     if (v.id === shown?.id || !loads(v)) return false;
     const st = stateOf(v.id);
     return !st.loading && !st.unavailable && refreshDue(st, now, every);
   });
-  const rank = (v) => [v.source === source ? 0 : 1, stateOf(v.id).at];
+  const rank = (v) => [contextViewIds.has(v.id) ? 0 : v.source === source ? 1 : 2, stateOf(v.id).at];
   return due.sort((a, b) => {
     const [x, y] = [rank(a), rank(b)];
     return x[0] - y[0] || x[1] - y[1];
@@ -2403,9 +2568,9 @@ export const azList = (json) => (Array.isArray(json) ? json : Array.isArray(json
 // values: [{ value, includeChildren }], default (the area a new work item
 // gets, or null) }.
 export function parseAreas(stdout) {
-  const json = azJson(stdout, "die Bereiche des Teams");
+  const json = azJson(stdout, "die Bereichspfade des Teams");
   const values = (Array.isArray(json?.values) ? json.values : []).filter((v) => typeof v?.value === "string" && v.value);
-  if (!values.length) throw new BoardError("Azure nannte keine Bereiche des Teams");
+  if (!values.length) throw new BoardError("Azure nannte keine Bereichspfade des Teams");
   return {
     field: json.field?.referenceName ?? AREA_PATH,
     values: values.map((v) => ({ value: v.value, includeChildren: v.includeChildren === true })),
@@ -2599,7 +2764,7 @@ export function backlogWarnings(data) {
 // shape shows it (sprintBoard), a task's move on the taskboard, and the
 // view as makeAzure uses it (sprintView).
 
-// The Sprint view's calls for a team context `c` ({ org, project, team }):
+// The Sprint view's calls for a team tab `c` ({ org, project, team }):
 // its current iteration, its areas (azAreasArgs), its taskboard's columns,
 // the project's work item types with their states, the team's backlog
 // configuration for its order field (s.backlogConfig), and per refresh the
@@ -2969,7 +3134,7 @@ export function sprintView(s) {
     return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c), what(view, "iteration"))))?.id ?? null;
   }
   async function loadSprint(view, chosen, live, last) {
-    const c = view.context;
+    const c = view.tab;
     const me = s.whoAmI(view);
     const settings = settingsOf(c, view);
     const listed = chosen ? iterationsOf(c, view) : null;
@@ -3008,7 +3173,7 @@ export function sprintView(s) {
       s.drop(titlesKey(s, c));
     },
     async iterations(view) {
-      const c = view.context;
+      const c = view.tab;
       const [list, current] = await Promise.all([iterationsOf(c, view), currentIdOf(c, view)]);
       return list.map((i) => ({ ...i, current: i.id === current }));
     },
@@ -3022,7 +3187,7 @@ export function sprintView(s) {
       if (plan.state) await s.setState(view, card, plan.state, onRefusal);
       if (!file) return plan;
       try {
-        const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
+        const out = await s.az(azMoveArgs(view.tab, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.tab));
         checkTaskboardMove(out, card, column);
       } catch (e) {
         throw plan.state ? columnNotMoved(plan.state, e) : e;
@@ -3039,7 +3204,7 @@ export function sprintView(s) {
 // backlog shape shows it (backlogList), a create and a parent link, and
 // the view as makeAzure uses it (backlogView).
 
-// The Backlog view's calls for a team context `c`: the team's backlog
+// The Backlog view's calls for a team tab `c`: the team's backlog
 // levels; its backlog configuration (the order field, each type's states
 // and their categories) and its settings (default and backlog iteration;
 // its default area comes from azAreasArgs' defaultValue), both of which the
@@ -3269,7 +3434,7 @@ export function backlogView(s) {
   return {
     forget,
     async load(view, { live = NO_LIVE }) {
-      const c = view.context;
+      const c = view.tab;
       const me = s.whoAmI(view);
       const settings = backlogSettingsOf(c, view);
       let types = null;
@@ -3296,7 +3461,7 @@ export function backlogView(s) {
     // that follows the current one (data.meta.follows) is read again first:
     // the one kept may have ended since, and Azure names no end for it.
     async create(view, data, { type, title }) {
-      const c = view.context;
+      const c = view.tab;
       let iteration = data.meta.iteration;
       if (data.meta.follows) {
         iteration = parseTeamSettings(await s.az(azTeamSettingsArgs(c), what(view, "team-settings"))).defaultIteration;
@@ -3307,12 +3472,12 @@ export function backlogView(s) {
     },
     // Makes the work item `id` a child of `parent`.
     async addParent(view, id, parent) {
-      checkParentLink(await s.az(azParentArgs(view.context, id, parent), { write: true, ...what(view, "parent-link") }), parent);
+      checkParentLink(await s.az(azParentArgs(view.tab, id, parent), { write: true, ...what(view, "parent-link") }), parent);
     },
     // The work items createdWiql finds for a create ({ type, title,
     // child }) in the view's project, as parseWorkItems reads them.
     async findCreated(view, { type, title, child }) {
-      const c = view.context;
+      const c = view.tab;
       return parseWorkItems(await s.az(azQueryArgs(c, createdWiql({ project: c.project, type, title, child })), what(view, "created-items")), c);
     },
   };
@@ -3411,7 +3576,7 @@ const section = (count, lines, error = null) => ({
   count, sent: lines.length, cut: false, hidden: error ? 0 : count - lines.length, hiddenAs: "nicht gefunden", error, lines,
 });
 
-// The related items of the work item `item` in the team context `c`
+// The related items of the work item `item` in the team tab `c`
 // (related.js): one az call, and one query more where it has children or
 // a parent. A failed query shows its reason in the children's place and
 // the parent's and marks the read to be repeated after the next refresh
@@ -3486,14 +3651,14 @@ export function parseAzurePullRequest(stdout) {
 // id, read in the view's organisation.
 export const azurePullRequest = (az) => ({
   reads: (item) => item.kind === "pr" && Number.isInteger(item.number),
-  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.context, item.number), what(view, "pull-request"))),
+  load: async (item, view) => parseAzurePullRequest(await az(azPullRequestArgs(view.tab, item.number), what(view, "pull-request"))),
 });
 
 // The Azure source's `related` (related.js): a work item with an id has
 // some to read.
 export const azureRelated = (az) => ({
   reads: (item) => item.kind === "workitem" && Number.isInteger(item.number),
-  load: (item, view) => loadAzureRelated(az, view.context, item, view),
+  load: (item, view) => loadAzureRelated(az, view.tab, item, view),
 });
 
 // ==== src/sources/azure/index.js ====
@@ -3653,7 +3818,7 @@ export function makeAzure(paths) {
       throw e;
     },
     setState: (view, item, state, onRefusal) =>
-      az(azStateArgs(view.context, item.number, state), { write: true, ...what(view, "state") }).catch(onRefusal(view.context)).then((out) => checkStateResult(out, state)),
+      az(azStateArgs(view.tab, item.number, state), { write: true, ...what(view, "state") }).catch(onRefusal(view.tab)).then((out) => checkStateResult(out, state)),
   };
   const views = { sprint: sprintView(shared), backlog: backlogView(shared) };
   const members = readMemo();
@@ -3669,17 +3834,17 @@ export function makeAzure(paths) {
       // The team's members, kept (parseMemberList); who az is is asked
       // each time, so a viewer read since counts.
       async people(item, view) {
-        const c = view.context;
+        const c = view.tab;
         const [list, me] = await Promise.all([members.get(teamKey(c), () => az(azMembersArgs(c), what(view, "members")).then(parseMemberList)), whoAmI(view)]);
         return membersFor(list, me);
       },
       // Without the list, az still knows its own account: "me".
       fallbackMe: () => ({ login: viewer, name: null, me: true }),
-      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.context, item.number, person), { write: true, ...what(view, "assign") }), item.number, person),
+      write: async (view, item, person) => checkAzAssigned(await az(azAssignArgs(view.tab, item.number, person), { write: true, ...what(view, "assign") }), item.number, person),
     },
     // Drops what the view keeps of its team (r, Board.reload).
     forget(view) {
-      if (view.context?.kind === "team") views[view.layout]?.forget(view.context);
+      if (view.tab?.kind === "team") views[view.layout]?.forget(view.tab);
     },
     views,
   };
@@ -5304,8 +5469,8 @@ export function typeTone(t, item) {
 // Which tones and tints these helpers take: tones.js.
 
 // What lasts across reloads beside this machine's settings (settings.js):
-// the shown source ("source"), each source's tab ("tab:<source>"), each
-// team's view ("teamView:<context>"), "nur meine" ("mine"), a Sprint's
+// the shown context ("context"), each context's tab ("tab:<context>"),
+// each team's view ("teamView:<tab>"), "nur meine" ("mine"), a Sprint's
 // folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or
@@ -5353,17 +5518,6 @@ export const store = {
     }
   },
 };
-
-// The shown view a board before the top bar kept ("view": a GitHub view's
-// id) becomes the GitHub source and that tab, once; what is set already
-// stays.
-export function migrateShownView() {
-  const view = store.get("view");
-  if (typeof view !== "string") return;
-  if (store.get("source") === null) store.set("source", "github");
-  if (store.get("tab:github") === null) store.set("tab:github", githubContextId(view));
-  store.set("view", null);
-}
 
 export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
@@ -6828,9 +6982,9 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // - takes(c): whether its key is taken (when by default): a few keys are
 //   taken where they do nothing, or say why they do nothing;
 // - bar: an action of the whole board or of the top bar (the tabs, the
-//   source, the team view, nur meine, the filter, reload, the menu), which
-//   runs on the moment as it is, without the board keeping its selection
-//   first (Board.keptContext);
+//   contexts, the team view, nur meine, the filter, reload, the menu), which
+//   runs on the situation as it is, without the board keeping its selection
+//   first (Board.keptSituation);
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
 // - hint(c): its text on the hint line, null for none; hintKey: the key
@@ -6840,28 +6994,30 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 //   leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc).
-// `c` is what the Board says of the moment (Board.actionContext): { b,
-// view, st, shape, item (the selected one), details (the item whose details
-// show: where the panel went down into a related item, that one), related
+// `c` is the situation an action runs in (Board.situation): { b, view, st,
+// shape, item (the selected one), details (the item whose details show:
+// where the panel went down into a related item, that one), related
 // (whether those read related items), sessions (how many sessions they
 // list: itemSessions), panel (the details panel's keyboard, or null), lines
 // (its lines now: Board.linesOf; null without it), line (its selected line
-// by what it is, related.js lineId, or null), picked
-// (that line among the panel's lines now: { related } or { session }, null
-// where it is not there, as a related item's line until a read brings it
-// again), drilled (whether the panel shows a related item rather than the
-// board's selected one), trail (the keys of the items on the panel's way
-// down, the board's selected one first) }.
+// by what it is, related.js lineId, or null), picked (that line among the
+// panel's lines now: { related } or { session }, null where it is not
+// there, as a related item's line until a read brings it again), drilled
+// (whether the panel shows a related item rather than the board's selected
+// one), trail (the keys of the items on the panel's way down, the board's
+// selected one first) }.
 
 // What a key event names (an action's key), or null for one no action has:
-// [ ] / and : as typed (with Shift, or with Control+Alt; Control alone
-// stays herdr's, and Alt alone is let through: a key herdr binds with Alt
-// never reaches a mod), else with no Control, Alt or platform key a digit,
-// Enter, or a letter: upper case with Shift alone, so that Caps Lock
-// changes no key, and an upper case letter is its own key (Shift+S is no s).
+// [ ] { } / and : as typed (with Shift, or with Control+Alt, as AltGr
+// types { } on a German layout; Control alone stays herdr's, and Alt alone
+// is let through: a key herdr binds with Alt never reaches a mod), else
+// with no Control, Alt or platform key a digit, Enter, or a letter: upper
+// case with Shift alone, so that Caps Lock changes no key, and an upper
+// case letter is its own key (Shift+S is no s). A digit after a g is the
+// key g and the digit (jumpKey, main.js).
 export function keyName(k, ch, mod) {
   const typed = !(mod.control && !mod.alt) && !mod.platform;
-  if (typed && ["[", "]", "/", ":"].includes(ch)) return ch;
+  if (typed && ["[", "]", "{", "}", "/", ":"].includes(ch)) return ch;
   if (mod.control || mod.alt || mod.platform) return null;
   if (/^[1-9]$/.test(ch)) return ch;
   if (k === "enter") return "enter";
@@ -6957,13 +7113,12 @@ export function hintsOf(c) {
   return shown.filter((h) => leads(h) || !named.has(h.key)).map((h) => [h.key, h.text]);
 }
 
-// The shown source's tabs, and the shown one's index.
-const tabsOf = (c) => c.b.contexts();
-const tabAt = (c) => shownIndex(tabsOf(c), c.b.context());
+const tabsOf = (c) => c.b.tabs();
+const tabAt = (c) => shownIndex(tabsOf(c), c.b.tab());
+const contextsNow = (c) => contextsOf(c.b.config);
+const contextAt = (c) => shownIndex(contextsNow(c), c.b.context());
 
-// The source after the shown one, and the shown team's next view.
-const nextSource = (c) => sourceAfter(sourcesOf(c.b.config), c.b.source());
-const nextView = (c) => teamViewAfter(c.b.context(), c.b.teamViewOf(c.b.context()));
+const nextView = (c) => teamViewAfter(c.b.tab(), c.b.teamViewOf(c.b.tab()));
 
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
@@ -7030,6 +7185,18 @@ const tabAction = (n) => ({
   ...(n === 1 ? { hint: () => "Tab", hintKey: "1 2 3 [ ]" } : {}),
 });
 
+const contextAction = (n) => ({
+  id: `context-${n}`,
+  group: "board",
+  name: (c) => `Kontext ${n}: ${contextsNow(c)[n - 1].name}`,
+  key: `g${n}`,
+  menu: 42,
+  bar: true,
+  when: (c) => Boolean(contextsNow(c)[n - 1]) && n - 1 !== contextAt(c),
+  takes: () => true,
+  run: (b, c, cx) => b.switchContext(n - 1, cx),
+});
+
 // A move of the selected card or task one column on (`by` 1) or back (-1).
 const moveAction = (id, key, by, name) => ({
   id,
@@ -7056,15 +7223,22 @@ export const ACTIONS = [
     run: (b, c, cx) => b.stepTab(-1, cx),
   },
   {
-    id: "source", group: "board", name: (c) => `Quelle wechseln: ${nextSource(c).name}`, key: null, menu: 42, bar: true,
-    when: (c) => sourcesOf(c.b.config).length > 1,
-    run: (b, c, cx) => b.switchSource(nextSource(c).id, cx),
+    id: "context-next", group: "board", name: "Nächster Kontext", key: "}", menu: 43, bar: true,
+    when: (c) => contextsNow(c).length > 1, takes: () => true,
+    run: (b, c, cx) => b.stepContext(1, cx),
+    hint: (c) => (contextsNow(c).length > 1 ? "Kontext" : null), hintKey: "{ }",
   },
   {
+    id: "context-previous", group: "board", name: "Vorheriger Kontext", key: "{", menu: 44, bar: true,
+    when: (c) => contextsNow(c).length > 1, takes: () => true,
+    run: (b, c, cx) => b.stepContext(-1, cx),
+  },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(contextAction),
+  {
     id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 25, bar: true,
-    when: (c) => Boolean(c.view) && hasViewSwitch(c.b.context()), takes: () => true,
+    when: (c) => Boolean(c.view) && hasViewSwitch(c.b.tab()), takes: () => true,
     run: (b, c, cx) => b.nextTeamView(cx),
-    hint: (c) => (hasViewSwitch(c.b.context()) ? viewSwitchHint(c.b.context()) : null),
+    hint: (c) => (hasViewSwitch(c.b.tab()) ? viewSwitchHint(c.b.tab()) : null),
   },
   moveAction("move-left", "H", -1, "Nach links verschieben"),
   moveAction("move-right", "L", 1, "Nach rechts verschieben"),
@@ -7189,9 +7363,9 @@ export const ACTIONS = [
   },
   {
     id: "mine", group: "board", name: (c) => (c.b.mine ? "Nur meine aus" : "Nur meine an"), key: "m", menu: 26, bar: true,
-    when: (c) => Boolean(c.b.source()), takes: () => true,
+    when: (c) => Boolean(c.b.context()), takes: () => true,
     run: (b, c, cx) => b.toggleMine(cx),
-    hint: (c) => (c.b.source() ? "nur meine" : null),
+    hint: (c) => (c.b.context() ? "nur meine" : null),
   },
   {
     id: "filter", group: "board", name: "Filter", key: "/", menu: 27, bar: true,
@@ -7250,7 +7424,7 @@ function runEntry(b, m, i, cx) {
 }
 
 export const commandsModal = {
-  // Opens the menu on the moment `c` (Board.openCommands).
+  // Opens the menu on the situation `c` (Board.openCommands).
   open(b, c, cx) {
     const m = { kind: "commands", view: c.view, entries: menuActions(c) };
     openFilterMenu(b, m, {
@@ -7503,7 +7677,7 @@ function whereText(m) {
   const meta = m.data.meta;
   const type = m.types[m.at];
   const place = type?.child ? `unter ${itemLabel(m.parent)} „${m.parent.title}“` : `in „${meta.level.name}“`;
-  return `Neu ${place}; Bereich ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
+  return `Neu ${place}; Bereichspfad ${meta.area ?? "—"}, Iteration ${meta.iteration ?? "—"}, mir zugewiesen`;
 }
 
 export const createModal = {
@@ -7516,7 +7690,7 @@ export const createModal = {
     const types = createTypes(data, parent);
     if (!types.length) return b.say(`„${data.meta.level.name}“ nennt keine Work-Item-Typen`, "warning", cx);
     if (!data.meta.area || !data.meta.iteration) {
-      const missing = [!data.meta.area && "keinen Standardbereich", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
+      const missing = [!data.meta.area && "keinen Standard-Bereichspfad", !data.meta.iteration && "keine Standard-Iteration"].filter(Boolean).join(" und ");
       return b.say(`Das Team hat ${missing}: in Azure unter Team-Einstellungen setzen`, "warning", cx);
     }
     const input = InputState.new({ placeholder: "Titel des neuen Work Items" });
@@ -7584,7 +7758,7 @@ export const createModal = {
         .shadow_lg()
         .child(
           v_flex().px(20).py(16).gap(4).border_b(1).border_color(t.border)
-            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.context.team}`))
+            .child(div().text_size(15).font_semibold().child(`Neues Work Item · ${m.view.tab.team}`))
             .child(div().text_size(12).text_color(t.muted).child(whereText(m))),
         )
         .child(
@@ -7647,7 +7821,7 @@ export const sprintsModal = {
   // Opens the picker for the Sprint view `view`, then asks its source for
   // the team's iterations.
   open(b, view, cx) {
-    const m = { kind: "sprints", view, team: view.context?.team ?? view.name };
+    const m = { kind: "sprints", view, team: view.tab?.team ?? view.name };
     openReadMenu(b, m, {
       placeholder: "Filter: Name des Sprints",
       count: (m) => sprintRowsOf(m).length,
@@ -7806,7 +7980,7 @@ function reposNotes(m) {
     ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
   ];
   if (!folders.length) {
-    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder im Kontext des Teams, etwa "repoFolders": ["~/Repos"]`);
+    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder beim Team, etwa "repoFolders": ["~/Repos"]`);
   } else if (!list.length) {
     notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen in ${CONFIG_NAME}.json unter „repoFolders“`);
   }
@@ -8073,7 +8247,7 @@ function loadRepos(b, cx) {
   const m = b.modal;
   if (!m.repos) return;
   const on = m.machines[m.machine];
-  const folders = m.view.context?.repoFolders ?? [];
+  const folders = m.view.tab?.repoFolders ?? [];
   const repos = reposLoading(on, folders);
   m.repos = repos;
   const listed = ({ repos: list, missing, unreadable }) => {
@@ -8325,7 +8499,7 @@ export const MODALS = { start: startModal, status: statusModal, columns: columns
 // shape: "backlog", meta: { level, childLevel, typeStates, states,
 // typeColors, orderField, area, iteration, follows, missing }, rows, viewer,
 // noViewer, total, limited, limit } (backlogList, sources/azure/backlog.js).
-// View fields it reads: id, source, layout (as writeAtOnce does), context
+// View fields it reads: id, source, layout (as writeAtOnce does), tab
 // (the create dialog).
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
@@ -8389,7 +8563,7 @@ export const backlogShape = {
   detailParts(b, t, view, item) {
     const st = b.state(view.id);
     if (!st.data) return {};
-    const rows = [["Sprint", item.sprint ?? "—"], ...(item.area ? [["Bereich", item.area]] : []), ...(item.iteration ? [["Iteration", item.iteration]] : [])];
+    const rows = [["Sprint", item.sprint ?? "—"], ...(item.area ? [["Bereichspfad", item.area]] : []), ...(item.iteration ? [["Iteration", item.iteration]] : [])];
     return workItemDetail(b, t, view, { state: item.state, color: stateColor(st.data, item.state), title: "BACKLOG", rows });
   },
 };
@@ -8688,7 +8862,7 @@ export const boardShape = {
   warnings: (view, data) => [
     ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
     ...(view.project.priorityGiven && data.meta.lacksPriorityField
-      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ (project.priorityField): die Karten zeigen keine Priorität`]
+      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ („priorityField“ des Projects): die Karten zeigen keine Priorität`]
       : []),
   ],
   settle: (b, view, due, data, cx) =>
@@ -9223,7 +9397,7 @@ export const sprintShape = {
     const state = shownState(item, column);
     const rows = [
       ...(column ? [["Spalte", column.name]] : []),
-      ...(item.area ? [["Bereich", item.area]] : []),
+      ...(item.area ? [["Bereichspfad", item.area]] : []),
       ...(item.iteration ? [["Iteration", item.iteration]] : []),
     ];
     return workItemDetail(b, t, view, { state, color: stateColor(st.data, state), title: isTask(item) ? "TASK" : "STORY", rows });
@@ -9981,13 +10155,13 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // open, or, with no dialog and no filter being typed, the details of an
 // item whose source has related items to read (readsRelated; to move the
 // keyboard into the details panel and back), the board takes it as an
-// action of its own. Of the matching bindings, the one in the deepest
-// context wins, so a binding in the context of the board's root comes
+// action of its own. Of the matching bindings, the one in the deepest key
+// context wins, so a binding in the key context of the board's root comes
 // first (the leader mod binds the same way and says more:
-// mods/leader/main.js, KEY_CONTEXT). The root carries that context only
-// while the board takes Tab (takesTab), and a binding matches only in a
-// context on the path to what has the keyboard, so otherwise herdr's own
-// Tab runs as before. That matters: herdr's AppWindow runs every
+// mods/leader/main.js, KEY_CONTEXT). The root carries that key context
+// only while the board takes Tab (takesTab), and a binding matches only in
+// a key context on the path to what has the keyboard, so otherwise herdr's
+// own Tab runs as before. That matters: herdr's AppWindow runs every
 // action the board does not stop as a command of its own, and says
 // "unknown command" for one it does not know (herdr's src/window.rs, its
 // ShellAction listener and run). Each action runs tabKey, the one place
@@ -9998,16 +10172,18 @@ export const BOARD_KEYS = [
   { keystroke: "shift-tab", action: "board_shift_tab", back: true },
 ];
 
-// Which end gg, G, Home and End go to ("top", "bottom"), "pending" for a
-// first `g` (`g`: one came just before), null for any other key. g and G
-// are the letter keys keyName (commands.js) names, so that Caps Lock
-// changes no key. No key of the board or of keys.json is a bare g, G, Home
-// or End.
-export function edgeKey(k, ch, mod, g) {
+// What a key names with the `g` before it (`g`: one came just before): the
+// end gg, G, Home and End go to ("top", "bottom"), "pending" for a first g,
+// g and a digit as the key "g<digit>" of an action (commands.js), null for
+// any other key. g and G are the letter keys keyName (commands.js) names, so
+// that Caps Lock changes no key. No key of the board or of keys.json is a
+// bare g, G, Home or End.
+export function jumpKey(k, ch, mod, g) {
   if (mod.control || mod.alt || mod.platform) return null;
   if (k === "home") return "top";
   const name = keyName(k, ch, mod);
   if (k === "end" || name === "G") return "bottom";
+  if (g && /^[1-9]$/.test(name ?? "")) return `g${name}`;
   if (name !== "g") return null;
   return g ? "top" : "pending";
 }
@@ -10029,17 +10205,17 @@ export default class Board extends View {
     this.configErrors = [];
     // views.json's text, this machine's settings file as last read, or as
     // the board's latest change makes it ({ text } or { error }), what
-    // readConfig applied of it, and the view kinds of the last valid config.
-    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, kinds: null };
+    // readConfig applied of it and its move of them, and the view kinds of
+    // the last valid config.
+    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, moving: null, kinds: null };
     this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
     this.prefetchLeft = new Set();
-    // What the top bar shows, as last chosen: the source, its tab (a context
-    // id) per source, the view per team context, and "nur meine".
-    migrateShownView();
-    this.sourceId = store.get("source");
-    this.tabIds = Object.fromEntries(SOURCES.map((s) => [s.id, store.get(`tab:${s.id}`)]));
+    // What the top bar shows, as last chosen: the context, its tab (a tab
+    // id) per context, the view per team tab, and "nur meine".
+    this.contextId = store.get("context");
+    this.tabIds = {};
     this.teamViews = {};
     this.mine = store.get("mine") === true;
     this.filterText = "";
@@ -10058,7 +10234,7 @@ export default class Board extends View {
     // panel's keyboard while it has it (panelOf).
     this.relatedUi = relatedState();
     this.panel = null;
-    // Whether the last key was a `g`, the first of gg (edgeKey).
+    // Whether the last key was a `g` (jumpKey).
     this.afterG = false;
     this.claude = null;
     this.claudeReading = false;
@@ -10188,37 +10364,38 @@ export default class Board extends View {
     return this.views[id];
   }
 
-  // The source the top bar shows (null without a valid views.json), its
-  // contexts (one tab each) and the shown one.
-  source() {
-    return pick(sourcesOf(this.config), this.sourceId);
-  }
-
-  contexts() {
-    const source = this.source();
-    return source ? contextsOf(this.config, source.id) : [];
-  }
-
+  // The context the top bar shows (null without a valid views.json), its
+  // tabs and the shown one.
   context() {
-    const source = this.source();
-    return source ? pick(this.contexts(), this.tabIds[source.id]) : null;
+    return pick(contextsOf(this.config), this.contextId);
   }
 
-  // The view a team context shows (one of TEAM_VIEWS).
-  teamViewOf(context) {
-    this.teamViews[context.id] ??= store.get(`teamView:${context.id}`);
-    return teamView(context, this.teamViews[context.id]);
+  tabs() {
+    return this.context()?.tabs ?? [];
   }
 
-  // The view a context shows (a team: the view it shows).
-  viewFor(context) {
-    return viewOf(context, context.kind === "team" ? this.teamViewOf(context) : null);
+  tab() {
+    const context = this.context();
+    if (!context) return null;
+    this.tabIds[context.id] ??= store.get(`tab:${context.id}`);
+    return pick(context.tabs, this.tabIds[context.id]);
+  }
+
+  // The view a team tab shows (one of TEAM_VIEWS).
+  teamViewOf(tab) {
+    this.teamViews[tab.id] ??= store.get(`teamView:${tab.id}`);
+    return teamView(tab, this.teamViews[tab.id]);
+  }
+
+  // The view a tab shows (a team: the view it shows).
+  viewFor(tab) {
+    return viewOf(tab, tab.kind === "team" ? this.teamViewOf(tab) : null);
   }
 
   // The view the shown tab holds, or null.
   view() {
-    const context = this.context();
-    return context ? this.viewFor(context) : null;
+    const tab = this.tab();
+    return tab ? this.viewFor(tab) : null;
   }
 
   // A view as the config has it now, by id; null when it is gone.
@@ -10245,7 +10422,7 @@ export default class Board extends View {
   }
 
   settingsFile() {
-    return settingsPath(appHome());
+    return settingsFileIn(appHome());
   }
 
   settingsName() {
@@ -10258,16 +10435,39 @@ export default class Board extends View {
   takeConfig() {
     const c = this.configState;
     const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
-    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin } = readConfig(c.text, read));
+    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, moving: c.moving = null } = readConfig(c.text, read));
     if (!this.config) return false;
     const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
     // Before the first valid config no view has a state to compare.
     const before = c.kinds ?? kinds;
     for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
     c.kinds = kinds;
+    this.moveShownSource();
     const m = this.modal;
     if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return true;
+  }
+
+  moveShownSource() {
+    const contexts = contextsOf(this.config);
+    const { set, remove } = shownContextMoves(contexts, (key) => store.get(key), !this.configErrors.length);
+    for (const [key, value] of set) store.set(key, value);
+    for (const key of remove) store.remove(key);
+    this.contextId = store.get("context") ?? firstContextOf(contexts, store.get("source"))?.id ?? null;
+  }
+
+  // `built`: the file's text the move was made over. A file that holds
+  // nothing of the form before the contexts any more was moved meanwhile.
+  moveSettings(move, built, cx) {
+    const name = this.settingsName();
+    const moved = move.moved.length ? move.moved.map(([from, to]) => `${pathText(from)} → ${pathText(to)}`).join(", ") : `das leere ${pathText(["sources", "github", "views"])} entfernt`;
+    const step = (fresh) => {
+      if (fresh === built) return { text: settingsText(move.settings) };
+      const { settings } = readSettings(fresh, name);
+      return settings && !settingsBeforeContexts(settings) ? { text: fresh } : { why: CHANGED_SINCE };
+    };
+    const words = { refused: (why) => `${name} nicht auf die Kontexte umgestellt: ${why}; ${MOVE_AGAIN}`, stale: CHANGED_SINCE, done: `${name} auf die Kontexte umgestellt: ${moved}` };
+    return this.queueSettingsWrite((cx) => this.writeSettingsFile(step, words, cx), cx);
   }
 
   async readSettingsFile() {
@@ -10288,7 +10488,7 @@ export default class Board extends View {
     const name = this.settingsName();
     const c = this.configState;
     const read = c.settingsRead;
-    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name) : null;
+    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name, nameKeyAt) : null;
     const why = !read
       ? `${name} ist noch nicht gelesen`
       : "error" in read
@@ -10303,20 +10503,8 @@ export default class Board extends View {
     this.takeConfig();
     this.followHidden(cx, before);
     cx.notify();
-    const queued = this.settingsWrites;
-    const write = new Promise((resolve) => {
-      cx.spawn(async (cx) => {
-        await queued;
-        try {
-          resolve(await this.writeSettings(changes, built, cx));
-        } catch (e) {
-          resolve(false);
-          this.say(report(e), "error", cx);
-        }
-      });
-    });
-    this.settingsWrites = write;
-    return write;
+    const words = { refused: (why) => `${name} nicht gespeichert: ${why}`, stale: CHANGED_MEANWHILE };
+    return this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, built), words, cx), cx);
   }
 
   changeSetting(path, value, cx, before = null) {
@@ -10324,11 +10512,39 @@ export default class Board extends View {
   }
 
   // `built`: the file's text the changes were made over.
-  async writeSettings(changes, built, cx) {
-    const file = this.settingsFile();
+  changeStep(changes, built) {
     const name = this.settingsName();
+    return (fresh) => {
+      const after = settingsAfter(fresh, changes, name, nameKeyAt);
+      if (after.error) return { why: after.error };
+      if (!readConfig(this.configState.text, { name, text: fresh }).settings) return { why: settingsAlone("die Datei") };
+      if (!sameAtPaths(built, fresh, changes, name, nameKeyAt)) return { why: CHANGED_MEANWHILE };
+      return { text: after.text };
+    };
+  }
+
+  queueSettingsWrite(write, cx) {
+    const queued = this.settingsWrites;
+    const done = new Promise((resolve) => {
+      cx.spawn(async (cx) => {
+        await queued;
+        try {
+          resolve(await write(cx));
+        } catch (e) {
+          resolve(false);
+          this.say(report(e), "error", cx);
+        }
+      });
+    });
+    this.settingsWrites = done;
+    return done;
+  }
+
+  // The one writer of this machine's settings file; step(fresh) gives { text } or { why }.
+  async writeSettingsFile(step, words, cx) {
+    const file = this.settingsFile();
     const refused = async (why) => {
-      this.say(`${name} nicht gespeichert: ${why}`, "error", cx);
+      this.say(words.refused(why), "error", cx);
       await this.readSettingsFile();
       this.takeConfig();
       this.followHidden(cx);
@@ -10341,20 +10557,20 @@ export default class Board extends View {
     } catch (e) {
       return refused(`ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`);
     }
-    const after = settingsAfter(fresh, changes, name);
-    if (after.error) return refused(after.error);
-    if (!readConfig(this.configState.text, { name, text: fresh }).settings) return refused(settingsAlone("die Datei"));
-    if (!sameAtPaths(built, fresh, changes, name)) return refused(CHANGED_MEANWHILE);
-    if (after.text !== fresh) {
+    const next = step(fresh);
+    if (next.why) return refused(next.why);
+    const writes = next.text !== fresh;
+    if (writes) {
       try {
-        await writeTextFile(file, after.text, fresh);
+        await writeTextFile(file, next.text, fresh);
       } catch (e) {
-        return refused(staleRefusal(e) ? CHANGED_MEANWHILE : firstLine(e?.message ?? e));
+        return refused(staleRefusal(e) ? words.stale : firstLine(e?.message ?? e));
       }
     }
-    this.configState.settingsRead = { text: after.text };
+    this.configState.settingsRead = { text: next.text };
     this.takeConfig();
     this.followHidden(cx);
+    if (writes && words.done) this.say(words.done, "info", cx);
     cx.notify();
     return true;
   }
@@ -10399,7 +10615,12 @@ export default class Board extends View {
         this.readSettingsFile(),
       ]);
       if (text !== undefined) this.configState.text = text;
-      const valid = text === undefined ? Boolean(this.config) : this.takeConfig();
+      let valid = text === undefined ? Boolean(this.config) : this.takeConfig();
+      const { moving, settingsRead } = this.configState;
+      if (text !== undefined && moving) {
+        await this.moveSettings(moving, settingsRead.text, cx);
+        valid = Boolean(this.config);
+      }
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
@@ -10560,7 +10781,7 @@ export default class Board extends View {
     if (!this.config || !boardShown(this.isLayer()) || this.modal?.busy) return;
     if (Object.values(this.views).some((st) => st.loading || Object.keys(st.pending).length)) return;
     const [next, ...rest] = prefetchOrder(viewsOf(this.config).filter((v) => this.prefetchLeft.has(v.id)), {
-      shown: this.view(), source: this.source()?.id, now: Date.now(), every: this.config.refreshMinutes * 60000,
+      shown: this.view(), contextViewIds: new Set(this.context() ? contextViews(this.context()).map((v) => v.id) : []), source: this.context()?.source, now: Date.now(), every: this.config.refreshMinutes * 60000,
       stateOf: (id) => this.state(id), loads: (v) => Boolean(this.loader(v)),
     });
     this.prefetchLeft = new Set(rest.map((v) => v.id));
@@ -10879,7 +11100,7 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // gg/G and Home/End (edgeKey) while the details panel has the keyboard:
+  // gg/G and Home/End (jumpKey) while the details panel has the keyboard:
   // its top, with no line selected, or its bottom, on its last line where it
   // has lines.
   panelEdge(view, panel, end) {
@@ -10969,7 +11190,7 @@ export default class Board extends View {
 
   // The details panel's selected line as it stands now: it follows its
   // session, or goes with it (lineNow). A draw takes it before its hint
-  // line reads the line, as each action's key does (keptContext).
+  // line reads the line, as each action's key does (keptSituation).
   keepLine(view) {
     const panel = this.panelOf(view);
     if (panel) panel.line = lineNow(this.linesOf(view), panel.line);
@@ -11007,34 +11228,39 @@ export default class Board extends View {
     if (row >= 0) this.shape(view).scrollTo(this, view, sel, row);
   }
 
-  // Shows the tab at `index` of the shown source; none there does nothing.
+  // Shows the tab at `index` of the shown context; none there does nothing.
   switchTab(index, cx) {
-    const source = this.source();
-    const context = this.contexts()[index];
-    if (!context) return;
-    this.tabIds[source.id] = context.id;
-    store.set(`tab:${source.id}`, context.id);
-    this.showContext(cx);
+    const context = this.context();
+    const tab = this.tabs()[index];
+    if (!tab) return;
+    this.tabIds[context.id] = tab.id;
+    store.set(`tab:${context.id}`, tab.id);
+    this.showTab(cx);
   }
 
-  // ] and [: the shown source's next or previous tab (`by` 1 or -1), past
+  // ] and [: the shown context's next or previous tab (`by` 1 or -1), past
   // the last the first and back.
   stepTab(by, cx) {
-    const tabs = this.contexts();
-    if (tabs.length) this.switchTab(stepIndex(tabs.length, shownIndex(tabs, this.context()), by), cx);
+    const tabs = this.tabs();
+    if (tabs.length) this.switchTab(stepIndex(tabs.length, shownIndex(tabs, this.tab()), by), cx);
   }
 
-  // Shows another source with the tab it showed last.
-  switchSource(id, cx) {
-    if (!sourcesOf(this.config).some((s) => s.id === id)) return;
-    this.sourceId = id;
-    store.set("source", id);
-    this.showContext(cx);
+  switchContext(index, cx) {
+    const context = contextsOf(this.config)[index];
+    if (!context) return;
+    this.contextId = context.id;
+    store.set("context", context.id);
+    this.showTab(cx);
+  }
+
+  stepContext(by, cx) {
+    const contexts = contextsOf(this.config);
+    if (contexts.length) this.switchContext(stepIndex(contexts.length, shownIndex(contexts, this.context()), by), cx);
   }
 
   // After another tab came up: the notice goes, and its view loads as the
   // header says (Calls).
-  showContext(cx) {
+  showTab(cx) {
     this.notice = null;
     const v = this.view();
     const st = v && this.state(v.id);
@@ -11044,26 +11270,25 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Shows a view of the shown team context; one it does not have does
-  // nothing.
+  // Shows a view of the shown team tab; one it does not have does nothing.
   setTeamView(name, cx) {
-    const context = this.context();
-    if (context?.kind !== "team" || !context.views.includes(name)) return;
-    this.teamViews[context.id] = name;
-    store.set(`teamView:${context.id}`, name);
-    this.showContext(cx);
+    const tab = this.tab();
+    if (tab?.kind !== "team" || !tab.views.includes(name)) return;
+    this.teamViews[tab.id] = name;
+    store.set(`teamView:${tab.id}`, name);
+    this.showTab(cx);
   }
 
-  // v: the shown team context's next view.
+  // v: the shown team tab's next view.
   nextTeamView(cx) {
-    const context = this.context();
-    if (context?.kind !== "team") return;
-    this.setTeamView(teamViewAfter(context, this.teamViewOf(context)), cx);
+    const tab = this.tab();
+    if (tab?.kind !== "team") return;
+    this.setTeamView(teamViewAfter(tab, this.teamViewOf(tab)), cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
   toggleMine(cx) {
-    if (!this.source()) return;
+    if (!this.context()) return;
     this.mine = !this.mine;
     store.set("mine", this.mine);
     const view = this.view();
@@ -11297,9 +11522,9 @@ export default class Board extends View {
 
   // ---- keys ----
 
-  // The moment an action runs in, `c` as the action table takes it
+  // The situation an action runs in, `c` as the action table takes it
   // (commands.js says its fields).
-  actionContext() {
+  situation() {
     const view = this.view();
     const st = view ? this.state(view.id) : null;
     const panel = view ? this.panelOf(view) : null;
@@ -11314,15 +11539,15 @@ export default class Board extends View {
     };
   }
 
-  // The moment an action runs in as its key runs it, the step the keys
+  // The situation an action runs in as its key runs it, the step the keys
   // (key), the menu's opening (openCommands) and its actions (runAction)
   // share: the board keeps its selection first (keepSelection), and the
   // panel its line (keepLine).
-  keptContext() {
+  keptSituation() {
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);
     if (view) this.keepLine(view);
-    return this.actionContext();
+    return this.situation();
   }
 
   // An entry the menu picked (ui/modals/commands.js, menuActions): its
@@ -11333,7 +11558,7 @@ export default class Board extends View {
   // cannot run on it any more (a refresh moved the card into the last
   // column), the menu says so and runs nothing.
   runAction(entry, cx) {
-    const c = entry.action.bar ? this.actionContext() : this.keptContext();
+    const c = entry.action.bar ? this.situation() : this.keptSituation();
     if (aimOf(entry.action, c, entry.line) !== entry.aim) this.say(groupAimOf(entry.action, c) === entry.groupAim ? entry.gone : entry.groupGone, "info", cx);
     else if (!entry.action.when(c)) this.say(`„${entry.name}“ geht hier nicht mehr`, "info", cx);
     else entry.action.run(this, c, cx);
@@ -11343,11 +11568,11 @@ export default class Board extends View {
   // The key of the action `id` where it runs it now, and its name now
   // (commands.js), for a text that names it.
   keyShown(id) {
-    return keyShown(id, this.actionContext());
+    return keyShown(id, this.situation());
   }
 
   actionName(id) {
-    return actionName(id, this.actionContext());
+    return actionName(id, this.situation());
   }
 
   key(e, cx) {
@@ -11381,20 +11606,20 @@ export default class Board extends View {
     if (view && plain && mod.control && (k === "d" || k === "u") && this.panelOf(view)) {
       return this.panelPage(k === "d" ? 1 : -1), done();
     }
-    const end = view ? edgeKey(k, ch, mod, g) : null;
-    if (end === "pending") return (this.afterG = true), done();
-    if (end) return this.toEdge(view, end, cx), done();
+    const jump = view ? jumpKey(k, ch, mod, g) : null;
+    if (jump === "pending") return (this.afterG = true), done();
+    if (jump === "top" || jump === "bottom") return this.toEdge(view, jump, cx), done();
     const panel = view && bare ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k)) return done();
     // A key of an action of the top bar runs it at once; then the board
-    // keeps its selection (keptContext), and Esc, the arrows and the keys
+    // keeps its selection (keptSituation), and Esc, the arrows and the keys
     // of the other actions follow (commands.js, actionFor).
-    const name = keyName(k, ch, mod);
-    const atOnce = name ? this.actionContext() : null;
+    const name = jump ?? keyName(k, ch, mod);
+    const atOnce = name ? this.situation() : null;
     const first = name ? actionFor(name, atOnce) : null;
     if (first?.bar) return first.run(this, atOnce, cx), done();
     if (mod.control || mod.alt || mod.platform) return;
-    const c = this.keptContext();
+    const c = this.keptSituation();
     const st = view ? this.state(view.id) : null;
     if (k === "escape") {
       if (st?.detail) st.detail = false;
@@ -11434,7 +11659,7 @@ export default class Board extends View {
   // The command menu (ui/modals/commands.js): the actions that can run now,
   // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
-    MODALS.commands.open(this, this.keptContext(), cx);
+    MODALS.commands.open(this, this.keptSituation(), cx);
   }
 
   // a: the assignee picker, where the shape's items can be assigned.
@@ -11522,32 +11747,27 @@ export default class Board extends View {
   }
 
   // The top bar, two rows so that neither the tabs nor the filter have to
-  // give way on a small screen: the source toggle, a tab per context of the
-  // shown source and a team's view switch (where it has two); then "nur
+  // give way on a small screen: the context switch and the shown context's
+  // tabs; then a team's view switch (where it has two), "nur
   // meine", the filter, the read under way, the age of the data drawn and
   // refresh. Without a valid views.json the first row holds only the
   // board's name.
   toolbar(t, view, st) {
     const { reading, age } = readLabels(st, Date.now());
-    const source = this.source();
     const context = this.context();
+    const tab = this.tab();
     const row = () => h_flex().gap(12).px(16).items_center();
     let nav = row().pt(8).pb(4);
-    if (!source) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
-    else {
-      const sources = sourcesOf(this.config).map((s) => ({ id: s.id, label: s.name }));
-      nav = nav
-        .child(this.segments(t, "source", sources, source.id, (id, cx) => this.switchSource(id, cx)))
-        .child(this.tabs(t, context))
-        .when(hasViewSwitch(context), (el) => {
-          const views = context.views.map((v) => ({ id: v, label: teamViewName(v) }));
-          return el.child(this.segments(t, "team-view", views, this.teamViewOf(context), (name, cx) => this.setTeamView(name, cx)));
-        });
-    }
+    if (!context) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
+    else nav = nav.child(this.contextSwitch(t, context)).child(this.tabRow(t, tab));
     const tools = row()
       .pt(4)
       .pb(8)
-      .when(Boolean(source), (el) => el.child(this.mineToggle(t)))
+      .when(hasViewSwitch(tab), (el) => {
+        const views = tab.views.map((v) => ({ id: v, label: teamViewName(v) }));
+        return el.child(this.segments(t, "team-view", views, this.teamViewOf(tab), (name, cx) => this.setTeamView(name, cx)));
+      })
+      .when(Boolean(context), (el) => el.child(this.mineToggle(t)))
       .child(
         h_flex()
           .flex_1()
@@ -11575,39 +11795,50 @@ export default class Board extends View {
   // A row of choices, the chosen one marked; a click picks one (`pick(id,
   // cx)`). Each choice has the id `<id>-<choice id>`.
   segments(t, id, choices, chosen, pick) {
-    return h_flex()
-      .id(id)
-      .flex_none()
-      .p(2)
-      .gap(2)
-      .rounded(7)
-      .border_1()
-      .border_color(t.border)
-      .bg(t.chrome)
-      .children(
-        choices.map((c) =>
-          div()
-            .id(`${id}-${c.id}`)
-            .px(10)
-            .py(4)
-            .rounded(5)
-            .text_size(12)
-            .cursor_pointer()
-            .text_color(c.id === chosen ? t.foreground : t.muted)
-            .when(c.id === chosen, (el) => el.bg(t.selected).font_semibold())
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => {
-              if (!this.modal) pick(c.id, cx);
-            })
-            .child(c.label),
-        ),
-      );
+    return this.segmentBox(t, id).children(choices.map((c) => this.segment(t, id, c, chosen, pick)));
   }
 
-  // The shown source's tabs: number, name and, for a view with data, how
+  segmentBox(t, id) {
+    return h_flex().id(id).flex_none().p(2).gap(2).rounded(7).border_1().border_color(t.border).bg(t.chrome);
+  }
+
+  segment(t, id, c, chosen, pick) {
+    return div()
+      .id(`${id}-${c.id}`)
+      .px(10)
+      .py(4)
+      .rounded(5)
+      .text_size(12)
+      .cursor_pointer()
+      .text_color(c.id === chosen ? t.foreground : t.muted)
+      .when(c.id === chosen, (el) => el.bg(t.selected).font_semibold())
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => {
+        if (!this.modal) pick(c.id, cx);
+      })
+      .child(c.label);
+  }
+
+  contextSwitch(t, shown) {
+    const pick = (id, cx) => this.switchContext(shownIndex(contextsOf(this.config), { id }), cx);
+    const parts = [];
+    let source = null;
+    for (const context of contextsOf(this.config)) {
+      if (context.source !== source) {
+        if (source) parts.push(div().id(`context-rule-${context.source}`).flex_none().self_stretch().w(1).my(4).mx(4).bg(t.border));
+        source = context.source;
+        const name = SOURCES.find((s) => s.id === source).name;
+        parts.push(div().id(`context-source-${source}`).flex_none().pl(8).pr(4).text_size(11).text_color(t.dim).child(name));
+      }
+      parts.push(this.segment(t, "context", { id: context.id, label: context.name }, shown.id, pick));
+    }
+    return this.segmentBox(t, "context").children(parts);
+  }
+
+  // The shown context's tabs: number, name and, for a view with data, how
   // many items it holds ("…" while it loads without data; shownOf while the
   // filter or "nur meine" hides some).
-  tabs(t, context) {
+  tabRow(t, shown) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
       if (st.loading && !st.data) return "…";
@@ -11621,7 +11852,7 @@ export default class Board extends View {
       .overflow_x_hidden()
       .gap(2)
       .children(
-        this.contexts().map((c, i) =>
+        this.tabs().map((c, i) =>
           h_flex()
             .id(`tab-${c.id}`)
             .min_w(0)
@@ -11631,8 +11862,8 @@ export default class Board extends View {
             .items_center()
             .rounded(6)
             .cursor_pointer()
-            .text_color(c.id === context?.id ? t.foreground : t.muted)
-            .when(c.id === context?.id, (el) => el.bg(t.selected).font_semibold())
+            .text_color(c.id === shown?.id ? t.foreground : t.muted)
+            .when(c.id === shown?.id, (el) => el.bg(t.selected).font_semibold())
             .hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => {
               if (!this.modal) this.switchTab(i, cx);
@@ -11838,7 +12069,7 @@ export default class Board extends View {
   // The hint line: the keys of what shows now, as the action table says
   // them (hintsOf).
   hints(t) {
-    const keys = hintsOf(this.actionContext());
+    const keys = hintsOf(this.situation());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

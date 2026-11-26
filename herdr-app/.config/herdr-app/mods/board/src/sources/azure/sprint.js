@@ -13,7 +13,7 @@ import {
   sprintName, wiqlFields, wiqlText,
 } from "./common.js";
 
-// The Sprint view's calls for a team context `c` ({ org, project, team }):
+// The Sprint view's calls for a team tab `c` ({ org, project, team }):
 // its current iteration, its areas (azAreasArgs), its taskboard's columns,
 // the project's work item types with their states, the team's backlog
 // configuration for its order field (s.backlogConfig), and per refresh the
@@ -383,7 +383,7 @@ export function sprintView(s) {
     return (kept ? kept.value : parseIteration(await s.az(azIterationArgs(c), what(view, "iteration"))))?.id ?? null;
   }
   async function loadSprint(view, chosen, live, last) {
-    const c = view.context;
+    const c = view.tab;
     const me = s.whoAmI(view);
     const settings = settingsOf(c, view);
     const listed = chosen ? iterationsOf(c, view) : null;
@@ -422,7 +422,7 @@ export function sprintView(s) {
       s.drop(titlesKey(s, c));
     },
     async iterations(view) {
-      const c = view.context;
+      const c = view.tab;
       const [list, current] = await Promise.all([iterationsOf(c, view), currentIdOf(c, view)]);
       return list.map((i) => ({ ...i, current: i.id === current }));
     },
@@ -436,7 +436,7 @@ export function sprintView(s) {
       if (plan.state) await s.setState(view, card, plan.state, onRefusal);
       if (!file) return plan;
       try {
-        const out = await s.az(azMoveArgs(view.context, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.context));
+        const out = await s.az(azMoveArgs(view.tab, data.meta.iterationId, card.number, file), { write: true, ...what(view, "move") }).catch(onRefusal(view.tab));
         checkTaskboardMove(out, card, column);
       } catch (e) {
         throw plan.state ? columnNotMoved(plan.state, e) : e;

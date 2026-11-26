@@ -6,27 +6,31 @@
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
-// - sources: what the board shows, by source.
-//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts:
-//     [...] }, a context either { team: { project, team }, views?:
-//     ["sprint", "backlog"] (both when missing), repoFolders? } or { prs: {
-//     project } }. repoFolders: the folders (~ is a machine's home; each
-//     once, a trailing / aside) whose git repositories the start dialog
-//     offers for a team's items without a repo ("Repo"); a team's own in
-//     place of those for all.
-//   - github: { views: [{ id, name, layout: "board" | "list", hide?: [column
-//     names], limit? (a board: the most items it reads, 1000; a list: per
-//     search, 50, at most 100), start? }] }, and by kind (VIEW_KINDS): a
-//     board has project { owner, number, field? ("Status"), priorityField?
-//     ("Priority") } and filter? (a Projects filter such as "assignee:@me");
-//     its columns are the options of that single-select field, a card's
+// - sources: what the board shows, in contexts by source; the top bar
+//   switches between the contexts and shows the tabs of one, its PR tab
+//   last.
+//   - github: { contexts: [{ owner, projects?: [...], prs: {...} }] }, a
+//     context per owner (a user or an organisation). A project is a tab with
+//     its board: { id, name, number, field? ("Status"), priorityField?
+//     ("Priority"), filter? (a Projects filter such as "assignee:@me"),
+//     hide?: [column names], limit? (the most items it reads, 1000), start?
+//     }; its columns are the options of that single-select field, a card's
 //     priority its option of the single-select field priorityField names
 //     (none where the project has no such field; one views.json names that
-//     the project lacks is a warning). A list has sections [{ name, query,
-//     tone? }], one GitHub search for pull requests each; tone is one of
-//     SECTION_TONES (shared.js), and without one a section takes the next
-//     of SECTION_TONE_ORDER by its place that no other section sets. A view
-//     may still say source: "github".
+//     the project lacks is a warning). prs is the context's PR tab: { id,
+//     name? ("PRs"), sections: [{ name, query, tone? }], limit? (per search,
+//     50, at most 100), start? }, one GitHub search for pull requests per
+//     section, as written; tone is one of SECTION_TONES (shared.js), and
+//     without one a section takes the next of SECTION_TONE_ORDER by its place
+//     that no other section sets. A tab's id is its own among all contexts'
+//     (readGithub in config.js).
+//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
+//     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
+//     missing), repoFolders? }] }] }, a context per project: a tab per team,
+//     then one for the project's pull requests. repoFolders: the folders (~
+//     is a machine's home; each once, a trailing / aside) whose git
+//     repositories the start dialog offers for a team's items without a repo
+//     ("Repo"); a team's own in place of those for all.
 // - start: what the start dialog proposes: agent (a programs.json key),
 //   machine, checkout (the folder the session starts in; ~ is that
 //   machine's home; an item without a repo (an Azure work item, or a pull
@@ -36,8 +40,9 @@
 //   {key}.
 // - repos: { "<owner>/<repo>": { any start field } }. startSettings says
 //   which start applies.
-// An older views.json with its views at the top is not read; the board says
-// where they go now.
+// In an older views.json, with its views at the top or its sources without
+// contexts (sources.github.views, an Azure context with team or prs), the
+// old part is not read: the board says where its views and teams go now.
 //
 // This machine's settings (settings.js; README, "herdr app") lie over
 // views.json and are read with it. Hidden columns are a view's hide,
@@ -104,7 +109,7 @@
 // write was refused, reads the Sprint again, a create the Backlog, and one
 // whose answer was unclear asks one WIQL query more after that refresh; a
 // create for a team whose default iteration follows the current one reads the
-// team's settings first, one call more. The PR tabs read nothing yet. The
+// team's settings first, one call more. Azure's PR tabs read nothing yet. The
 // start dialog's Repo field costs one sh call when it opens and one per
 // machine chosen in it (its repos; none without repoFolders). Finding gh and
 // az costs one sh call now and then (toolPaths says when). The Claude Code
@@ -126,18 +131,19 @@
 // costs each other view's refresh at most once; it waits while any read runs,
 // a write is under way or a dialog is busy. After that a view not shown reads
 // nothing. The Azure calls of a load that need nothing of each other run side
-// by side: the Sprint's settings (iteration, areas, columns, types, backlog
-// configuration) and who az is; its taskboard once the iteration came, its
-// query once the areas and the configuration came too, its parents' query and
-// the team's settings once all that came; the Backlog's settings (levels,
-// configuration, team settings, areas), the types' colors and who az is; its
-// ids once the levels came, the query for their fields once the configuration
-// came too. What a view drew last, as read, is saved (loading.js) and drawn
-// after a restart with its age until its read replaces it.
+// by side: the Sprint's settings (iteration, area paths, columns, types,
+// backlog configuration) and who az is; its taskboard once the iteration
+// came, its query once the area paths and the configuration came too, its
+// parents' query and the team's settings once all that came; the Backlog's
+// settings (levels, configuration, team settings, area paths), the types'
+// colors and who az is; its ids once the levels came, the query for their
+// fields once the configuration came too. What a view drew last, as read, is
+// saved (loading.js) and drawn after a restart with its age until its read
+// replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), settings.js (this machine's
-// settings over it), contexts.js (the top bar's sources, contexts and their
+// settings over it), contexts.js (the top bar's contexts, tabs and their
 // views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
@@ -170,20 +176,20 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, home, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
 import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
-import { githubViews, hidePath, readConfig, settingsAlone, startSettings } from "./config.js";
-import { CHANGED_MEANWHILE, ORIGIN, sameAtPaths, settingsAfter, settingsPath, staleRefusal } from "./settings.js";
+import { MOVE_AGAIN, githubViews, hidePath, nameKeyAt, readConfig, settingsAlone, settingsBeforeContexts, startSettings } from "./config.js";
+import { CHANGED_MEANWHILE, CHANGED_SINCE, ORIGIN, pathText, readSettings, sameAtPaths, settingsAfter, settingsFileIn, settingsText, staleRefusal } from "./settings.js";
 import { hiddenColumns, hiddenKey, isDue, pendingMoves, sameNames, storedHiddenMoves, withHidden } from "./kinds/board.js";
 import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
-import { SOURCES, teamViewName, contextsOf, sourcesOf, pick, teamView, viewOf, viewsOf, hasViewSwitch, shownIndex, stepIndex, teamViewAfter } from "./contexts.js";
+import { SOURCES, contextViews, contextsOf, firstContextOf, teamViewName, pick, teamView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, teamViewAfter } from "./contexts.js";
 import { call, toolPaths, what } from "./tools.js";
 import { SAVED_MAX, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
 import { renderTemplate, templateVars } from "./actions/start.js";
 import { AGENT_STATUS, itemSessions, placeKey, placed, readClaudeSessions, secondEnter, sessionIndex } from "./sessions.js";
 import { makeSources } from "./sources/index.js";
 import { keptRelated, lineAt, lineCount, lineId, lineIndex, lineNow, pathLabel, pickedLine, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
-import { store, migrateShownView, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
+import { store, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
@@ -282,13 +288,13 @@ const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
 // open, or, with no dialog and no filter being typed, the details of an
 // item whose source has related items to read (readsRelated; to move the
 // keyboard into the details panel and back), the board takes it as an
-// action of its own. Of the matching bindings, the one in the deepest
-// context wins, so a binding in the context of the board's root comes
+// action of its own. Of the matching bindings, the one in the deepest key
+// context wins, so a binding in the key context of the board's root comes
 // first (the leader mod binds the same way and says more:
-// mods/leader/main.js, KEY_CONTEXT). The root carries that context only
-// while the board takes Tab (takesTab), and a binding matches only in a
-// context on the path to what has the keyboard, so otherwise herdr's own
-// Tab runs as before. That matters: herdr's AppWindow runs every
+// mods/leader/main.js, KEY_CONTEXT). The root carries that key context
+// only while the board takes Tab (takesTab), and a binding matches only in
+// a key context on the path to what has the keyboard, so otherwise herdr's
+// own Tab runs as before. That matters: herdr's AppWindow runs every
 // action the board does not stop as a command of its own, and says
 // "unknown command" for one it does not know (herdr's src/window.rs, its
 // ShellAction listener and run). Each action runs tabKey, the one place
@@ -299,16 +305,18 @@ export const BOARD_KEYS = [
   { keystroke: "shift-tab", action: "board_shift_tab", back: true },
 ];
 
-// Which end gg, G, Home and End go to ("top", "bottom"), "pending" for a
-// first `g` (`g`: one came just before), null for any other key. g and G
-// are the letter keys keyName (commands.js) names, so that Caps Lock
-// changes no key. No key of the board or of keys.json is a bare g, G, Home
-// or End.
-export function edgeKey(k, ch, mod, g) {
+// What a key names with the `g` before it (`g`: one came just before): the
+// end gg, G, Home and End go to ("top", "bottom"), "pending" for a first g,
+// g and a digit as the key "g<digit>" of an action (commands.js), null for
+// any other key. g and G are the letter keys keyName (commands.js) names, so
+// that Caps Lock changes no key. No key of the board or of keys.json is a
+// bare g, G, Home or End.
+export function jumpKey(k, ch, mod, g) {
   if (mod.control || mod.alt || mod.platform) return null;
   if (k === "home") return "top";
   const name = keyName(k, ch, mod);
   if (k === "end" || name === "G") return "bottom";
+  if (g && /^[1-9]$/.test(name ?? "")) return `g${name}`;
   if (name !== "g") return null;
   return g ? "top" : "pending";
 }
@@ -330,17 +338,17 @@ export default class Board extends View {
     this.configErrors = [];
     // views.json's text, this machine's settings file as last read, or as
     // the board's latest change makes it ({ text } or { error }), what
-    // readConfig applied of it, and the view kinds of the last valid config.
-    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, kinds: null };
+    // readConfig applied of it and its move of them, and the view kinds of
+    // the last valid config.
+    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, moving: null, kinds: null };
     this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
     this.prefetchLeft = new Set();
-    // What the top bar shows, as last chosen: the source, its tab (a context
-    // id) per source, the view per team context, and "nur meine".
-    migrateShownView();
-    this.sourceId = store.get("source");
-    this.tabIds = Object.fromEntries(SOURCES.map((s) => [s.id, store.get(`tab:${s.id}`)]));
+    // What the top bar shows, as last chosen: the context, its tab (a tab
+    // id) per context, the view per team tab, and "nur meine".
+    this.contextId = store.get("context");
+    this.tabIds = {};
     this.teamViews = {};
     this.mine = store.get("mine") === true;
     this.filterText = "";
@@ -359,7 +367,7 @@ export default class Board extends View {
     // panel's keyboard while it has it (panelOf).
     this.relatedUi = relatedState();
     this.panel = null;
-    // Whether the last key was a `g`, the first of gg (edgeKey).
+    // Whether the last key was a `g` (jumpKey).
     this.afterG = false;
     this.claude = null;
     this.claudeReading = false;
@@ -489,37 +497,38 @@ export default class Board extends View {
     return this.views[id];
   }
 
-  // The source the top bar shows (null without a valid views.json), its
-  // contexts (one tab each) and the shown one.
-  source() {
-    return pick(sourcesOf(this.config), this.sourceId);
-  }
-
-  contexts() {
-    const source = this.source();
-    return source ? contextsOf(this.config, source.id) : [];
-  }
-
+  // The context the top bar shows (null without a valid views.json), its
+  // tabs and the shown one.
   context() {
-    const source = this.source();
-    return source ? pick(this.contexts(), this.tabIds[source.id]) : null;
+    return pick(contextsOf(this.config), this.contextId);
   }
 
-  // The view a team context shows (one of TEAM_VIEWS).
-  teamViewOf(context) {
-    this.teamViews[context.id] ??= store.get(`teamView:${context.id}`);
-    return teamView(context, this.teamViews[context.id]);
+  tabs() {
+    return this.context()?.tabs ?? [];
   }
 
-  // The view a context shows (a team: the view it shows).
-  viewFor(context) {
-    return viewOf(context, context.kind === "team" ? this.teamViewOf(context) : null);
+  tab() {
+    const context = this.context();
+    if (!context) return null;
+    this.tabIds[context.id] ??= store.get(`tab:${context.id}`);
+    return pick(context.tabs, this.tabIds[context.id]);
+  }
+
+  // The view a team tab shows (one of TEAM_VIEWS).
+  teamViewOf(tab) {
+    this.teamViews[tab.id] ??= store.get(`teamView:${tab.id}`);
+    return teamView(tab, this.teamViews[tab.id]);
+  }
+
+  // The view a tab shows (a team: the view it shows).
+  viewFor(tab) {
+    return viewOf(tab, tab.kind === "team" ? this.teamViewOf(tab) : null);
   }
 
   // The view the shown tab holds, or null.
   view() {
-    const context = this.context();
-    return context ? this.viewFor(context) : null;
+    const tab = this.tab();
+    return tab ? this.viewFor(tab) : null;
   }
 
   // A view as the config has it now, by id; null when it is gone.
@@ -546,7 +555,7 @@ export default class Board extends View {
   }
 
   settingsFile() {
-    return settingsPath(appHome());
+    return settingsFileIn(appHome());
   }
 
   settingsName() {
@@ -559,16 +568,39 @@ export default class Board extends View {
   takeConfig() {
     const c = this.configState;
     const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
-    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin } = readConfig(c.text, read));
+    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, moving: c.moving = null } = readConfig(c.text, read));
     if (!this.config) return false;
     const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
     // Before the first valid config no view has a state to compare.
     const before = c.kinds ?? kinds;
     for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
     c.kinds = kinds;
+    this.moveShownSource();
     const m = this.modal;
     if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return true;
+  }
+
+  moveShownSource() {
+    const contexts = contextsOf(this.config);
+    const { set, remove } = shownContextMoves(contexts, (key) => store.get(key), !this.configErrors.length);
+    for (const [key, value] of set) store.set(key, value);
+    for (const key of remove) store.remove(key);
+    this.contextId = store.get("context") ?? firstContextOf(contexts, store.get("source"))?.id ?? null;
+  }
+
+  // `built`: the file's text the move was made over. A file that holds
+  // nothing of the form before the contexts any more was moved meanwhile.
+  moveSettings(move, built, cx) {
+    const name = this.settingsName();
+    const moved = move.moved.length ? move.moved.map(([from, to]) => `${pathText(from)} → ${pathText(to)}`).join(", ") : `das leere ${pathText(["sources", "github", "views"])} entfernt`;
+    const step = (fresh) => {
+      if (fresh === built) return { text: settingsText(move.settings) };
+      const { settings } = readSettings(fresh, name);
+      return settings && !settingsBeforeContexts(settings) ? { text: fresh } : { why: CHANGED_SINCE };
+    };
+    const words = { refused: (why) => `${name} nicht auf die Kontexte umgestellt: ${why}; ${MOVE_AGAIN}`, stale: CHANGED_SINCE, done: `${name} auf die Kontexte umgestellt: ${moved}` };
+    return this.queueSettingsWrite((cx) => this.writeSettingsFile(step, words, cx), cx);
   }
 
   async readSettingsFile() {
@@ -589,7 +621,7 @@ export default class Board extends View {
     const name = this.settingsName();
     const c = this.configState;
     const read = c.settingsRead;
-    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name) : null;
+    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name, nameKeyAt) : null;
     const why = !read
       ? `${name} ist noch nicht gelesen`
       : "error" in read
@@ -604,20 +636,8 @@ export default class Board extends View {
     this.takeConfig();
     this.followHidden(cx, before);
     cx.notify();
-    const queued = this.settingsWrites;
-    const write = new Promise((resolve) => {
-      cx.spawn(async (cx) => {
-        await queued;
-        try {
-          resolve(await this.writeSettings(changes, built, cx));
-        } catch (e) {
-          resolve(false);
-          this.say(report(e), "error", cx);
-        }
-      });
-    });
-    this.settingsWrites = write;
-    return write;
+    const words = { refused: (why) => `${name} nicht gespeichert: ${why}`, stale: CHANGED_MEANWHILE };
+    return this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, built), words, cx), cx);
   }
 
   changeSetting(path, value, cx, before = null) {
@@ -625,11 +645,39 @@ export default class Board extends View {
   }
 
   // `built`: the file's text the changes were made over.
-  async writeSettings(changes, built, cx) {
-    const file = this.settingsFile();
+  changeStep(changes, built) {
     const name = this.settingsName();
+    return (fresh) => {
+      const after = settingsAfter(fresh, changes, name, nameKeyAt);
+      if (after.error) return { why: after.error };
+      if (!readConfig(this.configState.text, { name, text: fresh }).settings) return { why: settingsAlone("die Datei") };
+      if (!sameAtPaths(built, fresh, changes, name, nameKeyAt)) return { why: CHANGED_MEANWHILE };
+      return { text: after.text };
+    };
+  }
+
+  queueSettingsWrite(write, cx) {
+    const queued = this.settingsWrites;
+    const done = new Promise((resolve) => {
+      cx.spawn(async (cx) => {
+        await queued;
+        try {
+          resolve(await write(cx));
+        } catch (e) {
+          resolve(false);
+          this.say(report(e), "error", cx);
+        }
+      });
+    });
+    this.settingsWrites = done;
+    return done;
+  }
+
+  // The one writer of this machine's settings file; step(fresh) gives { text } or { why }.
+  async writeSettingsFile(step, words, cx) {
+    const file = this.settingsFile();
     const refused = async (why) => {
-      this.say(`${name} nicht gespeichert: ${why}`, "error", cx);
+      this.say(words.refused(why), "error", cx);
       await this.readSettingsFile();
       this.takeConfig();
       this.followHidden(cx);
@@ -642,20 +690,20 @@ export default class Board extends View {
     } catch (e) {
       return refused(`ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`);
     }
-    const after = settingsAfter(fresh, changes, name);
-    if (after.error) return refused(after.error);
-    if (!readConfig(this.configState.text, { name, text: fresh }).settings) return refused(settingsAlone("die Datei"));
-    if (!sameAtPaths(built, fresh, changes, name)) return refused(CHANGED_MEANWHILE);
-    if (after.text !== fresh) {
+    const next = step(fresh);
+    if (next.why) return refused(next.why);
+    const writes = next.text !== fresh;
+    if (writes) {
       try {
-        await writeTextFile(file, after.text, fresh);
+        await writeTextFile(file, next.text, fresh);
       } catch (e) {
-        return refused(staleRefusal(e) ? CHANGED_MEANWHILE : firstLine(e?.message ?? e));
+        return refused(staleRefusal(e) ? words.stale : firstLine(e?.message ?? e));
       }
     }
-    this.configState.settingsRead = { text: after.text };
+    this.configState.settingsRead = { text: next.text };
     this.takeConfig();
     this.followHidden(cx);
+    if (writes && words.done) this.say(words.done, "info", cx);
     cx.notify();
     return true;
   }
@@ -700,7 +748,12 @@ export default class Board extends View {
         this.readSettingsFile(),
       ]);
       if (text !== undefined) this.configState.text = text;
-      const valid = text === undefined ? Boolean(this.config) : this.takeConfig();
+      let valid = text === undefined ? Boolean(this.config) : this.takeConfig();
+      const { moving, settingsRead } = this.configState;
+      if (text !== undefined && moving) {
+        await this.moveSettings(moving, settingsRead.text, cx);
+        valid = Boolean(this.config);
+      }
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
@@ -861,7 +914,7 @@ export default class Board extends View {
     if (!this.config || !boardShown(this.isLayer()) || this.modal?.busy) return;
     if (Object.values(this.views).some((st) => st.loading || Object.keys(st.pending).length)) return;
     const [next, ...rest] = prefetchOrder(viewsOf(this.config).filter((v) => this.prefetchLeft.has(v.id)), {
-      shown: this.view(), source: this.source()?.id, now: Date.now(), every: this.config.refreshMinutes * 60000,
+      shown: this.view(), contextViewIds: new Set(this.context() ? contextViews(this.context()).map((v) => v.id) : []), source: this.context()?.source, now: Date.now(), every: this.config.refreshMinutes * 60000,
       stateOf: (id) => this.state(id), loads: (v) => Boolean(this.loader(v)),
     });
     this.prefetchLeft = new Set(rest.map((v) => v.id));
@@ -1180,7 +1233,7 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // gg/G and Home/End (edgeKey) while the details panel has the keyboard:
+  // gg/G and Home/End (jumpKey) while the details panel has the keyboard:
   // its top, with no line selected, or its bottom, on its last line where it
   // has lines.
   panelEdge(view, panel, end) {
@@ -1270,7 +1323,7 @@ export default class Board extends View {
 
   // The details panel's selected line as it stands now: it follows its
   // session, or goes with it (lineNow). A draw takes it before its hint
-  // line reads the line, as each action's key does (keptContext).
+  // line reads the line, as each action's key does (keptSituation).
   keepLine(view) {
     const panel = this.panelOf(view);
     if (panel) panel.line = lineNow(this.linesOf(view), panel.line);
@@ -1308,34 +1361,39 @@ export default class Board extends View {
     if (row >= 0) this.shape(view).scrollTo(this, view, sel, row);
   }
 
-  // Shows the tab at `index` of the shown source; none there does nothing.
+  // Shows the tab at `index` of the shown context; none there does nothing.
   switchTab(index, cx) {
-    const source = this.source();
-    const context = this.contexts()[index];
-    if (!context) return;
-    this.tabIds[source.id] = context.id;
-    store.set(`tab:${source.id}`, context.id);
-    this.showContext(cx);
+    const context = this.context();
+    const tab = this.tabs()[index];
+    if (!tab) return;
+    this.tabIds[context.id] = tab.id;
+    store.set(`tab:${context.id}`, tab.id);
+    this.showTab(cx);
   }
 
-  // ] and [: the shown source's next or previous tab (`by` 1 or -1), past
+  // ] and [: the shown context's next or previous tab (`by` 1 or -1), past
   // the last the first and back.
   stepTab(by, cx) {
-    const tabs = this.contexts();
-    if (tabs.length) this.switchTab(stepIndex(tabs.length, shownIndex(tabs, this.context()), by), cx);
+    const tabs = this.tabs();
+    if (tabs.length) this.switchTab(stepIndex(tabs.length, shownIndex(tabs, this.tab()), by), cx);
   }
 
-  // Shows another source with the tab it showed last.
-  switchSource(id, cx) {
-    if (!sourcesOf(this.config).some((s) => s.id === id)) return;
-    this.sourceId = id;
-    store.set("source", id);
-    this.showContext(cx);
+  switchContext(index, cx) {
+    const context = contextsOf(this.config)[index];
+    if (!context) return;
+    this.contextId = context.id;
+    store.set("context", context.id);
+    this.showTab(cx);
+  }
+
+  stepContext(by, cx) {
+    const contexts = contextsOf(this.config);
+    if (contexts.length) this.switchContext(stepIndex(contexts.length, shownIndex(contexts, this.context()), by), cx);
   }
 
   // After another tab came up: the notice goes, and its view loads as the
   // header says (Calls).
-  showContext(cx) {
+  showTab(cx) {
     this.notice = null;
     const v = this.view();
     const st = v && this.state(v.id);
@@ -1345,26 +1403,25 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Shows a view of the shown team context; one it does not have does
-  // nothing.
+  // Shows a view of the shown team tab; one it does not have does nothing.
   setTeamView(name, cx) {
-    const context = this.context();
-    if (context?.kind !== "team" || !context.views.includes(name)) return;
-    this.teamViews[context.id] = name;
-    store.set(`teamView:${context.id}`, name);
-    this.showContext(cx);
+    const tab = this.tab();
+    if (tab?.kind !== "team" || !tab.views.includes(name)) return;
+    this.teamViews[tab.id] = name;
+    store.set(`teamView:${tab.id}`, name);
+    this.showTab(cx);
   }
 
-  // v: the shown team context's next view.
+  // v: the shown team tab's next view.
   nextTeamView(cx) {
-    const context = this.context();
-    if (context?.kind !== "team") return;
-    this.setTeamView(teamViewAfter(context, this.teamViewOf(context)), cx);
+    const tab = this.tab();
+    if (tab?.kind !== "team") return;
+    this.setTeamView(teamViewAfter(tab, this.teamViewOf(tab)), cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
   toggleMine(cx) {
-    if (!this.source()) return;
+    if (!this.context()) return;
     this.mine = !this.mine;
     store.set("mine", this.mine);
     const view = this.view();
@@ -1598,9 +1655,9 @@ export default class Board extends View {
 
   // ---- keys ----
 
-  // The moment an action runs in, `c` as the action table takes it
+  // The situation an action runs in, `c` as the action table takes it
   // (commands.js says its fields).
-  actionContext() {
+  situation() {
     const view = this.view();
     const st = view ? this.state(view.id) : null;
     const panel = view ? this.panelOf(view) : null;
@@ -1615,15 +1672,15 @@ export default class Board extends View {
     };
   }
 
-  // The moment an action runs in as its key runs it, the step the keys
+  // The situation an action runs in as its key runs it, the step the keys
   // (key), the menu's opening (openCommands) and its actions (runAction)
   // share: the board keeps its selection first (keepSelection), and the
   // panel its line (keepLine).
-  keptContext() {
+  keptSituation() {
     const view = this.view();
     if (view && this.state(view.id).data) this.keepSelection(view);
     if (view) this.keepLine(view);
-    return this.actionContext();
+    return this.situation();
   }
 
   // An entry the menu picked (ui/modals/commands.js, menuActions): its
@@ -1634,7 +1691,7 @@ export default class Board extends View {
   // cannot run on it any more (a refresh moved the card into the last
   // column), the menu says so and runs nothing.
   runAction(entry, cx) {
-    const c = entry.action.bar ? this.actionContext() : this.keptContext();
+    const c = entry.action.bar ? this.situation() : this.keptSituation();
     if (aimOf(entry.action, c, entry.line) !== entry.aim) this.say(groupAimOf(entry.action, c) === entry.groupAim ? entry.gone : entry.groupGone, "info", cx);
     else if (!entry.action.when(c)) this.say(`„${entry.name}“ geht hier nicht mehr`, "info", cx);
     else entry.action.run(this, c, cx);
@@ -1644,11 +1701,11 @@ export default class Board extends View {
   // The key of the action `id` where it runs it now, and its name now
   // (commands.js), for a text that names it.
   keyShown(id) {
-    return keyShown(id, this.actionContext());
+    return keyShown(id, this.situation());
   }
 
   actionName(id) {
-    return actionName(id, this.actionContext());
+    return actionName(id, this.situation());
   }
 
   key(e, cx) {
@@ -1682,20 +1739,20 @@ export default class Board extends View {
     if (view && plain && mod.control && (k === "d" || k === "u") && this.panelOf(view)) {
       return this.panelPage(k === "d" ? 1 : -1), done();
     }
-    const end = view ? edgeKey(k, ch, mod, g) : null;
-    if (end === "pending") return (this.afterG = true), done();
-    if (end) return this.toEdge(view, end, cx), done();
+    const jump = view ? jumpKey(k, ch, mod, g) : null;
+    if (jump === "pending") return (this.afterG = true), done();
+    if (jump === "top" || jump === "bottom") return this.toEdge(view, jump, cx), done();
     const panel = view && bare ? this.panelOf(view) : null;
     if (panel && this.panelKey(view, panel, k)) return done();
     // A key of an action of the top bar runs it at once; then the board
-    // keeps its selection (keptContext), and Esc, the arrows and the keys
+    // keeps its selection (keptSituation), and Esc, the arrows and the keys
     // of the other actions follow (commands.js, actionFor).
-    const name = keyName(k, ch, mod);
-    const atOnce = name ? this.actionContext() : null;
+    const name = jump ?? keyName(k, ch, mod);
+    const atOnce = name ? this.situation() : null;
     const first = name ? actionFor(name, atOnce) : null;
     if (first?.bar) return first.run(this, atOnce, cx), done();
     if (mod.control || mod.alt || mod.platform) return;
-    const c = this.keptContext();
+    const c = this.keptSituation();
     const st = view ? this.state(view.id) : null;
     if (k === "escape") {
       if (st?.detail) st.detail = false;
@@ -1735,7 +1792,7 @@ export default class Board extends View {
   // The command menu (ui/modals/commands.js): the actions that can run now,
   // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
-    MODALS.commands.open(this, this.keptContext(), cx);
+    MODALS.commands.open(this, this.keptSituation(), cx);
   }
 
   // a: the assignee picker, where the shape's items can be assigned.
@@ -1823,32 +1880,27 @@ export default class Board extends View {
   }
 
   // The top bar, two rows so that neither the tabs nor the filter have to
-  // give way on a small screen: the source toggle, a tab per context of the
-  // shown source and a team's view switch (where it has two); then "nur
+  // give way on a small screen: the context switch and the shown context's
+  // tabs; then a team's view switch (where it has two), "nur
   // meine", the filter, the read under way, the age of the data drawn and
   // refresh. Without a valid views.json the first row holds only the
   // board's name.
   toolbar(t, view, st) {
     const { reading, age } = readLabels(st, Date.now());
-    const source = this.source();
     const context = this.context();
+    const tab = this.tab();
     const row = () => h_flex().gap(12).px(16).items_center();
     let nav = row().pt(8).pb(4);
-    if (!source) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
-    else {
-      const sources = sourcesOf(this.config).map((s) => ({ id: s.id, label: s.name }));
-      nav = nav
-        .child(this.segments(t, "source", sources, source.id, (id, cx) => this.switchSource(id, cx)))
-        .child(this.tabs(t, context))
-        .when(hasViewSwitch(context), (el) => {
-          const views = context.views.map((v) => ({ id: v, label: teamViewName(v) }));
-          return el.child(this.segments(t, "team-view", views, this.teamViewOf(context), (name, cx) => this.setTeamView(name, cx)));
-        });
-    }
+    if (!context) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
+    else nav = nav.child(this.contextSwitch(t, context)).child(this.tabRow(t, tab));
     const tools = row()
       .pt(4)
       .pb(8)
-      .when(Boolean(source), (el) => el.child(this.mineToggle(t)))
+      .when(hasViewSwitch(tab), (el) => {
+        const views = tab.views.map((v) => ({ id: v, label: teamViewName(v) }));
+        return el.child(this.segments(t, "team-view", views, this.teamViewOf(tab), (name, cx) => this.setTeamView(name, cx)));
+      })
+      .when(Boolean(context), (el) => el.child(this.mineToggle(t)))
       .child(
         h_flex()
           .flex_1()
@@ -1876,39 +1928,50 @@ export default class Board extends View {
   // A row of choices, the chosen one marked; a click picks one (`pick(id,
   // cx)`). Each choice has the id `<id>-<choice id>`.
   segments(t, id, choices, chosen, pick) {
-    return h_flex()
-      .id(id)
-      .flex_none()
-      .p(2)
-      .gap(2)
-      .rounded(7)
-      .border_1()
-      .border_color(t.border)
-      .bg(t.chrome)
-      .children(
-        choices.map((c) =>
-          div()
-            .id(`${id}-${c.id}`)
-            .px(10)
-            .py(4)
-            .rounded(5)
-            .text_size(12)
-            .cursor_pointer()
-            .text_color(c.id === chosen ? t.foreground : t.muted)
-            .when(c.id === chosen, (el) => el.bg(t.selected).font_semibold())
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => {
-              if (!this.modal) pick(c.id, cx);
-            })
-            .child(c.label),
-        ),
-      );
+    return this.segmentBox(t, id).children(choices.map((c) => this.segment(t, id, c, chosen, pick)));
   }
 
-  // The shown source's tabs: number, name and, for a view with data, how
+  segmentBox(t, id) {
+    return h_flex().id(id).flex_none().p(2).gap(2).rounded(7).border_1().border_color(t.border).bg(t.chrome);
+  }
+
+  segment(t, id, c, chosen, pick) {
+    return div()
+      .id(`${id}-${c.id}`)
+      .px(10)
+      .py(4)
+      .rounded(5)
+      .text_size(12)
+      .cursor_pointer()
+      .text_color(c.id === chosen ? t.foreground : t.muted)
+      .when(c.id === chosen, (el) => el.bg(t.selected).font_semibold())
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => {
+        if (!this.modal) pick(c.id, cx);
+      })
+      .child(c.label);
+  }
+
+  contextSwitch(t, shown) {
+    const pick = (id, cx) => this.switchContext(shownIndex(contextsOf(this.config), { id }), cx);
+    const parts = [];
+    let source = null;
+    for (const context of contextsOf(this.config)) {
+      if (context.source !== source) {
+        if (source) parts.push(div().id(`context-rule-${context.source}`).flex_none().self_stretch().w(1).my(4).mx(4).bg(t.border));
+        source = context.source;
+        const name = SOURCES.find((s) => s.id === source).name;
+        parts.push(div().id(`context-source-${source}`).flex_none().pl(8).pr(4).text_size(11).text_color(t.dim).child(name));
+      }
+      parts.push(this.segment(t, "context", { id: context.id, label: context.name }, shown.id, pick));
+    }
+    return this.segmentBox(t, "context").children(parts);
+  }
+
+  // The shown context's tabs: number, name and, for a view with data, how
   // many items it holds ("…" while it loads without data; shownOf while the
   // filter or "nur meine" hides some).
-  tabs(t, context) {
+  tabRow(t, shown) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
       if (st.loading && !st.data) return "…";
@@ -1922,7 +1985,7 @@ export default class Board extends View {
       .overflow_x_hidden()
       .gap(2)
       .children(
-        this.contexts().map((c, i) =>
+        this.tabs().map((c, i) =>
           h_flex()
             .id(`tab-${c.id}`)
             .min_w(0)
@@ -1932,8 +1995,8 @@ export default class Board extends View {
             .items_center()
             .rounded(6)
             .cursor_pointer()
-            .text_color(c.id === context?.id ? t.foreground : t.muted)
-            .when(c.id === context?.id, (el) => el.bg(t.selected).font_semibold())
+            .text_color(c.id === shown?.id ? t.foreground : t.muted)
+            .when(c.id === shown?.id, (el) => el.bg(t.selected).font_semibold())
             .hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => {
               if (!this.modal) this.switchTab(i, cx);
@@ -2139,7 +2202,7 @@ export default class Board extends View {
   // The hint line: the keys of what shows now, as the action table says
   // them (hintsOf).
   hints(t) {
-    const keys = hintsOf(this.actionContext());
+    const keys = hintsOf(this.situation());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()
