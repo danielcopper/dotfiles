@@ -1,5 +1,12 @@
 {
     "$schema": "https://opencode.ai/config.json",
+    "experimental": {
+        "todo": true
+    },
+    // OpenCode 2 allows paths outside the project without asking by default
+    "permissions": [
+        { "action": "external_directory", "resource": "*", "effect": "ask" }
+    ],
     // ──────────────────────────────────────────────────
     // Agent overrides
     // ──────────────────────────────────────────────────
