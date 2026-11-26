@@ -10,10 +10,10 @@ import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 import { stateColor } from "../kinds/states.js";
 
-// Settings that last across reloads: the shown source ("source"), each
-// source's tab ("tab:<source>"), each team's view ("teamView:<context>"),
-// "nur meine" ("mine"), each view's hidden columns ("hidden:<view>"), a
-// Sprint's folded stories ("folded:<view>", readStoredFolds), the repo a
+// What lasts across reloads beside this machine's settings (settings.js):
+// the shown source ("source"), each source's tab ("tab:<source>"), each
+// team's view ("teamView:<context>"), "nur meine" ("mine"), a Sprint's
+// folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or
 // missing localStorage keeps them for this session only.

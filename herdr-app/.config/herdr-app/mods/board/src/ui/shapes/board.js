@@ -12,13 +12,13 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { cardLabel, cardType, epicLabel, partOfText } from "../../shared.js";
-import { applyMoves, canDrop, findCard, hasStep, hideable, hiddenColumns, shownColumns, stepTarget, targetsFor, toggleHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
+import { applyMoves, canDrop, findCard, hasStep, hideable, hiddenColumns, shownColumns, stepTarget, targetsFor, toggledHidden, unknownHidden, withCard, withHidden } from "../../kinds/board.js";
 import { itemSessions } from "../../sessions.js";
 import { moveCardTo, reselectIn, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import {
-  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, inPlace, labelChip, selectedLook, showsMeta, shownOf, statusPill, store, typeChip, typeLine, unzoomed,
+  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, inPlace, labelChip, selectedLook, showsMeta, shownOf, statusPill, typeChip, typeLine, unzoomed,
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 import { rowTops } from "../../scroll.js";
@@ -357,16 +357,18 @@ function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
-// Hides a shown column or shows a hidden one; the selection follows
-// (reselectIn).
+// Hides a shown column or shows a hidden one, in this machine's settings
+// (the view's hide); the selection follows (reselectIn).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
   if (!boardShape.canHide(col)) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
   const before = b.navColumns(view);
-  st.stored = toggleHidden(view, st.stored, col);
-  st.hidden = hiddenColumns(view, st.stored);
-  store.set(`hidden:${view.id}`, st.stored);
+  b.changeSetting(["sources", "github", "views", view.id, "hide"], toggledHidden(b.viewById(view.id) ?? view, col), cx);
+  view = b.viewById(view.id) ?? view;
+  const hidden = hiddenColumns(view);
+  if (hidden.has(col.name) === Boolean(st.hidden?.has(col.name))) return;
+  st.hidden = hidden;
   st.data = withHidden(st.data, st.hidden);
   reselectIn(b, view, before);
   // What a column holds comes from the query, which leaves hidden ones out.

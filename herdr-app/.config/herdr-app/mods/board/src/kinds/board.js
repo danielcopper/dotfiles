@@ -4,37 +4,33 @@
 import { isObject, itemLabel, textList } from "../shared.js";
 import { shows, showsAll } from "../select.js";
 
-// The stored toggles of a view, { hide: [names], show: [names] }, or null when
-// what was stored is not that.
+// What the browser storage kept of a view's columns before they were this
+// machine's settings, { hide: [names], show: [names] }, or null when what
+// was stored is not that.
 export function readStoredHidden(value) {
   return isObject(value) && textList(value.hide) && textList(value.show) ? { hide: [...value.hide], show: [...value.show] } : null;
 }
 
-// The hidden columns: the view's hide, plus what the person hid, minus what
-// they showed.
-export function hiddenColumns(view, stored) {
+// The hidden list those toggles made of the view's hide: it, plus what the
+// person hid, minus what they showed.
+export function storedHiddenList(view, stored) {
   const hidden = new Set(view.hide);
-  const own = readStoredHidden(stored);
-  for (const name of own?.hide ?? []) hidden.add(name);
-  for (const name of own?.show ?? []) hidden.delete(name);
-  return hidden;
+  for (const name of stored.hide) hidden.add(name);
+  for (const name of stored.show) hidden.delete(name);
+  return [...hidden];
 }
+
+export const hiddenColumns = (view) => new Set(view.hide);
 
 // Whether a column can be hidden: one with a target (an option of the
 // view's field); the column without status is always shown.
 export const hideable = (column) => Boolean(column?.target);
 
-// The stored toggles after hiding or showing a column: only what differs from
-// the view's defaults, so a later edit to hide takes effect. A column that
-// cannot be hidden (hideable): unchanged.
-export function toggleHidden(view, stored, column) {
-  if (!hideable(column)) return stored;
-  const own = readStoredHidden(stored) ?? { hide: [], show: [] };
-  const byDefault = hiddenColumns(view, null).has(column.name);
-  const hideNow = !hiddenColumns(view, own).has(column.name);
-  const next = { hide: own.hide.filter((n) => n !== column.name), show: own.show.filter((n) => n !== column.name) };
-  if (hideNow !== byDefault) (hideNow ? next.hide : next.show).push(column.name);
-  return next;
+// The view's hide after hiding or showing a column; null for one that
+// cannot be hidden (hideable).
+export function toggledHidden(view, column) {
+  if (!hideable(column)) return null;
+  return view.hide.includes(column.name) ? view.hide.filter((n) => n !== column.name) : [...view.hide, column.name];
 }
 
 // Names in a view's hide that match none of `columns`.

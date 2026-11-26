@@ -1,8 +1,9 @@
-// views.json: reading it, what is wrong with it, and the start settings for
-// an item.
+// views.json: reading it with this machine's settings over it, what is
+// wrong with them, and the start settings for an item.
 
 import { CONFIG_NAME, PAGE, SECTION_TONES, SECTION_TONE_ORDER, isObject, isText, textList } from "./shared.js";
 import { viewDefaults, viewKind } from "./kinds/index.js";
+import { mergeSettings, readSettings } from "./settings.js";
 
 export const START_DEFAULTS = { agent: null, machine: null, checkout: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
@@ -242,19 +243,35 @@ function readAzure(raw) {
   return { azure: org && contexts.length ? { org, contexts } : null, errors };
 }
 
-// views.json as text (null: there is none) → { config, errors }: config is
-// { refreshMinutes, start, repos, azure: { org, contexts } or null, github:
-// { views } or null }. A view or context with problems is left out and each
-// problem is listed; config is null only when nothing usable is left.
-export function readConfig(text) {
-  if (text === null || text === undefined) return { config: null, errors: [`${CONFIG_NAME}.json fehlt im Ordner der Mod`] };
+// views.json as text (null: there is none) and this machine's settings
+// (`machine`: { name, text } with text null where there are none, or {
+// name, error } where they could not be read) → { config, errors, base,
+// machine }: config is { refreshMinutes, start, repos, azure: { org,
+// contexts } or null, github: { views } or null }, base views.json's object
+// and machine the settings applied (null: none). A view or context with
+// problems is left out and each problem is listed; config is null only when
+// nothing usable is left. Settings that cannot be read, or that add a
+// problem, are not applied, and each of their problems names their file.
+export function readConfig(text, machine = null) {
+  if (text === null || text === undefined) return { config: null, errors: [`${CONFIG_NAME}.json fehlt im Ordner der Mod`], base: null, machine: null };
   let raw;
   try {
     raw = JSON.parse(text);
   } catch (e) {
-    return { config: null, errors: [`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`] };
+    return { config: null, errors: [`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`], base: null, machine: null };
   }
-  return validateConfig(raw);
+  const base = { ...validateConfig(raw), base: raw, machine: null };
+  if (!machine) return base;
+  const named = (errors) => errors.map((e) => `${machine.name}: ${e}`);
+  const unused = (errors) => ({ ...base, errors: [...base.errors, ...errors, `${machine.name} gilt nicht: das Board zeigt ${CONFIG_NAME}.json allein`] });
+  if (machine.error !== undefined) return unused([`${machine.name} ließ sich nicht lesen: ${machine.error}`]);
+  const { settings, errors } = readSettings(machine.text, machine.name);
+  if (!settings) return unused(errors);
+  const { merged, errors: unmatched } = mergeSettings(raw, settings);
+  const read = validateConfig(merged);
+  const added = read.errors.filter((e) => !base.errors.includes(e));
+  if (added.length) return unused(named([...unmatched, ...added]));
+  return { ...read, errors: [...read.errors, ...named(unmatched)], base: raw, machine: settings };
 }
 
 export function validateConfig(raw) {

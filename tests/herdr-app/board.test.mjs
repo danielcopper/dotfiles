@@ -585,6 +585,108 @@ test("start settings: defaults < start < the view's start < the repo's entry", (
   assert.equal(board.startSettings(config, mine, "other/repo").checkout, null);
 });
 
+// ---- This machine's settings ----
+
+const MACHINE_FILE = "/fake-home/board/settings.json";
+const MINE_HIDE = ["sources", "github", "views", "mine", "hide"];
+const mineHidden = (hide) => ({ sources: { github: { views: { mine: { hide } } } } });
+// This machine's settings for readConfig, named "settings.json": an object
+// as its JSON, a text as it stands, null for no file.
+const machine = (settings) => ({ name: "settings.json", text: settings === null || typeof settings === "string" ? settings : JSON.stringify(settings) });
+const viewHide = (read, id) => board.githubViews(read.config).find((v) => v.id === id).hide;
+const ALONE = "settings.json gilt nicht: das Board zeigt views.json allein";
+
+test("this machine's settings lie in herdr's app folder, in board/settings.json", () => {
+  assert.equal(board.settingsPath("/x/herdr-app"), "/x/herdr-app/board/settings.json");
+});
+
+test("settings over views.json: a value overrides, an object merges key by key, a list replaces the views.json list whole", () => {
+  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 5, start: { agent: "codex" }, sources: { azure: { contexts: [{ prs: { project: "Other" } }] }, github: { views: { mine: { hide: ["Ready"] } } } } }));
+  assert.deepEqual(read.errors, []);
+  assert.equal(read.config.refreshMinutes, 5);
+  assert.deepEqual(read.config.start, { agent: "codex", message: "/work {number}", review: "/look {number}" });
+  assert.deepEqual(read.config.azure.contexts.map((c) => c.id), ["azure:prs:Other"]);
+  assert.equal(read.config.azure.org, "https://dev.azure.com/example-org", "beside the list, views.json's org stays");
+  assert.deepEqual(viewHide(read, "mine"), ["Ready"], "the hide list replaced, not joined");
+});
+
+test("settings name a views.json list's entries by their id: an object there merges into the entry with that id, wherever views.json moves it; an array replaces the list", () => {
+  const over = { sources: { github: { views: { mine: { hide: ["Ready"], filter: "" } } } } };
+  const read = board.readConfig(testConfig(), machine(over));
+  assert.deepEqual(read.errors, []);
+  assert.deepEqual(viewHide(read, "mine"), ["Ready"]);
+  assert.equal(board.githubViews(read.config)[0].filter, "");
+  assert.deepEqual(viewHide(read, "other"), ["Done"], "the other views keep views.json's");
+  const reordered = JSON.parse(testConfig());
+  reordered.sources.github.views.reverse();
+  const moved = board.readConfig(JSON.stringify(reordered), machine(over));
+  assert.deepEqual(board.githubViews(moved.config).map((v) => [v.id, v.hide]), [["other", ["Done"]], ["prs", []], ["mine", ["Ready"]]]);
+  const whole = board.readConfig(testConfig(), machine({ sources: { github: { views: [{ id: "solo", name: "Solo", layout: "board", project: { owner: "o", number: 1 } }] } } }));
+  assert.deepEqual(whole.errors, []);
+  assert.deepEqual(board.githubViews(whole.config).map((v) => v.id), ["solo"]);
+});
+
+test("an id views.json does not have, or an object for a list without ids, is an error naming the settings file and the key; the rest applies", () => {
+  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 7, sources: { github: { views: { gone: { hide: [] } } }, azure: { contexts: { x: {} } } } }));
+  assert.equal(read.config.refreshMinutes, 7);
+  assert.deepEqual(read.errors, [
+    "settings.json: „sources.github.views.gone“: einen Eintrag mit „id“ „gone“ gibt es in views.json nicht",
+    "settings.json: „sources.azure.contexts“ ist in views.json eine Liste ohne „id“ je Eintrag: hier nur als ganze Liste",
+  ]);
+  assert.equal(read.config.azure.contexts.length, 2, "views.json's contexts stay");
+});
+
+test("settings that add a problem, or cannot be read, are not applied: each problem names the file in config.js's words, and the board says it shows views.json alone", () => {
+  const alone = board.readConfig(testConfig());
+  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 0, sources: { github: { views: { mine: { hide: "Done" } } } } }));
+  assert.deepEqual([read.config, read.machine], [alone.config, null]);
+  assert.deepEqual(read.errors, [
+    "settings.json: „refreshMinutes“ ist eine Zahl ab 1",
+    "settings.json: GitHub-Ansicht 1 („Mine“): „hide“ muss eine Liste von Texten sein",
+    ALONE,
+  ]);
+  for (const [text, error] of [["{ refresh", /^settings\.json ist kein gültiges JSON: /], ["[1]", /^settings\.json: Oben muss ein Objekt stehen$/]]) {
+    const bad = board.readConfig(testConfig(), machine(text));
+    assert.deepEqual(bad.config, alone.config);
+    assert.match(bad.errors[0], error);
+    assert.deepEqual(bad.errors.slice(1), [ALONE]);
+  }
+  const unread = board.readConfig(testConfig(), { name: "settings.json", error: "Permission denied" });
+  assert.deepEqual([unread.config, unread.errors], [alone.config, ["settings.json ließ sich nicht lesen: Permission denied", ALONE]]);
+  const none = board.readConfig(testConfig(), machine(null));
+  assert.deepEqual([none.config, none.errors], [alone.config, []], "no file: views.json alone, nothing to say");
+});
+
+test("each value says where it comes from: this machine, views.json or the built-in default", () => {
+  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 5, sources: { github: { views: { mine: { hide: ["Ready"] } } }, azure: { contexts: [{ prs: { project: "P" } }] } } }));
+  const origin = (path) => board.originOf(read.base, read.machine, path);
+  assert.equal(origin(["refreshMinutes"]), "dieser Rechner");
+  assert.equal(origin(["start", "agent"]), "views.json");
+  assert.equal(origin(["start", "machine"]), "Standard");
+  assert.equal(origin(MINE_HIDE), "dieser Rechner");
+  assert.equal(origin(["sources", "github", "views", "mine", "filter"]), "views.json");
+  assert.equal(origin(["sources", "github", "views", "other", "hide"]), "views.json");
+  assert.equal(origin(["sources", "github", "views", "other", "limit"]), "Standard");
+  assert.equal(origin(["sources", "azure", "contexts"]), "dieser Rechner");
+  assert.equal(origin(["sources", "azure", "contexts", "0", "prs"]), "dieser Rechner", "inside a list set here");
+  assert.equal(origin(["sources", "azure", "org"]), "views.json");
+  const unused = board.readConfig(testConfig(), machine({ refreshMinutes: 0 }));
+  assert.equal(board.originOf(unused.base, unused.machine, ["refreshMinutes"]), "views.json", "settings not applied set nothing");
+});
+
+test("a value set or reset by its path: a reset takes it out and the objects it leaves empty, so views.json's applies again", () => {
+  const set = board.withSetting({ refreshMinutes: 5 }, MINE_HIDE, ["Ready"]);
+  assert.deepEqual(set, { refreshMinutes: 5, ...mineHidden(["Ready"]) });
+  assert.deepEqual(board.withSetting(set, MINE_HIDE, undefined), { refreshMinutes: 5 });
+  assert.deepEqual(board.withSetting({ refreshMinutes: 5 }, MINE_HIDE, undefined), { refreshMinutes: 5 }, "nothing there: unchanged");
+  assert.deepEqual(board.withSetting({ start: 3 }, ["start", "agent"], "codex"), { start: { agent: "codex" } }, "a value in the way gives way to an object");
+  const listed = { sources: { github: { views: [{ id: "mine", hide: [] }] } } };
+  assert.deepEqual(board.withSetting(listed, MINE_HIDE, ["Done"]), { sources: { github: { views: [{ id: "mine", hide: ["Done"] }] } } }, "into a list set here, by id");
+  assert.throws(() => board.withSetting(listed, ["sources", "github", "views", "gone", "hide"], []), /keinen Eintrag „gone“/);
+  assert.deepEqual(listed.sources.github.views[0].hide, [], "the settings given stay as they were");
+  assert.equal(board.settingsText({ a: 1 }), '{\n  "a": 1\n}\n');
+});
+
 // ---- The top bar's sources and contexts ----
 
 test("the sources come in the toggle's order, GitHub first, each with its contexts in views.json's order", () => {
@@ -630,12 +732,11 @@ test("each context shows one view, with an id and a kind; an Azure view's kind s
 
 // ---- Hidden columns ----
 
-test("hidden columns: the view's hide plus what the person hid, minus what they showed", () => {
+test("hidden columns are the view's hide; what the browser storage kept moves over as its hide plus what was hidden, minus what was shown", () => {
   const view = githubView();
-  assert.deepEqual([...board.hiddenColumns(view, null)], ["Backlog", "Done"]);
-  assert.deepEqual([...board.hiddenColumns(view, { hide: ["Ready"], show: ["Done"] })].sort(), ["Backlog", "Ready"]);
-  const later = { ...view, hide: ["Done", "In review"] };
-  assert.deepEqual([...board.hiddenColumns(later, { hide: [], show: ["Backlog"] })].sort(), ["Done", "In review"], "a later edit to hide takes effect");
+  assert.deepEqual([...board.hiddenColumns(view)], ["Backlog", "Done"]);
+  assert.deepEqual(board.storedHiddenList(view, { hide: ["Ready"], show: ["Done"] }).sort(), ["Backlog", "Ready"]);
+  assert.deepEqual(board.storedHiddenList(view, { hide: [], show: [] }), ["Backlog", "Done"]);
 });
 
 test("a stored hidden set is read only when it is lists of names", () => {
@@ -643,17 +744,13 @@ test("a stored hidden set is read only when it is lists of names", () => {
   for (const bad of [null, ["A"], { hide: [1], show: [] }, { hide: ["A"] }, "x"]) assert.equal(board.readStoredHidden(bad), null);
 });
 
-test("toggling stores only the difference to the view's hide; a column that takes no drops is never stored", () => {
+test("toggling gives the view's whole hide with the column added or taken out; a column that takes no drops gives none", () => {
   const view = githubView();
   const cols = casesBoard().columns;
   const col = (name) => cols.find((c) => c.name === name);
-  let stored = board.toggleHidden(view, null, col("Done"));
-  assert.deepEqual(stored, { hide: [], show: ["Done"] });
-  stored = board.toggleHidden(view, stored, col("Done"));
-  assert.deepEqual(stored, { hide: [], show: [] });
-  stored = board.toggleHidden(view, stored, col("Ready"));
-  assert.deepEqual(stored, { hide: ["Ready"], show: [] });
-  assert.equal(board.toggleHidden(view, stored, col("Ohne Status")), stored);
+  assert.deepEqual(board.toggledHidden(view, col("Done")), ["Backlog"]);
+  assert.deepEqual(board.toggledHidden(view, col("Ready")), ["Backlog", "Done", "Ready"]);
+  assert.equal(board.toggledHidden(view, col("Ohne Status")), null);
 });
 
 test("names in hide that match no column are reported", () => {
@@ -2408,7 +2505,7 @@ const SAMPLE_LOGIN = { code: 0, stdout: JSON.stringify({ data: { viewer: { login
 const NO_NOTIFICATIONS = { code: 0, stdout: "[]", stderr: "" };
 function fakeHost({
   config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false, oldMouse = false, viewerAnswer = SAMPLE_LOGIN,
-  notificationsAnswer = NO_NOTIFICATIONS, claudeHome = null, claudeAnswer = null,
+  notificationsAnswer = NO_NOTIFICATIONS, claudeHome = null, claudeAnswer = null, files = {}, failWrite = null,
 } = {}) {
   const calls = [];
   const lacked = oldMouse ? ["on_window_mouse_up"] : [];
@@ -2514,8 +2611,8 @@ function fakeHost({
     // views.json is `config`; any other file is in `files` (path → text),
     // which writeTextFile writes as herdr's does: only where the file still
     // holds `expected` (null: there is none). `failWrite` makes it fail.
-    files: {},
-    failWrite: null,
+    files: { ...files },
+    failWrite,
     readTextFile: async (path) => (path.endsWith("/views.json") ? host.config : host.files[path] ?? null),
     writeTextFile: async (path, text, expected) => {
       if (host.failWrite) throw host.failWrite;
@@ -3430,26 +3527,19 @@ test("UI: the command menu offers no „Spalte ausblenden“ on the column witho
   assert.ok(entries.some(([name]) => name === "Spalten…"), "the column menu it does offer");
   await press(b, cx, "escape");
   assert.equal(memory.has("hidden:mine"), false);
+  assert.equal(host.files[MACHINE_FILE], undefined);
   assert.equal(st().data.columns[0].hidden, false);
   assert.equal(host.open("gh").length, 0, "no refresh");
 });
 
-test("UI: a click on a hidden column's name shows it and keeps it shown when storage fails", async () => {
-  const { b, cx, st, host } = await openBoard();
-  const setItem = localStorage.setItem;
-  localStorage.setItem = () => {
-    throw new Error("full");
-  };
-  try {
-    await click(b, cx, "show-opt-done");
-  } finally {
-    localStorage.setItem = setItem;
-  }
-  assert.equal(st().hidden.has("Done"), false);
-  assert.equal(st().data.columns[4].hidden, false);
-  assert.deepEqual(b.navColumns(b.view()).map((c) => c.name), ["Ready", "In progress", "In review", "Done"]);
-  assert.deepEqual(texts(byId(b.render(), "hidden-columns")), ["ausgeblendet:", "Backlog"]);
+test("UI: a click on a hidden column's name shows it; where the settings cannot be written the board says so and the column follows the file again", async () => {
+  const { b, cx, st, host } = await openBoard({ failWrite: new Error("Permission denied") });
+  await click(b, cx, "show-opt-done");
   assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog"'), "the refresh asks for Done again");
+  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} nicht gespeichert: Permission denied`, level: "error" });
+  assert.equal(host.files[MACHINE_FILE], undefined);
+  assert.equal(st().hidden.has("Done"), true);
+  assert.deepEqual(texts(byId(b.render(), "hidden-columns")), ["ausgeblendet:", "Backlog", "Done"]);
 });
 
 test("UI: hidden columns are not drawn; the line below the columns names them, h/l skip them", async () => {
@@ -3480,6 +3570,99 @@ test("UI: with every column hidden the board says how to show one", async () => 
   await press(b, cx, "l");
   await press(b, cx, "enter");
   assert.equal(st().detail, false);
+});
+
+test("UI: the board reads this machine's settings at the start and on r; a view's hidden columns come from there", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: JSON.stringify(mineHidden(["Ready"])) } });
+  assert.deepEqual([...st().hidden], ["Ready"]);
+  assert.deepEqual(texts(byId(b.render(), "hidden-columns")), ["ausgeblendet:", "Ready"]);
+  host.files[MACHINE_FILE] = JSON.stringify(mineHidden(["Done"]));
+  await press(b, cx, "r");
+  assert.deepEqual([...st().hidden], ["Done"]);
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Done"'));
+});
+
+test("UI: hiding or showing a column writes the view's whole hide into this machine's settings at once, not into the browser storage", async () => {
+  const { b, cx, host, st } = await openBoard();
+  st().sel = { col: 1, key: "PVTI_rec1" };
+  await runCommand(b, cx, "Spalte ausblenden: In progress");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "Done", "In progress"]));
+  assert.equal(b.origin(MINE_HIDE), "dieser Rechner");
+  await click(b, cx, "show-opt-done");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "In progress"]));
+  assert.deepEqual([...st().hidden], ["Backlog", "In progress"]);
+  assert.deepEqual([...memory.keys()].filter((k) => k.startsWith("hidden:")), []);
+});
+
+test("UI: a reset takes this machine's entry out of the file, and views.json's hide applies again", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: JSON.stringify({ refreshMinutes: 4, ...mineHidden([]) }) } });
+  assert.deepEqual([...st().hidden], []);
+  assert.equal(await b.changeSetting(MINE_HIDE, undefined, cx), true);
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 4 });
+  assert.equal(b.origin(MINE_HIDE), "views.json");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog","Done"'), "read again without them");
+});
+
+test("UI: changes made one after the other are written one after the other, each over what the file holds then", async () => {
+  const { b, cx, host } = await openBoard();
+  host.files[MACHINE_FILE] = JSON.stringify({ start: { machine: "server" } });
+  const expected = [];
+  const write = host.writeTextFile;
+  host.writeTextFile = (path, text, old) => (expected.push(old), write(path, text, old));
+  assert.deepEqual(await Promise.all([b.changeSetting(["start", "agent"], "codex", cx), b.changeSetting(["refreshMinutes"], 4, cx)]), [true, true]);
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { start: { machine: "server", agent: "codex" }, refreshMinutes: 4 });
+  assert.deepEqual(expected.map((text) => JSON.parse(text)), [{ start: { machine: "server" } }, { start: { machine: "server", agent: "codex" } }]);
+  assert.deepEqual([b.config.start, b.config.refreshMinutes], [{ agent: "codex", message: "/work {number}", review: "/look {number}", machine: "server" }, 4]);
+});
+
+test("UI: a write the file refuses, as it changed since the board read it, is said, the file read again and what it holds kept", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: "{}\n" } });
+  const write = host.writeTextFile;
+  const other = `${JSON.stringify({ refreshMinutes: 9 })}\n`;
+  host.writeTextFile = (path, text, old) => {
+    host.files[path] = other;
+    host.writeTextFile = write;
+    return write(path, text, old);
+  };
+  st().sel = { col: 1, key: "PVTI_rec1" };
+  await runCommand(b, cx, "Spalte ausblenden: In progress");
+  assert.equal(host.files[MACHINE_FILE], other, "the other write stands");
+  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} nicht gespeichert: stale snapshot of ${MACHINE_FILE}`, level: "error" });
+  assert.equal(b.config.refreshMinutes, 9, "read again");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"], "the column shows again: the file does not hide it");
+});
+
+test("UI: with settings that are no JSON the board runs on views.json, says so with the file's name, and writes nothing into them", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: "{ hide" } });
+  assert.match(b.configErrors[0], /^\/fake-home\/board\/settings\.json ist kein gültiges JSON: /);
+  assert.equal(b.configErrors[1], "/fake-home/board/settings.json gilt nicht: das Board zeigt views.json allein");
+  assert.ok(b.configErrors.every((e) => texts(b.render()).includes(e)), "the banner shows them");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  st().sel = { col: 1, key: "PVTI_rec1" };
+  await runCommand(b, cx, "Spalte ausblenden: In progress");
+  assert.equal(host.files[MACHINE_FILE], "{ hide");
+  assert.match(b.notice.text, /^Nicht geändert: \/fake-home\/board\/settings\.json ist kein gültiges JSON/);
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  host.appHome = () => "/home/sample/.config/herdr-app";
+  host.files["/home/sample/.config/herdr-app/board/settings.json"] = "[]";
+  await press(b, cx, "r");
+  assert.equal(b.configErrors[0], "~/.config/herdr-app/board/settings.json: Oben muss ein Objekt stehen", "in the home folder named from ~");
+});
+
+test("UI: the hidden columns the browser storage kept move into this machine's settings once and leave the storage", async () => {
+  const stored = { source: "github", "hidden:mine": { hide: ["Ready"], show: ["Done"] }, "hidden:other": { hide: [], show: [] }, "hidden:prs": "x" };
+  const { st, host } = await openBoard({ stored });
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "Ready"]), "only what changed the view's hide");
+  assert.deepEqual([...memory.keys()].filter((k) => k.startsWith("hidden:")), []);
+  assert.deepEqual([...st().hidden], ["Backlog", "Ready"]);
+  const set = JSON.stringify(mineHidden(["Done"]));
+  const kept = await openBoard({ stored, files: { [MACHINE_FILE]: set } });
+  assert.equal(kept.host.files[MACHINE_FILE], set, "where the settings set the view's hide, they win");
+  assert.equal(memory.has("hidden:mine"), false);
+  const failing = await openBoard({ stored, failWrite: new Error("Permission denied") });
+  assert.equal(failing.b.notice.text, `${MACHINE_FILE} nicht gespeichert: Permission denied`);
+  assert.deepEqual(memory.get("hidden:mine"), JSON.stringify(stored["hidden:mine"]), "a move that failed leaves it in the storage for the next read");
 });
 
 test("UI: the command menu's „Spalte ausblenden“ hides the selected column; the selection goes to the column taking its place", async () => {

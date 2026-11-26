@@ -39,7 +39,10 @@
 // An older views.json with its views at the top is not read; the board says
 // where they go now.
 //
-// Hidden columns are left out of the query and of the board. GitHub's
+// This machine's settings (settings.js; README, "herdr app") lie over
+// views.json and are read with it. Hidden columns are a view's hide there:
+// hiding or showing one writes it. They are left out of the query and of
+// the board. GitHub's
 // queries also ask for the login gh runs as, which "nur meine" compares
 // with.
 //
@@ -133,7 +136,8 @@
 // after a restart with its age until its read replaces it.
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
-// and why): shared.js, config.js (views.json), contexts.js (the top bar's
+// and why): shared.js, config.js (views.json), settings.js (this machine's
+// settings over it), contexts.js (the top bar's
 // sources, contexts and their views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
@@ -164,10 +168,11 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { appHome, checking, exec, focused, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme } from "herdr";
+import { appHome, checking, exec, focused, home, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
 import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
-import { readConfig, startSettings } from "./config.js";
-import { readStoredHidden, hiddenColumns, isDue, pendingMoves } from "./kinds/board.js";
+import { githubViews, readConfig, startSettings } from "./config.js";
+import { ORIGIN, originOf, readSettings, settingsPath, settingsText, withSetting } from "./settings.js";
+import { readStoredHidden, hiddenColumns, isDue, pendingMoves, storedHiddenList, withHidden } from "./kinds/board.js";
 import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
@@ -189,6 +194,7 @@ import { LINE_PX, keptScroll, restoreScroll, scrollBy, scrollPage, scrollToEnd }
 import { shownDescription, webUrl } from "./description.js";
 export * from "./shared.js";
 export * from "./config.js";
+export * from "./settings.js";
 export * from "./contexts.js";
 export * from "./kinds/board.js";
 export * from "./kinds/index.js";
@@ -321,6 +327,14 @@ export default class Board extends View {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
+    // views.json's text as last read, this machine's settings as last read
+    // or written ({ text } or { error }), what readConfig made of both, and
+    // the writes to the settings, one after the other.
+    this.configText = null;
+    this.machineRead = null;
+    this.configBase = null;
+    this.machineSettings = null;
+    this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
     this.prefetchLeft = new Set();
@@ -457,7 +471,7 @@ export default class Board extends View {
   // success) and tried (last start), moves (laid over refreshes, see
   // pendingMoves), pending (keys of items being written), unclear (open
   // outcomes: key, label, at and writeAtOnce's w.open; see settleUnclear),
-  // stored/hidden (the person's toggles and the hidden set), sel
+  // hidden (the hidden set), sel
   // ({ col, key }, null before the first data), picked (the key of the item
   // the person chose, see clickItem), want (an item to choose once a refresh
   // has it: chooseWanted), related (by item key: readRelated), folds (as the
@@ -471,7 +485,7 @@ export default class Board extends View {
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
-      stored: readStoredHidden(store.get(`hidden:${id}`)), hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
+      hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
       saved: false, restored: false, progress: null, unavailable: false,
     };
@@ -530,35 +544,190 @@ export default class Board extends View {
 
   hiddenFor(view) {
     const st = this.state(view.id);
-    st.hidden = hiddenColumns(view, st.stored);
+    st.hidden = hiddenColumns(view);
     return st.hidden;
   }
 
-  // Reads views.json again and refreshes the shown view; see Calls in the
-  // header.
+  // This machine's settings file, and its name as the board says it.
+  settingsFile() {
+    return settingsPath(appHome());
+  }
+
+  settingsName() {
+    const file = this.settingsFile();
+    const own = home();
+    return own && file.startsWith(`${own}/`) ? `~${file.slice(own.length)}` : file;
+  }
+
+  // The config from views.json's text and this machine's settings as last
+  // read; true when it has views. Open outcomes of a view that is gone, or
+  // is now of another kind than in the last valid config, are dropped, and
+  // a dialog of such a view closes.
+  takeConfig() {
+    const machine = this.machineRead && { name: this.settingsName(), ...this.machineRead };
+    ({ config: this.config, errors: this.configErrors, base: this.configBase, machine: this.machineSettings } = readConfig(this.configText, machine));
+    if (!this.config) return false;
+    const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
+    // Before the first valid config no view has a state to compare.
+    const before = this.kinds ?? kinds;
+    for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
+    this.kinds = kinds;
+    const m = this.modal;
+    if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+    return true;
+  }
+
+  async readMachine() {
+    this.machineRead = await readTextFile(this.settingsFile()).then(
+      (text) => ({ text }),
+      (e) => ({ error: firstLine(e?.message ?? e) }),
+    );
+  }
+
+  // Where the value at `path` (keys of views.json from the top, a view's id
+  // in place of its index) comes from: one of ORIGIN.
+  origin(path) {
+    return originOf(this.configBase, this.machineSettings, path);
+  }
+
+  // Sets the values at their paths (undefined: resets one, so views.json's
+  // applies again) in this machine's settings: at once in the board, then in
+  // the file, over what it holds then. A write the file refuses (it changed
+  // between that read and the write, or cannot be written) is said, and the
+  // file read again. Resolves to whether the file has them.
+  changeSettings(changes, cx) {
+    const name = this.settingsName();
+    const now = this.machineRead && !("error" in this.machineRead) ? readSettings(this.machineRead.text, name) : null;
+    if (!now?.settings) {
+      const why = now?.errors[0] ?? (this.machineRead ? `${name} ließ sich nicht lesen: ${this.machineRead.error}` : `${name} ist noch nicht gelesen`);
+      this.say(`Nicht geändert: ${why}`, "error", cx);
+      return Promise.resolve(false);
+    }
+    let next;
+    try {
+      next = changes.reduce((over, [path, value]) => withSetting(over, path, value), now.settings);
+    } catch (e) {
+      this.say(errorText(e), "error", cx);
+      return Promise.resolve(false);
+    }
+    this.machineRead = { text: settingsText(next) };
+    this.takeConfig();
+    cx.notify();
+    const before = this.settingsWrites;
+    const write = new Promise((resolve) => {
+      cx.spawn(async (cx) => {
+        await before;
+        try {
+          resolve(await this.writeSettings(changes, cx));
+        } catch (e) {
+          resolve(false);
+          this.say(report(e), "error", cx);
+        }
+      });
+    });
+    this.settingsWrites = write;
+    return write;
+  }
+
+  changeSetting(path, value, cx) {
+    return this.changeSettings([[path, value]], cx);
+  }
+
+  async writeSettings(changes, cx) {
+    const file = this.settingsFile();
+    const name = this.settingsName();
+    const refused = async (why) => {
+      this.say(`${name} nicht gespeichert: ${why}`, "error", cx);
+      await this.readMachine();
+      this.takeConfig();
+      this.followHidden(cx);
+      cx.notify();
+      return false;
+    };
+    let fresh;
+    try {
+      fresh = await readTextFile(file);
+    } catch (e) {
+      return refused(`ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`);
+    }
+    const { settings, errors } = readSettings(fresh, name);
+    if (!settings) return refused(errors[0]);
+    let text;
+    try {
+      const next = changes.reduce((over, [path, value]) => withSetting(over, path, value), settings);
+      text = fresh === null && !Object.keys(next).length ? null : settingsText(next);
+    } catch (e) {
+      return refused(errorText(e));
+    }
+    if (text !== fresh) {
+      try {
+        await writeTextFile(file, text, fresh);
+      } catch (e) {
+        return refused(firstLine(e?.message ?? e));
+      }
+    }
+    this.machineRead = { text };
+    this.takeConfig();
+    this.followHidden(cx);
+    cx.notify();
+    return true;
+  }
+
+  // A view whose hidden columns the config changed shows them so, and is
+  // read again: its query leaves them out.
+  followHidden(cx) {
+    for (const view of viewsOf(this.config ?? {})) {
+      const st = this.views[view.id];
+      if (!st?.hidden || !st.data) continue;
+      const hidden = hiddenColumns(view);
+      if (hidden.size === st.hidden.size && [...hidden].every((n) => st.hidden.has(n))) continue;
+      st.hidden = hidden;
+      st.data = withHidden(st.data, hidden);
+      this.refresh(view, cx);
+    }
+  }
+
+  // The hidden columns the browser storage kept per view ("hidden:<view>")
+  // move into this machine's settings, once: where the settings set the
+  // view's hide already, or the toggles changed nothing, they are dropped.
+  moveStoredHidden(cx) {
+    const moves = [];
+    for (const view of githubViews(this.config)) {
+      const key = `hidden:${view.id}`;
+      if (store.text(key) === null) continue;
+      const stored = readStoredHidden(store.get(key));
+      const path = ["sources", "github", "views", view.id, "hide"];
+      const list = stored && this.origin(path) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
+      if (!list || (list.length === view.hide.length && list.every((n) => view.hide.includes(n)))) store.remove(key);
+      else moves.push({ key, path, list });
+    }
+    if (!moves.length) return;
+    this.changeSettings(moves.map((m) => [m.path, m.list]), cx).then((done) => {
+      if (done) for (const m of moves) store.remove(m.key);
+    });
+  }
+
+  // Reads views.json and this machine's settings again and refreshes the
+  // shown view; see Calls in the header.
   reload(cx) {
     cx.spawn(async (cx) => {
-      const text = await readTextFile(`${appHome()}/mods/${MOD}/${CONFIG_NAME}.json`).catch((e) => {
-        this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
-        return undefined;
-      });
-      if (text !== undefined) ({ config: this.config, errors: this.configErrors } = readConfig(text));
+      const [text] = await Promise.all([
+        readTextFile(`${appHome()}/mods/${MOD}/${CONFIG_NAME}.json`).catch((e) => {
+          this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
+          return undefined;
+        }),
+        this.readMachine(),
+      ]);
+      if (text !== undefined) this.configText = text;
+      const valid = text === undefined ? Boolean(this.config) : this.takeConfig();
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
-      if (!this.config) return;
-      // Open outcomes of a view that is gone, or is now of another kind than
-      // in the last valid views.json, are dropped.
-      const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
-      // Before the first valid views.json no view has a state to compare.
-      const before = this.kinds ?? kinds;
-      for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
-      this.kinds = kinds;
-      // A dialog of a view that is gone, or of another kind now, closes.
-      const m = this.modal;
-      if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+      if (!valid) return;
+      const kinds = this.kinds;
       // A views.json with problems leaves those views out.
       if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
+      this.moveStoredHidden(cx);
       this.prefetchLeft = new Set(kinds.keys());
       const shown = this.view();
       if (shown) this.restore(shown);

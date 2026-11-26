@@ -241,7 +241,9 @@ which `settings.json` picks by the system's light or dark mode, plus
 `themes/catppuccin-mocha.json`. The copper pair is copied unchanged from the
 copper-design release `v0.4.0` (`ports/herdr/`); on a new release, copy both
 files from its tag and update the tag here.
-Everything else in `~/.config/herdr-app` is herdr's own. `stow-packages.sh`
+Everything else in `~/.config/herdr-app` is herdr's own, except
+`board/settings.json`, the board's settings for this machine (below), which
+no package holds. `stow-packages.sh`
 stows the package without folding (the reason is in its comment on
 `no_folding_pkgs`), so relink it
 with `mise run dotfiles-relink herdr-app` rather than a bare `stow -R
@@ -446,6 +448,38 @@ by that run. Which files of the package git tracks is set in the root
   "nur meine" thins says so ("1/4"); a tab's count leaves the cards of hidden
   columns out. The code holds nothing of mine; the header of
   `mods/board/src/main.js` describes the file's fields.
+  `views.json` is the base; each machine's own settings lie over it in
+  `~/.config/herdr-app/board/settings.json`, outside the dotfiles: no stow
+  package has a `board/` there, `.stow-local-ignore` keeps every
+  `settings.json` of the package unlinked, and herdr reloads nothing when
+  it changes (it watches only `mods/`, `layouts/`, `themes/` and its own
+  files). The file has the shape of `views.json`, holding only what this
+  machine sets: a value there overrides the one in `views.json`, an object
+  merges key by key down to its lists and values, and a list replaces the
+  `views.json` list whole. A list of entries with an `id`, the GitHub views,
+  can also be reached entry by entry: an object in its place, keyed by id,
+  merges into the entries with those ids, wherever `views.json` moves them,
+  so `{ "sources": { "github": { "views": { "mine": { "hide": ["Done"] } } } } }`
+  sets that one view's hidden columns, while an array there would replace
+  every view. An id `views.json` does not have, or such an object for a list
+  without ids (the Azure contexts, set here only as a whole list), is an
+  error naming the file and the key, and the rest of the file applies.
+  Settings that cannot be read, are no JSON object, or give `views.json` a
+  problem it does not have on its own, are not applied: the board names the
+  file with each problem, in the words it uses for `views.json`, says that
+  it shows `views.json` alone, and does. Removing a value from the file (a
+  reset) lets `views.json`'s apply again. The board reads the file whenever
+  it reads `views.json` (the start, `r`), and a change it makes is written
+  at once, over what the file holds at that moment, one after the other;
+  where the file changed between that read and the write, or cannot be
+  written, the board says it did not save, reads the file again and shows
+  what it holds. Hidden columns are such a setting: hiding or showing a
+  column writes the view's whole hidden list there, which replaces the
+  view's `hide` from `views.json` on this machine until it is reset. The
+  hidden columns an older board kept in herdr's localStorage move into the
+  file at the first read of `views.json` and leave the localStorage; where
+  the file sets that view's hidden columns already, the file's stay. What
+  else the board remembers, as above, stays in herdr's localStorage.
   Each view keeps its last good read in herdr's localStorage (about 217 kB
   for a board of 300 cards; herdr's store takes at most 1 MiB a value and
   8 MiB in all, so a view keeps at most a million bytes, and one the store
@@ -545,7 +579,8 @@ by that run. Which files of the package git tracks is set in the root
   included (`s` picks from a menu, hidden ones too, or drag the card onto a
   column; the notice
   says when a card went to a hidden column), the command menu's "Spalte
-  ausblenden" hides the selected column (views.json sets which start hidden),
+  ausblenden" hides the selected column (views.json sets which start hidden;
+  hiding or showing one writes this machine's settings, above),
   `o` opens the item in the browser. A GitHub board reads its items in pages of
   up to 100, one gh call each, up to views.json's `limit` (1000 by default) and
   at most as many calls as full pages of it take; where that cuts them, a note
