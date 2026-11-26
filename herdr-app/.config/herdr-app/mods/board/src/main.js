@@ -40,11 +40,11 @@
 // where they go now.
 //
 // This machine's settings (settings.js; README, "herdr app") lie over
-// views.json and are read with it. Hidden columns are a view's hide there:
-// hiding or showing one writes it. They are left out of the query and of
-// the board. GitHub's
-// queries also ask for the login gh runs as, which "nur meine" compares
-// with.
+// views.json and are read with it. Hidden columns are a view's hide,
+// views.json's or this machine's settings'; hiding or showing one writes it
+// into the settings. They are left out of the query and of the board.
+// GitHub's queries also ask for the login gh runs as, which "nur meine"
+// compares with.
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
@@ -137,8 +137,8 @@
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), settings.js (this machine's
-// settings over it), contexts.js (the top bar's
-// sources, contexts and their views), kinds/index.js (view kinds),
+// settings over it), contexts.js (the top bar's sources, contexts and their
+// views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
@@ -170,9 +170,9 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, home, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
 import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
-import { githubViews, readConfig, startSettings } from "./config.js";
-import { ORIGIN, originOf, readSettings, settingsPath, settingsText, withSetting } from "./settings.js";
-import { readStoredHidden, hiddenColumns, isDue, pendingMoves, storedHiddenList, withHidden } from "./kinds/board.js";
+import { githubViews, hidePath, readConfig, settingsAlone, startSettings } from "./config.js";
+import { CHANGED_MEANWHILE, ORIGIN, sameAtPaths, settingsAfter, settingsPath, staleRefusal } from "./settings.js";
+import { hiddenColumns, hiddenKey, isDue, pendingMoves, sameNames, storedHiddenMoves, withHidden } from "./kinds/board.js";
 import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
@@ -188,6 +188,7 @@ import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
+import { reselectIn } from "./actions/move.js";
 import { descriptionFolds, levelParts, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
 import { actionFor, actionName, aimOf, groupAimOf, hintsOf, keyName, keyShown, startName } from "./commands.js";
 import { LINE_PX, keptScroll, restoreScroll, scrollBy, scrollPage, scrollToEnd } from "./scroll.js";
@@ -327,13 +328,10 @@ export default class Board extends View {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    // views.json's text as last read, this machine's settings as last read
-    // or written ({ text } or { error }), what readConfig made of both, and
-    // the writes to the settings, one after the other.
-    this.configText = null;
-    this.machineRead = null;
-    this.configBase = null;
-    this.machineSettings = null;
+    // views.json's text, this machine's settings file as last read, or as
+    // the board's latest change makes it ({ text } or { error }), what
+    // readConfig applied of it, and the view kinds of the last valid config.
+    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, kinds: null };
     this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
@@ -354,7 +352,6 @@ export default class Board extends View {
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
-    this.kinds = null; // view id → viewKind in the last valid views.json
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
@@ -471,17 +468,17 @@ export default class Board extends View {
   // success) and tried (last start), moves (laid over refreshes, see
   // pendingMoves), pending (keys of items being written), unclear (open
   // outcomes: key, label, at and writeAtOnce's w.open; see settleUnclear),
-  // hidden (the hidden set), sel
-  // ({ col, key }, null before the first data), picked (the key of the item
-  // the person chose, see clickItem), want (an item to choose once a refresh
-  // has it: chooseWanted), related (by item key: readRelated), folds (as the
-  // store keeps them: readStoredFolds) and chosenFolds (in the sprints the
-  // sprint picker chose, by their id: foldsOf), sprint (the sprint a Sprint
-  // view shows in place of the current one, { id, name } as the sprint picker
-  // chose it, null for the current one; never stored), saved (the data drawn
-  // is the saved state, or what a read drew over it so far), restored (the
-  // saved state was looked for), progress ({ page, pages }) and unavailable
-  // (the last read since views.json was read found its source unavailable).
+  // hidden (the hidden set), sel ({ col, key }, null before the first data),
+  // picked (the key of the item the person chose, see clickItem), want (an
+  // item to choose once a refresh has it: chooseWanted), related (by item
+  // key: readRelated), folds (as the store keeps them: readStoredFolds) and
+  // chosenFolds (in the sprints the sprint picker chose, by their id:
+  // foldsOf), sprint (the sprint a Sprint view shows in place of the current
+  // one, { id, name } as the sprint picker chose it, null for the current
+  // one; never stored), saved (the data drawn is the saved state, or what a
+  // read drew over it so far), restored (the saved state was looked for),
+  // progress ({ page, pages }) and unavailable (the last read since
+  // views.json was read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
@@ -548,7 +545,6 @@ export default class Board extends View {
     return st.hidden;
   }
 
-  // This machine's settings file, and its name as the board says it.
   settingsFile() {
     return settingsPath(appHome());
   }
@@ -559,66 +555,61 @@ export default class Board extends View {
     return own && file.startsWith(`${own}/`) ? `~${file.slice(own.length)}` : file;
   }
 
-  // The config from views.json's text and this machine's settings as last
-  // read; true when it has views. Open outcomes of a view that is gone, or
-  // is now of another kind than in the last valid config, are dropped, and
-  // a dialog of such a view closes.
+  // True when the config has views.
   takeConfig() {
-    const machine = this.machineRead && { name: this.settingsName(), ...this.machineRead };
-    ({ config: this.config, errors: this.configErrors, base: this.configBase, machine: this.machineSettings } = readConfig(this.configText, machine));
+    const c = this.configState;
+    const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
+    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin } = readConfig(c.text, read));
     if (!this.config) return false;
     const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
     // Before the first valid config no view has a state to compare.
-    const before = this.kinds ?? kinds;
+    const before = c.kinds ?? kinds;
     for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
-    this.kinds = kinds;
+    c.kinds = kinds;
     const m = this.modal;
     if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return true;
   }
 
-  async readMachine() {
-    this.machineRead = await readTextFile(this.settingsFile()).then(
+  async readSettingsFile() {
+    this.configState.settingsRead = await readTextFile(this.settingsFile()).then(
       (text) => ({ text }),
       (e) => ({ error: firstLine(e?.message ?? e) }),
     );
   }
 
-  // Where the value at `path` (keys of views.json from the top, a view's id
-  // in place of its index) comes from: one of ORIGIN.
   origin(path) {
-    return originOf(this.configBase, this.machineSettings, path);
+    return this.configState.origin(path);
   }
 
-  // Sets the values at their paths (undefined: resets one, so views.json's
-  // applies again) in this machine's settings: at once in the board, then in
-  // the file, over what it holds then. A write the file refuses (it changed
-  // between that read and the write, or cannot be written) is said, and the
-  // file read again. Resolves to whether the file has them.
-  changeSettings(changes, cx) {
+  // An undefined value resets. `before`: { id, columns }, the shown columns
+  // of a view whose selection follows (reselectIn). Resolves to whether the
+  // file has the changes.
+  changeSettings(changes, cx, before = null) {
     const name = this.settingsName();
-    const now = this.machineRead && !("error" in this.machineRead) ? readSettings(this.machineRead.text, name) : null;
-    if (!now?.settings) {
-      const why = now?.errors[0] ?? (this.machineRead ? `${name} ließ sich nicht lesen: ${this.machineRead.error}` : `${name} ist noch nicht gelesen`);
+    const c = this.configState;
+    const read = c.settingsRead;
+    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name) : null;
+    const why = !read
+      ? `${name} ist noch nicht gelesen`
+      : "error" in read
+        ? `${name} ließ sich nicht lesen: ${read.error}`
+        : after.error ?? (c.settings ? null : settingsAlone(name));
+    if (why) {
       this.say(`Nicht geändert: ${why}`, "error", cx);
       return Promise.resolve(false);
     }
-    let next;
-    try {
-      next = changes.reduce((over, [path, value]) => withSetting(over, path, value), now.settings);
-    } catch (e) {
-      this.say(errorText(e), "error", cx);
-      return Promise.resolve(false);
-    }
-    this.machineRead = { text: settingsText(next) };
+    const built = read.text;
+    c.settingsRead = { text: after.text };
     this.takeConfig();
+    this.followHidden(cx, before);
     cx.notify();
-    const before = this.settingsWrites;
+    const queued = this.settingsWrites;
     const write = new Promise((resolve) => {
       cx.spawn(async (cx) => {
-        await before;
+        await queued;
         try {
-          resolve(await this.writeSettings(changes, cx));
+          resolve(await this.writeSettings(changes, built, cx));
         } catch (e) {
           resolve(false);
           this.say(report(e), "error", cx);
@@ -629,16 +620,17 @@ export default class Board extends View {
     return write;
   }
 
-  changeSetting(path, value, cx) {
-    return this.changeSettings([[path, value]], cx);
+  changeSetting(path, value, cx, before = null) {
+    return this.changeSettings([[path, value]], cx, before);
   }
 
-  async writeSettings(changes, cx) {
+  // `built`: the file's text the changes were made over.
+  async writeSettings(changes, built, cx) {
     const file = this.settingsFile();
     const name = this.settingsName();
     const refused = async (why) => {
       this.say(`${name} nicht gespeichert: ${why}`, "error", cx);
-      await this.readMachine();
+      await this.readSettingsFile();
       this.takeConfig();
       this.followHidden(cx);
       cx.notify();
@@ -650,60 +642,49 @@ export default class Board extends View {
     } catch (e) {
       return refused(`ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`);
     }
-    const { settings, errors } = readSettings(fresh, name);
-    if (!settings) return refused(errors[0]);
-    let text;
-    try {
-      const next = changes.reduce((over, [path, value]) => withSetting(over, path, value), settings);
-      text = fresh === null && !Object.keys(next).length ? null : settingsText(next);
-    } catch (e) {
-      return refused(errorText(e));
-    }
-    if (text !== fresh) {
+    const after = settingsAfter(fresh, changes, name);
+    if (after.error) return refused(after.error);
+    if (!readConfig(this.configState.text, { name, text: fresh }).settings) return refused(settingsAlone("die Datei"));
+    if (!sameAtPaths(built, fresh, changes, name)) return refused(CHANGED_MEANWHILE);
+    if (after.text !== fresh) {
       try {
-        await writeTextFile(file, text, fresh);
+        await writeTextFile(file, after.text, fresh);
       } catch (e) {
-        return refused(firstLine(e?.message ?? e));
+        return refused(staleRefusal(e) ? CHANGED_MEANWHILE : firstLine(e?.message ?? e));
       }
     }
-    this.machineRead = { text };
+    this.configState.settingsRead = { text: after.text };
     this.takeConfig();
     this.followHidden(cx);
     cx.notify();
     return true;
   }
 
-  // A view whose hidden columns the config changed shows them so, and is
-  // read again: its query leaves them out.
-  followHidden(cx) {
+  // Where a settings change by the board changes a view's hide, it shows it
+  // so and is read again; `before` as in changeSettings.
+  followHidden(cx, before = null) {
     for (const view of viewsOf(this.config ?? {})) {
       const st = this.views[view.id];
       if (!st?.hidden || !st.data) continue;
       const hidden = hiddenColumns(view);
-      if (hidden.size === st.hidden.size && [...hidden].every((n) => st.hidden.has(n))) continue;
+      if (sameNames(hidden, st.hidden)) continue;
       st.hidden = hidden;
       st.data = withHidden(st.data, hidden);
+      if (before?.id === view.id) reselectIn(this, view, before.columns);
+      // What a column holds comes from the query, which leaves hidden ones out.
       this.refresh(view, cx);
     }
   }
 
-  // The hidden columns the browser storage kept per view ("hidden:<view>")
-  // move into this machine's settings, once: where the settings set the
-  // view's hide already, or the toggles changed nothing, they are dropped.
+  // Settings that do not apply keep the stored entries for a later read.
   moveStoredHidden(cx) {
-    const moves = [];
-    for (const view of githubViews(this.config)) {
-      const key = `hidden:${view.id}`;
-      if (store.text(key) === null) continue;
-      const stored = readStoredHidden(store.get(key));
-      const path = ["sources", "github", "views", view.id, "hide"];
-      const list = stored && this.origin(path) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
-      if (!list || (list.length === view.hide.length && list.every((n) => view.hide.includes(n)))) store.remove(key);
-      else moves.push({ key, path, list });
-    }
+    if (!this.configState.settings) return;
+    const entryOf = (view) => (store.text(hiddenKey(view.id)) === null ? undefined : store.get(hiddenKey(view.id)));
+    const { moves, drop } = storedHiddenMoves(githubViews(this.config), entryOf, (path) => this.origin(path));
+    for (const view of drop) store.remove(hiddenKey(view.id));
     if (!moves.length) return;
-    this.changeSettings(moves.map((m) => [m.path, m.list]), cx).then((done) => {
-      if (done) for (const m of moves) store.remove(m.key);
+    this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).then((done) => {
+      if (done) for (const m of moves) store.remove(hiddenKey(m.view.id));
     });
   }
 
@@ -716,16 +697,16 @@ export default class Board extends View {
           this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
           return undefined;
         }),
-        this.readMachine(),
+        this.readSettingsFile(),
       ]);
-      if (text !== undefined) this.configText = text;
+      if (text !== undefined) this.configState.text = text;
       const valid = text === undefined ? Boolean(this.config) : this.takeConfig();
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
       if (!valid) return;
-      const kinds = this.kinds;
-      // A views.json with problems leaves those views out.
+      const kinds = this.configState.kinds;
+      // A problem in views.json or in this machine's settings leaves views out.
       if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
       this.moveStoredHidden(cx);
       this.prefetchLeft = new Set(kinds.keys());

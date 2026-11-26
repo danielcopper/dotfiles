@@ -3,21 +3,46 @@
 
 import { isObject, itemLabel, textList } from "../shared.js";
 import { shows, showsAll } from "../select.js";
+import { hidePath } from "../config.js";
+import { ORIGIN } from "../settings.js";
 
-// What the browser storage kept of a view's columns before they were this
-// machine's settings, { hide: [names], show: [names] }, or null when what
-// was stored is not that.
+// What an older board stored of a view's columns, { hide: [names], show:
+// [names] }, or null when what was stored is not that.
 export function readStoredHidden(value) {
   return isObject(value) && textList(value.hide) && textList(value.show) ? { hide: [...value.hide], show: [...value.show] } : null;
 }
 
-// The hidden list those toggles made of the view's hide: it, plus what the
-// person hid, minus what they showed.
+export const hiddenKey = (id) => `hidden:${id}`;
+
 export function storedHiddenList(view, stored) {
   const hidden = new Set(view.hide);
   for (const name of stored.hide) hidden.add(name);
   for (const name of stored.show) hidden.delete(name);
   return [...hidden];
+}
+
+// `entryOf(view)`: what the store holds for the view, undefined for nothing.
+// → { moves: [{ view, list }], drop: [view] }: an entry is dropped where it
+// is no stored hide, this machine sets the view's hide already, or it
+// changes nothing.
+export function storedHiddenMoves(views, entryOf, originAt) {
+  const moves = [];
+  const drop = [];
+  for (const view of views) {
+    const entry = entryOf(view);
+    if (entry === undefined) continue;
+    const stored = readStoredHidden(entry);
+    const list = stored && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
+    if (list && !sameNames(list, view.hide)) moves.push({ view, list });
+    else drop.push(view);
+  }
+  return { moves, drop };
+}
+
+export function sameNames(a, b) {
+  const one = new Set(a);
+  const other = new Set(b);
+  return one.size === other.size && [...one].every((n) => other.has(n));
 }
 
 export const hiddenColumns = (view) => new Set(view.hide);
@@ -26,8 +51,7 @@ export const hiddenColumns = (view) => new Set(view.hide);
 // view's field); the column without status is always shown.
 export const hideable = (column) => Boolean(column?.target);
 
-// The view's hide after hiding or showing a column; null for one that
-// cannot be hidden (hideable).
+// null for a column that cannot be hidden.
 export function toggledHidden(view, column) {
   if (!hideable(column)) return null;
   return view.hide.includes(column.name) ? view.hide.filter((n) => n !== column.name) : [...view.hide, column.name];

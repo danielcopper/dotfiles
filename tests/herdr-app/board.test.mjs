@@ -592,16 +592,17 @@ const MINE_HIDE = ["sources", "github", "views", "mine", "hide"];
 const mineHidden = (hide) => ({ sources: { github: { views: { mine: { hide } } } } });
 // This machine's settings for readConfig, named "settings.json": an object
 // as its JSON, a text as it stands, null for no file.
-const machine = (settings) => ({ name: "settings.json", text: settings === null || typeof settings === "string" ? settings : JSON.stringify(settings) });
+const settingsRead = (settings) => ({ name: "settings.json", text: settings === null || typeof settings === "string" ? settings : JSON.stringify(settings) });
 const viewHide = (read, id) => board.githubViews(read.config).find((v) => v.id === id).hide;
 const ALONE = "settings.json gilt nicht: das Board zeigt views.json allein";
+const sampleView = (id, extra = {}) => ({ id, name: id, layout: "board", project: { owner: "o", number: 1 }, ...extra });
 
 test("this machine's settings lie in herdr's app folder, in board/settings.json", () => {
   assert.equal(board.settingsPath("/x/herdr-app"), "/x/herdr-app/board/settings.json");
 });
 
 test("settings over views.json: a value overrides, an object merges key by key, a list replaces the views.json list whole", () => {
-  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 5, start: { agent: "codex" }, sources: { azure: { contexts: [{ prs: { project: "Other" } }] }, github: { views: { mine: { hide: ["Ready"] } } } } }));
+  const read = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 5, start: { agent: "codex" }, sources: { azure: { contexts: [{ prs: { project: "Other" } }] }, github: { views: { mine: { hide: ["Ready"] } } } } }));
   assert.deepEqual(read.errors, []);
   assert.equal(read.config.refreshMinutes, 5);
   assert.deepEqual(read.config.start, { agent: "codex", message: "/work {number}", review: "/look {number}" });
@@ -612,66 +613,108 @@ test("settings over views.json: a value overrides, an object merges key by key, 
 
 test("settings name a views.json list's entries by their id: an object there merges into the entry with that id, wherever views.json moves it; an array replaces the list", () => {
   const over = { sources: { github: { views: { mine: { hide: ["Ready"], filter: "" } } } } };
-  const read = board.readConfig(testConfig(), machine(over));
+  const read = board.readConfig(testConfig(), settingsRead(over));
   assert.deepEqual(read.errors, []);
   assert.deepEqual(viewHide(read, "mine"), ["Ready"]);
   assert.equal(board.githubViews(read.config)[0].filter, "");
   assert.deepEqual(viewHide(read, "other"), ["Done"], "the other views keep views.json's");
   const reordered = JSON.parse(testConfig());
   reordered.sources.github.views.reverse();
-  const moved = board.readConfig(JSON.stringify(reordered), machine(over));
+  const moved = board.readConfig(JSON.stringify(reordered), settingsRead(over));
   assert.deepEqual(board.githubViews(moved.config).map((v) => [v.id, v.hide]), [["other", ["Done"]], ["prs", []], ["mine", ["Ready"]]]);
-  const whole = board.readConfig(testConfig(), machine({ sources: { github: { views: [{ id: "solo", name: "Solo", layout: "board", project: { owner: "o", number: 1 } }] } } }));
+  const whole = board.readConfig(testConfig(), settingsRead({ sources: { github: { views: [sampleView("solo", { name: "Solo" })] } } }));
   assert.deepEqual(whole.errors, []);
   assert.deepEqual(board.githubViews(whole.config).map((v) => v.id), ["solo"]);
 });
 
+test("one id rule: among a list's entries with a text id the first takes the id, in views.json and in the settings; entries without one leave the others reachable by theirs", () => {
+  const over = mineHidden(["Todo", "Done"]);
+  for (const [label, second] of [["an entry without id", { name: "neu", layout: "board" }], ["a second entry with the id", sampleView("mine")]]) {
+    const read = board.readConfig(JSON.stringify({ sources: { github: { views: [sampleView("mine", { hide: ["Todo"] }), second] } } }), settingsRead(over));
+    assert.equal(read.errors.some((e) => e.startsWith("settings.json")), false, label);
+    assert.deepEqual(viewHide(read, "mine"), ["Todo", "Done"], label);
+    assert.equal(read.origin(MINE_HIDE), "dieser Rechner", label);
+  }
+  const nameless = { ...sampleView("mine"), name: undefined };
+  const twice = board.readConfig(JSON.stringify({ sources: { github: { views: [nameless, sampleView("mine"), sampleView("other")] } } }));
+  assert.deepEqual(twice.errors, ["GitHub-Ansicht 1: „name“ fehlt", "GitHub-Ansicht 2 („mine“): „id“ mine gibt es schon"], "the first entry with the id takes it, valid or not");
+  const { merged } = board.mergeSettings({ list: [{ id: "a" }, { id: "a" }] }, { list: { a: { x: 1 } } });
+  assert.deepEqual(merged, { list: [{ id: "a", x: 1 }, { id: "a" }] });
+  assert.deepEqual(board.withSetting({ list: [{ id: "a" }, { id: "a" }] }, ["list", "a", "x"], 1), { list: [{ id: "a", x: 1 }, { id: "a" }] });
+});
+
 test("an id views.json does not have, or an object for a list without ids, is an error naming the settings file and the key; the rest applies", () => {
-  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 7, sources: { github: { views: { gone: { hide: [] } } }, azure: { contexts: { x: {} } } } }));
+  const read = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 7, sources: { github: { views: { gone: { hide: [] } } }, azure: { contexts: { x: {} } } } }));
   assert.equal(read.config.refreshMinutes, 7);
   assert.deepEqual(read.errors, [
     "settings.json: „sources.github.views.gone“: einen Eintrag mit „id“ „gone“ gibt es in views.json nicht",
-    "settings.json: „sources.azure.contexts“ ist in views.json eine Liste ohne „id“ je Eintrag: hier nur als ganze Liste",
+    "settings.json: „sources.azure.contexts“ hat in views.json keinen Eintrag mit eigener „id“: hier nur als ganze Liste",
   ]);
   assert.equal(read.config.azure.contexts.length, 2, "views.json's contexts stay");
+  const list = [{ name: "a" }];
+  assert.deepEqual(board.mergeSettings({ list }, { list: { a: { x: 1 } } }).merged, { list });
 });
 
 test("settings that add a problem, or cannot be read, are not applied: each problem names the file in config.js's words, and the board says it shows views.json alone", () => {
   const alone = board.readConfig(testConfig());
-  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 0, sources: { github: { views: { mine: { hide: "Done" } } } } }));
-  assert.deepEqual([read.config, read.machine], [alone.config, null]);
+  const read = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0, sources: { github: { views: { mine: { hide: "Done" } } } } }));
+  assert.deepEqual([read.config, read.settings], [alone.config, null]);
   assert.deepEqual(read.errors, [
     "settings.json: „refreshMinutes“ ist eine Zahl ab 1",
     "settings.json: GitHub-Ansicht 1 („Mine“): „hide“ muss eine Liste von Texten sein",
     ALONE,
   ]);
+  const both = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0, sources: { github: { views: { gone: { hide: [] } } } } }));
+  assert.deepEqual(both.errors, [
+    "settings.json: „sources.github.views.gone“: einen Eintrag mit „id“ „gone“ gibt es in views.json nicht",
+    "settings.json: „refreshMinutes“ ist eine Zahl ab 1",
+    ALONE,
+  ], "an unknown id is said beside the problem that keeps the file from applying");
   for (const [text, error] of [["{ refresh", /^settings\.json ist kein gültiges JSON: /], ["[1]", /^settings\.json: Oben muss ein Objekt stehen$/]]) {
-    const bad = board.readConfig(testConfig(), machine(text));
-    assert.deepEqual(bad.config, alone.config);
+    const bad = board.readConfig(testConfig(), settingsRead(text));
+    assert.deepEqual([bad.config, bad.settings], [alone.config, null]);
     assert.match(bad.errors[0], error);
     assert.deepEqual(bad.errors.slice(1), [ALONE]);
   }
   const unread = board.readConfig(testConfig(), { name: "settings.json", error: "Permission denied" });
-  assert.deepEqual([unread.config, unread.errors], [alone.config, ["settings.json ließ sich nicht lesen: Permission denied", ALONE]]);
-  const none = board.readConfig(testConfig(), machine(null));
-  assert.deepEqual([none.config, none.errors], [alone.config, []], "no file: views.json alone, nothing to say");
+  assert.deepEqual([unread.config, unread.errors, unread.settings], [alone.config, ["settings.json ließ sich nicht lesen: Permission denied", ALONE], null]);
+  const none = board.readConfig(testConfig(), settingsRead(null));
+  assert.deepEqual([none.config, none.errors, none.settings], [alone.config, [], {}], "no file: views.json alone, nothing to say");
+  assert.deepEqual(board.readSettings("[1]", "f"), { settings: null, errors: ["f: Oben muss ein Objekt stehen"] });
+  const own = JSON.parse(testConfig());
+  own.sources.github.views.push({ id: "bad", layout: "board" });
+  const flawed = board.readConfig(JSON.stringify(own), settingsRead({ refreshMinutes: 5 }));
+  assert.equal(flawed.config.refreshMinutes, 5, "views.json's own problems leave the settings applied");
+  assert.deepEqual(flawed.errors, board.readConfig(JSON.stringify(own)).errors);
 });
 
 test("each value says where it comes from: this machine, views.json or the built-in default", () => {
-  const read = board.readConfig(testConfig(), machine({ refreshMinutes: 5, sources: { github: { views: { mine: { hide: ["Ready"] } } }, azure: { contexts: [{ prs: { project: "P" } }] } } }));
-  const origin = (path) => board.originOf(read.base, read.machine, path);
+  const read = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 5, sources: { github: { views: { mine: { hide: ["Ready"] } } }, azure: { contexts: [{ prs: { project: "P" } }] } } }));
+  const origin = read.origin;
   assert.equal(origin(["refreshMinutes"]), "dieser Rechner");
   assert.equal(origin(["start", "agent"]), "views.json");
   assert.equal(origin(["start", "machine"]), "Standard");
   assert.equal(origin(MINE_HIDE), "dieser Rechner");
+  assert.equal(origin(["sources", "github", "views", "mine"]), "dieser Rechner", "an entry this machine sets a value of");
   assert.equal(origin(["sources", "github", "views", "mine", "filter"]), "views.json");
   assert.equal(origin(["sources", "github", "views", "other", "hide"]), "views.json");
   assert.equal(origin(["sources", "github", "views", "other", "limit"]), "Standard");
   assert.equal(origin(["sources", "azure", "contexts"]), "dieser Rechner");
-  assert.equal(origin(["sources", "azure", "contexts", "0", "prs"]), "dieser Rechner", "inside a list set here");
+  assert.equal(origin(["sources", "azure", "contexts", "0", "prs"]), "Standard", "a list's entry by its number names nothing");
   assert.equal(origin(["sources", "azure", "org"]), "views.json");
-  const unused = board.readConfig(testConfig(), machine({ refreshMinutes: 0 }));
-  assert.equal(board.originOf(unused.base, unused.machine, ["refreshMinutes"]), "views.json", "settings not applied set nothing");
+  const unused = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0 }));
+  assert.equal(unused.origin(["refreshMinutes"]), "views.json", "settings not applied set nothing");
+  const refused = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 5, start: {}, sources: { github: { views: { gone: { hide: [] } } }, azure: { contexts: { x: { prs: {} } } } } }));
+  assert.equal(refused.origin(["refreshMinutes"]), "dieser Rechner");
+  assert.equal(refused.origin(["start"]), "views.json", "an empty object sets nothing");
+  for (const path of [["sources", "github", "views"], ["sources", "github", "views", "gone", "hide"], ["sources", "azure", "contexts"], ["sources", "azure", "contexts", "x", "prs"]]) {
+    assert.notEqual(refused.origin(path), "dieser Rechner", `what the merge refused: ${path.join(".")}`);
+  }
+  const whole = board.readConfig(testConfig(), settingsRead({ sources: { github: { views: [sampleView("solo", { name: "Solo" })] } } }));
+  assert.equal(whole.origin(["sources", "github", "views", "solo", "name"]), "dieser Rechner");
+  assert.equal(whole.origin(["sources", "github", "views", "solo", "hide"]), "Standard", "in a list set here, what its entry leaves out is the default");
+  assert.equal(whole.origin(["sources", "github", "views", "mine", "hide"]), "Standard", "nor does views.json's list count below it");
+  assert.equal(board.readConfig(null).origin(["refreshMinutes"]), "Standard");
 });
 
 test("a value set or reset by its path: a reset takes it out and the objects it leaves empty, so views.json's applies again", () => {
@@ -679,12 +722,62 @@ test("a value set or reset by its path: a reset takes it out and the objects it 
   assert.deepEqual(set, { refreshMinutes: 5, ...mineHidden(["Ready"]) });
   assert.deepEqual(board.withSetting(set, MINE_HIDE, undefined), { refreshMinutes: 5 });
   assert.deepEqual(board.withSetting({ refreshMinutes: 5 }, MINE_HIDE, undefined), { refreshMinutes: 5 }, "nothing there: unchanged");
-  assert.deepEqual(board.withSetting({ start: 3 }, ["start", "agent"], "codex"), { start: { agent: "codex" } }, "a value in the way gives way to an object");
   const listed = { sources: { github: { views: [{ id: "mine", hide: [] }] } } };
   assert.deepEqual(board.withSetting(listed, MINE_HIDE, ["Done"]), { sources: { github: { views: [{ id: "mine", hide: ["Done"] }] } } }, "into a list set here, by id");
   assert.throws(() => board.withSetting(listed, ["sources", "github", "views", "gone", "hide"], []), /keinen Eintrag „gone“/);
+  assert.deepEqual(board.withSetting(listed, ["sources", "github", "views", "gone", "hide"], undefined), listed, "a reset of an entry not there changes nothing");
   assert.deepEqual(listed.sources.github.views[0].hide, [], "the settings given stay as they were");
   assert.equal(board.settingsText({ a: 1 }), '{\n  "a": 1\n}\n');
+});
+
+test("a path through a value this machine set: a reset leaves the settings as they are, a set is refused", () => {
+  const scalar = { refreshMinutes: 5, start: 3 };
+  assert.deepEqual(board.withSetting(scalar, ["start", "agent"], undefined), scalar);
+  assert.throws(() => board.withSetting(scalar, ["start", "agent"], "codex"), (e) => e instanceof board.BoardError && e.message === "„start.agent“: „start“ ist auf diesem Rechner ein Wert, kein Objekt");
+  assert.deepEqual(board.settingsAfter(JSON.stringify(scalar), [[["start", "agent"], "codex"]], "f"), { error: "„start.agent“: „start“ ist auf diesem Rechner ein Wert, kein Objekt" });
+});
+
+test("a path names a list's entry by its id only: a whole entry of a list set here is refused, an entry by its number is one no id matches", () => {
+  const listed = { sources: { github: { views: [sampleView("mine")] } } };
+  for (const value of [sampleView("mine", { hide: ["X"] }), undefined]) {
+    assert.throws(() => board.withSetting(listed, ["sources", "github", "views", "mine"], value), (e) => e instanceof board.BoardError && /ändert sich nur in seinen Werten oder mit der ganzen Liste/.test(e.message), String(value));
+    assert.throws(() => board.withSetting(listed, ["sources", "github", "views", "0"], value), board.BoardError);
+  }
+  assert.throws(() => board.withSetting(listed, ["sources", "github", "views", "0", "hide"], []), (e) => e instanceof board.BoardError && /keinen Eintrag „0“/.test(e.message));
+  assert.deepEqual(board.withSetting(listed, ["sources", "github", "views", "0", "hide"], undefined), listed);
+});
+
+test("an id of digits only is an id like any other", () => {
+  const own = JSON.parse(testConfig());
+  own.sources.github.views.push(sampleView("7", { name: "Seven" }));
+  const read = board.readConfig(JSON.stringify(own), settingsRead({ sources: { github: { views: { 7: { hide: ["Ready"] } } } } }));
+  assert.deepEqual(viewHide(read, "7"), ["Ready"]);
+  assert.equal(read.origin(["sources", "github", "views", "7", "hide"]), "dieser Rechner");
+  assert.equal(read.origin(["sources", "github", "views", "7", "name"]), "views.json");
+  const listed = { sources: { github: { views: [sampleView("7")] } } };
+  assert.deepEqual(board.withSetting(listed, ["sources", "github", "views", "7", "hide"], ["Done"]).sources.github.views[0].hide, ["Done"], "in a list set here");
+  const other = { sources: { github: { views: [sampleView("mine")] } } };
+  assert.throws(() => board.withSetting(other, ["sources", "github", "views", "7", "hide"], []), (e) => e instanceof board.BoardError && e.message === "„sources.github.views.7.hide“: in der Liste dieses Rechners gibt es keinen Eintrag „7“");
+});
+
+test("the file's text after changes: none stays none where nothing is set; a text that is no settings is refused", () => {
+  assert.deepEqual(board.settingsAfter(null, [[MINE_HIDE, undefined]], "f"), { text: null });
+  assert.deepEqual(board.settingsAfter(null, [[["refreshMinutes"], 4]], "f"), { text: '{\n  "refreshMinutes": 4\n}\n' });
+  assert.deepEqual(board.settingsAfter("{}\n", [[MINE_HIDE, undefined]], "f"), { text: "{}\n" });
+  assert.deepEqual(board.settingsAfter("[1]", [[MINE_HIDE, undefined]], "f"), { error: "f: Oben muss ein Objekt stehen" });
+});
+
+test("whether the file still holds at each changed path what the change was made over", () => {
+  const then = JSON.stringify({ refreshMinutes: 4, ...mineHidden(["Ready"]) });
+  assert.equal(board.sameAtPaths(then, JSON.stringify({ refreshMinutes: 9, ...mineHidden(["Ready"]) }), [[MINE_HIDE, []]], "f"), true, "a change elsewhere");
+  assert.equal(board.sameAtPaths(then, JSON.stringify({ refreshMinutes: 4, ...mineHidden(["Ready", "Backlog"]) }), [[MINE_HIDE, []]], "f"), false);
+  assert.equal(board.sameAtPaths(null, JSON.stringify(mineHidden([])), [[MINE_HIDE, ["Done"]]], "f"), false, "set where there was none");
+  assert.equal(board.sameAtPaths(then, null, [[["refreshMinutes"], 5]], "f"), false, "the file gone");
+  assert.equal(board.sameAtPaths(then, "{ x", [[["refreshMinutes"], 5]], "f"), false);
+  assert.equal(board.sameAtPaths(then, JSON.stringify({ sources: { github: { views: [] } } }), [[MINE_HIDE, []]], "f"), false, "the views a list now");
+  assert.equal(board.sameAtPaths(then, JSON.stringify({ refreshMinutes: 4, ...mineHidden([]) }), [[["refreshMinutes"], 5], [MINE_HIDE, []]], "f"), false, "every changed path counts");
+  const numbered = ["sources", "github", "views", "7", "hide"];
+  assert.equal(board.sameAtPaths(JSON.stringify({ sources: { github: { views: { 7: { hide: [] } } } } }), JSON.stringify({ sources: { github: { views: [{ id: "x" }] } } }), [[numbered, ["Done"]]], "f"), false, "a path the file no longer resolves");
 });
 
 // ---- The top bar's sources and contexts ----
@@ -2501,6 +2594,9 @@ function textView(format, id, text) {
 // focusCalls counts the calls of a focus handle's focus(). command(name)
 // hands the copy a command (board.<name>).
 const found = (tool) => `/opt/fake/bin/${tool}`;
+// herdr's refusals of a write whose expected text is stale (mod_files.rs).
+const HERDR_STALE = "The file changed outside Herdr. Reload before saving; your draft is still here.";
+const HERDR_STALE_SAVING = "The file changed while saving. Reload before saving.";
 const SAMPLE_LOGIN = { code: 0, stdout: JSON.stringify({ data: { viewer: { login: "sample-user" } } }), stderr: "" };
 const NO_NOTIFICATIONS = { code: 0, stdout: "[]", stderr: "" };
 function fakeHost({
@@ -2608,15 +2704,20 @@ function fakeHost({
       calls.push({ tool, args, options, ...d });
       return d.promise;
     },
-    // views.json is `config`; any other file is in `files` (path → text),
-    // which writeTextFile writes as herdr's does: only where the file still
-    // holds `expected` (null: there is none). `failWrite` makes it fail.
+    // views.json is `config`; any other file is in `files` (path → text, or
+    // the Error reading it throws), which writeTextFile writes as herdr's
+    // does: only where the file still holds `expected` (null: there is
+    // none). `failWrite` makes it fail.
     files: { ...files },
     failWrite,
-    readTextFile: async (path) => (path.endsWith("/views.json") ? host.config : host.files[path] ?? null),
+    readTextFile: async (path) => {
+      if (path.endsWith("/views.json")) return host.config;
+      if (host.files[path] instanceof Error) throw host.files[path];
+      return host.files[path] ?? null;
+    },
     writeTextFile: async (path, text, expected) => {
       if (host.failWrite) throw host.failWrite;
-      if ((host.files[path] ?? null) !== expected) throw new Error(`stale snapshot of ${path}`);
+      if ((host.files[path] ?? null) !== expected) throw new Error(HERDR_STALE);
       host.files[path] = text;
       return null;
     },
@@ -3540,6 +3641,9 @@ test("UI: a click on a hidden column's name shows it; where the settings cannot 
   assert.equal(host.files[MACHINE_FILE], undefined);
   assert.equal(st().hidden.has("Done"), true);
   assert.deepEqual(texts(byId(b.render(), "hidden-columns")), ["ausgeblendet:", "Backlog", "Done"]);
+  await host.answer("gh", ok(fixture("github-board.json")));
+  assert.equal(host.open("gh").length, 1);
+  assert.ok(host.open("gh")[0].args.includes('filter=assignee:@me -status:"Backlog","Done"'), "the refresh after it leaves Done out again");
 });
 
 test("UI: hidden columns are not drawn; the line below the columns names them, h/l skip them", async () => {
@@ -3582,6 +3686,17 @@ test("UI: the board reads this machine's settings at the start and on r; a view'
   assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Done"'));
 });
 
+test("UI: an r that cannot read views.json says so, keeps the config read before and reads the shown view again", async () => {
+  const { b, cx, host } = await openBoard({ files: { [MACHINE_FILE]: JSON.stringify({ refreshMinutes: 4 }) } });
+  const read = host.readTextFile;
+  host.readTextFile = (path) => (path.endsWith("/views.json") ? Promise.reject(new Error("Permission denied")) : read(path));
+  const reads = host.open("gh").length;
+  await press(b, cx, "r");
+  assert.deepEqual(b.configErrors, ["views.json ließ sich nicht lesen: Permission denied"]);
+  assert.equal(b.config.refreshMinutes, 4);
+  assert.equal(host.open("gh").length, reads + 1);
+});
+
 test("UI: hiding or showing a column writes the view's whole hide into this machine's settings at once, not into the browser storage", async () => {
   const { b, cx, host, st } = await openBoard();
   st().sel = { col: 1, key: "PVTI_rec1" };
@@ -3616,21 +3731,57 @@ test("UI: changes made one after the other are written one after the other, each
   assert.deepEqual([b.config.start, b.config.refreshMinutes], [{ agent: "codex", message: "/work {number}", review: "/look {number}", machine: "server" }, 4]);
 });
 
-test("UI: a write the file refuses, as it changed since the board read it, is said, the file read again and what it holds kept", async () => {
-  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: "{}\n" } });
-  const write = host.writeTextFile;
-  const other = `${JSON.stringify({ refreshMinutes: 9 })}\n`;
-  host.writeTextFile = (path, text, old) => {
-    host.files[path] = other;
-    host.writeTextFile = write;
-    return write(path, text, old);
-  };
+const CHANGED = `${MACHINE_FILE} nicht gespeichert: die Datei hat sich inzwischen geändert; bitte die Änderung noch einmal machen`;
+
+test("UI: a write the file refuses, as it changed since the board read it, is said in German, the file read again and what it holds kept", async () => {
+  for (const refusal of [HERDR_STALE, HERDR_STALE_SAVING]) {
+    const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: "{}\n" } });
+    const write = host.writeTextFile;
+    const other = `${JSON.stringify({ refreshMinutes: 9, ...mineHidden(["Backlog", "Done", "Ready"]) })}\n`;
+    host.writeTextFile = async (path, text, old) => {
+      host.files[path] = other;
+      host.writeTextFile = write;
+      if (refusal === HERDR_STALE_SAVING) throw new Error(refusal);
+      return write(path, text, old);
+    };
+    st().sel = { col: 1, key: "PVTI_rec1" };
+    await runCommand(b, cx, "Spalte ausblenden: In progress");
+    assert.equal(host.files[MACHINE_FILE], other, "the other write stands");
+    assert.deepEqual(b.notice, { text: CHANGED, level: "error" }, refusal);
+    assert.equal(b.config.refreshMinutes, 9, "read again");
+    assert.deepEqual([...st().hidden], ["Backlog", "Done", "Ready"], "the file's columns hidden, not those of the refused write");
+  }
+});
+
+test("UI: a change made over the board's last read, where the file has changed at that path since, is not written: the board says so, reads the file again and its columns follow it", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: JSON.stringify(mineHidden(["Ready"])) } });
+  const outside = JSON.stringify({ refreshMinutes: 9, ...mineHidden(["Ready", "Backlog"]) });
+  host.files[MACHINE_FILE] = outside;
+  await click(b, cx, "show-opt-ready");
+  assert.equal(host.files[MACHINE_FILE], outside, "the outside edit stands");
+  assert.deepEqual(b.notice, { text: CHANGED, level: "error" });
+  assert.equal(b.config.refreshMinutes, 9, "read again");
+  assert.deepEqual([...st().hidden], ["Ready", "Backlog"]);
+  await host.answer("gh", ok(fixture("github-board.json")));
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Ready","Backlog"'), "read again without the file's hidden columns");
+  await host.answer("gh", ok(fixture("github-board.json")));
+  host.files[MACHINE_FILE] = JSON.stringify({ refreshMinutes: 2, ...mineHidden(["Ready", "Backlog"]) });
+  await click(b, cx, "show-opt-backlog");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 2, ...mineHidden(["Ready"]) }, "a change elsewhere in the file is no reason to refuse");
+});
+
+test("UI: two copies of the board on one file: a change one makes over its older read does not overwrite what the other wrote since", async () => {
+  const { b, cx, host, st } = await openBoard();
+  const copy = new board.default();
+  const copyCx = fakeCx();
+  copy.init({}, copyCx);
+  await settle();
+  assert.equal(await copy.changeSetting(MINE_HIDE, ["Ready"], copyCx), true);
   st().sel = { col: 1, key: "PVTI_rec1" };
   await runCommand(b, cx, "Spalte ausblenden: In progress");
-  assert.equal(host.files[MACHINE_FILE], other, "the other write stands");
-  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} nicht gespeichert: stale snapshot of ${MACHINE_FILE}`, level: "error" });
-  assert.equal(b.config.refreshMinutes, 9, "read again");
-  assert.deepEqual([...st().hidden], ["Backlog", "Done"], "the column shows again: the file does not hide it");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Ready"]), "the other copy's write stands");
+  assert.deepEqual(b.notice, { text: CHANGED, level: "error" });
+  assert.deepEqual([...st().hidden], ["Ready"]);
 });
 
 test("UI: with settings that are no JSON the board runs on views.json, says so with the file's name, and writes nothing into them", async () => {
@@ -3640,8 +3791,10 @@ test("UI: with settings that are no JSON the board runs on views.json, says so w
   assert.ok(b.configErrors.every((e) => texts(b.render()).includes(e)), "the banner shows them");
   assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
   st().sel = { col: 1, key: "PVTI_rec1" };
+  const reads = host.open("gh").length;
   await runCommand(b, cx, "Spalte ausblenden: In progress");
   assert.equal(host.files[MACHINE_FILE], "{ hide");
+  assert.equal(host.open("gh").length, reads, "nothing changed, nothing read");
   assert.match(b.notice.text, /^Nicht geändert: \/fake-home\/board\/settings\.json ist kein gültiges JSON/);
   assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
   host.appHome = () => "/home/sample/.config/herdr-app";
@@ -3663,6 +3816,70 @@ test("UI: the hidden columns the browser storage kept move into this machine's s
   const failing = await openBoard({ stored, failWrite: new Error("Permission denied") });
   assert.equal(failing.b.notice.text, `${MACHINE_FILE} nicht gespeichert: Permission denied`);
   assert.deepEqual(memory.get("hidden:mine"), JSON.stringify(stored["hidden:mine"]), "a move that failed leaves it in the storage for the next read");
+});
+
+const NOT_APPLIED = `Nicht geändert: ${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`;
+
+test("UI: settings read but not applied, as they give views.json a problem, are never written: a change is refused and the stored hidden columns wait for a later read", async () => {
+  const text = JSON.stringify({ refreshMinutes: "oft", ...mineHidden(["Done"]) });
+  const stored = { source: "github", "hidden:mine": { hide: ["Ready"], show: [] }, "hidden:other": { hide: [], show: [] } };
+  const { b, cx, host, st } = await openBoard({ stored, files: { [MACHINE_FILE]: text } });
+  assert.deepEqual(b.configErrors, [`${MACHINE_FILE}: „refreshMinutes“ ist eine Zahl ab 1`, `${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`]);
+  assert.equal(host.files[MACHINE_FILE], text, "the migration writes nothing");
+  assert.deepEqual(["hidden:mine", "hidden:other"].map((k) => memory.has(k)), [true, true], "and keeps the entries");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  const reads = host.open("gh").length;
+  await click(b, cx, "show-opt-done");
+  assert.equal(host.files[MACHINE_FILE], text);
+  assert.deepEqual(b.notice, { text: NOT_APPLIED, level: "error" });
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  assert.equal(host.open("gh").length, reads, "nothing changed, nothing read");
+  assert.equal(await b.changeSetting(["refreshMinutes"], 4, cx), false, "not even the value that keeps them from applying");
+  assert.equal(host.files[MACHINE_FILE], text);
+});
+
+test("UI: a change whose file no longer applies when it is written, as it was given a problem since, is not written", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: "{}\n" } });
+  const broken = JSON.stringify({ refreshMinutes: "oft" });
+  host.files[MACHINE_FILE] = broken;
+  await click(b, cx, "show-opt-done");
+  assert.equal(host.files[MACHINE_FILE], broken);
+  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} nicht gespeichert: die Datei gilt nicht: das Board zeigt views.json allein`, level: "error" });
+  assert.equal(b.configErrors.at(-1), `${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`, "read again");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+});
+
+test("UI: settings that cannot be read are said with the file's name; the board runs on views.json and writes nothing", async () => {
+  const unreadable = new Error("Permission denied\nmore");
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: unreadable } });
+  const errors = [`${MACHINE_FILE} ließ sich nicht lesen: Permission denied`, `${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`];
+  assert.deepEqual(b.configErrors, errors);
+  assert.ok(errors.every((e) => texts(b.render()).includes(e)), "the banner shows them");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  await click(b, cx, "show-opt-done");
+  assert.deepEqual(b.notice, { text: `Nicht geändert: ${MACHINE_FILE} ließ sich nicht lesen: Permission denied`, level: "error" });
+  assert.equal(host.files[MACHINE_FILE], unreadable, "nothing written");
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+});
+
+test("UI: a toggle given the view as drawn before an earlier toggle builds on the config as it is now", async () => {
+  const { b, cx, host, st } = await openBoard();
+  const drawn = b.view();
+  const column = (name) => st().data.columns.find((c) => c.name === name);
+  cx.call((own) => b.toggleColumn(drawn, column("Ready"), own));
+  cx.call((own) => b.toggleColumn(drawn, column("In review"), own));
+  await settle();
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "Done", "Ready", "In review"]));
+});
+
+test("UI: a reset with no file and nothing set writes no file", async () => {
+  const { b, cx, host } = await openBoard();
+  const writes = [];
+  const write = host.writeTextFile;
+  host.writeTextFile = (...args) => (writes.push(args), write(...args));
+  assert.equal(await b.changeSetting(MINE_HIDE, undefined, cx), true);
+  assert.deepEqual([writes, Object.hasOwn(host.files, MACHINE_FILE)], [[], false]);
+  assert.equal(b.origin(MINE_HIDE), "views.json");
 });
 
 test("UI: the command menu's „Spalte ausblenden“ hides the selected column; the selection goes to the column taking its place", async () => {

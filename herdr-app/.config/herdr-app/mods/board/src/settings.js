@@ -1,31 +1,33 @@
-// This machine's settings: a file outside the dotfiles laid over views.json.
-// A list set there replaces the views.json list whole, a value overrides,
-// an object merges key by key. Where views.json has a list whose entries
-// each carry a unique text "id", an object there, keyed by id, merges into
-// those entries. A path names keys from the top, an id in place of such a
-// list's index.
+// This machine's settings over views.json; where they lie, how they merge
+// and how they are written: README, "herdr app". A path names keys from the
+// top, an entry of a list by its "id".
 
 import { BoardError, CONFIG_NAME, isObject, isText } from "./shared.js";
 
-// Under herdr's app folder, which herdr does not watch outside mods/,
-// layouts/, themes/ and its own files, and which stow leaves alone: no
-// package has a board/ there, and .stow-local-ignore keeps every
-// settings.json out of the herdr-app package.
 export const SETTINGS_FILE = "board/settings.json";
 export const settingsPath = (appHome) => `${appHome}/${SETTINGS_FILE}`;
 
 export const ORIGIN = { machine: "dieser Rechner", base: `${CONFIG_NAME}.json`, builtin: "Standard" };
 
 const pathText = (path) => `„${path.join(".")}“`;
+const pathKey = (path) => JSON.stringify(path);
+const hasId = (entry) => isObject(entry) && isText(entry.id);
 
-// A list whose entries can be named by id: objects, each with its own.
-export function idList(value) {
-  if (!Array.isArray(value) || !value.every((e) => isObject(e) && isText(e.id))) return false;
-  return new Set(value.map((e) => e.id)).size === value.length;
+export const entryById = (list, id) => list.find((e) => hasId(e) && e.id === id);
+
+function child(node, key) {
+  if (Array.isArray(node)) return entryById(node, key);
+  return isObject(node) ? node[key] : undefined;
 }
 
-// The settings file's text (null: there is none) → { settings, errors },
-// settings null where the text holds none; `name` names the file.
+function valueAt(node, keys) {
+  for (const key of keys) {
+    if (node === undefined) return undefined;
+    node = child(node, key);
+  }
+  return node;
+}
+
 export function readSettings(text, name) {
   if (text === null || text === undefined) return { settings: {}, errors: [] };
   let raw;
@@ -37,67 +39,65 @@ export function readSettings(text, name) {
   return isObject(raw) ? { settings: raw, errors: [] } : { settings: null, errors: [`${name}: Oben muss ein Objekt stehen`] };
 }
 
-function mergeAt(base, over, path, errors) {
-  if (!isObject(over)) return over;
-  if (Array.isArray(base)) {
-    if (!idList(base)) {
-      errors.push(`${pathText(path)} ist in ${ORIGIN.base} eine Liste ohne „id“ je Eintrag: hier nur als ganze Liste`);
-      return base;
-    }
-    for (const id of Object.keys(over)) {
-      if (!base.some((e) => e.id === id)) errors.push(`${pathText([...path, id])}: einen Eintrag mit „id“ „${id}“ gibt es in ${ORIGIN.base} nicht`);
-    }
-    return base.map((e) => (Object.hasOwn(over, e.id) ? mergeAt(e, over[e.id], [...path, e.id], errors) : e));
+function mergeAt(base, over, path, out) {
+  if (!isObject(over)) {
+    out.set.set(pathKey(path), over);
+    for (let i = 1; i < path.length; i++) out.below.add(pathKey(path.slice(0, i)));
+    return over;
   }
-  const out = isObject(base) ? { ...base } : {};
-  for (const [key, value] of Object.entries(over)) out[key] = mergeAt(out[key], value, [...path, key], errors);
-  return out;
+  if (!Array.isArray(base)) {
+    const merged = isObject(base) ? { ...base } : {};
+    for (const [key, value] of Object.entries(over)) merged[key] = mergeAt(merged[key], value, [...path, key], out);
+    return merged;
+  }
+  if (!base.some(hasId)) {
+    out.errors.push(`${pathText(path)} hat in ${ORIGIN.base} keinen Eintrag mit eigener „id“: hier nur als ganze Liste`);
+    return base;
+  }
+  const merged = [...base];
+  for (const [id, value] of Object.entries(over)) {
+    const at = base.indexOf(entryById(base, id));
+    if (at < 0) out.errors.push(`${pathText([...path, id])}: einen Eintrag mit „id“ „${id}“ gibt es in ${ORIGIN.base} nicht`);
+    else merged[at] = mergeAt(base[at], value, [...path, id], out);
+  }
+  return merged;
 }
 
-// views.json's object with this machine's settings over it → { merged,
-// errors }; an entry that names nothing to merge into is left out.
+// → { merged, errors, origin }: origin(path) is one of ORIGIN, never this
+// machine's where the merge refused what it set.
 export function mergeSettings(base, over) {
-  const errors = [];
-  return { merged: mergeAt(base, over, [], errors), errors };
+  const out = { errors: [], set: new Map(), below: new Set() };
+  const merged = mergeAt(base, over, [], out);
+  const origin = (path) => {
+    for (let i = 1; i <= path.length; i++) {
+      const key = pathKey(path.slice(0, i));
+      if (out.set.has(key)) return valueAt(out.set.get(key), path.slice(i)) === undefined ? ORIGIN.builtin : ORIGIN.machine;
+    }
+    if (out.below.has(pathKey(path))) return ORIGIN.machine;
+    return valueAt(base, path) === undefined ? ORIGIN.builtin : ORIGIN.base;
+  };
+  return { merged, errors: out.errors, origin };
 }
 
-// Where the value at `path` comes from (ORIGIN): `over` is the settings
-// applied, null when none are.
-export function originOf(base, over, path) {
-  let b = base;
-  let m = over ?? undefined;
-  for (const key of path) {
-    if (m !== undefined && !isObject(m)) return ORIGIN.machine;
-    m = m?.[key];
-    b = Array.isArray(b) ? b.find((e) => isObject(e) && e.id === key) : isObject(b) ? b[key] : undefined;
-  }
-  if (m !== undefined) return ORIGIN.machine;
-  return b === undefined ? ORIGIN.builtin : ORIGIN.base;
-}
-
-// The entry `key` names in `node`: a key of an object, the entry with that
-// id in a list set here.
-function child(node, key) {
-  return Array.isArray(node) ? node.find((e) => isObject(e) && e.id === key) : node[key];
-}
-
-// The settings with `value` at `path`; undefined takes the path's value out
-// (reset), and the objects it leaves empty with it.
-export function withSetting(over, path, value) {
-  const top = structuredClone(over);
+// An undefined `value` resets: it takes the value out, and the objects that
+// leaves empty.
+export function withSetting(settings, path, value) {
+  const top = structuredClone(settings);
   const parents = [top];
-  let node = top;
-  for (const key of path.slice(0, -1)) {
+  for (const [i, key] of path.slice(0, -1).entries()) {
+    const node = parents.at(-1);
     let next = child(node, key);
-    if (next === undefined && value === undefined) return top;
-    if (!isObject(next) && !Array.isArray(next)) {
+    if (next === undefined || (!isObject(next) && !Array.isArray(next))) {
+      if (value === undefined) return top;
+      if (next !== undefined) throw new BoardError(`${pathText(path)}: ${pathText(path.slice(0, i + 1))} ist auf diesem Rechner ein Wert, kein Objekt`);
       if (Array.isArray(node)) throw new BoardError(`${pathText(path)}: in der Liste dieses Rechners gibt es keinen Eintrag „${key}“`);
       next = node[key] = {};
     }
-    node = next;
-    parents.push(node);
+    parents.push(next);
   }
+  const node = parents.at(-1);
   const last = path.at(-1);
+  if (Array.isArray(node)) throw new BoardError(`${pathText(path)}: ein Eintrag einer Liste dieses Rechners ändert sich nur in seinen Werten oder mit der ganzen Liste`);
   if (value !== undefined) {
     node[last] = value;
     return top;
@@ -112,4 +112,29 @@ export function withSetting(over, path, value) {
   return top;
 }
 
-export const settingsText = (over) => `${JSON.stringify(over, null, 2)}\n`;
+// herdr's refusals of a write whose expected text is stale (mod_files.rs).
+export const staleRefusal = (e) => /^The file changed (outside Herdr|while saving)\./.test(String(e?.message ?? e));
+export const CHANGED_MEANWHILE = "die Datei hat sich inzwischen geändert; bitte die Änderung noch einmal machen";
+
+export const settingsText = (settings) => `${JSON.stringify(settings, null, 2)}\n`;
+
+// The file's text (null: there is none) after `changes`, [path, value] each:
+// { text } (null: still none) or { error }.
+export function settingsAfter(text, changes, name) {
+  const { settings, errors } = readSettings(text, name);
+  if (!settings) return { error: errors[0] };
+  try {
+    const next = changes.reduce((s, [path, value]) => withSetting(s, path, value), settings);
+    return { text: text === null && !Object.keys(next).length ? null : settingsText(next) };
+  } catch (e) {
+    if (!(e instanceof BoardError)) throw e;
+    return { error: e.message };
+  }
+}
+
+export function sameAtPaths(then, now, changes, name) {
+  const before = readSettings(then, name).settings;
+  const after = readSettings(now, name).settings;
+  if (!before || !after) return false;
+  return changes.every(([path]) => JSON.stringify(valueAt(before, path)) === JSON.stringify(valueAt(after, path)));
+}

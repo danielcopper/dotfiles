@@ -461,44 +461,52 @@ by that run. Which files of the package git tracks is set in the root
   merges into the entries with those ids, wherever `views.json` moves them,
   so `{ "sources": { "github": { "views": { "mine": { "hide": ["Done"] } } } } }`
   sets that one view's hidden columns, while an array there would replace
-  every view. An id `views.json` does not have, or such an object for a list
+  every view. Of two entries with one id the first has it, as for the
+  board's views, and entries without one leave the others reachable by
+  theirs. An id no entry of `views.json` has, or such an object for a list
   without ids (the Azure contexts, set here only as a whole list), is an
   error naming the file and the key, and the rest of the file applies.
   Settings that cannot be read, are no JSON object, or give `views.json` a
   problem it does not have on its own, are not applied: the board names the
   file with each problem, in the words it uses for `views.json`, says that
-  it shows `views.json` alone, and does. Removing a value from the file (a
-  reset) lets `views.json`'s apply again. The board reads the file whenever
-  it reads `views.json` (the start, `r`), and a change it makes is written
-  at once, over what the file holds at that moment, one after the other;
-  where the file changed between that read and the write, or cannot be
-  written, the board says it did not save, reads the file again and shows
-  what it holds. Hidden columns are such a setting: hiding or showing a
-  column writes the view's whole hidden list there, which replaces the
-  view's `hide` from `views.json` on this machine until it is reset. The
+  it shows `views.json` alone, and does, and it changes nothing in the file
+  until a read finds it fit again. Removing a value from the file (a reset)
+  lets `views.json`'s apply again. The board reads the file whenever it
+  reads `views.json` (the start, `r`), and a change it makes is written at
+  once, over what the file holds at that moment, one after the other.
+  Where the file no longer holds, at a value the change sets, what the board
+  made the change over (another copy of the board, or a hand, changed it
+  since), or changes while it is written, the board does not save, says that
+  the file changed and the change has to be made again, reads the file again
+  and shows what it holds; where it cannot write the file, it says so with
+  herdr's reason, the same way. Hidden columns are such a setting: hiding or
+  showing a column writes the view's whole hidden list there, which replaces
+  the view's `hide` from `views.json` on this machine until it is reset. The
   hidden columns an older board kept in herdr's localStorage move into the
-  file at the first read of `views.json` and leave the localStorage; where
-  the file sets that view's hidden columns already, the file's stay. What
-  else the board remembers, as above, stays in herdr's localStorage.
+  file at a read of `views.json` once the write succeeds, and leave the
+  localStorage; where the file sets that view's hidden columns already, the
+  file's stay; those of views `views.json` no longer has stay in the
+  localStorage, and all of them do while the file does not apply. What else
+  the board remembers, as above, stays in herdr's localStorage.
   Each view keeps its last good read in herdr's localStorage (about 217 kB
   for a board of 300 cards; herdr's store takes at most 1 MiB a value and
   8 MiB in all, so a view keeps at most a million bytes, and one the store
-  refuses keeps nothing, which herdr's log names). Each read of
-  `views.json` (the start, `r`) drops the entries of views it no longer
-  has, unless the file has problems. After a restart, and on a switch to a
-  tab not read yet, the view draws that state at once, its age at the top
-  right ("Stand vor 3 min", "vor 2 d" from two days on), and reads anew
-  behind it; a read that fails keeps it and says why. Every tab's age is
-  that of what it draws. Nothing is written against that saved state: a
-  move, a status change, an assignment or a create is refused with a note
-  and has to be made again once the read is in; a read that failed starts
-  again. While a view shows nothing or only its saved state, a GitHub board
-  draws each page as it comes, the "Nur die ersten" note after the last;
-  the PR list draws before the follow-up for pull requests with many review
-  threads, their rows marked "…" until it came ("?" stays for what could
-  not be read); the Sprint draws before its parents outside it (their tasks
-  where its saved state drew them, else in "Ohne Story"), the Backlog before
-  its types' colors. A read over data read since the start shows
+  refuses keeps nothing, which herdr's log names). Each read of `views.json`
+  (the start, `r`) drops the entries of views it no longer has, unless
+  `views.json` or this machine's settings have problems. After a restart,
+  and on a switch to a tab not read yet, the view draws that state at once,
+  its age at the top right ("Stand vor 3 min", "vor 2 d" from two days on),
+  and reads anew behind it; a read that fails keeps it and says why. Every
+  tab's age is that of what it draws. Nothing is written against that saved
+  state: a move, a status change, an assignment or a create is refused with
+  a note and has to be made again once the read is in; a read that failed
+  starts again. While a view shows nothing or only its saved state, a GitHub
+  board draws each page as it comes, the "Nur die ersten" note after the
+  last; the PR list draws before the follow-up for pull requests with many
+  review threads, their rows marked "…" until it came ("?" stays for what
+  could not be read); the Sprint draws before its parents outside it (their
+  tasks where its saved state drew them, else in "Ohne Story"), the Backlog
+  before its types' colors. A read over data read since the start shows
   its result only once whole, so the selection and open details stay. The
   top right says which page a board reads ("lädt … Seite 2 von 3"). After
   each read of `views.json`, once the shown view is read, the board reads

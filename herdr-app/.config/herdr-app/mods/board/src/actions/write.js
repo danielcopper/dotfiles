@@ -15,7 +15,7 @@ import { viewKind } from "../kinds/index.js";
 // keeps it), still has that view, of the same kind (followed); and the
 // view as views.json has it now (current, null while it is not there).
 export function viewStands(b, view) {
-  return { followed: b.kinds?.get(view.id) === viewKind(view), current: b.viewById(view.id) };
+  return { followed: b.configState.kinds?.get(view.id) === viewKind(view), current: b.viewById(view.id) };
 }
 
 // Writes the change `w` of the item w.key (labelled w.label) at once:

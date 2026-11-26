@@ -42,11 +42,11 @@
 // where they go now.
 //
 // This machine's settings (settings.js; README, "herdr app") lie over
-// views.json and are read with it. Hidden columns are a view's hide there:
-// hiding or showing one writes it. They are left out of the query and of
-// the board. GitHub's
-// queries also ask for the login gh runs as, which "nur meine" compares
-// with.
+// views.json and are read with it. Hidden columns are a view's hide,
+// views.json's or this machine's settings'; hiding or showing one writes it
+// into the settings. They are left out of the query and of the board.
+// GitHub's queries also ask for the login gh runs as, which "nur meine"
+// compares with.
 //
 // Calls: a GitHub board view costs one gh call per refresh for each page of
 // up to 100 items it reads (GitHub's most), at most as many as full pages of
@@ -139,8 +139,8 @@
 //
 // The modules in src/, built into main.js by build.mjs (its header says how
 // and why): shared.js, config.js (views.json), settings.js (this machine's
-// settings over it), contexts.js (the top bar's
-// sources, contexts and their views), kinds/index.js (view kinds),
+// settings over it), contexts.js (the top bar's sources, contexts and their
+// views), kinds/index.js (view kinds),
 // kinds/board.js (a board's columns and cards), kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
@@ -398,32 +398,34 @@ export const kindOf = (view) => KINDS[viewKind(view)] ?? null;
 
 // ==== src/settings.js ====
 
-// This machine's settings: a file outside the dotfiles laid over views.json.
-// A list set there replaces the views.json list whole, a value overrides,
-// an object merges key by key. Where views.json has a list whose entries
-// each carry a unique text "id", an object there, keyed by id, merges into
-// those entries. A path names keys from the top, an id in place of such a
-// list's index.
+// This machine's settings over views.json; where they lie, how they merge
+// and how they are written: README, "herdr app". A path names keys from the
+// top, an entry of a list by its "id".
 
-// Under herdr's app folder, which herdr does not watch outside mods/,
-// layouts/, themes/ and its own files, and which stow leaves alone: no
-// package has a board/ there, and .stow-local-ignore keeps every
-// settings.json out of the herdr-app package.
 export const SETTINGS_FILE = "board/settings.json";
 export const settingsPath = (appHome) => `${appHome}/${SETTINGS_FILE}`;
 
 export const ORIGIN = { machine: "dieser Rechner", base: `${CONFIG_NAME}.json`, builtin: "Standard" };
 
 const pathText = (path) => `„${path.join(".")}“`;
+const pathKey = (path) => JSON.stringify(path);
+const hasId = (entry) => isObject(entry) && isText(entry.id);
 
-// A list whose entries can be named by id: objects, each with its own.
-export function idList(value) {
-  if (!Array.isArray(value) || !value.every((e) => isObject(e) && isText(e.id))) return false;
-  return new Set(value.map((e) => e.id)).size === value.length;
+export const entryById = (list, id) => list.find((e) => hasId(e) && e.id === id);
+
+function child(node, key) {
+  if (Array.isArray(node)) return entryById(node, key);
+  return isObject(node) ? node[key] : undefined;
 }
 
-// The settings file's text (null: there is none) → { settings, errors },
-// settings null where the text holds none; `name` names the file.
+function valueAt(node, keys) {
+  for (const key of keys) {
+    if (node === undefined) return undefined;
+    node = child(node, key);
+  }
+  return node;
+}
+
 export function readSettings(text, name) {
   if (text === null || text === undefined) return { settings: {}, errors: [] };
   let raw;
@@ -435,67 +437,65 @@ export function readSettings(text, name) {
   return isObject(raw) ? { settings: raw, errors: [] } : { settings: null, errors: [`${name}: Oben muss ein Objekt stehen`] };
 }
 
-function mergeAt(base, over, path, errors) {
-  if (!isObject(over)) return over;
-  if (Array.isArray(base)) {
-    if (!idList(base)) {
-      errors.push(`${pathText(path)} ist in ${ORIGIN.base} eine Liste ohne „id“ je Eintrag: hier nur als ganze Liste`);
-      return base;
-    }
-    for (const id of Object.keys(over)) {
-      if (!base.some((e) => e.id === id)) errors.push(`${pathText([...path, id])}: einen Eintrag mit „id“ „${id}“ gibt es in ${ORIGIN.base} nicht`);
-    }
-    return base.map((e) => (Object.hasOwn(over, e.id) ? mergeAt(e, over[e.id], [...path, e.id], errors) : e));
+function mergeAt(base, over, path, out) {
+  if (!isObject(over)) {
+    out.set.set(pathKey(path), over);
+    for (let i = 1; i < path.length; i++) out.below.add(pathKey(path.slice(0, i)));
+    return over;
   }
-  const out = isObject(base) ? { ...base } : {};
-  for (const [key, value] of Object.entries(over)) out[key] = mergeAt(out[key], value, [...path, key], errors);
-  return out;
+  if (!Array.isArray(base)) {
+    const merged = isObject(base) ? { ...base } : {};
+    for (const [key, value] of Object.entries(over)) merged[key] = mergeAt(merged[key], value, [...path, key], out);
+    return merged;
+  }
+  if (!base.some(hasId)) {
+    out.errors.push(`${pathText(path)} hat in ${ORIGIN.base} keinen Eintrag mit eigener „id“: hier nur als ganze Liste`);
+    return base;
+  }
+  const merged = [...base];
+  for (const [id, value] of Object.entries(over)) {
+    const at = base.indexOf(entryById(base, id));
+    if (at < 0) out.errors.push(`${pathText([...path, id])}: einen Eintrag mit „id“ „${id}“ gibt es in ${ORIGIN.base} nicht`);
+    else merged[at] = mergeAt(base[at], value, [...path, id], out);
+  }
+  return merged;
 }
 
-// views.json's object with this machine's settings over it → { merged,
-// errors }; an entry that names nothing to merge into is left out.
+// → { merged, errors, origin }: origin(path) is one of ORIGIN, never this
+// machine's where the merge refused what it set.
 export function mergeSettings(base, over) {
-  const errors = [];
-  return { merged: mergeAt(base, over, [], errors), errors };
+  const out = { errors: [], set: new Map(), below: new Set() };
+  const merged = mergeAt(base, over, [], out);
+  const origin = (path) => {
+    for (let i = 1; i <= path.length; i++) {
+      const key = pathKey(path.slice(0, i));
+      if (out.set.has(key)) return valueAt(out.set.get(key), path.slice(i)) === undefined ? ORIGIN.builtin : ORIGIN.machine;
+    }
+    if (out.below.has(pathKey(path))) return ORIGIN.machine;
+    return valueAt(base, path) === undefined ? ORIGIN.builtin : ORIGIN.base;
+  };
+  return { merged, errors: out.errors, origin };
 }
 
-// Where the value at `path` comes from (ORIGIN): `over` is the settings
-// applied, null when none are.
-export function originOf(base, over, path) {
-  let b = base;
-  let m = over ?? undefined;
-  for (const key of path) {
-    if (m !== undefined && !isObject(m)) return ORIGIN.machine;
-    m = m?.[key];
-    b = Array.isArray(b) ? b.find((e) => isObject(e) && e.id === key) : isObject(b) ? b[key] : undefined;
-  }
-  if (m !== undefined) return ORIGIN.machine;
-  return b === undefined ? ORIGIN.builtin : ORIGIN.base;
-}
-
-// The entry `key` names in `node`: a key of an object, the entry with that
-// id in a list set here.
-function child(node, key) {
-  return Array.isArray(node) ? node.find((e) => isObject(e) && e.id === key) : node[key];
-}
-
-// The settings with `value` at `path`; undefined takes the path's value out
-// (reset), and the objects it leaves empty with it.
-export function withSetting(over, path, value) {
-  const top = structuredClone(over);
+// An undefined `value` resets: it takes the value out, and the objects that
+// leaves empty.
+export function withSetting(settings, path, value) {
+  const top = structuredClone(settings);
   const parents = [top];
-  let node = top;
-  for (const key of path.slice(0, -1)) {
+  for (const [i, key] of path.slice(0, -1).entries()) {
+    const node = parents.at(-1);
     let next = child(node, key);
-    if (next === undefined && value === undefined) return top;
-    if (!isObject(next) && !Array.isArray(next)) {
+    if (next === undefined || (!isObject(next) && !Array.isArray(next))) {
+      if (value === undefined) return top;
+      if (next !== undefined) throw new BoardError(`${pathText(path)}: ${pathText(path.slice(0, i + 1))} ist auf diesem Rechner ein Wert, kein Objekt`);
       if (Array.isArray(node)) throw new BoardError(`${pathText(path)}: in der Liste dieses Rechners gibt es keinen Eintrag „${key}“`);
       next = node[key] = {};
     }
-    node = next;
-    parents.push(node);
+    parents.push(next);
   }
+  const node = parents.at(-1);
   const last = path.at(-1);
+  if (Array.isArray(node)) throw new BoardError(`${pathText(path)}: ein Eintrag einer Liste dieses Rechners ändert sich nur in seinen Werten oder mit der ganzen Liste`);
   if (value !== undefined) {
     node[last] = value;
     return top;
@@ -510,7 +510,32 @@ export function withSetting(over, path, value) {
   return top;
 }
 
-export const settingsText = (over) => `${JSON.stringify(over, null, 2)}\n`;
+// herdr's refusals of a write whose expected text is stale (mod_files.rs).
+export const staleRefusal = (e) => /^The file changed (outside Herdr|while saving)\./.test(String(e?.message ?? e));
+export const CHANGED_MEANWHILE = "die Datei hat sich inzwischen geändert; bitte die Änderung noch einmal machen";
+
+export const settingsText = (settings) => `${JSON.stringify(settings, null, 2)}\n`;
+
+// The file's text (null: there is none) after `changes`, [path, value] each:
+// { text } (null: still none) or { error }.
+export function settingsAfter(text, changes, name) {
+  const { settings, errors } = readSettings(text, name);
+  if (!settings) return { error: errors[0] };
+  try {
+    const next = changes.reduce((s, [path, value]) => withSetting(s, path, value), settings);
+    return { text: text === null && !Object.keys(next).length ? null : settingsText(next) };
+  } catch (e) {
+    if (!(e instanceof BoardError)) throw e;
+    return { error: e.message };
+  }
+}
+
+export function sameAtPaths(then, now, changes, name) {
+  const before = readSettings(then, name).settings;
+  const after = readSettings(now, name).settings;
+  if (!before || !after) return false;
+  return changes.every(([path]) => JSON.stringify(valueAt(before, path)) === JSON.stringify(valueAt(after, path)));
+}
 
 // ==== src/config.js ====
 
@@ -648,13 +673,11 @@ function readGithub(raw) {
   const errors = Object.keys(raw).filter((k) => k !== "views").map((k) => `„sources.github.${k}“ gibt es nicht`);
   if (!Array.isArray(raw.views) || !raw.views.length) errors.push("„sources.github.views“ braucht mindestens eine Ansicht");
   const views = [];
-  const ids = new Set();
   (Array.isArray(raw.views) ? raw.views : []).forEach((v, i) => {
     const where = `GitHub-Ansicht ${i + 1}${isText(v?.name) ? ` („${v.name}“)` : ""}`;
     const problems = viewProblems(v);
-    if (!problems.length && ids.has(v.id)) problems.push(`„id“ ${v.id} gibt es schon`);
+    if (!problems.length && entryById(raw.views, v.id) !== v) problems.push(`„id“ ${v.id} gibt es schon`);
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    ids.add(v.id);
     views.push(normalizeView(v));
   });
   return { github: views.length ? { views } : null, errors };
@@ -755,36 +778,38 @@ function readAzure(raw) {
   return { azure: org && contexts.length ? { org, contexts } : null, errors };
 }
 
-// views.json as text (null: there is none) and this machine's settings
-// (`machine`: { name, text } with text null where there are none, or {
-// name, error } where they could not be read) → { config, errors, base,
-// machine }: config is { refreshMinutes, start, repos, azure: { org,
-// contexts } or null, github: { views } or null }, base views.json's object
-// and machine the settings applied (null: none). A view or context with
-// problems is left out and each problem is listed; config is null only when
-// nothing usable is left. Settings that cannot be read, or that add a
-// problem, are not applied, and each of their problems names their file.
-export function readConfig(text, machine = null) {
-  if (text === null || text === undefined) return { config: null, errors: [`${CONFIG_NAME}.json fehlt im Ordner der Mod`], base: null, machine: null };
+// views.json as text (null: there is none) and this machine's settings as
+// read (`settingsRead`: { name, text }, text null for no file, or { name,
+// error }) → { config, errors, settings, origin }: config is {
+// refreshMinutes, start, repos, azure: { org, contexts } or null, github: {
+// views } or null }, settings those applied (null: none), origin
+// mergeSettings's. A view or context with problems is left out and each
+// problem is listed; config is null only when nothing usable is left.
+export function readConfig(text, settingsRead = null) {
+  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}).origin });
+  if (text === null || text === undefined) return none(`${CONFIG_NAME}.json fehlt im Ordner der Mod`);
   let raw;
   try {
     raw = JSON.parse(text);
   } catch (e) {
-    return { config: null, errors: [`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`], base: null, machine: null };
+    return none(`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`);
   }
-  const base = { ...validateConfig(raw), base: raw, machine: null };
-  if (!machine) return base;
-  const named = (errors) => errors.map((e) => `${machine.name}: ${e}`);
-  const unused = (errors) => ({ ...base, errors: [...base.errors, ...errors, `${machine.name} gilt nicht: das Board zeigt ${CONFIG_NAME}.json allein`] });
-  if (machine.error !== undefined) return unused([`${machine.name} ließ sich nicht lesen: ${machine.error}`]);
-  const { settings, errors } = readSettings(machine.text, machine.name);
+  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}).origin };
+  if (!settingsRead) return alone;
+  const { name } = settingsRead;
+  const named = (errors) => errors.map((e) => `${name}: ${e}`);
+  const unused = (errors) => ({ ...alone, errors: [...alone.errors, ...errors, settingsAlone(name)] });
+  if (settingsRead.error !== undefined) return unused([`${name} ließ sich nicht lesen: ${settingsRead.error}`]);
+  const { settings, errors } = readSettings(settingsRead.text, name);
   if (!settings) return unused(errors);
-  const { merged, errors: unmatched } = mergeSettings(raw, settings);
+  const { merged, errors: unmatched, origin } = mergeSettings(raw, settings);
   const read = validateConfig(merged);
-  const added = read.errors.filter((e) => !base.errors.includes(e));
+  const added = read.errors.filter((e) => !alone.errors.includes(e));
   if (added.length) return unused(named([...unmatched, ...added]));
-  return { ...read, errors: [...read.errors, ...named(unmatched)], base: raw, machine: settings };
+  return { ...read, errors: [...read.errors, ...named(unmatched)], settings, origin };
 }
+
+export const settingsAlone = (subject) => `${subject} gilt nicht: das Board zeigt ${CONFIG_NAME}.json allein`;
 
 export function validateConfig(raw) {
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
@@ -830,6 +855,8 @@ export function validateConfig(raw) {
 
 // The GitHub views of a config (none without one).
 export const githubViews = (config) => config?.github?.views ?? [];
+
+export const hidePath = (view) => ["sources", "github", "views", view.id, "hide"];
 
 // The start for an item: the defaults, then views.json's start, then the
 // view's start, then the repo's entry in repos; a later one wins.
@@ -1007,20 +1034,43 @@ export function selectionInColumns(before, after, sel) {
 // A board's columns and cards: hidden columns, moves and their rollback,
 // where a card may go, and the columns as shown.
 
-// What the browser storage kept of a view's columns before they were this
-// machine's settings, { hide: [names], show: [names] }, or null when what
-// was stored is not that.
+// What an older board stored of a view's columns, { hide: [names], show:
+// [names] }, or null when what was stored is not that.
 export function readStoredHidden(value) {
   return isObject(value) && textList(value.hide) && textList(value.show) ? { hide: [...value.hide], show: [...value.show] } : null;
 }
 
-// The hidden list those toggles made of the view's hide: it, plus what the
-// person hid, minus what they showed.
+export const hiddenKey = (id) => `hidden:${id}`;
+
 export function storedHiddenList(view, stored) {
   const hidden = new Set(view.hide);
   for (const name of stored.hide) hidden.add(name);
   for (const name of stored.show) hidden.delete(name);
   return [...hidden];
+}
+
+// `entryOf(view)`: what the store holds for the view, undefined for nothing.
+// → { moves: [{ view, list }], drop: [view] }: an entry is dropped where it
+// is no stored hide, this machine sets the view's hide already, or it
+// changes nothing.
+export function storedHiddenMoves(views, entryOf, originAt) {
+  const moves = [];
+  const drop = [];
+  for (const view of views) {
+    const entry = entryOf(view);
+    if (entry === undefined) continue;
+    const stored = readStoredHidden(entry);
+    const list = stored && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
+    if (list && !sameNames(list, view.hide)) moves.push({ view, list });
+    else drop.push(view);
+  }
+  return { moves, drop };
+}
+
+export function sameNames(a, b) {
+  const one = new Set(a);
+  const other = new Set(b);
+  return one.size === other.size && [...one].every((n) => other.has(n));
 }
 
 export const hiddenColumns = (view) => new Set(view.hide);
@@ -1029,8 +1079,7 @@ export const hiddenColumns = (view) => new Set(view.hide);
 // view's field); the column without status is always shown.
 export const hideable = (column) => Boolean(column?.target);
 
-// The view's hide after hiding or showing a column; null for one that
-// cannot be hidden (hideable).
+// null for a column that cannot be hidden.
 export function toggledHidden(view, column) {
   if (!hideable(column)) return null;
   return view.hide.includes(column.name) ? view.hide.filter((n) => n !== column.name) : [...view.hide, column.name];
@@ -5856,7 +5905,7 @@ export function progressLine(t, progress, end) {
 // keeps it), still has that view, of the same kind (followed); and the
 // view as views.json has it now (current, null while it is not there).
 export function viewStands(b, view) {
-  return { followed: b.kinds?.get(view.id) === viewKind(view), current: b.viewById(view.id) };
+  return { followed: b.configState.kinds?.get(view.id) === viewKind(view), current: b.viewById(view.id) };
 }
 
 // Writes the change `w` of the item w.key (labelled w.label) at once:
@@ -8884,22 +8933,12 @@ function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
-// Hides a shown column or shows a hidden one, in this machine's settings
-// (the view's hide); the selection follows (reselectIn).
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
   if (!boardShape.canHide(col)) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
-  const before = b.navColumns(view);
-  b.changeSetting(["sources", "github", "views", view.id, "hide"], toggledHidden(b.viewById(view.id) ?? view, col), cx);
-  view = b.viewById(view.id) ?? view;
-  const hidden = hiddenColumns(view);
-  if (hidden.has(col.name) === Boolean(st.hidden?.has(col.name))) return;
-  st.hidden = hidden;
-  st.data = withHidden(st.data, st.hidden);
-  reselectIn(b, view, before);
-  // What a column holds comes from the query, which leaves hidden ones out.
-  b.refresh(view, cx);
+  const before = { id: view.id, columns: b.navColumns(view) };
+  b.changeSetting(hidePath(view), toggledHidden(b.viewById(view.id) ?? view, col), cx, before);
 }
 
 function openBoardStatusMenu(b, view) {
@@ -9988,13 +10027,10 @@ export default class Board extends View {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    // views.json's text as last read, this machine's settings as last read
-    // or written ({ text } or { error }), what readConfig made of both, and
-    // the writes to the settings, one after the other.
-    this.configText = null;
-    this.machineRead = null;
-    this.configBase = null;
-    this.machineSettings = null;
+    // views.json's text, this machine's settings file as last read, or as
+    // the board's latest change makes it ({ text } or { error }), what
+    // readConfig applied of it, and the view kinds of the last valid config.
+    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, kinds: null };
     this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
@@ -10015,7 +10051,6 @@ export default class Board extends View {
     this.over = null; // the column index under a drag
     this.paths = toolPaths(exec);
     this.sources = makeSources(this.paths);
-    this.kinds = null; // view id → viewKind in the last valid views.json
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
@@ -10132,17 +10167,17 @@ export default class Board extends View {
   // success) and tried (last start), moves (laid over refreshes, see
   // pendingMoves), pending (keys of items being written), unclear (open
   // outcomes: key, label, at and writeAtOnce's w.open; see settleUnclear),
-  // hidden (the hidden set), sel
-  // ({ col, key }, null before the first data), picked (the key of the item
-  // the person chose, see clickItem), want (an item to choose once a refresh
-  // has it: chooseWanted), related (by item key: readRelated), folds (as the
-  // store keeps them: readStoredFolds) and chosenFolds (in the sprints the
-  // sprint picker chose, by their id: foldsOf), sprint (the sprint a Sprint
-  // view shows in place of the current one, { id, name } as the sprint picker
-  // chose it, null for the current one; never stored), saved (the data drawn
-  // is the saved state, or what a read drew over it so far), restored (the
-  // saved state was looked for), progress ({ page, pages }) and unavailable
-  // (the last read since views.json was read found its source unavailable).
+  // hidden (the hidden set), sel ({ col, key }, null before the first data),
+  // picked (the key of the item the person chose, see clickItem), want (an
+  // item to choose once a refresh has it: chooseWanted), related (by item
+  // key: readRelated), folds (as the store keeps them: readStoredFolds) and
+  // chosenFolds (in the sprints the sprint picker chose, by their id:
+  // foldsOf), sprint (the sprint a Sprint view shows in place of the current
+  // one, { id, name } as the sprint picker chose it, null for the current
+  // one; never stored), saved (the data drawn is the saved state, or what a
+  // read drew over it so far), restored (the saved state was looked for),
+  // progress ({ page, pages }) and unavailable (the last read since
+  // views.json was read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
@@ -10209,7 +10244,6 @@ export default class Board extends View {
     return st.hidden;
   }
 
-  // This machine's settings file, and its name as the board says it.
   settingsFile() {
     return settingsPath(appHome());
   }
@@ -10220,66 +10254,61 @@ export default class Board extends View {
     return own && file.startsWith(`${own}/`) ? `~${file.slice(own.length)}` : file;
   }
 
-  // The config from views.json's text and this machine's settings as last
-  // read; true when it has views. Open outcomes of a view that is gone, or
-  // is now of another kind than in the last valid config, are dropped, and
-  // a dialog of such a view closes.
+  // True when the config has views.
   takeConfig() {
-    const machine = this.machineRead && { name: this.settingsName(), ...this.machineRead };
-    ({ config: this.config, errors: this.configErrors, base: this.configBase, machine: this.machineSettings } = readConfig(this.configText, machine));
+    const c = this.configState;
+    const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
+    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin } = readConfig(c.text, read));
     if (!this.config) return false;
     const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
     // Before the first valid config no view has a state to compare.
-    const before = this.kinds ?? kinds;
+    const before = c.kinds ?? kinds;
     for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
-    this.kinds = kinds;
+    c.kinds = kinds;
     const m = this.modal;
     if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return true;
   }
 
-  async readMachine() {
-    this.machineRead = await readTextFile(this.settingsFile()).then(
+  async readSettingsFile() {
+    this.configState.settingsRead = await readTextFile(this.settingsFile()).then(
       (text) => ({ text }),
       (e) => ({ error: firstLine(e?.message ?? e) }),
     );
   }
 
-  // Where the value at `path` (keys of views.json from the top, a view's id
-  // in place of its index) comes from: one of ORIGIN.
   origin(path) {
-    return originOf(this.configBase, this.machineSettings, path);
+    return this.configState.origin(path);
   }
 
-  // Sets the values at their paths (undefined: resets one, so views.json's
-  // applies again) in this machine's settings: at once in the board, then in
-  // the file, over what it holds then. A write the file refuses (it changed
-  // between that read and the write, or cannot be written) is said, and the
-  // file read again. Resolves to whether the file has them.
-  changeSettings(changes, cx) {
+  // An undefined value resets. `before`: { id, columns }, the shown columns
+  // of a view whose selection follows (reselectIn). Resolves to whether the
+  // file has the changes.
+  changeSettings(changes, cx, before = null) {
     const name = this.settingsName();
-    const now = this.machineRead && !("error" in this.machineRead) ? readSettings(this.machineRead.text, name) : null;
-    if (!now?.settings) {
-      const why = now?.errors[0] ?? (this.machineRead ? `${name} ließ sich nicht lesen: ${this.machineRead.error}` : `${name} ist noch nicht gelesen`);
+    const c = this.configState;
+    const read = c.settingsRead;
+    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name) : null;
+    const why = !read
+      ? `${name} ist noch nicht gelesen`
+      : "error" in read
+        ? `${name} ließ sich nicht lesen: ${read.error}`
+        : after.error ?? (c.settings ? null : settingsAlone(name));
+    if (why) {
       this.say(`Nicht geändert: ${why}`, "error", cx);
       return Promise.resolve(false);
     }
-    let next;
-    try {
-      next = changes.reduce((over, [path, value]) => withSetting(over, path, value), now.settings);
-    } catch (e) {
-      this.say(errorText(e), "error", cx);
-      return Promise.resolve(false);
-    }
-    this.machineRead = { text: settingsText(next) };
+    const built = read.text;
+    c.settingsRead = { text: after.text };
     this.takeConfig();
+    this.followHidden(cx, before);
     cx.notify();
-    const before = this.settingsWrites;
+    const queued = this.settingsWrites;
     const write = new Promise((resolve) => {
       cx.spawn(async (cx) => {
-        await before;
+        await queued;
         try {
-          resolve(await this.writeSettings(changes, cx));
+          resolve(await this.writeSettings(changes, built, cx));
         } catch (e) {
           resolve(false);
           this.say(report(e), "error", cx);
@@ -10290,16 +10319,17 @@ export default class Board extends View {
     return write;
   }
 
-  changeSetting(path, value, cx) {
-    return this.changeSettings([[path, value]], cx);
+  changeSetting(path, value, cx, before = null) {
+    return this.changeSettings([[path, value]], cx, before);
   }
 
-  async writeSettings(changes, cx) {
+  // `built`: the file's text the changes were made over.
+  async writeSettings(changes, built, cx) {
     const file = this.settingsFile();
     const name = this.settingsName();
     const refused = async (why) => {
       this.say(`${name} nicht gespeichert: ${why}`, "error", cx);
-      await this.readMachine();
+      await this.readSettingsFile();
       this.takeConfig();
       this.followHidden(cx);
       cx.notify();
@@ -10311,60 +10341,49 @@ export default class Board extends View {
     } catch (e) {
       return refused(`ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`);
     }
-    const { settings, errors } = readSettings(fresh, name);
-    if (!settings) return refused(errors[0]);
-    let text;
-    try {
-      const next = changes.reduce((over, [path, value]) => withSetting(over, path, value), settings);
-      text = fresh === null && !Object.keys(next).length ? null : settingsText(next);
-    } catch (e) {
-      return refused(errorText(e));
-    }
-    if (text !== fresh) {
+    const after = settingsAfter(fresh, changes, name);
+    if (after.error) return refused(after.error);
+    if (!readConfig(this.configState.text, { name, text: fresh }).settings) return refused(settingsAlone("die Datei"));
+    if (!sameAtPaths(built, fresh, changes, name)) return refused(CHANGED_MEANWHILE);
+    if (after.text !== fresh) {
       try {
-        await writeTextFile(file, text, fresh);
+        await writeTextFile(file, after.text, fresh);
       } catch (e) {
-        return refused(firstLine(e?.message ?? e));
+        return refused(staleRefusal(e) ? CHANGED_MEANWHILE : firstLine(e?.message ?? e));
       }
     }
-    this.machineRead = { text };
+    this.configState.settingsRead = { text: after.text };
     this.takeConfig();
     this.followHidden(cx);
     cx.notify();
     return true;
   }
 
-  // A view whose hidden columns the config changed shows them so, and is
-  // read again: its query leaves them out.
-  followHidden(cx) {
+  // Where a settings change by the board changes a view's hide, it shows it
+  // so and is read again; `before` as in changeSettings.
+  followHidden(cx, before = null) {
     for (const view of viewsOf(this.config ?? {})) {
       const st = this.views[view.id];
       if (!st?.hidden || !st.data) continue;
       const hidden = hiddenColumns(view);
-      if (hidden.size === st.hidden.size && [...hidden].every((n) => st.hidden.has(n))) continue;
+      if (sameNames(hidden, st.hidden)) continue;
       st.hidden = hidden;
       st.data = withHidden(st.data, hidden);
+      if (before?.id === view.id) reselectIn(this, view, before.columns);
+      // What a column holds comes from the query, which leaves hidden ones out.
       this.refresh(view, cx);
     }
   }
 
-  // The hidden columns the browser storage kept per view ("hidden:<view>")
-  // move into this machine's settings, once: where the settings set the
-  // view's hide already, or the toggles changed nothing, they are dropped.
+  // Settings that do not apply keep the stored entries for a later read.
   moveStoredHidden(cx) {
-    const moves = [];
-    for (const view of githubViews(this.config)) {
-      const key = `hidden:${view.id}`;
-      if (store.text(key) === null) continue;
-      const stored = readStoredHidden(store.get(key));
-      const path = ["sources", "github", "views", view.id, "hide"];
-      const list = stored && this.origin(path) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
-      if (!list || (list.length === view.hide.length && list.every((n) => view.hide.includes(n)))) store.remove(key);
-      else moves.push({ key, path, list });
-    }
+    if (!this.configState.settings) return;
+    const entryOf = (view) => (store.text(hiddenKey(view.id)) === null ? undefined : store.get(hiddenKey(view.id)));
+    const { moves, drop } = storedHiddenMoves(githubViews(this.config), entryOf, (path) => this.origin(path));
+    for (const view of drop) store.remove(hiddenKey(view.id));
     if (!moves.length) return;
-    this.changeSettings(moves.map((m) => [m.path, m.list]), cx).then((done) => {
-      if (done) for (const m of moves) store.remove(m.key);
+    this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).then((done) => {
+      if (done) for (const m of moves) store.remove(hiddenKey(m.view.id));
     });
   }
 
@@ -10377,16 +10396,16 @@ export default class Board extends View {
           this.configErrors = [`${CONFIG_NAME}.json ließ sich nicht lesen: ${firstLine(e?.message ?? e)}`];
           return undefined;
         }),
-        this.readMachine(),
+        this.readSettingsFile(),
       ]);
-      if (text !== undefined) this.configText = text;
+      if (text !== undefined) this.configState.text = text;
       const valid = text === undefined ? Boolean(this.config) : this.takeConfig();
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
       if (!valid) return;
-      const kinds = this.kinds;
-      // A views.json with problems leaves those views out.
+      const kinds = this.configState.kinds;
+      // A problem in views.json or in this machine's settings leaves views out.
       if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
       this.moveStoredHidden(cx);
       this.prefetchLeft = new Set(kinds.keys());
