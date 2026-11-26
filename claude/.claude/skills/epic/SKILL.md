@@ -18,7 +18,7 @@ Present to the user:
 
 - A **sensible order** for the open sub-issues (dependencies first, risk early)
 - The split into **runs autonomously** vs **needs the user** — a verification the profile's `user_gate` names, a decision only they can make, or a step only they can perform
-- Your questions about any issue — asked **one at a time**, before any work starts
+- Your questions about any issue — asked up to three at a time, as `CLAUDE.md` says, before any work starts
 
 When the epic or any of its sub-issues meets implement step 3's `/grill-with-docs` triggers, offer the pass first, as that step does.
 

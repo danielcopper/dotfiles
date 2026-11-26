@@ -28,8 +28,8 @@ explore the code far enough to know the blast radius.
 
 ## 3. Align
 
-State approach, scope and what stays untouched; ask open questions one at a time; start on the user's go. With `--go`
-(or a standing grant) and no open question, go straight on — open questions always stop.
+State approach, scope and what stays untouched; ask open questions up to three at a time, as `CLAUDE.md` says; start
+on the user's go. With `--go` (or a standing grant) and no open question, go straight on — open questions always stop.
 
 When the issue still has open `## To decide` items, or its answers would coin a glossary term or meet the ADR criteria,
 offer a `/grill-with-docs` pass before aligning, and on the user's yes read `~/.claude/skills/grill-with-docs/SKILL.md`
