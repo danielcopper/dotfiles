@@ -97,10 +97,13 @@ export function mergeSettings(base, over, nameKeyAt) {
   return { merged, errors: out.errors, origin };
 }
 
+const copied = (value) =>
+  Array.isArray(value) ? value.map(copied) : isObject(value) ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, copied(v)])) : value;
+
 // An undefined `value` resets: it takes the value out, and the objects that
 // leaves empty.
 export function withSetting(settings, path, value, nameKeyAt) {
-  const top = structuredClone(settings);
+  const top = copied(settings);
   const parents = [top];
   for (const [i, key] of path.slice(0, -1).entries()) {
     const node = parents.at(-1);

@@ -35,6 +35,7 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 export const HOST = ["gpui-kit", "gpui-base", "herdr"];

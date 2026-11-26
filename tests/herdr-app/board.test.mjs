@@ -130,7 +130,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import process from "node:process";
+import { setImmediate, setTimeout } from "node:timers";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { deserialize, serialize } from "node:v8";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const modDir = resolve(here, "../../herdr-app/.config/herdr-app/mods/board");
@@ -140,6 +143,24 @@ const realHome = process.env.HOME;
 const tempHome = mkdtempSync(join(tmpdir(), "board-home-"));
 process.env.HOME = tempHome;
 after(() => rmSync(tempHome, { recursive: true, force: true }));
+
+// herdr 0.1.18's globals (engine/quickjs: mod.rs install_globals, standard/mod.rs install, sandbox.rs), without its throwing stubs.
+const HERDR_GLOBALS = new Set([
+  "AggregateError", "Array", "ArrayBuffer", "AsyncDisposableStack", "Atomics", "BigInt", "BigInt64Array", "BigUint64Array",
+  "Boolean", "DOMException", "DataView", "Date", "DisposableStack", "Error", "EvalError", "FinalizationRegistry",
+  "Float16Array", "Float32Array", "Float64Array", "Function", "Infinity", "Int16Array", "Int32Array", "Int8Array",
+  "Iterator", "JSON", "Map", "Math", "NaN", "Number", "Object", "Promise", "Proxy", "RangeError", "ReferenceError",
+  "Reflect", "RegExp", "Set", "SharedArrayBuffer", "String", "SuppressedError", "Symbol", "SyntaxError", "TypeError",
+  "URIError", "Uint16Array", "Uint32Array", "Uint8Array", "Uint8ClampedArray", "WeakMap", "WeakRef", "WeakSet", "atob",
+  "btoa", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "globalThis", "isFinite",
+  "isNaN", "parseFloat", "parseInt", "performance", "queueMicrotask", "undefined", "unescape",
+  "Blob", "Buffer", "File", "URL", "URLSearchParams", "Crypto", "CryptoKey", "SubtleCrypto", "crypto",
+  "console", "process", "fetch", "window", "localStorage", "sessionStorage",
+]);
+for (const name of Object.getOwnPropertyNames(globalThis)) if (!HERDR_GLOBALS.has(name)) delete globalThis[name];
+const notGranted = (name) => () => { throw new TypeError(`process.${name}() is not granted`); };
+globalThis.process = { run: notGranted("run"), nextTick: process.nextTick, exit: notGranted("exit"), platform: process.platform, arch: process.arch };
+const clone = (value) => deserialize(serialize(value));
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -264,6 +285,18 @@ test("under mise run herdr-board-test nothing of the real home outside the repo 
   assert.equal(process.permission.has("fs.write", realHome), false);
   assert.equal(process.permission.has("fs.write", modDir), false, "the mod's folder is read-only");
   assert.equal(process.permission.has("fs.read", mainPath), true);
+});
+
+test("the mod and the tests run with only the global names herdr gives a mod", () => {
+  const own = new Set(["__boardHost"]);
+  assert.deepEqual(Object.getOwnPropertyNames(globalThis).filter((n) => !HERDR_GLOBALS.has(n) && !own.has(n)), []);
+  const missing = ["structuredClone", "setTimeout", "setInterval", "clearTimeout", "clearInterval", "setImmediate", "TextEncoder", "TextDecoder", "AbortController", "Intl"];
+  assert.deepEqual(missing.filter((name) => name in globalThis), []);
+});
+
+test("a module sees herdr's process: run, nextTick, exit, platform and arch", async () => {
+  const { default: seen } = await import(`data:text/javascript,${encodeURIComponent("export default Object.keys(process).sort();")}`);
+  assert.deepEqual(seen, ["arch", "exit", "nextTick", "platform", "run"]);
 });
 
 // ---- The build (mods/board/build.mjs) ----
@@ -975,7 +1008,7 @@ test("settings from before the contexts move into them: a GitHub view's entry by
       } },
     },
   };
-  const before = structuredClone(settings);
+  const before = clone(settings);
   assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), settings), {
     settings: {
       refreshMinutes: 4,
@@ -1020,7 +1053,7 @@ test("settings from before the contexts with a value that has no place in them m
     odd: {},
     prs: { colour: 1 },
   };
-  const own = structuredClone(base);
+  const own = clone(base);
   ghContext(own).projects.push({ id: "odd", name: "Odd", number: 3 });
   const settings = { sources: { github: { views: { ...views, odd: { layout: "list" } } }, azure: { contexts: [{ prs: { project: "P" } }] } } };
   assert.deepEqual(board.settingsForContexts(own, settings), { problems: [
@@ -1894,7 +1927,7 @@ test("what the list could not read whole on someone else's pull request is unrea
 test("reviews read for another login than the answer names are unread on someone else's pull request, also where that login gave none; one's own keep theirs, and the login the answer names or none reads them", () => {
   const data = json("github-list-attention.json");
   ["s0", "s1", "s2"].forEach((s) => data.data[s].nodes.forEach((pr) => (pr.reviews.nodes = [])));
-  const rows = (login) => board.parseGithubList(structuredClone(data), shippedListView(), [], { login }).sections.flatMap((s) => s.rows);
+  const rows = (login) => board.parseGithubList(clone(data), shippedListView(), [], { login }).sections.flatMap((s) => s.rows);
   const switched = rows("sample-other");
   assert.deepEqual(switched.filter((r) => r.author !== "sample-user").map((r) => [r.number, r.unread, r.waiting]).sort(([a], [b]) => a - b),
     [101, 102, 103, 104, 105, 106, 301, 302, 303].map((n) => [n, [UNREAD.reviews], false]));
@@ -12930,7 +12963,7 @@ test("UI: the follow-up for more threads reads at most 100 pull requests per gh 
   const data = json("github-list-attention.json");
   const base = attentionPr(data, 301);
   // 101 pull requests in Geprüft, each with twelve threads of which the list read ten.
-  const many = Array.from({ length: 101 }, (_, k) => ({ ...structuredClone(base), id: `PR_many${k}`, number: 1000 + k,
+  const many = Array.from({ length: 101 }, (_, k) => ({ ...clone(base), id: `PR_many${k}`, number: 1000 + k,
     reviewThreads: { totalCount: 12, nodes: resolvedThreads(10) } }));
   data.data.s2 = { issueCount: 101, nodes: many };
   const { b, cx, host } = await openBoard({ config: attentionConfig() });
@@ -14510,7 +14543,7 @@ function prioritySprintItems() {
   const answer = JSON.parse(itemsUnder290());
   const set = { 301: 3, 312: 1, 311: 2, 332: 4 };
   for (const wi of answer) if (set[wi.id]) wi.fields["Microsoft.VSTS.Common.Priority"] = set[wi.id];
-  const story = structuredClone(answer[0]);
+  const story = clone(answer[0]);
   story.id = 303;
   Object.assign(story.fields, { "System.Id": 303, "System.Title": "Plan the next import", "System.State": "New", "System.Parent": undefined });
   return JSON.stringify([...answer, story]);
@@ -16764,6 +16797,17 @@ test("UI: „Lädt …“ in an empty view has a spinner before it; the ↻ turn
   root = b.render();
   assert.deepEqual([refreshSpins(root), Boolean(byId(root, "columns"))], [true, true], "a refresh over the data drawn");
   assert.match(readFileSync(join(modDir, "refresh.svg"), "utf8"), /^<svg [^>]*stroke="currentColor"/, "tinted with the text color");
+});
+
+test("UI: ↻ with hidden columns the storage kept since moves them into this machine's settings and reads the shown view, the ↻ turning", async () => {
+  const { b, cx, host, st } = await openBoard();
+  assert.equal(host.open("gh").length, 0);
+  memory.set("hidden:mine", JSON.stringify({ hide: ["Ready"], show: ["Done"] }));
+  await click(b, cx, "refresh");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "Ready"]));
+  assert.equal(memory.has("hidden:mine"), false);
+  assert.equal(host.open("gh").filter((c) => isMineCall(c.args)).length, 1, "the shown view is read");
+  assert.deepEqual([st().loading, refreshSpins(b.render())], [true, true]);
 });
 
 test("UI: the create dialog on a Backlog that shows its saved state stays open with its title and says it is refused; while the read runs nothing more is read, after a failed one it starts again", async () => {

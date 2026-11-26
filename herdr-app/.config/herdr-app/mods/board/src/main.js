@@ -614,9 +614,8 @@ export default class Board extends View {
     return this.configState.origin(path);
   }
 
-  // An undefined value resets. `before`: { id, columns }, the shown columns
-  // of a view whose selection follows (reselectIn). Resolves to whether the
-  // file has the changes.
+  // `before`: { id, columns }, the shown columns of a view whose selection
+  // follows (reselectIn). Resolves to whether the file has the changes.
   changeSettings(changes, cx, before = null) {
     const name = this.settingsName();
     const c = this.configState;
