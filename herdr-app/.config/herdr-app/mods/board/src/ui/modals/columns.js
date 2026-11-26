@@ -10,7 +10,7 @@ import { columnColor, menu, menuKey } from "../helpers.js";
 // The view's columns, all of them, in the board's order.
 const columnsOf = (b, m) => b.state(m.view.id).data?.columns ?? [];
 
-// Hides or shows the column at `at`, on the view as views.json has it now.
+// Hides or shows the column at `at`, on the view as the config has it now.
 function toggleAt(b, m, at, cx) {
   const col = columnsOf(b, m)[at];
   if (!col) return;

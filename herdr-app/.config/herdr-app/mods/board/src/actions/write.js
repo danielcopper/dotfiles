@@ -11,9 +11,9 @@ import { BoardError, report } from "../shared.js";
 import { viewKind } from "../kinds/index.js";
 
 // Whether a write's view still stands, the one rule for following a write
-// up: views.json, as its last valid form says (an invalid one in between
+// up: the config, as its last valid form says (an invalid one in between
 // keeps it), still has that view, of the same kind (followed); and the
-// view as views.json has it now (current, null while it is not there).
+// view as the config has it now (current, null while it is not there).
 export function viewStands(b, view) {
   return { followed: b.configState.kinds?.get(view.id) === viewKind(view), current: b.viewById(view.id) };
 }

@@ -4,7 +4,7 @@
 // choice's open list closes only the list). A dialog keeps its state, and
 // makes the inputs it needs, in b.modal; one that belongs to a view keeps
 // it as b.modal.view, and a reload that finishes while it is open closes it
-// when views.json no longer has that view of that kind. A dialog with
+// when the config no longer has that view of that kind. A dialog with
 // fields also has tab(b, back, cx), which Tab and shift-Tab (`back`) call
 // to move between them (Board.tabKey). Optional: keys, the key bindings
 // Board.bindKeys binds for it, and keyboard(m), the input that takes the

@@ -522,7 +522,7 @@ export default class Board extends View {
     return context ? this.viewFor(context) : null;
   }
 
-  // A view as views.json has it now, by id; null when it is gone.
+  // A view as the config has it now, by id; null when it is gone.
   viewById(id) {
     return viewsOf(this.config).find((v) => v.id === id) ?? null;
   }

@@ -5901,9 +5901,9 @@ export function progressLine(t, progress, end) {
 // assignment are written so.
 
 // Whether a write's view still stands, the one rule for following a write
-// up: views.json, as its last valid form says (an invalid one in between
+// up: the config, as its last valid form says (an invalid one in between
 // keeps it), still has that view, of the same kind (followed); and the
-// view as views.json has it now (current, null while it is not there).
+// view as the config has it now (current, null while it is not there).
 export function viewStands(b, view) {
   return { followed: b.configState.kinds?.get(view.id) === viewKind(view), current: b.viewById(view.id) };
 }
@@ -6411,7 +6411,7 @@ export const assignModal = {
 // The view's columns, all of them, in the board's order.
 const columnsOf = (b, m) => b.state(m.view.id).data?.columns ?? [];
 
-// Hides or shows the column at `at`, on the view as views.json has it now.
+// Hides or shows the column at `at`, on the view as the config has it now.
 function toggleAt(b, m, at, cx) {
   const col = columnsOf(b, m)[at];
   if (!col) return;
@@ -8303,7 +8303,7 @@ export const statusModal = {
 // choice's open list closes only the list). A dialog keeps its state, and
 // makes the inputs it needs, in b.modal; one that belongs to a view keeps
 // it as b.modal.view, and a reload that finishes while it is open closes it
-// when views.json no longer has that view of that kind. A dialog with
+// when the config no longer has that view of that kind. A dialog with
 // fields also has tab(b, back, cx), which Tab and shift-Tab (`back`) call
 // to move between them (Board.tabKey). Optional: keys, the key bindings
 // Board.bindKeys binds for it, and keyboard(m), the input that takes the
@@ -10221,7 +10221,7 @@ export default class Board extends View {
     return context ? this.viewFor(context) : null;
   }
 
-  // A view as views.json has it now, by id; null when it is gone.
+  // A view as the config has it now, by id; null when it is gone.
   viewById(id) {
     return viewsOf(this.config).find((v) => v.id === id) ?? null;
   }
